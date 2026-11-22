@@ -1,6 +1,7 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
+import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { getSettingsSaveState, subscribeToSettingsSaveState } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
@@ -11,35 +12,20 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 
 interface SettingsPageLayoutProps {
-  /** Page content */
   children: React.ReactNode;
-  /** Optional page title shown above settings content. */
   title?: React.ReactNode;
-  /** Optional content rendered before a string/number page title. */
   titleLeading?: React.ReactNode;
-  /** Optional content rendered after a string/number page title. */
   titleAccessory?: React.ReactNode;
-  /** Optional supporting description under the page title. */
   description?: React.ReactNode;
-  /** Optional content rendered at the end of the header row (before save status). */
   headerEnd?: React.ReactNode;
-  /** Show persistence feedback for instant-save settings. */
   showSaveStatus?: boolean;
-  /**
-   * Commit-on-blur for autosaving pages: fires for every focus leaving the
-   * page content, so a text field does not need its own handler.
-   */
+  namedBySidebar?: boolean;
   onBlurCapture?: React.FocusEventHandler;
-  /** Additional className for the content container */
   className?: string;
-  /** Additional className for the outer ScrollableOverlay */
   outerClassName?: string;
+  fillHeight?: boolean;
 }
 
-/**
- * Standard layout wrapper for settings page content.
- * UI Kit: max-width 840px, padding 32px vertical / 48px horizontal.
- */
 export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   children,
   className,
@@ -50,35 +36,52 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   description,
   headerEnd,
   showSaveStatus = false,
+  namedBySidebar = false,
   onBlurCapture,
+  fillHeight = false,
 }) => {
   const scrollbarTopClearance = React.useContext(SettingsScrollbarTopClearanceContext);
+  const { isMobile } = useDeviceInfo();
   const hasHeader = title != null || description != null || headerEnd != null || showSaveStatus;
   const isPlainTitle = typeof title === 'string' || typeof title === 'number';
   const hasTitleChrome = titleLeading != null || titleAccessory != null;
 
   return (
     <ScrollableOverlay
-      outerClassName={cn('h-full overlay-scrollbar-wrapper--stable-gutter', outerClassName)}
-      className="w-full @container"
+      outerClassName={cn('h-full', outerClassName)}
+      className={cn('w-full @container', fillHeight && 'flex flex-col')}
       verticalTrackStart={scrollbarTopClearance}
     >
       <div
         className={cn(
           'mx-auto max-w-[840px] space-y-0 px-6 py-6 @3xl:px-12 @3xl:py-8',
-          // The first visible section never needs the top divider, no matter
-          // which platform-conditional sections above it rendered null.
+          fillHeight && 'flex w-full flex-1 flex-col',
           '[&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0',
           className
         )}
         onBlurCapture={onBlurCapture}
       >
-        {hasHeader && (
-          // Wraps rather than squeezes. The action cluster never shrinks, so on
-          // a narrow pane it used to starve the title until the name was a
-          // single letter and an ellipsis; giving the title block a basis lets
-          // the actions drop to their own line instead.
-          <div className="mb-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-3 pb-6">
+        {namedBySidebar ? (
+          <>
+            {title != null ? <h1 data-settings-page-heading tabIndex={-1} className="sr-only">{title}</h1> : null}
+            {headerEnd != null ? (
+              <div className="mb-6 flex flex-wrap items-center justify-end gap-3">
+                {headerEnd}
+                {showSaveStatus && <SettingsSaveStatus />}
+              </div>
+            ) : showSaveStatus ? (
+              <div className="pointer-events-none sticky top-0 z-10 flex h-0 justify-end">
+                <div className="pointer-events-auto rounded-md bg-background px-1">
+                  <SettingsSaveStatus />
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : hasHeader && (
+          <div className={cn(
+            'flex flex-wrap items-start justify-between gap-x-4 gap-y-3',
+            isMobile && description == null && headerEnd == null && !hasTitleChrome ? 'mb-0' : 'mb-2 pb-6',
+          )}>
             <div className="min-w-0 flex-1 basis-64 space-y-1">
               {title != null ? (
                 isPlainTitle ? (
@@ -86,12 +89,10 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
                     <div className="flex min-w-0 items-center gap-2">
                       {titleLeading}
                       <h1 data-settings-page-heading tabIndex={-1} className={cn(SETTINGS_PAGE_TITLE_CLASS, 'min-w-0 truncate')}>{title}</h1>
-                      {/* A status badge carries a fixed word; compressing it
-                          wraps the text inside its own pill. */}
                       <span className="shrink-0">{titleAccessory}</span>
                     </div>
                   ) : (
-                    <h1 data-settings-page-heading tabIndex={-1} className={SETTINGS_PAGE_TITLE_CLASS}>{title}</h1>
+                    <h1 data-settings-page-heading tabIndex={-1} className={cn(SETTINGS_PAGE_TITLE_CLASS, isMobile && 'sr-only')}>{title}</h1>
                   )
                 ) : (
                   title
@@ -117,8 +118,6 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   );
 };
 
-// Only saves slower than this surface a "Saving…" spinner — local writes
-// finish instantly and stay silent; remote/mobile connections get feedback.
 const SAVE_SPINNER_DELAY_MS = 500;
 
 const SettingsSaveStatus: React.FC = () => {

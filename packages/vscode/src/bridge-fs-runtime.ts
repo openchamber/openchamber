@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { StringDecoder } from 'node:string_decoder';
 import type { BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -37,15 +36,6 @@ type DirectoryEntry = {
   isDirectory: boolean;
 };
 
-type FsExecCommandResult = {
-  command: string;
-  success: boolean;
-  exitCode?: number;
-  stdout?: string;
-  stderr?: string;
-  error?: string;
-};
-
 // An env value is judged by its whole text, not by what `Number(...)` can
 // reinterpret: '' or ' ' must not read as 0, and '1e3', '0x10' or '5.9' must
 // not become a number the user never wrote. The web copies of these readers
@@ -59,13 +49,7 @@ const parsePlainDecimalInt = (raw: string | undefined): number | null => {
   return Number.isSafeInteger(value) ? value : null;
 };
 
-export const createGitReadCacheTtlMs = () => {
-  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
-  if (raw !== null && raw >= 0) return raw;
-  return 30 * 1000;
-};
-
-export const createGitCheckIgnoreTimeoutMs = () => {
+const createGitCheckIgnoreTimeoutMs = () => {
   const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
   // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
   // instead, so a larger configured timeout falls back to the default
@@ -77,65 +61,11 @@ export const createGitCheckIgnoreTimeoutMs = () => {
 // Byte cap for the api:fs:read handler, matching the web twin
 // (MAX_READ_BYTES in packages/web/server/lib/fs/routes.js) and the local-fs
 // proxy twin (LOCAL_FS_READ_MAX_BYTES in bridge-localfs-proxy-runtime.ts).
-export const FS_READ_MAX_BYTES = 16 * 1024 * 1024;
+const FS_READ_MAX_BYTES = 16 * 1024 * 1024;
 
-export const FS_EXEC_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
-
-// Per-stream byte cap for api:fs:exec command output, the same cap and env
-// var as the web twin in packages/web/server/lib/fs/routes.js. A verbose
-// command otherwise grows extension-host memory for the full timeout.
-export const createFsExecOutputMaxBytes = () => {
-  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES);
-  if (raw !== null && raw > 0) return raw;
-  return FS_EXEC_OUTPUT_MAX_BYTES;
-};
-
-const FS_EXEC_OUTPUT_LIMIT_BYTES = createFsExecOutputMaxBytes();
-
-const normalizeCommand = (command: unknown): string =>
-  typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
-
-const isCacheableGitReadCommand = (command: string): boolean => {
-  const normalized = normalizeCommand(command);
-  return /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/.test(normalized);
-};
-
-const GIT_READ_CACHE_TTL_MS = createGitReadCacheTtlMs();
 const GIT_CHECK_IGNORE_TIMEOUT_MS = createGitCheckIgnoreTimeoutMs();
-const GIT_READ_CACHE_MAX_ENTRIES = 500;
-const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
-const gitReadCache = new Map<string, { result: FsExecCommandResult; at: number }>();
-const inFlightGitReadCache = new Map<string, Promise<FsExecCommandResult>>();
 
-const gitReadEntryBytes = (key: string, result: FsExecCommandResult): number =>
-  key.length + (result.stdout?.length ?? 0) + (result.stderr?.length ?? 0);
-
-const setGitReadCacheEntry = (key: string, result: FsExecCommandResult): void => {
-  gitReadCache.delete(key);
-  gitReadCache.set(key, { result, at: Date.now() });
-
-  let totalBytes = 0;
-  for (const [entryKey, entry] of gitReadCache) {
-    totalBytes += gitReadEntryBytes(entryKey, entry.result);
-  }
-
-  while (
-    gitReadCache.size > GIT_READ_CACHE_MAX_ENTRIES ||
-    (totalBytes > GIT_READ_CACHE_MAX_BYTES && gitReadCache.size > 1)
-  ) {
-    const oldest = gitReadCache.entries().next().value;
-    if (!oldest) {
-      break;
-    }
-    totalBytes -= gitReadEntryBytes(oldest[0], oldest[1].result);
-    gitReadCache.delete(oldest[0]);
-  }
-};
-
-export const clearGitReadCacheForTests = (): void => {
-  gitReadCache.clear();
-  inFlightGitReadCache.clear();
-};
+const searchAbortControllers = new Map<string, AbortController>();
 
 type FsDeps = {
   resolveUserPath: (value: string, baseDirectory: string) => string;
@@ -148,6 +78,7 @@ type FsDeps = {
     limit: number | undefined,
     includeHidden: boolean,
     respectGitignore: boolean,
+    signal?: AbortSignal,
   ) => Promise<Array<{ name: string; path: string; relativePath: string; extension: string | undefined }>>;
   resolveFileReadPath: (inputPath: string) => Promise<
     | { ok: true; resolvedPath: string }
@@ -269,8 +200,21 @@ export async function handleFsBridgeMessage(
         includeHidden?: boolean;
         respectGitignore?: boolean;
       };
-      const files = await deps.searchDirectory(directory, query, limit, Boolean(includeHidden), respectGitignore !== false);
-      return { id, type, success: true, data: { files } };
+      const abort = new AbortController();
+      searchAbortControllers.set(id, abort);
+      try {
+        const files = await deps.searchDirectory(directory, query, limit, Boolean(includeHidden), respectGitignore !== false, abort.signal);
+        return { id, type, success: true, data: { files } };
+      } finally {
+        searchAbortControllers.delete(id);
+      }
+    }
+
+    case 'api:fs:search:abort': {
+      // SAFETY: the payload comes from the webview's own searchFilesRequest; an unknown id stops nothing.
+      const { requestID = '' } = (payload || {}) as { requestID?: string };
+      searchAbortControllers.get(requestID)?.abort();
+      return { id, type, success: true };
     }
 
     case 'api:fs:mkdir': {
@@ -285,7 +229,14 @@ export async function handleFsBridgeMessage(
     }
 
     case 'api:fs/home': {
-      return { id, type, success: true, data: { home: deps.normalizeFsPath(os.homedir()) } };
+      const home = os.homedir();
+      const chatsRoot = path.join(home, '.config', 'openchamber', 'chats');
+      const canonicalChatsRoot = await fs.promises.realpath(chatsRoot).catch(() => undefined);
+      return { id, type, success: true, data: {
+        home: deps.normalizeFsPath(home),
+        chatsRoot: deps.normalizeFsPath(chatsRoot),
+        ...(canonicalChatsRoot ? { canonicalChatsRoot: deps.normalizeFsPath(canonicalChatsRoot) } : {}),
+      } };
     }
 
     case 'api:fs:read': {
@@ -361,329 +312,6 @@ export async function handleFsBridgeMessage(
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to stat file';
-        return { id, type, success: false, error: message };
-      }
-    }
-
-    case 'api:fs:write': {
-      const { path: targetPath, content } = (payload as { path: string; content: string }) || {};
-      if (!targetPath) {
-        return { id, type, success: false, error: 'Path is required' };
-      }
-      if (typeof content !== 'string') {
-        return { id, type, success: false, error: 'Content is required' };
-      }
-      try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedPath = deps.resolveUserPath(targetPath, workspaceRoot);
-        const uri = vscode.Uri.file(resolvedPath);
-        const parentUri = vscode.Uri.file(path.dirname(resolvedPath));
-        try {
-          await vscode.workspace.fs.createDirectory(parentUri);
-        } catch {
-          // Directory may already exist
-        }
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-        return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedPath) } };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to write file';
-        return { id, type, success: false, error: message };
-      }
-    }
-
-    case 'api:fs:delete': {
-      const targetPath = (payload as { path: string })?.path;
-      if (!targetPath) {
-        return { id, type, success: false, error: 'Path is required' };
-      }
-      try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedPath = deps.resolveUserPath(targetPath, workspaceRoot);
-        const uri = vscode.Uri.file(resolvedPath);
-        await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
-        return { id, type, success: true, data: { success: true } };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to delete file';
-        return { id, type, success: false, error: message };
-      }
-    }
-
-    case 'api:fs:rename': {
-      const { oldPath, newPath } = (payload as { oldPath: string; newPath: string }) || {};
-      if (!oldPath) {
-        return { id, type, success: false, error: 'oldPath is required' };
-      }
-      if (!newPath) {
-        return { id, type, success: false, error: 'newPath is required' };
-      }
-      try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedOld = deps.resolveUserPath(oldPath, workspaceRoot);
-        const resolvedNew = deps.resolveUserPath(newPath, workspaceRoot);
-        const oldUri = vscode.Uri.file(resolvedOld);
-        const newUri = vscode.Uri.file(resolvedNew);
-        await vscode.workspace.fs.rename(oldUri, newUri, { overwrite: false });
-        return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedNew) } };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to rename file';
-        return { id, type, success: false, error: message };
-      }
-    }
-
-    case 'api:fs:exec': {
-      const { commands, cwd } = (payload as { commands: string[]; cwd: string }) || {};
-      if (!Array.isArray(commands) || commands.length === 0) {
-        return { id, type, success: false, error: 'Commands array is required' };
-      }
-      if (!cwd) {
-        return { id, type, success: false, error: 'Working directory (cwd) is required' };
-      }
-      try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedCwd = deps.resolveUserPath(cwd, workspaceRoot);
-        const { spawn } = await import('child_process');
-        const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');
-        const shellFlag = process.platform === 'win32' ? '/c' : '-c';
-
-        const augmentedEnv = {
-          ...process.env,
-          PATH: process.env.PATH,
-        };
-
-        // Launch through argv spawn, the same form the web server uses
-        // (packages/web/server/lib/fs/routes.js, runCommandInDirectory): the
-        // command reaches the shell as a single argv entry and is parsed
-        // exactly once. Interpolating it into an exec string instead let an
-        // outer shell expand $VAR and $(...) inside the caller's quoting
-        // before the intended shell ever ran. On Windows this is
-        // spawn('cmd.exe', ['/c', cmd]): cmd.exe still receives the command
-        // as one argument and there is no outer shell there either. The
-        // timeout and the output cap kill the shell's whole process tree
-        // (see killCommandTree below), so no grandchild can outlive it
-        // while holding the result's pipes open.
-        const runCommand = (cmd: string): Promise<FsExecCommandResult> =>
-          new Promise((resolve) => {
-            let stdout = '';
-            let stderr = '';
-            let stdoutBytes = 0;
-            let stderrBytes = 0;
-            let timedOut = false;
-            let outputTooLarge = false;
-            let stdoutTruncated = false;
-            let stderrTruncated = false;
-            // Decode incrementally per stream: a multi-byte character split
-            // across pipe chunks has to survive, and chunk.toString() would
-            // turn each half into U+FFFD in the returned output (#1590).
-            // Mirrors the web twin in packages/web/server/lib/fs/routes.js
-            // (runCommandInDirectory).
-            const stdoutDecoder = new StringDecoder('utf8');
-            const stderrDecoder = new StringDecoder('utf8');
-
-            const killForOutputLimit = () => {
-              if (outputTooLarge) return;
-              outputTooLarge = true;
-              killCommandTree();
-            };
-
-            // Overflow and timeout must end the whole command, not just
-            // the shell: a descendant that inherited the pipes keeps them
-            // open after the shell dies, and the result resolves on
-            // 'close', which waits for pipe EOF -- so a shell-only kill
-            // can leave the result unsettled until the descendant exits
-            // on its own. The child is spawned detached (its own POSIX
-            // process group, the owned-process.ts pattern) and the group
-            // is signalled; on Windows taskkill /T ends the tree.
-            // Destroying the pipes afterwards settles 'close' promptly
-            // even if a descendant escaped the group while holding them.
-            const killCommandTree = () => {
-              const pid = child.pid;
-              // A pid that is not an integer greater than 1 is never
-              // group-signalled: kill(-1) would hit every process we
-              // may signal, and pid 0 is our own process group.
-              const treePid = pid !== undefined && Number.isInteger(pid) && pid > 1 ? pid : null;
-              if (process.platform === 'win32') {
-                if (treePid !== null) {
-                  try {
-                    const killer = spawn('taskkill.exe', ['/T', '/F', '/PID', String(treePid)], {
-                      windowsHide: true,
-                      stdio: 'ignore',
-                    });
-                    killer.once?.('error', () => {
-                      try { child.kill('SIGKILL'); } catch { /* already exited */ }
-                    });
-                  } catch {
-                    try { child.kill('SIGKILL'); } catch { /* already exited */ }
-                  }
-                } else {
-                  try { child.kill('SIGKILL'); } catch { /* already exited */ }
-                }
-              } else if (treePid !== null) {
-                try {
-                  process.kill(-treePid, 'SIGKILL');
-                } catch {
-                  try { child.kill('SIGKILL'); } catch { /* already exited */ }
-                }
-              } else {
-                try { child.kill('SIGKILL'); } catch { /* already exited */ }
-              }
-              try { child.stdout?.destroy?.(); } catch { /* no pipes to destroy */ }
-              try { child.stderr?.destroy?.(); } catch { /* no pipes to destroy */ }
-            };
-
-            // Append at most the bytes left under the cap and report
-            // overflow, so a capped stream stops at the cap. Bytes go to
-            // the stream decoder, which holds a split character until the
-            // rest arrives; on truncation the held tail is dropped rather
-            // than flushed as a replacement character the cap did not ask
-            // for.
-            const appendCapped = (current: string, currentBytes: number, chunk: Buffer, decoder: StringDecoder) => {
-              const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-              if (currentBytes >= FS_EXEC_OUTPUT_LIMIT_BYTES) {
-                return { value: current, bytes: currentBytes, exceeded: true };
-              }
-              const remaining = FS_EXEC_OUTPUT_LIMIT_BYTES - currentBytes;
-              if (buffer.length <= remaining) {
-                return { value: current + decoder.write(buffer), bytes: currentBytes + buffer.length, exceeded: false };
-              }
-              return { value: current + decoder.write(buffer.subarray(0, remaining)), bytes: FS_EXEC_OUTPUT_LIMIT_BYTES, exceeded: true };
-            };
-
-            // A stream that ended on its own flushes the decoder tail; a
-            // truncated one keeps its last whole character and drops the
-            // cut sequence.
-            const flushDecoded = (value: string, decoder: StringDecoder, truncated: boolean) =>
-              truncated ? value : value + decoder.end();
-
-            let child: ReturnType<typeof spawn>;
-            try {
-              child = spawn(shell, [shellFlag, cmd], {
-                cwd: resolvedCwd,
-                env: augmentedEnv,
-                windowsHide: true,
-                // Own process group so killCommandTree can signal the
-                // tree; never on Windows (owned-process.ts pattern).
-                detached: process.platform !== 'win32',
-                stdio: ['ignore', 'pipe', 'pipe'],
-              });
-            } catch (error) {
-              resolve({
-                command: cmd,
-                success: false,
-                stdout: '',
-                stderr: '',
-                error: error instanceof Error ? error.message : 'Command execution failed',
-              });
-              return;
-            }
-
-            const timeout = setTimeout(() => {
-              timedOut = true;
-              killCommandTree();
-            }, 300000);
-
-            child.stdout?.on('data', (chunk) => {
-              if (outputTooLarge) return;
-              const appended = appendCapped(stdout, stdoutBytes, chunk, stdoutDecoder);
-              stdout = appended.value;
-              stdoutBytes = appended.bytes;
-              stdoutTruncated = stdoutTruncated || appended.exceeded;
-              if (appended.exceeded) killForOutputLimit();
-            });
-            child.stderr?.on('data', (chunk) => {
-              if (outputTooLarge) return;
-              const appended = appendCapped(stderr, stderrBytes, chunk, stderrDecoder);
-              stderr = appended.value;
-              stderrBytes = appended.bytes;
-              stderrTruncated = stderrTruncated || appended.exceeded;
-              if (appended.exceeded) killForOutputLimit();
-            });
-
-            child.on('error', (error) => {
-              clearTimeout(timeout);
-              resolve({
-                command: cmd,
-                success: false,
-                stdout: flushDecoded(stdout, stdoutDecoder, stdoutTruncated).trim(),
-                stderr: flushDecoded(stderr, stderrDecoder, stderrTruncated).trim(),
-                error: error.message || 'Command execution failed',
-              });
-            });
-
-            child.on('close', (code, signal) => {
-              clearTimeout(timeout);
-              const result: FsExecCommandResult = {
-                command: cmd,
-                success: code === 0 && !timedOut,
-                stdout: flushDecoded(stdout, stdoutDecoder, stdoutTruncated).trim(),
-                stderr: flushDecoded(stderr, stderrDecoder, stderrTruncated).trim(),
-              };
-              if (typeof code === 'number') {
-                result.exitCode = code;
-              }
-              if (outputTooLarge) {
-                result.success = false;
-                result.error = `Command output exceeded the ${FS_EXEC_OUTPUT_LIMIT_BYTES} byte limit (output-too-large)`;
-              } else if (timedOut) {
-                result.error = `Command timed out after 300000ms` + (signal ? ` (${signal})` : '');
-              }
-              resolve(result);
-            });
-          });
-
-        const runCommandWithGitReadCache = async (cmd: string): Promise<FsExecCommandResult> => {
-          const cacheable = GIT_READ_CACHE_TTL_MS > 0 && isCacheableGitReadCommand(cmd);
-          const cacheKey = cacheable ? `${resolvedCwd}\0${normalizeCommand(cmd)}` : null;
-
-          if (cacheKey) {
-            const cached = gitReadCache.get(cacheKey);
-            if (cached && Date.now() - cached.at < GIT_READ_CACHE_TTL_MS) {
-              gitReadCache.delete(cacheKey);
-              gitReadCache.set(cacheKey, cached);
-              return { ...cached.result, command: cmd };
-            }
-            if (cached) {
-              gitReadCache.delete(cacheKey);
-            }
-
-            const inFlight = inFlightGitReadCache.get(cacheKey);
-            if (inFlight) {
-              const result = await inFlight;
-              return { ...result, command: cmd };
-            }
-          }
-
-          const runPromise = runCommand(cmd).then((result) => {
-            if (cacheKey && result.success) {
-              setGitReadCacheEntry(cacheKey, result);
-            }
-            return result;
-          }).finally(() => {
-            if (cacheKey && inFlightGitReadCache.get(cacheKey) === runPromise) {
-              inFlightGitReadCache.delete(cacheKey);
-            }
-          });
-
-          if (cacheKey) {
-            inFlightGitReadCache.set(cacheKey, runPromise);
-          }
-
-          return runPromise;
-        };
-
-        const results: FsExecCommandResult[] = [];
-
-        for (const cmd of commands) {
-          if (typeof cmd !== 'string' || !cmd.trim()) {
-            results.push({ command: cmd, success: false, error: 'Invalid command' });
-            continue;
-          }
-          results.push(await runCommandWithGitReadCache(cmd));
-        }
-
-        const allSucceeded = results.every((r) => r.success);
-        return { id, type, success: true, data: { success: allSucceeded, results } };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to execute commands';
         return { id, type, success: false, error: message };
       }
     }

@@ -1,5 +1,5 @@
 import type { Metadata, Part } from '@/lib/opencode/model';
-import { readContextPart, type ContextPartPayload } from './contextParts';
+import { changeRequestCheckSource, changeRequestCommentSource, readContextPart, type ContextPartPayload } from './contextParts';
 import { extractTerminalContexts } from './terminalContext';
 
 // A fixed-offset cut can land between the halves of a surrogate pair,
@@ -16,7 +16,6 @@ const dropSplitTail = (text: string): string => {
   return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
 };
 
-/** Preserve both the source and the reply when a model context needs a limit. */
 export function excerptMarkdown(text: string, limit: number): string {
   if (text.length <= limit) return text;
   const marker = '\n\n[Content omitted]\n\n';
@@ -55,25 +54,24 @@ function formatContext(payload: ContextPartPayload, originalText: string, fieldL
     case 'browser-annotation':
       return quoteContext(`Browser annotation on ${payload.pageUrl}:`, payload.prompt, payload.text, fieldLimit);
     case 'pr-comment':
-      return quoteContext(`${payload.provider === 'gitlab' ? 'GitLab merge request' : 'GitHub PR'} comment, ${payload.label}:`, payload.body, payload.text, fieldLimit);
+      return quoteContext(`${changeRequestCommentSource(payload.provider)}, ${payload.label}:`, payload.body, payload.text, fieldLimit);
     case 'pr-check':
-      return quoteContext(`${payload.provider === 'gitlab' ? 'GitLab merge request pipeline job' : 'GitHub PR check'}, ${payload.label}:`, payload.output, payload.text, fieldLimit, '');
+      return quoteContext(`${changeRequestCheckSource(payload.provider)}, ${payload.label}:`, payload.output, payload.text, fieldLimit, '');
     case 'terminal':
       return quoteContext(`Terminal ${payload.terminalLabel}, lines ${payload.startLine}-${payload.endLine}:`, payload.output, '', fieldLimit, '');
     case 'repository-issue':
+    case 'repository-discussion':
     case 'change-request':
-    case 'linear-issue':
+    case 'tracker-item':
     case 'guest-issue':
     case 'guest-pr':
+    case 'session':
+    case 'session-message':
+    case 'shared-page':
       return fieldLimit ? excerptMarkdown(originalText, fieldLimit) : originalText;
   }
 }
 
-/**
- * The model-facing text of a message's own parts. Attached context is no
- * longer a part — it arrives as its own synthetic message — so render it with
- * `formatContextMessage`.
- */
 export function formatMessageText(
   parts: readonly Part[],
   options: { user?: boolean; fieldLimit?: number } = {},
@@ -99,7 +97,6 @@ export function formatMessageText(
   return blocks.map((block) => block.trim()).filter(Boolean).join('\n\n');
 }
 
-/** One attached context item (a synthetic message) as model-facing Markdown. */
 export function formatContextMessage(
   message: { text: string; metadata?: Metadata },
   fieldLimit?: number,

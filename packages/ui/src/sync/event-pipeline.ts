@@ -1,24 +1,10 @@
-/**
- * Event Pipeline — transport connection, translation, coalescing, and batched flush.
- *
- * Wire events (OpenCode v2 `/api/event`, or the OpenChamber server's WebSocket
- * bridge of that stream) are translated into `SyncEvent`s here and coalesced
- * per directory before the reducer sees them. This module must not make
- * state-dependent decisions about event validity: deciding whether a delta is
- * already represented by a full part snapshot belongs in the reducer.
- *
- * Plain closure API:
- *   const { cleanup } = createEventPipeline({ sdk, onEvents })
- *
- * No class, no start/stop lifecycle. One pipeline per mount.
- * Abort controller created once at init, cleaned up via returned cleanup fn.
- */
 
 import type { OpenCodeClient, OpenCodeEvent } from "@opencode/client"
 import { z } from "zod"
 import { opencodeClient } from "@/lib/opencode/client"
-import { GLOBAL_EVENT_DIRECTORY, routeWireEvent, syncEventSessionID, type SyncEvent } from "@/lib/opencode/events"
+import { GLOBAL_EVENT_DIRECTORY, hostTurnStart, routeWireEvent, syncEventSessionID, type SyncEvent } from "@/lib/opencode/events"
 import { messagingCreatedEvent } from "@/lib/opencode/messaging"
+import { createTurnBoundaryOrder, wireEventSchema, type StaleWireEventCheck } from "@/lib/opencode/wire-admission"
 import type { Metadata } from "@/lib/opencode/model"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
@@ -26,16 +12,11 @@ import { useAuthSessionStore, waitForAuthSession } from "@/lib/runtime-auth-expi
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
-import { spaceCreationStepSchema } from "@/lib/spaces/spaces-api"
+import { spaceCreationStepSchema, spaceTaskTitleSchema, type SpaceTaskTitle } from "@/lib/spaces/spaces-api"
+import { workflowRunSchema } from "@/lib/workflows/model"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
 
-// Paces a sustained event stream only: the first event after a quiet spell is
-// flushed at once, so a lone permission or status event is not delayed. Every
-// flush publishes the directory store and re-renders the streaming message,
-// while streamed text is shown at most every 100ms, so flushing faster than
-// that bought renders nobody sees. Measured at 300 characters per second,
-// 33ms cost six more points of renderer CPU for the same visible output.
 const FLUSH_FRAME_MS = 100
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
 const BACKPRESSURE_MODE_MS = 10_000
@@ -43,13 +24,8 @@ const STREAM_YIELD_MS = 8
 const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
 const WS_FALLBACK_WINDOW_MS = 60_000
+const WS_PROVEN_OPEN_FAILURES_BEFORE_FALLBACK = 3
 const DEFAULT_WS_READY_TIMEOUT_MS = 2_000
-// Retry pacing. Visible+online tabs probe quickly so the user sees connection
-// recovery in under a second of real outage; hidden/offline tabs back off
-// further so a backgrounded PWA on a flaky link doesn't burn battery probing
-// a dead network every few seconds. The browser would throttle hidden-tab
-// timers anyway, but this keeps the intent explicit and shrinks server load
-// from idle tabs.
 const RETRY_BACKOFF_BASE_MS = 250
 const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
 const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
@@ -71,27 +47,12 @@ export type EventPipelineInput = {
   onReconnect?: (details: { replayReset: boolean; resumed: boolean }) => void
   /** Called when the stream disconnects (heartbeat timeout, network error, or transport failure). */
   onDisconnect?: (reason: string) => void
-  /** Called when transport switches (e.g. WS timeout → SSE fallback) without actual disconnection. */
   onTransportSwitch?: () => void
-  /**
-   * Called when the host announces that an isolated space's own event connection came or
-   * went; after a gap that one space is re-read. `wasReady` says whether the space's stream
-   * had been connected before.
-   */
   onSpaceStream?: (details: { spaceId: string; status: "connected" | "disconnected"; wasReady: boolean }) => void
-  /**
-   * Called when the host announces a step of an isolated space's creation, `failed` with the
-   * failure of the step that stopped it.
-   */
   onSpaceProgress?: (details: SpaceProgress) => void
-  /** Called when the setup commands of an isolated space moved on: began, the next one, or ended. */
+  onSpaceTaskTitle?: (spaceId: string, taskTitle: SpaceTaskTitle | null) => void
   onSpaceSetup?: (spaceId: string) => void
-  /** Called when the host follows an isolated space's permission modes again, after a gap or at first. */
   onSpacePermissionStream?: (spaceId: string) => void
-  /**
-   * Called whenever the stream receives anything: an event, a WebSocket frame, or a keepalive
-   * that carries no event. Starting an attempt that has received nothing yet does not count.
-   */
   onStreamActivity?: () => void
   transport?: "auto" | "ws" | "sse"
   heartbeatTimeoutMs?: number
@@ -104,8 +65,6 @@ export type EventPipeline = {
   reconnect: (reason?: string) => void
 }
 
-// Frames the OpenChamber server sends on `/api/global/event/ws`. `payload` is
-// the wire event as OpenCode published it; the server adds replay metadata.
 const wsFrameSchema = z.object({
   type: z.enum(["ready", "event", "error", "backpressure"]),
   replayReset: z.boolean().optional(),
@@ -118,8 +77,6 @@ const wsFrameSchema = z.object({
   message: z.string().optional(),
 })
 
-// OpenChamber's own session-status bridge rides the same stream. It predates
-// OpenCode's `session.status` and carries the status in `properties`.
 const openchamberStatusSchema = z.object({
   type: z.literal("openchamber:session-status"),
   properties: z.object({
@@ -127,10 +84,11 @@ const openchamberStatusSchema = z.object({
     sessionId: z.string().min(1).optional(),
     status: z.enum(["idle", "busy", "retry"]),
     metadata: z.object({ attempt: z.number(), message: z.string(), next: z.number() }).partial().optional(),
+    timestamp: z.number().optional(),
+    turnStartedAt: z.number().optional(),
   }),
 })
 
-// OpenChamber owns archive state; its server announces changes on the stream.
 const openchamberArchivedSchema = z.object({
   type: z.literal("openchamber:session-archived"),
   properties: z.object({ sessionID: z.string().min(1), archivedAt: z.number().nullable() }),
@@ -153,14 +111,13 @@ const openchamberNotificationSchema = z.object({
       tag: z.string(),
       requireHidden: z.boolean(),
       showWhenFocused: z.boolean(),
+      toastOnly: z.boolean(),
       desktopNotificationDelivered: z.boolean(),
       desktopStdoutActive: z.boolean(),
     })
     .partial(),
 })
 
-// A page an agent showed that waits for the user's answer; the server holds
-// the waiting call, so it announces both ends of the wait.
 const openchamberPageWaitingSchema = z.object({
   type: z.literal("openchamber:page-waiting"),
   properties: z.object({
@@ -175,8 +132,6 @@ const openchamberPageSettledSchema = z.object({
   properties: z.object({ sessionID: z.string().min(1), pageID: z.string().min(1) }),
 })
 
-// The server writes a session's recap and suggestion a while after its turn
-// ends, reading the session's directory; it announces both ends of the wait.
 const openchamberSessionAssistSchema = z.object({
   type: z.literal("openchamber:session-assist"),
   properties: z.object({
@@ -186,8 +141,16 @@ const openchamberSessionAssistSchema = z.object({
   }),
 })
 
-// The host's announcement of an isolated space's event connection. It is not an event of any
-// session, so it never enters a directory queue; the pipeline hands it to its owner.
+const openchamberWorkflowRunSchema = z.object({
+  type: z.literal("openchamber:workflow-run"),
+  properties: z.object({ run: workflowRunSchema }),
+})
+
+const openchamberWorkflowRunRemovedSchema = z.object({
+  type: z.literal("openchamber:workflow-run-removed"),
+  properties: z.object({ runId: z.string().min(1), parentSessionId: z.string().min(1) }),
+})
+
 const openchamberSpaceStreamSchema = z.object({
   type: z.literal("openchamber:space-stream"),
   properties: z.object({
@@ -197,25 +160,27 @@ const openchamberSpaceStreamSchema = z.object({
   }),
 })
 
-// A step of an isolated space's creation, announced on the host's hub the same way.
 const openchamberSpaceProgressSchema = z.object({
   type: z.literal("openchamber:space-progress"),
   properties: z.object({
     spaceId: z.string().regex(/^[0-9a-f]{12}$/),
-    step: z.union([spaceCreationStepSchema, z.literal("failed")]),
+    step: z.union([spaceCreationStepSchema, z.literal("failed"), z.literal("removed")]),
     failure: z.object({ code: z.string(), message: z.string() }).nullable(),
   }),
 })
 
+const openchamberSpaceTaskTitleSchema = z.object({
+  type: z.literal("openchamber:space-task-title.updated"),
+  properties: z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/), taskTitle: spaceTaskTitleSchema.nullable() }),
+})
+
 export type SpaceProgress = z.infer<typeof openchamberSpaceProgressSchema>["properties"]
 
-// The setup commands of a space moved on: the list says how.
 const openchamberSpaceSetupSchema = z.object({
   type: z.literal("openchamber:space-setup"),
   properties: z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/) }),
 })
 
-// `spaceId` marks a policy the host forwarded from that isolated space, which keeps its own.
 const openchamberAutoAcceptSchema = z.object({
   type: z.literal("openchamber:permission-auto-accept.updated"),
   properties: z.object({
@@ -226,14 +191,11 @@ const openchamberAutoAcceptSchema = z.object({
   }),
 })
 
-// The host follows an isolated space's permission modes again; what changed in a gap is read from the space.
 const openchamberSpacePermissionStreamSchema = z.object({
   type: z.literal("openchamber:space-permission-stream"),
   properties: z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/), status: z.literal("connected") }),
 })
 
-// The server's auto-answer in a `safety` or `auto` session held back or failed:
-// the request is the user's after all.
 const openchamberLeftForUserSchema = z.object({
   type: z.literal("openchamber:permission-auto-accept.left-for-user"),
   properties: z.object({
@@ -244,18 +206,6 @@ const openchamberLeftForUserSchema = z.object({
   }),
 })
 
-// The wire event contract is generated from the server; the stream is trusted
-// once its shape matches. Only the discriminator and location are checked here
-// because the translator narrows on `type` for everything else.
-const wireEventSchema = z.object({
-  id: z.string(),
-  type: z.string(),
-  location: z.object({ directory: z.string() }).partial().optional(),
-})
-
-// Only the discriminator is read before dispatch: a streamed reply delivers
-// one payload per delta, and trying every OpenChamber schema in turn cost
-// eleven zod parses per delta, nine of them certain to fail.
 const payloadTypeSchema = z.object({ type: z.string() })
 
 const OPENCHAMBER_TYPE_PREFIX = "openchamber:"
@@ -263,20 +213,22 @@ const OPENCHAMBER_TYPE_PREFIX = "openchamber:"
 function translateOpenchamberStatus(payload: unknown): SyncEvent | null {
   const parsed = openchamberStatusSchema.safeParse(payload)
   if (!parsed.success) return null
-  const { sessionID, sessionId, status, metadata } = parsed.data.properties
+  const { sessionID, sessionId, status, metadata, timestamp, turnStartedAt } = parsed.data.properties
   const id = sessionID ?? sessionId
   if (!id) return null
+  const turnStart = status !== "idle" && timestamp !== undefined && turnStartedAt !== undefined
+    ? { turnStart: hostTurnStart(turnStartedAt, timestamp) }
+    : {}
   if (status === "retry") {
     if (metadata?.attempt === undefined || metadata.message === undefined || metadata.next === undefined) return null
     return {
       type: "session.status",
-      properties: { sessionID: id, status: { type: "retry", attempt: metadata.attempt, message: metadata.message, next: metadata.next } },
+      properties: { sessionID: id, status: { type: "retry", attempt: metadata.attempt, message: metadata.message, next: metadata.next }, ...turnStart },
     }
   }
-  return { type: "session.status", properties: { sessionID: id, status: { type: status } } }
+  return { type: "session.status", properties: { sessionID: id, status: { type: status }, ...turnStart } }
 }
 
-/** Translates an `openchamber:*` bridge payload into a sync event, or null when it is not a valid one. */
 function translateOpenchamberEvent(type: string, payload: unknown): SyncEvent | null {
   switch (type) {
     case "openchamber:session-status":
@@ -319,22 +271,27 @@ function translateOpenchamberEvent(type: string, payload: unknown): SyncEvent | 
       const parsed = openchamberLeftForUserSchema.safeParse(payload)
       return parsed.success ? { type: "openchamber.permission-left-for-user", properties: parsed.data.properties } : null
     }
+    case "openchamber:workflow-run": {
+      const parsed = openchamberWorkflowRunSchema.safeParse(payload)
+      return parsed.success ? { type: "openchamber.workflow-run", properties: parsed.data.properties } : null
+    }
+    case "openchamber:workflow-run-removed": {
+      const parsed = openchamberWorkflowRunRemovedSchema.safeParse(payload)
+      return parsed.success ? { type: "openchamber.workflow-run-removed", properties: parsed.data.properties } : null
+    }
     default:
       return null
   }
 }
 
-/**
- * Turns one raw wire payload into routed sync events. `frameDirectory` is
- * the directory the server bridge attached, used when the event itself does
- * not name a location.
- */
-function translateWirePayload(payload: unknown, frameDirectory: string | undefined): Array<{ directory: string; event: SyncEvent }> {
+function translateWirePayload(payload: unknown, frameDirectory: string | undefined, isStale?: StaleWireEventCheck): Array<{ directory: string; event: SyncEvent }> {
   if (!wireEventSchema.safeParse(payload).success) return []
   // SAFETY: the discriminator and location were validated above; the rest of
   // the shape is the server's generated contract, narrowed per `type` by the
   // translator.
-  const routed = routeWireEvent(payload as OpenCodeEvent)
+  const event = payload as OpenCodeEvent
+  if (isStale?.(event)) return []
+  const routed = routeWireEvent(event)
   if (!frameDirectory) return routed
   return routed.map((entry) => (entry.directory === GLOBAL_EVENT_DIRECTORY ? { ...entry, directory: frameDirectory } : entry))
 }
@@ -342,18 +299,14 @@ function translateWirePayload(payload: unknown, frameDirectory: string | undefin
 type ClassifiedStreamPayload =
   | { kind: "space-stream"; properties: z.infer<typeof openchamberSpaceStreamSchema>["properties"] }
   | { kind: "space-progress"; properties: SpaceProgress }
+  | { kind: "space-task-title"; properties: z.infer<typeof openchamberSpaceTaskTitleSchema>["properties"] }
   | { kind: "space-setup"; spaceId: string }
   | { kind: "space-permission-stream"; spaceId: string }
   | { kind: "events"; events: Array<{ directory: string; event: SyncEvent }> }
 
 const NO_EVENTS: ClassifiedStreamPayload = { kind: "events", events: [] }
 
-/**
- * Sorts one raw stream payload: an isolated-space announcement for its owner,
- * or the sync events it translates to. Dispatches on `type`, so each payload
- * is validated only against the schema its type names.
- */
-export function classifyStreamPayload(payload: unknown, frameDirectory: string | undefined): ClassifiedStreamPayload {
+export function classifyStreamPayload(payload: unknown, frameDirectory: string | undefined, isStale?: StaleWireEventCheck): ClassifiedStreamPayload {
   const typed = payloadTypeSchema.safeParse(payload)
   if (!typed.success) return NO_EVENTS
   const { type } = typed.data
@@ -365,7 +318,7 @@ export function classifyStreamPayload(payload: unknown, frameDirectory: string |
       ? { kind: "events", events: [{ directory: GLOBAL_EVENT_DIRECTORY, event: { type, properties: created.data.data } }] }
       : NO_EVENTS
   }
-  if (!type.startsWith(OPENCHAMBER_TYPE_PREFIX)) return { kind: "events", events: translateWirePayload(payload, frameDirectory) }
+  if (!type.startsWith(OPENCHAMBER_TYPE_PREFIX)) return { kind: "events", events: translateWirePayload(payload, frameDirectory, isStale) }
 
   switch (type) {
     case "openchamber:space-stream": {
@@ -375,6 +328,10 @@ export function classifyStreamPayload(payload: unknown, frameDirectory: string |
     case "openchamber:space-progress": {
       const parsed = openchamberSpaceProgressSchema.safeParse(payload)
       return parsed.success ? { kind: "space-progress", properties: parsed.data.properties } : NO_EVENTS
+    }
+    case "openchamber:space-task-title.updated": {
+      const parsed = openchamberSpaceTaskTitleSchema.safeParse(payload)
+      return parsed.success ? { kind: "space-task-title", properties: parsed.data.properties } : NO_EVENTS
     }
     case "openchamber:space-setup": {
       const parsed = openchamberSpaceSetupSchema.safeParse(payload)
@@ -387,9 +344,7 @@ export function classifyStreamPayload(payload: unknown, frameDirectory: string |
   }
   const bridged = translateOpenchamberEvent(type, payload)
   if (bridged) return { kind: "events", events: [{ directory: frameDirectory ?? GLOBAL_EVENT_DIRECTORY, event: bridged }] }
-  // An OpenChamber type this client does not know may still be a wire event
-  // shape; the wire translator ignores types it does not handle.
-  return { kind: "events", events: translateWirePayload(payload, frameDirectory) }
+  return { kind: "events", events: translateWirePayload(payload, frameDirectory, isStale) }
 }
 
 function buildGlobalEventWsUrl(lastEventId?: string): string {
@@ -406,12 +361,6 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
   )
 }
 
-// In relay mode the global-event WebSocket rides the E2EE tunnel instead of a
-// native network socket. The resolver still builds the authenticated URL (it
-// carries the oc_url_token the host replays to the loopback origin); we hand
-// its path+query to the tunnel, which returns a socket-like with the exact
-// on* handler surface this pipeline uses. Direct-URL runtimes keep the native
-// WebSocket path, wrapped to the same shape so the caller holds one type.
 function openGlobalEventSocket(lastEventId?: string): RelayTunnelWebSocket {
   const url = buildGlobalEventWsUrl(lastEventId)
   return openRuntimeWebSocket(url)
@@ -432,7 +381,6 @@ type AttemptAbortReason =
   | `${"ws" | "sse"}_${string}`
   | null
 
-/** Key under which repeated events for the same entity collapse into one. */
 function coalesceKey(event: SyncEvent): string | undefined {
   switch (event.type) {
     case "session.status":
@@ -450,8 +398,13 @@ function coalesceKey(event: SyncEvent): string | undefined {
   }
 }
 
-/** Merges a later event into the queued one it coalesces with. */
 function mergeCoalesced(previous: SyncEvent, next: SyncEvent): SyncEvent {
+  if (previous.type === "session.status" && next.type === "session.status") {
+    const turnStart = next.properties.turnStart ?? previous.properties.turnStart
+    return turnStart && next.properties.status.type !== "idle"
+      ? { ...next, properties: { ...next.properties, turnStart } }
+      : next
+  }
   if (previous.type === "message.part.delta" && next.type === "message.part.delta") {
     return { ...next, properties: { ...next.properties, delta: previous.properties.delta + next.properties.delta } }
   }
@@ -480,6 +433,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onTransportSwitch,
     onSpaceStream,
     onSpaceProgress,
+    onSpaceTaskTitle,
     onSpaceSetup,
     onSpacePermissionStream,
     onStreamActivity,
@@ -510,8 +464,11 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       if (frame?.eventId) lastEventId = frame.eventId
     }
   }
+  let wsEverReady = false
+  let wsOpenFailuresSinceReady = 0
 
   const directories = new Map<string, DirectoryQueue>()
+  const isStaleTurnBoundary = createTurnBoundaryOrder(syncDebug.pipeline.staleTurnBoundary)
 
   const getOrCreateDir = (directory: string): DirectoryQueue => {
     let d = directories.get(directory)
@@ -596,9 +553,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const isHidden = (): boolean =>
     typeof document !== "undefined" && document.visibilityState !== "visible"
 
-  // Extract an HTTP status code from anywhere it might be hiding on the
-  // error object. Our client normaliser stashes it on `.status`; raw
-  // fetch failures may carry `.response.status`.
   const extractStatus = (error: unknown): number | undefined => {
     if (!error || typeof error !== "object") return undefined
     const direct = (error as { status?: unknown }).status
@@ -610,26 +564,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     return undefined
   }
 
-  // 4xx errors don't recover from blind retry — wrong path, expired auth,
-  // bad request body. Keep retrying anyway (a remote reconfigure or reauth
-  // can fix the underlying problem) but at the long cap so we're not
-  // hammering the server at 5s intervals indefinitely. 408 (timeout) and
-  // 429 (rate limit) are retryable in spirit — let them through to the
-  // normal exponential path.
   const isPermanentHttpStatus = (status: number): boolean => {
     if (status < 400 || status >= 500) return false
     if (status === 408 || status === 429) return false
     return true
   }
 
-  /**
-   * Wait between reconnect attempts. Resolves early when:
-   *   - the browser fires `online` (network came back — probe immediately),
-   *   - the tab becomes visible (user came back — probe immediately),
-   *   - an expired OpenChamber session becomes usable (the user logged in),
-   *   - the pipeline is being torn down (cleanup aborts).
-   * Otherwise resolves after `ms` like a plain timer.
-   */
   const waitForRetry = (ms: number) => new Promise<void>((resolve) => {
     if (ms <= 0 || abort.signal.aborted) {
       resolve()
@@ -675,9 +615,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
   const computeRetryDelay = (failures: number): number => {
     if (failures <= 0) return 0
-    // Offline: don't spin probing a dead network. Use the long cap and rely on
-    // waitForRetry to resolve early when the `online` event fires. The cap is
-    // also a fallback for browsers that miss `online`.
     if (isOffline()) return RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
     const cap = isHidden() ? RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS : RETRY_BACKOFF_CAP_VISIBLE_MS
     const exponent = Math.min(failures - 1, RETRY_BACKOFF_MAX_EXPONENT)
@@ -704,11 +641,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const markConnected = (replayReset = false, resumed = false) => {
     disconnected = false
     consecutiveFailures = 0
-    // Fire onReconnect on every successful connect — including the very
-    // first one. Consumer state (isConnected) starts at false and needs
-    // to be flipped positively; without this the send button throws
-    // "Connection lost" until something else (HTTP health check) happens
-    // to race a setState({isConnected: true}) through.
     onReconnect?.({ replayReset, resumed })
   }
 
@@ -721,11 +653,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       if (tracked) tracked.pending += 1
     }
 
-    // A full part snapshot is a coalescing barrier for that part's deltas:
-    // drop its pending delta coalescing keys so a delta arriving after the
-    // snapshot starts a fresh queue entry instead of merging into a delta
-    // queued before the snapshot, which the snapshot would then overwrite and
-    // drop the later delta's text. The already-queued delta event stays.
     if (event.type === "message.part.updated") {
       const deltaPrefix = `message.part.delta:${event.properties.part.messageID}:${event.properties.part.id}:`
       for (const key of d.coalesced.keys()) {
@@ -767,13 +694,17 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const enqueuePayload = (payload: unknown, frameDirectory: string | undefined, frame?: number) => {
-    const classified = classifyStreamPayload(payload, frameDirectory)
+    const classified = classifyStreamPayload(payload, frameDirectory, isStaleTurnBoundary)
     if (classified.kind === "space-stream") {
       onSpaceStream?.(classified.properties)
       return
     }
     if (classified.kind === "space-progress") {
       onSpaceProgress?.(classified.properties)
+      return
+    }
+    if (classified.kind === "space-task-title") {
+      onSpaceTaskTitle?.(classified.properties.spaceId, classified.properties.taskTitle)
       return
     }
     if (classified.kind === "space-setup") {
@@ -804,14 +735,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     heartbeat = undefined
   }
 
-  // Anything received proves the stream is alive, including keepalives that carry no event.
   const noteStreamActivity = () => {
     resetHeartbeat()
     onStreamActivity?.()
   }
 
   const runSseAttempt = async (signal: AbortSignal) => {
-    // Keepalive comments carry no event but prove the socket is alive.
     const events = sdk.event.subscribe({ signal, onActivity: noteStreamActivity })
 
     let connected = false
@@ -834,20 +763,19 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     }
   }
 
+  const wsOpenFailureFallsBack = (): boolean => {
+    if (!wsEverReady) return true
+    if (isOffline()) return false
+    wsOpenFailuresSinceReady += 1
+    return wsOpenFailuresSinceReady >= WS_PROVEN_OPEN_FAILURES_BEFORE_FALLBACK
+  }
+
   const runWsAttempt = async (signal: AbortSignal) => {
-    // A WebSocket upgrade can't carry an Authorization header, so it
-    // authenticates purely via the oc_url_token query param. The sync token
-    // getter returns "" while the token is unminted or inside its expiry skew
-    // window, which would open the socket WITHOUT credentials — the server then
-    // rejects it ("HTTP Authentication failed; no valid credentials available")
-    // and the resulting reconnect storm churns the sync store (transient
-    // status-missing → idle flicker). Mint/await a valid token BEFORE
-    // connecting. (SSE avoids this: the SDK fetch sends the bearer header.)
     try {
       await refreshRuntimeUrlAuthToken()
     } catch (error) {
       const wrapped = error instanceof Error ? error : new Error("Message stream WebSocket auth token unavailable")
-      if (transport === "auto") {
+      if (transport === "auto" && wsOpenFailureFallsBack()) {
         wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
         ;(wrapped as Error & { code?: string }).code = "WS_FALLBACK"
       }
@@ -862,11 +790,15 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       let opened = false
       let readyAt = 0
       const socket: RelayTunnelWebSocket = openGlobalEventSocket(lastEventId)
+      let openFailureFallsBack: boolean | undefined
       const setFallbackCode = (error: Error, force = false) => {
-        if ((force || !opened) && transport === "auto") {
-          wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
-          ;(error as Error & { code?: string }).code = "WS_FALLBACK"
+        if ((!force && opened) || transport !== "auto") return
+        if (!force) {
+          openFailureFallsBack ??= wsOpenFailureFallsBack()
+          if (!openFailureFallsBack) return
         }
+        wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
+        ;(error as Error & { code?: string }).code = "WS_FALLBACK"
       }
 
       let readyTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
@@ -940,8 +872,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         const frame = parsed.data
 
         if (frame.type === "ready") {
-          // The retained suffix no longer covers our cursor. The normal
-          // reconnect callback repairs authoritative state; retire that cursor.
           if (frame.replayReset === true) lastEventId = undefined
           // With no cursor of its own (it has applied no OpenCode event yet), this client adopts the server's
           // head, so a reconnect resumes from it instead of refetching. It waits until every frame read so far
@@ -950,6 +880,8 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
             lastEventId = frame.headEventId
           }
           opened = true
+          wsEverReady = true
+          wsOpenFailuresSinceReady = 0
           readyAt = Date.now()
           if (readyTimer) {
             clearTimeout(readyTimer)
@@ -1001,16 +933,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           ? `ws_closed:code=${event?.code ?? "?"}`
           : "ws_closed_before_ready"
 
-        // Closed before the socket ever opened → the server rejected the
-        // upgrade, typically an auth failure on the oc_url_token. Drop the
-        // cached token so the next attempt mints a fresh one instead of
-        // replaying a token the server won't accept (which would loop).
         if (!opened) {
           clearRuntimeUrlAuthToken()
         }
 
-        // If the WS stream connects (ready) but then drops quickly, prefer SSE for a while.
-        // This avoids tight reconnect loops with repeated console spam.
         const livedMs = readyAt > 0 ? Date.now() - readyAt : 0
         const unstableAfterReady = opened && livedMs > 0 && livedMs < 2_000
         setFallbackCode(error, unstableAfterReady)
@@ -1020,7 +946,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const resolveTransport = (): "ws" | "sse" => {
-    // The VS Code webview bridges only HTTP/SSE; there is no WebSocket bridge.
     if (typeof WebSocket !== "function" || isVSCodeRuntime()) {
       return "sse"
     }
@@ -1035,8 +960,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
   void (async () => {
     while (!abort.signal.aborted) {
-      // An expired OpenChamber session refuses every attempt; wait for the
-      // user to log in rather than retrying into 401s.
       await waitForAuthSession(abort.signal)
       if (abort.signal.aborted) return
       attempt = new AbortController()
@@ -1061,9 +984,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
         if (currentTransport === "ws" && code === "WS_FALLBACK") {
           retryDelayMs = 0
-          // Transport switch (WS → SSE fallback), not a real disconnection.
-          // The consumer still gets a hook so it can resync authoritative
-          // state; real networks can lose/buffer events around transport flips.
           onTransportSwitch?.()
         } else if (!isAbortError(error)) {
           consecutiveFailures += 1
@@ -1071,10 +991,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
             streamErrorLogged = true
             console.error("[event-pipeline] stream failed", error)
           }
-          // Notify consumer that the stream has disconnected, so it can
-          // update connection state (e.g. set isConnected = false).
-          // Guard: only fire once per disconnection cycle to avoid repeated
-          // setState calls on every failed retry attempt.
           const taggedReason = typeof error === "object" && error !== null
             ? (error as { reason?: unknown }).reason
             : undefined
@@ -1088,18 +1004,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
               : `${currentTransport}_error:unknown`
           notifyDisconnected(reason)
 
-          // Exponential backoff so a hard-down server / dead network doesn't
-          // spin the event loop. Caps lower (5s) when the user is foreground
-          // and the browser thinks it's online; caps higher (60s) when hidden
-          // or offline so a backgrounded PWA on a flaky link doesn't burn
-          // battery. waitForRetry below resolves early on `online` or
-          // visibility-visible so recovery is still under a second.
-          //
-          // Override for permanent 4xx errors: stuck-path / bad-auth scenarios
-          // won't recover from blind retry. Use the long cap immediately so
-          // the client doesn't pound the server log at 12 reqs/min. The
-          // waitForRetry interrupters still apply, so a fix on the other end
-          // followed by `online`/visibility recovery probes promptly.
           const status = extractStatus(error)
           if (status !== undefined && isPermanentHttpStatus(status)) {
             retryDelayMs = RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
@@ -1137,28 +1041,16 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     attempt?.abort()
   }
 
-  // OS wake-from-sleep (Electron powerMonitor.resume). The SSE connection
-  // is almost certainly dead after sleep — abort immediately so the
-  // reconnect loop fires on the next tick with retryDelayMs = 0.
   const onSystemResume = () => {
     attemptAbortReason = `${activeTransport}_system_resume`
     attempt?.abort()
   }
 
-  // Browser told us the network is back. If we're already in a disconnected
-  // cycle, abort the (stale) attempt and let the loop probe immediately;
-  // waitForRetry also resolves early on `online`, so any inter-attempt sleep
-  // ends now. Guard on `disconnected` so a spurious `online` from the browser
-  // doesn't disrupt a healthy connection.
   const onOnline = () => {
     if (!disconnected) return
     attempt?.abort()
   }
 
-  // Browser told us we're offline. Abort the current attempt — its socket /
-  // fetch will throw soon anyway, this just stops sooner. computeRetryDelay
-  // then returns the long cap so we wait for `online` instead of hammering
-  // a dead network.
   const onOffline = () => {
     attempt?.abort()
   }
@@ -1173,8 +1065,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     window.addEventListener("pageshow", onPageShow)
   }
 
-  // Use globalThis (not window) for the system-resume listener so that
-  // test environments can replace globalThis.window with a stub.
   if (typeof globalThis.window !== "undefined") {
     globalThis.window.addEventListener("openchamber:system-resume", onSystemResume)
     globalThis.window.addEventListener("online", onOnline)

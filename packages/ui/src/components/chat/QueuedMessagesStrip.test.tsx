@@ -3,7 +3,9 @@ import { Window } from 'happy-dom';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
+import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { I18nProvider } from '@/lib/i18n';
+import { getDefaultTheme } from '@/lib/theme/themes';
 import { getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { QueuedMessagesStrip } from './QueuedMessagesStrip';
@@ -11,6 +13,15 @@ import { QueuedMessagesStrip } from './QueuedMessagesStrip';
 const target: MessageQueueTarget = { runtimeKey: 'local', directory: '/repo', sessionId: 'ses_root' };
 
 const queued = (id: string, content: string): QueuedMessage => ({ id, content, text: content, createdAt: 1 });
+
+const theme = getDefaultTheme(false);
+// Agent badges take their color from the theme.
+const themeContext: ThemeContextValue = {
+  currentTheme: theme, availableThemes: [theme], customThemeIds: [], setTheme: () => {}, customThemesLoading: false,
+  reloadCustomThemes: async () => {}, importTheme: async () => theme, deleteImportedTheme: async () => {},
+  isSystemPreference: false, setSystemPreference: () => {}, themeMode: 'light', setThemeMode: () => {},
+  lightThemeId: theme.metadata.id, darkThemeId: theme.metadata.id, setLightThemePreference: () => {}, setDarkThemePreference: () => {},
+};
 
 const setQueue = (...messages: QueuedMessage[]) => act(async () => {
   useMessageQueueStore.setState({ queuedMessages: messages.length ? { [getMessageQueueKey(target)]: messages } : {} });
@@ -22,6 +33,14 @@ describe('QueuedMessagesStrip', () => {
   let root: Root;
   let sent: string[];
 
+  const renderStrip = (composerAgentName: string) => act(async () => {
+    root.render(
+      <I18nProvider><ThemeSystemContext.Provider value={themeContext}>
+        <QueuedMessagesStrip target={target} composerAgentName={composerAgentName} onEditMessage={() => {}} onSendMessage={(id) => { sent.push(id); }} />
+      </ThemeSystemContext.Provider></I18nProvider>,
+    );
+  });
+
   beforeEach(async () => {
     windowInstance = new Window({ url: 'http://localhost' });
     Object.assign(globalThis, {
@@ -32,6 +51,8 @@ describe('QueuedMessagesStrip', () => {
       HTMLElement: windowInstance.HTMLElement,
       Element: windowInstance.Element,
       Node: windowInstance.Node,
+      requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+      cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
       IS_REACT_ACT_ENVIRONMENT: true,
     });
     sent = [];
@@ -40,13 +61,7 @@ describe('QueuedMessagesStrip', () => {
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
-    await act(async () => {
-      root.render(
-        <I18nProvider>
-          <QueuedMessagesStrip target={target} onEditMessage={() => {}} onSendMessage={(id) => { sent.push(id); }} />
-        </I18nProvider>,
-      );
-    });
+    await renderStrip('build');
   });
 
   afterEach(async () => {
@@ -85,5 +100,22 @@ describe('QueuedMessagesStrip', () => {
     expect(host.textContent).toContain('First');
     expect(host.textContent).toContain('Second');
     expect(buttons().filter((item) => item.getAttribute('aria-label') === 'Drag to reorder')).toHaveLength(2);
+  });
+
+  test('a row names its captured agent only while the composer is on another one', async () => {
+    const asAgent = (message: QueuedMessage, agent: string): QueuedMessage => ({ ...message, sendConfig: { providerID: 'p', modelID: 'm', agent } });
+    await act(async () => useUIStore.setState({ messageQueueExpanded: true }));
+    await setQueue(asAgent(queued('q1', 'First'), 'build'), asAgent(queued('q2', 'Second'), 'plan'), queued('q3', 'Third'));
+    const rowText = (content: string) => [...host.querySelectorAll('.oc-composer-row')]
+      .find((row) => row.textContent?.includes(content))?.textContent ?? '';
+
+    expect(rowText('First')).not.toContain('Build');
+    expect(rowText('Second')).toContain('Plan');
+    expect(rowText('Third')).toBe('Thirdeditsend');
+
+    await renderStrip('plan');
+    expect(rowText('First')).toContain('Build');
+    expect(rowText('Second')).not.toContain('Plan');
+    expect(rowText('Third')).toBe('Thirdeditsend');
   });
 });

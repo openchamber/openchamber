@@ -13,22 +13,18 @@ type PackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun';
 
 const DEV_COMMAND_PATTERNS = [
   { pattern: /^dev(:.*)?$/i },
-  { pattern: /^start(:.*)?$/i },
+  { pattern: /^start$/i },
+  { pattern: /^start:(?:dev|preview|serve)(?::.*)?$/i },
   { pattern: /^preview(:.*)?$/i },
   { pattern: /^serve(:.*)?$/i },
   { pattern: /^develop(:.*)?$/i },
 ];
 
-const COMMON_DEV_COMMANDS = [
-  'dev',
-  'start',
-  'preview',
-  'serve',
-];
+const DEV_ACTION_NAME_PATTERN = /^(?:(?:dev(?:elopment)?|preview|serve)(?: server)?|(?:start|run)\s+(?:dev(?:elopment)?\s+)?(?:server|preview))(?:\s+\([^)]+\))?$/i;
+const DEV_SCRIPT_COMMAND_PATTERN = /^(?:cd\s+(?:"[^"]+"|'[^']+'|[^\s;&|]+)\s*&&\s*)?(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:--shell=bun\s+)?([^\s;&|]+)(?:\s|$)/i;
 
-/**
- * Detect the dev server command from project actions or package.json scripts
- */
+const isDevScriptName = (name: string): boolean => DEV_COMMAND_PATTERNS.some(({ pattern }) => pattern.test(name));
+
 export async function detectDevServerCommand(
   directory: string,
   projectActions: OpenChamberProjectAction[],
@@ -36,7 +32,6 @@ export async function detectDevServerCommand(
 ): Promise<DevServerInfo | null> {
   if (!directory) return null;
 
-  // First, check if there's a project action that looks like a dev server
   const devAction = findDevServerAction(projectActions);
   if (devAction) {
     return {
@@ -47,11 +42,9 @@ export async function detectDevServerCommand(
     };
   }
 
-  // Then, check package.json scripts
   if (packageJsonScripts) {
     const devScript = findDevScript(packageJsonScripts);
     if (devScript) {
-      // Determine the package manager command
       const pm = await detectPackageManager(directory);
       const pmCommand = pm === 'npm' ? 'npm run' : pm === 'yarn' ? 'yarn' : pm === 'pnpm' ? 'pnpm' : pm === 'bun' ? 'bun run --shell=bun' : 'npm run';
       return {
@@ -61,8 +54,6 @@ export async function detectDevServerCommand(
     }
   }
 
-  // Fallback: static sites (no package.json) can be previewed via a simple file server.
-  // This keeps Start Preview usable for non-Node projects.
   if (await hasStaticIndexHtml(directory)) {
     const port = await allocatePreviewPort();
     const resolvedPort = typeof port === 'number' && Number.isFinite(port) && port > 0 ? port : 8000;
@@ -94,20 +85,11 @@ async function allocatePreviewPort(): Promise<number | null> {
   }
 }
 
-/**
- * Find a project action that looks like a dev server
- */
 function findDevServerAction(actions: OpenChamberProjectAction[]): OpenChamberProjectAction | null {
-  // Look for actions with "dev", "preview", "start" in the name or command
   for (const action of actions) {
-    const nameAndCommand = `${action.name} ${action.command}`.toLowerCase();
-    
-    // Check if it's likely a dev server action
-    const isDevAction = COMMON_DEV_COMMANDS.some(cmd => 
-      nameAndCommand.includes(cmd)
-    );
-    
-    if (isDevAction) {
+    const scriptName = DEV_SCRIPT_COMMAND_PATTERN.exec(action.command.trim())?.[1];
+    if ((scriptName && isDevScriptName(scriptName))
+      || (action.source !== 'shared' && DEV_ACTION_NAME_PATTERN.test(action.name.trim()))) {
       return action;
     }
   }
@@ -115,9 +97,6 @@ function findDevServerAction(actions: OpenChamberProjectAction[]): OpenChamberPr
   return null;
 }
 
-/**
- * Find a dev script in package.json scripts
- */
 function findDevScript(scripts: Record<string, string>): string | null {
   for (const { pattern } of DEV_COMMAND_PATTERNS) {
     for (const scriptName of Object.keys(scripts)) {
@@ -129,11 +108,6 @@ function findDevScript(scripts: Record<string, string>): string | null {
   return null;
 }
 
-/**
- * Simple package manager detection based on lock files
- * Note: This is intentionally a simple client-side check.
- * For server-side operations, the server's package-manager.js is used.
- */
 async function detectPackageManager(directory: string): Promise<PackageManager> {
   const packageJsonContent = await readOptionalTextFile(`${directory}/package.json`, directory);
   if (packageJsonContent) {
@@ -203,9 +177,6 @@ async function readOptionalTextFile(path: string, directory?: string): Promise<s
   }
 }
 
-/**
- * Read package.json scripts from a directory
- */
 export async function readPackageJsonScripts(directory: string): Promise<Record<string, string> | null> {
   try {
     const content = await readOptionalTextFile(`${directory}/package.json`, directory);

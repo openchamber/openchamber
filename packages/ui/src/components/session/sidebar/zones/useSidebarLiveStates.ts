@@ -2,10 +2,10 @@ import React from 'react';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
-import { useNotificationStore } from '@/sync/notification-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { SessionAttentionState } from '@/stores/sidebarLayout';
 import type { SessionLiveState } from './sidebarZones';
+import { isSessionUnread } from '@/sync/session-unread';
 
 /** A top-level session whose live state the zones need, with its subsessions. */
 export type LiveStateCandidate = { id: string; treeIds: readonly string[] };
@@ -73,10 +73,11 @@ export const useSidebarLiveStates = (
     }
     return entries.join(SEPARATOR);
   }, [candidates, enabled]));
-  const unread = useNotificationStore(React.useCallback((state) => {
+  // Unread is the session's own state (upstream session-unread: unseen turn or a mark).
+  const unread = useGlobalSessionsStore(React.useCallback((state) => {
     if (!enabled || !readUnread) return '';
     return candidates
-      .filter((candidate) => (state.index.session.unseenCount[candidate.id] ?? 0) > 0)
+      .filter((candidate) => isSessionUnread(state.entityById.get(candidate.id)))
       .map((candidate) => candidate.id)
       .join(SEPARATOR);
   }, [candidates, enabled, readUnread]));

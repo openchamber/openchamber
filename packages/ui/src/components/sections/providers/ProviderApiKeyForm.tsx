@@ -1,5 +1,5 @@
 import React from 'react';
-import type { FormValue, IntegrationKeyMethod } from '@opencode/client';
+import type { FormValue, IntegrationKeyMethod } from '@/lib/opencode/model';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
@@ -22,21 +22,11 @@ export interface IntegrationKeyRequest {
 
 interface ProviderApiKeyFormProps {
   integrationId: string;
-  /**
-   * The integration's key method. Its `form` (an Azure resource name, a
-   * Cloudflare account id) is answered alongside the key. Undefined for a
-   * provider OpenCode has no integration for, which takes a bare key.
-   */
   keyMethod: IntegrationKeyMethod | undefined;
-  /** Stores the credential; injected so the form does not own the SDK call. */
   connectKey: (request: IntegrationKeyRequest) => Promise<void>;
   onSaved: () => void;
 }
 
-/**
- * The API key form for one integration. Mount with `key={integrationId}` so a
- * different provider starts from an empty form.
- */
 export const ProviderApiKeyForm: React.FC<ProviderApiKeyFormProps> = ({
   integrationId,
   keyMethod,
@@ -46,8 +36,6 @@ export const ProviderApiKeyForm: React.FC<ProviderApiKeyFormProps> = ({
   const { t } = useI18n();
   const fields = React.useMemo(() => (keyMethod?.form ?? []).filter(isAnswerableField), [keyMethod]);
   const [apiKey, setApiKey] = React.useState('');
-  // Only what the user typed; declared defaults fill the rest, so a catalog
-  // refresh that changes the form never leaves a field without a value.
   const [editedValues, setEditedValues] = React.useState<Record<string, FormValue>>({});
   const fieldValues = React.useMemo(
     () => ({ ...defaultFieldValues(fields), ...editedValues }),
@@ -87,28 +75,26 @@ export const ProviderApiKeyForm: React.FC<ProviderApiKeyFormProps> = ({
   };
 
   return (
-    <div className="py-1.5 space-y-3">
-      <div>
-        <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-          {t('settings.providers.page.auth.apiKeyLabel')}
-          <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
-        </label>
-        <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
-          <Input
-            type="password"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
-            className="flex-1 font-mono text-xs"
-          />
+    <div className="space-y-3">
+      <div className="flex flex-col @xl:flex-row @xl:items-center gap-2">
+        <Input
+          type="password"
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+          placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
+          aria-label={t('settings.providers.page.auth.apiKeyLabel')}
+          className="flex-1 font-mono text-xs"
+        />
+        <div className="flex shrink-0 items-center gap-1.5">
           <Button
             size="xs"
-            className="!font-normal shrink-0"
+            className="!font-normal"
             onClick={() => void save()}
             disabled={saving}
           >
             {saving ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
           </Button>
+          <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
         </div>
       </div>
       {fields.length > 0 ? (

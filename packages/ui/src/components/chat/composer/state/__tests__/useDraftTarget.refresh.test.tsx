@@ -51,10 +51,12 @@ describe('useDraftTarget refresh', () => {
     });
 
     const calls: string[] = [];
+    let askingRemotes = true;
     const now = Date.now();
     useGitStore.setState({
       directories: new Map([[PROJECT.path, {
         isGitRepo: true,
+        repoUnreadable: null,
         status: null,
         branches: { all: ['main'], current: 'main', branches: {} },
         log: null,
@@ -68,6 +70,7 @@ describe('useDraftTarget refresh', () => {
         lastBranchesFetch: now,
         lastIdentityFetch: 0,
         logMaxCount: 25,
+        askedRemoteOnlyBranches: [],
         isLoadingStatus: false,
         isLoadingLog: false,
         isLoadingBranches: false,
@@ -76,6 +79,7 @@ describe('useDraftTarget refresh', () => {
       fetchBranches: async (directory: string) => {
         calls.push(directory);
       },
+      isAskingRemotes: () => askingRemotes,
     });
 
     const target = React.createRef<ReturnType<typeof useDraftTarget>>();
@@ -99,6 +103,13 @@ describe('useDraftTarget refresh', () => {
     // A fresh list is exactly the case the old code left alone.
     expect(calls).toEqual([]);
 
+    // Coming back from a PIN window leaves the request it was opened for alone.
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(calls).toEqual([]);
+
+    askingRemotes = false;
     await act(async () => {
       window.dispatchEvent(new Event('focus'));
     });
@@ -142,6 +153,7 @@ describe('useDraftTarget refresh', () => {
     useGitStore.setState({
       directories: new Map([[PROJECT.path, {
         isGitRepo: true,
+        repoUnreadable: null,
         status: null,
         branches: { all: ['main'], current: 'main', branches: {} },
         log: null,
@@ -155,6 +167,7 @@ describe('useDraftTarget refresh', () => {
         lastBranchesFetch: now,
         lastIdentityFetch: 0,
         logMaxCount: 25,
+        askedRemoteOnlyBranches: [],
         isLoadingStatus: false,
         isLoadingLog: false,
         isLoadingBranches: false,

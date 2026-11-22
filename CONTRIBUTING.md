@@ -2,31 +2,14 @@
 
 ## Before you start
 
-Bug fixes and small improvements: just open the PR. That's most of what gets
-merged, and a typical merged PR is around 200 lines.
+Every pull request links an issue, and which issue depends on the change.
 
-New features, changes to how something behaves for users, or reworks of how a
-module is put together: start an
-[Ideas discussion](https://github.com/openchamber/openchamber/discussions/categories/ideas)
-first, and start it before the code. Say what you were trying to do, what got
-in your way, and what you'd want instead, in your own words. A screenshot or a
-rough mockup helps more than a specification.
+- **Bug fix.** Open a [bug report](https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml), or find the existing one, and put `Fixes #N` in the PR description. You don't need to wait for anyone.
+- **New feature or a change to how something behaves.** Open a [feature request](https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml) and wait. Building starts after the maintainer marks it `accepted`. Write it in a few sentences of your own: what you were trying to do, what got in your way, what you'd want instead. A long generated write-up with headings, implementation plans and file lists isn't read.
 
-A post describing something you already built is a report, not a discussion:
-the decision is made by then, and it gets closed along with the PR behind it.
-Not because it was drafted by an AI, we all use AI, but because it arrives
-after the only moment when talking would have changed anything. If you have an
-idea of how you'd implement it, or a branch already sketched out, bring it as a
-question: here's how I'd do it, does that shape work? A branch you're willing
-to change is a proposal. Once the shape is agreed, build it and link the
-discussion from the PR.
+A pull request without a linked bug report or accepted feature request is closed automatically with the `needs-accepted-issue` label. It reopens on its own once its description links one (`Fixes #N`, or `Part of #N` for one piece of a larger feature), or once the linked feature request gets `accepted`. Pull requests that only change documentation or tests don't need an issue. An issue labeled `in-house` is one I'm building myself, so a pull request from outside the core team that links it is closed too.
 
-Wait for the answer before you build. A pull request that carries a product
-decision, with no discussion behind it and no maintainer go-ahead, is not
-getting reviewed, whatever shape the code is in. That "yes, go ahead" is the
-thing that makes it worth your evening.
-
-**What counts as a product decision?** Anything where two reasonable people
+**What counts as a feature request?** Anything where two reasonable people
 could disagree about whether it should exist or how it should behave. In
 practice: a new button, panel, setting or command; a changed default; a
 shortcut or gesture that now does something else; different wording, ordering
@@ -35,20 +18,20 @@ everyone. Also removing or working around behavior the code marks as
 deliberate: if a comment says something is skipped on purpose, then "is that
 actually a bug?" is a product question, and it comes first.
 
-Not a product decision: a crash, wrong data, something that doesn't work the
-way it plainly says it does, a performance fix that keeps behavior identical.
-Those are bugs. Just open the PR.
+A bug is a crash, wrong data, something that doesn't work the way it plainly
+says it does, or a performance fix that keeps behavior identical. A feature
+filed as a bug report gets relabeled, and its pull request closes with it.
 
-Not sure? Ask in the discussion first. It costs you one paragraph and saves
-you the whole pull request.
+Not sure which one it is? Open a feature request and ask. It costs you one
+paragraph and saves you the whole pull request.
 
-A large PR with no discussion behind it gets a `needs-discussion` label and a
-comment asking for one. It stays parked until the discussion exists. Nobody is
-shooing you away, we just can't review a product decision inside a 3,000-line
-diff.
+Repository collaborators and the people listed in
+[`.github/trusted-contributors`](.github/trusted-contributors) skip the
+automatic close. Their pull requests still carry product decisions only after
+the maintainer agreed to them.
 
-The single maintainer reviews everything by hand. Small, focused PRs get
-reviewed first; a PR that mixes unrelated fixes waits for the largest of them.
+Maintainers review everything by hand. Small, focused PRs get reviewed first;
+a PR that mixes unrelated fixes waits for the largest of them.
 
 ## Getting Started
 
@@ -71,9 +54,7 @@ Run commands from the project root unless a section says otherwise.
 
 | Script | Description | Ports |
 |--------|-------------|-------|
-| `bun run dev` | Default web HMR dev flow. | auto-selected dev ports |
-| `bun run dev:web:full` | Build watcher + Express server. No HMR — manual refresh after changes. | `3001` (server + static) |
-| `bun run dev:web:hmr` | Vite dev server + Express API. **Open the Vite URL for HMR**, not the backend. | `5180` (Vite HMR), `3902` (API) |
+| `bun run dev` | Vite dev server + Express API. **Open the Vite URL for HMR**, not the backend. | `5180` (Vite HMR), `3902` (API) |
 | `bun run start:web` | Start the packaged web server. | `3000` by default |
 
 Both are configurable via env vars: `OPENCHAMBER_PORT`, `OPENCHAMBER_HMR_UI_PORT`, `OPENCHAMBER_HMR_API_PORT`.
@@ -176,7 +157,7 @@ OPENCHAMBER_TARGET_ARCH=arm64 bun run electron:build
 bun run --cwd packages/electron verify:linux-appimage
 ```
 
-The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode CLI, and packaged native modules.
+The final AppImage verifier checks desktop identity and the architecture of Electron, the bundled OpenCode server's native files, and packaged native modules.
 
 ## Before Submitting
 
@@ -205,7 +186,11 @@ canonical full-suite command.
 
 UI tests run on happy-dom, where DOMPurify stops visiting the siblings of a node
 it removed: test each malicious payload in its own call, or a combined payload
-passes or fails for the wrong reason. The UI's `bun:test` type shim is trimmed
+passes or fails for the wrong reason. happy-dom refuses an event built by another
+realm, so a test that installs a `Window` as `window` also installs that window's
+`Event` and `CustomEvent`: app code dispatches `new CustomEvent(...)` on `window`
+when stores load. `src/test/preload.ts` turns off Base UI's animation waits,
+since nothing animates in happy-dom. The UI's `bun:test` type shim is trimmed
 (no `test.each`, no `toMatch`): use loops and `regex.test()` with `toBe`.
 
 For docs-only changes, validation may be enough:
@@ -231,15 +216,14 @@ without reconstructing the contributor's work.
 
 Before opening a pull request:
 
-1. For anything that is not a bug fix or a small improvement, make sure the
-   [Ideas discussion](https://github.com/openchamber/openchamber/discussions/categories/ideas)
-   happened first, that a maintainer said go ahead, and link it. Opening one
-   after the implementation, to describe what you already built, closes the
-   post and this pull request with it; opening the pull request without the
-   go-ahead means nobody reviews it.
+1. Link the issue: `Fixes #N` for a bug report or a whole accepted feature
+   request, `Part of #N` for one piece of an accepted feature request (see
+   *Before you start*).
 2. Read [`AGENTS.md`](./AGENTS.md), every project skill matching the character
    of the change, and the nearest package README and module `DOCUMENTATION.md`.
-3. Keep the change focused. Separate unrelated cleanup or refactors.
+3. Keep the change focused. Separate unrelated cleanup or refactors. A feature
+   made of several parts that work on their own is one pull request per part
+   or small group, so each can be reviewed and tested whole.
 4. Run the validation required by the applicable project guidance, not only
    the broad commands above.
 5. Complete the pull request template with concrete, current evidence.
@@ -256,13 +240,13 @@ Every pull request must explain:
   a line.
 - **Affected surfaces:** packages, persisted/external contracts, and
   user-visible states affected by the change, plus one line per runtime (web,
-  desktop, VS Code, hosted mobile, Capacitor mobile) saying what the change
-  does there. "Not applicable" is an answer; a blank row is not. Write that
-  list while deciding what to build, not after: it is the same list the pull
-  request template asks for.
-- **Validation:** exact automated and manual checks performed, their result,
-  and anything that was not verified. A command name without a result is not
-  evidence.
+  desktop, VS Code, hosted mobile, Capacitor mobile) with one of two answers:
+  what you did there in the running app and what you saw, or that the change
+  has no code of its own in that runtime ("same code as web, run there",
+  "does not run here"). Write that list while deciding what to build, not
+  after: it is the same list the pull request template asks for.
+- **Validation:** exact automated and manual checks performed and their
+  result. A command name without a result is not evidence.
 - **Live run:** if your change touches behavior a user can reach at run time,
   say that you ran the built or running app and exercised the changed path.
   This is in addition to any screenshot, recording, or measurement the change
@@ -270,19 +254,46 @@ Every pull request must explain:
   a live run says a person reached it in a running build.
   Name the runtime you used (web, desktop, VS Code, hosted mobile, or Capacitor
   mobile), the operating system, and what you saw. Reading the diff, passing
-  types, and green CI are not a live run. If you genuinely cannot run it, say
-  so and explain why; an honest gap is reviewable, a claim we later find hollow
-  is not.
-- **Risks:** meaningful failure, rollback, cleanup, compatibility, security,
-  performance, or cross-runtime considerations.
+  types, and green CI are not a live run.
+- **Run it where it lives:** a change to a runtime's own code is run in that
+  runtime before the pull request opens: `packages/electron` and the mini chat
+  on desktop, `packages/vscode` in VS Code, `packages/mobile` and the mobile UI
+  on a phone or the iOS Simulator. A change to the relay (`lib/relay` in the
+  UI and the server) is run through the relay from both a desktop client and
+  a phone, because each has its own transport code; the `relay-transport`
+  skill says how to start a test host and pair with it. Shared UI that renders the
+  same everywhere is proven once, on web. State that has to survive a server
+  switch, a reload or eviction from cache (drafts, persisted UI state) is run
+  through those, in every runtime that keeps it. Touch gestures can be run in
+  a desktop browser's device mode; the iOS keyboard, safe areas and the native
+  shell need the Simulator or a device. With no way to run a runtime your
+  change touches, the change is not yours to send: open a bug report or a
+  feature request, and someone who can run it picks it up. A pull request that
+  touches such code without saying it was run there gets `needs-live-run` and
+  is not reviewed until it does.
+- **Everything you claim, run for real:** every runtime, platform, and
+  external service the pull request says it supports is exercised live before
+  the pull request opens, not only the one you happen to use. Tests, mocks, and
+  fixtures repeat your own idea of how the other side behaves, so they pass
+  exactly where that idea is wrong. Most of it is cheap to set up: a free
+  account, a Docker container, a simulator, and an agent that drives the app.
+  Say per target what you did, what you saw, and how you checked the result
+  outside the app, including the refusals and error cases.
+- **Known problems:** none. A pull request is ready when its author knows of
+  no problem in it. A case you noticed while building, such as a runtime that
+  might behave differently or state that might come back after a reload, is
+  checked and fixed in the same pull request, and reported under Validation
+  as something you ran. Choosing between several ways to fix a bug is your
+  job too: pick the one that works, passes the checks and follows the
+  project skills, and show that it does. Product questions go into a feature
+  request before the code, never into a pull request.
 
 You still have to read the project skills and module docs that match your
 change (step 1 above); the reviewer checks the code against them. You don't
 have to list them in the PR.
 
 Do not claim a runtime, platform, relay path, performance characteristic, or
-interaction is correct based only on type-checking or linting. If required
-validation could not be performed, state that explicitly and explain why.
+interaction is correct based only on type-checking or linting.
 
 ### Visual Evidence
 
@@ -290,6 +301,26 @@ User-visible changes require evidence that lets a reviewer compare the
 behavior before and after the change. Attach screenshots for static states and
 a short recording for motion, gestures, drag-and-drop, focus, or multi-step
 interactions.
+
+Evidence goes in the PR description, never in the branch: committed images,
+recordings, logs and traces ship in every clone of the repository, and the
+intake check asks you to remove them. Two ways to attach it:
+
+- By hand: drag the files into the PR description editor and GitHub hosts them.
+- From an agent or a script: `node scripts/pr-evidence.mjs --title "openchamber #123 evidence" before.png after.png`
+  uploads PNG, JPEG, GIF or WebP files to a secret gist and prints the Markdown
+  to paste into the description. Record motion as a GIF. It needs an
+  authenticated `gh`.
+
+Changes to the translation catalogs, where all UI wording lives, need no
+screenshots.
+
+Both rules are checked on every pull request. A branch that adds screenshots,
+recordings or logs gets `evidence-in-branch`; a change to UI files
+(`packages/ui/src`, `.tsx` and `.css`) whose description has no image gets
+`needs-visual-evidence`. The review starts once the label is gone, and it comes
+off on its own when the files leave the branch or the description gains a
+screenshot.
 
 Claims about performance, memory, CPU, rendering, startup, or similar empirical
 behavior require relevant before and after measurements.
@@ -308,9 +339,9 @@ Choose evidence based on the affected behavior:
 
 Evidence must represent the current pull request HEAD. After implementation
 changes that can affect the demonstrated behavior, refresh the evidence or
-state why it remains valid. If there is genuinely no user-visible change, say
-so and provide a concrete reason; deleting the evidence section is not an
-exemption.
+state why it remains valid. If a UI change genuinely shows nothing on screen,
+say why in the description; the maintainer then lifts the label by hand.
+Deleting the evidence section is not an exemption.
 
 ### Review enforcement
 
@@ -348,17 +379,12 @@ verify a trustworthy result, in which case it applies `review:automation-failed`
 Each completed review creates a new comment tied to its reviewed HEAD so the
 conversation remains chronological. Previous review comments are not rewritten.
 
-### Size label and parking
+### Size label
 
 Every PR gets a `size:XS` to `size:XXL` label from its changed lines. Tests,
-lockfiles, translation catalogs (`packages/ui/src/lib/i18n/messages`) and PR
-evidence images don't count, so a one-line settings change that touches twelve
-locale files is still `size:XS`.
-
-A `size:XL` or larger PR with no Ideas discussion linked in its body also gets
-`needs-discussion` and a comment. Link the discussion (or shrink the PR) and
-the label comes off on the next push or edit. Repo collaborators are exempt:
-the team settles product questions before the work starts.
+lockfiles and translation catalogs (`packages/ui/src/lib/i18n/messages`) don't
+count, so a one-line settings change that touches twelve locale files is still
+`size:XS`.
 
 ### Keeping PRs active
 
@@ -388,7 +414,7 @@ You can still help:
 
 - Report bugs. Even "this felt confusing" is useful. Write issues in English (machine translation is fine); reports in other languages wait until someone translates them
 - Test on different devices, browsers, or OS versions
-- Suggest features in [Ideas discussions](https://github.com/openchamber/openchamber/discussions/categories/ideas). The issue tracker is for bugs only
+- Suggest features with a [feature request](https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml)
 - Answer questions in [Q&A discussions](https://github.com/openchamber/openchamber/discussions/categories/q-a)
 
 ## Questions?

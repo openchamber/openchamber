@@ -85,6 +85,13 @@ describe('browser control router', () => {
     expect(proxied).toHaveLength(0);
   });
 
+  test('refuses an action outside the provider contract without sending it', async () => {
+    const { router, brokerCalls, proxied } = createRouter();
+    await expect(router.request('browser.hover', { ref: 'e1' })).rejects.toThrow('does not offer browser.hover');
+    expect(proxied).toHaveLength(0);
+    expect(brokerCalls).toHaveLength(0);
+  });
+
   test('"builtin" is the in-app broker as well', async () => {
     const { router, brokerCalls } = createRouter({ settings: { browserProvider: 'builtin' } });
     await router.request('browser.snapshot', {});
@@ -112,6 +119,24 @@ describe('browser control router', () => {
     });
     expect(call.idleStopMs).toBe(BROWSER_PROVIDER_IDLE_MS);
     expect(call.granted).toEqual(['service']);
+  });
+
+  test('routes browser.select to the selected provider unchanged', async () => {
+    const { router, proxied } = createRouter({
+      serviceAnswer: {
+        status: 200,
+        body: JSON.stringify({ ok: true, data: { selector: '#country', label: 'Canada', value: 'ca', url: 'https://example.test/' } }),
+      },
+    });
+
+    await expect(router.request('browser.select', { selector: '#country', label: 'Canada' })).resolves.toEqual({
+      selector: '#country',
+      label: 'Canada',
+      value: 'ca',
+      url: 'https://example.test/',
+    });
+    expect(JSON.parse(proxied[0].body).action).toBe('browser.select');
+    expect(JSON.parse(proxied[0].body).parameters).toEqual({ selector: '#country', label: 'Canada' });
   });
 
   test('a slow page gets the open budget when the caller sets none', async () => {

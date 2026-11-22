@@ -2,8 +2,8 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { completeWorktreeCheckoutHydration, getWorktreeBootstrapStatus } from './service.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { completeWorktreeCheckoutHydration, getWorktreeBootstrapGateStatus, getWorktreeBootstrapStatus } from './service.js';
 import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
 
 const directories = [];
@@ -26,6 +26,134 @@ afterEach(async () => {
 });
 
 describe('worktree bootstrap storage', () => {
+  it('forgets a failed checkout after its directory disappears, including the cached gate state', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-orphan-');
+    const checkout = path.join(directory, 'checkout');
+    await fs.mkdir(checkout);
+    const store = createWorktreeBootstrapStore({ filePath: path.join(directory, 'bootstrap.json') });
+    const failure = await store.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store })).resolves.toEqual(failure);
+    await fs.rmdir(checkout);
+
+    await Promise.all([1, 2, 3].map(() => getWorktreeBootstrapStatus(checkout, { bootstrapStore: store })));
+    await expect(getWorktreeBootstrapStatus(checkout, { bootstrapStore: store }))
+      .resolves.toMatchObject({ status: 'ready', error: null });
+    await expect(store.read(checkout)).resolves.toBeNull();
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store }))
+      .resolves.toMatchObject({ status: 'ready', error: null });
+  });
+
+  it('forgets a cached failure after another store prunes the missing checkout', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-external-prune-');
+    const checkout = path.join(directory, 'checkout');
+    await fs.mkdir(checkout);
+    const filePath = path.join(directory, 'bootstrap.json');
+    const first = createWorktreeBootstrapStore({ filePath });
+    const second = createWorktreeBootstrapStore({ filePath });
+    const failure = await first.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: first })).resolves.toEqual(failure);
+    await fs.rmdir(checkout);
+    await expect(second.remove(checkout, { ifMissingFailed: true })).resolves.toBe(true);
+
+    await expect(getWorktreeBootstrapStatus(checkout, { bootstrapStore: first }))
+      .resolves.toMatchObject({ status: 'ready', error: null });
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: first }))
+      .resolves.toMatchObject({ status: 'ready', error: null });
+  });
+
+  it('opens the gate for a cached failure once its directory is deleted', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-gate-orphan-');
+    const checkout = path.join(directory, 'checkout');
+    await fs.mkdir(checkout);
+    const store = createWorktreeBootstrapStore({ filePath: path.join(directory, 'bootstrap.json') });
+    const failure = await store.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store })).resolves.toEqual(failure);
+
+    await fs.rmdir(checkout);
+
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store }))
+      .resolves.toMatchObject({ status: 'ready', error: null });
+    await expect(store.read(checkout)).resolves.toBeNull();
+  });
+
+  it('keeps failing a cached failure whose directory still exists', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-gate-present-');
+    const checkout = path.join(directory, 'checkout');
+    await fs.mkdir(checkout);
+    const store = createWorktreeBootstrapStore({ filePath: path.join(directory, 'bootstrap.json') });
+    const failure = await store.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store })).resolves.toEqual(failure);
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: store })).resolves.toEqual(failure);
+
+    await expect(store.read(checkout)).resolves.toEqual(failure);
+  });
+
+  it('forgets a removed failed checkout on the first gated request after restart', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-orphan-restart-');
+    const checkout = path.join(directory, 'checkout');
+    const filePath = path.join(directory, 'bootstrap.json');
+    const store = createWorktreeBootstrapStore({ filePath, maxRecords: 1 });
+    await store.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+
+    await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: createWorktreeBootstrapStore({ filePath }) }))
+      .resolves.toMatchObject({ status: 'ready', error: null });
+    await expect(store.read(checkout)).resolves.toBeNull();
+    await expect(store.write(path.join(directory, 'next'), {
+      status: 'pending', phase: 'directory-created', error: null, updatedAt: 2,
+    })).resolves.toMatchObject({ status: 'pending' });
+  });
+
+  it('retains failures when the filesystem cannot confirm the checkout is gone', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-unreadable-checkout-');
+    const checkout = path.join(directory, 'checkout');
+    const filePath = path.join(directory, 'bootstrap.json');
+    const store = createWorktreeBootstrapStore({ filePath });
+    const failure = await store.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    const denied = createWorktreeBootstrapStore({ filePath, fsImpl: {
+      ...fs, lstat: async (target, options) => {
+        if (target.toLowerCase() === checkout.toLowerCase()) throw Object.assign(new Error('Denied'), { code: 'EACCES' });
+        return fs.lstat(target, options);
+      },
+    } });
+
+    await expect(denied.remove(checkout, { ifMissingFailed: true })).rejects.toMatchObject({ code: 'EACCES' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(getWorktreeBootstrapGateStatus(checkout, { bootstrapStore: denied })).resolves.toEqual(failure);
+    } finally {
+      warn.mockRestore();
+    }
+    await expect(store.read(checkout)).resolves.toEqual(failure);
+  });
+
+  it('does not remove a newer pending record when pruning an old failure', async () => {
+    const directory = await temporaryDirectory('worktree-bootstrap-orphan-race-');
+    const checkout = path.join(directory, 'checkout');
+    const filePath = path.join(directory, 'bootstrap.json');
+    const first = createWorktreeBootstrapStore({ filePath });
+    const second = createWorktreeBootstrapStore({ filePath });
+    await first.write(checkout, {
+      status: 'failed', phase: 'directory-created', error: 'Failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    const pending = { status: 'pending', phase: 'directory-created', error: null, updatedAt: 2 };
+    await second.write(checkout, pending);
+
+    await expect(first.remove(checkout, { ifMissingFailed: true })).resolves.toBe(false);
+    await expect(second.read(checkout)).resolves.toEqual(pending);
+  });
+
   it('persists status by directory fingerprint without writing the directory', async () => {
     const dataDirectory = await temporaryDirectory('worktree-bootstrap-store-');
     const filePath = path.join(dataDirectory, 'bootstrap.json');
@@ -86,6 +214,9 @@ describe('worktree bootstrap storage', () => {
     expect(encoded).not.toContain('git@example.com');
     expect(encoded).not.toContain('token_secret');
     expect(encoded).not.toContain('process output');
+    await expect(createWorktreeBootstrapStore({ filePath }).read(directory)).resolves.toMatchObject({
+      hydration: { submodules: [{ path: 'vendor/module', error: { message: 'Worktree checkout hydration failed' } }] },
+    });
   });
 
   it('round-trips a checkout with too many files to inspect with its own public message', async () => {
@@ -157,6 +288,44 @@ describe('worktree bootstrap storage', () => {
     await expect(store.read(worktree)).resolves.toBeNull();
   });
 
+  it('closes a checkout that failed before a restart from the first gated request', async () => {
+    const dataDirectory = await temporaryDirectory('worktree-bootstrap-gate-');
+    const broken = path.join(dataDirectory, 'broken');
+    const healthy = path.join(dataDirectory, 'healthy');
+    await fs.mkdir(broken);
+    const filePath = path.join(dataDirectory, 'bootstrap.json');
+    // Written by the previous run: this process holds nothing in memory for it.
+    await createWorktreeBootstrapStore({ filePath }).write(broken, {
+      status: 'failed', phase: 'git-ready', error: 'Setup failed', errorCode: 'UNKNOWN', updatedAt: 1,
+    });
+    const store = createWorktreeBootstrapStore({ filePath });
+    const reads = [];
+    const bootstrapStore = { ...store, read: (directory) => { reads.push(directory); return store.read(directory); } };
+
+    const first = await Promise.all([1, 2, 3].map(() => getWorktreeBootstrapGateStatus(broken, { bootstrapStore })));
+    expect(first.map((status) => status.status)).toEqual(['failed', 'failed', 'failed']);
+    await expect(getWorktreeBootstrapGateStatus(broken, { bootstrapStore })).resolves.toMatchObject({ status: 'failed' });
+    await expect(getWorktreeBootstrapGateStatus(healthy, { bootstrapStore })).resolves.toMatchObject({ status: 'ready' });
+    await expect(getWorktreeBootstrapGateStatus(healthy, { bootstrapStore })).resolves.toMatchObject({ status: 'ready' });
+    // One read of the file per folder, then memory only.
+    expect(reads).toHaveLength(2);
+  });
+
+  it('leaves the gate open when the file cannot be read, and reads it once', async () => {
+    const directory = path.join(await temporaryDirectory('worktree-bootstrap-gate-broken-'), 'checkout');
+    let reads = 0;
+    const bootstrapStore = { read: async () => { reads += 1; throw new Error('storage is invalid'); } };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(getWorktreeBootstrapGateStatus(directory, { bootstrapStore })).resolves.toMatchObject({ status: 'ready' });
+      await expect(getWorktreeBootstrapGateStatus(directory, { bootstrapStore })).resolves.toMatchObject({ status: 'ready' });
+      expect(reads).toBe(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('completes only hydration-owned failures and publishes the transition in memory', async () => {
     const dataDirectory = await temporaryDirectory('worktree-bootstrap-complete-');
     const hydrationWorktree = path.join(dataDirectory, 'hydration-repair');
@@ -186,6 +355,39 @@ describe('worktree bootstrap storage', () => {
       .resolves.toMatchObject({ status: 'ready', phase: 'setup-ready' });
     await expect(completeWorktreeCheckoutHydration(unrelatedWorktree, { bootstrapStore: store })).resolves.toBeNull();
     await expect(store.read(unrelatedWorktree)).resolves.toEqual(persistedUnrelated);
+  });
+
+  it('drops the OpenCode location of a repaired checkout while it is still recorded as failed', async () => {
+    const dataDirectory = await temporaryDirectory('worktree-bootstrap-complete-reset-');
+    const repaired = path.join(dataDirectory, 'hydration-repair');
+    const healthy = path.join(dataDirectory, 'healthy');
+    const store = createWorktreeBootstrapStore({ filePath: path.join(dataDirectory, 'bootstrap.json') });
+    await store.write(repaired, {
+      status: 'failed', phase: 'directory-created', error: 'Hydration failed',
+      errorCode: 'TIMEOUT', updatedAt: 1,
+      hydration: {
+        status: 'cancelled',
+        submodules: [{
+          path: 'vendor/slow', status: 'cancelled',
+          endpoint: { displayUrl: 'https://modules.example/slow.git', fingerprint: 'slow_fingerprint' },
+          error: { code: 'TIMEOUT', message: 'Checkout hydration timed out' },
+        }],
+        lfs: [],
+      },
+    });
+    await store.write(healthy, { status: 'ready', phase: 'setup-ready', error: null, updatedAt: 2 });
+    const statusAtDisposal = [];
+    const disposeInstance = async (directory) => {
+      statusAtDisposal.push((await store.read(directory))?.status);
+      throw new Error('OpenCode is not running');
+    };
+
+    await expect(completeWorktreeCheckoutHydration(repaired, { bootstrapStore: store, disposeInstance }))
+      .resolves.toMatchObject({ status: 'ready', phase: 'setup-ready' });
+    await expect(completeWorktreeCheckoutHydration(healthy, { bootstrapStore: store, disposeInstance }))
+      .resolves.toBeNull();
+
+    expect(statusAtDisposal).toEqual(['failed']);
   });
 
   it('serializes hydration completion across store instances', async () => {

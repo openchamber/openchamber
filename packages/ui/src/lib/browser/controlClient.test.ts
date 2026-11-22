@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
 type RequestContext = { directory: string | null; sessionId: string | null };
-type Listener = (event: {
-  type: string;
-  requestId: string;
-  action: string;
-  parameters: Record<string, unknown>;
-  context: RequestContext;
-}) => void;
+type Listener = (event: { type: string } & Record<string, unknown>) => void;
 
 const posted: Array<{ requestId: string; ok: boolean; data?: unknown; error?: string }> = [];
 const claims: string[] = [];
@@ -49,15 +43,27 @@ const REPO = '/repo';
 /** Registrations are module-global, so every test unwinds its own. */
 const cleanups: Array<() => void> = [];
 
-const emitOpen = (parameters: Record<string, unknown>, context: RequestContext = UNKNOWN_CONTEXT): void => {
-  listener?.({ type: 'browser-control-request', requestId: 'req-1', action: 'browser.open', parameters, context });
+const emitOpen = (
+  parameters: Record<string, unknown>,
+  context: RequestContext = UNKNOWN_CONTEXT,
+  preferredConnectionId: string | null = null,
+): void => {
+  listener?.({ type: 'browser-control-request', requestId: 'req-1', action: 'browser.open', parameters, context, preferredConnectionId });
 };
 
-const emit = (action: string, parameters: Record<string, unknown>, context: RequestContext = UNKNOWN_CONTEXT): void => {
-  listener?.({ type: 'browser-control-request', requestId: 'req-1', action, parameters, context });
+const emit = (
+  action: string,
+  parameters: Record<string, unknown>,
+  context: RequestContext = UNKNOWN_CONTEXT,
+  preferredConnectionId: string | null = null,
+): void => {
+  listener?.({ type: 'browser-control-request', requestId: 'req-1', action, parameters, context, preferredConnectionId });
 };
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** An Electron renderer's window: the only host that can drive a page. */
+const desktopWindow = () => Object.assign(new EventTarget(), { __OPENCHAMBER_ELECTRON__: {} });
 
 /** A mounted tab that records the actions it ran. */
 const tab = (
@@ -140,17 +146,6 @@ describe('opening a page before any view exists', () => {
     expect(posted).toEqual([]);
   });
 
-  test('claims the request before touching a page', async () => {
-    const ran: string[] = [];
-    cleanups.push(tab('tab-1', ran));
-
-    emit('browser.click', { selector: 'button' });
-    await wait(50);
-
-    expect(claims).toEqual(['req-1']);
-    expect(ran).toEqual(['tab-1:browser.click']);
-  });
-
   test('does not wait for a view when no layout was requested', async () => {
     cleanups.push(registerBrowserOpener(() => 'tab-new'));
 
@@ -160,16 +155,62 @@ describe('opening a page before any view exists', () => {
     expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', drivable: false });
   });
 
-  test('on a driving host, an open reports that the page can be driven', async () => {
+  test('on a driving host, an open whose view never appears is drivable and not settled', async () => {
     // Only an Electron renderer can drive the page it shows.
-    Object.defineProperty(globalThis, 'window', { value: { __OPENCHAMBER_ELECTRON__: {} }, configurable: true, writable: true });
+    Object.defineProperty(globalThis, 'window', { value: desktopWindow(), configurable: true, writable: true });
     cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
     cleanups.push(registerBrowserOpener(() => 'tab-new'));
 
     emitOpen({ url: 'https://example.test' });
-    await wait(20);
+    // Past the client's own attach deadline.
+    await wait(2_400);
 
-    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', drivable: true });
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', settled: false, drivable: true });
+  });
+
+  test('on a driving host, an open waits for the new view to say how its page came out', async () => {
+    Object.defineProperty(globalThis, 'window', { value: desktopWindow(), configurable: true, writable: true });
+    cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
+    const ran: string[] = [];
+    cleanups.push(registerBrowserOpener(() => {
+      setTimeout(() => {
+        cleanups.push(registerBrowserController({
+          tabId: 'tab-new',
+          directory: REPO,
+          ownerSessionId: null,
+          describe: () => ({ title: '', url: '' }),
+          run: async (action) => { ran.push(action); return { title: 'App', settled: true }; },
+        }));
+      }, 120);
+      return 'tab-new';
+    }));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(400);
+
+    expect(ran).toEqual(['browser.settle']);
+    expect(posted[0]?.data).toEqual({
+      url: 'https://example.test', opened: true, tabId: 'tab-new', title: 'App', settled: true, drivable: true,
+    });
+  });
+
+  test('a failed wait on a new tab still reports the open, as not settled', async () => {
+    Object.defineProperty(globalThis, 'window', { value: desktopWindow(), configurable: true, writable: true });
+    cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
+    cleanups.push(registerBrowserController({
+      tabId: 'tab-new',
+      directory: REPO,
+      ownerSessionId: null,
+      describe: () => ({ title: '', url: '' }),
+      run: async () => { throw new Error('The browser panel is not ready'); },
+    }));
+    cleanups.push(registerBrowserOpener(() => 'tab-new'));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(50);
+
+    expect(posted[0]?.ok).toBe(true);
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', settled: false, drivable: true });
   });
 
   test('says the layout was not applied when no view ever appears', async () => {
@@ -202,6 +243,23 @@ describe('choosing the tab an action runs in', () => {
     await wait(50);
 
     expect(ran).toEqual(['shown:browser.click']);
+  });
+
+  test('routes browser.select with its option criterion', async () => {
+    const seen: Array<{ action: string; parameters: Record<string, unknown> }> = [];
+    cleanups.push(registerBrowserController({
+      tabId: 'shown',
+      directory: REPO,
+      ownerSessionId: null,
+      describe: () => ({ title: '', url: '' }),
+      run: async (action, parameters) => { seen.push({ action, parameters }); return {}; },
+    }));
+    setShownBrowserTab(REPO, 'shown');
+
+    emit('browser.select', { selector: '#country', label: 'Canada' });
+    await wait(50);
+
+    expect(seen).toEqual([{ action: 'browser.select', parameters: { selector: '#country', label: 'Canada' } }]);
   });
 
   test('runs in the named tab and passes the rest of the parameters without tabId', async () => {
@@ -647,5 +705,101 @@ describe('closing a tab the session opened', () => {
     expect(closed).toEqual([]);
     expect(posted[0]?.ok).toBe(false);
     expect(posted[0]?.error).toContain('no browser tab with id gone');
+  });
+});
+
+/**
+ * Several windows can be connected to one server, a desktop app on another
+ * machine among them. What any of them could serve goes to the window the user
+ * acted in last; the request names it.
+ */
+describe('the window the user is at claims first', () => {
+  beforeEach(resetRequests);
+
+  afterEach(() => {
+    while (cleanups.length > 0) cleanups.pop()?.();
+  });
+
+  const session: RequestContext = { directory: REPO, sessionId: 'ses_a' };
+
+  /** Names this window's event-stream connection, as the server's ready event does. */
+  const connectAs = (connectionId: string): void => {
+    listener?.({ type: 'event-stream-ready', connectionId });
+  };
+
+  test('a window the user is not at gives the preferred one a head start on a new tab', async () => {
+    cleanups.push(registerBrowserOpener(() => 'tab-new'));
+    connectAs('here');
+
+    emitOpen({ url: 'https://example.test' }, session, 'there');
+    await wait(400);
+    expect(claims).toEqual([]);
+
+    // The preferred window never claimed, so this one serves the request.
+    await wait(1_300);
+    expect(claims).toEqual(['req-1']);
+  });
+
+  test('the window the user is at claims a new tab at once', async () => {
+    cleanups.push(registerBrowserOpener(() => 'tab-new'));
+    connectAs('here');
+
+    emitOpen({ url: 'https://example.test' }, session, 'here');
+    await wait(20);
+
+    expect(claims).toEqual(['req-1']);
+  });
+
+  test("a window the user is not at gives the preferred one a head start on the user's tab", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('mine', ran));
+    setShownBrowserTab(REPO, 'mine');
+    connectAs('here');
+
+    emit('browser.snapshot', {}, session, 'there');
+    await wait(600);
+    expect(ran).toEqual([]);
+
+    await wait(1_400);
+    expect(ran).toEqual(['mine:browser.snapshot']);
+  });
+
+  test("an action in the session's own tab runs at once wherever the user is", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-a', ran, { ownerSessionId: 'ses_a' }));
+    connectAs('here');
+
+    emit('browser.click', { selector: 'button' }, session, 'there');
+    await wait(50);
+
+    expect(ran).toEqual(['tab-a:browser.click']);
+  });
+
+  test('a window with no tab for the session lets the window the user is at answer first', async () => {
+    cleanups.push(registerBrowserOpener(() => null));
+    connectAs('here');
+
+    // The preferred window may hold the user's tab; its claim may come over a relay.
+    emit('browser.snapshot', {}, session, 'there');
+    await wait(600);
+    expect(claims).toEqual([]);
+
+    // Nobody else claimed, so this window says why it cannot serve.
+    await wait(1_400);
+    expect(claims).toEqual(['req-1']);
+    expect(posted[0]?.ok).toBe(false);
+  });
+
+  test('the window the user is at waits as long before saying it has no tab for the session', async () => {
+    cleanups.push(registerBrowserOpener(() => null));
+    connectAs('here');
+
+    emit('browser.snapshot', {}, session, 'here');
+    await wait(600);
+    expect(claims).toEqual([]);
+
+    await wait(1_400);
+    expect(claims).toEqual(['req-1']);
+    expect(posted[0]?.ok).toBe(false);
   });
 });

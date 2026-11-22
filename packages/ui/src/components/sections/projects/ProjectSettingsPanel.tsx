@@ -9,7 +9,8 @@ import { ProjectEnvironmentSection } from '@/components/sections/projects/Projec
 import { ProjectGeneralTab } from '@/components/sections/projects/ProjectGeneralTab';
 import { ProjectSettingsHeader } from '@/components/sections/projects/ProjectSettingsHeader';
 import { ProjectWorktreesTab } from '@/components/sections/projects/ProjectWorktreesTab';
-import type { ProjectSettingsTab } from '@/components/sections/projects/projectSettingsTabs';
+import { projectSettingsTabAnchors, type ProjectSettingsTab } from '@/components/sections/projects/projectSettingsTabs';
+import { SettingsNewBadge } from '@/components/sections/shared/SettingsSection';
 import { useProjectSetup } from '@/components/sections/projects/useProjectSetup';
 import {
   useProjectIdentityForm,
@@ -25,11 +26,8 @@ type ProjectSettingsPanelProps = {
   onIdentitySave: (data: ProjectIdentitySaveData) => void | Promise<void>;
   tab: ProjectSettingsTab;
   onTabChange: (tab: ProjectSettingsTab) => void;
-  /** Settings frames the panel as a page with the save indicator; the edit dialog shows it bare. */
   frame: 'page' | 'dialog';
-  /** Opens the project's worktrees page; absent where that page is not reachable. */
   onOpenWorktrees?: () => void;
-  /** Closes the project, as the sidebar's "Close project" does; shown only in the page frame. */
   onCloseProject?: () => void;
 };
 
@@ -37,11 +35,6 @@ const isProjectSettingsTab = (id: string): id is ProjectSettingsTab => (
   id === 'general' || id === 'actions' || id === 'worktrees' || id === 'environment'
 );
 
-/**
- * Everything a project carries, on one page: the icon, colour and name in
- * the header, and below it a tab per concern. Settings and the project's
- * edit dialog both show this panel.
- */
 export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   project,
   onIdentitySave,
@@ -57,16 +50,17 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
 
   const projectRef = React.useMemo(() => ({ id: project.id, path: project.path }), [project.id, project.path]);
   const setupState = useProjectSetup(projectRef);
-  // VS Code runs no OpenChamber server that could apply environment settings.
   const hasEnvironment = !isVSCodeRuntime();
   const activeTab = tab === 'environment' && !hasEnvironment ? 'general' : tab;
 
-  const tabs = React.useMemo<SortableTabsStripItem[]>(() => [
-    { id: 'general', label: t('settings.projects.tab.general') },
-    { id: 'actions', label: t('settings.projects.tab.actions') },
-    { id: 'worktrees', label: t('settings.projects.tab.worktrees') },
-    ...(hasEnvironment ? [{ id: 'environment', label: t('settings.projects.tab.environment') }] : []),
-  ], [hasEnvironment, t]);
+  const tabs = React.useMemo<SortableTabsStripItem[]>(() => {
+    const ids: ProjectSettingsTab[] = ['general', 'actions', 'worktrees', ...(hasEnvironment ? ['environment' as const] : [])];
+    return ids.map((id) => ({
+      id,
+      label: t(`settings.projects.tab.${id}`),
+      accessory: <SettingsNewBadge items={projectSettingsTabAnchors(id)} />,
+    }));
+  }, [hasEnvironment, t]);
 
   const header = <ProjectSettingsHeader form={form} />;
   const tabStrip = (
@@ -112,8 +106,6 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
     );
   }
 
-  // The dialog has a fixed height: the header and tabs stay put and only the
-  // tab's content scrolls, so switching tabs never resizes the dialog.
   return (
     <div className="flex min-h-0 flex-1 flex-col @container">
       <div className="shrink-0 space-y-6 px-4 pt-6 pb-5 sm:px-6 sm:pt-8">

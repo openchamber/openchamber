@@ -4,7 +4,7 @@ import type { TrackedItem, TrackedItemState } from './model';
 
 type Request = { path: string; body: { connectionId: string; visible: boolean; items?: TrackedItem[] } };
 
-const pull = (number: number): TrackedItem => ({ provider: 'github', kind: 'pull', owner: 'acme', repo: 'app', number });
+const pull = (number: number): TrackedItem => ({ provider: 'github', instance: 'github.com', kind: 'pull', owner: 'acme', repo: 'app', number });
 
 function setup() {
   let listener: ((event: { type: 'event-stream-ready'; connectionId: string | null }) => void) | null = null;
@@ -38,6 +38,16 @@ const settle = async (ms = 200) => {
 describe('tracked items interest', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
+
+  test('items on screen fill the cap before a background follower declared earlier', async () => {
+    const { interest, posts, ready } = setup();
+    interest.declare(Symbol('cleanup'), Array.from({ length: 300 }, (_, index) => pull(1000 + index)), { background: true });
+    interest.declare(Symbol('panel'), [pull(1)]);
+    ready('c1');
+    await settle(0);
+    expect(posts[0].body.items).toHaveLength(300);
+    expect(posts[0].body.items?.some((item) => item.kind === 'pull' && item.number === 1)).toBe(true);
+  });
 
   test('sends the union once the connection is known, once per change, and again after a reconnect', async () => {
     const { interest, posts, ready } = setup();
@@ -76,6 +86,25 @@ describe('tracked items interest', () => {
     setVisible(false);
     await settle(0);
     expect(posts[2]).toEqual({ path: '/api/tracked-items/presence', body: { connectionId: 'c1', visible: false } });
+  });
+
+  test('keeps the set within what the server accepts, the surfaces declared first in full', async () => {
+    const { interest, posts, ready } = setup();
+    const sidebar = Symbol('sidebar');
+    interest.declare(sidebar, [pull(1), pull(2)]);
+    interest.declare(Symbol('board'), Array.from({ length: 400 }, (_, index) => pull(index + 3)));
+    ready('c1');
+    await settle(0);
+    const sent = posts[0].body.items ?? [];
+    expect(sent).toHaveLength(300);
+    expect(sent.slice(0, 2)).toEqual([pull(1), pull(2)]);
+
+    // The sidebar's set changes after the board declared: it keeps its place.
+    interest.declare(sidebar, [pull(1), pull(2), pull(1000)]);
+    await settle();
+    const resent = posts[1].body.items ?? [];
+    expect(resent).toHaveLength(300);
+    expect(resent.slice(0, 3)).toEqual([pull(1), pull(2), pull(1000)]);
   });
 
   test('retries a failed send later and waits for the next connection after a 409', async () => {

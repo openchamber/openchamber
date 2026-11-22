@@ -1,18 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import os from 'os';
+import path from 'path';
+import { configureClaudeCredentialEnvironment, configureClaudeCredentialSources, findClaudeCredential, loadClaudeCredential, readClaudeCredentialContext } from './auth.js';
 
 const execFileSync = vi.fn();
 const files = new Map();
 const openCodeAuth = vi.fn(() => ({}));
 
-// Dependency seams: the keychain exec, the credentials-file JSON read, and
-// the OpenCode credential read are injected per call instead of mocked.
-const deps = {
-  execFileSyncImpl: (...args) => execFileSync(...args),
-  readJsonFileImpl: (filePath) => (files.has(filePath) ? JSON.parse(files.get(filePath)) : null),
-  readAuth: async () => openCodeAuth(),
+// The Keychain command, the credentials file and OpenCode's credential store
+// are injected through the module's source seam, served from these fakes.
+const sources = {
+  execFileSync: (...args) => execFileSync(...args),
+  readJsonFile: (filePath) => (files.has(filePath) ? JSON.parse(files.get(filePath)) : null),
+  readOpenCodeCredentials: async () => openCodeAuth(),
 };
-
-import { findClaudeCredential, loadClaudeCredential } from './auth.js';
 
 const claudeCodeBlob = (accessToken) => JSON.stringify({
   mcpOAuth: { 'linear|abc': { accessToken: 'unrelated-mcp-token' } },
@@ -39,21 +40,23 @@ beforeEach(() => {
   execFileSync.mockReset();
   execFileSync.mockImplementation(() => { throw new Error('no keychain entry'); });
   openCodeAuth.mockReturnValue({});
-  delete process.env.CLAUDE_CONFIG_DIR;
-  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  configureClaudeCredentialSources(sources);
+  vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
+  vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', undefined);
 });
 
 afterEach(() => {
-  delete process.env.CLAUDE_CONFIG_DIR;
-  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  vi.unstubAllEnvs();
+  configureClaudeCredentialEnvironment(() => process.env);
+  configureClaudeCredentialSources(null);
 });
 
-const findLocal = () => findClaudeCredential(openCodeAuth(), deps);
+const findLocal = () => findClaudeCredential(openCodeAuth());
 
 describe('Claude credential discovery', () => {
   it('prefers the macOS Keychain over a stale credentials file', () => {
     execFileSync.mockReturnValue(claudeCodeBlob('keychain-token'));
-    files.set(`${process.env.HOME}/.claude/.credentials.json`, claudeCodeBlob('file-token'));
+    files.set(path.join(os.homedir(), '.claude', '.credentials.json'), claudeCodeBlob('file-token'));
 
     const credential = withPlatform('darwin', findLocal);
 
@@ -64,7 +67,7 @@ describe('Claude credential discovery', () => {
   });
 
   it('reads the credentials file on Linux, where there is no Keychain', () => {
-    files.set(`${process.env.HOME}/.claude/.credentials.json`, claudeCodeBlob('file-token'));
+    files.set(path.join(os.homedir(), '.claude', '.credentials.json'), claudeCodeBlob('file-token'));
 
     const credential = withPlatform('linux', findLocal);
 
@@ -75,9 +78,61 @@ describe('Claude credential discovery', () => {
 
   it('honours CLAUDE_CONFIG_DIR when locating the credentials file', () => {
     process.env.CLAUDE_CONFIG_DIR = '/tmp/claude-home';
-    files.set('/tmp/claude-home/.credentials.json', claudeCodeBlob('custom-dir-token'));
+    files.set(path.join(path.resolve('/tmp/claude-home'), '.credentials.json'), claudeCodeBlob('custom-dir-token'));
 
     expect(withPlatform('linux', findLocal).accessToken).toBe('custom-dir-token');
+  });
+
+  it('reads the custom home Keychain service, using the exact override string', () => {
+    // Verified with Claude Code 2.1.325: the trailing slash is part of the hash.
+    process.env.CLAUDE_CONFIG_DIR = '/custom/claude';
+    execFileSync.mockReturnValue(claudeCodeBlob('selected-token'));
+    expect(withPlatform('darwin', findLocal).accessToken).toBe('selected-token');
+    expect(execFileSync.mock.calls[0][1]).toEqual(['find-generic-password', '-s', 'Claude Code-credentials-7427f042', '-w']);
+
+    process.env.CLAUDE_CONFIG_DIR += '/';
+    withPlatform('darwin', findLocal);
+    expect(execFileSync.mock.calls[1][1][2]).toBe('Claude Code-credentials-801f8946');
+  });
+
+  it('uses the injected home live for both discovery paths and sanitizes reader failures', async () => {
+    let configDir = '/first';
+    configureClaudeCredentialEnvironment(() => ({ CLAUDE_CONFIG_DIR: configDir }));
+    files.set('/first/.credentials.json', claudeCodeBlob('first-token'));
+    files.set('/second/.credentials.json', claudeCodeBlob('second-token'));
+    expect(withPlatform('linux', findLocal).accessToken).toBe('first-token');
+    configDir = '/second';
+    expect((await loadClaudeCredential()).accessToken).toBe('second-token');
+    configureClaudeCredentialEnvironment(() => { throw new Error('private value'); });
+    expect(readClaudeCredentialContext()).toEqual({ configDir: null, error: 'Cannot read Claude usage environment settings.' });
+    expect(findLocal()).toBeNull();
+    expect(await loadClaudeCredential()).toBeNull();
+  });
+
+  it('uses the selected home file after an unreadable or malformed Keychain entry', () => {
+    process.env.CLAUDE_CONFIG_DIR = '/custom/claude';
+    files.set('/custom/claude/.credentials.json', claudeCodeBlob('selected-file'));
+    expect(withPlatform('darwin', findLocal).accessToken).toBe('selected-file');
+    execFileSync.mockReturnValue('{"mcpOAuth":{}}');
+    expect(withPlatform('darwin', findLocal).accessToken).toBe('selected-file');
+    files.clear();
+    expect(withPlatform('darwin', findLocal)).toBeNull();
+  });
+
+  it('never substitutes another account when an explicit home has no credential', async () => {
+    process.env.CLAUDE_CONFIG_DIR = '/missing/claude-home';
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'other-env-token';
+    openCodeAuth.mockReturnValue({ anthropic: { access: 'other-opencode-token' } });
+    execFileSync.mockImplementation((_command, args) => {
+      if (args[2] === 'Claude Code-credentials') return claudeCodeBlob('default-token');
+      throw new Error('missing selected entry');
+    });
+
+    expect(withPlatform('darwin', findLocal)).toBeNull();
+    openCodeAuth.mockClear();
+    expect(await loadClaudeCredential()).toBeNull();
+    expect(openCodeAuth).not.toHaveBeenCalled();
+    expect(execFileSync.mock.calls.every(([, args]) => args[2] !== 'Claude Code-credentials')).toBe(true);
   });
 
   it('falls back to the OpenCode auth entry when Claude Code is not signed in', () => {
@@ -113,11 +168,11 @@ describe('Claude credential discovery', () => {
   it('asks OpenCode only when the local Claude Code sources are empty', async () => {
     openCodeAuth.mockClear();
     openCodeAuth.mockReturnValue({ anthropic: { access: 'opencode-token', refresh: 'opencode-refresh', expires: 1 } });
-    files.set(`${process.env.HOME}/.claude/.credentials.json`, claudeCodeBlob('file-token'));
-    expect((await withPlatform('linux', () => loadClaudeCredential(deps))).source).toBe('credentials-file');
+    files.set(path.join(os.homedir(), '.claude', '.credentials.json'), claudeCodeBlob('file-token'));
+    expect((await withPlatform('linux', loadClaudeCredential)).source).toBe('credentials-file');
     expect(openCodeAuth).not.toHaveBeenCalled();
 
     files.clear();
-    expect((await withPlatform('linux', () => loadClaudeCredential(deps))).source).toBe('opencode-auth');
+    expect((await withPlatform('linux', loadClaudeCredential)).source).toBe('opencode-auth');
   });
 });

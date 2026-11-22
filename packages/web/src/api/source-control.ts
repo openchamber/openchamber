@@ -8,29 +8,17 @@ import type {
   ChangeRequest,
   ChangeRequestCommit,
   ChangeRequestContext,
-  ChangeRequestVerdict,
-  ChangeRequestFile,
+  ChangeRequestLocalRevision,
   ChangeRequestReviewComment,
+  ChangeRequestRevision,
+  ChangeRequestSubmitRequirement,
+  ChangeRequestVerdict,
+  ChangeRequestVote,
+  ChangeRequestVoteLabel,
+  PullRequestStack,
   ChangeRequestStatus,
   CI,
-  CIRun,
-  GitHubAuthStatus,
-  GitHubCheckRun,
-  GitHubChecksSummary,
-  GitHubDeviceFlowComplete,
-  GitHubDeviceFlowStart,
-  GitHubIssue,
-  GitHubIssueComment,
-  GitHubIssueCommentsResult,
-  GitHubIssueGetResult,
-  GitHubIssuesListResult,
-  GitHubPullRequest,
-  GitHubPullRequestContextResult,
-  GitHubPullRequestStatus,
-  GitHubPullRequestSummary,
-  GitHubPullRequestsListResult,
-  GitHubRepoUpstreamResult,
-  GitHubUserSummary,
+  CISummary,
   Issue,
   IssueComment,
   CreateChangeRequestInput,
@@ -39,8 +27,19 @@ import type {
   Project,
   ProjectUpstream,
   ReadyChangeRequestInput,
+  DraftChangeRequestInput,
   CommentInput,
+  CommentUpdateInput,
+  CommentDeleteInput,
+  DiscussionCloseReason,
+  DiscussionCommentInput,
   ReviewChangeRequestInput,
+  ReviewCommentDeleteInput,
+  ReviewCommentInput,
+  ReviewCommentUpdateInput,
+  ReviewDiscardInput,
+  SetDiscussionAnswerInput,
+  SetDiscussionStateInput,
   SetStateInput,
   SetLabelsInput,
   SetReviewersInput,
@@ -57,10 +56,12 @@ import type {
   SourceControlCreateMutationTarget,
   SourceControlExistingMutationTarget,
   SourceControlExpectedMutationTarget,
+  SourceControlCreateMutationResult,
   SourceControlMergeMutationResult,
   SourceControlMutationContext,
   SourceControlMutationReceipt,
   SourceControlReadyMutationResult,
+  SourceControlDraftMutationResult,
   SourceControlReviewMutationResult,
   SourceControlStateMutationResult,
   SourceControlResolvedMutationTarget,
@@ -72,18 +73,29 @@ import type {
   SourceControlReadContext,
   SourceControlUser,
   UpdateChangeRequestInput,
-  GitHubIssueLabel,
-  GitHubReferenceReviewer,
-  GitHubRepoSelector,
+  UpdateIssueInput,
+  UpdateDiscussionInput,
+  Label,
+  RepositoryReferenceReviewer,
+  RepositorySelector,
 } from '@openchamber/ui/lib/api/types';
+import { SourceControlInstanceAliasError, SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
-import { fetchGitHubPullStatuses, fetchGitHubReferenceDetail, fetchGitHubReferences, fetchGitHubReferencesAcross } from './github-references';
+import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
+import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
+import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
+import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
+import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
+import { parseReviewerStates } from './review-state';
+import { isBooleanValue, isNonEmptyString, isNumberValue, isPositiveSafeInteger, isStringValue, type BoundaryScalar } from './boundary-guards';
 
 interface ErrorResponse {
   error?: string;
   code?: string;
+
+  provider?: string;
 }
 
 class SourceControlRequestError extends Error {
@@ -110,28 +122,26 @@ interface RepositoryBindingDTO extends ErrorResponse {
   binding: SourceControlRepositoryBinding | null;
 }
 
-interface GitHubRepoDTO {
-  owner: string;
-  repo: string;
-  url: string;
-  cloneUrl?: string;
-  sshUrl?: string;
-  defaultBranch?: string;
-  defaultBranchSha?: string | null;
-  remoteName?: string | null;
-}
-
-interface GitHubBranchesDTO {
+interface BranchesDTO {
   branches?: string[];
 }
 
-interface AuthStatusDTO extends GitHubAuthStatus {
-  status?: 'disconnected' | 'unavailable' | 'unreachable' | 'temporarily-unavailable';
-  message?: string;
+interface DeviceFlowStartDTO {
+  flowId: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  expiresIn: number;
+  interval: number;
+  scope?: string;
 }
 
+type DeviceFlowCompleteDTO =
+  | { connected: true; user: SourceUserDTO; scope?: string }
+  | { connected: false; status?: string; error?: string };
+
 type DisconnectedSourceControlAuthStatus = Extract<SourceControlAuthStatus, { status: 'disconnected' }>;
-type GitLabAuthStatusDTO = SourceControlAuthStatus | {
+type ProviderAuthStatusDTO = SourceControlAuthStatus | {
   connected: false;
   status?: undefined;
   accounts?: SourceControlAuthAccount[];
@@ -184,69 +194,114 @@ interface MutationReceiptDTO extends ErrorResponse {
 interface MutationResultDTO {
   merged?: boolean;
   message?: string;
+  outcome?: string;
+  stacked?: boolean;
   ready?: boolean;
+  draft?: boolean;
   commented?: boolean;
   state?: string;
 }
 
+
+type ReviewBody = MutationBody<SourceControlExistingMutationTarget> & { body?: string } & (
+  | { verdict: NonNullable<ReviewChangeRequestInput['verdict']> }
+  | { votes: Record<string, number>; publishDrafts?: boolean }
+);
+
 type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
 type PostBody =
   | { flowId: string }
-  | { token: string }
+  | { token: string; username?: string }
+  | { sshUrl: string | null }
   | { reference: string }
   | { accountId: string }
   | { disabled: boolean }
   | CreateBody
   | UpdateBody
-  | (MutationBody<SourceControlExistingMutationTarget> & { method: 'merge' | 'squash' | 'rebase' })
+  | (MutationBody<SourceControlExistingMutationTarget> & { method: MergeChangeRequestInput['method']; cancel?: boolean })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
   | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state'] })
   | (MutationBody<SourceControlExistingMutationTarget> & { labels: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { reviewers: string[] })
-  | (MutationBody<SourceControlExistingMutationTarget> & { verdict: ReviewChangeRequestInput['verdict']; body?: string })
+  | (MutationBody<SourceControlExistingMutationTarget> & { body: string; replyTo?: string })
+  | (MutationBody<SourceControlExistingMutationTarget> & { state: SetDiscussionStateInput['state']; reason?: DiscussionCloseReason })
+  | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string; answer: boolean })
+  | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string; body: string })
+  | (MutationBody<SourceControlExistingMutationTarget> & { commentId: string })
+  | ReviewBody
   | MutationBody;
 
 interface WebSourceControlAPIOptions {
   fetch?: SourceControlFetch;
 }
 
-const GITHUB_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 
-const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
-  if (identity.provider === 'gitlab') {
-    const raw = identity.instance.trim();
-    let url: URL;
-    try {
-      url = new URL(raw.includes('://') ? raw : `https://${raw}`);
-    } catch {
-      throw new Error(`Invalid source control instance: ${identity.instance}`);
-    }
-    const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname.toLowerCase());
-    if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/')
-      || (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))) {
-      throw new Error(`Invalid GitLab instance: ${identity.instance}`);
-    }
-    return { provider: 'gitlab', instance: url.origin };
+type InstanceFormat = SourceControlProviderDescriptor['instances']['format'];
+const providerInstances = new Map<string, { format: InstanceFormat; label: string; pathStyle: boolean }>();
+
+const rememberProviderInstances = (descriptors: ReadonlyArray<Pick<SourceControlProviderDescriptor, 'id' | 'label' | 'instances' | 'repository'>>): void => {
+  for (const descriptor of descriptors) {
+    providerInstances.set(descriptor.id, {
+      format: descriptor.instances.format, label: descriptor.label, pathStyle: descriptor.repository.pathStyle === 'path',
+    });
   }
+};
 
+
+const isProjectOwner = (identity: SourceControlIdentity, owner: BoundaryScalar): owner is string => (
+  isStringValue(owner)
+    && (owner.trim().length > 0 || (owner === '' && providerInstances.get(identity.provider)?.pathStyle !== false))
+);
+rememberProviderInstances(BUILT_IN_SOURCE_CONTROL_PROVIDERS);
+
+const providerLabel = (identity: SourceControlIdentity): string => providerInstances.get(identity.provider)?.label ?? identity.provider;
+
+const normalizeOriginInstance = (identity: SourceControlIdentity): SourceControlIdentity => {
+  const raw = identity.instance.trim();
+  let url: URL;
+  try {
+    url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+  } catch {
+    throw new Error(`Invalid source control instance: ${identity.instance}`);
+  }
+  const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname.toLowerCase());
+  if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/')
+    || (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))) {
+    throw new Error(`Invalid ${providerLabel(identity)} instance: ${identity.instance}`);
+  }
+  return { provider: identity.provider, instance: url.origin };
+};
+
+const normalizeHostInstance = (identity: SourceControlIdentity): SourceControlIdentity => {
   const value = identity.instance.trim().toLowerCase().replace(/\.$/, '');
   let host = value;
   if (value.includes('://')) {
     try {
-      host = new URL(value).hostname.toLowerCase().replace(/\.$/, '');
+      const url = new URL(value);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash
+        || (url.pathname && url.pathname !== '/')) {
+        throw new Error(`Invalid ${providerLabel(identity)} instance: ${identity.instance}`);
+      }
+      host = url.hostname.toLowerCase().replace(/\.$/, '');
     } catch {
-      throw new Error(`Invalid source control instance: ${identity.instance}`);
+      throw new Error(`Invalid ${providerLabel(identity)} instance: ${identity.instance}`);
     }
   }
-  if (host !== 'github.com') {
-    throw new Error(`GitHub instance "${identity.instance}" is not supported; only github.com is available`);
-  }
-  return GITHUB_IDENTITY;
+  return { provider: identity.provider, instance: host };
 };
 
-const providerPath = (identity: SourceControlIdentity, path: string): string => `/api/source-control/${identity.provider}${path}`;
+const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
+  const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
+    ? normalizeHostInstance(identity)
+    : normalizeOriginInstance(identity);
+  const result: SourceControlIdentity = identity.instanceSshUrl?.trim()
+    ? { ...normalized, instanceSshUrl: identity.instanceSshUrl.trim() }
+    : normalized;
+  const aliases = Array.isArray(identity.instanceAliases) ? identity.instanceAliases.filter(isNonEmptyString) : [];
+  return aliases.length ? { ...result, instanceAliases: aliases } : result;
+};
 
 const parseRepositoryContext = (payload: RepositoryContextDTO): SourceControlRepositoryContext => {
   if (!payload || !isStringValue(payload.repositoryId) || !payload.repositoryId
@@ -338,7 +393,7 @@ export const configureWebAuxiliaryBinding = async (
   return { status: 'configured', binding: parseRepositoryBinding(payload) };
 };
 
-const request = async <TResult extends ErrorResponse>(
+const request = async <TResult extends ErrorResponse | null>(
   fetch: SourceControlFetch,
   identity: SourceControlIdentity,
   path: string,
@@ -356,30 +411,34 @@ const request = async <TResult extends ErrorResponse>(
   });
   const payload: TResult = await response.json();
   if (!response.ok) {
-    throw new SourceControlRequestError(payload.error || response.statusText || 'Source control request failed', payload.code);
+    const message = payload?.error || response.statusText || 'Source control request failed';
+    if (payload?.code === 'SOURCE_CONTROL_INSTANCE_OTHER_PROVIDER' && isNonEmptyString(payload.provider)) {
+      throw new SourceControlInstanceOtherProviderError(message, payload.provider);
+    }
+    throw new SourceControlRequestError(message, payload?.code);
   }
   return payload;
 };
 
-const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => new URLSearchParams({
-  directory: context.directory,
-  repositoryId: context.repositoryId,
-  accountId: context.accountId,
-  bindingRevision: String(context.bindingRevision),
-  primaryRemote: context.primaryRemote,
-});
-
-const parseIncompleteGitHubProjectIds = (
-  failedRepos: GitHubPullRequestsListResult['failedRepos'] | GitHubIssuesListResult['failedRepos'],
-): string[] | undefined => {
-  if (failedRepos === undefined) return undefined;
-  if (!Array.isArray(failedRepos)) throw new Error('Source control response contained invalid incomplete repositories');
-  return failedRepos.map((repo) => {
-    if (!repo || !isStringValue(repo.owner) || !repo.owner || !isStringValue(repo.repo) || !repo.repo) {
-      throw new Error('Source control response contained an invalid incomplete repository');
-    }
-    return `${repo.owner}/${repo.repo}`;
+const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
+  const query = new URLSearchParams({
+    directory: context.directory,
+    repositoryId: context.repositoryId,
+    accountId: context.accountId,
+    bindingRevision: String(context.bindingRevision),
+    primaryRemote: context.primaryRemote,
   });
+  if (context.linked) query.set('linked', '1');
+  return query;
+};
+
+
+const parseIncompleteProjectIds = (ids: PageResult<never>['incompleteProjectIds']): string[] | undefined => {
+  if (ids === undefined) return undefined;
+  if (!Array.isArray(ids) || ids.some((id) => !isNonEmptyString(id))) {
+    throw new Error('Source control response contained invalid incomplete projects');
+  }
+  return [...ids];
 };
 
 const post = <TResult extends ErrorResponse>(
@@ -423,7 +482,7 @@ function mutationBody(
   if (!isNonEmptyString(payload.directory) || !isNonEmptyString(payload.repositoryId)
     || !isNonEmptyString(payload.accountId) || !isNonNegativeSafeInteger(payload.bindingRevision)
     || !isNonEmptyString(payload.primaryRemote) || !isNonEmptyString(payload.idempotencyKey)
-    || !target || !isNonEmptyString(target.project?.owner) || !isNonEmptyString(target.project?.name)
+    || !target || !isProjectOwner(identity, target.project?.owner) || !isNonEmptyString(target.project?.name)
     || (operation === 'create' && ('number' in target || 'headSha' in target))
     || (operation === 'create' && (!isNonEmptyString(target.head) || !isNonEmptyString(target.base)))
     || (operation === 'existing' && !isPositiveSafeInteger(target.number))
@@ -481,12 +540,6 @@ const mutationTargetMatches = (
   && (context.target.base === undefined || target.base === context.target.base)
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
-const providerAccountMatches = (identity: SourceControlIdentity, providerAccountId: string): boolean => {
-  if (identity.provider === 'github') return /^github\.com#\d+$/.test(providerAccountId);
-  return providerAccountId.startsWith(`${identity.instance}#`)
-    && /^\d+$/.test(providerAccountId.slice(identity.instance.length + 1));
-};
-
 const parseMutationReceipt = <TResult>(
   payload: MutationReceiptDTO,
   context: SourceControlMutationContext,
@@ -500,14 +553,14 @@ const parseMutationReceipt = <TResult>(
     || payload.status !== 'succeeded' || !isBooleanValue(payload.replayed)
     || !actor || !hasExactKeys(actor, ['provider', 'instance', 'providerAccountId'])
     || actor.provider !== identity.provider || actor.instance !== identity.instance
-    || !isNonEmptyString(actor.providerAccountId) || !providerAccountMatches(identity, actor.providerAccountId)
+    || !isNonEmptyString(actor.providerAccountId) || !isProviderUserId(identity.provider, identity.instance, actor.providerAccountId)
     || !target || !hasExactKeys(target, [
       'repositoryId', 'bindingRevision', 'primaryRemote', 'project',
       ...(['number', 'head', 'base', 'headSha'] as const).filter((key) => target[key] !== undefined),
     ])
     || !isNonEmptyString(target.repositoryId) || !isNonNegativeSafeInteger(target.bindingRevision)
     || !isNonEmptyString(target.primaryRemote) || !project || !hasExactKeys(project, ['id', 'owner', 'name'])
-    || !isNonEmptyString(project.id) || !isNonEmptyString(project.owner) || !isNonEmptyString(project.name)
+    || !isNonEmptyString(project.id) || !isProjectOwner(identity, project.owner) || !isNonEmptyString(project.name)
     || (target.number !== undefined && !isPositiveSafeInteger(target.number))
     || (target.head !== undefined && !isNonEmptyString(target.head))
     || (target.base !== undefined && !isNonEmptyString(target.base))
@@ -540,13 +593,30 @@ const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmpty
   return {};
 };
 
+const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'] as const;
+const mergeOutcomeOf = (value: string): SourceControlMergeMutationResult['outcome'] | null => (
+  MERGE_OUTCOMES.find((outcome) => outcome === value) ?? null
+);
+
+const parseCreateMutationResult = (result: MutationResultDTO): SourceControlCreateMutationResult => {
+  if (!hasExactKeys(result, result.stacked === undefined ? [] : ['stacked'])
+    || (result.stacked !== undefined && !isBooleanValue(result.stacked))) {
+    throw new Error('Source control response contained an invalid create result');
+  }
+  return result.stacked === undefined ? {} : { stacked: result.stacked };
+};
+
 const parseMergeMutationResult = (result: MutationResultDTO): SourceControlMergeMutationResult => {
-  const keys = result.message === undefined ? ['merged'] : ['merged', 'message'];
+  const keys = ['merged', ...(result.message === undefined ? [] : ['message']), ...(result.outcome === undefined ? [] : ['outcome'])];
+  const outcome = result.outcome === undefined ? undefined : mergeOutcomeOf(result.outcome);
   if (!hasExactKeys(result, keys) || !isBooleanValue(result.merged)
-    || (result.message !== undefined && !isStringValue(result.message))) {
+    || (result.message !== undefined && !isStringValue(result.message)) || outcome === null) {
     throw new Error('Source control response contained an invalid merge result');
   }
-  return result.message === undefined ? { merged: result.merged } : { merged: result.merged, message: result.message };
+  const parsed: SourceControlMergeMutationResult = { merged: result.merged };
+  if (result.message !== undefined) parsed.message = result.message;
+  if (outcome !== undefined) parsed.outcome = outcome;
+  return parsed;
 };
 
 const parseReviewMutationResult = (result: MutationResultDTO): SourceControlReviewMutationResult => {
@@ -561,11 +631,11 @@ interface RepositoryChoicesDTO extends ErrorResponse {
   items?: Array<{ name?: string; color?: string; id?: string; login?: string; avatarUrl?: string }>;
 }
 
-/** Labels or reviewer candidates of one project in the bound repository's network. */
+
 const readRepositoryChoices = async (
   fetch: SourceControlFetch,
   context: SourceControlReadContext,
-  project: GitHubRepoSelector,
+  project: RepositorySelector,
   path: string,
 ): Promise<NonNullable<RepositoryChoicesDTO['items']>> => {
   const identity = normalizeIdentity(context);
@@ -573,19 +643,19 @@ const readRepositoryChoices = async (
   query.set('owner', project.owner);
   query.set('repo', project.repo);
   const payload = await request<RepositoryChoicesDTO>(fetch, identity, path, {}, query);
-  if (payload.connected !== true) throw new Error(`${identity.provider === 'gitlab' ? 'GitLab' : 'GitHub'} is not connected`);
+  if (payload.connected !== true) throw new Error(`${providerLabel(identity)} is not connected`);
   if (!Array.isArray(payload.items)) throw new Error('Source control response contained an invalid list');
   return payload.items;
 };
 
-const parseLabelChoices = (items: NonNullable<RepositoryChoicesDTO['items']>): GitHubIssueLabel[] => items.map((item) => {
+const parseLabelChoices = (items: NonNullable<RepositoryChoicesDTO['items']>): Label[] => items.map((item) => {
   if (!isNonEmptyString(item.name) || (item.color !== undefined && !isStringValue(item.color))) {
     throw new Error('Source control response contained an invalid label');
   }
   return item.color ? { name: item.name, color: item.color } : { name: item.name };
 });
 
-const parseReviewerChoices = (items: NonNullable<RepositoryChoicesDTO['items']>): GitHubReferenceReviewer[] => items.map((item) => {
+const parseReviewerChoices = (items: NonNullable<RepositoryChoicesDTO['items']>): RepositoryReferenceReviewer[] => items.map((item) => {
   if (!isNonEmptyString(item.id) || !isNonEmptyString(item.login) || (item.avatarUrl !== undefined && !isHttpUrl(item.avatarUrl))) {
     throw new Error('Source control response contained an invalid user');
   }
@@ -606,315 +676,19 @@ const parseReadyMutationResult = (result: MutationResultDTO): SourceControlReady
   return { ready: result.ready };
 };
 
-const mapUser = (user: GitHubUserSummary, identity: SourceControlIdentity = GITHUB_IDENTITY): SourceControlUser => {
-  const result: SourceControlUser = {
-    ...identity,
-    id: String(user.id ?? user.login),
-    username: user.login,
-  };
-  if (user.avatarUrl) result.avatarUrl = user.avatarUrl;
-  if (user.name) result.name = user.name;
-  if (user.email) result.email = user.email;
-  return result;
-};
-
-const mapProject = (repo: GitHubRepoDTO, identity: SourceControlIdentity = GITHUB_IDENTITY): Project => {
-  if (!repo || !isNonEmptyString(repo.owner) || !isNonEmptyString(repo.repo) || !isHttpUrl(repo.url)
-    || (repo.cloneUrl !== undefined && !isNonEmptyString(repo.cloneUrl))
-    || (repo.sshUrl !== undefined && !isNonEmptyString(repo.sshUrl))
-    || (repo.defaultBranch !== undefined && !isNonEmptyString(repo.defaultBranch))
-    || (repo.defaultBranchSha !== undefined && repo.defaultBranchSha !== null && !isNonEmptyString(repo.defaultBranchSha))
-    || (repo.remoteName !== undefined && repo.remoteName !== null && !isNonEmptyString(repo.remoteName))) {
-    throw new Error('Source control response contained an invalid project');
+const parseDraftMutationResult = (result: MutationResultDTO): SourceControlDraftMutationResult => {
+  if (!hasExactKeys(result, ['draft']) || !isBooleanValue(result.draft)) {
+    throw new Error('Source control response contained an invalid draft result');
   }
-  const result: Project = {
-    ...identity,
-    id: `${repo.owner}/${repo.repo}`,
-    owner: repo.owner,
-    name: repo.repo,
-    url: repo.url,
-  };
-  if (repo.cloneUrl) result.cloneUrl = repo.cloneUrl;
-  if (repo.sshUrl) result.sshUrl = repo.sshUrl;
-  if (repo.defaultBranch) result.defaultBranch = repo.defaultBranch;
-  if (repo.defaultBranchSha !== undefined) result.defaultBranchSha = repo.defaultBranchSha;
-  if (repo.remoteName !== undefined) result.remoteName = repo.remoteName;
-  return result;
-};
-
-const projectFromSelector = (repo: { owner: string; repo: string; url?: string }, identity: SourceControlIdentity = GITHUB_IDENTITY): Project => mapProject({
-  ...repo,
-  url: repo.url ?? `https://github.com/${repo.owner}/${repo.repo}`,
-}, identity);
-
-const resolveListProject = (repo: { owner: string; repo: string } | null | undefined, fallback: Project | null): Project => {
-  if (repo) return projectFromSelector(repo);
-  if (fallback) return fallback;
-  throw new Error('GitHub list item did not include a repository');
-};
-
-const mapReviewComment = (comment: NonNullable<GitHubPullRequestContextResult['reviewComments']>[number]): ChangeRequestReviewComment => {
-  const result: ChangeRequestReviewComment = mapComment(comment);
-  if (comment.path) result.path = comment.path;
-  if (comment.line !== undefined) result.line = comment.line;
-  if (comment.position !== undefined) result.position = comment.position;
-  return result;
-};
-
-const mapFile = (file: NonNullable<GitHubPullRequestContextResult['files']>[number]): ChangeRequestFile => {
-  const result: ChangeRequestFile = { path: file.filename };
-  if (file.status) result.status = file.status;
-  if (file.additions !== undefined) result.additions = file.additions;
-  if (file.deletions !== undefined) result.deletions = file.deletions;
-  if (file.changes !== undefined) result.changes = file.changes;
-  if (file.patch) result.patch = file.patch;
-  return result;
-};
-
-const mapChecks = (summary: GitHubChecksSummary, runs?: GitHubCheckRun[]): CI => {
-  validateCISummary(summary);
-  const result: CI = {
-    summary: {
-      state: summary.state,
-      total: summary.total,
-      success: summary.success,
-      failure: summary.failure,
-      pending: summary.pending,
-    },
-  };
-  if (summary.inProgress !== undefined) result.summary.inProgress = summary.inProgress;
-  if (summary.queued !== undefined) result.summary.queued = summary.queued;
-  if (summary.startedAt) result.summary.startedAt = summary.startedAt;
-  if (runs) result.runs = runs.map(mapCheckRun);
-  return result;
-};
-
-const hasInvalidGitHubCheckRunApplication = (app: GitHubCheckRun['app']): boolean => (
-  app !== undefined && (
-    Object.prototype.toString.call(app) !== '[object Object]'
-    || (app.name !== undefined && !isStringValue(app.name))
-    || (app.slug !== undefined && !isStringValue(app.slug))
-  )
-);
-
-const hasInvalidGitHubCheckRunJob = (job: GitHubCheckRun['job']): boolean => (
-  job !== undefined && (
-    Object.prototype.toString.call(job) !== '[object Object]'
-    || (job.runId !== undefined && (!Number.isInteger(job.runId) || job.runId < 0))
-    || (job.jobId !== undefined && (!Number.isInteger(job.jobId) || job.jobId < 0))
-    || (job.url !== undefined && !isHttpUrl(job.url))
-    || (job.name !== undefined && !isStringValue(job.name))
-    || (job.workflowName !== undefined && !isStringValue(job.workflowName))
-    || (job.conclusion !== undefined && job.conclusion !== null && !isStringValue(job.conclusion))
-  )
-);
-
-const hasInvalidGitHubCheckRunSteps = (steps: NonNullable<GitHubCheckRun['job']>['steps']): boolean => (
-  steps !== undefined && (
-    !Array.isArray(steps)
-    || steps.some((step) => !step
-      || !isNonEmptyString(step.name)
-      || (step.status !== undefined && !isStringValue(step.status))
-      || (step.conclusion !== undefined && step.conclusion !== null && !isStringValue(step.conclusion))
-      || (step.number !== undefined && (!Number.isInteger(step.number) || step.number < 0))
-      || (step.startedAt !== undefined && !isNonEmptyString(step.startedAt))
-      || (step.completedAt !== undefined && !isNonEmptyString(step.completedAt)))
-  )
-);
-
-const hasInvalidGitHubCheckRunOutput = (output: GitHubCheckRun['output']): boolean => (
-  output !== undefined && (
-    Object.prototype.toString.call(output) !== '[object Object]'
-    || (output.title !== undefined && !isStringValue(output.title))
-    || (output.summary !== undefined && !isStringValue(output.summary))
-    || (output.text !== undefined && !isStringValue(output.text))
-  )
-);
-
-const hasInvalidGitHubCheckRunAnnotations = (annotations: GitHubCheckRun['annotations']): boolean => (
-  annotations !== undefined && (
-    !Array.isArray(annotations)
-    || annotations.some((annotation) => !annotation
-      || !isNonEmptyString(annotation.message)
-      || (annotation.path !== undefined && !isStringValue(annotation.path))
-      || (annotation.startLine !== undefined && (!Number.isInteger(annotation.startLine) || annotation.startLine < 0))
-      || (annotation.endLine !== undefined && (!Number.isInteger(annotation.endLine) || annotation.endLine < 0))
-      || (annotation.level !== undefined && !isStringValue(annotation.level))
-      || (annotation.title !== undefined && !isStringValue(annotation.title))
-      || (annotation.rawDetails !== undefined && !isStringValue(annotation.rawDetails)))
-  )
-);
-
-const validateGitHubCheckRun = (run: GitHubCheckRun): void => {
-  if (!run || !isNonEmptyString(run.name)
-    || (run.id !== undefined && (!Number.isInteger(run.id) || run.id < 0))
-    || (run.startedAt !== undefined && !isNonEmptyString(run.startedAt))
-    || (run.completedAt !== undefined && !isNonEmptyString(run.completedAt))
-    || (run.status !== undefined && !isNonEmptyString(run.status))
-    || (run.conclusion !== undefined && run.conclusion !== null && !isStringValue(run.conclusion))
-    || (run.annotationsTruncated !== undefined && !isBooleanValue(run.annotationsTruncated))
-    || (run.detailsUrl !== undefined && !isHttpUrl(run.detailsUrl))) {
-    throw new Error('Source control response contained invalid GitHub check-run fields');
-  }
-  if (hasInvalidGitHubCheckRunApplication(run.app)) {
-    throw new Error('Source control response contained an invalid GitHub check-run application');
-  }
-  if (hasInvalidGitHubCheckRunJob(run.job)) {
-    throw new Error('Source control response contained an invalid GitHub check-run job');
-  }
-  if (hasInvalidGitHubCheckRunSteps(run.job?.steps)) {
-    throw new Error('Source control response contained invalid GitHub check-run steps');
-  }
-  if (hasInvalidGitHubCheckRunOutput(run.output)) {
-    throw new Error('Source control response contained invalid GitHub check-run output');
-  }
-  if (hasInvalidGitHubCheckRunAnnotations(run.annotations)) {
-    throw new Error('Source control response contained invalid GitHub check-run annotations');
-  }
-};
-
-const mapCheckRun = (run: GitHubCheckRun, index: number): CIRun => {
-  validateGitHubCheckRun(run);
-  const result: CIRun = {
-    ...GITHUB_IDENTITY,
-    id: String(run.id ?? `${run.name}:${run.startedAt ?? index}`),
-    name: run.name,
-  };
-  if (run.startedAt) result.startedAt = run.startedAt;
-  if (run.completedAt) result.completedAt = run.completedAt;
-  if (run.status) result.status = run.status;
-  if (run.conclusion !== undefined) result.conclusion = run.conclusion;
-  if (run.detailsUrl) result.detailsUrl = run.detailsUrl;
-  if (run.app) result.application = { name: run.app.name, slug: run.app.slug };
-  if (run.job) {
-    result.job = {
-      runId: run.job.runId === undefined ? undefined : String(run.job.runId),
-      jobId: run.job.jobId === undefined ? undefined : String(run.job.jobId),
-      url: run.job.url,
-      name: run.job.name,
-      workflowName: run.job.workflowName,
-      conclusion: run.job.conclusion,
-      steps: run.job.steps?.map((step) => ({
-        name: step.name,
-        status: step.status,
-        conclusion: step.conclusion,
-        number: step.number,
-        startedAt: step.startedAt,
-        completedAt: step.completedAt,
-      })),
-    };
-  }
-  if (run.output) result.output = { title: run.output.title, summary: run.output.summary, text: run.output.text };
-  if (run.annotationsTruncated) result.annotationsTruncated = true;
-  if (run.annotations) {
-    result.annotations = run.annotations.map((annotation) => ({
-      message: annotation.message,
-      path: annotation.path,
-      startLine: annotation.startLine,
-      endLine: annotation.endLine,
-      level: annotation.level,
-      title: annotation.title,
-      rawDetails: annotation.rawDetails,
-    }));
-  }
-  return result;
-};
-
-const mapChangeRequest = (pr: GitHubPullRequest | GitHubPullRequestSummary, project: Project): ChangeRequest => {
-  if (!Number.isInteger(pr.number) || pr.number < 1
-    || !isNonEmptyString(pr.title) || !isHttpUrl(pr.url)
-    || !['open', 'closed', 'merged'].includes(pr.state)
-    || !isBooleanValue(pr.draft)
-    || !isNonEmptyString(pr.base) || !isNonEmptyString(pr.head)
-    || (pr.body !== undefined && !isStringValue(pr.body))
-    || (pr.headSha !== undefined && !isNonEmptyString(pr.headSha))
-    || (pr.mergeable !== undefined && pr.mergeable !== null && !isBooleanValue(pr.mergeable))
-    || (pr.mergeableState !== undefined && pr.mergeableState !== null && !isStringValue(pr.mergeableState))) {
-    throw new Error('Source control response contained an invalid change request');
-  }
-  const result: ChangeRequest = {
-    ...GITHUB_IDENTITY,
-    id: `${project.id}#${pr.number}`,
-    number: pr.number,
-    project,
-    title: pr.title,
-    url: pr.url,
-    state: pr.state,
-    draft: pr.draft,
-    base: pr.base,
-    head: pr.head,
-  };
-  if (pr.body !== undefined) result.body = pr.body;
-  if (pr.headSha) result.headSha = pr.headSha;
-  if ('author' in pr && pr.author) result.author = mapUser(pr.author);
-  if ('createdAt' in pr && pr.createdAt) result.createdAt = pr.createdAt;
-  if ('updatedAt' in pr && pr.updatedAt) result.updatedAt = pr.updatedAt;
-  if ('headLabel' in pr && pr.headLabel) result.headLabel = pr.headLabel;
-  if ('headRepo' in pr && pr.headRepo) result.headProject = mapProject(pr.headRepo);
-  if (pr.mergeable !== undefined) result.mergeable = pr.mergeable;
-  if (pr.mergeableState !== undefined) result.mergeableState = pr.mergeableState;
-  return result;
-};
-
-const mapIssue = (issue: GitHubIssue, project: Project, identity: SourceControlIdentity = GITHUB_IDENTITY): Issue => {
-  if (!issue || !Number.isInteger(issue.number) || issue.number < 1
-    || !isNonEmptyString(issue.title) || !isHttpUrl(issue.url)
-    || (issue.state !== 'open' && issue.state !== 'closed')
-    || (issue.body !== undefined && !isStringValue(issue.body))
-    || (issue.createdAt !== undefined && !isNonEmptyString(issue.createdAt))
-    || (issue.updatedAt !== undefined && !isNonEmptyString(issue.updatedAt))) {
-    throw new Error('Source control response contained an invalid issue');
-  }
-  if (issue.author !== undefined && issue.author !== null) validateGitHubUser(issue.author);
-  if (issue.assignees !== undefined) {
-    if (!Array.isArray(issue.assignees)) throw new Error('Source control response contained invalid issue assignees');
-    issue.assignees.forEach(validateGitHubUser);
-  }
-  if (issue.labels !== undefined && (!Array.isArray(issue.labels) || issue.labels.some((label) => !label
-    || !isNonEmptyString(label.name) || (label.color !== undefined && !isStringValue(label.color))))) {
-    throw new Error('Source control response contained invalid issue labels');
-  }
-  const result: Issue = {
-    ...identity,
-    id: `${project.id}#${issue.number}`,
-    number: issue.number,
-    project,
-    title: issue.title,
-    url: issue.url,
-    state: issue.state,
-  };
-  if (issue.body !== undefined) result.body = issue.body;
-  if (issue.author) result.author = mapUser(issue.author, identity);
-  if (issue.assignees) result.assignees = issue.assignees.map((user) => mapUser(user, identity));
-  if (issue.labels) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
-  if (issue.createdAt) result.createdAt = issue.createdAt;
-  if (issue.updatedAt) result.updatedAt = issue.updatedAt;
-  return result;
-};
-
-const mapComment = (comment: GitHubIssueComment, identity: SourceControlIdentity = GITHUB_IDENTITY): IssueComment => {
-  if (!comment || !Number.isInteger(comment.id) || comment.id < 1 || !isHttpUrl(comment.url)
-    || !isStringValue(comment.body)
-    || (comment.createdAt !== undefined && !isNonEmptyString(comment.createdAt))
-    || (comment.updatedAt !== undefined && !isNonEmptyString(comment.updatedAt))) {
-    throw new Error('Source control response contained an invalid comment');
-  }
-  if (comment.author !== undefined && comment.author !== null) validateGitHubUser(comment.author);
-  const result: IssueComment = {
-    ...identity,
-    id: String(comment.id),
-    url: comment.url,
-    body: comment.body,
-  };
-  if (comment.author) result.author = mapUser(comment.author, identity);
-  if (comment.createdAt) result.createdAt = comment.createdAt;
-  if (comment.updatedAt) result.updatedAt = comment.updatedAt;
-  return result;
+  return { draft: result.draft };
 };
 
 const parseSourceUser = (user: SourceUserDTO, identity: SourceControlIdentity): SourceControlUser => {
   const username = user?.username || user?.login;
-  if (!user || !isValidId(user.id) || !isNonEmptyString(username)
+  const validId = isExtensionProviderId(identity.provider)
+    ? typeof user?.id === 'string' && user.id.length > 0 && user.id.length <= 256 || isPositiveSafeInteger(user?.id)
+    : user && isValidId(user.id);
+  if (!user || !validId || !isNonEmptyString(username)
     || !hasCompatibleIdentity(user, identity)
     || (user.avatarUrl !== undefined && !isHttpUrl(user.avatarUrl))
     || (user.name !== undefined && !isStringValue(user.name))
@@ -929,7 +703,7 @@ const parseSourceUser = (user: SourceUserDTO, identity: SourceControlIdentity): 
 };
 
 const parseSourceProject = (project: Project, identity: SourceControlIdentity): Project => {
-  if (!project || !isValidId(project.id) || !isNonEmptyString(project.owner) || !isNonEmptyString(project.name)
+  if (!project || !isValidId(project.id) || !isProjectOwner(identity, project.owner) || !isNonEmptyString(project.name)
     || !isHttpUrl(project.url) || !hasMatchingIdentity(project, identity)
     || (project.cloneUrl !== undefined && !isNonEmptyString(project.cloneUrl))
     || (project.sshUrl !== undefined && !isNonEmptyString(project.sshUrl))
@@ -1051,7 +825,12 @@ const parseSourceChangeRequest = (request: ChangeRequest, identity: SourceContro
     || (request.mergeable !== undefined && request.mergeable !== null && !isBooleanValue(request.mergeable))
     || (request.mergeableState !== undefined && request.mergeableState !== null && !isStringValue(request.mergeableState))
     || (request.labels !== undefined && (!Array.isArray(request.labels) || request.labels.some((label) => !label
-      || !isNonEmptyString(label.name) || (label.color !== undefined && !isStringValue(label.color)))))) {
+      || !isNonEmptyString(label.name) || (label.color !== undefined && !isStringValue(label.color)))))
+    || (request.workInProgress !== undefined && !isBooleanValue(request.workInProgress))
+    || (request.private !== undefined && !isBooleanValue(request.private))
+    || (request.topic !== undefined && !isStringValue(request.topic))
+    || (request.hashtags !== undefined && (!Array.isArray(request.hashtags) || request.hashtags.some((tag) => !isNonEmptyString(tag))))
+    || (request.revisionNumber !== undefined && !isPositiveSafeInteger(request.revisionNumber))) {
     throw new Error('Source control response contained an invalid change request');
   }
   const result: ChangeRequest = {
@@ -1078,6 +857,11 @@ const parseSourceChangeRequest = (request: ChangeRequest, identity: SourceContro
   if (request.mergeable !== undefined) result.mergeable = request.mergeable;
   if (request.mergeableState !== undefined) result.mergeableState = request.mergeableState;
   if (request.labels !== undefined) result.labels = request.labels.map((label) => ({ name: label.name, color: label.color }));
+  if (request.workInProgress !== undefined) result.workInProgress = request.workInProgress;
+  if (request.private !== undefined) result.private = request.private;
+  if (request.topic) result.topic = request.topic;
+  if (request.hashtags !== undefined) result.hashtags = [...request.hashtags];
+  if (request.revisionNumber !== undefined) result.revisionNumber = request.revisionNumber;
   return result;
 };
 
@@ -1114,6 +898,8 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
+  const references = parseSourceReferenceLinks(issue.references);
+  if (references.length > 0) result.references = references;
   return result;
 };
 
@@ -1127,6 +913,37 @@ const parseSourceCommit = (commit: ChangeRequestCommit): ChangeRequestCommit => 
   return { sha: commit.sha, headline: commit.headline, authorName: commit.authorName, committedAt: commit.committedAt, url: commit.url };
 };
 
+const STACK_LAYER_STATES = ['open', 'closed', 'merged'] as const;
+
+
+const parseSourceStack = (stack: PullRequestStack): PullRequestStack => {
+  if (!stack || !isNonEmptyString(stack.base) || !Array.isArray(stack.layers)
+    || (stack.number !== null && !Number.isSafeInteger(stack.number))) {
+    throw new Error('Source control response contained an invalid merge request chain');
+  }
+  return {
+    number: stack.number,
+    base: stack.base,
+    layers: stack.layers.map((layer) => {
+      const state = STACK_LAYER_STATES.find((candidate) => candidate === layer?.state);
+      if (!layer || !Number.isSafeInteger(layer.number) || !isStringValue(layer.title) || !isHttpUrl(layer.url)
+        || !state || !isBooleanValue(layer.draft) || !isNonEmptyString(layer.head)) {
+        throw new Error('Source control response contained an invalid merge request chain');
+      }
+      return { number: layer.number, title: layer.title, url: layer.url, state, draft: layer.draft, head: layer.head };
+    }),
+  };
+};
+
+
+const parseOptionalStack = (stack: PullRequestStack): PullRequestStack | undefined => {
+  try {
+    return parseSourceStack(stack);
+  } catch {
+    return undefined;
+  }
+};
+
 const parseSourceVerdict = (verdict: ChangeRequestVerdict, identity: SourceControlIdentity): ChangeRequestVerdict => {
   if (!verdict || (verdict.state !== 'approved' && verdict.state !== 'changes_requested') || !isNonEmptyString(verdict.url)
     || (verdict.createdAt !== null && !isNonEmptyString(verdict.createdAt))) {
@@ -1137,12 +954,88 @@ const parseSourceVerdict = (verdict: ChangeRequestVerdict, identity: SourceContr
   return result;
 };
 
+const VOTE_STATUSES = ['approved', 'rejected', 'recommended', 'disliked', 'neutral'] as const;
+const REQUIREMENT_STATUSES = ['satisfied', 'unsatisfied', 'overridden', 'not-applicable', 'error', 'forced'] as const;
+const REVISION_KINDS = ['rework', 'trivial-rebase', 'merge-first-parent-update', 'no-code-change', 'no-change'] as const;
+const isVoteValue = (value: BoundaryScalar): value is number => isNumberValue(value) && Number.isInteger(value) && value >= -10 && value <= 10;
+
+const parseSourceVote = (vote: ChangeRequestVote, identity: SourceControlIdentity): ChangeRequestVote => {
+  if (!vote || !isVoteValue(vote.value) || (vote.revision !== undefined && !isPositiveSafeInteger(vote.revision))) {
+    throw new Error('Source control response contained an invalid vote');
+  }
+  const result: ChangeRequestVote = { user: parseSourceUser(vote.user, identity), value: vote.value };
+  if (vote.revision !== undefined) result.revision = vote.revision;
+  return result;
+};
+
+const parseSourceVoteLabel = (label: ChangeRequestVoteLabel, identity: SourceControlIdentity): ChangeRequestVoteLabel => {
+  const status = VOTE_STATUSES.find((candidate) => candidate === label?.status);
+  if (!label || !isNonEmptyString(label.name) || !status || !isVoteValue(label.defaultValue) || !isBooleanValue(label.blocking)
+    || !Array.isArray(label.values) || label.values.some((entry) => !entry || !isVoteValue(entry.value) || !isStringValue(entry.description))
+    || !Array.isArray(label.permitted) || label.permitted.some((value) => !isVoteValue(value))
+    || !Array.isArray(label.votes)) {
+    throw new Error('Source control response contained an invalid vote label');
+  }
+  return {
+    name: label.name,
+    values: label.values.map((entry) => ({ value: entry.value, description: entry.description })),
+    defaultValue: label.defaultValue,
+    permitted: [...label.permitted],
+    blocking: label.blocking,
+    status,
+    votes: label.votes.map((vote) => parseSourceVote(vote, identity)),
+  };
+};
+
+const parseSourceSubmitRequirement = (requirement: ChangeRequestSubmitRequirement): ChangeRequestSubmitRequirement => {
+  const status = REQUIREMENT_STATUSES.find((candidate) => candidate === requirement?.status);
+  if (!requirement || !isNonEmptyString(requirement.name) || !status
+    || (requirement.description !== undefined && !isStringValue(requirement.description))) {
+    throw new Error('Source control response contained an invalid submit requirement');
+  }
+  const result: ChangeRequestSubmitRequirement = { name: requirement.name, status };
+  if (requirement.description) result.description = requirement.description;
+  return result;
+};
+
+const parseSourceRevision = (revision: ChangeRequestRevision, identity: SourceControlIdentity): ChangeRequestRevision => {
+  const kind = revision?.kind === undefined ? undefined : REVISION_KINDS.find((candidate) => candidate === revision.kind);
+  if (!revision || !isPositiveSafeInteger(revision.number) || !isNonEmptyString(revision.sha) || !isNonEmptyString(revision.ref)
+    || (revision.createdAt !== null && !isNonEmptyString(revision.createdAt)) || (revision.kind !== undefined && !kind)) {
+    throw new Error('Source control response contained an invalid revision');
+  }
+  const result: ChangeRequestRevision = { number: revision.number, sha: revision.sha, createdAt: revision.createdAt, ref: revision.ref };
+  if (revision.uploader) result.uploader = parseSourceUser(revision.uploader, identity);
+  if (kind) result.kind = kind;
+  return result;
+};
+
+const parseSourceLocalRevision = (local: ChangeRequestLocalRevision): ChangeRequestLocalRevision => {
+  if (!local || !isNonEmptyString(local.sha)
+    || (local.changeId !== null && !isNonEmptyString(local.changeId))
+    || (local.uploadedAs !== null && !isPositiveSafeInteger(local.uploadedAs))) {
+    throw new Error('Source control response contained an invalid local revision');
+  }
+  return { sha: local.sha, changeId: local.changeId, uploadedAs: local.uploadedAs };
+};
+
+const parseSourceReviewComment = (comment: ChangeRequestReviewComment, identity: SourceControlIdentity): ChangeRequestReviewComment => {
+  if (comment?.revision !== undefined && !isPositiveSafeInteger(comment.revision)) {
+    throw new Error('Source control response contained an invalid review comment');
+  }
+  const result: ChangeRequestReviewComment = { ...parseSourceComment(comment, identity), path: comment.path, line: comment.line, position: comment.position };
+  if (comment.revision !== undefined) result.revision = comment.revision;
+  return result;
+};
+
 const parseSourceComment = (comment: IssueComment, identity: SourceControlIdentity): IssueComment => {
   if (!comment || !isValidId(comment.id) || !isNonEmptyString(comment.url) || !isStringValue(comment.body)
     || !hasMatchingIdentity(comment, identity)
     || (comment.author !== undefined && comment.author !== null && !hasMatchingIdentity(comment.author, identity))
     || (comment.createdAt !== undefined && !isNonEmptyString(comment.createdAt))
-    || (comment.updatedAt !== undefined && !isNonEmptyString(comment.updatedAt))) {
+    || (comment.updatedAt !== undefined && !isNonEmptyString(comment.updatedAt))
+    || (comment.canUpdate !== undefined && !isBooleanValue(comment.canUpdate))
+    || (comment.canDelete !== undefined && !isBooleanValue(comment.canDelete))) {
     throw new Error('Source control response contained an invalid comment');
   }
   const thread = comment.thread;
@@ -1161,27 +1054,13 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
   if (comment.author) result.author = parseSourceUser(comment.author, identity);
   if (comment.createdAt) result.createdAt = comment.createdAt;
   if (comment.updatedAt) result.updatedAt = comment.updatedAt;
+  if (comment.canUpdate !== undefined) result.canUpdate = comment.canUpdate;
+  if (comment.canDelete !== undefined) result.canDelete = comment.canDelete;
   return result;
 };
 
-type BoundaryScalar = string | number | boolean | null | undefined;
-const isStringValue = (value: BoundaryScalar): value is string => Object.prototype.toString.call(value) === '[object String]';
-const isBooleanValue = (value: BoundaryScalar): value is boolean => Object.prototype.toString.call(value) === '[object Boolean]';
-const isNumberValue = (value: BoundaryScalar): value is number => Object.prototype.toString.call(value) === '[object Number]';
-const isNonEmptyString = (value: BoundaryScalar): value is string => isStringValue(value) && value.trim().length > 0;
-const isPositiveSafeInteger = (value: BoundaryScalar): value is number => isNumberValue(value) && Number.isSafeInteger(value) && value >= 1;
-// A binding revision of 0 is the unbound repository, read with the account the client is signed in to.
 const isNonNegativeSafeInteger = (value: BoundaryScalar): value is number => isNumberValue(value) && Number.isSafeInteger(value) && value >= 0;
 const isValidId = (value: string | number | undefined): boolean => isNonEmptyString(value) || Number.isFinite(value);
-const isHttpUrl = (value: BoundaryScalar): value is string => {
-  if (!isNonEmptyString(value)) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:';
-  } catch {
-    return false;
-  }
-};
 const hasMatchingIdentity = (
   value: { provider?: string; instance?: string } | null | undefined,
   identity: SourceControlIdentity,
@@ -1192,28 +1071,26 @@ const hasCompatibleIdentity = (
 ): boolean => value.provider === undefined && value.instance === undefined
   ? true
   : hasMatchingIdentity(value, identity);
-const validateGitHubUser = (user: GitHubUserSummary): void => {
-  if (!user || !isNonEmptyString(user.login)
-    || (user.id !== undefined && (!Number.isInteger(user.id) || user.id < 0))
-    || (user.avatarUrl !== undefined && !isHttpUrl(user.avatarUrl))
-    || (user.name !== undefined && !isStringValue(user.name))
-    || (user.email !== undefined && !isStringValue(user.email))) {
-    throw new Error('Source control response contained an invalid user');
-  }
-};
 const parsePageFields = (page: number | undefined, hasMore: boolean | undefined): Pick<PageResult<never>, 'page' | 'hasMore'> => {
   if (!isNumberValue(page) || !Number.isInteger(page) || page < 1 || !isBooleanValue(hasMore)) {
     throw new Error('Source control response contained invalid pagination');
   }
   return { page, hasMore };
 };
-const parseBranches = (payload: GitHubBranchesDTO): string[] => {
+
+const parsePage = <TItem>(payload: PageResult<TItem>, items: TItem[]): PageResult<TItem> => {
+  const result: PageResult<TItem> = { items, ...parsePageFields(payload.page, payload.hasMore) };
+  const incompleteProjectIds = parseIncompleteProjectIds(payload.incompleteProjectIds);
+  if (incompleteProjectIds?.length) result.incompleteProjectIds = incompleteProjectIds;
+  return result;
+};
+const parseBranches = (payload: BranchesDTO): string[] => {
   if (!payload || !Array.isArray(payload.branches) || payload.branches.some((branch) => !isNonEmptyString(branch))) {
     throw new Error('Source control response contained invalid branches');
   }
   return [...payload.branches];
 };
-const validateCISummary = (summary: GitHubChecksSummary | CI['summary']): void => {
+const validateCISummary = (summary: CISummary | CI['summary']): void => {
   if (!['success', 'failure', 'pending', 'unknown'].includes(summary.state)
     || !Number.isInteger(summary.total) || summary.total < 0
     || !Number.isInteger(summary.success) || summary.success < 0
@@ -1251,41 +1128,12 @@ const parseSourceChangeRequestStatus = (
   if (payload.defaultBranch !== undefined) result.defaultBranch = payload.defaultBranch;
   if (payload.resolvedRemoteName !== undefined) result.resolvedRemoteName = payload.resolvedRemoteName;
   if (payload.fetchedAt !== undefined) result.fetchedAt = payload.fetchedAt;
-  return result;
-};
-
-const parseGitHubChangeRequestStatus = (
-  payload: GitHubPullRequestStatus,
-  branch: string,
-): ChangeRequestStatus => {
-  if (!payload || !isBooleanValue(payload.connected) || payload.connected !== true
-    || !isNonEmptyString(payload.branch) || payload.branch !== branch
-    || (payload.fetchedAt !== undefined && (!Number.isFinite(payload.fetchedAt) || payload.fetchedAt < 0))
-    || (payload.canMerge !== undefined && !isBooleanValue(payload.canMerge))
-    || (payload.defaultBranch !== undefined && payload.defaultBranch !== null && !isNonEmptyString(payload.defaultBranch))
-    || (payload.resolvedRemoteName !== undefined && payload.resolvedRemoteName !== null && !isNonEmptyString(payload.resolvedRemoteName))) {
-    throw new Error('Source control response contained an invalid GitHub change request status');
+  if (payload.localRevision !== undefined) result.localRevision = parseSourceLocalRevision(payload.localRevision);
+  if (payload.stack === null) result.stack = null;
+  else if (payload.stack !== undefined) {
+    const stack = parseOptionalStack(payload.stack);
+    if (stack) result.stack = stack;
   }
-  if (payload.repo !== undefined && payload.repo !== null) {
-    if (!isNonEmptyString(payload.repo.owner) || !isNonEmptyString(payload.repo.repo) || !isHttpUrl(payload.repo.url)) {
-      throw new Error('Source control response contained an invalid project');
-    }
-  }
-  if (payload.pr !== undefined && payload.pr !== null && !payload.repo) {
-    throw new Error('Source control response contained a change request without a project');
-  }
-  const project = payload.repo ? projectFromSelector(payload.repo) : null;
-  const result: ChangeRequestStatus = {
-    identity: GITHUB_IDENTITY,
-    project,
-    branch: payload.branch,
-    changeRequest: payload.pr !== undefined && payload.pr !== null && project ? mapChangeRequest(payload.pr, project) : null,
-  };
-  if (payload.fetchedAt !== undefined) result.fetchedAt = payload.fetchedAt;
-  if (payload.checks !== undefined) result.ci = payload.checks === null ? null : mapChecks(payload.checks);
-  if (payload.canMerge !== undefined) result.canMerge = payload.canMerge;
-  if (payload.defaultBranch !== undefined) result.defaultBranch = payload.defaultBranch;
-  if (payload.resolvedRemoteName !== undefined) result.resolvedRemoteName = payload.resolvedRemoteName;
   return result;
 };
 
@@ -1297,10 +1145,11 @@ const parseAuthAccounts = (
     || !isPositiveSafeInteger(account.credentialRevision) || !isNonEmptyString(account.providerUserId)
     || !['available', 'unavailable'].includes(account.providerUserStatus)
     || !isBooleanValue(account.current) || !['oauth', 'pat', 'cli'].includes(account.source)
-    || !['valid', 'invalid'].includes(account.status)) {
+    || !['valid', 'invalid'].includes(account.status)
+    || (account.usable !== undefined && !isBooleanValue(account.usable))) {
     throw new Error('Source control response contained an invalid auth credential');
   }
-  return {
+  const result: SourceControlAuthAccount = {
     id: account.id,
     credentialId: account.credentialId,
     credentialRevision: account.credentialRevision,
@@ -1313,37 +1162,12 @@ const parseAuthAccounts = (
     status: account.status,
     tokenReference: isNonEmptyString(account.tokenReference) ? account.tokenReference : undefined,
   };
+
+  if (account.usable !== undefined) result.usable = account.usable;
+  return result;
 });
 
-const parseGitHubAuthAccounts = (
-  accounts: GitHubAuthStatus['accounts'],
-  identity: SourceControlIdentity,
-): SourceControlAuthAccount[] => (accounts ?? []).map((account) => {
-  let source: SourceControlAuthAccount['source'] = 'oauth';
-  if (account.source === 'gh-cli' || account.source === 'cli') source = 'cli';
-  else if (account.source === 'pat') source = 'pat';
-
-  if (!isNonEmptyString(account.id) || account.id !== account.credentialId
-    || !isPositiveSafeInteger(account.credentialRevision) || !isNonEmptyString(account.providerUserId)
-    || !['available', 'unavailable'].includes(account.providerUserStatus)) {
-    throw new Error('Source control response contained an invalid GitHub auth credential');
-  }
-  return {
-    id: account.id,
-    credentialId: account.credentialId,
-    credentialRevision: account.credentialRevision,
-    providerUserId: account.providerUserId,
-    providerUserStatus: account.providerUserStatus,
-    user: mapUser(account.user, identity),
-    scope: account.scope,
-    current: Boolean(account.current),
-    source,
-    status: account.status === 'invalid' ? 'invalid' : 'valid',
-    tokenReference: isNonEmptyString(account.tokenReference) ? account.tokenReference : undefined,
-  };
-});
-
-const parseGitLabAuthStatus = (payload: GitLabAuthStatusDTO, identity: SourceControlIdentity): SourceControlAuthStatus => {
+const parseProviderAuthStatus = (payload: ProviderAuthStatusDTO, identity: SourceControlIdentity): SourceControlAuthStatus => {
   if (!payload.connected) {
     if (!payload.status) {
       const result: Extract<SourceControlAuthStatus, { status: 'disconnected' }> = {
@@ -1380,55 +1204,6 @@ const parseGitLabAuthStatus = (payload: GitLabAuthStatusDTO, identity: SourceCon
   };
 };
 
-const requireConnected = (connected: boolean): void => {
-  if (!isBooleanValue(connected)) throw new Error('Source control response contained an invalid connection state');
-  if (!connected) throw new Error('GitHub is not connected');
-};
-
-const mapGhCli = (
-  ghCli: AuthStatusDTO['ghCli'],
-  identity: SourceControlIdentity,
-): DisconnectedSourceControlAuthStatus['cli'] => {
-  if (!ghCli) return undefined;
-  const cli: NonNullable<DisconnectedSourceControlAuthStatus['cli']> = {
-    available: ghCli.available,
-    disabled: ghCli.disabled,
-    active: ghCli.active,
-  };
-  if (ghCli.user) cli.user = mapUser(ghCli.user, identity);
-  return cli;
-};
-
-const mapAuthStatus = (payload: AuthStatusDTO, identity: SourceControlIdentity): SourceControlAuthStatus => {
-  // The gh CLI entry is listed whether or not an account is connected: a
-  // disconnected user still needs its Enable / Switch to controls.
-  const cli = mapGhCli(payload.ghCli, identity);
-  if (!payload.connected || !payload.user) {
-    if (payload.status === 'unreachable' || payload.status === 'temporarily-unavailable' || payload.status === 'unavailable') {
-      if (payload.message) return { ...identity, status: payload.status, connected: false, message: payload.message };
-      return { ...identity, status: payload.status, connected: false };
-    }
-    const disconnected: DisconnectedSourceControlAuthStatus = {
-      ...identity,
-      status: 'disconnected',
-      connected: false,
-      accounts: parseGitHubAuthAccounts(payload.accounts, identity),
-    };
-    if (cli) disconnected.cli = cli;
-    return disconnected;
-  }
-  const result: Extract<SourceControlAuthStatus, { status: 'connected' }> = {
-    ...identity,
-    status: 'connected',
-    connected: true,
-    user: mapUser(payload.user, identity),
-    accounts: parseGitHubAuthAccounts(payload.accounts, identity),
-  };
-  if (payload.scope) result.scope = payload.scope;
-  if (cli) result.cli = cli;
-  return result;
-};
-
 export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = {}): SourceControlAPI => {
   const fetch = options.fetch ?? runtimeFetch;
 
@@ -1463,6 +1238,11 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       }
       return parseRepositoryBinding(payload);
     },
+    providers: async () => {
+      const descriptors = await fetchSourceControlProviders(fetch);
+      rememberProviderInstances(descriptors);
+      return descriptors;
+    },
     authInstances: async () => {
       const response = await fetch('/api/source-control/instances', { headers: { Accept: 'application/json' } });
       const payload: SourceControlInstancesResponse = await response.json();
@@ -1480,6 +1260,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         issues: payload.issues,
         changeRequests: payload.changeRequests,
         draftChangeRequests: payload.draftChangeRequests,
+        draftConversion: payload.draftConversion === true,
         mergeChangeRequests: payload.mergeChangeRequests,
         mergeMethods: payload.mergeMethods ? [...payload.mergeMethods] : undefined,
         ci: payload.ci,
@@ -1487,13 +1268,10 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     authStatus: async (identity) => {
       const normalized = normalizeIdentity(identity);
-      if (normalized.provider === 'gitlab') {
-        return parseGitLabAuthStatus(await request<GitLabAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
-      }
-      return mapAuthStatus(await request<AuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
+      return parseProviderAuthStatus(await request<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
     },
     authStart: async (identity): Promise<SourceControlDeviceFlowStart> => {
-      const payload = await request<GitHubDeviceFlowStart & ErrorResponse>(fetch, identity, '/auth/start', {
+      const payload = await request<DeviceFlowStartDTO & ErrorResponse>(fetch, identity, '/auth/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       });
       const result: SourceControlDeviceFlowStart = {
@@ -1508,9 +1286,9 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       return result;
     },
     authComplete: async (identity, flowId): Promise<SourceControlDeviceFlowComplete> => {
-      let payload: GitHubDeviceFlowComplete & ErrorResponse;
+      let payload: DeviceFlowCompleteDTO & ErrorResponse;
       try {
-        payload = await post<GitHubDeviceFlowComplete & ErrorResponse>(fetch, identity, '/auth/complete', { flowId });
+        payload = await post<DeviceFlowCompleteDTO & ErrorResponse>(fetch, identity, '/auth/complete', { flowId });
       } catch (error) {
         if (error instanceof SourceControlRequestError && error.code === 'SOURCE_CONTROL_OAUTH_FLOW_UNAVAILABLE') {
           return { status: 'error', code: 'expired', message: error.message };
@@ -1518,7 +1296,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         throw error;
       }
       if (payload.connected) {
-        const result: SourceControlDeviceFlowComplete = { status: 'connected', user: mapUser(payload.user, normalizeIdentity(identity)) };
+        const result: SourceControlDeviceFlowComplete = { status: 'connected', user: parseSourceUser(payload.user, normalizeIdentity(identity)) };
         if (payload.scope) result.scope = payload.scope;
         return result;
       }
@@ -1533,21 +1311,46 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       } else if (payload.status === 'expired_token') {
         code = 'expired';
       }
-      return { status: 'error', code, message: payload.error || payload.status || 'GitHub authentication failed' };
+      return { status: 'error', code, message: payload.error || payload.status || `${providerLabel(identity)} authentication failed` };
     },
-    authSetToken: async (identity, token) => {
+    authSetToken: async (identity, token, tokenOptions) => {
       const normalized = normalizeIdentity(identity);
-      // GitHub takes a token only as a 1Password reference (op://…); GitLab's
-      // token field takes a token or a reference.
-      if (normalized.provider === 'gitlab') {
-        await post<{ connected: boolean; user?: GitHubUserSummary; error?: string }>(fetch, normalized, '/auth/token', { token });
-      } else {
-        await post<{ connected: boolean; user?: GitHubUserSummary; error?: string }>(fetch, normalized, '/auth/vault', { reference: token });
+      // A 1Password reference (op://…) adds an account that keeps only the
+      // reference; the server reads the token from the vault on each use.
+      if (/^op:\/\//.test(token.trim())) {
+        await post<ErrorResponse>(fetch, normalized, '/auth/vault', { reference: token.trim() });
+        return parseProviderAuthStatus(await request<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
       }
-      if (normalized.provider === 'gitlab') {
-        return parseGitLabAuthStatus(await request<GitLabAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
+      await post<ErrorResponse>(fetch, normalized, '/auth/token', tokenOptions?.username ? { token, username: tokenOptions.username } : { token });
+      return parseProviderAuthStatus(await request<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
+    },
+    authSetSshUrl: async (identity, sshUrl) => {
+      const normalized = normalizeIdentity(identity);
+      const payload = await post<{ sshUrl?: string | null; error?: string }>(fetch, normalized, '/auth/ssh-url', { sshUrl });
+      if (payload.sshUrl !== null && !isNonEmptyString(payload.sshUrl)) {
+        throw new Error('Source control response contained an invalid SSH URL');
       }
-      return mapAuthStatus(await request<GitHubAuthStatus & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
+      return { sshUrl: payload.sshUrl ?? null };
+    },
+    setInstanceAliases: async (identity, aliases) => {
+      const normalized = normalizeIdentity(identity);
+      const response = await fetch('/api/source-control/instances/aliases', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: normalized.provider, instance: normalized.instance, aliases }),
+      });
+      const payload: { aliases?: BoundaryScalar[]; alias?: BoundaryScalar } & ErrorResponse = await response.json();
+      if (!response.ok) {
+        const message = payload.error || response.statusText || 'Failed to save instance aliases';
+        if ((payload.code === 'INVALID_INSTANCE_ALIAS' || payload.code === 'INSTANCE_ALIAS_TAKEN') && isNonEmptyString(payload.alias)) {
+          throw new SourceControlInstanceAliasError(message, payload.code === 'INSTANCE_ALIAS_TAKEN' ? 'taken' : 'invalid', payload.alias);
+        }
+        throw new SourceControlRequestError(message, payload.code);
+      }
+      if (!Array.isArray(payload.aliases) || !payload.aliases.every(isNonEmptyString)) {
+        throw new Error('Source control response contained invalid instance aliases');
+      }
+      return { aliases: [...payload.aliases] };
     },
     authDisconnect: async (identity, accountId) => {
       if (!isNonEmptyString(accountId) || accountId.trim() !== accountId) {
@@ -1562,14 +1365,11 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     authActivate: async (identity, accountId) => {
       const normalized = normalizeIdentity(identity);
-      if (normalized.provider === 'gitlab') {
-        return parseGitLabAuthStatus(await post<GitLabAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/activate', { accountId }), normalized);
-      }
-      return mapAuthStatus(await post<GitHubAuthStatus & ErrorResponse>(fetch, normalized, '/auth/activate', { accountId }), normalized);
+      return parseProviderAuthStatus(await post<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/activate', { accountId }), normalized);
     },
     authSetCliDisabled: async (identity, disabled) => {
       const normalized = normalizeIdentity(identity);
-      const payload = await post<{ disabled?: boolean; error?: string }>(fetch, normalized, normalized.provider === 'gitlab' ? '/auth/cli' : '/auth/gh-cli', { disabled });
+      const payload = await post<{ disabled?: boolean; error?: string }>(fetch, normalized, '/auth/cli', { disabled });
       return { disabled: Boolean(payload.disabled) };
     },
 
@@ -1578,13 +1378,8 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const query = boundReadQuery(context);
       query.set('branch', branch);
       if (requestOptions?.force) query.set('force', 'true');
-
-      if (normalized.provider === 'gitlab') {
-        const payload = await request<ChangeRequestStatus & ErrorResponse>(fetch, normalized, '/pr/status', {}, query);
-        return parseSourceChangeRequestStatus(payload, normalized, branch);
-      }
-      const payload = await request<GitHubPullRequestStatus & ErrorResponse>(fetch, normalized, '/pr/status', {}, query);
-      return parseGitHubChangeRequestStatus(payload, branch);
+      const payload = await request<ChangeRequestStatus & ErrorResponse>(fetch, normalized, '/pr/status', {}, query);
+      return parseSourceChangeRequestStatus(payload, normalized, branch);
     },
     changeRequestCreate: async (payload: CreateChangeRequestInput) => {
       const identity = normalizeIdentity(payload);
@@ -1598,6 +1393,55 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (payload.remote) body.remote = payload.remote;
       if (payload.headRemote) body.headRemote = payload.headRemote;
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/create', body);
+      return parseMutationReceipt(result, payload, identity, parseCreateMutationResult);
+    },
+    issueUpdate: async (payload: UpdateIssueInput) => {
+      const identity = normalizeIdentity(payload);
+      const body: UpdateBody = { ...mutationBody(payload, identity, 'existing'), title: payload.title };
+      if (payload.body !== undefined) body.body = payload.body;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/update', body);
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    issueCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/issues/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionCommentUpdate: async (payload: CommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionCommentDelete: async (payload: CommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     changeRequestUpdate: async (payload: UpdateChangeRequestInput) => {
@@ -1611,6 +1455,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/merge', {
         ...mutationBody(payload, identity, 'existing'), method: payload.method,
+        cancel: payload.cancel,
       });
       return parseMutationReceipt(result, payload, identity, parseMergeMutationResult);
     },
@@ -1618,6 +1463,11 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/ready', mutationBody(payload, identity, 'existing'));
       return parseMutationReceipt(result, payload, identity, parseReadyMutationResult);
+    },
+    changeRequestDraft: async (payload: DraftChangeRequestInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/draft', mutationBody(payload, identity, 'existing'));
+      return parseMutationReceipt(result, payload, identity, parseDraftMutationResult);
     },
     changeRequestComment: async (payload: CommentInput) => {
       const identity = normalizeIdentity(payload);
@@ -1649,12 +1499,52 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     changeRequestReview: async (payload: ReviewChangeRequestInput) => {
       const identity = normalizeIdentity(payload);
-      const body: MutationBody<SourceControlExistingMutationTarget> & { verdict: ReviewChangeRequestInput['verdict']; body?: string } = {
-        ...mutationBody(payload, identity, 'existing'), verdict: payload.verdict,
-      };
+      const context = mutationBody(payload, identity, 'existing');
+
+      let body: ReviewBody;
+      if (payload.votes !== undefined) {
+        const entries = Object.entries(payload.votes);
+        if (payload.verdict !== undefined || (entries.length === 0 && payload.publishDrafts !== true)
+          || entries.some(([label, value]) => !isNonEmptyString(label) || !isVoteValue(value))) {
+          throw new Error('Source control review input is invalid');
+        }
+        body = { ...context, votes: Object.fromEntries(entries), publishDrafts: payload.publishDrafts };
+      } else {
+        body = { ...context, verdict: payload.verdict };
+      }
       if (payload.body !== undefined) body.body = payload.body;
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review', body);
       return parseMutationReceipt(result, payload, identity, parseReviewMutationResult);
+    },
+    changeRequestReviewState: (context, ref) => fetchChangeRequestReviewState(fetch, context, ref),
+    changeRequestReviewComment: async (payload: ReviewCommentInput) => {
+      const identity = normalizeIdentity(payload);
+      const position = payload.line === undefined
+        ? { path: payload.path }
+        : { path: payload.path, side: payload.side, line: payload.line, startLine: payload.startLine };
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment', {
+        ...mutationBody(payload, identity, 'existing'), ...position, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewCommentUpdate: async (payload: ReviewCommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewCommentDelete: async (payload: ReviewCommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewDiscard: async (payload: ReviewDiscardInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/discard', mutationBody(payload, identity, 'existing'));
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     changeRequestSetState: async (payload: SetStateInput) => {
       const identity = normalizeIdentity(payload);
@@ -1691,8 +1581,11 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       });
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
-    refreshProviderReads: async (identity) => {
-      await request<ErrorResponse>(fetch, identity, '/read-cache/refresh', { method: 'POST' });
+    refreshProviderReads: async (identity, scope) => {
+      const query = 'item' in scope
+        ? new URLSearchParams({ scope: 'item', owner: scope.item.owner, repo: scope.item.repo, number: String(scope.item.number) })
+        : new URLSearchParams({ scope: 'lists' });
+      await request<ErrorResponse>(fetch, identity, '/read-cache/refresh', { method: 'POST' }, query);
     },
     referenceLabels: async (context, project) => parseLabelChoices(await readRepositoryChoices(fetch, context, project, '/references/labels')),
     referenceReviewers: async (context, project) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers')),
@@ -1703,6 +1596,46 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       });
       return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
+    discussionComment: async (payload: DiscussionCommentInput) => {
+      const identity = normalizeIdentity(payload);
+
+      const body: MutationBody<SourceControlExistingMutationTarget> & { body: string; replyTo?: string } = {
+        ...mutationBody(payload, identity, 'existing'), body: payload.body,
+      };
+      if (payload.replyTo) body.replyTo = payload.replyTo;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/comment', body);
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionSetState: async (payload: SetDiscussionStateInput) => {
+      const identity = normalizeIdentity(payload);
+      const context = mutationBody(payload, identity, 'existing');
+
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/state', payload.state === 'closed'
+        ? { ...context, state: 'closed', reason: payload.reason }
+        : { ...context, state: 'open' });
+      return parseMutationReceipt(result, payload, identity, parseStateMutationResult);
+    },
+    discussionSetAnswer: async (payload: SetDiscussionAnswerInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/answer', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, answer: payload.answer,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionUpdate: async (payload: UpdateDiscussionInput) => {
+      const identity = normalizeIdentity(payload);
+      const body: UpdateBody = { ...mutationBody(payload, identity, 'existing'), title: payload.title };
+      if (payload.body !== undefined) body.body = payload.body;
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/update', body);
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    discussionSetLabels: async (payload: SetLabelsInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/discussions/labels', {
+        ...mutationBody(payload, identity, 'existing'), labels: payload.labels,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
     changeRequestsList: async (context, listOptions): Promise<PageResult<ChangeRequest>> => {
       const normalized = normalizeIdentity(context);
       const query = boundReadQuery(context);
@@ -1710,18 +1643,10 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (listOptions?.query) query.set('query', listOptions.query);
       if (listOptions?.state) query.set('state', listOptions.state);
       if (listOptions?.people) query.set('people', listOptions.people);
-      if (normalized.provider === 'gitlab') {
-        const payload = await request<PageResult<ChangeRequest> & ErrorResponse>(fetch, normalized, '/pulls/list', {}, query);
-        return { items: payload.items.map((item) => parseSourceChangeRequest(item, normalized)), page: payload.page, hasMore: payload.hasMore };
-      }
-      const payload = await request<GitHubPullRequestsListResult & ErrorResponse>(fetch, normalized, '/pulls/list', {}, query);
-      requireConnected(payload.connected);
-      const fallback = payload.repo ? projectFromSelector(payload.repo) : null;
-      const items = (payload.prs ?? []).map((pr) => mapChangeRequest(pr, resolveListProject(pr.sourceRepo, fallback)));
-      const result: PageResult<ChangeRequest> = { items, page: payload.page ?? listOptions?.page ?? 1, hasMore: Boolean(payload.hasMore) };
-      const incompleteProjectIds = parseIncompleteGitHubProjectIds(payload.failedRepos);
-      if (incompleteProjectIds?.length) result.incompleteProjectIds = incompleteProjectIds;
-      return result;
+      for (const label of listOptions?.labels ?? []) query.append('label', label);
+      const payload = await request<PageResult<ChangeRequest> & ErrorResponse>(fetch, normalized, '/pulls/list', {}, query);
+      if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid change requests');
+      return parsePage(payload, payload.items.map((item) => parseSourceChangeRequest(item, normalized)));
     },
     changeRequestContext: async (context, number, contextOptions): Promise<ChangeRequestContext> => {
       const normalized = normalizeIdentity(context);
@@ -1730,52 +1655,52 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (contextOptions?.includeDiff) query.set('diff', '1');
       if (contextOptions?.includeCIDetails) query.set('checkDetails', '1');
       if (contextOptions?.includeTimeline) query.set('timeline', '1');
+      if (contextOptions?.includeReferences) query.set('references', '1');
+      if (contextOptions?.revision) query.set('revision', contextOptions.revision);
       if (contextOptions?.project) {
         query.set('owner', contextOptions.project.owner);
         query.set('repo', contextOptions.project.name);
       }
-      if (normalized.provider === 'gitlab') {
-        const payload = await request<ChangeRequestContext & ErrorResponse>(fetch, normalized, '/pulls/context', {}, query);
-        const context: ChangeRequestContext = {
-          identity: normalized,
-          project: payload.project ? parseSourceProject(payload.project, normalized) : null,
-          changeRequest: payload.changeRequest ? parseSourceChangeRequest(payload.changeRequest, normalized) : null,
-          issueComments: payload.issueComments.map((comment) => parseSourceComment(comment, normalized)),
-          reviewComments: payload.reviewComments.map((comment) => ({ ...parseSourceComment(comment, normalized), path: comment.path, line: comment.line, position: comment.position })),
-          files: payload.files.map((file) => ({ ...file })),
-          diff: payload.diff,
-          ci: parseSourceCI(payload.ci, normalized),
-          fetchedAt: payload.fetchedAt,
-        };
-        // Only the preview's timeline asks for commits and verdicts.
-        if (payload.commits) {
-          context.commits = payload.commits.map(parseSourceCommit);
-          context.commitsComplete = payload.commitsComplete !== false;
-          context.verdicts = (payload.verdicts ?? []).map((verdict) => parseSourceVerdict(verdict, normalized));
-          if (payload.reviewers) context.reviewers = payload.reviewers.map((user) => parseSourceUser(user, normalized));
-        }
-        return context;
-      }
-      const payload = await request<GitHubPullRequestContextResult & ErrorResponse>(fetch, normalized, '/pulls/context', {}, query);
-      requireConnected(payload.connected);
-      if (payload.checkRuns !== undefined) {
-        if (!Array.isArray(payload.checkRuns) || !payload.checks) {
-          throw new Error('Source control response contained invalid GitHub check-run details');
-        }
-        payload.checkRuns.forEach(validateGitHubCheckRun);
-      }
-      const project = payload.repo ? projectFromSelector(payload.repo) : null;
+      const payload = await request<ChangeRequestContext & ErrorResponse>(fetch, normalized, '/pulls/context', {}, query);
       const result: ChangeRequestContext = {
-        identity: GITHUB_IDENTITY,
-        project,
-        changeRequest: payload.pr && project ? mapChangeRequest(payload.pr, project) : null,
-        issueComments: (payload.issueComments ?? []).map((comment) => mapComment(comment)),
-        reviewComments: (payload.reviewComments ?? []).map(mapReviewComment),
-        files: (payload.files ?? []).map(mapFile),
+        identity: normalized,
+        project: payload.project ? parseSourceProject(payload.project, normalized) : null,
+        changeRequest: payload.changeRequest ? parseSourceChangeRequest(payload.changeRequest, normalized) : null,
+        issueComments: payload.issueComments.map((comment) => parseSourceComment(comment, normalized)),
+        reviewComments: payload.reviewComments.map((comment) => parseSourceReviewComment(comment, normalized)),
+        files: payload.files.map((file) => ({ ...file })),
+        diff: payload.diff,
+        ci: parseSourceCI(payload.ci, normalized),
+        fetchedAt: payload.fetchedAt,
       };
-      if (payload.fetchedAt !== undefined) result.fetchedAt = payload.fetchedAt;
-      if (payload.diff) result.diff = payload.diff;
-      if (payload.checks) result.ci = parseSourceCI(mapChecks(payload.checks, payload.checkRuns), GITHUB_IDENTITY);
+
+      if (payload.commits) {
+        result.commits = payload.commits.map(parseSourceCommit);
+        result.commitsComplete = payload.commitsComplete !== false;
+        result.verdicts = (payload.verdicts ?? []).map((verdict) => parseSourceVerdict(verdict, normalized));
+        if (payload.reviewers) result.reviewers = payload.reviewers.map((user) => parseSourceUser(user, normalized));
+      }
+      const references = parseSourceReferenceLinks(payload.references);
+      if (references.length > 0) result.references = references;
+      if (payload.stack === null) result.stack = null;
+      else if (payload.stack !== undefined) {
+        const stack = parseOptionalStack(payload.stack);
+        if (stack) result.stack = stack;
+      }
+      const reviewerStates = payload.reviewerStates === undefined ? undefined : parseReviewerStates(payload.reviewerStates, normalized, parseSourceUser);
+      if (reviewerStates) result.reviewerStates = reviewerStates;
+      if (payload.voteLabels !== undefined) {
+        if (!Array.isArray(payload.voteLabels)) throw new Error('Source control response contained invalid vote labels');
+        result.voteLabels = payload.voteLabels.map((label) => parseSourceVoteLabel(label, normalized));
+      }
+      if (payload.submitRequirements !== undefined) {
+        if (!Array.isArray(payload.submitRequirements)) throw new Error('Source control response contained invalid submit requirements');
+        result.submitRequirements = payload.submitRequirements.map(parseSourceSubmitRequirement);
+      }
+      if (payload.revisions !== undefined) {
+        if (!Array.isArray(payload.revisions)) throw new Error('Source control response contained invalid revisions');
+        result.revisions = payload.revisions.map((revision) => parseSourceRevision(revision, normalized));
+      }
       return result;
     },
 
@@ -1786,43 +1711,23 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (listOptions?.query) query.set('query', listOptions.query);
       if (listOptions?.state) query.set('state', listOptions.state);
       if (listOptions?.people) query.set('people', listOptions.people);
-      if (normalized.provider === 'gitlab') {
-        const payload = await request<PageResult<Issue> & ErrorResponse>(fetch, normalized, '/issues/list', {}, query);
-        if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid issues');
-        return { items: payload.items.map((item) => parseSourceIssue(item, normalized)), ...parsePageFields(payload.page, payload.hasMore) };
-      }
-      const payload = await request<GitHubIssuesListResult & ErrorResponse>(fetch, normalized, '/issues/list', {}, query);
-      requireConnected(payload.connected);
-      if (!Array.isArray(payload.issues) || payload.repo === undefined) {
-        throw new Error('Source control response contained invalid issues');
-      }
-      const pagination = parsePageFields(payload.page, payload.hasMore);
-      const fallback = payload.repo ? projectFromSelector(payload.repo, normalized) : null;
-      const items = payload.issues.map((issue) => mapIssue(issue, resolveListProject(issue.sourceRepo, fallback), normalized));
-      const result: PageResult<Issue> = { items, ...pagination };
-      const incompleteProjectIds = parseIncompleteGitHubProjectIds(payload.failedRepos);
-      if (incompleteProjectIds?.length) result.incompleteProjectIds = incompleteProjectIds;
-      return result;
+      for (const label of listOptions?.labels ?? []) query.append('label', label);
+      const payload = await request<PageResult<Issue> & ErrorResponse>(fetch, normalized, '/issues/list', {}, query);
+      if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid issues');
+      return parsePage(payload, payload.items.map((item) => parseSourceIssue(item, normalized)));
     },
-    issueGet: async (context, number, projectSelector) => {
+    issueGet: async (context, number, projectSelector, readOptions): Promise<Issue | null> => {
       const normalized = normalizeIdentity(context);
       const query = boundReadQuery(context);
       query.set('number', String(number));
+      if (readOptions?.includeReferences) query.set('references', '1');
       if (projectSelector) {
         query.set('owner', projectSelector.owner);
         query.set('repo', projectSelector.name);
       }
-      if (normalized.provider === 'gitlab') {
-        const payload = await request<Issue & ErrorResponse>(fetch, normalized, '/issues/get', {}, query);
-        return parseSourceIssue(payload, normalized);
-      }
-      const payload = await request<GitHubIssueGetResult & ErrorResponse>(fetch, normalized, '/issues/get', {}, query);
-      requireConnected(payload.connected);
-      if (payload.issue === undefined || payload.repo === undefined || (payload.issue !== null && !payload.repo)) {
-        throw new Error('Source control response contained an invalid issue result');
-      }
-      if (payload.repo) projectFromSelector(payload.repo, normalized);
-      return payload.issue && payload.repo ? mapIssue(payload.issue, projectFromSelector(payload.repo, normalized), normalized) : null;
+
+      const payload = await request<(Issue & ErrorResponse) | null>(fetch, normalized, '/issues/get', {}, query);
+      return payload === null ? null : parseSourceIssue(payload, normalized);
     },
     issueComments: async (context, number, projectSelector): Promise<IssueComment[]> => {
       const normalized = normalizeIdentity(context);
@@ -1832,50 +1737,32 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         query.set('owner', projectSelector.owner);
         query.set('repo', projectSelector.name);
       }
-      if (normalized.provider === 'gitlab') {
-        const payload = await request<IssueComment[] & ErrorResponse>(fetch, normalized, '/issues/comments', {}, query);
-        if (!Array.isArray(payload)) throw new Error('Source control response contained invalid comments');
-        return payload.map((comment) => parseSourceComment(comment, normalized));
-      }
-      const payload = await request<GitHubIssueCommentsResult & ErrorResponse>(fetch, normalized, '/issues/comments', {}, query);
-      requireConnected(payload.connected);
-      if (!Array.isArray(payload.comments) || payload.repo === undefined) {
-        throw new Error('Source control response contained invalid comments');
-      }
-      if (payload.repo) projectFromSelector(payload.repo, normalized);
-      return payload.comments.map((comment) => mapComment(comment, normalized));
+      const payload = await request<IssueComment[] & ErrorResponse>(fetch, normalized, '/issues/comments', {}, query);
+      if (!Array.isArray(payload)) throw new Error('Source control response contained invalid comments');
+      return payload.map((comment) => parseSourceComment(comment, normalized));
     },
     projectUpstream: async (context): Promise<ProjectUpstream> => {
       const normalized = normalizeIdentity(context);
       const query = boundReadQuery(context);
-      if (normalized.provider === 'gitlab') {
-        const payload = await request<ProjectUpstream & ErrorResponse>(fetch, normalized, '/repo/upstream', {}, query);
-        if (!payload || !hasMatchingIdentity(payload.identity, normalized) || !isBooleanValue(payload.isFork)
-          || (payload.upstream !== null && payload.upstream === undefined)
-          || payload.isFork !== Boolean(payload.upstream)) {
-          throw new Error('Source control response contained an invalid upstream');
-        }
-        return { identity: normalized, isFork: payload.isFork, upstream: payload.upstream ? parseSourceProject(payload.upstream, normalized) : null };
-      }
-      const payload = await request<GitHubRepoUpstreamResult & ErrorResponse>(fetch, normalized, '/repo/upstream', {}, query);
-      requireConnected(payload.connected);
-      if (!isBooleanValue(payload.isFork) || (payload.upstream !== null && payload.upstream === undefined)
+      const payload = await request<ProjectUpstream & ErrorResponse>(fetch, normalized, '/repo/upstream', {}, query);
+      if (!payload || !hasMatchingIdentity(payload.identity, normalized) || !isBooleanValue(payload.isFork)
+        || (payload.upstream !== null && payload.upstream === undefined)
         || payload.isFork !== Boolean(payload.upstream)) {
         throw new Error('Source control response contained an invalid upstream');
       }
-      return { identity: normalized, isFork: payload.isFork, upstream: payload.upstream ? mapProject(payload.upstream, normalized) : null };
+      return { identity: normalized, isFork: payload.isFork, upstream: payload.upstream ? parseSourceProject(payload.upstream, normalized) : null };
     },
     projectBranches: async (context, owner, project) => {
       const normalized = normalizeIdentity(context);
       const query = boundReadQuery(context);
       query.set('owner', owner);
       query.set('repo', project);
-      const payload = await request<GitHubBranchesDTO & ErrorResponse>(fetch, normalized, '/repo/branches', {}, query);
+      const payload = await request<BranchesDTO & ErrorResponse>(fetch, normalized, '/repo/branches', {}, query);
       return parseBranches(payload);
     },
-    githubReferences: (context, referenceOptions) => fetchGitHubReferences(fetch, context, referenceOptions),
-    githubReferencesAcross: (contexts, referenceOptions) => fetchGitHubReferencesAcross(fetch, contexts, referenceOptions),
-    githubReferenceDetail: (context, item) => fetchGitHubReferenceDetail(fetch, context, item),
-    githubPullStatuses: (context, pulls) => fetchGitHubPullStatuses(fetch, context, pulls),
+    references: (context, referenceOptions) => fetchRepositoryReferences(fetch, context, referenceOptions),
+    referencesAcross: (contexts, referenceOptions) => fetchRepositoryReferencesAcross(fetch, contexts, referenceOptions),
+    referenceDetail: (context, item, readOptions) => fetchRepositoryReferenceDetail(fetch, context, item, readOptions),
+    changeRequestListStatuses: (context, refs) => fetchChangeRequestListStatuses(fetch, context, refs),
   };
 };

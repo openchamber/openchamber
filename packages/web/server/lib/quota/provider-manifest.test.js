@@ -20,11 +20,11 @@ const expectedFor = (surface) => new Set(
 
 // Registry keys are the dispatchable provider ids. The registry object is
 // not exported, so the keys are read from its source block: top-level keys
-// of the `const registry = { ... }` literal, in the same shape the python
+// of the `const registry: ... = { ... }` literal, in the same shape the python
 // and sibling conformance extractions use.
 const registryIds = () => {
-  const source = fs.readFileSync(path.join(here, 'providers/index.js'), 'utf8');
-  const start = source.indexOf('const registry = {');
+  const source = fs.readFileSync(path.join(here, 'providers/index.ts'), 'utf8');
+  const start = source.search(/const registry(?::[^=]+)? = \{/);
   const lines = source.slice(start).split('\n');
   const ids = [];
   let depth = 0;

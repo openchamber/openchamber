@@ -159,7 +159,7 @@ export const createSelfHandoffRuntime = ({
   env = process.env,
   timeoutMs = resolveHandoffTimeoutMs(env),
   log = console,
-  reclaimOpenCodeOwnership = null,
+  reclaimOpenCodeOwnership = /** @type {null | ((input: { successorPid: number }) => Promise<boolean>)} */ (null),
 }) => {
   let inFlight = null;
 

@@ -20,8 +20,6 @@ const sendVisibility = (visible: boolean) => {
     return;
   }
 
-  // platform lets the server distinguish mobile (push recipients) from interactive surfaces
-  // (desktop/web/vscode) so it can suppress phone push only while an interactive client is visible.
   void apis.push.setVisibility({ visible, platform: getClientPlatform() });
 };
 
@@ -32,12 +30,6 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
       return;
     }
 
-    // Native (Capacitor): drive visibility AUTHORITATIVELY from App.appStateChange. The
-    // web signals (document.visibilityState / hasFocus) are unreliable in a WKWebView —
-    // hasFocus() often returns false while the app is active — which made the app report
-    // "hidden" while foregrounded and leaked push notifications. The server's focus gate
-    // suppresses push whenever a UI client is visible, so getting this right is what
-    // guarantees "no push while the app is active".
     if (isCapacitorApp()) {
       let active = true;
       let disposed = false;
@@ -62,7 +54,6 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
         })
         .catch(() => undefined);
 
-      // Heartbeat so the server's visibility TTL never expires while the app is active.
       const interval = window.setInterval(() => {
         if (active) sendVisibility(true);
       }, HEARTBEAT_MS);
@@ -74,7 +65,6 @@ export const usePushVisibilityBeacon = (options?: { enabled?: boolean }) => {
       };
     }
 
-    // Web / desktop: document-based visibility.
     if (typeof document === 'undefined') {
       return;
     }

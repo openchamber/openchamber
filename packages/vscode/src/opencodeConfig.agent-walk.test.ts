@@ -127,7 +127,7 @@ describe('VS Code agent directory walk limits', () => {
 describe('agent walk ceiling agreement', () => {
   test('web and VS Code keep the same per-root directory cap', () => {
     const vscodeSource = fs.readFileSync(new URL('./opencodeConfig.ts', import.meta.url), 'utf8');
-    const webSource = fs.readFileSync(new URL('../../web/server/lib/opencode/agents.js', import.meta.url), 'utf8');
+    const webSource = fs.readFileSync(new URL('../../web/server/lib/opencode/agents.ts', import.meta.url), 'utf8');
     const capFromSource = (source: string): number => Number(source.match(/const AGENT_WALK_MAX_DIRS = (\d+);/)?.[1]);
 
     assert.equal(capFromSource(webSource), 5000);

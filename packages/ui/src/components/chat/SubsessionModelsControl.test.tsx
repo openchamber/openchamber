@@ -77,6 +77,14 @@ const installDom = () => {
     KeyboardEvent: win.KeyboardEvent, FocusEvent: win.FocusEvent, MutationObserver: win.MutationObserver,
     ResizeObserver: win.ResizeObserver, IntersectionObserver: win.IntersectionObserver };
   for (const name of DOM_GLOBAL_NAMES) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
+  // happy-dom lays nothing out; the list's scroller gets a menu's height so
+  // the virtual list mounts the rows in view, as it does in a browser.
+  for (const [name, size] of [['clientHeight', 400], ['clientWidth', 380]] as const) {
+    Object.defineProperty(win.HTMLElement.prototype, name, {
+      configurable: true,
+      get(this: HTMLElement) { return this.classList.contains('overlay-scrollbar-target') ? size : 0; },
+    });
+  }
   const container = document.createElement('div');
   document.body.appendChild(container);
   return { container, restore: () => {

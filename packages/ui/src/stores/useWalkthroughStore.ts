@@ -17,6 +17,7 @@ import {
   type WalkthroughStage,
   type WalkthroughTarget,
 } from '@/lib/walkthrough/types';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 type WalkthroughEntryStatus = 'idle' | 'loading' | 'generating' | 'ready' | 'error';
 
@@ -46,19 +47,18 @@ export const walkthroughSourceKey = (source: WalkthroughSource): string => {
   if (source.kind === 'working-tree') return `working-tree:${source.scope}`;
   if (source.kind === 'branch') return `branch:${source.baseRef}...${source.headRef}`;
   if (source.kind === 'commit') return `commit:${source.hash}`;
-  return source.sourceRepo ? `pr:${source.sourceRepo.owner}/${source.sourceRepo.repo}:${source.number}` : `pr:${source.number}`;
+  const pr = source.sourceRepo ? `pr:${joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo)}:${source.number}` : `pr:${source.number}`;
+  return source.revision ? `${pr}@${source.revision}` : pr;
 };
 
 const walkthroughTargetKey = (target: WalkthroughTarget): string => {
   if (!('context' in target)) return walkthroughSourceKey(target.source);
   const { context, source } = target;
-  // The named repository keeps equal numbers in different repositories apart,
-  // even under one binding: the server refuses the one that is not bound, and
-  // that refusal must not be cached under the other's key.
   return JSON.stringify([
     'pr',
     source.number,
-    source.sourceRepo ? `${source.sourceRepo.owner}/${source.sourceRepo.repo}` : null,
+    source.sourceRepo ? joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo) : null,
+    source.revision ?? null,
     ...sourceControlReadContextParts(context),
   ]);
 };
@@ -93,11 +93,6 @@ interface WalkthroughState {
 
 interface WalkthroughActions {
   getEntry: (directory: string, target: WalkthroughTarget) => WalkthroughEntry;
-  /**
-   * `providerID` / `modelID` are the composer's: without a model of its own
-   * the walkthrough stays on that provider, and on that model when the
-   * provider has no small one.
-   */
   load: (directory: string, target: WalkthroughTarget, options?: { language?: string; providerID?: string; modelID?: string }) => Promise<void>;
   generate: (
     directory: string,

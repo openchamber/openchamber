@@ -61,6 +61,14 @@ beforeEach(async () => {
     globals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
+  // happy-dom lays nothing out; the list's scroller gets a menu's height so
+  // the virtual list mounts the rows in view, as it does in a browser.
+  for (const [name, size] of [['clientHeight', 400], ['clientWidth', 380]] as const) {
+    Object.defineProperty(dom.HTMLElement.prototype, name, {
+      configurable: true,
+      get(this: HTMLElement) { return this.classList.contains('overlay-scrollbar-target') ? size : 0; },
+    });
+  }
   // The stores this list reads start background loads; keep them pending.
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(() => undefined));
   restoreFetch = () => fetch.mockRestore();
@@ -84,7 +92,7 @@ afterEach(async () => {
   dom.close();
 });
 
-const renderPicker = async (leadingEntry: ModelPickerEntry | null = null) => {
+const renderPicker = async (leadingEntry: ModelPickerEntry | null = null, selectedModel: ModelPickerEntry | null = null) => {
   await act(async () => {
     root.render(
       <ModelPickerList
@@ -96,6 +104,7 @@ const renderPicker = async (leadingEntry: ModelPickerEntry | null = null) => {
         onSelect={() => {}}
         labels={labels}
         leadingEntry={leadingEntry}
+        selectedModel={selectedModel}
         autoFocus={false}
         stickyHeaders={false}
       />,
@@ -137,4 +146,12 @@ test('the Auto row, which has no provider, gets no card', async () => {
 
   await hover(autoRow!, 3);
   expect(cardText()).toBeNull();
+});
+
+test('on open the card describes the current model, not the first row', async () => {
+  // The list highlights the current model before the card subscribes to the
+  // highlight; the card must start from it.
+  await renderPicker(null, favorites[1]);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
+  expect(cardText()).toBe('ProviderLab Router');
 });

@@ -1,11 +1,11 @@
 ---
 title: Desktoptunnels
-description: Maak Cloudflare- of Ngrok-tunnels vanuit de desktopapp.
+description: Maak Cloudflare-, Ngrok- of Tailscale-tunnels vanuit de desktopapp.
 ---
 
 # Desktoptunnels
 
-De desktopapp kan een openbare tunnel maken via **Instellingen → OpenChamber → Tunnel**. Daarvoor hoeft u OpenChamber niet vanuit de CLI te starten.
+De desktopapp kan een tunnel maken via **Instellingen → OpenChamber → Tunnel**. Daarvoor hoeft u OpenChamber niet vanuit de CLI te starten.
 
 ## Een provider installeren
 
@@ -22,14 +22,16 @@ Cloudflare gebruikt `cloudflared`. Voor Ngrok hebt u een ngrok-account en een au
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+Voor Tailscale installeert u de [Tailscale-app](https://tailscale.com/download) en meldt u zich aan.
+
 ## Starten vanuit de app
 
 1. Open **Instellingen → OpenChamber → Tunnel**.
-2. Kies **Cloudflare** of **Ngrok**.
-3. Start een snelle tunnel.
+2. Kies **Cloudflare**, **Ngrok** of **Tailscale**.
+3. Kies het tunneltype en selecteer **Tunnel starten**.
 4. Scan de gegenereerde QR-code met uw telefoon.
 
-Ngrok ondersteunt momenteel snelle tunnels. Cloudflare ondersteunt zowel snelle tunnels als beheerde Cloudflare-modi.
+Ngrok ondersteunt momenteel snelle tunnels. Cloudflare ondersteunt zowel snelle tunnels als beheerde Cloudflare-modi. Tailscale biedt **Serve**, dat alleen apparaten in uw tailnet kunnen openen, en **Funnel**, dat iedereen op internet kan openen. Moet Tailscale eerst HTTPS of Funnel voor uw tailnet aanzetten, dan verschijnt naast de fout de knop **Goedkeuringspagina openen**; keur daar goed en start opnieuw.
 
 ## Toegangsbescherming
 

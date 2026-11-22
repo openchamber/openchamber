@@ -57,4 +57,39 @@ describe('createSessionLineage', () => {
     const cyclic = createSessionLineage([linked('x', 'y'), linked('y', 'x')]);
     expect(ids(cyclic.descendantsOf('x', 'all'))).toEqual(['y']);
   });
+
+  test('archive and delete include reviews and their subagents but leave independent forks active', () => {
+    const review = { ...linked('review', null), metadata: { openchamber: { kind: 'review', originalSessionID: 'root' } } };
+    const lineage = createSessionLineage([
+      linked('root', null), review, linked('review-child', 'review'),
+      { ...linked('fork', null), fork: { sessionID: 'root', boundary: { type: 'through', messageID: 'message' } } },
+      { ...linked('promoted', null), fork: { sessionID: 'root', boundary: { type: 'through', messageID: 'message' } }, metadata: { openchamber: { btwPromoted: true } } },
+    ]);
+    expect(ids(lineage.descendantsOf('root', 'activeThroughArchived'))).toEqual(['review', 'review-child']);
+    expect(ids(lineage.descendantsOf('root', 'all'))).toEqual(['review', 'review-child']);
+    expect(lineage.descendantsOf('root', 'active')).toEqual([]);
+  });
+
+  test('restore includes archived reviews and their children, stopping at active reviews', () => {
+    const review = (id: string, archived?: number) => ({
+      ...linked(id, null, archived),
+      metadata: { openchamber: { kind: 'review', originalSessionID: 'root' } },
+    });
+    const lineage = createSessionLineage([
+      linked('root', null, 5), review('review', 5), linked('child', 'review', 5),
+      review('active-review'), linked('other-child', 'active-review', 5),
+      { ...linked('fork', null, 5), fork: { sessionID: 'root', boundary: { type: 'through', messageID: 'message' } } },
+    ]);
+    expect(ids(lineage.descendantsOf('root', 'archived'))).toEqual(['review', 'child']);
+  });
+
+  test('review metadata cycles terminate and parentID takes precedence', () => {
+    const review = (id: string, originalSessionID: string, parentID: string | null = null) => ({
+      ...linked(id, parentID), metadata: { openchamber: { kind: 'review', originalSessionID } },
+    });
+    const lineage = createSessionLineage([
+      review('root', 'review'), review('review', 'root'), review('elsewhere', 'root', 'other'),
+    ]);
+    expect(ids(lineage.descendantsOf('root', 'all'))).toEqual(['review']);
+  });
 });

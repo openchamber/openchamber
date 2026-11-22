@@ -70,8 +70,6 @@ export async function waitForUpdateApplied(
         if (parsed.success && parsed.data.code === 'DESKTOP_UPDATE_RESTART_FAILED') {
           return { status: 'failed', error: parsed.data.error };
         }
-        // Package-manager restarts can replace the browser session. A native
-        // update must still prove its target version after authentication.
         if (target.owner === 'package-manager' && (response.status === 401 || response.status === 403)) {
           const health = await fetchUpdate('/health', { headers: { Accept: 'application/json' }, signal });
           if (health.ok) return { status: 'applied' };

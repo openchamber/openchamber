@@ -3,21 +3,19 @@ import type { Session } from '@/lib/opencode/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { getSettingsSurface } from '@/lib/settings/surface';
+import { isSpaceDirectoryStopped } from '@/lib/spaces/spaces-store';
 
 const SESSION_PREFETCH_HOVER_DELAY_MS = 180;
 const SESSION_PREFETCH_SETTLE_MS = 150;
 const SESSION_PREFETCH_CONCURRENCY = 2;
 const SESSION_PREFETCH_PENDING_LIMIT = 8;
-// Only the rows right next to the open session: each speculative load costs
-// a history request and a cache slot, and a second neighbor is rarely the
-// next click.
 const NEIGHBOR_PREFETCH_OFFSETS = [-1, 1];
 
 type Args = {
   enabled?: boolean;
   currentSessionId: string | null;
   sortedSessions: Session[];
-  /** Sessions in work, in their block's order: their neighbours there are prefetched too. */
   workSessions?: readonly Session[];
   prefetchSession: (target: { directory: string; sessionID: string }) => Promise<void>;
 };
@@ -39,11 +37,6 @@ const sessionDirectory = (session: PrefetchTarget | null | undefined): string | 
   return directory || null;
 };
 
-/**
- * Speculative message loads a session row asks for while the pointer rests on
- * it or it has keyboard focus. Both go through the same delay, concurrency cap
- * and dedupe as the neighbour prefetch.
- */
 export type SessionHoverPrefetch = {
   schedule: (session: PrefetchTarget) => void;
   cancel: (session: PrefetchTarget) => void;
@@ -51,18 +44,15 @@ export type SessionHoverPrefetch = {
 
 const SessionHoverPrefetchContext = React.createContext<SessionHoverPrefetch | null>(null);
 
-/** Null outside the sidebar's prefetch owner, where rows do not prefetch on hover. */
 export const useSessionHoverPrefetch = (): SessionHoverPrefetch | null => React.useContext(SessionHoverPrefetchContext);
 
 export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSessions, workSessions = [], prefetchSession }: Args): SessionHoverPrefetch => {
   const sessionPrefetchTimersRef = React.useRef<Map<string, number>>(new Map());
-  // Timers only a hover asked for; ending the hover may cancel these, never a
-  // neighbor prefetch that happens to target the same row.
   const hoverOnlyTimerKeysRef = React.useRef<Set<string>>(new Set());
   const sessionPrefetchQueueRef = React.useRef<PrefetchRequest[]>([]);
   const sessionPrefetchInFlightRef = React.useRef<Set<string>>(new Set());
   const generationRef = React.useRef(0);
-  const prefetchDisabled = React.useMemo(() => isVSCodeRuntime(), []);
+  const prefetchDisabled = React.useMemo(() => isVSCodeRuntime() || getSettingsSurface() === 'mobile', []);
 
   const clearPendingPrefetches = React.useCallback(() => {
     generationRef.current += 1;
@@ -89,8 +79,7 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
         continue;
       }
 
-      // Check if the session is already renderable in the sync child store.
-      if (getSyncSessionMaterializationStatus(request.sessionId, request.directory).renderable) {
+      if (getSyncSessionMaterializationStatus(request.sessionId, request.directory).renderable || isSpaceDirectoryStopped(request.directory)) {
         continue;
       }
 
@@ -108,13 +97,12 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
   const scheduleSessionPrefetch = React.useCallback((session: PrefetchTarget | null | undefined, origin: 'hover' | 'neighbor' = 'neighbor') => {
     const sessionId = session?.id;
     const directory = sessionDirectory(session);
-    if (!enabled || prefetchDisabled || !sessionId || !directory || sessionId === currentSessionId) {
+    if (!enabled || prefetchDisabled || !sessionId || !directory || sessionId === currentSessionId || isSpaceDirectoryStopped(directory)) {
       return;
     }
     const request = { sessionId, directory, generation: generationRef.current };
     const key = getPrefetchRequestKey(request);
 
-    // Already renderable in sync
     if (getSyncSessionMaterializationStatus(sessionId, directory).renderable) {
       return;
     }
@@ -129,7 +117,6 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
 
     const existingTimer = sessionPrefetchTimersRef.current.get(key);
     if (existingTimer !== undefined) {
-      // A pending neighbor prefetch stays one even when a hover passes over it.
       if (origin === 'hover' && !hoverOnlyTimerKeysRef.current.has(key)) return;
       window.clearTimeout(existingTimer);
     }
@@ -150,8 +137,6 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
     sessionPrefetchTimersRef.current.set(key, timer);
   }, [currentSessionId, enabled, prefetchDisabled, pumpSessionPrefetchQueue]);
 
-  // A hover that ends before the delay is not interest in the session. A
-  // request already queued or in flight is left alone.
   const cancelSessionPrefetch = React.useCallback((session: PrefetchTarget) => {
     const directory = sessionDirectory(session);
     if (!directory) return;
@@ -163,8 +148,6 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
     hoverOnlyTimerKeysRef.current.delete(key);
   }, []);
 
-  // Stable for the rows: the callbacks behind it change with the open
-  // session, and a changing context value would re-render every mounted row.
   const scheduleRef = React.useRef(scheduleSessionPrefetch);
   scheduleRef.current = scheduleSessionPrefetch;
   const [hoverPrefetch] = React.useState<SessionHoverPrefetch>(() => ({
@@ -176,8 +159,6 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
     clearPendingPrefetches();
   }, [clearPendingPrefetches, currentSessionId, enabled, prefetchDisabled]);
 
-  // Wait for the active session to finish loading before prefetching neighbors.
-  // On rapid session switches the timer resets, so only the final session triggers prefetch.
   React.useEffect(() => {
     if (!enabled || prefetchDisabled || !currentSessionId || sortedSessions.length === 0) {
       return;
@@ -207,12 +188,6 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
   return hoverPrefetch;
 };
 
-/**
- * Owns the sidebar's speculative message loads: the rows next to the open
- * session, and a row the pointer rests on or focus reaches. Kept in its own
- * component so the open-session subscription re-renders only this owner, not
- * the rows it provides for.
- */
 export const SessionPrefetchProvider: React.FC<Omit<Args, 'currentSessionId'> & { children: React.ReactNode }> = ({ children, ...args }) => {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const hoverPrefetch = useSessionPrefetch({ ...args, currentSessionId });

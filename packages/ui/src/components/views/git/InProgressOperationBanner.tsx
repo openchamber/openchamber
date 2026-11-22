@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import type { GitMergeInProgress, GitRebaseInProgress } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 interface InProgressOperationBannerProps {
   mergeInProgress: GitMergeInProgress | null | undefined;
@@ -26,7 +27,6 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
   const { t } = useI18n();
   const [processingAction, setProcessingAction] = React.useState<'continue' | 'abort' | null>(null);
 
-  // Only show banner if we have actual in-progress operation data
   const hasMergeInProgress = mergeInProgress && mergeInProgress.head;
   const hasRebaseInProgress = rebaseInProgress && (rebaseInProgress.headName || rebaseInProgress.onto);
   const operation = hasMergeInProgress ? 'merge' : hasRebaseInProgress ? 'rebase' : null;
@@ -58,7 +58,6 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
 
   const operationLabel = operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase');
 
-  // Build description
   let description = '';
   if (mergeInProgress) {
     description = mergeInProgress.message
@@ -100,47 +99,53 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
           </p>
 
           <div className="flex shrink-0 items-center gap-1.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleAbort}
-              disabled={isProcessing || isLoading}
-              className="gap-1.5"
-            >
-              {processingAction === 'abort' ? (
-                <Icon name="loader-4" className="size-4 animate-spin" />
-              ) : (
-                <Icon name="close" className="size-4" />
-              )}
-              {t('gitView.operation.abort')}
-            </Button>
+            <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.abortOperation')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleAbort}
+                disabled={isProcessing || isLoading}
+                className="gap-1.5"
+              >
+                {processingAction === 'abort' ? (
+                  <Icon name="loader-4" className="size-4 animate-spin" />
+                ) : (
+                  <Icon name="close" className="size-4" />
+                )}
+                {t('gitView.operation.abort')}
+              </Button>
+            </ButtonTooltip>
 
             {hasUnresolvedConflicts
               ? onResolveWithAI && (
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={onResolveWithAI}
-                  disabled={isProcessing || isLoading}
-                >
-                  {t('gitView.operation.resolveWithAi')}
-                </Button>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveWithAgent')}>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={onResolveWithAI}
+                    disabled={isProcessing || isLoading}
+                  >
+                    {t('gitView.operation.resolveWithAi')}
+                  </Button>
+                </ButtonTooltip>
               )
               : (
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={handleContinue}
-                  disabled={isProcessing || isLoading}
-                  className="gap-1.5"
-                >
-                  {processingAction === 'continue' ? (
-                    <Icon name="loader-4" className="size-4 animate-spin" />
-                  ) : (
-                    <Icon name="check" className="size-4" />
-                  )}
-                  {t('gitView.operation.continue')}
-                </Button>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.continueOperation')}>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleContinue}
+                    disabled={isProcessing || isLoading}
+                    className="gap-1.5"
+                  >
+                    {processingAction === 'continue' ? (
+                      <Icon name="loader-4" className="size-4 animate-spin" />
+                    ) : (
+                      <Icon name="check" className="size-4" />
+                    )}
+                    {t('gitView.operation.continue')}
+                  </Button>
+                </ButtonTooltip>
               )}
           </div>
         </div>

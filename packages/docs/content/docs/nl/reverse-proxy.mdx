@@ -35,6 +35,7 @@ Gebruik deze pagina als u OpenChamber achter Nginx, Nginx Proxy Manager, Caddy, 
 - Schakel gzip op de proxy uit als OpenChamber antwoorden al comprimeert.
 - Houd compressie slechts op één laag actief.
 - Stuur gebruikelijke proxyheaders door, zoals `Host`, `X-Forwarded-For` en `X-Forwarded-Proto`.
+- Draait de proxy op een andere machine of in een andere container, zet dan zijn adres in [`OPENCHAMBER_TRUSTED_PROXIES`](/nl/environment/#openchamber_trusted_proxies). Anders delen alle gebruikers erachter één limiet voor mislukte aanmeldpogingen.
 - Verhoog de limiet voor verzoekgrootte als gebruikers bestanden uploaden.
 
 ## Korte controlelijst
@@ -324,6 +325,21 @@ reverse_proxy 127.0.0.1:3000 {
 </details>
 
 Caddy handelt WebSocket-upgrades automatisch af. Extra configuratie is niet nodig. `flush_interval -1` zorgt dat SSE-delen onmiddellijk zonder buffering worden doorgestuurd.
+
+## Proxy's met aanmelding (Authentik, Authelia, oauth2-proxy)
+
+Als gebruikers zich bij de proxy aanmelden voordat ze OpenChamber bereiken, hebben extensiepanelen één uitzondering nodig. Een paneel draait in een geïsoleerd frame, en de browser stuurt de aanmeldcookie van de proxy niet mee met de eigen verzoeken van dat frame. De proxy stuurt de bestanden van het paneel daarom naar zijn aanmeldpagina en het paneel blijft leeg.
+
+Laat `/api/guest-files/` door zonder aanmelding. Dat pad levert alleen de bestanden van extensies die je hebt geïnstalleerd, en alleen via een link die OpenChamber voor dat paneel aan een aangemelde gebruiker geeft. Het opent verder niets. Met Nginx en `auth_request`:
+
+```nginx
+location ^~ /api/guest-files/ {
+    auth_request off;
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+Voeg in andere proxy's een regel toe die de aanmelding overslaat voor hetzelfde padvoorvoegsel. Zondert `/api/guests/` niet uit: dat pad installeert ook extensies en behandelt hun verzoeken, en zonder OpenChamber-UI-wachtwoord kan iedereen het gebruiken.
 
 ## CDN's en dubbele compressie
 

@@ -42,6 +42,14 @@ Los agentes leen y actualizan las mismas notas, tareas y planes a través de la 
 Un agente trabaja en el proyecto al que pertenece su sesión, worktrees incluidos. Si un agente cambia una nota o un plan mientras escribes en él, lo que escribas se guardará por encima del cambio del agente. Se pide a los agentes que envíen el texto que leyeron junto con cualquier nota o plan que reemplacen por completo; si ha cambiado desde entonces, la escritura se rechaza y el agente lo lee de nuevo.
 
 La herramienta está activada por defecto. Desactívala en **Settings → General → OpenChamber Tools** con **Project knowledge tool**. Como las demás herramientas de OpenChamber, solo está presente cuando OpenChamber ejecuta su propio servidor de OpenCode, así que no con un servidor externo ni en la extensión de VS Code.
+Un agente puede vincular una nota o una tarea a un plan y hacer que una tarea dependa de otras tareas del mismo plan; una tarea sin plan no tiene dependencias. Puede pedir las tareas listas, es decir, las no terminadas cuyas dependencias están todas completadas. Al eliminar una tarea, desaparece de las dependencias de las demás tareas, y al eliminar un plan, sus notas y tareas quedan desvinculadas. Un agente también puede establecer o quitar la sesión vinculada a un plan.
+
+## Notas y tareas en el repositorio
+
+Las notas y las tareas se guardan en los datos propios de OpenChamber en este equipo. Para sincronizarlas con Git, abre **Settings → Projects**, elige el proyecto y activa **Guardar notas y tareas pendientes en el repositorio** en la pestaña General. A partir de ahí se guardan en `.openchamber/notes-todos.json`; haz commit del archivo como de cualquier otro. La opción solo vale para este equipo, así que actívala en cada equipo que deba usar el archivo.
+
+Al activar la opción, tus notas y tareas se mueven al archivo, después de las que ya contiene. Al desactivarla, las entradas del archivo se copian de vuelta a este equipo, y el archivo sigue en el repositorio. Los planes no forman parte del archivo; para compartir un plan, muévelo a la carpeta de planes del repositorio. Si el archivo tiene un conflicto de Git, el panel no puede cargar ni guardar notas y tareas hasta que lo arregles.
+
 ## Relacionado
 
 - [Sesiones de worktree](/es/worktrees/) — ejecuta una tarea en su propia rama

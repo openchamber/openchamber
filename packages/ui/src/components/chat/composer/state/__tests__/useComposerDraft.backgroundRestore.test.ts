@@ -6,6 +6,7 @@ import { installHookTestDom } from '@/components/session/sidebar/test-utils/test
 import { readChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
+import { createComposerText } from '../composerText';
 import { useComposerDraft, type ComposerDraftControls } from '../useComposerDraft';
 
 // A send that waited on a background goal gives its text back through
@@ -36,20 +37,20 @@ function renderComposer(initialIdentity: ChatDraftIdentity) {
     };
 
     function Probe({ identity }: { identity: ChatDraftIdentity }) {
-        const [message, setMessage] = React.useState('');
-        const messageRef = React.useRef(message);
+        const [text] = React.useState(() => createComposerText(''));
+        const [, setRevision] = React.useState(0);
+        const setMessage = React.useCallback((next: string) => {
+            text.set(next);
+            setRevision((revision) => revision + 1);
+        }, [text]);
         const confirmedMentionsRef = React.useRef(new Set<string>());
-        messageRef.current = message;
         state.controls = useComposerDraft({
-            message, messageRef, setMessage, confirmedMentionsRef, identity, persistEnabled: true,
+            text, setMessage, confirmedMentionsRef, identity,
             initialDraft: { text: '', identity: initialIdentity },
             newSessionDraftId: identity.sessionId === null ? 1 : null,
         });
-        state.text = message;
-        state.setText = (text: string) => {
-            messageRef.current = text;
-            setMessage(text);
-        };
+        state.text = text.get();
+        state.setText = setMessage;
         return null;
     }
 

@@ -1,0 +1,94 @@
+[
+  {
+    "id": "memory-explicit",
+    "kind": "explicit",
+    "prompt": "Запамʼятай на майбутнє: в усіх моїх проєктах я використовую bun, ніколи npm.",
+    "expect": { "calls": [{ "tool": "openchamber_memory", "action": "memory.save" }] }
+  },
+  {
+    "id": "memory-correction",
+    "kind": "implicit",
+    "note": "The guidance asks to save a correction of how the agent works without being asked.",
+    "prompt": "Не став емодзі у відповідях, мене це дратує. А шо взагалі лежить у цьому репо?",
+    "expect": { "calls": [{ "tool": "openchamber_memory", "action": "memory.save" }] }
+  },
+  {
+    "id": "link-pr",
+    "kind": "implicit",
+    "note": "The guidance asks to link a pull request the user gives to work on.",
+    "prompt": "Глянь https://github.com/acme/demo/pull/42, після нього падає тест для src/index.js. Розберись чому і виправ.",
+    "expect": { "calls": [{ "tool": "openchamber", "action": "session.link", "args": { "link.url": "~pull/42" } }] }
+  },
+  {
+    "id": "dispatch-session",
+    "kind": "explicit",
+    "prompt": "Запусти окрему сесію, яка допише в README розділ Installation. Ми тут далі займемось іншим.",
+    "expect": { "calls": [{ "tool": "openchamber", "action": "session.create" }] }
+  },
+  {
+    "id": "dispatch-send",
+    "kind": "explicit",
+    "note": "Hands work to a session that already exists (#6608).",
+    "otherSession": "Docs",
+    "prompt": "Передай у сесію Docs: хай допише в README розділ Installation. Ми тут далі займемось іншим.",
+    "expect": { "calls": [{ "tool": "openchamber", "action": "session.send" }] }
+  },
+  {
+    "id": "control-subagent",
+    "kind": "control",
+    "note": "A subagent is the agent's own helper, never a dispatched session.",
+    "prompt": "Запусти сабагента, хай знайде всі місця, де src/index.js щось експортує, і скаже мені список.",
+    "expect": { "noOpenChamberCalls": true }
+  },
+  {
+    "id": "worktree-move",
+    "kind": "explicit",
+    "prompt": "У цьому чекауті зараз працює інша сесія. Перейди в окремий worktree і вже там додай файл CHANGELOG.md з рядком \"# Changelog\".",
+    "expect": { "calls": [{ "tool": "openchamber", "action": "session.moveToWorktree" }] }
+  },
+  {
+    "id": "models-list",
+    "kind": "explicit",
+    "prompt": "Які моделі в мене серед улюблених і недавніх в OpenChamber?",
+    "expect": { "calls": [{ "tool": "openchamber", "action": "models." }] }
+  },
+  {
+    "id": "schedule-create",
+    "kind": "explicit",
+    "prompt": "Щопонеділка о 9:00 хай агент проганяє bun outdated у цьому проєкті й пише, шо застаріло.",
+    "expect": { "calls": [{ "tool": "openchamber_schedule", "action": "schedule.create" }] }
+  },
+  {
+    "id": "todo-add",
+    "kind": "explicit",
+    "prompt": "Додай у список справ проєкту: перейти на Node 24.",
+    "expect": { "calls": [{ "tool": "openchamber_knowledge", "action": "knowledge.save", "args": { "kind": "todo" } }] }
+  },
+  {
+    "id": "notify-done",
+    "kind": "explicit",
+    "prompt": "Перевір, чи в README є розділ License. Я відійду, тож коли закінчиш, надішли мені сповіщення.",
+    "expect": { "calls": [{ "tool": "openchamber_notify", "action": "notify.send" }] }
+  },
+  {
+    "id": "browser-open",
+    "kind": "explicit",
+    "note": "The isolated instance has no browser panel, so the call may fail; reaching the tool is what counts.",
+    "prompt": "Відкрий https://example.com у браузерній панелі й скажи, який там заголовок.",
+    "expect": { "calls": [{ "tool": "openchamber_web", "action": "browser.open" }] }
+  },
+  {
+    "id": "control-code",
+    "kind": "control",
+    "note": "Ordinary code question: no OpenChamber tool is needed.",
+    "prompt": "Шо робить src/index.js?",
+    "expect": { "noOpenChamberCalls": true }
+  },
+  {
+    "id": "control-mcp",
+    "kind": "control",
+    "note": "Reaching a tool of the large MCP stand-in, so a failure on our tools is not Code Mode failing in general.",
+    "prompt": "Скільки DNS-записів у моєму акаунті cloud? account_id: acc_1",
+    "expect": { "calls": [{ "toolIncludes": "dns_record_list" }] }
+  }
+]

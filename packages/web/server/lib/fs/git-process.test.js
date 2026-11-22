@@ -8,24 +8,30 @@ import { createFsSearchRuntime } from './search.js';
 import { registerFsRoutes } from './routes.js';
 
 // Use real OS pipes. A mocked data event cannot reproduce a full stderr pipe.
-const noisyGit = `
+const noisyGit = (separator) => `
   const fs = require('node:fs');
   const chunk = Buffer.alloc(65536, 'x');
   for (let i = 0; i < 32; i++) fs.writeSync(2, chunk);
-  fs.writeSync(1, 'ignored.txt\\n');
+  fs.writeSync(1, ${JSON.stringify(`ignored.txt${separator}`)});
 `;
 
 describe('filesystem Git process ownership', () => {
-  for (const operation of ['search', 'list']) {
+  for (const operation of ['search', 'workspace-search', 'list']) {
     it(`${operation} completes repeated checks with more diagnostics than an OS pipe can hold`, async () => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-git-pipes-'));
       const children = [];
       const exits = [];
       const launch = (binary, args, options) => {
         expect(binary).toBe('git');
-        expect(args).toContain('check-ignore');
-        expect(args).toContain('ignored.txt');
-        const child = spawn(process.execPath, ['-e', noisyGit], options);
+        if (operation === 'workspace-search') {
+          expect(args).toEqual(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z']);
+        } else if (operation === 'search') {
+          expect(args).toEqual(['check-ignore', '--stdin', '-z']);
+        } else {
+          expect(args).toContain('check-ignore');
+          expect(args).toContain('ignored.txt');
+        }
+        const child = spawn(process.execPath, ['-e', noisyGit(operation === 'list' ? '\n' : '\0')], options);
         children.push(child);
         exits.push(new Promise((resolve) => child.once('close', (code) => resolve(code))));
         return child;
@@ -35,7 +41,7 @@ describe('filesystem Git process ownership', () => {
         await fs.writeFile(path.join(root, 'ignored.txt'), 'ignored');
         await fs.writeFile(path.join(root, 'visible.txt'), 'visible');
         const dependencies = { fsPromises: fs, path, spawn: launch, resolveGitBinaryForSpawn: () => 'git' };
-        const search = createFsSearchRuntime(dependencies);
+        const search = createFsSearchRuntime({ ...dependencies, workspaceSearch: operation === 'workspace-search' });
         const routes = new Map();
         registerFsRoutes({
           get(route, handler) { routes.set(route, handler); }, post() {}, put() {}, delete() {},
@@ -47,7 +53,7 @@ describe('filesystem Git process ownership', () => {
           gitCheckIgnoreTimeoutMs: 10_000,
         });
         const work = Array.from({ length: 12 }, async () => {
-          if (operation === 'search') {
+          if (operation !== 'list') {
             const files = await search.searchFilesystemFiles(root, { query: '', limit: 10, respectGitignore: true });
             expect(files.map((file) => file.name)).toEqual(['visible.txt']);
           } else {

@@ -94,4 +94,20 @@ describe('useGuestsStore', () => {
     useGuestsStore.getState().applyUpdates({ 'git-one': { version: '9.0.0' } }, 'instance-b');
     expect(useGuestsStore.getState().guests[1].update).toBeUndefined();
   });
+
+  test('a reload that found nothing new keeps the list, and an offered update stays', () => {
+    const guest: InstalledGuest = { ...hello, id: 'row', source: 'git', version: '1.0.0' };
+    useGuestsStore.setState({ runtimeKey: 'instance-a', status: 'idle', guests: [], unreadable: [], failure: null });
+    useGuestsStore.getState().replaceCatalog([guest], 'instance-a');
+    useGuestsStore.getState().applyUpdates({ row: { version: '1.1.0' } }, 'instance-a');
+    const before = useGuestsStore.getState().guests;
+    useGuestsStore.getState().replaceCatalog([{ ...guest }], 'instance-a');
+    expect(useGuestsStore.getState().guests).toBe(before);
+    useGuestsStore.getState().replaceCatalog([{ ...guest, origin: { url: 'https://github.com/acme/other' } }], 'instance-a');
+    expect(useGuestsStore.getState().guests[0]?.update).toBeUndefined();
+    useGuestsStore.getState().replaceCatalog([guest], 'instance-a');
+    useGuestsStore.getState().applyUpdates({ row: { version: '1.1.0' } }, 'instance-a');
+    useGuestsStore.getState().replaceCatalog([{ ...guest, version: '1.1.0' }], 'instance-a');
+    expect(useGuestsStore.getState().guests[0]?.update).toBeUndefined();
+  });
 });

@@ -24,7 +24,7 @@
  */
 import { asNonEmptyString, isPlainObject, isString } from '../shared/guards.js';
 import { OpenChamberControlError, asControlError } from './error.js';
-import { CONFIG_FILE, getConfigForPath, readConfigLayers, writeConfig } from '../opencode/shared.js';
+import { CONFIG_FILE, getConfigForPath, readConfigLayers, writeConfig } from '../opencode/config-files.js';
 import { readDisabledProviders, setProviderDisabled } from '../opencode/providers.js';
 import {
   deleteSectionEntry,

@@ -400,6 +400,7 @@ describe('goal spec jobs with the real message queue', () => {
       const method = init.method ?? 'GET';
       if (pathname === '/api/session/active') return Response.json({ data: {} });
       if (pathname === '/api/session' && method === 'GET') return Response.json({ data: [], cursor: {} });
+      if (/^\/api\/session\/[^/]+$/.test(pathname) && method === 'GET') return Response.json({ location: { directory: DIRECTORY }, data: { id: decodeURIComponent(pathname.split('/').at(-1)) } });
       if (pathname.endsWith('/message')) return Response.json({ data: [], cursor: {} });
       if (pathname === '/api/command') return Response.json({ location: { directory: DIRECTORY }, data: [{ name: 'summarize' }] });
       if (method === 'POST' && (pathname.endsWith('/model') || pathname.endsWith('/agent'))) return new Response(null, { status: 204 });

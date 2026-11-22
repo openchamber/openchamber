@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import type { SyncEvent } from "@/lib/opencode/events"
+import { GLOBAL_EVENT_DIRECTORY, type SyncEvent } from "@/lib/opencode/events"
 import type { Message, Part, Session } from "@/lib/opencode/model"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
+import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
 import { ChildStoreManager } from "../child-store"
 import { setActionRefs } from "../session-actions"
+import { SessionMessageLoader, setImperativeSessionMessageLoader } from "../session-message-loader"
 import { createEventRoutingIndex, handleEvent } from "../sync-context"
 
 const cleanups: Array<() => void> = []
@@ -58,8 +62,10 @@ function setup() {
   const receive = (directory: string, event: SyncEvent) => (
     handleEvent(directory, event, childStores, routingIndex, getRuntimeKey())
   )
-  return { source, destination, receive }
+  return { childStores, source, destination, receive, routingIndex }
 }
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe("session.moved", () => {
   test("carries the session and its transcript to the destination store", () => {
@@ -88,6 +94,91 @@ describe("session.moved", () => {
     expect(source.getState().message.ses_1).toBe(undefined)
   })
 
+  // Recorded from OpenCode 2.1.4: `session.moved` is tagged with the directory
+  // the session left, and the `permission.asked` that follows carries no
+  // location. The old directory's store gets a copy of the session back only
+  // when that directory is read again later (a stream reconnect, opening it),
+  // and that read indexes the session there again; the copy below models it.
+  test("a permission asked after the move lands where the chat reads", () => {
+    const { source, destination, receive, routingIndex } = setup()
+    useGlobalSessionsStore.getState().upsertSession(session())
+    cleanups.push(() => useGlobalSessionsStore.getState().removeSessions(["ses_1"]))
+
+    for (const event of movedEvents()) receive(from, event)
+    source.setState({ session: [{ ...session(), directory: to }], message: { ses_1: [user] } })
+    routingIndex.sessionDirectoryById.set("ses_1", from)
+    receive(GLOBAL_EVENT_DIRECTORY, {
+      type: "permission.asked",
+      properties: { id: "per_1", sessionID: "ses_1", action: "edit", resources: ["/outside/note.txt"], metadata: {} },
+    })
+
+    expect(destination.getState().permission.ses_1?.map((request) => request.id)).toEqual(["per_1"])
+    expect(source.getState().permission.ses_1).toBe(undefined)
+  })
+
+  test("drops the transcript and live state other stores kept of the session", () => {
+    const { receive, childStores } = setup()
+    const elsewhere = childStores.ensureChild(`/moved-${run}/other`, { bootstrap: false })
+    elsewhere.setState({
+      session: [session()],
+      session_status: { ses_1: { type: "busy" } },
+      message: { ses_1: [user] },
+      part: { msg_u: [text] },
+    })
+
+    for (const event of movedEvents()) receive(from, event)
+
+    expect(elsewhere.getState().message.ses_1).toBe(undefined)
+    expect(elsewhere.getState().part.msg_u).toBe(undefined)
+    expect(elsewhere.getState().session_status.ses_1).toBe(undefined)
+    // A parent repository lists its worktrees' sessions; the list is not live state.
+    expect(elsewhere.getState().session.map((candidate) => candidate.id)).toEqual(["ses_1"])
+  })
+
+  test("drops parts of the session filed under a message that store does not list", () => {
+    const { receive, childStores } = setup()
+    const elsewhere = childStores.ensureChild(`/moved-${run}/other`, { bootstrap: false })
+    const orphan: Part = { id: "prt_o", messageID: "msg_o", sessionID: "ses_1", type: "text", text: "streamed" }
+    const unrelated: Part = { id: "prt_x", messageID: "msg_x", sessionID: "ses_2", type: "text", text: "kept" }
+    elsewhere.setState({
+      session_status: { ses_1: { type: "busy" } },
+      message: { ses_1: [user] },
+      part: { msg_u: [text], msg_o: [orphan], msg_x: [unrelated] },
+    })
+
+    for (const event of movedEvents()) receive(from, event)
+
+    // A part event can land before the message it belongs to.
+    expect(elsewhere.getState().part.msg_o).toBe(undefined)
+    expect(elsewhere.getState().part.msg_u).toBe(undefined)
+    expect(elsewhere.getState().part.msg_x).toEqual([unrelated])
+  })
+
+  test("drops a part of the session that is all a store holds of it, the store it left included", () => {
+    const { receive, childStores, source } = setup()
+    const elsewhere = childStores.ensureChild(`/moved-${run}/other`, { bootstrap: false })
+    const orphan: Part = { id: "prt_o", messageID: "msg_o", sessionID: "ses_1", type: "text", text: "streamed" }
+    elsewhere.setState({ part: { msg_o: [orphan] } })
+    source.setState({ part: { ...source.getState().part, msg_o: [orphan] } })
+
+    for (const event of movedEvents()) receive(from, event)
+
+    expect(elsewhere.getState().part.msg_o).toBe(undefined)
+    expect(source.getState().part.msg_o).toBe(undefined)
+  })
+
+  test("a request another store held follows the session instead of vanishing", () => {
+    const { receive, childStores, destination } = setup()
+    const elsewhere = childStores.ensureChild(`/moved-${run}/other`, { bootstrap: false })
+    const request = { id: "per_1", sessionID: "ses_1", action: "edit", resources: [], metadata: {} }
+    elsewhere.setState({ permission: { ses_1: [request] } })
+
+    for (const event of movedEvents()) receive(from, event)
+
+    expect(elsewhere.getState().permission.ses_1).toBe(undefined)
+    expect(destination.getState().permission.ses_1?.map((pending) => pending.id)).toEqual(["per_1"])
+  })
+
   test("a second delivery of the same move changes nothing", () => {
     const { destination, receive } = setup()
     for (const event of movedEvents()) receive(to, event)
@@ -97,5 +188,77 @@ describe("session.moved", () => {
 
     expect(destination.getState().session).toBe(after.session)
     expect(destination.getState().message).toBe(after.message)
+  })
+
+  test("a session only the global list knows still takes its tab and folder along", () => {
+    run += 1
+    from = `/moved-${run}/old`
+    to = `/moved-${run}/new`
+    const childStores = new ChildStoreManager()
+    setActionRefs(childStores, () => "/somewhere-else")
+    cleanups.push(() => childStores.disposeAll())
+    useGlobalSessionsStore.getState().upsertSession(session())
+    const loaded = useGlobalSessionsStore.getState().hasLoaded
+    useGlobalSessionsStore.setState({ hasLoaded: true })
+    cleanups.push(() => {
+      useGlobalSessionsStore.getState().removeSessions(["ses_1"])
+      useGlobalSessionsStore.setState({ hasLoaded: loaded })
+    })
+    const runtimeKey = getRuntimeKey()
+    useSessionTabsStore.setState({ scope: `${runtimeKey}|/shown`, tabIds: ["ses_other"], previewTabId: null, sets: { [`${runtimeKey}|${from}`]: { tabIds: ["ses_1"], previewTabId: null } } })
+    const tasks = useSessionFoldersStore.getState().createFolder(from, "Tasks")
+    useSessionFoldersStore.getState().addSessionToFolder(from, tasks.id, "ses_1")
+    cleanups.push(() => useSessionFoldersStore.getState().forgetScopes([from]))
+
+    // No store for either directory: OpenCode tags the move with the one it left.
+    handleEvent(from, movedEvents()[0], childStores, createEventRoutingIndex(), runtimeKey)
+
+    expect(useGlobalSessionsStore.getState().entityById.get("ses_1")?.directory).toBe(to)
+    expect(useSessionTabsStore.getState().sets[`${runtimeKey}|${from}`]?.tabIds).toEqual([])
+    expect(useSessionTabsStore.getState().sets[`${runtimeKey}|${to}`]?.tabIds).toEqual(["ses_1"])
+    expect(useSessionFoldersStore.getState().getFoldersForScope(from)[0]?.sessionIds).toEqual([])
+  })
+
+  test("this client's own move, already applied, is not followed twice", () => {
+    const { source, destination, receive } = setup()
+    useGlobalSessionsStore.getState().upsertSession({ ...session(), directory: to })
+    cleanups.push(() => useGlobalSessionsStore.getState().removeSessions(["ses_1"]))
+    // The move's response already carried the session over.
+    destination.setState({ session: [{ ...session(), directory: to }], sessionTotal: 1, message: source.getState().message, part: source.getState().part })
+    source.setState({ session: [], sessionTotal: 0, message: {}, part: {} })
+    const after = destination.getState()
+
+    receive(from, movedEvents()[0])
+
+    expect(destination.getState().message).toBe(after.message)
+    expect(source.getState().session).toHaveLength(0)
+  })
+
+  test("a recovery asked for in the directory it left reads into the one it moved to", async () => {
+    const { childStores, source, receive } = setup()
+    const reads: string[] = []
+    const loader = new SessionMessageLoader(childStores, {
+      sdk: { getSessionMessages: async (_id, _options, directory) => { reads.push(directory ?? ""); return { items: [], cursor: {} } } },
+      runtimeKey: getRuntimeKey(),
+    })
+    setImperativeSessionMessageLoader(loader)
+    cleanups.push(() => { setImperativeSessionMessageLoader(null); loader.dispose() })
+    // The global list takes the new directory from the same event.
+    useGlobalSessionsStore.getState().upsertSession({ ...session(), directory: to })
+    cleanups.push(() => useGlobalSessionsStore.getState().removeSessions(["ses_1"]))
+    const patchUnknown = (messageID: string): SyncEvent => ({
+      type: "message.patched",
+      properties: { sessionID: "ses_1", messageID, patch: { time: { completed: 6 } } },
+    })
+
+    // OpenCode reports the move's own steps in the old directory, in the same
+    // flush as the move: the recovery they ask for runs after the move.
+    receive(from, patchUnknown("msg_old"))
+    for (const event of movedEvents()) receive(to, event)
+    await settle()
+
+    expect(reads).toEqual([to])
+    expect(source.getState().session).toHaveLength(0)
+    expect(source.getState().message.ses_1).toBe(undefined)
   })
 })

@@ -1,7 +1,3 @@
-// A browser provider with no browser: one in-memory "page" that answers every
-// `browser.*` action the host can send. It exists to show the contract and to
-// test the host's routing (Settings → OpenChamber Tools → Browser provider)
-// without Chrome. A real provider replaces `page` with a driven browser.
 import http from 'node:http';
 import { deflateSync } from 'node:zlib';
 
@@ -25,6 +21,7 @@ import {
   type BrowserProviderResult,
   type BrowserScrollData,
   type BrowserSnapshotElement,
+  type BrowserSnapshotOption,
   type BrowserViewportSummary,
   type SurfaceController,
   type SurfaceInputEvent,
@@ -44,7 +41,6 @@ const VIEWPORTS = {
   fill: { width: null, height: null },
 } as const;
 
-// A 1×1 transparent PNG, so `browser.capture` still writes a real image file.
 const PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
 type Page = {
@@ -55,6 +51,7 @@ type Page = {
   viewport: keyof typeof VIEWPORTS;
   scrollY: number;
   fields: Map<string, string>;
+  select: { label: string; value: string };
 };
 
 const page: Page = {
@@ -65,14 +62,21 @@ const page: Page = {
   viewport: 'fill',
   scrollY: 0,
   fields: new Map(),
+  select: { label: 'United States', value: 'us' },
 };
 
 const viewport = (): BrowserViewportSummary => ({ mode: page.viewport, ...VIEWPORTS[page.viewport] });
 
+const selectOptions = (): BrowserSnapshotOption[] => [
+  { label: 'United States', value: 'us', selected: page.select.value === 'us', disabled: false },
+  { label: 'Canada', value: 'ca', selected: page.select.value === 'ca', disabled: false },
+];
+
 const elements = (): BrowserSnapshotElement[] => [
   { selector: '#name', tag: 'input', type: 'text', label: 'Name', bounds: { x: 16, y: 40, width: 240, height: 32 }, inViewport: true },
+  { selector: '#country', tag: 'select', label: 'Country', multiple: false, options: selectOptions(), bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
   { selector: '#save', tag: 'button', label: 'Save', bounds: { x: 16, y: 88, width: 80, height: 32 }, inViewport: true },
-  { selector: 'a[href="/about"]', tag: 'a', label: 'About', bounds: { x: 16, y: 140, width: 60, height: 20 }, inViewport: true },
+  { selector: 'a[href="/about"]', tag: 'a', label: 'About', bounds: { x: 16, y: 188, width: 60, height: 20 }, inViewport: true },
 ];
 
 const navigate = (url: string): void => {
@@ -83,15 +87,11 @@ const navigate = (url: string): void => {
   page.scrollY = 0;
 };
 
-// The last chat that drove the page, shown in the strip. A real provider
-// with one browser per project or chat would key its targets on this.
 let lastCaller: BrowserProviderRequest['context'] = { directory: null, sessionId: null };
 
 const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
   markAgentActive();
   lastCaller = request.context;
-  // One page, no tabs: an id this stub never issued is refused, never
-  // answered from the one page it has.
   if (request.parameters.tabId !== undefined) {
     return { ok: false, error: 'This browser has a single page and no tabs; omit tabId.' };
   }
@@ -109,7 +109,7 @@ const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
           scope: request.parameters.selector ?? 'document',
           scrollY: page.scrollY,
           maxScrollY: 600,
-          text: `This page is served by the browser provider stub, not a browser.\nName: ${page.fields.get('#name') ?? ''}`,
+          text: `This page is served by the browser provider stub, not a browser.\nName: ${page.fields.get('#name') ?? ''}\nCountry: ${page.select.label}`,
           elements: elements(),
           viewport: viewport(),
         },
@@ -127,6 +127,20 @@ const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
       if (request.parameters.selector !== '#name') return { ok: false, error: `${request.parameters.selector} is not a text field` };
       page.fields.set('#name', request.parameters.value);
       return { ok: true, data: { selector: '#name', url: page.url } };
+    }
+    case 'browser.select': {
+      if (request.parameters.selector !== '#country') return { ok: false, error: `No element matches ${request.parameters.selector}` };
+      const options = [
+        { label: 'United States', value: 'us' },
+        { label: 'Canada', value: 'ca' },
+      ];
+      const target = options.filter((option) => (
+        'label' in request.parameters ? option.label === request.parameters.label : option.value === request.parameters.value
+      ));
+      if (target.length === 0) return { ok: false, error: 'No option matches the exact label or value' };
+      if (target.length > 1) return { ok: false, error: 'More than one option matches the exact label or value' };
+      page.select = target[0];
+      return { ok: true, data: { selector: '#country', label: page.select.label, value: page.select.value, url: page.url } };
     }
     case 'browser.scroll': {
       const { direction } = request.parameters;
@@ -163,17 +177,9 @@ const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
       page.viewport = request.parameters.viewport;
       return { ok: true, data: { viewport: viewport() } };
     case 'browser.close':
-      // One page, no tabs: there is nothing to close, and the provider must
-      // not claim a close it did not do.
       return { ok: false, error: 'This browser has a single page and no tabs; there is nothing to close.' };
   }
 };
-
-// ---- Shared surface: the same page, drawn as a picture ----------------------
-//
-// A real provider would screencast its browser. This one paints the fake page
-// with rectangles so the host's viewer, control hand-off, and input path can
-// be seen working without any browser at all.
 
 type Surface = {
   width: number;
@@ -192,8 +198,6 @@ type Surface = {
 const surface: Surface = {
   width: 640,
   height: 400,
-  // Starts above zero so a viewer's first request (`after=0`) gets a picture
-  // right away instead of waiting for something to change.
   seq: 1,
   cursor: null,
   pressed: false,
@@ -240,7 +244,6 @@ const pngChunk = (type: string, data: Uint8Array): Buffer => {
   return Buffer.concat([length, typed, crc]);
 };
 
-/** Encodes an RGB raster as a PNG with Node's zlib; enough for a demo. */
 const encodePng = (width: number, height: number, rgb: Uint8Array): Buffer => {
   const stride = width * 3;
   const raw = Buffer.alloc((stride + 1) * height);
@@ -285,13 +288,11 @@ const renderFrame = (): Buffer => {
     }
   };
   fill(0, 0, width, height, hslToRgb(surface.hue, 0.25, 0.94));
-  // The page's elements, at the positions the snapshot reports.
   for (const element of elements()) {
     const { x, y, width: w, height: h } = element.bounds;
     fill(x, y, w, h, element.tag === 'button' ? hslToRgb(surface.hue, 0.6, 0.45) : [255, 255, 255]);
     fill(x, y + h - 2, w, 2, hslToRgb(surface.hue, 0.5, 0.35));
   }
-  // Who is in control, as a stripe along the top: blue for the agent, green for the user.
   const stripe: [number, number, number] = surface.controller === 'user' ? [46, 160, 67] : surface.controller === 'agent' ? [31, 111, 235] : [180, 180, 180];
   fill(0, 0, width, 4, stripe);
   if (surface.cursor) {
@@ -309,7 +310,6 @@ const applyInput = (events: SurfaceInputEvent[]): void => {
       if (event.action === 'up') surface.pressed = false;
     } else if (event.type === 'key' && event.action === 'down') {
       surface.lastKey = event.key;
-      // Any key shifts the hue, so a keystroke is visibly received.
       surface.hue = (surface.hue + 23) % 360;
       if ((event.modifiers.meta || event.modifiers.ctrl) && event.key.toLowerCase() === 'c') {
         surface.clipboard = `Copied from the stub at ${new Date().toISOString()}`;
@@ -336,7 +336,15 @@ const handleSurface = async (req: http.IncomingMessage, res: http.ServerResponse
     if (surface.seq <= after) {
       await new Promise<void>((resolve) => {
         surface.waiters.push(resolve);
-        setTimeout(resolve, wait);
+        // touch() would remove it, but a poll whose timer fires first has to
+        // remove its own resolver: the host polls again after a 204, so a
+        // resolver left behind accumulates one per timed-out poll for as long
+        // as the viewer stays attached, even on an idle page.
+        setTimeout(() => {
+          const at = surface.waiters.indexOf(resolve);
+          if (at !== -1) surface.waiters.splice(at, 1);
+          resolve();
+        }, wait);
       });
     }
     if (surface.seq <= after) {
@@ -388,7 +396,6 @@ const handleSurface = async (req: http.IncomingMessage, res: http.ServerResponse
       res.end();
       return true;
     }
-    // Follow the panel, within reason: a demo does not need 4K rasters.
     surface.width = Math.max(200, Math.min(1600, request.width));
     surface.height = Math.max(150, Math.min(1200, request.height));
     touch();
@@ -425,11 +432,11 @@ http.createServer((req, res) => {
     });
     return;
   }
-  // The strip above the surface (panel/main.ts) reads and drives the page
-  // through these; the host proxies them with the same bearer token.
   if (url.pathname === '/state' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller }));
+    // waiters is the long-poll list: it belongs in the state a test reads, since
+    // a leftover resolver is invisible in the frame answer itself.
+    res.end(JSON.stringify({ url: page.url, title: page.title, caller: lastCaller, waiters: surface.waiters.length }));
     return;
   }
   if (url.pathname === '/navigate' && req.method === 'POST') {

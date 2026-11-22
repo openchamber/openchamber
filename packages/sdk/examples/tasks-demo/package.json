@@ -9,13 +9,18 @@
         "id": "tasks-demo",
         "name": "Task Board",
         "icon": "task",
-        "entry": "panel/index.html"
+        "entry": "panel/index.html",
+        "mobile": true
       },
       "attach": {
         "mode": "dialog",
         "entry": "panel/attach.html"
       },
-      "page": { "entry": "panel/page.html", "title": "Tasks board" },
+      "page": {
+        "entry": "panel/page.html",
+        "title": "Tasks board",
+        "mobile": true
+      },
       "capabilities": [
         "prompt",
         "sessions",
@@ -49,7 +54,7 @@
       ],
       "tools": [
         {
-          "match": "mcp.tasks.*",
+          "match": "tasks_*",
           "name": "Tasks",
           "icon": "checkbox-circle",
           "title": "{input.id}",
@@ -60,7 +65,22 @@
             "status"
           ]
         }
-      ]
+      ],
+      "links": {
+        "action": "open",
+        "identifier": {
+          "keys": [
+            "DEMO"
+          ]
+        },
+        "urls": {
+          "origin": "https://example.com",
+          "identifier": "short-code",
+          "item": [
+            "/tasks/{id}"
+          ]
+        }
+      }
     }
   },
   "dependencies": {

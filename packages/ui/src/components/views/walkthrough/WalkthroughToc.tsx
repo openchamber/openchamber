@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { summarizeHunkFiles } from '@/lib/walkthrough/model';
 import { changedPathName } from '@/components/views/git/changesTree';
@@ -13,7 +14,6 @@ interface WalkthroughTocProps {
   activeStopId: string | null;
   visitedStopIds: ReadonlySet<string>;
   onSelectStop: (stopId: string) => void;
-  /** Column beside the stream at this width; omitted, the contents are a page of their own (the phone). */
   width?: number;
 }
 
@@ -61,8 +61,6 @@ const TocStop = ({
         <span className="flex items-center gap-2">
           <span
             className={cn(
-              // A pill rather than a fixed circle: two-digit steps were cramped
-              // and visibly off-centre in a square.
               'typography-micro flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 tabular-nums',
               isActive
                 ? 'bg-interactive-selection-foreground/20'
@@ -82,8 +80,6 @@ const TocStop = ({
             />
           )}
         </span>
-        {/* One line: the first file's name says where the step lives, and a
-            full path cut from its end showed only the shared folders. */}
         {files.length > 0 && (
           <span
             className={cn('flex min-w-0 items-baseline gap-1.5 ps-6 text-muted-foreground', page ? 'typography-meta' : 'typography-micro')}
@@ -111,18 +107,16 @@ export const WalkthroughToc = memo(function WalkthroughToc({
   const activeRef = useRef<HTMLButtonElement | null>(null);
   const page = width === undefined;
 
-  // Scrolling the stream moves the active step, and past a certain point the
-  // highlighted row leaves the contents column entirely — the reader loses
-  // their place in the very thing meant to hold it. `nearest` keeps the move
-  // minimal, so clicking a row that is already visible does not jolt the list.
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: 'nearest' });
   }, [activeStopId]);
 
-  return (
-    <nav
-      className={cn('flex flex-col overflow-y-auto', page ? 'min-h-0 flex-1 px-3 py-3' : 'shrink-0 border-e border-border/60 p-2')}
-      style={page ? undefined : { width }}
+  const contents = (
+    <ScrollableOverlay
+      as="nav"
+      outerClassName="min-h-0 flex-1"
+      className={cn('flex flex-col', page ? 'px-3 py-3' : 'p-2')}
+      disableHorizontal
     >
       {view.walkthrough.focus && (
         <p className={cn('px-2 pb-3 pt-1 text-muted-foreground', page ? 'typography-ui-label' : 'typography-meta')}>{view.walkthrough.focus}</p>
@@ -153,6 +147,13 @@ export const WalkthroughToc = memo(function WalkthroughToc({
           {t('walkthrough.toc.uncovered', { count: view.uncoveredHunks.length })}
         </p>
       )}
-    </nav>
+    </ScrollableOverlay>
+  );
+
+  if (page) return contents;
+  return (
+    <div className="flex shrink-0 flex-col border-e border-edge" style={{ width }}>
+      {contents}
+    </div>
   );
 });

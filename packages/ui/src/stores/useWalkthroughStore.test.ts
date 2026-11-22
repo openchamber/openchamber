@@ -107,6 +107,7 @@ test('PR cache and handoff identity include the selected repository', () => {
   expect(walkthroughSourceKey({ kind: 'pr', number: 42 })).toBe('pr:42');
   expect(walkthroughSourceKey(upstream)).toBe('pr:upstream/project:42');
   expect(walkthroughSourceKey(fork)).toBe('pr:fork/project:42');
+  expect(walkthroughSourceKey({ ...upstream, revision: 'a'.repeat(40) })).toBe(`pr:upstream/project:42@${'a'.repeat(40)}`);
   const context = {
     provider: 'github', instance: 'github.com', accountId: 'account-a', repositoryId: 'repo-1',
     bindingRevision: 3, directory: '/repo', primaryRemote: 'origin',

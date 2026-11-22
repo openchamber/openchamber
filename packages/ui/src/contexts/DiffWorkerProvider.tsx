@@ -1,20 +1,12 @@
 import React, { useEffect, useSyncExternalStore } from 'react';
-import type { SupportedLanguages } from '@pierre/diffs';
+import type { HighlighterTypes, SupportedLanguages } from '@pierre/diffs';
 import type { WorkerPoolManager } from '@pierre/diffs/worker';
 
 import { useOptionalThemeSystem } from './useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { Theme } from '@/types/theme';
-// NOTE: keep provider lightweight; avoid main-thread diff parsing here.
-// This module must not statically import `@pierre/diffs` runtime code:
-// `@pierre/diffs/worker` pulls the Shiki highlighter (core + oniguruma engine
-// + grammar registry) into the eager startup graph and `initialize()` spawns
-// workers plus a main-thread shared highlighter before any diff is visible.
-// Everything heavy loads on demand and is only warmed after startup idle.
 
-// Preload common languages for faster initial diff rendering
 const PRELOAD_LANGS: SupportedLanguages[] = [
-  // Keep small; workers load others on-demand.
   'typescript',
   'javascript',
   'tsx',
@@ -28,6 +20,8 @@ interface DiffWorkerProviderProps {
 }
 
 type WorkerPoolStyle = 'unified' | 'split';
+
+const MAIN_THREAD_MAX_CHARACTERS = 64 * 1024;
 
 const WORKER_POOL_CONFIG: Record<WorkerPoolStyle, { poolSize: number; totalASTLRUCacheSize: number; lineDiffType: 'none' | 'word-line' }> = {
   unified: {
@@ -45,7 +39,8 @@ const WORKER_POOL_CONFIG: Record<WorkerPoolStyle, { poolSize: number; totalASTLR
 type PoolModules = {
   WorkerPoolManager: typeof WorkerPoolManager;
   workerFactory: () => Worker;
-  ensurePierreThemeRegistered: (theme: Theme) => void;
+  ensurePierreThemeRegistered: (theme: Theme) => string;
+  highlighter: HighlighterTypes;
 };
 
 let poolModulesPromise: Promise<PoolModules> | null = null;
@@ -53,12 +48,14 @@ let poolModulesPromise: Promise<PoolModules> | null = null;
 const loadPoolModules = (): Promise<PoolModules> => {
   poolModulesPromise ??= Promise.all([
     import('@pierre/diffs/worker'),
-    import('@/lib/diff/workerFactory'),
+    import('@/lib/diff/workerFactory').then(({ workerFactory }) => workerFactory),
     import('@/lib/shiki/appThemeRegistry'),
-  ]).then(([workerModule, factoryModule, themeRegistryModule]) => ({
+    import('@/lib/shiki/diffsHighlighter'),
+  ]).then(([workerModule, workerFactory, themeRegistryModule, highlighterModule]) => ({
     WorkerPoolManager: workerModule.WorkerPoolManager,
-    workerFactory: factoryModule.workerFactory,
+    workerFactory,
     ensurePierreThemeRegistered: themeRegistryModule.ensurePierreThemeRegistered,
+    highlighter: highlighterModule.DIFFS_HIGHLIGHTER,
   }));
   return poolModulesPromise;
 };
@@ -94,6 +91,7 @@ const ensurePool = (style: WorkerPoolStyle): void => {
         workerFactory: modules.workerFactory,
         poolSize: config.poolSize,
         totalASTLRUCacheSize: config.totalASTLRUCacheSize,
+        mainThreadMaxCharacters: MAIN_THREAD_MAX_CHARACTERS,
       },
       {
         theme: {
@@ -102,7 +100,7 @@ const ensurePool = (style: WorkerPoolStyle): void => {
         },
         langs: PRELOAD_LANGS,
         lineDiffType: config.lineDiffType,
-        preferredHighlighter: 'shiki-wasm',
+        preferredHighlighter: modules.highlighter,
       }
     );
     void pool.initialize();
@@ -144,33 +142,26 @@ export const DiffWorkerProvider: React.FC<DiffWorkerProviderProps> = ({ children
     themeSystem?.availableThemes.find((theme) => theme.metadata.id === darkThemeId) ??
     fallbackDark;
 
-  // Register the active app themes with @pierre/diffs and forward them to any
-  // live pools. Registration goes through the deferred module load so the
-  // theme registry (and its @pierre/diffs import) stays out of the eager
-  // startup graph; each diff surface also registers the themes it renders
-  // with, so ordering is preserved even before this resolves.
   useEffect(() => {
     let cancelled = false;
     void loadPoolModules().then((modules) => {
       if (cancelled) return;
-      modules.ensurePierreThemeRegistered(lightTheme);
-      modules.ensurePierreThemeRegistered(darkTheme);
-      setRenderTheme({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id });
+      setRenderTheme({
+        light: modules.ensurePierreThemeRegistered(lightTheme),
+        dark: modules.ensurePierreThemeRegistered(darkTheme),
+      });
     });
     return () => {
       cancelled = true;
     };
   }, [darkTheme, lightTheme]);
 
-  // Warm the worker pools once startup work has settled so the first diff a
-  // user opens does not pay worker spawn + highlighter init. Idle-deferred:
-  // warming competed with initial load (3 workers, shiki grammars, oniguruma
-  // wasm) when it ran during mount.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const warm = () => {
       ensurePool('unified');
       ensurePool('split');
+      void import('@/components/chat/markdown/highlightsEngine').then(({ loadHighlights }) => loadHighlights());
     };
     if (typeof window.requestIdleCallback === 'function') {
       const handle = window.requestIdleCallback(warm, { timeout: 5000 });

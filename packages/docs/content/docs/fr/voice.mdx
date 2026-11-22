@@ -11,7 +11,7 @@ Le mode vocal vous permet de dicter des messages et d’entendre les réponses l
 
 Choisissez comment les réponses sont lues :
 
-- **browser** — les voix intégrées de votre navigateur, sans configuration
+- **browser** utilise les voix disponibles dans votre navigateur. Sur Linux de bureau, installez `speech-dispatcher`, sa bibliothèque cliente `libspeechd` et un moteur vocal comme `espeak-ng`. Activez le service speech-dispatcher si votre distribution ne le démarre pas automatiquement, puis redémarrez OpenChamber.
 - **OpenAI** — les voix d’OpenAI ; collez votre clé API et choisissez une voix
 - **OpenAI-compatible** — tout service qui parle le format OpenAI ; saisissez son URL et, s’il en demande une, une clé API
 - **macOS say** — la commande intégrée `say`, sur les Mac qui l’ont
@@ -22,9 +22,20 @@ Une fois activé, un bouton de lecture apparaît sur les messages pour les écou
 
 Choisissez comment votre parole est transcrite :
 
-- **browser** — la reconnaissance intégrée de votre navigateur, sans configuration
-- **server** — un service de transcription compatible OpenAI ; saisissez son URL et, si nécessaire, une clé API
-- **on-device** — un modèle vocal qui s’exécute dans votre navigateur et se télécharge à la première utilisation
+- **Local** exécute un modèle vocal sur l’ordinateur où tourne OpenChamber. Le modèle se télécharge la première fois que vous dictez, et votre audio reste sur cet ordinateur.
+- **Serveur** envoie votre audio à un service de transcription compatible OpenAI. Saisissez son URL et, s’il en demande une, une clé API. Pour aider le modèle avec des noms, des termes ou plusieurs langues parlées, décrivez-les dans **Prompt de transcription**, par exemple « Espagnol et anglais. Termes : OpenChamber ». Il part avec chaque requête ; seuls les modèles qui acceptent un prompt l’utilisent, et certains services refusent la requête.
+
+Modèles locaux :
+
+- **Parakeet v3** est le modèle par défaut. Il connaît 25 langues européennes, dont l’anglais et l’ukrainien, et c’est le plus rapide. Si vous dictiez déjà avec Parakeet v2 avant que v3 devienne le modèle par défaut, vous restez sur v2 jusqu’à ce que vous choisissiez un autre modèle.
+- **Parakeet v2** ne connaît que l’anglais.
+- **Whisper large-v3 turbo** connaît 99 langues. Il est environ neuf fois plus lent que Parakeet, donc les longues dictées mettent quelques secondes à apparaître.
+- **Qwen3-ASR 0.6B** connaît 30 langues, dont le chinois, le japonais, le coréen et l’arabe. Il ne connaît pas l’ukrainien.
+- **Whisper tiny** est le plus léger à télécharger, pour les ordinateurs lents.
+
+Les modèles Whisper et Qwen3-ASR détectent la langue eux-mêmes et, sur une phrase courte, ils peuvent se tromper de langue. Saisissez le code de votre langue dans **Langue**, sous la liste des modèles, par exemple `uk` ou `en`, et ils cessent de deviner.
+
+Activez **Corriger les mots mal compris** pour que votre Small Model (Paramètres → Sessions → Small Model) relise le texte quand vous arrêtez de dicter. Il remplace les mots que le modèle vocal a mal compris et retire les hésitations comme "euh". Le texte part alors chez le fournisseur du Small Model et apparaît une ou deux secondes plus tard. Sans Small Model, le texte est inséré tel qu’il a été entendu.
 
 Les clés API saisies pour ces services sont conservées par le serveur OpenChamber, pas par votre navigateur. Tapez une clé et appuyez sur Entrée pour l’enregistrer ; le champ indique ensuite qu’une clé est enregistrée, et la croix la supprime.
 

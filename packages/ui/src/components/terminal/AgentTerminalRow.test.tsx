@@ -16,6 +16,7 @@ const SESSION = 'ses_root';
 const terminal = (id: string, overrides: Partial<PersistentPtyInfo> = {}): PersistentPtyInfo => ({
   id,
   title: id,
+  userTitle: null,
   command: 'sh',
   args: ['-c', `run ${id}`],
   cwd: DIRECTORY,

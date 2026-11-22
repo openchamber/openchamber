@@ -1,18 +1,13 @@
-/**
- * Projection of the server's routing state: whether Auto can be offered, the
- * config the settings page edits, the last routing decision per session, and
- * the permissions the safety net is holding. The server is authoritative; this
- * store is refreshed from `/api/routing` and kept current by control-stream
- * events. Nothing here is persisted.
- */
 import { create } from 'zustand';
 import {
   clearCustomEndpoint,
+  clearGeminiKey,
   clearRoutingToken,
   fetchRoutingState,
   ROUTING_UNAVAILABLE,
   saveClassifierSource,
   saveCustomEndpoint,
+  saveGeminiKey,
   saveRoutingConfig,
   saveRoutingToken,
   type ClassifierSource,
@@ -51,12 +46,13 @@ interface RoutingStoreState extends RoutingState {
   saveConfig: (config: RoutingConfig) => Promise<void>;
   setToken: (token: string) => Promise<void>;
   clearToken: () => Promise<void>;
+  setGeminiKey: (key: string) => Promise<void>;
+  clearGeminiKey: () => Promise<void>;
   setClassifierSource: (source: ClassifierSource) => Promise<void>;
   setCustomEndpoint: (endpoint: CustomEndpointInput) => Promise<void>;
   clearCustomEndpoint: () => Promise<void>;
 }
 
-/** Bumped on every load and every runtime switch; a response from an older generation is dropped. */
 let loadGeneration = 0;
 
 const heldRecord = (list: RoutingHeldPermission[] | undefined): Record<string, RoutingHeldPermission> =>
@@ -77,14 +73,11 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
       set({ ...state, held: heldRecord(state.heldPermissions), loaded: true, loadError: null });
     } catch (error) {
       if (generation !== loadGeneration) return;
-      // A failed read keeps whatever was known from this same server; it is not "routing is off".
       set({ loaded: true, loadError: error instanceof Error ? error.message : String(error) });
     }
   },
 
   resetForRuntime: () => {
-    // Another server means another config, key and set of held requests; nothing
-    // from the previous one may be offered while the new one loads.
     loadGeneration += 1;
     set({ ...ROUTING_UNAVAILABLE, loaded: false, loadError: null, decisions: {}, held: {} });
   },
@@ -95,7 +88,6 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
 
   applyAvailability: ({ available, autoReady, jevAvailable, tokenPresent, jevSource }) => {
     set({ available, autoReady, jevAvailable, tokenPresent, jevSource });
-    // The config behind the change lives on the server; re-read rather than guess.
     if (available) void get().load();
   },
 
@@ -134,6 +126,18 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
     if (generation === loadGeneration) get().applyState(state);
   },
 
+  setGeminiKey: async (key) => {
+    const generation = loadGeneration;
+    const state = await saveGeminiKey(key);
+    if (generation === loadGeneration) get().applyState(state);
+  },
+
+  clearGeminiKey: async () => {
+    const generation = loadGeneration;
+    const state = await clearGeminiKey();
+    if (generation === loadGeneration) get().applyState(state);
+  },
+
   setClassifierSource: async (source) => {
     const generation = loadGeneration;
     const state = await saveClassifierSource(source);
@@ -153,8 +157,6 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
   },
 }));
 
-/** Whether the composer may offer the Auto row right now. */
 export const selectAutoReady = (state: RoutingStoreState): boolean => state.available && state.autoReady;
 
-/** Whether the safety net can be offered: this runtime has a server and a classification provider answers. */
 export const selectSafetyNetAvailable = (state: RoutingStoreState): boolean => state.available && state.jevAvailable;

@@ -1,18 +1,12 @@
 import { z } from "zod"
 
-// v2 reports active loops globally. A malformed response cannot prove idle.
 export const activeSessionSnapshotSchema = z.record(z.string().min(1), z.object({ type: z.literal("running") }))
 
-// Requests the host forwards from OpenCode's own events. Only the fields the
-// cross-directory index needs are parsed; zod drops the rest, so a parsed
-// entry is exactly the projection `sync/global-blocking-requests.ts` stores.
 const hostPermissionRequestSchema = z.object({
   id: z.string().min(1),
   sessionID: z.string().min(1),
   action: z.string(),
   resources: z.array(z.string()),
-  // The tray decides whether to offer "Allow always" from these patterns, so a
-  // seeded request has to keep them or it looks unsavable.
   save: z.array(z.string()).optional(),
 })
 const hostFormRequestSchema = z.object({
@@ -20,25 +14,23 @@ const hostFormRequestSchema = z.object({
   sessionID: z.string().min(1),
   title: z.string(),
 })
-// A page an agent showed that waits for the user's answer: same projection.
 const hostPageRequestSchema = hostFormRequestSchema
 
-// Cross-project status kept by the OpenChamber host (web server or VS Code
-// extension host) from its single upstream event stream. Entries carry the
-// host's own clock so staleness is judged against `serverTime`, not the client.
 export const hostSessionStatusSnapshotSchema = z.object({
   sessions: z.record(z.string().min(1), z.object({
     status: z.string(),
     lastUpdateAt: z.number(),
+    turnStartedAt: z.number().optional(),
   })),
-  // Permission requests and forms the host still sees unanswered, keyed by
-  // session. Optional: hosts predating the field, and the VS Code shim, omit it.
   pending: z.record(z.string().min(1), z.object({
     permissions: z.array(hostPermissionRequestSchema),
     forms: z.array(hostFormRequestSchema),
-    // Hosts predating waiting pages, and the VS Code shim, omit it.
     pages: z.array(hostPageRequestSchema).optional().default([]),
   })).optional(),
+  context: z.record(z.string().min(1), z.discriminatedUnion("state", [
+    z.object({ state: z.literal("measured"), tokens: z.number().positive() }),
+    z.object({ state: z.literal("compacted") }),
+  ])).optional(),
   serverTime: z.number(),
   // A replaced OpenCode still runs the turns busy at its handoff, and the
   // current OpenCode's running list does not name them. Hosts predating the

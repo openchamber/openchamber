@@ -16,61 +16,36 @@ type BuiltInContextSurfaceId =
   | 'messages'
   | 'context'
   | 'browser'
-  | 'chat';
+  | 'workflows'
+  | 'subagents'
+  | 'chat'
+  | 'pages';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
 
 export type ContextSurfaceDescriptor = {
   id: ContextSurfaceId;
-  /** The context panel tab mode this surface activates. 1:1 in the current model. */
   mode: ContextPanelMode;
   icon: IconName;
-  /** Authenticated package SVG for a guest rail mark. Prefer over `icon` when set. */
   iconSrc?: string;
-  /** Guest-provided name. When set, the rail prefers this over `labelKey`. */
   label?: string;
   labelKey: I18nKey;
-  /**
-   * 'always' surfaces can be opened empty from the rail.
-   * 'has-content' surfaces are content-driven: they need an existing tab of
-   * their mode (a split session, a diff to show) and stay hidden on the rail
-   * until one exists.
-   */
   availability: 'always' | 'has-content';
-  /** Short tooltip explanation shown on the rail. */
   descriptionKey: I18nKey;
-  /**
-   * Which of the two default widths the panel opens at until the user resizes
-   * this surface. The panel never takes more than the chat area leaves after
-   * a minimum chat column, so a small window shows it narrower.
-   */
-  width: ContextSurfaceWidth;
 };
-
-/** Default panel widths in px. Every surface, built-in or guest, uses one. */
-export const CONTEXT_SURFACE_WIDTHS = {
-  // Code side by side with the chat: files, diffs, the terminal, the walkthrough.
-  wide: 640,
-  // A list or a card: every other surface, guest panels included.
-  regular: 540,
-} as const;
-
-type ContextSurfaceWidth = keyof typeof CONTEXT_SURFACE_WIDTHS;
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'context',
     descriptionKey: 'contextRail.surface.context.description',
-    width: 'regular',
     mode: 'context',
-    icon: 'donut-chart-fill',
+    icon: 'pie-chart',
     labelKey: 'contextPanel.mode.context',
     availability: 'always',
   },
   {
     id: 'git',
     descriptionKey: 'contextRail.surface.git.description',
-    width: 'regular',
     mode: 'git',
     icon: 'git-branch',
     labelKey: 'layout.rightSidebar.git',
@@ -79,7 +54,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'pr',
     descriptionKey: 'contextRail.surface.pr.description',
-    width: 'regular',
     mode: 'pr',
     icon: 'github',
     labelKey: 'contextPanel.mode.pr',
@@ -88,16 +62,14 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'diff',
     descriptionKey: 'contextRail.surface.diff.description',
-    width: 'wide',
     mode: 'diff',
-    icon: 'arrow-left-right',
+    icon: 'layout-column',
     labelKey: 'contextPanel.mode.diff',
     availability: 'always',
   },
   {
     id: 'walkthrough',
     descriptionKey: 'contextRail.surface.walkthrough.description',
-    width: 'wide',
     mode: 'walkthrough',
     icon: 'route',
     labelKey: 'contextPanel.mode.walkthrough',
@@ -106,7 +78,6 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'editor',
     descriptionKey: 'contextRail.surface.editor.description',
-    width: 'wide',
     mode: 'file',
     icon: 'file-edit',
     labelKey: 'contextPanel.mode.files',
@@ -115,16 +86,22 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'terminal',
     descriptionKey: 'contextRail.surface.terminal.description',
-    width: 'wide',
     mode: 'terminal',
     icon: 'terminal-box',
     labelKey: 'layout.mainTab.terminal',
     availability: 'always',
   },
   {
+    id: 'browser',
+    descriptionKey: 'contextRail.surface.browser.description',
+    mode: 'browser',
+    icon: 'global',
+    labelKey: 'contextPanel.mode.browser',
+    availability: 'always',
+  },
+  {
     id: 'notes',
     descriptionKey: 'contextRail.surface.notes.description',
-    width: 'regular',
     mode: 'notes',
     icon: 'book-marked',
     labelKey: 'contextRail.surface.notes',
@@ -133,51 +110,78 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   {
     id: 'messages',
     descriptionKey: 'contextRail.surface.messages.description',
-    width: 'regular',
     mode: 'messages',
     icon: 'mail',
     labelKey: 'contextRail.surface.messages',
     availability: 'always',
   },
   {
-    id: 'browser',
-    descriptionKey: 'contextRail.surface.browser.description',
-    width: 'regular',
-    mode: 'browser',
-    icon: 'global',
-    labelKey: 'contextPanel.mode.browser',
+    id: 'workflows',
+    descriptionKey: 'contextRail.surface.workflows.description',
+    mode: 'workflows',
+    icon: 'flow-chart',
+    labelKey: 'contextPanel.mode.workflows',
     availability: 'always',
+  },
+  {
+    id: 'subagents',
+    descriptionKey: 'contextRail.surface.subagents.description',
+    mode: 'subagents',
+    icon: 'ai-agent',
+    labelKey: 'contextPanel.mode.subagents',
+    availability: 'has-content',
   },
   {
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
-    width: 'regular',
     mode: 'chat',
     icon: 'chat-4',
     labelKey: 'contextPanel.mode.chat',
     availability: 'has-content',
   },
+  {
+    id: 'pages',
+    descriptionKey: 'contextRail.surface.pages.description',
+    mode: 'pages',
+    icon: 'pages',
+    labelKey: 'contextPanel.mode.pages',
+    availability: 'has-content',
+  },
 ];
 
-const WIDTH_BY_MODE = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode, surface.width]));
-
-// Tablet width and up: below this the walkthrough cannot show a stop and its
-// code side by side, which is the whole point of the surface.
 export const WALKTHROUGH_MIN_WIDTH = 768;
 
-export const getContextSurfaceDefaultWidth = (mode: ContextPanelMode): number => {
-  // Guest panels and any unlisted mode open at the regular width.
-  return CONTEXT_SURFACE_WIDTHS[WIDTH_BY_MODE.get(mode) ?? 'regular'];
-};
+type ContextSurfaceGroup = 'context' | 'changes' | 'tools' | 'workspace' | 'extensions';
+
+const BUILT_IN_SURFACE_GROUPS = {
+  context: 'context',
+  git: 'changes',
+  pr: 'changes',
+  diff: 'changes',
+  walkthrough: 'changes',
+  editor: 'tools',
+  terminal: 'tools',
+  browser: 'tools',
+  notes: 'workspace',
+  messages: 'workspace',
+  workflows: 'workspace',
+  subagents: 'workspace',
+  chat: 'workspace',
+  pages: 'workspace',
+} satisfies Record<BuiltInContextSurfaceId, ContextSurfaceGroup>;
+
+const isBuiltInSurfaceId = (id: ContextSurfaceId): id is BuiltInContextSurfaceId => Object.hasOwn(BUILT_IN_SURFACE_GROUPS, id);
+
+export const contextSurfaceGroup = (surface: Pick<ContextSurfaceDescriptor, 'id' | 'mode'>): ContextSurfaceGroup => (
+  !isPluginContextPanelMode(surface.mode) && isBuiltInSurfaceId(surface.id)
+    ? BUILT_IN_SURFACE_GROUPS[surface.id]
+    : 'extensions'
+);
 
 const isKnownSurfaceId = (value: string, byId: ReadonlyMap<string, ContextSurfaceDescriptor>): boolean => {
   return byId.has(value);
 };
 
-/**
- * Applies a persisted user reorder on top of the default registry order:
- * unknown ids are dropped, missing surfaces are appended in default order.
- */
 export const sortContextSurfaces = (
   railOrder: readonly string[],
   extras: readonly ContextSurfaceDescriptor[] = [],
@@ -204,35 +208,26 @@ export const sortContextSurfaces = (
     }
   }
 
-  return ordered;
+  const groupOrder: ContextSurfaceGroup[] = [];
+  for (const surface of ordered) {
+    const group = contextSurfaceGroup(surface);
+    if (!groupOrder.includes(group)) groupOrder.push(group);
+  }
+  return groupOrder.flatMap((group) => ordered.filter((surface) => contextSurfaceGroup(surface) === group));
 };
 
 type VisibleRailSurfacesOptions = {
   railOrder: readonly string[];
-  /** Surfaces the user chose to hide from the rail (and from the digit
-      shortcuts, which share this filter). */
   hiddenSurfaces?: readonly string[];
   isVSCode: boolean;
   screenWidth: number;
   tabs: readonly { mode: ContextPanelMode; targetPath?: string | null }[];
-  /** The Tracker rail icon stays off until a GitHub or GitLab account is
-      connected (OAuth, a token, or a detected `gh`/`glab` login), or an item
-      such as a Linear issue is open in it. Accounts are connected from
-      Settings, so hiding the surface removes no entry point. */
   sourceControlConnected: boolean;
-  /** Installed guest panels. Empty on VS Code and when the catalog has not
-      loaded or failed. */
+  workflowsShown: boolean;
+  receivedPagesShown?: boolean;
   extras?: readonly ContextSurfaceDescriptor[];
 };
 
-/**
- * The context panel rail's visible, user-ordered surfaces. Shared by the rail
- * (for rendering and number badges) and the global surface-switch shortcut so
- * both agree on which surface each digit maps to.
- *
- * Content-driven surfaces are hidden (not disabled) until content exists; an
- * existing tab keeps them visible even if the content source went away.
- */
 export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOptions): ContextSurfaceDescriptor[] => {
   return sortContextSurfaces(options.railOrder, options.extras).filter((surface) => {
     if (options.hiddenSurfaces?.includes(surface.id)) {
@@ -241,22 +236,21 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     if (isPluginContextPanelMode(surface.mode) && options.isVSCode) {
       return false;
     }
-    // The walkthrough needs room for a stop list beside real code, and its
-    // diffs come from OpenChamber's Git routes, which VS Code does not serve.
     if (surface.id === 'walkthrough' && (options.isVSCode || options.screenWidth < WALKTHROUGH_MIN_WIDTH)) {
       return false;
     }
-    // VS Code already is an editor with a browser next to it. What OpenChamber
-    // could add there is a bare frame: no annotation, no agent control, no
-    // remote dev servers — all of which need a Chromium host the extension does
-    // not have. Offering the surface anyway would promise the panel people see
-    // on the desktop.
     if (surface.id === 'browser' && options.isVSCode) {
       return false;
     }
     if (surface.id === 'pr' && !options.sourceControlConnected
       && !options.tabs.some((tab) => tab.mode === 'pr' && tab.targetPath)) {
       return false;
+    }
+    if (surface.id === 'workflows' && (options.isVSCode || !options.workflowsShown)) {
+      return false;
+    }
+    if (surface.id === 'pages' && options.receivedPagesShown) {
+      return true;
     }
     if (surface.availability === 'has-content') {
       return options.tabs.some((tab) => tab.mode === surface.mode);

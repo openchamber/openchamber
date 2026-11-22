@@ -5,10 +5,12 @@ import { partIds, type ConfigDocument } from "./model"
 import {
   configModelIdentifier,
   deniesAnyProvider,
+  findIntegrationPolicy,
   isIntegrationDenied,
   mergeConfigDocuments,
   projectAgent,
   projectAssistantContent,
+  withSessionMetadata,
   projectMessage,
   projectSession,
   projectToolPart,
@@ -35,6 +37,30 @@ describe("projectSession", () => {
     expect(session.metadata).toEqual({ pinned: true })
     expect("parentID" in session).toBe(false)
     expect("agent" in session).toBe(false)
+  })
+
+  test("a workflow agent nests under the session that ran it, which OpenCode does not know as its parent", () => {
+    const metadata = { openchamber: { kind: "workflow-agent", parentID: "ses_parent" } }
+    expect(projectSession({ ...sessionInfo, metadata }).parentID).toBe("ses_parent")
+    expect(projectSession({ ...sessionInfo, parentID: "ses_opencode", metadata }).parentID).toBe("ses_opencode")
+    expect("parentID" in projectSession({ ...sessionInfo, metadata: { openchamber: { parentID: "ses_parent" } } })).toBe(false)
+  })
+
+  test("a session an agent runs for its own work nests under that agent's session until the user takes it over", () => {
+    const link = { openchamber: { kind: "operator-child", parentID: "ses_operator", work: { state: "open" } } }
+    const child = projectSession({ ...sessionInfo, metadata: link })
+    expect(child.parentID).toBe("ses_operator")
+
+    const takenOver = withSessionMetadata(child, { openchamber: { work: { state: "open" } } })
+    expect("parentID" in takenOver).toBe(false)
+    expect(withSessionMetadata(takenOver, link).parentID).toBe("ses_operator")
+  })
+
+  test("a metadata change never moves a subagent away from its OpenCode parent", () => {
+    const subagent = projectSession({ ...sessionInfo, parentID: "ses_opencode" })
+    const relinked = withSessionMetadata(subagent, { openchamber: { kind: "operator-child", parentID: "ses_other" } })
+    expect(relinked.parentID).toBe("ses_opencode")
+    expect(withSessionMetadata(subagent, {}).parentID).toBe("ses_opencode")
   })
 
   test("an untitled session gets an empty title rather than undefined", () => {
@@ -186,6 +212,7 @@ describe("projectToolPart", () => {
       status: "error",
       input: { command: "false" },
       error: "exit 1",
+      errorType: "tool.failed",
       output: "partial",
       time: { start: 6, end: 9 },
     })
@@ -216,16 +243,41 @@ describe("projectUserParts", () => {
     const parts = projectUserParts({ text: "" }, { sessionID: "s", messageID: "m", created: 1 })
     expect(parts).toEqual([])
   })
+
+  test("skills attached to a stored prompt stay on the message without their text", () => {
+    const attached = projectMessage({
+      id: "msg_u", type: "user", time: { created: 1 }, text: "Follow $demo",
+      skills: [{ id: "demo", name: "Demo", text: "<skill_content>…</skill_content>" }],
+    }, "ses_1")
+    expect(attached.message).toEqual({ id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1 }, skills: [{ id: "demo", name: "Demo" }] })
+    const plain = projectMessage({ id: "msg_p", type: "user", time: { created: 2 }, text: "hi" }, "ses_1")
+    expect(plain.message).not.toHaveProperty("skills")
+  })
 })
 
 describe("projectMessage (other roles)", () => {
+  test("completed compactions retain the summarizing model, independently of the session model", () => {
+    const model = { providerID: "summary-provider", id: "summary-model" }
+    const entry = projectMessage({
+      id: "compact", type: "compaction", time: { created: 1 }, status: "completed",
+      reason: "auto", summary: "Summary", model,
+    }, "ses_1")
+    expect(entry.message).toMatchObject({ role: "compaction", model })
+    const legacy = projectMessage({
+      id: "old", type: "compaction", time: { created: 1 }, status: "completed",
+      reason: "auto", summary: "Summary",
+    }, "ses_1")
+    expect(legacy.message).toMatchObject({ role: "compaction", summary: "Summary" })
+    expect(legacy.message).not.toHaveProperty("model")
+  })
+
   test("every non-conversation message projects with its role and no parts", () => {
     const items: SessionMessageInfo[] = [
       { id: "1", type: "synthetic", time: { created: 1 }, text: "ctx" },
       { id: "2", type: "system", time: { created: 2 }, text: "sys", description: "d" },
       { id: "3", type: "skill", time: { created: 3 }, skill: "sk", name: "Skill", text: "t" },
       { id: "4", type: "shell", time: { created: 4 }, shellID: "sh", command: "ls", status: "exited", exit: 0 },
-      { id: "5", type: "compaction", time: { created: 5 }, status: "running", reason: "auto", summary: "", recent: "" },
+      { id: "5", type: "compaction", time: { created: 5 }, status: "running", reason: "auto", summary: "" },
       {
         id: "6",
         type: "compaction",
@@ -356,6 +408,7 @@ describe("integration policies", () => {
     ])
     expect(isIntegrationDenied(policies, "mcp:github-enterprise")).toBe(true)
     expect(isIntegrationDenied(policies, "skill:deploy")).toBe(true)
+    expect(findIntegrationPolicy(policies, "skill:deploy")).toEqual({ resource: "skill:deploy", effect: "deny", path: "/repo/opencode.json" })
     expect(isIntegrationDenied(policies, "skill:deploy-docs")).toBe(false)
     expect(isIntegrationDenied(policies, "mcp:linear")).toBe(false)
   })
@@ -382,6 +435,40 @@ describe("integration policies", () => {
       { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "mcp:github", effect: "deny" }] } },
     ])
     expect(isIntegrationDenied(policies, "mcp:github")).toBe(true)
+  })
+
+  test("reads the skill.use and mcp.use statements OpenCode decodes the legacy prefix into", () => {
+    // OpenCode 2.2.3+ serves `integration.use` `skill:<id>` as `skill.use` `<id>`.
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "skill.use", resource: "gemini-imagen", effect: "deny" },
+        { action: "mcp.use", resource: "github*", effect: "deny" },
+        { action: "skill.use", resource: "review", effect: "allow" },
+      ] } },
+    ])
+    expect(findIntegrationPolicy(policies, "skill:gemini-imagen")).toEqual({ resource: "skill:gemini-imagen", effect: "deny", path: "/repo/opencode.json" })
+    expect(isIntegrationDenied(policies, "mcp:github-enterprise")).toBe(true)
+    expect(isIntegrationDenied(policies, "skill:review")).toBe(false)
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
+
+  test("ignores an integration.use statement without an mcp:, skill: or plugin: prefix, which decides providers and accounts", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "*", effect: "deny" }] } },
+    ])
+    expect(policies).toEqual([])
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
+
+  test("reads plugin statements in both spellings", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "plugin.use", resource: "leakshield", effect: "deny" },
+        { action: "integration.use", resource: "plugin:other", effect: "allow" },
+      ] } },
+    ])
+    expect(isIntegrationDenied(policies, "plugin:leakshield")).toBe(true)
+    expect(findIntegrationPolicy(policies, "plugin:other")).toEqual({ resource: "plugin:other", effect: "allow", path: "/repo/opencode.json" })
   })
 })
 

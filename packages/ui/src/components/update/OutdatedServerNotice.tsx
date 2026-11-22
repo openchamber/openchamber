@@ -12,12 +12,6 @@ type UpdateOffer =
   | { kind: 'available'; info: UpdateInfo }
   | { kind: 'manual'; info: UpdateInfo | null; error: string | null };
 
-/**
- * The connected server runs an OpenChamber this app cannot use. Offers the
- * server's own update through its update route, over the transport the app
- * already uses for it, so a relay or tunnel host can be updated from here too.
- * A server that cannot update itself gets the command to run on it.
- */
 export function OutdatedServerNotice({ version }: { version: string }) {
   const { t } = useI18n();
   const [offer, setOffer] = React.useState<UpdateOffer>({ kind: 'idle' });
@@ -52,15 +46,23 @@ export function OutdatedServerNotice({ version }: { version: string }) {
           {!manual.info?.available && (
             <p className="typography-meta text-[var(--status-error)]">{t('startup.serverOutdated.noUpdate')}</p>
           )}
-          {manual.error && <p className="typography-meta text-muted-foreground">{manual.error}</p>}
-          {manual.info?.installBlocked === 'desktop-host' ? (
+          {manual.error && <p dir="auto" className="typography-meta text-muted-foreground">{manual.error}</p>}
+          {manual.info?.installBlocked === 'opencode-version' ? (
+            <p className="typography-meta text-[var(--status-warning)]">
+              {t('updateDialog.openCodeTooOld', {
+                version: manual.info.version || '',
+                required: manual.info.requiredOpenCodeVersion || '',
+                current: manual.info.openCodeVersion || '',
+              })}
+            </p>
+          ) : manual.info?.installBlocked === 'desktop-host' ? (
             <p className="typography-meta text-muted-foreground">
               {t('updateDialog.desktopHostInstall', { version: manual.info.version || '' })}
             </p>
           ) : (
             <>
               <p className="typography-meta text-muted-foreground">{t('onboarding.desktopRecovery.remoteIncompatible.manualUpdate')}</p>
-              <code className="block select-text rounded-md bg-[var(--surface-muted)] px-3 py-2 font-mono text-sm text-foreground">{manualCommand}</code>
+              <code dir="ltr" className="block select-text rounded-md bg-[var(--surface-muted)] px-3 py-2 font-mono text-sm text-foreground">{manualCommand}</code>
             </>
           )}
         </div>

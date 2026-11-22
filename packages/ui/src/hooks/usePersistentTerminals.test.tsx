@@ -9,7 +9,7 @@ import { useSessionTerminalsLoaded } from './usePersistentTerminals';
 
 const terminal = (status: PersistentPtyInfo['status'], exitCode?: number): PersistentPtyInfo => {
   const info: PersistentPtyInfo = {
-    id: 'pty_1', title: 'dev', command: 'bun', args: ['run', 'dev'], cwd: '/repo', status, pid: 1, sessionID: 'ses_a',
+    id: 'pty_1', title: 'dev', userTitle: null, command: 'bun', args: ['run', 'dev'], cwd: '/repo', status, pid: 1, sessionID: 'ses_a',
     foregroundProcess: null, size: { cols: 120, rows: 40 }, output: { head: 0, tail: 0 },
   };
   if (exitCode !== undefined) info.exitCode = exitCode;

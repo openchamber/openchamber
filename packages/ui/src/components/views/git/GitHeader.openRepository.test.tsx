@@ -11,9 +11,9 @@ test('the repository menu opens provider links and hides the entry elsewhere', a
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
-    window: dom, document: dom.document, navigator: dom.navigator,
+    window: dom, document: dom.document, CustomEvent: dom.CustomEvent, navigator: dom.navigator,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
-    Event: dom.Event, CustomEvent: dom.CustomEvent, MutationObserver: dom.MutationObserver, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
+    Event: dom.Event, MutationObserver: dom.MutationObserver, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
     ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     localStorage: dom.localStorage, sessionStorage: dom.sessionStorage,
@@ -33,7 +33,12 @@ test('the repository menu opens provider links and hides the entry elsewhere', a
   const { I18nProvider } = await import('@/lib/i18n');
   const { GitHeader } = await import('./GitHeader');
   const { useSourceControlAuthStore } = await import('@/stores/useSourceControlAuthStore');
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor, gitlabLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
   const originalIdentities = useSourceControlAuthStore.getState().identities;
+  // The served providers name the hosts a remote is recognised on and how a project path reads.
+  const providers = [githubLikeDescriptor(), gitlabLikeDescriptor()];
+  useSourceControlProviderRegistry.setState({ ordered: providers, byId: new Map(providers.map((entry) => [entry.id, entry])), status: 'ready', holdsList: true });
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);

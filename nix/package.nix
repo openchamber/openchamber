@@ -89,6 +89,8 @@ stdenvNoCC.mkDerivation {
     chmod -R u+w .
     patchShebangs node_modules packages
     bun run --cwd packages/sdk build
+    # `build` compiles the TypeScript server and CLI into packages/web/build
+    # (build:server) before the Vite UI build; the wrapper runs build/bin/cli.js.
     bun run --cwd packages/web build
     runHook postBuild
   '';
@@ -98,7 +100,7 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/lib/openchamber
     cp -R . $out/lib/openchamber/
     makeWrapper ${lib.getExe nodejs_24} $out/bin/openchamber \
-      --add-flags $out/lib/openchamber/packages/web/bin/cli.js \
+      --add-flags $out/lib/openchamber/packages/web/build/bin/cli.js \
       --prefix PATH : ${
         lib.makeBinPath [
           git

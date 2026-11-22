@@ -1,73 +1,253 @@
-import type { DecorateContext } from '../markdown/decorate';
+import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
+import type { VSCodeAPI } from '@/lib/api/types';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { loadedAppFontCSS } from '@/lib/fontLoader';
+import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
+import type { Theme } from '@/types/theme';
 
 export const MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE = 'data-message-image-export-exclude';
+
+const MESSAGE_IMAGE_EXPORT_MAX_CANVAS_PX = 16384;
+
+export const resolveMessageImageExportWidth = (element: HTMLElement | null): number => {
+    const width = element?.getBoundingClientRect().width ?? 0;
+    return width > 0 ? Math.round(width) : 0;
+};
+
+export const resolveMessageImageExportPixelRatio = (
+    width: number,
+    height: number,
+    preferred = 2,
+): number => {
+    const limit = MESSAGE_IMAGE_EXPORT_MAX_CANVAS_PX / Math.max(1, width, height);
+    return Math.max(0.5, Math.min(preferred, Math.floor(limit * 100) / 100));
+};
+
+const isPainted = (element: HTMLElement, root: HTMLElement): boolean => {
+    for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+        const style = window.getComputedStyle(current);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        if (style.clip && style.clip !== 'auto') return false;
+        if (style.clipPath && style.clipPath !== 'none') return false;
+        if (current === root) break;
+    }
+    return true;
+};
+
+export const widenMessageImageExportOverflow = (root: HTMLElement): { left: number; right: number } => {
+    const content = root.getBoundingClientRect();
+    const elements = Array.from(root.querySelectorAll<HTMLElement>('*')).filter(element => isPainted(element, root));
+    const overflowing = elements.filter(element => {
+        const bounds = element.getBoundingClientRect();
+        return content.left - bounds.left > 1 || bounds.right - content.right > 1;
+    });
+    overflowing.forEach((element) => {
+
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+            const parentStyle = window.getComputedStyle(parent);
+            if (parentStyle.overflowX !== 'visible' || parentStyle.overflowY !== 'visible') {
+                parent.style.overflowX = 'visible';
+                parent.style.overflowY = 'visible';
+                if (parent !== root) {
+                    parent.style.width = 'max-content';
+                    parent.style.maxWidth = 'none';
+                }
+            }
+            if (parent === root) break;
+        }
+    });
+    let left = 0;
+    let right = 0;
+    elements.forEach((element) => {
+        const bounds = element.getBoundingClientRect();
+        left = Math.max(left, content.left - bounds.left);
+        right = Math.max(right, bounds.right - content.right);
+    });
+    return { left: left > 1 ? Math.ceil(left) : 0, right: right > 1 ? Math.ceil(right) : 0 };
+};
+
+export const fitMessageImageExportLayout = (wrapper: HTMLElement, clone: HTMLElement, width: number): void => {
+    clone.style.direction = window.getComputedStyle(clone).direction;
+    wrapper.style.direction = 'ltr';
+    clone.style.width = `${width}px`;
+    clone.style.marginLeft = '0';
+    clone.style.marginRight = 'auto';
+    const overflow = widenMessageImageExportOverflow(clone);
+    clone.style.marginLeft = `${overflow.left}px`;
+    wrapper.style.width = `${width + overflow.left + overflow.right}px`;
+};
 
 export const cloneMessageImageExportSource = (source: HTMLElement): HTMLElement => {
     // SAFETY: cloneNode preserves the concrete type of an HTMLElement source.
     const clone = source.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll(`[${MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE}="true"]`).forEach((element) => {
+    clone.querySelectorAll(`[${MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE}="true"], [data-export-ignore]`).forEach((element) => {
         element.remove();
     });
     return clone;
 };
 
-// An image has no buttons to label and no settings to toggle: the decoration
-// only has to draw code blocks and tables the way the chat does.
-const IMAGE_DECORATE_CONTEXT: DecorateContext = {
-    labels: {
-        copy: '',
-        copied: '',
-        enableCodeWrap: '',
-        disableCodeWrap: '',
-        enableTableWrap: '',
-        disableTableWrap: '',
-        copyTable: '',
-        downloadTable: '',
-        copyDiagram: '',
-        downloadDiagram: '',
-        zoomInDiagram: '',
-        zoomOutDiagram: '',
-        resetDiagramView: '',
-        previewLabel: '',
-        previewTitle: '',
-    },
-    mermaidControls: { download: false, copy: false, showPanZoomControls: false },
-    codeBlockLineWrap: false,
-    tableCellWrap: false,
-    renderMermaid: () => ({}),
+export const collapseMessageImageExportTables = (clone: HTMLElement): void => {
+    clone.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"]').forEach((wrapper) => {
+        delete wrapper.dataset.chatTable;
+        delete wrapper.dataset.tableOverflowStart;
+        delete wrapper.dataset.tableOverflowEnd;
+        if (wrapper.dataset.tableExpanded !== 'true') return;
+        delete wrapper.dataset.tableExpanded;
+        const table = wrapper.querySelector<HTMLTableElement>('[data-streamdown="table"]');
+        const frame = table?.closest<HTMLElement>('.overlay-scrollbar-wrapper');
+        if (frame && wrapper.contains(frame)) {
+            frame.style.removeProperty('transform');
+            frame.style.removeProperty('width');
+        }
+        const widths = table?.dataset.collapsedWidths?.split(',').map(Number);
+        if (!table || !widths?.length || widths.some((width) => !Number.isFinite(width))) return;
+        const capped = table.dataset.collapsedCapped ?? '';
+        table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
+        table.querySelectorAll<HTMLElement>(':scope > colgroup > col').forEach((col, index) => {
+            if (widths[index] !== undefined) col.style.width = `${widths[index]}px`;
+        });
+        table.querySelectorAll<HTMLTableRowElement>('tr').forEach((row) => {
+            Array.from(row.cells).forEach((cell, index) => {
+                cell.style.setProperty('--oc-table-code-wrap', capped[index] === '1' ? 'normal' : 'nowrap');
+            });
+        });
+    });
 };
 
-/** Renders assistant Markdown to sanitized, highlighted HTML the way the chat does. */
-const renderAssistantMarkdownHtml = async (text: string): Promise<string> => {
-    const { renderMarkdownBlocks } = await import('../markdown/markdownCore');
-    const blocks = await renderMarkdownBlocks(text, false, 'label');
-    return blocks.map((block) => block.html).join('');
+export type MessageImageSaveResult = 'saved' | 'canceled';
+
+type VSCodeImageSavePayload = { saved?: boolean; canceled?: boolean; error?: string };
+
+const dataUrlToBlob = (dataUrl: string): Blob => {
+    const [header = '', base64 = ''] = dataUrl.split(',');
+    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    return new Blob([bytes], { type: header.match(/^data:([^;]+)/)?.[1] ?? 'image/png' });
 };
 
-/**
- * The image source for a whole turn: every text part its assistant messages
- * wrote, in order. Earlier steps may be folded away or not mounted, and part of
- * the last message can sit in Activity, so the text is rendered here from
- * Markdown with the classes and decoration the chat uses. `syntaxStyle` carries
- * the code colour variables the chat sets inline on its Markdown roots.
- */
+const deliverMessageImage = async (dataUrl: string, fileName: string, vscode: VSCodeAPI | undefined): Promise<MessageImageSaveResult> => {
+    if (isVSCodeRuntime()) {
+        // SAFETY: the extension's `api:files/save-image` handler answers with this shape.
+        const payload = await vscode?.saveImage?.({ fileName, dataUrl }) as VSCodeImageSavePayload | undefined;
+        if (!payload) throw new Error('Failed to save image in VS Code');
+        if (payload.saved === true) return 'saved';
+        if (payload.canceled) return 'canceled';
+        throw new Error(payload.error || 'Failed to save image in VS Code');
+    }
+    const blob = dataUrlToBlob(dataUrl);
+    if (isCapacitorMobileApp()) {
+        try {
+            await shareFileFromNativeApp(new File([blob], fileName, { type: blob.type || 'image/png' }));
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') return 'canceled';
+            throw error;
+        }
+        return 'saved';
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = fileName;
+    link.href = url;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    return 'saved';
+};
+
+const prepareMessageImageClone = (source: HTMLElement): HTMLElement => {
+    const clone = cloneMessageImageExportSource(source);
+    clone.style.cssText = `
+        ${window.getComputedStyle(source).cssText}
+        transform: none;
+        contain: none;
+    `;
+    collapseMessageImageExportTables(clone);
+    clone.querySelectorAll<HTMLElement>('[data-code-wrap]').forEach((root) => {
+        root.setAttribute('data-code-wrap', 'true');
+    });
+    clone.querySelectorAll<HTMLElement>('[data-message-actions="true"], [data-message-action-group="true"]').forEach((element) => {
+        element.style.display = 'none';
+    });
+    const footerRowsAdjusted = new Set<HTMLElement>();
+    clone.querySelectorAll<HTMLElement>('[aria-label^="Message time:"]').forEach((element) => {
+        const timestamp = element.getAttribute('aria-label')?.replace('Message time:', '').trim();
+        if (!timestamp || element.textContent?.includes(timestamp)) return;
+        const timestampText = document.createElement('span');
+        timestampText.style.marginLeft = '4px';
+        timestampText.textContent = timestamp;
+        element.appendChild(timestampText);
+        const footerRow = element.parentElement?.parentElement;
+        if (!footerRow || footerRowsAdjusted.has(footerRow)) return;
+        footerRow.style.justifyContent = 'flex-start';
+        footerRowsAdjusted.add(footerRow);
+    });
+    return clone;
+};
+
+export const saveMessageImageExport = async ({ source, width, fileName, vscode }: {
+    source: HTMLElement;
+    width: number;
+    fileName: string;
+    vscode: VSCodeAPI | undefined;
+}): Promise<MessageImageSaveResult> => {
+    let wrapper: HTMLDivElement | null = null;
+    try {
+        const { getFontEmbedCSS, toPng } = await import('html-to-image');
+        const rootStyle = window.getComputedStyle(document.documentElement);
+        const backgroundColor = rootStyle.getPropertyValue('--surface-background').trim()
+            || window.getComputedStyle(source).backgroundColor
+            || window.getComputedStyle(document.body).backgroundColor;
+        wrapper = document.createElement('div');
+        wrapper.setAttribute('data-message-image-export', 'true');
+        wrapper.style.cssText = `
+            padding: 24px;
+            ${width ? `width: ${width}px; box-sizing: content-box;` : ''}
+            background-color: ${backgroundColor};
+            display: inline-block;
+        `;
+        const exportStyle = document.createElement('style');
+        exportStyle.textContent = `
+            [data-message-image-export] * { scrollbar-width: none; animation: none !important; transition: none !important; }
+            [data-message-image-export] *::-webkit-scrollbar { display: none; }
+        `;
+        wrapper.appendChild(exportStyle);
+        const clone = prepareMessageImageClone(source);
+        wrapper.appendChild(clone);
+        document.body.appendChild(wrapper);
+        const stylesheetFontCSS = await getFontEmbedCSS(wrapper);
+        const appFontCSS = await loadedAppFontCSS([
+            rootStyle.getPropertyValue('--font-sans'),
+            rootStyle.getPropertyValue('--font-mono'),
+        ]);
+        if (width) fitMessageImageExportLayout(wrapper, clone, width);
+        const bounds = wrapper.getBoundingClientRect();
+        const canvasWidth = Math.ceil(bounds.width);
+        const canvasHeight = Math.ceil(bounds.height);
+        const dataUrl = await toPng(wrapper, {
+            quality: 1,
+            width: canvasWidth,
+            height: canvasHeight,
+            pixelRatio: resolveMessageImageExportPixelRatio(canvasWidth, canvasHeight),
+            backgroundColor,
+            fontEmbedCSS: [stylesheetFontCSS, appFontCSS].filter(Boolean).join('\n'),
+        });
+        return await deliverMessageImage(dataUrl, fileName, vscode);
+    } finally {
+        wrapper?.remove();
+    }
+};
+
 export const buildTurnImageExportSource = async (
     segments: readonly string[],
     syntaxStyle: string | null,
-    renderMarkdownHtml: (text: string) => Promise<string> = renderAssistantMarkdownHtml,
+    options: { width?: number; theme?: Theme } = {},
 ): Promise<HTMLElement> => {
-    const { decorateMarkdown } = await import('../markdown/decorate');
+    const { renderMarkdownForExport } = await import('../markdown/renderMarkdownForExport');
     const source = document.createElement('div');
-
     for (const text of segments) {
-        const html = await renderMarkdownHtml(text);
+        const markdown = await renderMarkdownForExport(text, { ...options, purpose: 'image', syntaxStyle });
         const segment = document.createElement('div');
         segment.className = 'relative break-words my-1';
-        const markdown = document.createElement('div');
-        markdown.className = 'markdown-content leading-relaxed';
-        if (syntaxStyle) markdown.setAttribute('style', syntaxStyle);
-        markdown.innerHTML = html;
-        decorateMarkdown(markdown, IMAGE_DECORATE_CONTEXT);
         segment.appendChild(markdown);
         source.appendChild(segment);
     }

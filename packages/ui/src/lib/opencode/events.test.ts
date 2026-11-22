@@ -40,6 +40,23 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("session.created of a workflow agent names the session that ran it as the parent", () => {
+    const [event] = translateWireEvent({
+      ...base,
+      type: "session.created",
+      durable,
+      data: {
+        sessionID: "ses_agent",
+        projectID: "proj_1",
+        location: { directory: "/repo" },
+        slug: "agent",
+        version: "2.3.0",
+        metadata: { openchamber: { kind: "workflow-agent", parentID: "ses_parent" } },
+      },
+    })
+    expect(event?.type === "session.created" && event.properties.info.parentID).toBe("ses_parent")
+  })
+
   test("session.forked carries the fork and parent ids (2.x sends no session.created for a fork)", () => {
     const forked = translateWireEvent({
       ...base,
@@ -107,6 +124,24 @@ describe("translateWireEvent", () => {
     expect(done.map((e) => e.type)).toEqual(["session.patched", "session.idle"])
   })
 
+  test("a view moves the watermark to the turn the viewer saw, not to when it was recorded", () => {
+    const viewed = translateWireEvent({ ...base, type: "session.viewed", durable, data: { sessionID: "ses_1", idle: 400 } })
+    expect(viewed).toEqual([
+      { type: "session.patched", properties: { sessionID: "ses_1", patch: { time: { viewed: 400 } } } },
+    ])
+  })
+
+  test("archive and unarchive stamp the archive time from the event and move the update time", () => {
+    const archived = translateWireEvent({ ...base, type: "session.archived", durable, data: { sessionID: "ses_1" } })
+    expect(archived).toEqual([
+      { type: "session.patched", properties: { sessionID: "ses_1", patch: { time: { archived: 1000, updated: 1000 } } } },
+    ])
+    const restored = translateWireEvent({ ...base, type: "session.unarchived", durable, data: { sessionID: "ses_1" } })
+    expect(restored).toEqual([
+      { type: "session.patched", properties: { sessionID: "ses_1", patch: { time: { archived: null, updated: 1000 } } } },
+    ])
+  })
+
   test("a user prompt entering the inbox becomes a user message with projected parts", () => {
     const events = translateWireEvent({
       ...base,
@@ -126,6 +161,40 @@ describe("translateWireEvent", () => {
       type: "message.parts.replaced",
       properties: { messageID: "msg_u", parts: [{ id: partIds.userText("msg_u"), type: "text", text: "hi" }] },
     })
+  })
+
+  test("skills attached to a prompt entering the inbox reach the live user message", () => {
+    const events = translateWireEvent({
+      ...base,
+      type: "session.inbox.enqueued",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        inboxID: "msg_u",
+        item: { type: "user", delivery: "steer", payload: { text: "Follow $demo", skills: [{ id: "demo", name: "Demo" }] } },
+      },
+    })
+    expect(events[0]).toEqual({
+      type: "message.updated",
+      properties: { info: { id: "msg_u", sessionID: "ses_1", role: "user", time: { created: 1000 }, skills: [{ id: "demo", name: "Demo" }] } },
+    })
+  })
+
+  test("a synthetic item entering the inbox is pending until it is delivered", () => {
+    const events = translateWireEvent({
+      ...base,
+      type: "session.inbox.enqueued",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        inboxID: "msg_s",
+        item: { type: "synthetic", delivery: "steer", payload: { text: "result" } },
+      },
+    })
+    expect(events).toEqual([{
+      type: "message.updated",
+      properties: { info: { id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 1000 }, text: "result", pending: true } },
+    }])
   })
 
   test("assistant steps create the message, then patch it on completion", () => {
@@ -165,6 +234,21 @@ describe("translateWireEvent", () => {
         },
       },
     ])
+  })
+
+  test("completed compaction events retain the model that wrote the summary", () => {
+    const model = { providerID: "summary-provider", id: "summary-model" }
+    const events = translateWireEvent({
+      ...base, type: "session.compaction.ended", durable,
+      data: { sessionID: "ses_1", reason: "auto", text: "Summary", model },
+    })
+    expect(events[0]).toMatchObject({ properties: { info: { role: "compaction", status: "completed", model } } })
+    const legacy = translateWireEvent({
+      ...base, type: "session.compaction.ended", durable,
+      data: { sessionID: "ses_1", reason: "auto", text: "Summary" },
+    })
+    expect(legacy[0]).toMatchObject({ properties: { info: { role: "compaction", status: "completed", summary: "Summary" } } })
+    expect(legacy[0]).not.toHaveProperty("properties.info.model")
   })
 
   test("text streams as a part, deltas, then a final snapshot", () => {
@@ -286,7 +370,11 @@ describe("translateWireEvent", () => {
     })
     expect(form[0]).toMatchObject({ type: "form.created", properties: { form: { id: "form_1" } } })
     const settled = translateWireEvent({ ...base, type: "form.cancelled", data: { id: "form_1", sessionID: "ses_1" } })
-    expect(settled).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1" } }])
+    // The two settle events collapse for the reducer but keep their
+    // disposition: recovery must tell an answer from a cancellation.
+    expect(settled).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1", disposition: "cancelled" } }])
+    const replied = translateWireEvent({ ...base, type: "form.replied", data: { id: "form_1", sessionID: "ses_1", answer: { a: true } } })
+    expect(replied).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1", disposition: "replied" } }])
   })
 
   test("catalog rebuilds name the list that has to be re-read", () => {
@@ -296,7 +384,7 @@ describe("translateWireEvent", () => {
       [{ ...base, type: "command.updated", data: {} }, "command"],
       [{ ...base, type: "skill.updated", data: {} }, "skill"],
       [{ ...base, type: "plugin.updated", data: {} }, "plugin"],
-      [{ ...base, type: "credential.updated", data: {} }, "credential"],
+      [{ ...base, type: "credential.updated", data: { integrationID: "openai", credentialID: "cred_1" } }, "credential"],
       [{ ...base, type: "credential.switched", data: { integrationID: "openai", credentialID: null } }, "credential"],
       [
         { ...base, type: "project.updated", data: { id: "proj", canonical: "/repo", time: { created: 1, updated: 1, active: 1 }, sandboxes: [] } },
@@ -362,10 +450,14 @@ describe("translateWireEvent", () => {
       { ...base, type: "session.inbox.delivery.changed", durable, data: { sessionID: "ses_1", inboxID: "in_1", delivery: "queue" } },
       { ...base, type: "tui.toast.show", data: { message: "x", variant: "info" } },
       { ...base, type: "integration.updated", data: {} },
-      { ...base, type: "filesystem.changed", data: { file: "/repo/a.ts", event: "change" } },
       { ...base, type: "worktree.updated", data: { projectID: "proj" } },
     ]
     for (const event of ignored) expect(translateWireEvent(event)).toEqual([])
+  })
+
+  test("a watched file's change names the file", () => {
+    expect(translateWireEvent({ ...base, type: "filesystem.changed", data: { file: "/repo/a.ts", event: "unlink" } }))
+      .toEqual([{ type: "filesystem.changed", properties: { file: "/repo/a.ts" } }])
   })
 })
 

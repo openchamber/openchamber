@@ -1,43 +1,49 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTrackedItemReaders } from './readers.js';
 
-const rateLimitModule = (limited = false) => ({
-  isGitHubRateLimited: () => limited,
-  isGitHubRateLimitError: (error) => error?.status === 429,
-  noteGitHubRateLimit: vi.fn(),
-});
-
-const readersWith = ({ octokit = {}, fetchPrSummaries = vi.fn(async () => ({ summaries: [{ number: 1 }], issueSummaries: [] })), limited = false, gitlab, linear } = {}) => createTrackedItemReaders({
-  loadGitHub: async () => ({ getOctokitOrNull: async () => octokit, getOctokitForAccountId: async (accountId) => (accountId === 'bound' ? { octokit: { bound: true } } : null) }),
-  loadGitHubSummaries: async () => ({ fetchPrSummaries, isGraphqlRateLimitError: () => false }),
-  loadGitHubRateLimit: async () => rateLimitModule(limited),
-  loadLinear: async () => ({ getLinearIssueSummaries: linear ?? (async () => ({ connected: false })) }),
-  readGitLabLiveSummaries: gitlab,
+const trackersWith = (implementations) => ({
+  implementation: vi.fn(async (id) => implementations[id] ?? null),
 });
 
 describe('tracked item readers', () => {
-  it('reads GitHub with the current account and says why when it cannot', async () => {
-    const fetchPrSummaries = vi.fn(async () => ({ summaries: [{ number: 1 }], issueSummaries: [{ number: 2 }] }));
-    await expect(readersWith({ fetchPrSummaries }).github({ pulls: [{ owner: 'a', repo: 'b', number: 1 }], issues: [] }))
-      .resolves.toEqual({ status: 'ok', pulls: [{ number: 1 }], issues: [{ number: 2 }] });
-    await expect(readersWith({ octokit: null }).github({ pulls: [], issues: [] })).resolves.toEqual({ status: 'disconnected' });
-    // A bound repository's account answers for its own pull requests.
-    await readersWith({ fetchPrSummaries }).github({ accountId: 'bound', pulls: [], issues: [] });
-    expect(fetchPrSummaries).toHaveBeenLastCalledWith({ octokit: { bound: true }, refs: [], issueRefs: [] });
-    await expect(readersWith().github({ accountId: 'gone', pulls: [], issues: [] })).resolves.toEqual({ status: 'disconnected' });
-    await expect(readersWith({ limited: true }).github({ pulls: [], issues: [] })).resolves.toEqual({ status: 'unavailable' });
-    const limitedNow = vi.fn(async () => { throw Object.assign(new Error('limit'), { status: 429 }); });
-    await expect(readersWith({ fetchPrSummaries: limitedNow }).github({ pulls: [], issues: [] })).resolves.toEqual({ status: 'unavailable' });
+  it('reads change requests and issues through the provider-neutral reader', async () => {
+    const readLiveSummaries = vi.fn(async () => ({ connected: true, summaries: [{ number: 3 }], issueSummaries: [{ number: 4 }] }));
+    const readers = createTrackedItemReaders({ readLiveSummaries });
+    await expect(readers.sourceControl({
+      provider: 'gitlab', instance: 'https://gitlab.com', accountId: 'acc', pulls: [{ owner: 'g', repo: 'r', number: 3 }], issues: [],
+    })).resolves.toEqual({ status: 'ok', pulls: [{ number: 3 }], issues: [{ number: 4 }], discussions: [] });
+    expect(readLiveSummaries).toHaveBeenCalledWith({
+      provider: 'gitlab', instance: 'https://gitlab.com', accountId: 'acc', refs: [{ owner: 'g', repo: 'r', number: 3 }], issueRefs: [], discussionRefs: [], details: false,
+    });
   });
 
-  it('maps GitLab and Linear answers into the same terms', async () => {
-    const gitlab = vi.fn(async () => ({ connected: true, summaries: [{ number: 3 }], issueSummaries: [] }));
-    await expect(readersWith({ gitlab }).gitlab({ instance: 'https://gitlab.com', pulls: [{ owner: 'g', repo: 'r', number: 3 }], issues: [] }))
-      .resolves.toEqual({ status: 'ok', pulls: [{ number: 3 }], issues: [] });
-    expect(gitlab).toHaveBeenCalledWith({ instance: 'https://gitlab.com', accountId: null, refs: [{ owner: 'g', repo: 'r', number: 3 }], issueRefs: [] });
-    await expect(readersWith({ gitlab: async () => ({ connected: false }) }).gitlab({ instance: 'https://gitlab.com', pulls: [], issues: [] }))
+  it('says why a provider cannot answer: no account, or its own status', async () => {
+    const answer = (result) => createTrackedItemReaders({ readLiveSummaries: async () => result })
+      .sourceControl({ provider: 'github', instance: 'github.com', pulls: [], issues: [] });
+    await expect(answer({ connected: false })).resolves.toEqual({ status: 'disconnected' });
+    // GitHub's per-host rate limit and refused token come back as a status.
+    await expect(answer({ connected: true, status: 'unavailable' })).resolves.toEqual({ status: 'unavailable' });
+    await expect(answer({ connected: true, status: 'unavailable', retryAfterMs: 5000 })).resolves.toEqual({ status: 'unavailable', retryAfterMs: 5000 });
+    await expect(answer({ connected: true, status: 'disconnected' })).resolves.toEqual({ status: 'disconnected' });
+    await expect(createTrackedItemReaders({}).sourceControl({ provider: 'github', pulls: [], issues: [] }))
       .resolves.toEqual({ status: 'disconnected' });
-    await expect(readersWith({ linear: async () => ({ connected: true, issues: [{ identifier: 'OPE-1' }] }) }).linear({ identifiers: ['OPE-1'] }))
-      .resolves.toEqual({ status: 'ok', issues: [{ identifier: 'OPE-1' }] });
+  });
+
+  it('reads work items through the tracker registry', async () => {
+    const liveSummaries = vi.fn(async () => ({ connected: true, items: [{ identifier: 'OPE-1', title: 'T', state: { name: 'Todo', category: 'todo' } }] }));
+    const trackers = trackersWith({ linear: { liveSummaries } });
+    await expect(createTrackedItemReaders({ trackers }).workItems({ provider: 'linear', identifiers: ['OPE-1'] }))
+      .resolves.toEqual({ status: 'ok', items: [{ identifier: 'OPE-1', title: 'T', state: { name: 'Todo', category: 'todo' } }] });
+    expect(liveSummaries).toHaveBeenCalledWith(['OPE-1']);
+    const disconnected = trackersWith({ linear: { liveSummaries: async () => ({ connected: false }) } });
+    await expect(createTrackedItemReaders({ trackers: disconnected }).workItems({ provider: 'linear', identifiers: ['OPE-1'] }))
+      .resolves.toEqual({ status: 'disconnected' });
+  });
+
+  it('answers disconnected for a tracker this server does not register', async () => {
+    const trackers = trackersWith({});
+    await expect(createTrackedItemReaders({ trackers }).workItems({ provider: 'jira', identifiers: ['OPS-1'] }))
+      .resolves.toEqual({ status: 'disconnected' });
+    expect(trackers.implementation).toHaveBeenCalledWith('jira');
   });
 });

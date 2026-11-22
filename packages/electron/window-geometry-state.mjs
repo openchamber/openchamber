@@ -19,7 +19,7 @@ export const createWindowGeometryState = ({
   const schedule = (browserWindow, immediate = false) => {
     if (!browserWindow || browserWindow.isDestroyed()) return;
     const key = String(browserWindow.id);
-    const revision = (revisions.get(key) || 0) + 1;
+    const revision = {};
     revisions.set(key, revision);
 
     const existingTimer = timers.get(key);
@@ -51,5 +51,5 @@ export const createWindowGeometryState = ({
     timers.set(key, timer);
   };
 
-  return { schedule, cancel, revisions, timers };
+  return { schedule, cancel };
 };

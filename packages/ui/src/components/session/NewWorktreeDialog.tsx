@@ -18,10 +18,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSourceControlAuthEntry } from '@/stores/useSourceControlAuthStore';
-import { formatChangeRequestReference, GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
@@ -32,7 +29,6 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
 import { NewWorktreeBranchPicker } from './NewWorktreeBranchPicker';
-import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { branchNameFromTemplate, uniqueBranchName } from '@/lib/worktrees/branchNameTemplate';
 import {
   checkPullRequestSource,
@@ -42,10 +38,9 @@ import {
 } from '@/lib/worktrees/worktreeStartSource';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
+import { useGitBranches, useGitBranchesFetchedAt, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
-import { referencePickerItemKey, type ReferencePickerSelection } from '@/components/references/referencePickerItems';
-import { readLinearIssueDetail, useGitHubReadContext, useRepositoryReferenceProvider } from '@/components/references/referenceSources';
+import { referencePickerItemKey, trackerReferenceSource, type ReferencePickerSelection, type ReferencePickerSource } from '@/components/references/referencePickerItems';
 import { resolveComposerReferences } from '@/components/references/resolveComposerReferences';
 import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
 import { useInputStore } from '@/sync/input-store';
@@ -56,8 +51,20 @@ import { resolvePrWorktreeConfig, type PrWorktreeSource } from './prWorktreeConf
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
+import { useSourceControlDescriptorOf, useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getWorktreeCreateCommand } from '@/lib/openchamberConfig';
+import { resolveBranchOnTopSource, resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
+import { remoteDefaultBranches, splitBranchList } from '@/lib/worktrees/branchSearch';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { readTrackerDescriptor } from '@/lib/trackers/registry';
+import { useTrackerSources } from '@/lib/trackers/sources';
+import { readTrackerItemDetail, useRepositoryReadContext, useRepositoryReferenceProvider, useRepositorySourceStatus } from '@/components/references/referenceSources';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
-/** The dialog's tabs: a fresh branch, a branch that exists, or the branch of an issue or PR. */
 type Mode = 'new-branch' | 'existing-branch' | 'from-item';
 
 interface ValidationState {
@@ -67,23 +74,17 @@ interface ValidationState {
   touched: boolean;
 }
 
-/** A branch to create, and the worktree folder named after it until the user renames the folder. */
 interface BranchDraft {
   branchName: string;
   worktreeName: string;
   isSyncingWorktreeName: boolean;
 }
 
-/**
- * What a "PR or issue" worktree is for. A PR checks out its own branch; the
- * others get a new branch named after them. `selection` is the picker's choice,
- * handed to the new draft's composer as a chip.
- */
+
 type LinkedItem =
   | {
     kind: 'pr';
     pr: PrWorktreeSource & { title: string; url: string };
-    /** The account and repository the PR's branch is fetched through. */
     context: SourceControlReadContext;
     includeDiff: boolean;
     selection: ReferencePickerSelection;
@@ -92,8 +93,8 @@ type LinkedItem =
     /** Its branch is checked out in another worktree, so only a new branch can start from it. */
     headInUse: boolean;
   }
-  | { kind: 'issue'; number: number; title: string; url: string; selection: ReferencePickerSelection }
-  | { kind: 'linear'; identifier: string; title: string; url: string; selection: ReferencePickerSelection }
+  | { kind: 'issue'; number: number; title: string; url: string; discussion: boolean; selection: ReferencePickerSelection }
+  | { kind: 'tracker'; provider: string; identifier: string; title: string; url: string; selection: ReferencePickerSelection }
   | { kind: 'guest'; guest: AttachIssueRequest };
 
 interface ExistingBranchState {
@@ -129,12 +130,10 @@ const slugifyWorktreeName = (value: string): string => {
 interface NewWorktreeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The project to create in; the sidebar's active project when absent. A draft passes its own. */
   project?: { id: string; path: string };
-  /** The dialog is closed by then; a chosen issue or PR follows as a composer chip. */
   onWorktreeCreated?: (worktreePath: string) => void;
-  /** Opens on "PR or issue" with this item already chosen. */
   initialSelection?: ReferencePickerSelection;
+  initialSourceBranch?: string;
 }
 
 export function NewWorktreeDialog({
@@ -143,32 +142,41 @@ export function NewWorktreeDialog({
   project,
   onWorktreeCreated,
   initialSelection,
+  initialSourceBranch,
 }: NewWorktreeDialogProps) {
   const { t } = useI18n();
-  const { sourceControl, git, linear } = useRuntimeAPIs();
+  const { sourceControl, git, trackers } = useRuntimeAPIs();
   const trustConfirmation = useConfirmDialog();
   const isMobile = useUIStore((state) => state.isMobile);
-  const githubAuthEntry = useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY);
-  const githubAuthStatus = githubAuthEntry?.status ?? null;
-  const githubAuthChecked = githubAuthEntry?.hasChecked ?? false;
-  const linearAuthStatus = useLinearAuthStore((state) => state.status);
-  const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
-  const guestAttachItems = useGuestAttachItems();
+  const trackerSources = useTrackerSources();
+  const [guestDialogId, setGuestDialogId] = React.useState<string | null>(null);
+  const [referencePickerSource, setReferencePickerSource] = React.useState<ReferencePickerSource | null>(null);
+  const activeProject = useProjectsStore((state) => state.getActiveProject());
+  const projectId = project?.id ?? activeProject?.id ?? null;
+  const projectDirectory = project?.path ?? activeProject?.path ?? null;
+  const guestAttachItems = useGuestAttachItems([projectDirectory]);
   const dialogGuests = React.useMemo(
     () => guestAttachItems.filter((item) => item.mode === 'dialog'),
     [guestAttachItems],
   );
-  const [guestDialogId, setGuestDialogId] = React.useState<string | null>(null);
-  const [referencePickerSource, setReferencePickerSource] = React.useState<'github' | 'linear' | null>(null);
-  const activeProject = useProjectsStore((state) => state.getActiveProject());
-  const projectId = project?.id ?? activeProject?.id ?? null;
-  const projectDirectory = project?.path ?? activeProject?.path ?? null;
   const projectRef: ProjectRef | null = React.useMemo(
     () => (projectId && projectDirectory ? { id: projectId, path: projectDirectory } : null),
     [projectDirectory, projectId],
   );
 
-  // Each tab keeps its own fields while the user switches between them.
+  const [usesCreateCommand, setUsesCreateCommand] = React.useState(false);
+  React.useEffect(() => {
+    setUsesCreateCommand(false);
+    if (!open || !projectRef) return;
+    let cancelled = false;
+    void getWorktreeCreateCommand(projectRef).then((command) => {
+      if (!cancelled) setUsesCreateCommand(Boolean(command));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectRef]);
+
   const [mode, setMode] = React.useState<Mode>('new-branch');
   const [newBranch, setNewBranch] = React.useState<BranchDraft>(EMPTY_DRAFT);
   const [itemBranch, setItemBranch] = React.useState<BranchDraft>(EMPTY_DRAFT);
@@ -178,25 +186,12 @@ export function NewWorktreeDialog({
   // A linked PR: start a new branch from its head instead of checking out its branch.
   const [prBranchOff, setPrBranchOff] = React.useState(false);
 
-  // Use cached branches from Git store (instant if already fetched)
   const branches = useGitBranches(projectDirectory);
   const isLoadingBranches = useGitLoadingBranches(projectDirectory);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
 
-  const localBranches = React.useMemo(() => {
-    if (!branches?.all) return [];
-    return branches.all.filter((branchName: string) => !branchName.startsWith('remotes/')).sort();
-  }, [branches]);
+  const { localBranches, remoteBranches } = React.useMemo(() => splitBranchList(branches?.all), [branches]);
 
-  const remoteBranches = React.useMemo(() => {
-    if (!branches?.all) return [];
-    return branches.all
-      .filter((branchName: string) => branchName.startsWith('remotes/'))
-      .map((branchName: string) => branchName.replace(/^remotes\//, ''))
-      .sort();
-  }, [branches]);
-
-  // Get existing worktrees for the current project to avoid conflicts
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const existingWorktreeNames = React.useMemo(() => {
     if (!projectDirectory) return new Set<string>();
@@ -204,7 +199,6 @@ export function NewWorktreeDialog({
     return new Set(worktrees.map(wt => wt.name));
   }, [availableWorktreesByProject, projectDirectory]);
 
-  // Generate a unique slug that doesn't conflict with existing worktrees
   const generateUniqueSlug = React.useCallback((maxAttempts = 10): string => {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const slug = generateBranchSlug();
@@ -212,21 +206,22 @@ export function NewWorktreeDialog({
         return slug;
       }
     }
-    // Fallback: add timestamp if all attempts failed
     return `${generateBranchSlug()}-${Date.now().toString(36).slice(-4)}`;
   }, [existingWorktreeNames]);
 
   const canFetchBranches = Boolean(projectDirectory && git);
   const handleFetchBranches = React.useCallback(() => {
     if (!projectDirectory || !git) return;
-    void fetchBranches(projectDirectory, git);
+    void fetchBranches(projectDirectory, git, { remote: 'live' });
   }, [projectDirectory, git, fetchBranches]);
 
+  const branchesFetchedAt = useGitBranchesFetchedAt(projectDirectory);
+  const fetchedBranchList = branchesFetchedAt > 0 ? branches?.all : undefined;
   React.useEffect(() => {
     if (!open || !projectDirectory || !git) return;
-    if (branches?.all) return;
+    if (fetchedBranchList) return;
     void fetchBranches(projectDirectory, git);
-  }, [open, projectDirectory, git, branches?.all, fetchBranches]);
+  }, [open, projectDirectory, git, fetchedBranchList, fetchBranches]);
 
   const [validation, setValidation] = React.useState<ValidationState>({
     isValidating: false,
@@ -235,10 +230,7 @@ export function NewWorktreeDialog({
     touched: false,
   });
   const [isCreating, setIsCreating] = React.useState(false);
-  const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
-  // The random name this open started with. Folder names stay ASCII, so a
-  // branch name without Latin letters or digits (`测试分支`) leaves no slug and
-  // the folder keeps this name instead of going empty.
+  const validationAbortController = React.useRef<AbortController | null>(null);
   const [fallbackFolderName, setFallbackFolderName] = React.useState('');
   const folderNameForBranch = React.useCallback(
     (branch: string) => slugifyWorktreeName(branch) || fallbackFolderName,
@@ -247,7 +239,6 @@ export function NewWorktreeDialog({
   const initializedForCurrentOpen = React.useRef(false);
   // This open's branch suggestion, before and after the step past local branches.
   const branchSuggestion = React.useRef<{ base: string; value: string } | null>(null);
-  // The item the dialog was opened with, until it is chosen.
   const pendingInitialSelection = React.useRef<ReferencePickerSelection | null>(null);
 
   const linkedPr = mode === 'from-item' && linked?.kind === 'pr' ? linked.pr : null;
@@ -255,14 +246,15 @@ export function NewWorktreeDialog({
   const linkedPrChoices = mode === 'from-item' && linked?.kind === 'pr' ? pullRequestWorktreeChoices(linked) : null;
   // A PR checked out brings its branch; branched off, it is only where the new branch starts.
   const checksOutPr = Boolean(linkedPr) && !prBranchOff;
-  const githubContext = useGitHubReadContext(open ? projectDirectory : null);
-  // A GitLab project's items are merge requests: the PR-or-issue copy says so.
-  const itemProvider = useRepositoryReferenceProvider(open ? projectDirectory : null);
+  const repositoryContext = useRepositoryReadContext(open ? projectDirectory : null);
+  const repositorySourceStatus = useRepositorySourceStatus(open ? projectDirectory : null);
+  const itemDescriptor = useSourceControlProvider(useRepositoryReferenceProvider(open ? projectDirectory : null));
+  const itemTerm = itemDescriptor.terminology.changeRequest;
   const tItem = React.useCallback(
-    (key: I18nKey) => t(changeRequestCopy(key, itemProvider)),
-    [itemProvider, t],
+    (key: I18nKey) => t(changeRequestCopy(key, itemTerm)),
+    [itemTerm, t],
   );
-  // The fields the visible tab edits.
+  const descriptorOf = useSourceControlDescriptorOf();
   const draft = mode === 'from-item' ? itemBranch : newBranch;
   const setDraft = mode === 'from-item' ? setItemBranch : setNewBranch;
   const branchName = mode === 'existing-branch' ? existingBranch.selectedBranch : draft.branchName;
@@ -281,9 +273,19 @@ export function NewWorktreeDialog({
   const pullRequestMode = useConfigStore((state) => state.settingsPullRequestWorktree);
   const branchTemplate = useConfigStore((state) => state.settingsWorktreeBranchTemplate);
   const pullRequestBranchTemplate = useConfigStore((state) => state.settingsPullRequestBranchTemplate);
+  const onTopRemote = repositoryContext && repositoryContext !== 'missing' ? repositoryContext.primaryRemote : 'origin';
+  const remoteDefaults = React.useMemo(
+    () => remoteDefaultBranches({ defaultBranches: branches?.defaultBranches, remoteBranches, primaryRemote: onTopRemote }),
+    [branches?.defaultBranches, remoteBranches, onTopRemote],
+  );
   React.useEffect(() => {
-    if (!open || !branches?.all || !projectDirectory || sourceBranch) return;
-    const remoteDefault = startFrom === 'remote-default' ? resolveRemoteDefaultStartRef(branches) : null;
+    if (!open || !initialSourceBranch || !fetchedBranchList || sourceBranch) return;
+    setSourceBranch(resolveBranchOnTopSource(fetchedBranchList, initialSourceBranch) || `remotes/${onTopRemote}/${initialSourceBranch}`);
+  }, [open, initialSourceBranch, fetchedBranchList, sourceBranch, onTopRemote]);
+
+  React.useEffect(() => {
+    if (!open || initialSourceBranch || !fetchedBranchList || !projectDirectory || sourceBranch) return;
+    const remoteDefault = startFrom === 'remote-default' && branches ? resolveRemoteDefaultStartRef(branches) : null;
     if (remoteDefault) {
       setSourceBranch(remoteDefault);
       return;
@@ -291,16 +293,16 @@ export function NewWorktreeDialog({
     let cancelled = false;
     void getRootBranch(projectDirectory).catch(() => null).then((rootBranch) => {
       if (cancelled) return;
-      const preferred = resolveDefaultSourceBranch({ branches: branches.all, rootBranch });
+      const defaultBranches = branches?.defaultBranches ?? {};
+      const defaultBranch = defaultBranches[onTopRemote] ?? null;
+      const preferred = resolveDefaultSourceBranch({ branches: fetchedBranchList, rootBranch, defaultBranch, remote: onTopRemote });
       if (preferred) setSourceBranch((current) => current || preferred);
     });
     return () => {
       cancelled = true;
     };
-  }, [open, branches, projectDirectory, sourceBranch, startFrom]);
+  }, [open, initialSourceBranch, fetchedBranchList, branches, projectDirectory, sourceBranch, onTopRemote, startFrom]);
 
-  // Reset state on each open. Resetting on close would empty the form during
-  // the close animation, causing visible flicker.
   React.useLayoutEffect(() => {
     if (!open) {
       initializedForCurrentOpen.current = false;
@@ -336,7 +338,6 @@ export function NewWorktreeDialog({
     setNewBranch((prev) => (prev.branchName === suggestion.value ? { ...prev, branchName: next } : prev));
   }, [open, localBranches]);
 
-  // The folder follows the branch name until the user renames the folder.
   React.useEffect(() => {
     if (!newBranch.isSyncingWorktreeName) return;
     const synced = folderNameForBranch(newBranch.branchName);
@@ -348,15 +349,12 @@ export function NewWorktreeDialog({
     if (synced !== itemBranch.worktreeName) setItemBranch((prev) => ({ ...prev, worktreeName: synced }));
   }, [folderNameForBranch, itemBranch.branchName, itemBranch.isSyncingWorktreeName, itemBranch.worktreeName]);
 
-  // Validation - only runs after fields are touched
   const validateInputs = React.useCallback(async () => {
     if (!projectRef || !validation.touched || isCreating) return;
 
-    if (validationAbortController) {
-      validationAbortController.abort();
-    }
+    validationAbortController.current?.abort();
     const abortController = new AbortController();
-    setValidationAbortController(abortController);
+    validationAbortController.current = abortController;
     setValidation(prev => ({ ...prev, isValidating: true }));
 
     try {
@@ -411,12 +409,10 @@ export function NewWorktreeDialog({
     prBranchOff,
     branches?.branches,
     validation.touched,
-    validationAbortController,
     isCreating,
     t,
   ]);
 
-  // Trigger validation on input changes (only after touched)
   React.useEffect(() => {
     if (!open || !projectRef || !validation.touched || isCreating) return;
     const timer = setTimeout(() => {
@@ -425,22 +421,25 @@ export function NewWorktreeDialog({
     return () => clearTimeout(timer);
   }, [worktreeName, branchName, open, projectRef, validateInputs, validation.touched, isCreating]);
 
-  // Hands the chosen item to the new draft's composer as a chip; the user
-  // writes the first message. Its context is read here, where the item's
-  // project is known; reading takes a moment, so the draft opens first.
   const attachLinkedItem = (item: LinkedItem) => {
     if (item.kind === 'guest') {
       useInputStore.getState().setPendingGuestIssue(item.guest);
       return;
     }
+    const draft = useSessionUIStore.getState().newSessionDraft;
+    if (!draft.open || !draft.workDraftId) return;
+    const target = { kind: 'draft', workDraftId: draft.workDraftId, runtimeKey: getRuntimeKey() } as const;
     void resolveComposerReferences([item.selection], {
       sourceControl,
-      context: item.kind === 'pr' ? item.context : (githubContext && githubContext !== 'missing' ? githubContext : null),
-      readLinearDetail: (issueId) => (linear
-        ? readLinearIssueDetail(linear, issueId)
-        : Promise.reject(new Error('Linear is not available here'))),
+      context: item.kind === 'pr' ? item.context : (repositoryContext && repositoryContext !== 'missing' ? repositoryContext : null),
+      readTrackerDetail: (provider, itemId) => (trackers
+        ? readTrackerItemDetail(trackers, provider, itemId)
+        : Promise.reject(new Error('Trackers are not available here'))),
+      trackerName: (provider) => readTrackerDescriptor(provider).name,
     }).then(({ references, failures }) => {
-      if (references.length > 0) usePendingComposerReferences.getState().push(references);
+      if (references.length > 0) {
+        usePendingComposerReferences.getState().push(references, target);
+      }
       const failure = failures[0];
       if (failure) {
         toast.error(t('session.newWorktree.error.attachLinkedFailed', { item: failure.label }), { description: failure.error });
@@ -466,10 +465,8 @@ export function NewWorktreeDialog({
       return;
     }
 
-    if (validationAbortController) {
-      validationAbortController.abort();
-      setValidationAbortController(null);
-    }
+    validationAbortController.current?.abort();
+    validationAbortController.current = null;
     setValidation((prev) => ({ ...prev, isValidating: false, branchError: null, worktreeError: null }));
     setIsCreating(true);
 
@@ -481,8 +478,6 @@ export function NewWorktreeDialog({
       const args: CreateWorktreeArgs = (() => {
         if (linkedPr) {
           if (!linkedPrContext) throw new Error(tItem('session.newWorktree.error.changeRequestAuthorityMissing'));
-          // The server fetches the PR's head through the repository's account
-          // and checks it is still the revision the picker showed.
           const prConfig = resolvePrWorktreeConfig(linkedPr, linkedPrContext, branches?.branches ?? {});
           sourceLabel = prConfig.sourceLabel;
           // The server starts the new branch at the head it resolves from the PR.
@@ -507,6 +502,7 @@ export function NewWorktreeDialog({
             returnAfterDirectoryCreated: true,
             expectedRevision: prConfig.expectedRevision,
             changeRequestSource: prConfig.changeRequestSource,
+            taskTitle: linkedPr.title,
           };
         }
 
@@ -519,6 +515,7 @@ export function NewWorktreeDialog({
           existingBranch: mode === 'existing-branch' ? normalizedBranch : undefined,
           setupCommands: resolvedSetupCommands,
           returnAfterDirectoryCreated: true,
+          taskTitle: item?.kind === 'issue' || item?.kind === 'tracker' ? item.title : item?.kind === 'guest' ? item.guest.title : undefined,
         };
         if (sourceBranch && startsNewBranch) baseArgs.startRef = sourceBranch;
         return baseArgs;
@@ -526,8 +523,6 @@ export function NewWorktreeDialog({
 
       const metadata = await createWorktreeWithDefaults(projectRef, args);
 
-      // A contributor's fork may carry hooks or setup commands; they run only
-      // when the user says so, after the checkout is ready.
       if (metadata.provenance?.kind === 'contributor-fork') {
         await waitForWorktreeBootstrap(metadata.path);
         const trust = await git.inspectCheckoutTrust(metadata.path);
@@ -544,8 +539,6 @@ export function NewWorktreeDialog({
 
       onOpenChange(false);
       setIsCreating(false);
-      // The draft opens in the new worktree before the chosen item arrives,
-      // so its chip lands on that draft's composer and not the one behind.
       onWorktreeCreated?.(metadata.path);
 
       toast.success(t('session.newWorktree.toast.worktreeCreated'), {
@@ -568,7 +561,6 @@ export function NewWorktreeDialog({
     setValidation(prev => ({ ...prev, touched: false, branchError: null, worktreeError: null }));
   };
 
-  // A chosen item names the branch the worktree gets; a PR brings its own.
   const linkItem = (item: LinkedItem, branch: string) => {
     setLinked(item);
     setItemBranch({ branchName: branch, worktreeName: folderNameForBranch(branch), isSyncingWorktreeName: true });
@@ -579,20 +571,20 @@ export function NewWorktreeDialog({
     const [choice] = selections;
     if (!choice) return null;
 
-    if (choice.source === 'linear') {
-      const { issue } = choice;
+    if (choice.source === 'tracker') {
+      const { item, provider } = choice;
       linkItem(
-        { kind: 'linear', identifier: issue.identifier, title: issue.title, url: issue.url, selection: choice },
-        `issue-${issue.identifier}-${generateBranchSlug()}`,
+        { kind: 'tracker', provider, identifier: item.identifier, title: item.title, url: item.url, selection: choice },
+        `${trackerPresentation(provider).branchName(item)}-${generateBranchSlug()}`,
       );
       return null;
     }
 
     const { reference } = choice;
-    if (reference.kind === 'issue') {
+    if (reference.kind === 'issue' || reference.kind === 'discussion') {
       linkItem(
-        { kind: 'issue', number: reference.number, title: reference.title, url: reference.url, selection: choice },
-        `issue-${reference.number}-${generateBranchSlug()}`,
+        { kind: 'issue', number: reference.number, title: reference.title, url: reference.url, discussion: reference.kind === 'discussion', selection: choice },
+        `${reference.kind}-${reference.number}-${generateBranchSlug()}`,
       );
       return null;
     }
@@ -601,18 +593,19 @@ export function NewWorktreeDialog({
     // branch lives, which decides whether it can be branched off. Its branch
     // can live in one worktree only, and a fork's PR can only be checked out;
     // a PR with neither way left is refused here.
+    const branch = descriptorOf(reference.provider).features.branchHeads ? reference.head : `change-${reference.number}`;
     const failure = (message: string): ReferencePickerConfirmFailure => ({ failedKeys: [referencePickerItemKey(choice)], message });
-    if (!githubContext || githubContext === 'missing') {
+    if (!repositoryContext || repositoryContext === 'missing') {
       return failure(tItem('session.newWorktree.error.changeRequestAuthorityMissing'));
     }
-    const label = githubContext.provider === 'gitlab'
-      ? formatChangeRequestReference('gitlab', reference.number)
-      : t('session.newWorktree.prNumber', { number: reference.number });
+    const label = repositoryContext.provider === 'github'
+      ? t('session.newWorktree.prNumber', { number: reference.number })
+      : formatChangeRequestReference(descriptorOf(repositoryContext.provider), reference.number);
     let headOwner = reference.headRepo?.owner ?? null;
     let check: Awaited<ReturnType<typeof checkPullRequestSource>>;
     try {
       check = await checkPullRequestSource({
-        context: githubContext,
+        context: repositoryContext,
         number: reference.number,
         mode: pullRequestMode,
         readChangeRequest: async (context, number) => {
@@ -624,10 +617,13 @@ export function NewWorktreeDialog({
           headOwner = changeRequest?.headProject?.owner ?? headOwner;
           return changeRequest;
         },
-        isBranchInUse: async (branch) => (projectRef
-          ? (await validateWorktreeCreate(projectRef, { mode: 'new', branchName: branch, worktreeName: branch }))
-            .errors.some((entry) => entry.code === 'branch_in_use')
-          : false),
+        isBranchInUse: async (head) => {
+          const name = descriptorOf(reference.provider).features.branchHeads ? head : branch;
+          return projectRef
+            ? (await validateWorktreeCreate(projectRef, { mode: 'new', branchName: name, worktreeName: name }))
+              .errors.some((entry) => entry.code === 'branch_in_use')
+            : false;
+        },
       });
     } catch {
       return failure(t('session.githubIntegration.validation.failed'));
@@ -648,32 +644,30 @@ export function NewWorktreeDialog({
       headSha: reference.headSha,
       headProject: headOwner ? { owner: headOwner } : null,
       project: {
-        id: reference.projectId ?? `${reference.sourceRepo.owner}/${reference.sourceRepo.repo}`,
+        id: reference.projectId ?? joinProjectPath(reference.sourceRepo.owner, reference.sourceRepo.repo),
         owner: reference.sourceRepo.owner,
         name: reference.sourceRepo.repo,
       },
     };
     setPrBranchOff(branchOff);
     linkItem(
-      { kind: 'pr', pr, context: githubContext, includeDiff: choice.includeDiff, selection: choice, fromFork, headInUse },
-      branchOff ? prBranchName(pr) : reference.head,
+      { kind: 'pr', pr, context: repositoryContext, includeDiff: choice.includeDiff, selection: choice, fromFork, headInUse },
+      branchOff ? prBranchName(pr) : branch,
     );
     return null;
   };
 
-  // A PR is chosen once the project's read context is known: its branch is
-  // fetched through it. Issues need none.
   const handleReferenceConfirmRef = React.useRef(handleReferenceConfirm);
   handleReferenceConfirmRef.current = handleReferenceConfirm;
   React.useEffect(() => {
     const choice = pendingInitialSelection.current;
     if (!open || !choice) return;
-    if (choice.source === 'github' && choice.reference.kind === 'pull' && githubContext === null) return;
+    if (choice.source === 'repository' && choice.reference.kind === 'pull' && repositoryContext === null) return;
     pendingInitialSelection.current = null;
     void handleReferenceConfirmRef.current([choice]).then((failure) => {
       if (failure) toast.error(failure.message);
     });
-  }, [githubContext, open]);
+  }, [repositoryContext, open]);
 
   const handleGuestSelect = (issue: AttachIssueRequest): void => {
     const kind = issue.kind === 'pull' ? 'pull' : 'issue';
@@ -681,7 +675,6 @@ export function NewWorktreeDialog({
     setGuestDialogId(null);
   };
 
-  // Only this unlinks: editing the branch name keeps the chosen item.
   const handleClearLinkedItem = () => {
     setLinked(null);
     setItemBranch(EMPTY_DRAFT);
@@ -697,13 +690,8 @@ export function NewWorktreeDialog({
     setValidation(prev => ({ ...prev, touched: false, branchError: null, worktreeError: null }));
   };
 
-  const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
-  // A GitLab project lists its issues and merge requests in the same picker,
-  // read with the account its context names.
-  const isGitLabProject = githubContext !== null && githubContext !== 'missing' && githubContext.provider === 'gitlab';
-  const isRepositoryConnected = isGitHubConnected || isGitLabProject;
-  const isLinearConnected = Boolean(linear) && linearAuthChecked && linearAuthStatus?.connected === true;
-  const canLinkItems = isRepositoryConnected || isLinearConnected || dialogGuests.length > 0;
+  const isRepositoryConnected = repositorySourceStatus === 'ready';
+  const canLinkItems = isRepositoryConnected || trackerSources.length > 0 || dialogGuests.length > 0;
 
   const isFormValid = Boolean(normalizeBranchName(branchName))
     && Boolean(slugifyWorktreeName(worktreeName))
@@ -726,12 +714,24 @@ export function NewWorktreeDialog({
     </section>
   );
 
-  // Where the chosen item comes from: one source opens straight away, several ask which.
   const itemSources = [
-    ...(isRepositoryConnected ? [isGitLabProject
-      ? { id: 'github', name: 'GitLab', label: t('session.newWorktree.actions.startFromGitLabIssueMr'), icon: <Icon name="gitlab" className="size-4 shrink-0" />, open: () => setReferencePickerSource('github') }
-      : { id: 'github', name: 'GitHub', label: t('session.newWorktree.actions.startFromGitHubIssuePr'), icon: <Icon name="github" className="size-4 shrink-0" />, open: () => setReferencePickerSource('github') }] : []),
-    ...(isLinearConnected ? [{ id: 'linear', name: 'Linear', label: t('session.newWorktree.actions.startFromLinearIssue'), icon: <Icon name="linear" className="size-4 shrink-0" />, open: () => setReferencePickerSource('linear') }] : []),
+    ...(isRepositoryConnected ? [{
+      id: 'repository',
+      name: itemDescriptor.label,
+      label: t(`session.newWorktree.actions.startFromRepository.${itemTerm}`, { provider: itemDescriptor.label }),
+      icon: <ProviderIcon descriptor={itemDescriptor} className="size-4 shrink-0" />,
+      open: () => setReferencePickerSource('repository'),
+    }] : []),
+    ...trackerSources.map((descriptor) => {
+      const presentation = trackerPresentation(descriptor.id);
+      return {
+        id: `tracker:${descriptor.id}`,
+        name: descriptor.name,
+        label: t('session.newWorktree.actions.startFromTrackerItem', { provider: descriptor.name }),
+        icon: <Icon name={presentation.icon} className="size-4 shrink-0" />,
+        open: () => setReferencePickerSource(trackerReferenceSource(descriptor.id)),
+      };
+    }),
     ...dialogGuests.map((guest) => ({
       id: guest.id,
       name: guest.name,
@@ -747,17 +747,16 @@ export function NewWorktreeDialog({
     : undefined;
   const linkedView = linked
     ? linked.kind === 'pr'
-      ? { id: linked.context.provider === 'gitlab' ? formatChangeRequestReference('gitlab', linked.pr.number) : t('session.newWorktree.prNumber', { number: linked.pr.number }), title: linked.pr.title, url: linked.pr.url, icon: <Icon name="git-pull-request" className="size-4 shrink-0 text-muted-foreground" /> }
+      ? { id: formatChangeRequestLabel(descriptorOf(linked.context.provider), linked.pr.number), title: linked.pr.title, url: linked.pr.url, icon: <Icon name="git-pull-request" className="size-4 shrink-0 text-muted-foreground" /> }
       : linked.kind === 'issue'
-        ? { id: t('session.newWorktree.issueNumber', { number: linked.number }), title: linked.title, url: linked.url, icon: <Icon name={isGitLabProject ? 'gitlab' : 'github'} className="size-4 shrink-0 text-muted-foreground" /> }
-        : linked.kind === 'linear'
-          ? { id: linked.identifier, title: linked.title, url: linked.url, icon: <Icon name="linear" className="size-4 shrink-0 text-muted-foreground" /> }
+        ? { id: t(linked.discussion ? 'session.newWorktree.discussionNumber' : 'session.newWorktree.issueNumber', { number: linked.number }), title: linked.title, url: linked.url, icon: <ProviderIcon descriptor={itemDescriptor} className="size-4 shrink-0 text-muted-foreground" /> }
+        : linked.kind === 'tracker'
+          ? { id: linked.identifier, title: linked.title, url: linked.url, icon: <Icon name={trackerPresentation(linked.provider).icon} className="size-4 shrink-0 text-muted-foreground" /> }
           : { id: linked.guest.id, title: linked.guest.title, url: linked.guest.url, icon: <GuestIcon icon={linkedGuestEntry?.icon ?? 'window'} iconSrc={linkedGuestEntry?.iconSrc} className="size-4 shrink-0" /> }
     : null;
 
-  // One row, the height of a field, whether empty or holding the chosen item.
   const itemPicker = linkedView ? (
-    <div className={cn('flex h-8 min-w-0 items-center gap-2 rounded-lg border border-border/60 px-2.5', itemPickerDisabled && 'opacity-50')}>
+    <div className={cn('flex h-8 min-w-0 items-center gap-2 rounded-lg border border-edge px-2.5', itemPickerDisabled && 'opacity-50')}>
       {linkedView.icon}
       <span className="shrink-0 typography-micro text-muted-foreground">{linkedView.id}</span>
       <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">{linkedView.title}</span>
@@ -782,7 +781,6 @@ export function NewWorktreeDialog({
       </button>
     </div>
   ) : (
-    // One button per source; extensions that attach items add theirs.
     <div className="flex min-h-8 flex-wrap items-center gap-1.5">
       {itemSources.map((source) => (
         <Button
@@ -827,8 +825,6 @@ export function NewWorktreeDialog({
     </SettingsRadioGroup>
   );
 
-  // The branch row keeps its height in every mode: a name, a branch to check
-  // out, or the PR's own branch.
   const branchControl = mode === 'existing-branch' ? (
     <div className="flex items-center gap-1.5">
       <div className="min-w-0 flex-1">
@@ -879,6 +875,7 @@ export function NewWorktreeDialog({
       title={t('session.newWorktree.selectSourceBranch')}
       localBranches={localBranches}
       remoteBranches={remoteBranches}
+      remoteDefaults={remoteDefaults}
       isLoading={isLoadingBranches}
       isMobile={isMobile}
       disabled={!startsNewBranch}
@@ -903,7 +900,6 @@ export function NewWorktreeDialog({
         placeholder={t('session.newWorktree.worktreeDirectoryPlaceholder')}
         className={cn('h-8 min-w-0 flex-1', validation.touched && validation.worktreeError && 'border-destructive')}
       />
-      {/* Kept in place, disabled while the folder already follows the branch. */}
       <Button
         variant="ghost"
         size="sm"
@@ -947,7 +943,6 @@ export function NewWorktreeDialog({
       {fieldBlock(t('session.newWorktree.worktreeDirectory'), folderControl)}
     </>
   );
-  // Two fixed columns on desktop; one column on a phone, read top to bottom.
   const body = isMobile ? (
     <div className="flex min-w-0 flex-col gap-5">
       {choiceBlocks}
@@ -963,15 +958,19 @@ export function NewWorktreeDialog({
   );
 
   const validationText = validation.touched ? (validation.branchError || validation.worktreeError) : null;
+  const creatingText = !validationText && isCreating && usesCreateCommand ? t('session.newWorktree.creatingWithCommand') : null;
   const footer = (
     <div className={cn('flex w-full gap-2', isMobile ? 'flex-col' : 'flex-row items-center')}>
-      {/* One line that never grows the dialog; the full message is its tooltip. */}
       <p
-        className={cn('flex min-h-4 min-w-0 items-center gap-1.5 typography-micro text-destructive', isMobile ? 'order-first w-full' : 'flex-1')}
-        title={validationText ?? undefined}
+        className={cn(
+          'flex min-h-4 min-w-0 items-center gap-1.5 typography-micro',
+          creatingText ? 'text-muted-foreground' : 'text-destructive',
+          isMobile ? 'order-first w-full' : 'flex-1',
+        )}
+        title={validationText ?? creatingText ?? undefined}
       >
         {validationText ? <Icon name="error-warning" className="h-3.5 w-3.5 shrink-0" /> : null}
-        <span className="truncate">{validationText}</span>
+        <span className="truncate">{validationText ?? creatingText}</span>
       </p>
       <div className={cn('flex shrink-0 gap-2', isMobile && 'w-full')}>
         <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={isCreating} className={cn(isMobile && 'flex-1')}>

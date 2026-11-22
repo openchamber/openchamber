@@ -11,7 +11,7 @@ const providersModule = fileURLToPath(new URL('./providers.js', import.meta.url)
 // homedir-derived config source can leak the machine's real state (#2309).
 let isolatedHome;
 
-// The user config path is fixed when shared.js loads, so the calls run in a
+// The user config path is fixed when config-files.js loads, so the calls run in a
 // child process pointed at a temporary OPENCODE_CONFIG_DIR; the real user
 // config is never touched.
 const run = (configDir, body) => {
@@ -28,7 +28,7 @@ const run = (configDir, body) => {
   const env = { ...process.env, OPENCODE_CONFIG_DIR: configDir, HOME: isolatedHome };
   delete env.OPENCODE_CONFIG;
   delete env.OPENCODE_CONFIG_PATH;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+  const result = spawnSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script], {
     env,
     encoding: 'utf8',
   });

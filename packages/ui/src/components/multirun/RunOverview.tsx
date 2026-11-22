@@ -34,9 +34,10 @@ import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from 
 import { RunLaneCard } from './RunLaneCard';
 import { ModelEffortMenu } from './ModelEffortMenu';
 import { LaneStatusIcon } from './LaneStatusIcon';
-import { LANE_STATUS_COUNT_KEYS, LANE_STATUS_ORDER, resolveLaneStatus, type LaneStatus } from '@/lib/multirun/laneStatus';
+import { hasRunningGoal, LANE_STATUS_COUNT_KEYS, LANE_STATUS_ORDER, resolveLaneStatus, type LaneStatus } from '@/lib/multirun/laneStatus';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
-import { useNotificationStore } from '@/sync/notification-store';
+import { isSessionUnread } from '@/sync/session-unread';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 
 type BarMode =
   | { kind: 'idle' }
@@ -49,7 +50,6 @@ const modelLabelFor = (member: MultiRunMember, providers: ReturnType<typeof useC
   return member.identity.index && member.identity.index > 1 ? `${name} #${member.identity.index}` : name;
 };
 
-/** The first prompt of each variant, read once, as the caption over its cards. */
 function useVariantPrompts(run: MultiRunSummary | null, sessionById: ReadonlyMap<string, Session>): ReadonlyMap<string, string> {
   const [prompts, setPrompts] = React.useState<ReadonlyMap<string, string>>(new Map());
   const firstLaneByVariant = React.useMemo(() => {
@@ -71,17 +71,11 @@ function useVariantPrompts(run: MultiRunSummary | null, sessionById: ReadonlyMap
       }, () => undefined);
     }
     return () => { cancelled = true; };
-  // Captions are fixed once read; a session update never changes the first prompt.
   // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [firstLaneByVariant]);
   return prompts;
 }
 
-/**
- * The prompt a variant's lanes received: one line until expanded, then the
- * whole text in a bounded, scrollable block. The toggle shows only when the
- * line is actually cut or the prompt has several lines.
- */
 function PromptCaption({ prompt, expanded, onToggle }: { prompt: string; expanded: boolean; onToggle: () => void }): React.ReactNode {
   const { t } = useI18n();
   const lineRef = React.useRef<HTMLSpanElement>(null);
@@ -99,9 +93,9 @@ function PromptCaption({ prompt, expanded, onToggle }: { prompt: string; expande
   return (
     <div className="flex min-w-0 flex-1 items-start gap-1">
       {expanded ? (
-        <div className="max-h-64 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--surface-muted)] px-2 py-1.5 typography-meta text-foreground">
+        <ScrollableOverlay outerClassName="max-h-64 min-w-0 flex-1 rounded-md bg-[var(--surface-muted)]" className="whitespace-pre-wrap break-words px-2 py-1.5 typography-meta text-foreground" disableHorizontal>
           {prompt}
-        </div>
+        </ScrollableOverlay>
       ) : (
         <span ref={lineRef} className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">{prompt}</span>
       )}
@@ -130,8 +124,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   const projects = useProjectsStore((state) => state.projects);
   const activeSessionIds = useGlobalSessionStatusStore((state) => state.activeSessionIds);
   const blockingBySession = useGlobalBlockingRequestsStore((state) => state.bySession);
-  const unseenCountBySession = useNotificationStore((state) => state.index.session.unseenCount);
-  // Phones get the overview, fusion and Keep, but never launch lanes (no header back arrow either).
+  const globalSessionById = useGlobalSessionsStore((state) => state.entityById);
   const isMobile = useUIStore((state) => state.isMobile);
   const [bar, setBar] = React.useState<BarMode>({ kind: 'idle' });
   const [busyAction, setBusyAction] = React.useState<'keep' | 'fuse' | 'ask' | 'archive' | 'member' | 'parent' | null>(null);
@@ -166,6 +159,20 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     if (providerID && modelID) setJudge([{ providerID, modelID, variant: auto?.variant, instanceId: generateInstanceId() }]);
   }, [currentModelId, currentProviderId, judge.length, run?.autoFusion]);
 
+  const seenFusionsRef = React.useRef<{ runKey: string; ids: ReadonlySet<string> } | null>(null);
+  const fusionIds = run?.fusions.map((fusion) => fusion.sessionId).join('\n') ?? null;
+  React.useEffect(() => {
+    if (fusionIds === null) return;
+    const ids = new Set(fusionIds ? fusionIds.split('\n') : []);
+    const seen = seenFusionsRef.current;
+    seenFusionsRef.current = { runKey, ids };
+    if (!seen || seen.runKey !== runKey) return;
+    const started = [...ids].find((id) => !seen.ids.has(id));
+    if (!started || useUIStore.getState().runOverviewKey !== runKey) return;
+    useUIStore.getState().closeMainSurfaces();
+    useSessionUIStore.getState().setCurrentSession(started, useGlobalSessionsStore.getState().entityById.get(started)?.directory ?? null);
+  }, [fusionIds, runKey]);
+
   if (!run) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center typography-meta text-muted-foreground">
@@ -179,8 +186,10 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
 
   const laneIds = run.lanes.map((lane) => lane.sessionId);
   const finishedLaneIds = [...run.lanes, ...run.fusions].map((member) => member.sessionId)
-    .filter((id) => !activeSessionIds.has(id) && sessionById.get(id)?.time.idle);
-  const busyLaneCount = laneIds.filter((id) => activeSessionIds.has(id)).length;
+    .filter((id) => (
+    !activeSessionIds.has(id) && sessionById.get(id)?.time.idle && !hasRunningGoal(sessionById.get(id))
+  ));
+  const busyLaneCount = laneIds.filter((id) => activeSessionIds.has(id) || hasRunningGoal(sessionById.get(id))).length;
   const isolated = run.lanes.some((lane) => worktreeById.get(lane.sessionId));
   const memberById = new Map([...run.lanes, ...run.fusions, ...run.parents].map((member) => [member.sessionId, member]));
   const nameOf = (sessionId: string): string => {
@@ -225,7 +234,6 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
       hasCodeResult: identity?.role === 'fusion' && Boolean(identity.fusion?.baseCommit) };
   }));
 
-  // Cards are only selectable while choosing fusion sources.
   const toggleFuseSource = (sessionId: string) => {
     if (bar.kind !== 'fuse' || !finishedLaneIds.includes(sessionId)) return;
     const excluded = new Set(bar.excluded);
@@ -399,7 +407,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
         isFusion={isFusion}
         busy={activeSessionIds.has(member.sessionId)}
         status={statusOf(member.sessionId) ?? 'notStarted'}
-        unread={(unseenCountBySession[member.sessionId] ?? 0) > 0}
+        unread={isSessionUnread(globalSessionById.get(member.sessionId))}
         summary={summaries.get(member.sessionId)}
         fuseSource={bar.kind === 'fuse' && member.identity.role !== 'parent'
           ? { checked: finished && !bar.excluded.has(member.sessionId), selectable: finished }
@@ -423,7 +431,6 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     );
   };
 
-  // Two steps: pick the model, then its thinking effort, then run it.
   const renderAddModel = (runGroup: string | undefined) => {
     const pending = pendingModel && pendingModel.runGroup === runGroup ? pendingModel.model : null;
     if (pending) {
@@ -473,8 +480,6 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     );
   };
 
-  // One card per row on a phone: two 280px columns never fit, and a single
-  // card squeezed below that clips its actions.
   const cardGridClassName = isMobile
     ? 'grid grid-cols-1 gap-2.5'
     : 'grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-2.5';
@@ -711,7 +716,6 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   );
 }
 
-/** Replaces the chat area while a run overview is open. */
 export function RunOverview(): React.ReactNode {
   const runKey = useUIStore((state) => state.runOverviewKey);
   if (!runKey) return null;

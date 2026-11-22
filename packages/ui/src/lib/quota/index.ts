@@ -1,8 +1,12 @@
-export { QUOTA_PROVIDERS } from './providers';
+export { QUOTA_PROVIDERS, type QuotaProviderMeta } from './providers';
+export { isExtensionQuotaProviderId, quotaProviderList } from './extensionProviders';
 export {
   clampPercent,
-  formatQuotaValueLabel,
+  formatQuotaWindowValueLabel,
+  formatQuotaRowValue,
   formatQuotaResetLabel,
+  formatQuotaResetShort,
+  compactQuotaValueLabel,
   resolveUsageTone,
   formatWindowLabel,
 } from './utils';

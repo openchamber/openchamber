@@ -1,19 +1,3 @@
-/**
- * Remote names and URLs from `git remote -v` output.
- *
- * The parser is pure so it can be tested outside the extension host, like the
- * status-path and submodule helpers in `gitPathDiff.ts`. Each remote's URLs
- * must read as `git remote get-url [--push]` reports them, so the line
- * grammar and fallbacks match the web server's `parseRemoteListing`: the
- * first URL of several wins, and a remote with no fetch URL reads as a URL
- * equal to its name, as Git does. Anything after the URL-kind marker — Git
- * 2.54+ appends the partial-clone filter there as `[blob:none]` — is
- * decoration about the remote, never part of the URL, and is ignored whether
- * or not its shape is recognized. Lines may end in CRLF (Git for Windows); a
- * kept `\r` would match no line and read every remote as URL-less. A remote
- * no line parses for is skipped; the web parser keeps it through its
- * separately read remote names.
- */
 
 export interface GitRemote {
   name: string;

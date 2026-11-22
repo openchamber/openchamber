@@ -3,6 +3,7 @@ import { AnimatePresence } from 'motion/react';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import type { PermissionRequest } from '@/types/permission';
 import { useScopedBlockingPermissions } from '@/sync/sync-context';
@@ -14,17 +15,8 @@ import {
 } from './PermissionCard';
 import { getPermissionToolPresentation } from './permissionToolPresentation';
 import { usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/**
- * The agent's permission requests, docked above the composer in the same
- * frame as the form dock. Every pending request for the composer's session
- * (including its subagents') is a step in the header, one dot per request
- * with the current one solid, so a batch of requests raised together reads
- * as one panel to walk through rather than a stack of cards. The dock
- * answers one request at a time; once it is answered the next one takes
- * its place. The BTW sheet keeps the inline `PermissionCard` for its child
- * session's requests.
- */
 
 interface PermissionDockProps {
     sessionId: string | null;
@@ -47,16 +39,12 @@ const PermissionDockPanel: React.FC<{ permissions: PermissionRequest[] }> = ({ p
     const [collapsed, setCollapsed] = React.useState(false);
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
 
-    // "Open session" on a request's toast expands the dock on that request.
     const permissionIds = React.useMemo(() => permissions.map((permission) => permission.id), [permissions]);
     useRequestReveal(permissionIds, React.useCallback((id: string) => {
         setSelectedId(id);
         setCollapsed(false);
     }, []));
 
-    // The chosen request stays current while it is pending; a request that
-    // was answered elsewhere (another client, auto-accept) falls back to the
-    // oldest one still open.
     const currentIndex = Math.max(0, permissions.findIndex((permission) => permission.id === selectedId));
     const current = permissions[currentIndex];
     const availableMaxHeight = useMobileAutocompleteMaxHeight(bodyRef, !collapsed, 320);
@@ -99,6 +87,8 @@ const PermissionDockRequest: React.FC<{
             ariaLabel={title}
             compact={collapsed}
             header={<>
+                <Tooltip>
+                <TooltipTrigger asChild>
                 <button
                     type="button"
                     onClick={onToggleCollapsed}
@@ -120,24 +110,29 @@ const PermissionDockRequest: React.FC<{
                         </span>
                     ) : null}
                 </button>
-                {/* One dot per pending request, the current one solid. */}
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{collapsed ? t('chat.permissionDock.expandAria') : t('chat.permissionDock.collapseAria')}</TooltipContent>
+                </Tooltip>
                 {!collapsed && permissions.length > 1 ? (
                     <div className="flex shrink-0 items-center gap-1" role="tablist">
                         {permissions.map((entry, index) => {
                             const label = t('chat.permissionDock.stepAria', { index: String(index + 1), tool: getPermissionToolPresentation(entry).name });
                             return (
-                                <button
-                                    key={entry.id}
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={index === currentIndex}
-                                    aria-label={label}
-                                    title={label}
-                                    onClick={() => onSelect(entry.id)}
-                                    className="flex size-4 items-center justify-center"
-                                >
-                                    <span className={cn('block size-1.5 rounded-full transition-colors', index === currentIndex ? 'bg-primary' : 'bg-foreground/15')} />
-                                </button>
+                                <Tooltip key={entry.id}>
+                                    <TooltipTrigger asChild>
+                                        <button
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={index === currentIndex}
+                                            aria-label={label}
+                                            onClick={() => onSelect(entry.id)}
+                                            className="flex size-4 items-center justify-center"
+                                        >
+                                            <span className={cn('block size-1.5 rounded-full transition-colors', index === currentIndex ? 'bg-primary' : 'bg-foreground/15')} />
+                                        </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+                                </Tooltip>
                             );
                         })}
                     </div>
@@ -150,13 +145,15 @@ const PermissionDockRequest: React.FC<{
         >
             {!collapsed ? (
                 <div>
-                    <div
+                    <ScrollableOverlay
                         ref={bodyRef}
-                        className="max-h-[50vh] overflow-y-auto overscroll-contain px-1.5"
-                        style={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(120, availableMaxHeight - 96) }}
+                        outerClassName="max-h-[50vh]"
+                        outerStyle={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(120, availableMaxHeight - 96) }}
+                        className="overscroll-contain px-1.5"
+                        disableHorizontal
                     >
                         <PermissionRequestContent permission={permission} />
-                    </div>
+                    </ScrollableOverlay>
                     <PermissionActions
                         permission={permission}
                         isResponding={isResponding}
@@ -169,5 +166,4 @@ const PermissionDockRequest: React.FC<{
     );
 };
 
-/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
 export const PermissionDock = React.memo(PermissionDockView);

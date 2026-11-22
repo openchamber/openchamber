@@ -5,7 +5,9 @@ import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { McpxSecretRequestPrompt } from '@/components/mcp/McpxSecretRequestPrompt';
-import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
+import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
+import { GlobalQuestionDialogs } from '@/components/layout/GlobalQuestionDialogs';
+import { OpenCodeTrustDialog } from '@/components/projects/OpenCodeTrustDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from '@/components/ui';
@@ -15,6 +17,7 @@ import { setRequestsInFlightTrackingEnabled } from '@/stores/utils/requestsInFli
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
+import { useGuestInstallLinks } from '@/hooks/useGuestInstallLinks';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
@@ -23,6 +26,12 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
+import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
+import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
+import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
+import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
+import { useGuestMarksSync } from '@/hooks/useGuestMarksSync';
+import { useLimitFailoverNotices } from '@/hooks/useLimitFailoverNotices';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRelayLimitToast } from '@/hooks/useRelayLimitToast';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
@@ -31,7 +40,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, openHostSession, takePendingDesktopSessionLinks } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, openSessionInOwningHostWindow, takePendingDesktopSessionLinks } from '@/lib/desktop';
 import { isDesktopSafeStart } from '@/lib/desktopSafeStart';
 import { runPendingDesktopHostActions } from '@/lib/desktopHostActions';
 import {
@@ -45,22 +54,22 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { openSession, openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { parseRoute } from '@/lib/router';
 import { beginLastSessionRestore, type LastSessionRestoreResult } from '@/sync/last-session-restore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
+import { useChatWidthAttribute } from '@/hooks/useChatWidthAttribute';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
+import { refreshTrackers } from '@/stores/useTrackerAuthStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -205,6 +214,7 @@ type AppProps = {
 };
 
 function App({ apis }: AppProps) {
+  useGuestInstallLinks();
   React.useEffect(() => startDiagnosticCapture(), []);
   React.useEffect(() => {
     markStartupTrace('App:mounted');
@@ -228,13 +238,12 @@ function App({ apis }: AppProps) {
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
   const refreshSourceControlAuth = useSourceControlAuthStore((state) => state.refreshAll);
-  const refreshLinearAuthStatus = useLinearAuthStore((state) => state.refreshStatus);
+  const refreshSourceControlProviders = useSourceControlProviderRegistry((state) => state.refresh);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
-  const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
@@ -305,30 +314,7 @@ function App({ apis }: AppProps) {
     });
   }, []);
 
-  const autoReviewResumeSignature = useAutoReviewStore((state) => {
-    const runtimeKey = getRuntimeKey();
-    return Object.values(state.runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
-      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
-      .sort()
-      .join('|');
-  });
-
-  React.useEffect(() => {
-    const runtimeKey = getRuntimeKey();
-    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
-    for (const run of runs) {
-      resumeAutoReviewRun(run.originalSessionID);
-    }
-  }, [autoReviewResumeSignature, runtimeEndpointEpoch]);
-
-  React.useEffect(() => {
-    document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
-    return () => {
-      document.documentElement.classList.remove('wide-chat-layout');
-    };
-  }, [wideChatLayoutEnabled]);
+  useChatWidthAttribute();
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
@@ -340,14 +326,15 @@ function App({ apis }: AppProps) {
       return;
     }
 
+    void refreshSourceControlProviders(apis.sourceControl);
     void refreshSourceControlAuth(apis.sourceControl, { force: true });
-    void refreshLinearAuthStatus(apis.linear, { force: true });
+    void refreshTrackers(apis.trackers);
     // `apis` is the same object across an instance switch, so without the epoch
     // this ran once for the whole app session and both statuses kept describing
     // whichever instance happened to be connected at startup. `isConnected` is
     // here to re-ask, not to gate: both integrations answer independently of
     // OpenCode, but a switch can race the transport and the retry is deduped.
-  }, [apis.sourceControl, apis.linear, isConnected, refreshSourceControlAuth, refreshLinearAuthStatus, runtimeEndpointEpoch]);
+  }, [apis.sourceControl, apis.trackers, isConnected, refreshSourceControlAuth, refreshSourceControlProviders, runtimeEndpointEpoch]);
 
   useAppFontEffects();
 
@@ -519,27 +506,17 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string; requireKnownSession?: boolean }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      // A notification click names the runtime that owns the session. When
-      // this window is on another instance, the desktop shell opens the
-      // session in a window for the owning one.
-      const runtimeKey = String(detail?.runtimeKey ?? '').trim();
-      if (runtimeKey && runtimeKey !== getRuntimeKey() && openHostSession(runtimeKey, sessionId)) {
-        return;
-      }
-      // A link (a desktop deep link, a link to this window's instance) carries
-      // no directory; the route opener resolves it from the global session
-      // list, as for a web link.
-      if (!directory) {
-        void openSessionLink(sessionId, typeof detail?.messageId === 'string' ? detail.messageId.trim() : null);
-        return;
-      }
-      void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
+      const messageId = typeof detail?.messageId === 'string' ? detail.messageId.trim() || null : null;
+      if (openSessionInOwningHostWindow(sessionId, String(detail?.runtimeKey ?? '').trim(), messageId)) return;
+      // A session event carries the owning directory; a link carries none and
+      // lets the opener resolve it from the global session list.
+      void openSession(sessionId, { directory, messageId, requireKnownSession: detail?.requireKnownSession === true });
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);
@@ -547,7 +524,11 @@ function App({ apis }: AppProps) {
     // desktop shell keeps it until the window asks. Taking is one-shot, so a
     // cleanup must not drop links already taken (Strict Mode re-runs this).
     void takePendingDesktopSessionLinks().then((links) => {
-      for (const link of links) void openSessionLink(link.sessionId, link.messageId);
+      for (const link of links) {
+        if (openSessionInOwningHostWindow(link.sessionId, link.runtimeKey, link.messageId)) continue;
+        if (link.requireKnownSession) void openSession(link.sessionId, { messageId: link.messageId, requireKnownSession: true });
+        else void openSessionLink(link.sessionId, link.messageId);
+      }
     });
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
   }, []);
@@ -587,7 +568,7 @@ function App({ apis }: AppProps) {
   React.useLayoutEffect(() => {
     const restore = lastSessionRestoreRef.current;
     if (restore.attempt) return;
-    restore.attempt = beginLastSessionRestore({ selectNow: !parseRoute().sessionId });
+    restore.attempt = beginLastSessionRestore({ selectNow: !parseRoute().sessionId, refresh: false });
   }, []);
   React.useEffect(() => {
     const restore = lastSessionRestoreRef.current;
@@ -684,6 +665,12 @@ function App({ apis }: AppProps) {
   // Project notes sent every message with no memory index at all.
   useAgentMemorySync(currentDirectory || null);
   useBrowserProviderSync();
+  useSourceControlProviderSync(apis.sourceControl);
+  useTrackerProviderSync(apis.trackers);
+  useQuotaProviderSync();
+  useGuestCatalogSync();
+  useGuestMarksSync();
+  useLimitFailoverNotices();
   useRoutingSync();
   useEnterprisePolicySync();
   // Desktop windows on a relay host; the phone has its own handling in MobileApp.
@@ -892,10 +879,14 @@ function App({ apis }: AppProps) {
                   <OpenCodeUpdateToast />
                   <ProjectConfigErrorToast />
                   <MainLayout />
-                  {isDesktopRuntime ? <AppStartupOverlay ready={bootOutcomeKnown && bootViewIsMain} /> : null}
+                  {/* Unmounted, not faded: the shell under it is ready, and a
+                      fade only delays the moment it is seen. */}
+                  {isDesktopRuntime && !(bootOutcomeKnown && bootViewIsMain) ? <AppStartupOverlay ready={false} /> : null}
                   <Toaster />
                   <AppLinkConfirmDialog />
-                  <SharedTrustConfirmDialog />
+                  <SnippetQuickCreateDialog />
+                  <GlobalQuestionDialogs />
+                  <OpenCodeTrustDialog />
                   <McpxSecretRequestPrompt />
                   <ConfigUpdateOverlay />
                   <AboutDialogWrapper />

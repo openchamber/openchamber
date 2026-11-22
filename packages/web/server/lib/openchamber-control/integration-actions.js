@@ -41,10 +41,9 @@
 import path from 'node:path';
 
 import { asNonEmptyString, isPlainObject, isString } from '../shared/guards.js';
-import { readConfigLayers, getConfigForPath, writeConfig } from '../opencode/shared.js';
+import { readConfigLayers, getConfigForPath, writeConfig } from '../opencode/config-files.js';
 import { listMcpConfigs, updateMcpConfig } from '../opencode/mcp.js';
 import { discoverSkills, getSkillSources, updateSkill } from '../opencode/skills.js';
-import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 import { OpenChamberControlError } from './error.js';
 
 export const INTEGRATION_ACTION_DEFINITIONS = Object.freeze([
@@ -68,7 +67,7 @@ const INTEGRATION_ACTIONS = INTEGRATION_ACTION_DEFINITIONS.map(({ action }) => a
 const SYSTEM_TOOLS = Object.freeze([
   { tool: 'openchamber', settingKey: 'agentControlToolEnabled', defaultEnabled: true, description: 'Projects, sessions, scheduled tasks, settings and integrations; this tool' },
   { tool: 'openchamber_web', settingKey: 'agentWebToolEnabled', defaultEnabled: true, description: 'Look at and drive the page in the browser panel' },
-  { tool: 'openchamber_memory', settingKey: 'agentMemoryToolEnabled', defaultEnabled: false, description: 'Remember facts across sessions', available: isAgentMemoryFeatureAvailable },
+  { tool: 'openchamber_memory', settingKey: 'agentMemoryToolEnabled', defaultEnabled: false, description: 'Remember facts across sessions' },
   { tool: 'openchamber_notify', settingKey: 'agentNotifyToolEnabled', defaultEnabled: false, description: 'Send the user a notification' },
 ]);
 

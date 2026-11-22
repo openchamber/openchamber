@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
 import { z } from 'zod';
@@ -20,7 +20,7 @@ const browser = new Window({ url: 'http://runtime.test' });
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 for (const [name, value] of Object.entries({
   window: browser,
-  document: browser.document,
+  document: browser.document, Event: browser.Event, CustomEvent: browser.CustomEvent,
   navigator: browser.navigator,
   localStorage: browser.localStorage,
   HTMLElement: browser.HTMLElement,
@@ -41,8 +41,7 @@ for (const [name, value] of Object.entries({
   HTMLInputElement: browser.HTMLInputElement,
   HTMLTextAreaElement: browser.HTMLTextAreaElement,
   PointerEvent: browser.PointerEvent,
-  Event: browser.Event,
-  CustomEvent: browser.CustomEvent,
+  
   ResizeObserver: browser.ResizeObserver,
   MutationObserver: browser.MutationObserver,
   EventSource: TestEventSource,
@@ -56,7 +55,7 @@ for (const [name, value] of Object.entries({
 }
 
 type Context = Awaited<ReturnType<typeof fetchProjectContext>>;
-const emptyContext = (): Context => ({ notes: [], todos: [], plans: [], sharedPlansDir: null });
+const emptyContext = (): Context => ({ notes: [], todos: [], plans: [], sharedPlansDir: null, notesTodosStore: 'local' });
 const peerNote: ProjectNote = {
   id: 'peer-note', body: 'Peer note', source: 'manual', pinned: false, createdAt: 1, updatedAt: 1,
 };
@@ -65,6 +64,8 @@ let readFailed = false;
 let readContext = async (): Promise<Response> => Response.json(serverContext);
 let reads = 0;
 const noteWrites: string[] = [];
+let noteCreateGate: Promise<void> = Promise.resolve();
+let noteCreateFails = false;
 const todoWrites: string[] = [];
 const originalFetch = globalThis.fetch;
 globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -77,9 +78,18 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: Request
       serverContext = { ...serverContext, todos: serverContext.todos.map(todo => todo.id === todoId ? { ...todo, completed } : todo) };
       return Response.json(serverContext);
     }
+    if (url.pathname.endsWith('/notes') && init?.method === 'POST') {
+      await noteCreateGate;
+      if (noteCreateFails) return Response.json({ error: 'offline' }, { status: 503 });
+      const { body } = z.object({ body: z.string() }).parse(JSON.parse(String(init.body)));
+      const created = { ...peerNote, id: `note-${serverContext.notes.length + 1}`, body };
+      serverContext = { ...serverContext, notes: [...serverContext.notes, created] };
+      return Response.json({ note: created, context: serverContext });
+    }
     if (init?.method === 'PATCH') {
       noteWrites.push(String(init.body));
-      const saved = { ...peerNote, body: 'Local autosave draft', updatedAt: 2 };
+      const { body } = z.object({ body: z.string() }).parse(JSON.parse(String(init.body)));
+      const saved = { ...peerNote, body: body.trim(), updatedAt: 2 };
       serverContext = { ...serverContext, notes: [saved] };
       return Response.json({ note: saved });
     }
@@ -90,11 +100,6 @@ globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: Request
   return Response.json({ error: 'Unavailable in this fixture' }, { status: 503 });
 }, originalFetch);
 
-// An open note renders Markdown, whose highlighter is a Vite worker URL.
-const { plugin } = await import('bun');
-plugin({ name: 'knowledge-note-worker-url', setup(build) {
-  build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "http://localhost/worker.js";', loader: 'js' }));
-} });
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
@@ -139,11 +144,11 @@ const sdk = OpenCode.make({
   baseUrl: 'http://runtime.test',
   fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
 });
-const render = async (visible = true) => {
+const render = async (visible = true, projectRef = project) => {
   await act(async () => root?.render(
     <RuntimeAPIContext.Provider value={runtimeApis}>
       <SyncProvider sdk={sdk} directory="">
-        <I18nProvider><ProjectNotesTodoPanel projectRef={project} visible={visible} /></I18nProvider>
+        <I18nProvider><ProjectNotesTodoPanel projectRef={projectRef} visible={visible} /></I18nProvider>
       </SyncProvider>
     </RuntimeAPIContext.Provider>,
   ));
@@ -180,6 +185,8 @@ beforeEach(() => {
   reads = 0;
   noteWrites.length = 0;
   todoWrites.length = 0;
+  noteCreateGate = Promise.resolve();
+  noteCreateFails = false;
   Object.defineProperty(browser.document, 'visibilityState', { value: 'visible', configurable: true });
   Object.defineProperty(browser.navigator, 'onLine', { value: true, configurable: true });
   useProjectContextStore.getState().reset();
@@ -289,6 +296,35 @@ test('peer refreshes do not postpone the local note autosave', async () => {
     await announce();
   }
   expect(noteWrites).toEqual([JSON.stringify({ body: 'Local autosave draft' })]);
+});
+
+test('note autosave keeps whitespace in the editor and accepts later peer changes', async () => {
+  serverContext = { ...serverContext, notes: [peerNote] };
+  await mount();
+  const editor = await openNoteEditor();
+  // Run the autosave callback explicitly so the test does not depend on timer timing.
+  const originalTimeout = browser.setTimeout.bind(browser);
+  let save: () => void = () => { throw new Error('Autosave was not scheduled'); };
+  const timeout = spyOn(browser, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+    if (delay !== 400) return originalTimeout(callback, delay, ...args);
+    save = () => callback(...args);
+    const handle = originalTimeout(() => undefined, 0);
+    browser.clearTimeout(handle);
+    return handle;
+  });
+  try {
+    await editor.type('  Local draft \n');
+    expect(noteWrites).toEqual([]);
+    await act(async () => save());
+  } finally {
+    timeout.mockRestore();
+  }
+  expect(noteWrites).toEqual([JSON.stringify({ body: 'Local draft' })]);
+  expect(editor.text()).toBe('  Local draft \n');
+
+  serverContext = { ...serverContext, notes: [{ ...peerNote, body: 'Peer replacement', updatedAt: 3 }] };
+  await announce();
+  expect(editor.text()).toBe('Peer replacement');
 });
 
 test('hidden panels stop refreshing and re-read when they become visible again', async () => {
@@ -415,4 +451,81 @@ test('going back from an open note returns to where the list was', async () => {
 
   expect(scroller.scrollTop).toBe(120);
   expect(browser.document.activeElement?.getAttribute('data-knowledge-entry-id')).toBe('second-note');
+});
+
+/** The add field of the open section. */
+const field = () => {
+  const element = host.querySelector<HTMLTextAreaElement>('textarea');
+  if (!element) throw new Error('Add field missing');
+  return element;
+};
+const type = (text: string) => act(async () => {
+  const element = browser.document.querySelector('textarea');
+  const setter = Object.getOwnPropertyDescriptor(browser.HTMLTextAreaElement.prototype, 'value')?.set;
+  if (!element || !setter) throw new Error('Add field missing');
+  setter.call(element, text);
+  element.dispatchEvent(new browser.Event('input', { bubbles: true }));
+});
+const openTab = async (label: string) => {
+  const tab = Array.from(host.querySelectorAll<HTMLButtonElement>('nav button'))
+    .find(button => button.textContent?.startsWith(label));
+  if (!tab) throw new Error(`${label} tab missing`);
+  await act(async () => tab.click());
+};
+
+test('a new note keeps its unsaved text per project through a tab switch and a remount, until it is added', async () => {
+  await mount();
+  await type('Half-written note');
+  await openTab('Todo');
+  await type('Half-written todo');
+  await openTab('Notes');
+  expect(field().value).toBe('Half-written note');
+
+  // Another project has its own, empty field; the first keeps its text.
+  const other = { id: 'other', path: '/fixture/other' };
+  await render(true, other);
+  expect(field().value).toBe('');
+  await render();
+  expect(field().value).toBe('Half-written note');
+
+  // A remount stands for a reload: the text comes back from storage.
+  await act(async () => root?.unmount());
+  root = createRoot(host);
+  await render();
+  expect(field().value).toBe('Half-written note');
+  await openTab('Todo');
+  expect(field().value).toBe('Half-written todo');
+  await openTab('Notes');
+
+  const send = host.querySelector<HTMLButtonElement>('button[aria-label="Add note"]');
+  if (!send) throw new Error('Send button missing');
+  await act(async () => send.click());
+  await settle();
+  expect(serverContext.notes.map(note => note.body)).toEqual(['Half-written note']);
+  expect(field().value).toBe('');
+
+  await act(async () => root?.unmount());
+  root = createRoot(host);
+  await render();
+  expect(field().value).toBe('');
+});
+
+test('a failed add puts the text back into its own project, not the one open meanwhile', async () => {
+  await mount();
+  await type('Note for this project');
+  let release = () => {};
+  noteCreateGate = new Promise((resolve) => { release = resolve; });
+  noteCreateFails = true;
+  const send = host.querySelector<HTMLButtonElement>('button[aria-label="Add note"]');
+  if (!send) throw new Error('Send button missing');
+  await act(async () => send.click());
+  expect(field().value).toBe('');
+
+  await render(true, { id: 'other', path: '/fixture/other' });
+  await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 0)); });
+  await settle();
+  expect(field().value).toBe('');
+
+  await render();
+  expect(field().value).toBe('Note for this project');
 });

@@ -80,7 +80,7 @@ describe('snippet registry', () => {
     };
 
     const earlyLoad = useSnippetsStore.getState().loadSnippets();
-    expect(await useSnippetsStore.getState().createSnippet('deploy', 'deploy body')).toBe(true);
+    expect(await useSnippetsStore.getState().createSnippet('deploy', 'deploy body')).toEqual({ ok: true });
     expect(listReads()).toHaveLength(2);
     expect(useSnippetsStore.getState().snippets.map((item) => item.name)).toEqual(['deploy']);
 
@@ -89,5 +89,31 @@ describe('snippet registry', () => {
     // Before: the create awaited the early read and published its empty list.
     expect(useSnippetsStore.getState().snippets.map((item) => item.name)).toEqual(['deploy']);
     expect(useSnippetsStore.getState().isLoading).toBe(false);
+  });
+
+  test('a rename moves the open snippet to its new name', async () => {
+    useDirectoryStore.setState({ currentDirectory: '/repo-rename' });
+    useSnippetsStore.setState({ snippets: [snippet('old-name')], selectedSnippetName: 'old-name' });
+    handle = (request) => (
+      request.method === 'PATCH'
+        ? Response.json({ success: true, snippet: snippet('new-name') })
+        : Response.json([snippet('new-name')])
+    );
+
+    expect(await useSnippetsStore.getState().updateSnippet('old-name', { name: 'new-name' })).toEqual({ ok: true });
+    expect(useSnippetsStore.getState().selectedSnippetName).toBe('new-name');
+  });
+
+  test('a new snippet under a taken name leaves the existing one alone', async () => {
+    useDirectoryStore.setState({ currentDirectory: '/repo-taken' });
+    handle = (request) => (
+      request.method === 'POST'
+        ? Response.json({ error: 'Snippet "deploy" already exists' }, { status: 409 })
+        : Response.json([snippet('deploy')])
+    );
+
+    expect(await useSnippetsStore.getState().createSnippet('deploy', 'other body')).toEqual({ ok: false, reason: 'taken' });
+    // Before: a 409 fell through to a PATCH that overwrote the existing snippet.
+    expect(requests.filter((request) => request.method === 'PATCH')).toHaveLength(0);
   });
 });

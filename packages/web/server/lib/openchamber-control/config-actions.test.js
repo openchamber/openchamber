@@ -132,7 +132,7 @@ describe('per-surface settings', () => {
   // Backed by the real preferences-file logic, so surface resolution here is
   // the one the settings route uses.
   const createSurfaceActions = async () => {
-    const files = await import('../opencode/settings-files.js');
+    const files = await import('../settings/settings-files.js');
     let fields = files.buildPreferencesFields({}, { sidebarLayout: { attention: 'separate' }, themeId: 'flexoki' }, 1);
     let now = 1;
     const read = async ({ surface = null } = {}) => files.flattenPreferences(fields, surface);

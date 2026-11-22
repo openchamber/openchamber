@@ -510,12 +510,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
           onClose={closeSessionSearch}
           placeholder={t('sessions.sidebar.header.search.placeholder')}
           clearLabel={t('sessions.sidebar.header.search.clear')}
-          leadingHint={hasSessionSearchQuery
-            ? (searchMatchCount === 1
-              ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
-              : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
-            : undefined}
-          trailingHint={t('sessions.sidebar.header.search.escapeHint')}
+          trailing={hasSessionSearchQuery ? (
+            <span className="shrink-0 typography-micro tabular-nums text-muted-foreground" aria-live="polite">
+              {searchMatchCount === 1
+                ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
+                : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount })}
+            </span>
+          ) : undefined}
         />
       </div>
     );
@@ -671,12 +672,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
               onClose={closeSessionSearch}
               placeholder={t('sessions.sidebar.header.search.placeholder')}
               clearLabel={t('sessions.sidebar.header.search.clear')}
-              leadingHint={hasSessionSearchQuery
-                ? (searchMatchCount === 1
-                  ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
-                  : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
-                : undefined}
-              trailingHint={t('sessions.sidebar.header.search.escapeHint')}
+              trailing={hasSessionSearchQuery ? (
+                <span className="shrink-0 typography-micro tabular-nums text-muted-foreground" aria-live="polite">
+                  {searchMatchCount === 1
+                    ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
+                    : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount })}
+                </span>
+              ) : undefined}
             />
           </div>
         ) : null}

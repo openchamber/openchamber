@@ -1,5 +1,5 @@
 import { Popover } from '@base-ui/react/popover';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import {
@@ -13,11 +13,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { GlassRedrawGuard } from '@/components/ui/glass-redraw-guard';
+import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
+import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestDiffServing, useChangeRequestTerm } from '@/lib/source-control/providers/registry';
+import { ChangeRequestDiffUnavailable } from '@/components/views/git/ChangeRequestDiffUnavailable';
 import type { WalkthroughSource, WalkthroughTarget, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
+import { useBranchPullRequestRequest } from '@/hooks/useBranchPullRequestRequest';
 import { useCommitComparison } from '@/hooks/useCommitComparison';
 import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { PullRequestComparisonSelector } from '@/components/views/git/PullRequestComparisonSelector';
@@ -26,10 +32,6 @@ import { BranchComparisonSelector } from '@/components/views/git/BranchCompariso
 import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
 import { gitPushScopeKey, subscribeGitPush } from '@/lib/gitPushEvents';
 import { useGitBranches, useGitStatus, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
-import {
-  getSourceControlStatusKey,
-  useGitHubPrStatusStore,
-} from '@/stores/useGitHubPrStatusStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -48,6 +50,7 @@ import {
   WalkthroughGenerateButton,
   WalkthroughLanguagePicker,
   WalkthroughModelPicker,
+  WalkthroughExportMenu,
   WalkthroughOptions,
   WalkthroughStepMenu,
 } from './WalkthroughControls';
@@ -55,44 +58,25 @@ import { MENU_GROUP_LABEL_CLASS, openWalkthroughGuide } from './walkthroughActio
 import { useWalkthroughReview } from './useWalkthroughReview';
 import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
-import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from '@/components/views/git/GitRepositoryUnreadableState';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
+import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
 import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
+import { diffCommentOriginFromTarget } from '@/lib/diffCommentOrigin';
 
 interface WalkthroughViewProps {
   directory: string;
-  /**
-   * The context panel keeps this view mounted but hidden via CSS, so work
-   * that should only run for a visible consumer has to be told. Defaults to
-   * true for mounts that have no visibility signal.
-   */
   visible?: boolean;
 }
 
 const SCOPES: WalkthroughWorkingTreeScope[] = ['all', 'staged', 'working'];
 
-// Below this the table of contents would squeeze the diff into uselessness, so
-// the stream takes the whole panel and the header arrows carry navigation.
 const TOC_MIN_PANEL_WIDTH = 720;
 const TOC_MIN_WIDTH = 180;
-// The diff is the point of the surface; the contents column may never take more
-// than half the panel no matter how far the user drags.
 const TOC_MAX_FRACTION = 0.5;
 
-// The header never wraps. While its row does not fit it gives up room in
-// steps (the CSS is in `index.css`): first the labels, keeping the icons that
-// already name each control; then the model, the language and the guide move
-// into "More"; then the step arrows and Generate go, leaving the step list and
-// "More" to reach them; last the scope keeps only its icon. A fixed width
-// cannot pick the step: the pickers in the row change with the scope and the
-// language.
-//
-// Every control in this row is 28px tall — `Button` size `sm` and the dropdown
-// trigger's default size are both h-7, the design system's toolbar scale
-// rather than a number picked here. Three heights in one row read as
-// misalignment, not hierarchy.
 const WALKTHROUGH_HEADER_FIT = {
   steps: [
     'data-walkthrough-header-compact',
@@ -108,14 +92,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const inPanelHeader = useInContextPanelHeader();
   const [panelWidth, setPanelWidth] = useState(0);
 
-  // The walkthrough documents one repository. When the root is not itself a
-  // repository, that is the resolved nested repository; everything below keys
-  // off `directory`.
-  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(rootDirectory || null, { enabled: visible });
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions, unreadable } = useNestedGitDirectory(rootDirectory || null, { enabled: visible, recheckOnOpen: true });
   const directory = gitDirectory ?? rootDirectory;
 
-  // Panel width, not viewport width: this surface is resizable independently of
-  // the window.
   useEffect(() => {
     const element = rootRef.current;
     if (!element || typeof ResizeObserver === 'undefined') return;
@@ -126,9 +105,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     return () => observer.disconnect();
   }, []);
 
-  // Fitted against the header's own width, not the panel's: inside the context
-  // panel header it shares the row with the panel's fullscreen and close
-  // buttons.
   const headerRef = useRef<HTMLElement | null>(null);
   useToolbarFit(headerRef, WALKTHROUGH_HEADER_FIT);
 
@@ -137,9 +113,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const [draggingToc, setDraggingToc] = useState(false);
 
   const showToc = panelWidth === 0 || panelWidth >= TOC_MIN_PANEL_WIDTH;
-  // Clamped on read rather than on write: the panel can be resized after the
-  // width was stored, and a remembered 400px column must not swallow a narrow
-  // panel.
   const tocWidth = Math.min(
     Math.max(storedTocWidth, TOC_MIN_WIDTH),
     Math.max(TOC_MIN_WIDTH, (panelWidth || TOC_MIN_PANEL_WIDTH) * TOC_MAX_FRACTION)
@@ -150,7 +123,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
       event.preventDefault();
       const startX = event.clientX;
       const startWidth = tocWidth;
-      // The contents column is at the start; in RTL dragging left widens it.
       const sign = isRightToLeft(event.currentTarget) ? -1 : 1;
       const maxWidth = Math.max(TOC_MIN_WIDTH, (rootRef.current?.clientWidth ?? 0) * TOC_MAX_FRACTION);
       setDraggingToc(true);
@@ -190,15 +162,11 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
 
   const diffLayoutPreference = useUIStore((state) => state.diffLayoutPreference);
   const wrapLines = useUIStore((state) => state.diffWrapLines);
-  // The walkthrough column is narrower than the diff surface and stops are read
-  // top-to-bottom, so `dynamic` resolves to inline here rather than guessing
-  // from the window width.
   const renderSideBySide = diffLayoutPreference === 'side-by-side';
 
   const requestedTarget = useWalkthroughStore((state) => state.getRequestedTarget(directory));
   const clearRequestedTarget = useWalkthroughStore((state) => state.clearRequestedTarget);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-  // The panel this view lives in, which may show another project's PR here.
   const panelDirectory = useEffectiveDirectory() ?? rootDirectory;
 
   const status = useGitStatus(directory || null);
@@ -218,8 +186,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     if (visible && directory) void ensureAll(directory, git);
   }, [directory, ensureAll, git, visible]);
 
-  // Changes and the walkthrough share one base: the person's explicit choice,
-  // else the open pull request's base, the reflog, then the default branch.
   const currentBranch = status?.current ?? null;
   const choosingCommit = pendingSourceSelection?.directory === directory && pendingSourceSelection.kind === 'commit' && !requestedTarget;
   const isCommitScope = choosingCommit || requestedTarget?.source.kind === 'commit';
@@ -238,72 +204,18 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     currentBranch && comparisonBase ? { kind: 'branch', baseRef: comparisonBase, headRef: currentBranch } : null
   ), [comparisonBase, currentBranch]);
 
-  // The pull request for this branch used to appear only after visiting the PR
-  // panel, because nothing else asked GitHub about it. Ask here too: the status
-  // store already dedupes by signature and throttles by TTL, so several panels
-  // wanting the same answer produce one request.
-  const sourceControlAuthEntries = useSourceControlAuthStore((state) => state.entries);
-  const ensurePrStatusEntry = useGitHubPrStatusStore((state) => state.ensureEntry);
-  const setPrStatusParams = useGitHubPrStatusStore((state) => state.setParams);
-  const beginActiveSourceControlContextsLoad = useGitHubPrStatusStore((state) => state.beginActiveContextsLoad);
-  const commitActiveSourceControlContexts = useGitHubPrStatusStore((state) => state.commitActiveContexts);
-  const releaseActiveSourceControlContexts = useGitHubPrStatusStore((state) => state.releaseActiveContexts);
-  const sourceControlContextsOwnerId = useId();
-  const refreshPrStatusTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
-
-  useEffect(() => {
-    if (!directory) return;
-    const capturedRuntimeKey = binding.scope.runtimeKey;
-    const contextRequestId = beginActiveSourceControlContextsLoad(capturedRuntimeKey, directory, sourceControlContextsOwnerId);
-    const activeContexts = binding.contexts.filter((context) => getSourceControlReadContextAuthState(
-      sourceControlAuthEntries[getSourceControlAuthKey(context)], context,
-    ).connected);
-    commitActiveSourceControlContexts(capturedRuntimeKey, directory, sourceControlContextsOwnerId, contextRequestId, activeContexts);
-    return () => {
-      releaseActiveSourceControlContexts(capturedRuntimeKey, directory, sourceControlContextsOwnerId);
-    };
-  }, [beginActiveSourceControlContextsLoad, binding.contexts, binding.scope.runtimeKey, commitActiveSourceControlContexts, directory, releaseActiveSourceControlContexts, sourceControlAuthEntries, sourceControlContextsOwnerId]);
+  useBranchPullRequestRequest(directory || null, currentBranch, binding);
   const readContext = binding.contexts[0] ?? null;
-  const readAuthEntry = readContext ? sourceControlAuthEntries[getSourceControlAuthKey(readContext)] : undefined;
-  const readAuth = readContext
-    ? getSourceControlReadContextAuthState(readAuthEntry, readContext)
-    : { authChecked: false, connected: false };
-
-  useEffect(() => {
-    if (!readContext || !currentBranch) return;
-    const key = getSourceControlStatusKey(readContext, currentBranch);
-    ensurePrStatusEntry(key);
-    setPrStatusParams(key, {
-      directory: readContext.directory,
-      branch: currentBranch,
-      remoteName: readContext.primaryRemote,
-      canShow: true,
-      identity: readContext,
-      readContext,
-      sourceControl,
-      authChecked: readAuth.authChecked,
-      connected: readAuth.connected,
-    });
-    void refreshPrStatusTargets([{ context: readContext, branch: currentBranch }]);
-  }, [
-    currentBranch,
-    ensurePrStatusEntry,
-    readContext,
-    readAuth.authChecked,
-    readAuth.connected,
-    refreshPrStatusTargets,
-    setPrStatusParams,
-    sourceControl,
-  ]);
 
   const choosingPr = pendingSourceSelection?.directory === directory && pendingSourceSelection.kind === 'pr' && !requestedTarget;
   const isPrScope = choosingPr || requestedTarget?.source.kind === 'pr';
   const prComparison = usePullRequestComparison(directory || null, currentBranch, readContext, visible && isPrScope,
     requestedTarget?.source.kind === 'pr' ? requestedTarget.source : undefined);
   const selectedPr = prComparison.selectedSource;
-  // Pull requests on GitHub and merge requests on GitLab both have a published diff to walk through.
-  const readsChangeRequests = readContext?.provider === 'github' || readContext?.provider === 'gitlab';
-  const changeRequestProvider = prComparison.provider;
+  const readsChangeRequests = prComparison.readContext !== null;
+  const offersChangeRequests = useChangeRequestDiffServing(readContext?.provider) !== 'not-served' && readContext !== null;
+  const prDiffUnavailable = isPrScope && prComparison.diffUnavailable;
+  const changeRequestTerm = useChangeRequestTerm(prComparison.provider);
 
   const target = useMemo<WalkthroughTarget>(
     () => isPrScope && selectedPr && readsChangeRequests && readContext
@@ -316,15 +228,15 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     [branchSource, isCommitScope, isPrScope, readContext, readsChangeRequests, requestedTarget, scope, selectedCommitHash, selectedPr]
   );
   const source = target.source;
-  // A scope the person picked before its subject exists: the base of a branch
-  // comparison, or which commit to read. Nothing loads until they say.
+  const commentOrigin = useMemo(() => diffCommentOriginFromTarget(target), [target]);
+  const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, directory, visible && isPrScope);
   const choosingBranchBase = pendingSourceSelection?.directory === directory
     && pendingSourceSelection.kind === 'branch' && !requestedTarget;
   const isBranchScope = choosingBranchBase || source.kind === 'branch';
   const branchNeedsBase = choosingBranchBase || (source.kind === 'branch' && !branchSource);
   const commitNeedsSelection = choosingCommit || (isCommitScope && !selectedCommitHash);
   const prNeedsSelection = isPrScope && !selectedPr;
-  const needsSourceSelection = branchNeedsBase || commitNeedsSelection || prNeedsSelection;
+  const needsSourceSelection = branchNeedsBase || commitNeedsSelection || prNeedsSelection || prDiffUnavailable;
 
   const selectWorkingTree = useCallback(
     (value: WalkthroughWorkingTreeScope) => {
@@ -350,8 +262,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     requestTarget(directory, { source: { kind: 'commit', hash: selectedCommitHash } });
     setPendingSourceSelection(null);
   }, [choosingCommit, directory, requestTarget, selectedCommitHash]);
-  // Reads again when the subject moves: a branch's new commits, a push to the
-  // pull request.
   const sourceRevision = source.kind === 'branch' ? branchRevision : '';
   const prPushRevision = source.kind === 'pr' ? pushRevision : 0;
   const review = useWalkthroughReview({
@@ -376,28 +286,25 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const sourceValue = isPrScope ? 'pr' : isCommitScope ? 'commit' : isBranchScope ? 'branch' : source.kind === 'working-tree' ? source.scope : source.kind;
-  const sourceLabel = isPrScope ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider)) : isCommitScope ? t('commitComparison.mode') : isBranchScope
+  const sourceLabel = isPrScope ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm)) : isCommitScope ? t('commitComparison.mode') : isBranchScope
     ? t('walkthrough.scope.branch')
     : source.kind === 'pr'
-      ? t(changeRequestCopy('walkthrough.scope.pullRequest', changeRequestProvider), { number: source.number })
+      ? `${t(changeRequestCopy('walkthrough.scope.pullRequest', changeRequestTerm), { number: source.number })}${revisionSuffix(source)}`
       : scope === 'all'
         ? t('walkthrough.scope.all')
         : scope === 'staged'
           ? t('walkthrough.scope.staged')
           : t('walkthrough.scope.working');
   const openChanges = () => openContextPanelTab(panelDirectory, { mode: 'diff', diffScope: 'pr', targetDirectory: rootDirectory });
-  // Before the first walkthrough the empty state holds the model, the language
-  // and Generate, so the header does not repeat them; a blocker keeps them in
-  // the header, where a roomier model is the way past it.
   const headerOffersGeneration = Boolean(view || review.blocked);
   const sourceIcon = isPrScope ? 'git-pull-request' : isCommitScope ? 'git-commit' : isBranchScope ? 'git-branch' : 'file-edit';
 
   const isGitRepo = useIsGitRepo(gitDirectory || null);
   const ensureNestedRepos = useGitStore((state) => state.ensureNestedRepos);
   const selectNestedRepo = useGitStore((state) => state.selectNestedRepo);
-  // Non-repo root: surface nested-repository resolution while the operating
-  // directory has not proven to be a repository (discovering, failed,
-  // unsupported, none found, or settling on the auto-selected one).
+  if (unreadable) {
+    return <GitRepositoryUnreadableState directory={unreadable.directory} message={unreadable.message} />;
+  }
   if (rootIsGitRepo === false && isGitRepo !== true) {
     return (
       <NestedRepoResolutionStates
@@ -413,13 +320,14 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   }
 
   return (
+    <ChangeRequestReviewContext.Provider value={changeRequestReview}>
     <div ref={rootRef} data-find-surface="" className="flex h-full min-h-0 flex-col">
       <ContextPanelHeaderToolbar>
       <header
         ref={headerRef}
         className={cn(
           'walkthrough-header flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden',
-          inPanelHeader ? 'flex-1 py-1 pe-1' : 'shrink-0 border-b border-border/60 px-3 py-2'
+          inPanelHeader ? 'flex-1 py-1 pe-1' : 'shrink-0 border-b border-edge px-3 py-2'
         )}
       >
         {repositoryOptions ? (
@@ -435,18 +343,24 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
           </div>
         ) : null}
         <DropdownMenu open={sourceMenuOpen} onOpenChange={setSourceMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className={cn(dropdownTriggerVariants(), 'shrink-0')}
-              aria-label={t('walkthrough.scope.selectorAria')}
-              title={sourceLabel}
-            >
-              <Icon name={sourceIcon} className="walkthrough-header__source-icon" />
-              <span className="walkthrough-header__source-label">{sourceLabel}</span>
-              <Icon name="arrow-down-s" />
-            </button>
-          </DropdownMenuTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(dropdownTriggerVariants(), 'shrink-0')}
+                    aria-label={t('walkthrough.scope.selectorAria')}
+                  >
+                    <Icon name={sourceIcon} className="walkthrough-header__source-icon" />
+                    <span className="walkthrough-header__source-label">{sourceLabel}</span>
+                    <Icon name="arrow-down-s" />
+                  </button>
+                </DropdownMenuTrigger>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.scope.selectorAria')}</TooltipContent>
+          </Tooltip>
           <DropdownMenuContent align="start" className="w-48">
             <DropdownMenuRadioGroup
               value={sourceValue}
@@ -475,9 +389,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                 selectWorkingTree(value as WalkthroughWorkingTreeScope);
               }}
             >
-              {/* Grouped so "everything" is visibly scoped to uncommitted work:
-                  on its own next to "This branch" it read as "all changes that
-                  exist", which is the opposite of what it selects. */}
               <DropdownMenuLabel className={MENU_GROUP_LABEL_CLASS}>
                 {t('walkthrough.scope.group.workingTree')}
               </DropdownMenuLabel>
@@ -490,8 +401,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                       : t('walkthrough.scope.working')}
                 </DropdownMenuRadioItem>
               ))}
-              {/* The branch scope is offered on any branch: without a base yet,
-                  picking it asks for one instead of hiding the option. */}
               {currentBranch && (
                 <>
                   <DropdownMenuSeparator />
@@ -504,9 +413,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
               <DropdownMenuRadioItem value="commit">
                 {t('commitComparison.mode')}
               </DropdownMenuRadioItem>
-              {readsChangeRequests && (
+              {offersChangeRequests && (
                 <DropdownMenuRadioItem value="pr">
-                  {t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider))}
+                  {t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm))}
                 </DropdownMenuRadioItem>
               )}
             </DropdownMenuRadioGroup>
@@ -518,6 +427,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             <BranchComparisonSelector
               key={JSON.stringify([directory, currentBranch])}
               branches={branches?.all ?? []}
+              defaultBranches={branches?.defaultBranches}
+              primaryRemote={binding.contexts[0]?.primaryRemote}
               currentBranch={currentBranch}
               base={comparisonBase}
               automatic={comparisonBaseSource !== 'chosen'}
@@ -544,19 +455,26 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             />
           </div>
         )}
-        {isPrScope && (
+        {isPrScope && !prDiffUnavailable && (
           <div className="min-w-0 shrink">
             <PullRequestComparisonSelector key={JSON.stringify([directory, currentBranch])} comparison={prComparison} />
           </div>
         )}
 
         <div className="ms-auto flex shrink-0 items-center gap-1">
-          {isPrScope && selectedPr && <Button variant="ghost" size="sm" className="walkthrough-header__option"
-            aria-label={t('contextPanel.mode.diff')} title={t('contextPanel.mode.diff')}
-            onClick={openChanges}>
-            <Icon name="arrow-left-right" className="size-4" />
-            <span className="walkthrough-header__label">{t('contextPanel.mode.diff')}</span>
-          </Button>}
+          {isPrScope && selectedPr && !prDiffUnavailable && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" className="walkthrough-header__option"
+                  aria-label={t('contextPanel.mode.diff')}
+                  onClick={openChanges}>
+                  <Icon name="arrow-left-right" className="size-4" />
+                  <span className="walkthrough-header__label">{t('contextPanel.mode.diff')}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.walkthrough.openChanges')}</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -575,6 +493,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             </TooltipContent>
           </Tooltip>
 
+          <WalkthroughExportMenu review={review} className="walkthrough-header__option" />
           {headerOffersGeneration && (
             <>
               <WalkthroughLanguagePicker review={review} className="walkthrough-header__option max-w-40" />
@@ -583,34 +502,44 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
           )}
           {view && (
             <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="walkthrough-header__step-arrow"
-                aria-label={t('walkthrough.action.previous')}
-                onClick={() => review.step(-1)}
-              >
-                <Icon name="arrow-right-s" className="size-4 rotate-180" />
-              </Button>
-              {/* Without the contents column the arrows alone say neither where
-                  the reader is nor what is ahead, so the position opens the
-                  list of steps. */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="walkthrough-header__step-arrow"
+                    aria-label={t('walkthrough.action.previous')}
+                    onClick={() => review.step(-1)}
+                  >
+                    <Icon name="arrow-right-s" className="size-4 rotate-180" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.action.previous')}</TooltipContent>
+              </Tooltip>
               {!showToc && <WalkthroughStepMenu review={review} view={view} />}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="walkthrough-header__step-arrow"
-                aria-label={t('walkthrough.action.next')}
-                onClick={() => review.step(1)}
-              >
-                <Icon name="arrow-right-s" className="size-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="walkthrough-header__step-arrow"
+                    aria-label={t('walkthrough.action.next')}
+                    onClick={() => review.step(1)}
+                  >
+                    <Icon name="arrow-right-s" className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.action.next')}</TooltipContent>
+              </Tooltip>
             </>
           )}
 
-          {(headerOffersGeneration || review.isGenerating) && (
+          {changeRequestReview && reviewProvider ? (
+            <ReviewSubmitButton review={changeRequestReview} provider={reviewProvider} labelClassName="walkthrough-header__label" />
+          ) : null}
+          {!prDiffUnavailable && (headerOffersGeneration || review.isGenerating) && (
             <WalkthroughGenerateButton
               review={review}
               hasView={Boolean(view)}
@@ -619,20 +548,24 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             />
           )}
           <Popover.Root open={moreOpen} onOpenChange={setMoreOpen}>
-            <Popover.Trigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="walkthrough-header__more data-[popup-open]:bg-interactive-hover"
-                  aria-label={t('walkthrough.options.moreAria')}
-                  title={t('walkthrough.options.moreAria')}
-                />
-              }
-            >
-              <Icon name="more" className="size-4" />
-            </Popover.Trigger>
+            <Tooltip disabled={moreOpen}>
+              <TooltipTrigger asChild>
+                <Popover.Trigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="walkthrough-header__more data-[popup-open]:bg-interactive-hover"
+                      aria-label={t('walkthrough.options.moreAria')}
+                    />
+                  }
+                >
+                  <Icon name="more" className="size-4" />
+                </Popover.Trigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.options.moreAria')}</TooltipContent>
+            </Tooltip>
             <Popover.Portal>
               <Popover.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
                 <Popover.Popup
@@ -645,6 +578,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                     onOpenChanges={isPrScope && selectedPr ? openChanges : undefined}
                     onActed={() => setMoreOpen(false)}
                   />
+                  <GlassRedrawGuard />
                 </Popover.Popup>
               </Popover.Positioner>
             </Popover.Portal>
@@ -653,15 +587,17 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
       </header>
       </ContextPanelHeaderToolbar>
 
-      <WalkthroughBanners review={review} view={view} />
+      {!prDiffUnavailable && <WalkthroughBanners review={review} view={view} />}
 
       <div className={cn('flex min-h-0 flex-1', showToc ? 'flex-row' : 'flex-col')}>
-        {prNeedsSelection ? (
+        {prDiffUnavailable ? (
+          <ChangeRequestDiffUnavailable provider={prComparison.provider} className="p-8" />
+        ) : prNeedsSelection ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
             {!prComparison.error && !prComparison.loading && <Icon name="git-pull-request" className="size-6 text-muted-foreground" />}
             <p className="typography-meta text-muted-foreground">{prComparison.error ?? (prComparison.loading
-              ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', changeRequestProvider))
-              : t(changeRequestCopy('pullRequestComparison.pickAbove', changeRequestProvider)))}</p>
+              ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', changeRequestTerm))
+              : t(changeRequestCopy('pullRequestComparison.pickAbove', changeRequestTerm)))}</p>
           </div>
         ) : commitNeedsSelection ? (
           <div className="flex flex-1 items-center justify-center gap-2 p-8 typography-meta text-muted-foreground">
@@ -717,7 +653,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                 />
               </>
             )}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               {diffFind.isOpen && (
                 <DiffFindBar
                   query={diffFind.query}
@@ -740,6 +676,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                 onScrollHandled={review.clearScrollRequest}
                 renderSideBySide={renderSideBySide}
                 wrapLines={wrapLines}
+                commentOrigin={commentOrigin}
                 summary={showToc ? undefined : view.walkthrough.focus}
                 uncoveredOpenRequest={findInWalkthrough.uncoveredOpenRequest}
                 registerFindViewerRef={findInWalkthrough.registerViewer}
@@ -752,5 +689,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
         )}
       </div>
     </div>
+    </ChangeRequestReviewContext.Provider>
   );
 };

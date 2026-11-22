@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import { shutdownTerminalProcesses } from './shutdown.js';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -11,6 +11,23 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 // than the old 1500 ms, and then SIGKILL lands first, so no SIGTERM is recorded. Each test still ends as
 // soon as its children exit, so the longer grace only costs time when a child is slow.
 const GRACE_MS = 5000;
+test('Windows shutdown leaves teardown to each PTY and continues after a kill failure', async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const posixKill = vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('Unexpected POSIX signal'); });
+  const signals = [];
+  try {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    await shutdownTerminalProcesses([
+      { process: { pid: 100_001, kill: signal => { signals.push(signal); throw new Error('already gone'); } }, shellExecutable: 'cmd.exe' },
+      { process: { pid: 100_002, kill: signal => { signals.push(signal); } }, shellExecutable: 'powershell.exe' },
+    ]);
+    assert.deepEqual(signals, [undefined, undefined]);
+    assert.equal(posixKill.mock.calls.length, 0);
+  } finally {
+    posixKill.mockRestore();
+    Object.defineProperty(process, 'platform', platform);
+  }
+});
 const script = `
 const fs = require('node:fs');
 const [file, mode] = process.argv.slice(1);

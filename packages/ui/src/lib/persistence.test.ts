@@ -125,7 +125,7 @@ const deferred = <T>() => {
 };
 
 const registerSettingsApi = (
-  save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>,
+  save: (changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }) => Promise<SettingsPayload>,
   load: () => Promise<{ settings: SettingsPayload; source: 'web' | 'vscode' }> = async () => ({ settings: {}, source: 'web' }),
 ): void => {
   registerRuntimeAPIs({
@@ -137,7 +137,7 @@ const registerSettingsApi = (
   } as unknown as RuntimeAPIs);
 };
 
-const registerSettingsSave = (save: (changes: Partial<SettingsPayload>) => Promise<SettingsPayload>): void => {
+const registerSettingsSave = (save: (changes: Partial<SettingsPayload>, options?: { keepalive?: boolean }) => Promise<SettingsPayload>): void => {
   registerSettingsApi(save);
 };
 
@@ -150,6 +150,7 @@ const resetModelPrefsState = (): void => {
     recentAgents: [],
     favoriteAgents: [],
     recentEfforts: {},
+    lastUsedEfforts: {},
   });
 };
 
@@ -506,6 +507,19 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().managedToolsApplyLive).toBe(true);
   });
 
+  test('mirrors a custom stt endpoint path into local storage', async () => {
+    getWindow();
+    localStorage.clear();
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://endpoint-path.example', runtimeKey: 'endpoint-path' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { sttEndpointPath: '/speech_to_text' },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+
+    expect(localStorage.getItem('sttEndpointPath')).toBe('/speech_to_text');
+  });
+
   test('keeps in-memory preferences that an authoritative runtime snapshot omits', async () => {
     getWindow();
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-a.example', runtimeKey: 'preferences-a' });
@@ -839,6 +853,7 @@ describe('updateDesktopSettings', () => {
       recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
       recentAgents: ['build', 'plan'],
       recentEfforts: { 'anthropic/claude-haiku-4': ['high', 'default'] },
+      lastUsedEfforts: { 'anthropic/claude-haiku-4': 'high', 'openai/gpt-5': null },
       draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     } satisfies SettingsPayload;
     registerSettingsApi(async () => ({}), async () => ({ settings, source: 'web' }));
@@ -852,6 +867,7 @@ describe('updateDesktopSettings', () => {
     expect(state.recentModels).toEqual(settings.recentModels);
     expect(state.recentAgents).toEqual(settings.recentAgents);
     expect(state.recentEfforts).toEqual(settings.recentEfforts);
+    expect(state.lastUsedEfforts).toEqual(settings.lastUsedEfforts);
   });
 
   test('applies the persisted terminal shell from server settings', async () => {
@@ -889,6 +905,7 @@ describe('updateDesktopSettings', () => {
         recentAgents: ['build'],
         favoriteAgents: ['plan'],
         recentEfforts: { 'openai/gpt-5': ['low'] },
+        lastUsedEfforts: { 'openai/gpt-5': 'low', 'openai/gpt-5-mini': null },
       });
 
       await delay(1500);
@@ -904,6 +921,8 @@ describe('updateDesktopSettings', () => {
         recentEfforts: { 'openai/gpt-5': ['low'] },
         modelDefaultVariants: {},
         modelDefaultVariantLocks: [],
+
+        lastUsedEfforts: { 'openai/gpt-5': 'low', 'openai/gpt-5-mini': null },
         customProviderIcons: {},
       });
     } finally {
@@ -934,6 +953,8 @@ describe('updateDesktopSettings', () => {
         recentEfforts: {},
         modelDefaultVariants: {},
         modelDefaultVariantLocks: [],
+
+        lastUsedEfforts: {},
         customProviderIcons: {},
       }]);
     } finally {
@@ -1541,6 +1562,8 @@ describe('unload lifecycle flush (#2197)', () => {
         recentEfforts: {},
         modelDefaultVariants: {},
         modelDefaultVariantLocks: [],
+
+        lastUsedEfforts: {},
         customProviderIcons: {},
       }]);
     } finally {
@@ -1582,6 +1605,22 @@ describe('unload lifecycle flush (#2197)', () => {
     } finally {
       globalThis.fetch = previousFetch;
     }
+  });
+
+  test('asks the runtime settings API for keepalive on the unload flush only', async () => {
+    const saveOptions: Array<{ keepalive?: boolean } | undefined> = [];
+    registerSettingsSave(async (_changes, options) => {
+      saveOptions.push(options);
+      return {};
+    });
+
+    const update = updateDesktopSettings({ gitChangesViewMode: 'flat' });
+    getWindow().dispatchEvent(new Event('pagehide'));
+    await update;
+    await updateDesktopSettings({ gitChangesViewMode: 'tree' });
+    await delay(300);
+
+    expect(saveOptions).toEqual([{ keepalive: true }, { keepalive: false }]);
   });
 
   test('ignores lifecycle events when no settings write is pending', async () => {

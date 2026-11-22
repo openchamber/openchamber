@@ -103,8 +103,8 @@ describe('mergeSessionLists', () => {
     expect(merged.cursor).toEqual({ next: 'abc' });
     // A space whose project is not registered on this host is marked with no project and no directory.
     expect(merged.spaces).toEqual([
-      { id: ID, name: 'First', state: 'complete', sessions: 1, projectDirectory: '/home/me/repo', directory: `/spaces/${ID}/repo` },
-      { id: OTHER, name: '', state: 'stale', sessions: 2, projectDirectory: null, directory: null },
+      { id: ID, name: 'First', taskTitle: null, state: 'complete', sessions: 1, projectDirectory: '/home/me/repo', directory: `/spaces/${ID}/repo` },
+      { id: OTHER, name: '', taskTitle: null, state: 'stale', sessions: 2, projectDirectory: null, directory: null },
     ]);
   });
 });

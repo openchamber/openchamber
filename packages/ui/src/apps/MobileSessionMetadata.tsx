@@ -5,7 +5,7 @@ import type { IconName } from '@/components/icon/icons';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
-import { clampPercent, resolveUsageTone } from '@/lib/quota';
+import { clampPercent, isExtensionQuotaProviderId, resolveUsageTone } from '@/lib/quota';
 import { UsageProviderCards } from '@/components/usage/UsageProviderCards';
 import { useUsageProviderGroups, type UsageProviderGroup } from '@/components/usage/usageGroups';
 import { cn } from '@/lib/utils';
@@ -15,6 +15,7 @@ import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionMessages } from '@/sync/sync-context';
+import { MOBILE_HEADER_BUTTON_CLASS } from '@/components/ui/mobileHeader';
 
 const TABLET_METADATA_POPOVER_WIDTH = 380;
 
@@ -32,15 +33,12 @@ const formatTokens = (value: number): string => {
 
 type ContextDisplay =
   | { state: 'measured'; percentage: number; tokens: string; colorClass: string }
-  /** Compacted since the last response that reported tokens: the fill is unknown. */
   | { state: 'compacted'; tokens: string }
-  /** Nothing to measure yet: a draft, or a session without a response. */
   | { state: 'pending' }
   | null;
 
 const UNKNOWN_VALUE = '\u2014';
 
-/** `percentage: null` draws the empty track only: the fill is unknown after a compaction. */
 const ContextProgressIcon: React.FC<{ percentage: number | null }> = ({ percentage }) => {
   const progressPct = clampPercent(percentage ?? 0) ?? 0;
   const tone = resolveUsageTone(percentage ?? 0);
@@ -120,16 +118,10 @@ const SessionMetadataOverlay: React.FC<{
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
   const [isExiting, setIsExiting] = React.useState(false);
-  // Tablet: a phone-width sheet stretched across the whole chat column looks
-  // broken — render a popover anchored to the metadata button instead.
   const { enabled: isTabletLayout } = useTabletLayout();
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const [anchorLeft, setIpadAnchorLeft] = React.useState<number | null>(null);
 
-  // The shell has transformed ancestors, so the fixed wrapper's containing
-  // block is the chat column, NOT the viewport. Anchor the popover in the
-  // wrapper's own coordinate space — viewport-based lefts would double-count
-  // the sidebar offset.
   React.useLayoutEffect(() => {
     if (!open || !isTabletLayout || !shouldRender) return;
     const compute = () => {
@@ -147,8 +139,6 @@ const SessionMetadataOverlay: React.FC<{
       setIpadAnchorLeft(left);
     };
     compute();
-    // Re-anchor if the chat column shifts while the popover is open (sidebar
-    // toggle/resize, orientation change) — the header buttons move with it.
     const wrapper = wrapperRef.current;
     if (typeof ResizeObserver === 'undefined' || !wrapper) return;
     const observer = new ResizeObserver(compute);
@@ -213,7 +203,7 @@ const SessionMetadataOverlay: React.FC<{
         role="dialog"
         aria-label={t('mobile.header.openMetadataAria')}
         className={cn(
-          'oc-surface-elevated overflow-y-auto overscroll-contain rounded-[20px] border border-border/70 bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          'oc-surface-elevated overflow-y-auto overscroll-contain rounded-[20px] border border-edge bg-surface-elevated p-2 shadow-[0_4px_12px_rgb(0_0_0_/_0.08)] will-change-transform',
           isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}
@@ -248,8 +238,6 @@ const SessionMetadataOverlay: React.FC<{
           {contextDisplay?.state === 'compacted' ? (
             <p className="px-2.5 pb-1 typography-meta text-muted-foreground">{t('contextUsage.compacted.description')}</p>
           ) : null}
-          {/* The header ring is empty on a draft; this row says why, so the
-              empty ring reads as "nothing yet" rather than "still loading". */}
           {contextDisplay?.state === 'pending' ? (
             <p className="px-2.5 pb-1 typography-meta text-muted-foreground">{t('mobile.header.metadata.contextPending')}</p>
           ) : null}
@@ -284,8 +272,6 @@ const MobileUsageLimits: React.FC<{
   const { t } = useI18n();
   const modeLabel = displayMode === 'remaining' ? t('header.services.remaining') : t('header.services.used');
 
-  // First open often races the quota fetch (~2s) — show an explicit loading
-  // row instead of collapsing to an empty overlay.
   if (groups.length === 0) {
     if (!isLoading) return null;
     return (
@@ -347,43 +333,19 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
       [currentSessionId],
     ),
   );
-  const quotaResults = useQuotaStore((state) => state.results);
-  const quotaRefreshErrors = useQuotaStore((state) => state.refreshErrors);
-  const quotaRefreshAttempted = React.useRef(false);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
 
-  useQuotaAutoRefresh();
+  useQuotaAutoRefresh(open);
+
 
   React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
-
-  React.useEffect(() => {
-    preloadProviderLogos(dropdownProviderIds);
+    preloadProviderLogos(dropdownProviderIds.filter((id) => !isExtensionQuotaProviderId(id)));
   }, [dropdownProviderIds]);
 
-  React.useEffect(() => {
-    if (!open) {
-      quotaRefreshAttempted.current = false;
-      return;
-    }
-    if (quotaRefreshAttempted.current || isQuotaLoading) return;
-    const missingEnabledProvider = dropdownProviderIds.some((providerId) => (
-      !quotaResults.some((result) => result.providerId === providerId) || quotaRefreshErrors[providerId]
-    ));
-    if (!missingEnabledProvider) return;
-    // Trigger at most one attempt per opening. A failed first load remains
-    // unknown, not an empty result that can suppress retries.
-    quotaRefreshAttempted.current = true;
-    void fetchAllQuotas();
-  }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults, quotaRefreshErrors]);
 
-  // v2 records the model on the assistant reply (a user message carries none).
   const latestMessageModel = React.useMemo(() => {
     for (let i = activeSessionMessages.length - 1; i >= 0; i -= 1) {
       const message = activeSessionMessages[i];
@@ -431,7 +393,7 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
 
   React.useEffect(() => {
     if (!open || usageGroups.length === 0) return;
-    preloadProviderLogos(usageGroups.map((group) => group.providerId));
+    preloadProviderLogos(usageGroups.map((group) => group.providerId).filter((id) => !isExtensionQuotaProviderId(id)));
   }, [open, usageGroups]);
 
   return (
@@ -439,14 +401,12 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
       <button
         ref={metadataTriggerRef}
         type="button"
-        className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={MOBILE_HEADER_BUTTON_CLASS}
         aria-label={t('mobile.header.openMetadataAria')}
         aria-expanded={open}
         onClick={() => onOpenChange((currentOpen) => !currentOpen)}
         style={{ touchAction: 'manipulation' }}
       >
-        {/* Live context gauge doubles as the metadata trigger: filled by the
-            session's context usage, an empty ring on a fresh draft. */}
         <ContextProgressIcon
           percentage={contextDisplay?.state === 'measured'
             ? contextDisplay.percentage

@@ -3,7 +3,9 @@ import React from 'react';
 import type { SurfaceInputEvent, SurfaceModifiers } from '@openchamber/sdk';
 
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isGuestActive } from '@/lib/guests/capabilities';
 import { useGuestsStore } from '@/lib/guests/store';
@@ -12,19 +14,6 @@ import { SurfaceClient, type SurfaceConnectionState, type SurfaceControlState, t
 import { pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
 import { cn } from '@/lib/utils';
 
-/**
- * The rail panel of an extension whose service shows a shared surface: a
- * live picture of what the agent is working in, which the user can take
- * over by clicking or typing and hand back with one button.
- *
- * The picture is a canvas the host draws; the extension never runs code in
- * this panel. Pointer and keyboard events are translated to frame pixels
- * and sent as a batch per animation frame. While the surface has focus the
- * host's own shortcuts stand down (`data-terminal-owner`, the same gate the
- * terminal uses), so a Ctrl+P typed into a remote page stays in that page.
- * Paste sends text rather than the key chord; copy sends the chord and then
- * asks the extension for what was copied, so the user's clipboard follows.
- */
 
 type Props = { mode: PluginContextPanelMode };
 
@@ -45,6 +34,7 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
   const guestId = pluginIdFromMode(mode);
   const guest = useGuestsStore((state) => state.guests.find((entry) => entry.id === guestId) ?? null);
   const active = guest !== null && isGuestActive(guest) && guest.service?.surface === true;
+  const packageKey = `${guest?.version ?? ''}:${guest?.revision ?? 0}`;
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -53,7 +43,6 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
   const batchRef = React.useRef<SurfaceInputEvent[]>([]);
   const flushRef = React.useRef<number | null>(null);
   const clipboardRequestsRef = React.useRef(0);
-  /** A copy chord in the current batch: ask for the clipboard right after it. */
   const clipboardAfterFlushRef = React.useRef(false);
   const controlRef = React.useRef<SurfaceControlState>({ controller: 'none', mine: false });
 
@@ -67,6 +56,8 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
   const [agentActive, setAgentActive] = React.useState(false);
   const [hasFrame, setHasFrame] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
+  const { isMobile, hasTouchOnlyPointer } = useDeviceInfo();
+  const touch = isMobile || hasTouchOnlyPointer;
 
   const drawFrame = React.useCallback(async (frame: SurfaceFrame) => {
     const canvas = canvasRef.current;
@@ -88,8 +79,6 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
     } catch {
       // An undecodable frame is skipped; the next one replaces it.
     } finally {
-      // Acknowledged after drawing, whatever happened: an unacknowledged
-      // frame would stop every later one.
       client.ack(frame.seq);
     }
   }, []);
@@ -120,10 +109,8 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
       frameSizeRef.current = null;
       setHasFrame(false);
     };
-  }, [active, drawFrame, guestId, setControl]);
+  }, [active, drawFrame, guestId, packageKey, setControl]);
 
-  // Tell the extension how much room the panel has, so a browser or a
-  // simulator can lay itself out at that size instead of being scaled.
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container || !active) return undefined;
@@ -156,9 +143,6 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
       const events = batchRef.current;
       batchRef.current = [];
       clientRef.current?.sendInput(events);
-      // Sent on the same socket right after the batch; the host handles
-      // them in order, so the extension has done the copy by the time it
-      // is asked what was copied.
       if (clipboardAfterFlushRef.current) {
         clipboardAfterFlushRef.current = false;
         clipboardRequestsRef.current += 1;
@@ -167,7 +151,6 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
     });
   }, []);
 
-  /** Pointer position in frame pixels, or null when outside the picture. */
   const framePoint = React.useCallback((event: React.PointerEvent | React.WheelEvent): { x: number; y: number } | null => {
     const canvas = canvasRef.current;
     const size = frameSizeRef.current;
@@ -181,8 +164,6 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
 
   const onPointer = (action: 'down' | 'up' | 'move') => (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (!hasFrame) return;
-    // Hovering is looking, not acting: moves without a button go out only
-    // once the user holds control, so a glance never takes it from the agent.
     if (action === 'move' && event.buttons === 0 && !(controlRef.current.controller === 'user' && controlRef.current.mine)) return;
     const point = framePoint(event);
     if (!point) return;
@@ -215,13 +196,12 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
   const onKey = (action: 'down' | 'up') => (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!hasFrame) return;
     if (isPasteChord(event)) {
-      // The paste event carries the text; the chord itself stays here.
       return;
     }
     event.preventDefault();
     event.stopPropagation();
     if (action === 'down' && isCopyChord(event)) clipboardAfterFlushRef.current = true;
-    queue({ type: 'key', action, key: event.key, code: event.code, modifiers: modifiersOf(event) });
+    queue({ type: 'key', action, key: event.key, code: event.code, keyCode: event.keyCode, modifiers: modifiersOf(event) });
   };
 
   const onPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
@@ -250,12 +230,13 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
     if (connection.status === 'ended') return `contextPanel.surface.ended.${connection.reason}` as const;
     if (control.controller === 'user') return control.mine ? 'contextPanel.surface.status.youControl' : 'contextPanel.surface.status.otherControls';
     if (control.controller === 'agent' || agentActive) return 'contextPanel.surface.status.agentWorking';
+    if (touch) return 'contextPanel.surface.status.readyTouch';
     return focused ? 'contextPanel.surface.status.readyFocused' : 'contextPanel.surface.status.ready';
   })();
 
   return (
     <div className="flex h-full flex-col bg-[var(--surface-background)]">
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3 pointer-coarse:h-11">
         <span className="typography-meta min-w-0 flex-1 truncate text-foreground" title={title || guest.name}>
           {title || guest.name}
         </span>
@@ -269,14 +250,24 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
           {t(statusKey)}
         </span>
         {control.controller === 'user' && control.mine ? (
-          <Button size="xs" variant="outline" onClick={release}>
-            {t('contextPanel.surface.handBack')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="xs" variant="outline" onClick={release}>
+                {t('contextPanel.surface.handBack')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.panel.releaseSurface')}</TooltipContent>
+          </Tooltip>
         ) : null}
         {connection.status === 'ended' ? (
-          <Button size="xs" variant="outline" onClick={() => clientRef.current?.retry()}>
-            {t('contextPanel.surface.retry')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="xs" variant="outline" onClick={() => clientRef.current?.retry()}>
+                {t('contextPanel.surface.retry')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.panel.reconnectSurface')}</TooltipContent>
+          </Tooltip>
         ) : null}
       </div>
       <div
@@ -297,10 +288,11 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
       >
         <canvas
           ref={canvasRef}
-          className={cn('max-h-full max-w-full', hasFrame ? 'block' : 'hidden', control.controller === 'user' && !control.mine ? 'cursor-not-allowed' : 'cursor-default')}
+          className={cn('max-h-full max-w-full touch-none', hasFrame ? 'block' : 'hidden', control.controller === 'user' && !control.mine ? 'cursor-not-allowed' : 'cursor-default')}
           onPointerDown={onPointer('down')}
           onPointerMove={onPointer('move')}
           onPointerUp={onPointer('up')}
+          onPointerCancel={onPointer('up')}
           onWheel={onWheel}
           onContextMenu={(event) => event.preventDefault()}
         />

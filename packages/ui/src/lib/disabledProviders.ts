@@ -53,12 +53,6 @@ const offStateAfterToggle = (providers: string[], previous: ProviderOffState | n
   return { offProviders: Object.keys(offReasons), offReasons };
 };
 
-/**
- * Providers turned off in the user's OpenCode config (`disabled_providers`).
- * OpenCode leaves them out of its provider list entirely, so this is the only
- * way Settings can show them again. Null where the runtime has no OpenChamber
- * server to ask (VS Code): the feature is not offered there.
- */
 const fetchDisabledProviders = async (): Promise<{ providers: string[]; offState: ProviderOffState; catalogReady: boolean } | null> => {
   const response = await runtimeFetch('/api/provider/disabled');
   if (response.status === 404) return null;
@@ -213,7 +207,6 @@ export const prefetchDisabledProviders = (): void => {
   void ensureDisabledProviders();
 };
 
-/** Turns a provider off or back on; answers with the new list. */
 export const setProviderDisabled = async (providerId: string, disabled: boolean): Promise<string[]> => {
   const response = await runtimeFetch(`/api/provider/${encodeURIComponent(providerId)}/disabled`, {
     method: 'PUT',

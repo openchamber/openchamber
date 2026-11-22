@@ -78,6 +78,66 @@ describe('GitHub accounts from a vault', () => {
 });
 
 describe('GitHub auth credentials', () => {
+  it('keeps the gh CLI switch per instance: an enterprise host toggle never moves github.com', async () => {
+    await auth.setGhCliDisabledForHost('github.example.com', true);
+    expect(await auth.isGhCliDisabledForHost('github.example.com')).toBe(true);
+    expect(await auth.isGhCliDisabledForHost('github.com')).toBe(false);
+    // github.com's own switch stays the only one that gates github.com.
+    await auth.setGhCliDisabledForHost('github.com', true);
+    expect(await auth.isGhCliDisabledForHost('github.com')).toBe(true);
+    expect(await auth.isGhCliDisabledForHost('github.example.com')).toBe(true);
+  });
+  it('remembers the gh login an instance uses, and forgets it with the switch', async () => {
+    await auth.setGhCliActiveForHost('github.com', true, 'work-user');
+    expect(await auth.isGhCliActiveForHost('github.com')).toBe(true);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBe('work-user');
+    // Switching off drops the choice; switching back on without naming a login
+    // keeps gh's own active account, the behavior earlier releases had.
+    await auth.setGhCliActiveForHost('github.com', false);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBeNull();
+    await auth.setGhCliActiveForHost('github.com', true);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBeNull();
+    // Activating a stored credential instead of gh ends the instance's gh use.
+    await auth.setGhCliActiveForHost('github.com', true, 'octocat');
+    await auth.setGitHubAuth({ accessToken: 'pat-secret', user: { id: 7, login: 'user' }, source: 'pat' });
+    expect(await auth.isGhCliActiveForHost('github.com')).toBe(false);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBeNull();
+  });
+  it('keeps a pinned gh login when the switch is turned on again without naming one', async () => {
+    await auth.setGhCliActiveForHost('github.com', true, 'work-user');
+    // A legacy client's activate names no login; it must not drop the pin the
+    // instance already made, the way the shared store keeps it.
+    await auth.setGhCliActiveForHost('github.com', true);
+    expect(await auth.getGhCliLoginForHost('github.com')).toBe('work-user');
+    // A repeated activate of the same login is idempotent too.
+    await auth.setGhCliActiveForHost('github.com', true, 'work-user');
+    expect(await auth.getGhCliLoginForHost('github.com')).toBe('work-user');
+  });
+  it('writes cliLogin to github-auth.json only while a login is pinned', async () => {
+    // A store of its own: the pinned login is a per-instance field of the file,
+    // and the property under test is what the serializer emits.
+    const filePath = path.join(directory, 'github-auth-instances.json');
+    const store = auth.createGitHubAuthStore({ filePath });
+    await store.setCliActiveForHost('github.com', true);
+    const unpinned = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    // An older release's strict parser rejects unknown keys, so a switch with no
+    // pinned login leaves the key out rather than writing `cliLogin: null`.
+    expect(Object.hasOwn(unpinned.instances['github.com'], 'cliLogin')).toBe(false);
+    expect(unpinned.instances['github.com'].cliActive).toBe(true);
+
+    await store.setCliActiveForHost('github.com', true, 'work-user');
+    const pinned = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(pinned.instances['github.com'].cliLogin).toBe('work-user');
+  });
+  it('pins a gh login per enterprise instance without touching github.com', async () => {
+    await auth.setGhCliActiveForHost('github.example.com', true, 'work-user');
+    expect(await auth.isGhCliActiveForHost('github.example.com')).toBe(true);
+    expect(await auth.getGhCliLoginForHost('github.example.com')).toBe('work-user');
+    expect(await auth.getGhCliLoginForHost('github.com')).toBeNull();
+    // Disabling the instance drops the pin with the switch.
+    await auth.setGhCliDisabledForHost('github.example.com', true);
+    expect(await auth.getGhCliLoginForHost('github.example.com')).toBeNull();
+  });
   it('migrates the shipped array once while preserving the exact legacy credential ID and secret', async () => {
     const filePath = path.join(directory, 'github-auth.json');
     await fs.writeFile(filePath, JSON.stringify([
@@ -96,9 +156,30 @@ describe('GitHub auth credentials', () => {
       status: 'valid',
     })]);
     await expect(auth.getGitHubAuthByAccountId('github.com#7', 1)).resolves.toMatchObject({ accessToken: 'new-secret' });
+    // github.com alone is written in the version 2 shape earlier releases read.
     const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
     expect(stored).toMatchObject({ version: 2, activeCredentialId: 'github.com#7' });
     expect(stored.credentials).toEqual([expect.objectContaining({ credentialId: 'github.com#7', revision: 1, accessToken: 'new-secret' })]);
+  });
+
+  it('reads a version 2 flat file into the github.com instance and keeps writing version 2', async () => {
+    const filePath = path.join(directory, 'github-auth.json');
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 2,
+      activeCredentialId: 'cred-1',
+      credentials: [
+        { credentialId: 'cred-1', revision: 1, providerUserId: 'github.com#7', accessToken: 'old-secret', scope: 'repo', tokenType: 'bearer', createdAt: 1, user: { id: 7, login: 'user' }, source: 'oauth', status: 'valid' },
+      ],
+    }), 'utf8');
+
+    await expect(auth.getGitHubAuthAccounts()).resolves.toEqual([expect.objectContaining({
+      id: 'cred-1', providerUserId: 'github.com#7', status: 'valid', current: true,
+    })]);
+    await auth.setGitHubAuth({ accessToken: 'new-secret', user: { id: 8, login: 'other' }, source: 'pat' });
+
+    const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(stored).toMatchObject({ version: 2, activeCredentialId: expect.any(String) });
+    expect(stored.credentials).toHaveLength(2);
   });
 
   it('keeps OAuth and PAT credentials for one provider user distinct and immutable', async () => {
@@ -129,8 +210,8 @@ describe('GitHub auth credentials', () => {
       expect.objectContaining({ id: oauth.accountId, status: 'invalid', providerUserStatus: 'available' }),
       expect.objectContaining({ id: pat.accountId, status: 'valid', providerUserStatus: 'available' }),
     ]);
-    await expect(auth.removeGitHubAuthAccount(oauth.accountId)).resolves.toBe(true);
-    await expect(auth.removeGitHubAuthAccount(oauth.accountId)).resolves.toBe(false);
+    await expect(auth.removeGitHubAuthAccountForHost('github.com', oauth.accountId)).resolves.toBe(true);
+    await expect(auth.removeGitHubAuthAccountForHost('github.com', oauth.accountId)).resolves.toBe(false);
   });
 
   it('fails closed on malformed or unsupported storage and leaves it untouched', async () => {
@@ -167,8 +248,8 @@ describe('GitHub auth credentials', () => {
     `;
 
     await Promise.all([
-      execFileAsync(process.execPath, ['-e', worker({ token: 'one', id: 1, login: 'one', source: 'oauth' })]),
-      execFileAsync(process.execPath, ['-e', worker({ token: 'two', id: 2, login: 'two', source: 'pat' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'one', id: 1, login: 'one', source: 'oauth' })]),
+      execFileAsync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '-e', worker({ token: 'two', id: 2, login: 'two', source: 'pat' })]),
     ]);
 
     const store = auth.createGitHubAuthStore({ filePath });
@@ -217,7 +298,7 @@ describe('gh-CLI settings writes', () => {
   it('writes the gh-CLI keys when settings.json is missing', async () => {
     auth.setGhCliDisabled(true);
     const stored = JSON.parse(await fs.readFile(settingsPath(), 'utf8'));
-    expect(stored).toEqual({ ghCliDisabled: true, ghCliActive: false });
+    expect(stored).toEqual({ ghCliDisabled: true, ghCliActive: false, ghCliLogin: null });
     expect(auth.isGhCliDisabled()).toBe(true);
   });
 
@@ -226,13 +307,13 @@ describe('gh-CLI settings writes', () => {
     await fs.writeFile(settingsPath(), JSON.stringify(original));
     auth.setGhCliDisabled(true);
     const stored = JSON.parse(await fs.readFile(settingsPath(), 'utf8'));
-    expect(stored).toEqual({ ...original, ghCliDisabled: true, ghCliActive: false });
+    expect(stored).toEqual({ ...original, ghCliDisabled: true, ghCliActive: false, ghCliLogin: null });
   });
 
   it('keeps read-only gh-CLI getters lenient on a malformed settings.json', async () => {
     await fs.writeFile(settingsPath(), '{"theme":');
     expect(auth.isGhCliDisabled()).toBe(false);
-    expect(auth.isGhCliActive()).toBe(false);
+    await expect(auth.isGhCliActiveForHost('github.com')).resolves.toBe(false);
   });
 });
 

@@ -1,19 +1,9 @@
-/**
- * Issues, pull requests and tracker tickets attached to the composer.
- *
- * A message may carry any number of them, from any source: repository issues
- * and change requests (GitHub, or GitLab on a message restored from the
- * queue), Linear issues, and items extensions hand over through `attach`. Each
- * one becomes its own context part on send, in the order it was attached.
- * Attaching an item that is already on the composer replaces it in place,
- * so reopening the picker to toggle a PR's diff never duplicates the chip.
- */
 
 import type { JsonValue } from '@openchamber/sdk';
 
 import type { SourceControlProvider } from '@/lib/api/types';
 
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedLinearIssue, type LinkedIssue } from '@/lib/linkedIssues';
+import { buildLinkedDiscussion, buildLinkedGuestIssue, buildLinkedIssue, buildLinkedTrackerItem, type LinkedIssue } from '@/lib/linkedIssues';
 
 import type { ComposerContextReference } from './submit/buildOutgoingMessage';
 
@@ -21,9 +11,27 @@ export type ComposerReferenceAuthor = { login: string; avatarUrl?: string };
 
 export type ComposerReference =
     | {
+        kind: 'shared-page';
+        shareKey: string;
+        receivedId: string | null;
+        host: string;
+        title: string | null;
+        opened: boolean;
+        contextText: string;
+        link?: string;
+    }
+    | {
         kind: 'repository-issue';
-        /** Absent on issues restored from messages written before GitLab: those are GitHub. */
         provider?: SourceControlProvider;
+        number: number;
+        title: string;
+        url: string;
+        contextText: string;
+        author?: ComposerReferenceAuthor;
+    }
+    | {
+        kind: 'repository-discussion';
+        provider: SourceControlProvider;
         number: number;
         title: string;
         url: string;
@@ -36,7 +44,7 @@ export type ComposerReference =
         number: number;
         title: string;
         url: string;
-        /** Empty when restored from a queued message: branches were not captured. */
+        sourceLinks?: string[];
         head: string;
         base: string;
         includeDiff: boolean;
@@ -44,7 +52,8 @@ export type ComposerReference =
         author?: ComposerReferenceAuthor;
     }
     | {
-        kind: 'linear-issue';
+        kind: 'tracker-item';
+        provider: string;
         identifier: string;
         title: string;
         url: string;
@@ -62,24 +71,30 @@ export type ComposerReference =
         author?: string;
         head?: string;
         base?: string;
-        /** Opaque guest payload from `attach`; handed back on chip click, never shown. */
         data?: JsonValue;
     };
 
-/** One key per item, whichever way it reached the composer. */
 export const composerReferenceKey = (reference: ComposerReference): string => {
     switch (reference.kind) {
         case 'repository-issue':
+        case 'repository-discussion':
         case 'change-request':
             return `repository:${reference.url.toLowerCase()}`;
-        case 'linear-issue':
-            return `linear:${reference.identifier.toUpperCase()}`;
+        case 'tracker-item':
+            return `${reference.provider}:${reference.identifier.toUpperCase()}`;
         case 'guest':
             return `guest:${reference.providerId}:${reference.id}`;
+        case 'shared-page':
+            return `shared-page:${reference.shareKey}`;
     }
 };
 
-/** Append new items; an item already attached is replaced where it stands. */
+export const withReferenceSourceLinks = (reference: ComposerReference, links: readonly string[]): ComposerReference => {
+    if (reference.kind !== 'change-request') return reference;
+    const sourceLinks = [...new Set([...(reference.sourceLinks ?? []), ...links])].filter((link) => link !== reference.url);
+    return sourceLinks.length > 0 ? { ...reference, sourceLinks } : reference;
+};
+
 export const withComposerReferences = (
     current: readonly ComposerReference[],
     added: readonly ComposerReference[],
@@ -91,7 +106,8 @@ export const withComposerReferences = (
         if (index === -1) {
             next.push(reference);
         } else {
-            next[index] = reference;
+            const previous = next[index];
+            next[index] = withReferenceSourceLinks(reference, previous.kind === 'change-request' ? previous.sourceLinks ?? [] : []);
         }
     }
     return next;
@@ -100,9 +116,10 @@ export const withComposerReferences = (
 export const withoutComposerReference = (current: readonly ComposerReference[], key: string): ComposerReference[] =>
     current.filter((entry) => composerReferenceKey(entry) !== key);
 
-/** The session snapshot a sent reference leaves behind (see `linkedIssues.ts`). */
-export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): LinkedIssue => {
+export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): LinkedIssue | null => {
     switch (reference.kind) {
+        case 'shared-page':
+            return null;
         case 'repository-issue':
         case 'change-request':
             return buildLinkedIssue({
@@ -113,8 +130,11 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
                 author: reference.author,
                 linkedAt,
             });
-        case 'linear-issue':
-            return buildLinkedLinearIssue({
+        case 'repository-discussion':
+            return buildLinkedDiscussion({ url: reference.url, number: reference.number, title: reference.title, linkedAt });
+        case 'tracker-item':
+            return buildLinkedTrackerItem({
+                provider: reference.provider,
                 identifier: reference.identifier,
                 title: reference.title,
                 url: reference.url,
@@ -137,9 +157,17 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
     }
 };
 
-/** What the submission builder needs from a reference: text and identity, not chip details. */
 export const toContextReference = (reference: ComposerReference): ComposerContextReference => {
     switch (reference.kind) {
+        case 'shared-page':
+            return {
+                kind: 'shared-page',
+                receivedId: reference.receivedId,
+                host: reference.host,
+                title: reference.title ?? '',
+                opened: reference.opened,
+                contextText: reference.contextText,
+            };
         case 'repository-issue':
             return {
                 kind: 'repository-issue',
@@ -149,8 +177,17 @@ export const toContextReference = (reference: ComposerReference): ComposerContex
                 url: reference.url,
                 contextText: reference.contextText,
             };
-        case 'change-request':
+        case 'repository-discussion':
             return {
+                kind: 'repository-discussion',
+                provider: reference.provider,
+                number: reference.number,
+                title: reference.title,
+                url: reference.url,
+                contextText: reference.contextText,
+            };
+        case 'change-request': {
+            const entry: Extract<ComposerContextReference, { kind: 'change-request' }> = {
                 kind: 'change-request',
                 provider: reference.provider,
                 number: reference.number,
@@ -158,8 +195,18 @@ export const toContextReference = (reference: ComposerReference): ComposerContex
                 url: reference.url,
                 context: reference.contextText,
             };
-        case 'linear-issue':
-            return { kind: 'linear-issue', identifier: reference.identifier, title: reference.title, url: reference.url, contextText: reference.contextText };
+            if (reference.sourceLinks?.length) entry.sourceLinks = reference.sourceLinks;
+            return entry;
+        }
+        case 'tracker-item':
+            return {
+                kind: 'tracker-item',
+                provider: reference.provider,
+                identifier: reference.identifier,
+                title: reference.title,
+                url: reference.url,
+                contextText: reference.contextText,
+            };
         case 'guest': {
             const entry: Extract<ComposerContextReference, { kind: 'guest' }> = {
                 kind: 'guest',

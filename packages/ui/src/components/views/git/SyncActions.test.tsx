@@ -134,6 +134,42 @@ test('a branch without upstream reads Publish, a contributor fork worktree reads
   }
 });
 
+test('a detached HEAD shows no counts', async () => {
+  const restoreDom = installDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { SyncActions } = await import('./SyncActions');
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => root.render(
+      <I18nProvider>
+        <SyncActions
+          syncAction={null}
+          remotes={[origin]}
+          onFetch={() => {}}
+          onPull={() => {}}
+          onSync={() => {}}
+          onPublish={() => {}}
+          onChooseSyncTargets={() => {}}
+          currentBranch="HEAD"
+          disabled={false}
+          aheadCount={1}
+          behindCount={2}
+        />
+      </I18nProvider>
+    ));
+    const primary = container.querySelector('button');
+    expect(primary?.textContent).toBe('Publish');
+    expect(primary?.disabled).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
+    await restoreDom();
+  }
+});
+
 // A narrow Git panel hides `.sync-actions__label` first and `.sync-actions__text` last (index.css).
 test('a narrow Git panel hides the word before the counts', async () => {
   const restoreDom = installDom();

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The renderer recolors it from the theme (SRC_ATOP keeps the shape). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#2e2b29"/>
+    <corners android:radius="7dp"/>
+</shape>

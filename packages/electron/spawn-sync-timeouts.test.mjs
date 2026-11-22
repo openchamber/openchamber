@@ -5,14 +5,11 @@ import test from 'node:test';
 import {
   OPEN_IN_APP_SPAWN_TIMEOUT_MS,
   SW_VERS_SPAWN_TIMEOUT_MS,
-  WHERE_SPAWN_TIMEOUT_MS,
-  WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS,
 } from './spawn-sync-timeouts.mjs';
+import { createWindowsAppDiscovery } from './windows-app-discovery.mjs';
 
 const TIMEOUTS = {
   SW_VERS_SPAWN_TIMEOUT_MS,
-  WHERE_SPAWN_TIMEOUT_MS,
-  WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS,
   OPEN_IN_APP_SPAWN_TIMEOUT_MS,
 };
 
@@ -38,9 +35,25 @@ test('each #833 site passes its named timeout constant', () => {
   const earlyStartup = fs.readFileSync(new URL('./early-startup.mjs', import.meta.url), 'utf8');
   const main = fs.readFileSync(new URL('./main.mjs', import.meta.url), 'utf8');
   assert.match(earlyStartup, /timeout: SW_VERS_SPAWN_TIMEOUT_MS/);
-  assert.match(main, /timeout: WHERE_SPAWN_TIMEOUT_MS/);
-  assert.match(main, /timeout: WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS/);
   assert.match(main, /timeout: OPEN_IN_APP_SPAWN_TIMEOUT_MS/);
+});
+
+test('the Windows app lookups (where.exe, PowerShell) are bounded too', async () => {
+  const calls = [];
+  const discovery = createWindowsAppDiscovery({
+    run: async (file, args, options) => {
+      calls.push({ file, timeout: options?.timeout });
+      return { stdout: file === 'where.exe' ? `C:\\Tools\\${args[0]}\r\n` : '' };
+    },
+    getFileIcon: async () => ({ isEmpty: () => true }),
+    env: { ProgramFiles: '/nonexistent-openchamber-test-program-files', SystemRoot: '/nonexistent-openchamber-test-windows' },
+  });
+  await discovery.buildWindowsInstalledApps(['Terminal', 'Visual Studio Code']);
+  assert.ok(calls.some((call) => call.file === 'where.exe'), 'expected where.exe lookups');
+  assert.ok(calls.some((call) => call.file !== 'where.exe'), 'expected a PowerShell lookup');
+  for (const call of calls) {
+    assert.ok(Number.isInteger(call.timeout) && call.timeout > 0, `${call.file} runs without a timeout`);
+  }
 });
 
 test('a hanging child settles as ETIMEDOUT instead of blocking forever', () => {

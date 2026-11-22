@@ -20,11 +20,13 @@ export interface ToolPopupContent {
         mimeType?: string;
         filename?: string;
         size?: number;
+        load?: () => Promise<Blob>;
         gallery?: Array<{
             url: string;
             mimeType?: string;
             filename?: string;
             size?: number;
+            load?: () => Promise<Blob>;
         }>;
         index?: number;
     };
@@ -33,5 +35,10 @@ export interface ToolPopupContent {
         mimeType?: string;
         filename?: string;
         source?: string;
+    };
+    document?: {
+        url: string;
+        filename: string;
+        size?: number;
     };
 }

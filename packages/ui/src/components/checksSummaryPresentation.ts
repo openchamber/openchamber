@@ -1,6 +1,6 @@
-import type { GitHubChecksSummary } from '@/lib/api/types';
+import type { CISummary } from '@/lib/source-control/types';
 
-export const getWorkStatusChecksPresentation = (checks: Pick<GitHubChecksSummary, 'failure' | 'pending' | 'success'> & { state: string }) => {
+export const getWorkStatusChecksPresentation = (checks: Pick<CISummary, 'failure' | 'pending' | 'success'> & { state: string }) => {
   const presentation = {
     failure: checks.failure > 0 ? checks.failure : null,
     pending: checks.pending > 0 ? checks.pending : null,
@@ -13,7 +13,7 @@ export const getWorkStatusChecksPresentation = (checks: Pick<GitHubChecksSummary
     : presentation;
 };
 
-export const getPullRequestChecksText = (checks: GitHubChecksSummary, label: string): string => (
+export const getPullRequestChecksText = (checks: CISummary, label: string): string => (
   checks.state === 'unknown' || checks.total <= 0
     ? `${checks.state} ${label}`
     : `${checks.success}/${checks.total} ${label}`

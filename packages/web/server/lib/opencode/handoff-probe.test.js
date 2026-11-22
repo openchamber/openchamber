@@ -96,7 +96,7 @@ describe('createHandoffProbeGate', () => {
     const gate = createHandoffProbeGate({
       version: '2.6.0',
       dataDir: '/tmp/unused',
-      previewOpenCode: async () => ({ decision: { action: 'adopt', reason: 'matches-state' }, openCodeVersion: '2.0.26' }),
+      previewOpenCode: async () => ({ decision: { action: 'adopt', reason: 'matches-state' }, openCodeVersion: '2.2.4' }),
       send: (message) => { sent.push(message); },
       onMessage: (fn) => { handler = fn; return () => { handler = null; }; },
       onDisconnect: (fn) => { disconnectHandler = fn; return () => { disconnectHandler = null; }; },
@@ -119,7 +119,7 @@ describe('createHandoffProbeGate', () => {
     const { gate, sent, deliver } = createGate({
       previewOpenCode: async (args) => {
         previewArgs.push(args);
-        return { decision: { action: 'adopt', reason: 'matches-state' }, openCodeVersion: '2.0.26' };
+        return { decision: { action: 'adopt', reason: 'matches-state' }, openCodeVersion: '2.2.4' };
       },
     });
     const pending = gate({ port: 3000, bindHost: '127.0.0.1' });
@@ -132,7 +132,7 @@ describe('createHandoffProbeGate', () => {
       version: '2.6.0',
       handoffProtocol: 2,
       stateVersion: 1,
-      opencode: { decision: 'adopt', reason: 'matches-state', version: '2.0.26' },
+      opencode: { decision: 'adopt', reason: 'matches-state', version: '2.2.4' },
     });
     deliver({ type: HANDOFF_GO_MESSAGE });
     await expect(pending).resolves.toBeUndefined();

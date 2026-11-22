@@ -17,26 +17,21 @@ type IntegrationCatalogCardProps = {
   logo: React.ReactNode;
   name: string;
   description: string;
-  /** Pills shown before the status pill (bundled, update available). */
+  keepDescriptionWhenNarrow?: boolean;
   badges?: React.ReactNode;
   status: string;
   statusTone: IntegrationCatalogStatusTone;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The expanded body: actions and notes. */
   children: React.ReactNode;
 };
 
-/**
- * One collapsible card on the Integrations page: logo, name,
- * one-line description, status pill. Every integration, built-in or from an
- * extension, renders through it, so the cards stay identical.
- */
 export const IntegrationCatalogCard: React.FC<IntegrationCatalogCardProps> = ({
   settingsItem,
   logo,
   name,
   description,
+  keepDescriptionWhenNarrow = false,
   badges,
   status,
   statusTone,
@@ -54,12 +49,19 @@ export const IntegrationCatalogCard: React.FC<IntegrationCatalogCardProps> = ({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-foreground">{name}</div>
-          <p className="mt-0.5 truncate text-xs leading-snug text-muted-foreground">{description}</p>
+          <p
+            className={cn(
+              'mt-0.5 truncate text-xs leading-snug text-muted-foreground',
+              !keepDescriptionWhenNarrow && 'hidden @md:block',
+            )}
+          >
+            {description}
+          </p>
         </div>
         {badges}
         <span
           aria-live="polite"
-          className={cn('max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium', STATUS_TONE_CLASS[statusTone])}
+          className={cn('max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[0.625rem] font-medium', STATUS_TONE_CLASS[statusTone])}
         >
           {status}
         </span>
@@ -71,8 +73,6 @@ export const IntegrationCatalogCard: React.FC<IntegrationCatalogCardProps> = ({
           )}
         />
       </CollapsibleTrigger>
-      {/* The header's own padding plus pt-3 keeps the body clear of the
-          header's hover fill. */}
       <CollapsibleContent className="px-4 pb-4 pt-3">
         {children}
       </CollapsibleContent>

@@ -60,8 +60,7 @@ const makePlanner = (overrides = {}) => createNetworkOperationPlanner({
     credentialRevision: 3,
     providerUserId: provider === 'github' ? 'github.com#42' : `${instance}#42`,
     status: 'valid',
-    accessToken: 'github-secret',
-    token: 'gitlab-secret',
+    secret: 'provider-secret',
   })),
   resolveRef: vi.fn(async () => SHA),
   resolveSymbolicRef: vi.fn(async () => 'refs/heads/feature'),
@@ -490,16 +489,93 @@ describe('Git network operation planner', () => {
       .rejects.toMatchObject({ code: 'INVALID_GIT_NETWORK_OPERATION', status: 400 });
   });
 
-  it('rejects credentials embedded in an authoritative endpoint', async () => {
-    const planner = makePlanner({
-      validateGitTransportContext: async () => ({ ...authority, endpoint: 'https://user:secret@example.com/repo.git' }),
-    });
-    await expect(planner.planNetworkOperation(existingInput('fetch')))
-      .rejects.toThrow('Git endpoint is invalid');
+  it.each([
+    ['fetch', 'https://user:secret@example.com/repo.git'],
+    ['fetch', 'https://user@example.com/repo.git'],
+    ['fetch', 'https://ghp_token123@example.com/repo.git'],
+    ['fetch', 'https://:secret@example.com/repo.git'],
+    ['pull', 'https://myorg@dev.azure.com/myorg/app/_git/app'],
+    ['sync', 'https://myorg@dev.azure.com/myorg/app/_git/app'],
+  ])('refuses %s from a remote with userinfo %s and names the fix without repeating it', async (operation, endpoint) => {
+    const planner = makePlanner({ validateGitTransportContext: async () => ({ ...authority, endpoint }) });
+    const input = operation === 'sync' ? syncInput() : existingInput(operation);
+    const error = await planner.planNetworkOperation(input).catch((caught) => caught);
+    expect(error).toMatchObject({ code: 'INVALID_GIT_REMOTE_USERINFO', status: 400, message: 'Git remote URL has a name before @' });
+  });
+
+  it('plans every existing-remote operation for an HTTPS endpoint that names a user when the repository uses System Git', async () => {
+    const endpoint = 'https://myorg@dev.azure.com/myorg/app/_git/app';
+    const displayUrl = 'https://dev.azure.com/myorg/app/_git/app';
+    const endpointAuthority = {
+      endpoint, endpointFingerprint: fingerprintRemoteUrl(endpoint), transportMode: 'system', transportRevision: 'transport_one',
+    };
+    const remote = (name) => ({ name, endpoint: { displayUrl, fingerprint: endpointAuthority.endpointFingerprint } });
+    const inputs = [
+      existingInput('fetch', { remote: remote('upstream'), transportMode: 'system' }),
+      existingInput('pull', { remote: remote('upstream'), transportMode: 'system' }),
+      existingInput('push', { remote: remote('upstream'), transportMode: 'system' }),
+      syncInput({
+        fetch: { ...syncInput().fetch, remote: remote('upstream'), transportMode: 'system' },
+        push: { ...syncInput().push, remote: remote('origin'), transportMode: 'system' },
+      }),
+    ];
+    for (const input of inputs) {
+      const plans = await makePlanner({ validateGitTransportContext: async () => endpointAuthority }).planNetworkOperation(input);
+      expect(JSON.stringify(plans.publicPlan)).not.toContain('myorg@');
+      const rawEndpoints = input.operation === 'sync'
+        ? [plans.internalPlan.fetch.rawEndpoint, plans.internalPlan.push.rawEndpoint]
+        : [plans.internalPlan.rawEndpoint];
+      expect(rawEndpoints).toEqual(rawEndpoints.map(() => endpoint));
+    }
+    // A client still holding an anonymous binding is told to reload, as for any other stale mode.
+    await expect(makePlanner({ validateGitTransportContext: async () => endpointAuthority })
+      .planNetworkOperation(existingInput('fetch', { remote: remote('upstream'), transportMode: 'anonymous' })))
+      .rejects.toMatchObject({ code: 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED', status: 409 });
   });
 
   it.each([
-    'https://user@example.com/repo.git',
+    'https://myorg:secret@dev.azure.com/myorg/app/_git/app',
+    'https://:secret@dev.azure.com/myorg/app/_git/app',
+    'https://-oProxyCommand=touch@dev.azure.com/myorg/app/_git/app',
+    'https://my%20org@dev.azure.com/myorg/app/_git/app',
+  ])('still refuses System Git remote %s', async (endpoint) => {
+    const planner = makePlanner({ validateGitTransportContext: async () => ({
+      endpoint, endpointFingerprint: fingerprintRemoteUrl(endpoint), transportMode: 'system', transportRevision: 'transport_one',
+    }) });
+    await expect(planner.planNetworkOperation(existingInput('fetch', { transportMode: 'system' })))
+      .rejects.toMatchObject({ code: 'INVALID_GIT_REMOTE_USERINFO', status: 400 });
+  });
+
+  it('keeps an HTTPS user name out of managed and anonymous transfers whatever the request claims', async () => {
+    const endpoint = 'https://myorg@dev.azure.com/myorg/app/_git/app';
+    for (const transportMode of ['managed', 'anonymous']) {
+      const planner = makePlanner({ validateGitTransportContext: async () => ({
+        ...authority, endpoint, transportMode, credentialId: transportMode === 'managed' ? 'credential_one' : undefined,
+      }) });
+      for (const requested of [transportMode, 'system']) {
+        await expect(planner.planNetworkOperation(existingInput('fetch', { transportMode: requested })))
+          .rejects.toMatchObject({ code: 'INVALID_GIT_REMOTE_USERINFO', status: 400 });
+      }
+    }
+  });
+
+  it('clones an HTTPS URL that names a user with System Git only', async () => {
+    const remoteUrl = 'https://myorg@dev.azure.com/myorg/app/_git/app';
+    const clone = { operation: 'clone', remoteUrl, destinationPath: '/projects/app' };
+    const plans = await makePlanner().planNetworkOperation({ ...clone, transportMode: 'system', unverifiedConfirmed: true });
+    expect(plans.internalPlan.rawEndpoint).toBe(remoteUrl);
+    expect(JSON.stringify(plans.publicPlan)).not.toContain('myorg@');
+    await expect(makePlanner().planNetworkOperation({ ...clone, transportMode: 'anonymous' }))
+      .rejects.toMatchObject({ code: 'INVALID_GIT_NETWORK_OPERATION', status: 400 });
+    await expect(makePlanner().planNetworkOperation({
+      ...clone, transportMode: 'managed', credentialAccount: { provider: 'github', instance: 'github.com', accountId: 'one' },
+    })).rejects.toMatchObject({ code: 'INVALID_GIT_NETWORK_OPERATION', status: 400 });
+  });
+
+  it.each([
+    'https://user@example.com/repo.git?access_token=secret',
+    'http://user@git.example.com/repo.git',
+    'file://user@example.com/repo.git',
     'https://example.com/repo.git?access_token=secret',
     'https://example.com/repo.git#private',
     'ssh://git:secret@example.com/owner/repo.git',
@@ -773,7 +849,7 @@ describe('Git network operation planner', () => {
       credentialRevision: 7,
       providerUserId: 'https://example.com#42',
       status: 'valid',
-      token: 'private-token',
+      secret: 'private-token',
     }));
     const plans = await makePlanner({ resolveSourceControlAccount }).planNetworkOperation({
       operation: 'clone', remoteUrl: 'https://example.com/team/repo.git', destinationPath: '/new/repo',
@@ -798,10 +874,14 @@ describe('Git network operation planner', () => {
     };
     for (const resolved of [null, {
       credentialId: 'replacement', credentialRevision: 1, providerUserId: 'https://example.com#42',
-      status: 'valid', token: 'secret',
+      status: 'valid', secret: 'secret',
     }, {
       credentialId: 'credential-three', credentialRevision: 2, providerUserId: 'https://example.com#42',
-      status: 'invalid', token: 'secret',
+      status: 'invalid', secret: 'secret',
+    }, {
+      // A credential of another instance never stands in for this one.
+      credentialId: 'credential-three', credentialRevision: 2, providerUserId: 'https://other.example.com#42',
+      status: 'valid', secret: 'secret',
     }]) {
       await expect(makePlanner({ fsImpl: { stat }, resolveSourceControlAccount: vi.fn(async () => resolved) })
         .planNetworkOperation(input)).rejects.toMatchObject({ code: 'INVALID_REQUEST' });

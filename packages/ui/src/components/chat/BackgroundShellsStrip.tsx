@@ -10,6 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { opencodeClient } from '@/lib/opencode/client';
 import { cn } from '@/lib/utils';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   sessionsInTree,
   backgroundShellsOfSessions,
@@ -19,6 +20,9 @@ import {
   type EndedShell,
   type TrackedShell,
 } from '@/sync/background-shells';
+import { isForegroundShellStopping, useForegroundShellStopping, useForegroundShellStoppingIds } from './message/parts/foregroundShellStop';
+import { backgroundImagesOfSessions, useBackgroundImagesStore } from '@/sync/background-images';
+import type { RunningImageJob } from '@/lib/opencode/background-image';
 
 interface BackgroundShellsStripProps {
   sessionId: string | null;
@@ -27,6 +31,15 @@ interface BackgroundShellsStripProps {
 
 const COMMAND_TOOLTIP_DELAY_MS = 500;
 
+const useTreeIds = (sessionId: string, workingSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
+  const treeKey = useGlobalSessionsStore(React.useCallback((state) => (
+    workingSessionIds.size === 0
+      ? ''
+      : sessionsInTree(workingSessionIds, sessionId, (id) => state.entityById.get(id)?.parentID ?? undefined).join('\n')
+  ), [sessionId, workingSessionIds]));
+  return React.useMemo(() => new Set(treeKey ? treeKey.split('\n') : []), [treeKey]);
+};
+
 /** A command still running, or one that ended and keeps its row until dismissed. */
 type ShellRowItem =
   | { kind: 'running'; shell: TrackedShell }
@@ -34,20 +47,16 @@ type ShellRowItem =
 
 /**
  * Commands of this session and of its subagents, running or ended, in the
- * order they started, so a command keeps its row when it ends. The tree is
- * resolved only for sessions that have a row, and the result is compared as
- * a string, so the session list changing during a stream re-renders nothing
- * here.
+ * order they started, so a command keeps its row when it ends.
  */
 const useSessionTreeShells = (sessionId: string): ShellRowItem[] => {
   const runningSessionIds = useBackgroundShellsStore((state) => state.sessionIds);
   const endedSessionIds = useBackgroundShellsStore((state) => state.endedSessionIds);
-  const treeKey = useGlobalSessionsStore(React.useCallback((state) => {
-    if (runningSessionIds.size === 0 && endedSessionIds.size === 0) return '';
-    const candidates = new Set([...runningSessionIds, ...endedSessionIds]);
-    return sessionsInTree(candidates, sessionId, (id) => state.entityById.get(id)?.parentID ?? undefined).join('\n');
-  }, [endedSessionIds, runningSessionIds, sessionId]));
-  const treeIds = React.useMemo(() => new Set(treeKey ? treeKey.split('\n') : []), [treeKey]);
+  const candidateIds = React.useMemo(
+    () => (endedSessionIds.size === 0 ? runningSessionIds : new Set([...runningSessionIds, ...endedSessionIds])),
+    [endedSessionIds, runningSessionIds],
+  );
+  const treeIds = useTreeIds(sessionId, candidateIds);
   const running = useBackgroundShellsStore(useShallow(React.useCallback((state) => (
     treeIds.size === 0 ? [] : backgroundShellsOfSessions(state.byId, treeIds)
   ), [treeIds])));
@@ -62,7 +71,13 @@ const useSessionTreeShells = (sessionId: string): ShellRowItem[] => {
   }, [ended, running]);
 };
 
-/** Its own leaf, so the once-a-second tick re-renders this text alone. */
+const useSessionTreeImages = (sessionId: string): RunningImageJob[] => {
+  const treeIds = useTreeIds(sessionId, useBackgroundImagesStore((state) => state.sessionIds));
+  return useBackgroundImagesStore(useShallow(React.useCallback((state) => (
+    treeIds.size === 0 ? [] : backgroundImagesOfSessions(state.byId, treeIds)
+  ), [treeIds])));
+};
+
 const ShellElapsed: React.FC<{ startedAt: number }> = ({ startedAt }) => {
   const { t } = useI18n();
   const now = useDurationTickerNow(true);
@@ -114,19 +129,12 @@ const ShellEndStatus: React.FC<{ shell: EndedShell }> = ({ shell }) => {
 const STOP_BUTTON_CLASS = 'shrink-0 text-status-error/80 hover:bg-transparent hover:text-status-error';
 const ROW_ACTION_CLASS = 'shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground';
 
-/**
- * Stops commands through the same flow as a command's row in the chat: the
- * agent is told first, then the commands are removed. Commands of one session
- * go in one call, so stopping several tells that agent once and its
- * completions arrive together. A row stays disabled until OpenCode reports
- * its command ended; the row then says how it ended.
- */
 const useStopShells = (rootSessionId: string, rootDirectory: string | undefined) => {
   const { t } = useI18n();
   const [stoppingIds, setStoppingIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
   const stop = React.useCallback((shells: readonly TrackedShell[]) => {
-    const pending = shells.filter((shell) => !stoppingIds.has(shell.id));
+    const pending = shells.filter((shell) => !stoppingIds.has(shell.id) && !isForegroundShellStopping(shell.id));
     if (pending.length === 0) return;
     setStoppingIds((current) => new Set([...current, ...pending.map((shell) => shell.id)]));
     const bySession = new Map<string, [TrackedShell, ...TrackedShell[]]>();
@@ -145,8 +153,6 @@ const useStopShells = (rootSessionId: string, rootDirectory: string | undefined)
         sessionDirectory,
         shells: [toStop(first), ...rest.map(toStop)],
       }).catch(() => {
-        // A command whose kill went through ends on its own; the rest become
-        // stoppable again.
         setStoppingIds((current) => {
           const next = new Set(current);
           for (const shell of [first, ...rest]) next.delete(shell.id);
@@ -168,23 +174,21 @@ const ShellRow: React.FC<{
 }> = ({ item, fromSubagent, stopping, onStop }) => {
   const { t } = useI18n();
   const { shell } = item;
+  const stoppingFromRow = useForegroundShellStopping(shell.id);
 
   return (
-    <div className="flex h-10 items-center gap-2 ps-3 pe-1.5">
+    <div className="flex oc-composer-row items-center gap-2 ps-3 pe-1.5">
       <Icon name="terminal-box" className="size-3.5 shrink-0 text-muted-foreground" />
       <Tooltip delayDuration={COMMAND_TOOLTIP_DELAY_MS}>
         <TooltipTrigger asChild>
-          <span className="min-w-0 flex-1 truncate font-mono typography-meta text-foreground">
+          <span className="min-w-0 flex-1 truncate font-mono typography-code text-foreground">
             {shell.command}
           </span>
         </TooltipTrigger>
-        {/* The row shows one truncated line; the tooltip keeps the command's
-            own line breaks and indentation and wraps only overlong lines. A
-            long command scrolls inside the tooltip without moving the page. */}
         <TooltipContent side="top" sideOffset={6} className="max-w-[min(36rem,90vw)] [text-wrap:wrap]">
-          <pre className="max-h-[50vh] overflow-y-auto overscroll-contain whitespace-pre-wrap break-words font-mono typography-meta">
+          <ScrollableOverlay as="pre" outerClassName="max-h-[50vh]" className="whitespace-pre-wrap break-words font-mono typography-code" disableHorizontal>
             {shell.command}
-          </pre>
+          </ScrollableOverlay>
         </TooltipContent>
       </Tooltip>
       {fromSubagent ? (
@@ -193,18 +197,25 @@ const ShellRow: React.FC<{
       {item.kind === 'running' ? (
         <>
           <ShellElapsed startedAt={shell.startedAt} />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={stopping}
-            onClick={() => onStop(item.shell)}
-            onMouseDown={(event) => event.preventDefault()}
-            aria-label={t('chat.backgroundShells.stopAria', { command: shell.command })}
-            className={STOP_BUTTON_CLASS}
-          >
-            {t('chat.backgroundShells.stop')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={stopping || stoppingFromRow}
+                  onClick={() => onStop(item.shell)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  aria-label={t('chat.backgroundShells.stopAria', { command: shell.command })}
+                  className={STOP_BUTTON_CLASS}
+                >
+                  {t('chat.backgroundShells.stop')}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.shellStop')}</TooltipContent>
+          </Tooltip>
         </>
       ) : (
         <>
@@ -227,83 +238,123 @@ const ShellRow: React.FC<{
   );
 };
 
-/**
- * Commands the agent left running in the background (dev servers, watchers,
- * test pages), as a top row of the composer next to the "looks done" hint.
- * One command is its own row; several collapse into a count that expands in
- * place, so the composer grows by one row unless the user asks for the list.
- * A command that ends keeps its row, now saying how it ended, until the user
- * dismisses it.
- */
+const imageName = (path: string): string => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+
+const ImageRow: React.FC<{ job: RunningImageJob; fromSubagent: boolean }> = ({ job, fromSubagent }) => {
+  const { t } = useI18n();
+
+  return (
+    <div className="flex oc-composer-row items-center gap-2 ps-3 pe-3">
+      <Icon name="image" className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="shrink-0 typography-ui-label text-foreground">{t('chat.backgroundImages.generating')}</span>
+      <Tooltip delayDuration={COMMAND_TOOLTIP_DELAY_MS}>
+        <TooltipTrigger asChild>
+          <span className="min-w-0 flex-1 truncate font-mono typography-code text-muted-foreground">
+            {imageName(job.path)}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6} className="max-w-[min(36rem,90vw)] break-words">
+          <div className="font-mono typography-code">{job.path}</div>
+          <div className="typography-meta text-muted-foreground">{job.model}</div>
+        </TooltipContent>
+      </Tooltip>
+      {fromSubagent ? (
+        <span className="shrink-0 typography-meta text-muted-foreground">{t('chat.backgroundShells.subagent')}</span>
+      ) : null}
+      <ShellElapsed startedAt={job.startedAt} />
+    </div>
+  );
+};
+
 export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React.memo(({ sessionId, directory }) => {
   const { t } = useI18n();
-  const rows = useSessionTreeShells(sessionId ?? '');
+  const shellRows = useSessionTreeShells(sessionId ?? '');
+  const images = useSessionTreeImages(sessionId ?? '');
   const [expanded, setExpanded] = React.useState(false);
   const listId = React.useId();
   const { stoppingIds, stop } = useStopShells(sessionId ?? '', directory);
   const stopOne = React.useCallback((shell: TrackedShell) => stop([shell]), [stop]);
+  const foregroundStoppingIds = useForegroundShellStoppingIds();
 
-  if (!sessionId || rows.length === 0) return null;
+  const count = shellRows.length + images.length;
+  if (!sessionId || count === 0) return null;
 
-  const row = (item: ShellRowItem) => (
-    <ShellRow
-      key={item.shell.id}
-      item={item}
-      fromSubagent={item.shell.sessionID !== sessionId}
-      stopping={stoppingIds.has(item.shell.id)}
-      onStop={stopOne}
-    />
-  );
+  const shells: TrackedShell[] = [];
+  const endedIds: string[] = [];
+  for (const item of shellRows) {
+    if (item.kind === 'running') shells.push(item.shell);
+    else endedIds.push(item.shell.id);
+  }
 
-  if (rows.length === 1) {
+  const ariaLabel = images.length === 0 ? t('chat.backgroundShells.aria') : t('chat.backgroundWork.aria');
+  const rows = [
+    ...shellRows.map((item) => (
+      <ShellRow
+        key={item.shell.id}
+        item={item}
+        fromSubagent={item.shell.sessionID !== sessionId}
+        stopping={stoppingIds.has(item.shell.id)}
+        onStop={stopOne}
+      />
+    )),
+    ...images.map((job) => <ImageRow key={job.id} job={job} fromSubagent={job.sessionID !== sessionId} />),
+  ];
+
+  if (count === 1) {
     return (
-      <div role="group" className="border-b border-border/60" aria-label={t('chat.backgroundShells.aria')}>
-        {row(rows[0])}
+      <div role="group" className="border-b border-edge" aria-label={ariaLabel}>
+        {rows}
       </div>
     );
   }
 
-  const running: TrackedShell[] = [];
-  const endedIds: string[] = [];
-  for (const item of rows) {
-    if (item.kind === 'running') running.push(item.shell);
-    else endedIds.push(item.shell.id);
-  }
-
-  // The header toggles the list, as the queue header does. While a command
-  // runs it stops every running one at once; once none runs it dismisses them.
   return (
-    <div role="group" className="border-b border-border/60" aria-label={t('chat.backgroundShells.aria')}>
-      <div className="flex h-10 items-center gap-2 ps-3 pe-1.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setExpanded((value) => !value)}
-          onMouseDown={(event) => event.preventDefault()}
-          aria-expanded={expanded}
-          aria-controls={expanded ? listId : undefined}
-          className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
-        >
-          <Icon name="terminal-box" className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-start">
-            {t('chat.backgroundShells.count', { count: rows.length })}
-          </span>
-          <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
-        </Button>
-        {running.length > 0 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={running.every((shell) => stoppingIds.has(shell.id))}
-            onClick={() => stop(running)}
-            onMouseDown={(event) => event.preventDefault()}
-            className={STOP_BUTTON_CLASS}
-          >
-            {t('chat.backgroundShells.stopAll')}
-          </Button>
-        ) : (
+    <div role="group" className="border-b border-edge" aria-label={ariaLabel}>
+      <div className="flex oc-composer-row items-center gap-2 ps-3 pe-1.5">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setExpanded((value) => !value)}
+              onMouseDown={(event) => event.preventDefault()}
+              aria-expanded={expanded}
+              aria-controls={expanded ? listId : undefined}
+              className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
+            >
+              <Icon name={shellRows.length === 0 ? 'image' : 'terminal-box'} className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-start">
+                {images.length === 0
+                  ? t('chat.backgroundShells.count', { count })
+                  : t('chat.backgroundWork.count', { count })}
+              </span>
+              <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t(expanded ? 'contextTooltips.chat.shellsHide' : 'contextTooltips.chat.shellsShow')}</TooltipContent>
+        </Tooltip>
+        {shells.length > 0 ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={shells.every((shell) => stoppingIds.has(shell.id) || foregroundStoppingIds.has(shell.id))}
+                  onClick={() => stop(shells)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  className={STOP_BUTTON_CLASS}
+                >
+                  {t('chat.backgroundShells.stopAll')}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.shellStopAll')}</TooltipContent>
+          </Tooltip>
+        ) : endedIds.length > 0 ? (
+          // Once no command runs, the header dismisses the ended ones.
           <Button
             type="button"
             variant="ghost"
@@ -314,13 +365,13 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
           >
             {t('chat.backgroundShells.dismissAll')}
           </Button>
-        )}
+        ) : null}
       </div>
       {expanded ? (
         // Four rows, then the list scrolls, so ended commands kept for their
         // status cannot push the editor off a short screen.
         <div id={listId} className="max-h-40 overflow-y-auto overscroll-contain">
-          {rows.map(row)}
+          {rows}
         </div>
       ) : null}
     </div>

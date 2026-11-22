@@ -1,4 +1,5 @@
 import { opencodeClient } from '@/lib/opencode/client';
+import { findMessagePageItem } from '@/lib/opencode/messagePaging';
 import type { FilePart, Part } from '@/lib/opencode/model';
 import { flattenAssistantTextParts, flattenUserTextParts } from '@/lib/messages/messageText';
 import { getGitStatus } from '@/lib/gitApi';
@@ -19,10 +20,8 @@ export type LaneDiffStat = {
 
 const isFilePart = (part: Part): part is FilePart => part.type === 'file';
 
-/** The user message that started the lane, with its attachments. Null when there is none yet. */
 export async function loadLaneFirstPrompt(sessionId: string, directory: string): Promise<LanePrompt | null> {
-  const page = await opencodeClient.getSessionMessages(sessionId, { limit: 10, order: 'asc' }, directory);
-  const first = page.items.find((record) => record.info.role === 'user');
+  const first = await findMessagePageItem(sessionId, (item) => item.info.role === 'user', { limit: 10, order: 'asc' }, directory);
   if (!first) return null;
   return {
     messageId: first.info.id,
@@ -32,16 +31,12 @@ export async function loadLaneFirstPrompt(sessionId: string, directory: string):
 }
 
 export type LaneLastTurn = {
-  /** Latest assistant reply text; empty when it has not answered yet. */
   text: string;
-  /** Error OpenCode recorded on the newest assistant message, if any. */
   error: string | null;
 };
 
-/** The lane's latest reply text and the error its newest step recorded. */
 export async function loadLaneLastTurn(sessionId: string, directory: string): Promise<LaneLastTurn> {
   const page = await opencodeClient.getSessionMessages(sessionId, { limit: 50 }, directory);
-  // v2 pages messages newest first, so the first assistant record is the last reply.
   let error: string | null = null;
   for (const record of page.items) {
     if (record.info.role !== 'assistant') continue;
@@ -52,7 +47,6 @@ export async function loadLaneLastTurn(sessionId: string, directory: string): Pr
   return { text: '', error };
 }
 
-/** Text of the lane's latest assistant reply; an empty string when it has not answered yet. */
 export async function loadLaneLastReply(sessionId: string, directory: string): Promise<string> {
   return (await loadLaneLastTurn(sessionId, directory)).text;
 }
@@ -73,11 +67,6 @@ export async function loadLaneConversation(sessionId: string, directory: string)
   });
 }
 
-/**
- * Uncommitted changes of a lane worktree against its HEAD: every changed path
- * counts as a file, tracked edits contribute line counts. Throws on failure,
- * so a read error is never shown as a lane without changes.
- */
 export async function loadLaneDiffStat(directory: string): Promise<LaneDiffStat> {
   const status = await getGitStatus(directory);
   let insertions = 0;
@@ -93,12 +82,6 @@ export async function loadLaneDiffStat(directory: string): Promise<LaneDiffStat>
 
 type CachedValue<T> = { token: string; value: T };
 
-/**
- * Tiny result cache for the overview: an entry is reused while its token
- * (runtime + session + the lane's last idle time) is unchanged, so reopening
- * the overview does not refetch finished lanes. Bounded by eviction of the
- * oldest entries.
- */
 export function createLaneCache<T>(limit = 200) {
   const entries = new Map<string, CachedValue<T>>();
   return {

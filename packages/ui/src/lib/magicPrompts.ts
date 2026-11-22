@@ -1,10 +1,14 @@
+import { z } from 'zod';
+
 import { runtimeFetch } from './runtime-fetch';
+import { getRuntimeKey } from './runtime-switch';
 
 export type MagicPromptId =
   | 'git.commit.generate.visible'
   | 'git.commit.generate.instructions'
   | 'git.pr.generate.visible'
   | 'git.pr.generate.instructions'
+  | 'walkthrough.instructions'
   | 'git.conflict.resolve.visible'
   | 'git.conflict.resolve.instructions'
   | 'git.integrate.cherrypick.resolve.visible'
@@ -43,7 +47,9 @@ export type MagicPromptId =
   | 'session.fusion.instructions'
   | 'session.fusion.codeInstructions'
   | 'memory.tidy.visible'
-  | 'memory.tidy.instructions';
+  | 'memory.tidy.instructions'
+  | 'memory.toDocs.visible'
+  | 'memory.toDocs.instructions';
 
 interface MagicPromptDefinition {
   id: MagicPromptId;
@@ -143,6 +149,13 @@ Commits in range (base...head):
 
 Files changed across these commits:
 {{changed_files}}{{additional_context_block}}{{pr_template_block}}`,
+  },
+  {
+    id: 'walkthrough.instructions',
+    title: 'Walkthrough Instructions',
+    group: 'Git',
+    description: 'Your preferences for Changes walkthroughs: tone, emphasis, what to dwell on or leave out. The server adds them to its own prompt, so they cannot change the walkthrough format. Empty means none.',
+    template: '',
   },
   {
     id: 'git.conflict.resolve.visible',
@@ -510,7 +523,9 @@ Focus on correctness, regressions, missing implementation, missing tests, and wh
     ],
     template: `Another agent reviewed your changes and left the feedback below.
 
-Fix the findings you agree with. When you think a finding is wrong, leave the code as it is and explain why. Then list what you changed and which findings you declined, with the reason for each.
+Weigh each finding yourself before you act on it. A problem your change neither causes nor set out to fix, such as another path, a rare case or a small cost that was there before, is a nit whatever label it came with. Something your change breaks is never a nit, however rare. Fix what is wrong in the case this change is for, with the smallest fix: one that deletes or narrows code beats a new guard, helper, option or test the goal does not need. When you think a finding is wrong, leave the code as it is and say why, with evidence: file and line, a test, command output. Decline nits and anything outside the change in one line each. Do not agree with a finding just to end the review.
+
+Then list what you changed and which findings you declined, with the reason for each.
 
 {{review_feedback}}`,
   },
@@ -858,21 +873,25 @@ Read diffs selectively, file by file; do not print every attempt in full.
     ],
     template: `You are tidying up the memory you keep through the openchamber_memory tool. Agents save entries as they work and rarely revisit them, while the code and the decisions behind them keep moving. Your job is to bring the store back in line with what is true now. Every stored entry is listed in full below, so you do not need memory.read or memory.list.
 
-During this session, save no new memories: you only restructure what is already stored, whatever the usual memory rules say.
+During this session, save no new memories: you only restructure what is already stored, whatever the usual memory rules say. The one save allowed is moving an entry to its right scope.
 
 1. Go through every entry. For project entries, check the files, flags, commands, routes and decisions they name against the project: the code, git history, docs, instructions and skills, plans and notes, and whatever else you can reach, such as issues and linked trackers. A reference to something that is gone is a sign the entry is stale, not proof: a decision can outlive renamed code.
 
-2. Decide what changes. The first test for every entry: would an agent that reads the relevant code, docs and skills learn everything this entry says, including why it is so and whether it may be changed? If yes, the entry only duplicates the project and drifts from it over time: delete it. Where the entry and a doc or skill disagree, the doc or skill is current. Code shows what was done, not why, nor that it was deliberate: an entry that holds a decision, its reason, a rejected alternative or a "leave this as it is" that the project does not state stays, trimmed to that part if the rest is readable elsewhere. Do not move anything into docs or skills; this session changes memory only.
-- Obsolete: what it describes is gone or was reversed. Delete it.
+2. Decide what changes. The first test for every entry: would an agent that reads the relevant code, docs and skills learn everything this entry says, including why it is so and whether it may be changed? If yes, the entry only duplicates the project and drifts from it over time: delete it. Where the entry and a doc or skill disagree, the doc or skill is current. Who wrote an entry does not protect it: the user's own corrections go too once a newer entry or the project contradicts them. Code shows what was done, not why, nor that it was deliberate: an entry that holds a decision, its reason, a rejected alternative or a "leave this as it is" that the project does not state stays, trimmed to that part if the rest is readable elsewhere. Do not move anything into docs or skills; this session changes memory only.
+- Obsolete: what it describes is gone. Delete it.
+- Reversed: a decision the project or a later entry replaced. Rewrite it by memoryId to the decision that holds now, with one line on what it replaced and why when the reason is known: the abandoned choice and the reason for leaving it are what the code will never show.
+- Contradicting entries: the dates settle most of them. When the newer one records a decision or a correction, it holds: merge the two into one entry as under Reversed. When the newer one only discusses or proposes a change, the older one still holds; that pair is a question for the user.
 - Duplicates and overlapping entries: merge them into one entry, rewritten with memory.save and the surviving entry's memoryId, then delete the rest.
 - Partly outdated: rewrite it by memoryId with what is true now.
 - Wrong scope: something about this project filed under the user (global), or the other way round. Save it in the right scope, then delete the original.
 - One-off task state and anything the save rules exclude: delete.
-- A date in a title that only records when a decision was made: keep the decision; drop the date if the title needs the room.
+- A title with a date, or cut off mid-word: rewrite it by memoryId without the date, in at most 60 characters. The store keeps the dates, and they are what settles a contradiction.
+- A title that names only a topic ("Product decisions, part 2", "Feedback: what is still open"): rewrite it by memoryId to name what the entry holds, so an agent can tell from the session index whether to read it. Do not split the entry to do so.
+- Too many titles: sessions are given every title, newest first, in about 8,000 characters (roughly 150 titles). When the store holds more, merge related entries into topical ones, a short title with every still-true detail in the body, until the titles fit. Never delete what is still true just to fit.
 - Entries marked flagged: leave them alone; the user decides on those.
 An entry nothing contradicts still holds. Leave it as it is.
 
-3. Ask the user only about a real discrepancy you cannot settle from the project: two entries that contradict each other, or an entry the project contradicts while it may record a decision the project has not caught up with yet. Put all such questions in one question form, a handful at most. Never ask the user to re-confirm a standing preference or fact that nothing contradicts; assume it still holds. Entries about the user can rarely be checked against anything, so this applies to them most of all.
+3. Ask the user only about a real discrepancy you cannot settle from the project or the dates: two entries that contradict each other where the newer one only proposes a change or the dates do not tell which came later, or an entry the project contradicts while it may record a decision the project has not caught up with yet. Put all such questions in one question form, a handful at most. Never ask the user to re-confirm a standing preference or fact that nothing contradicts; assume it still holds. Entries about the user can rarely be checked against anything, so this applies to them most of all.
 
 4. Apply every change.
 
@@ -884,6 +903,33 @@ An entry nothing contradicts still holds. Leave it as it is.
 Nothing waits for approval. Keep the original text of what you changed in mind: if the user disagrees with something, you restore it from there.
 
 --- STORED MEMORY ---
+{{memory_entries}}`,
+  },
+  {
+    id: 'memory.toDocs.visible',
+    title: 'Memory to Docs Visible Prompt',
+    group: 'Memory',
+    description: 'Visible user message sent when the Memory panel offers to move entries into the project\'s agent docs.',
+    template: 'Move these memory entries into the project\'s agent docs.',
+  },
+  {
+    id: 'memory.toDocs.instructions',
+    title: 'Memory to Docs Instructions',
+    group: 'Memory',
+    description: 'Hidden instructions for moving memory entries into the project\'s agent docs, followed by the entries to move.',
+    placeholders: [
+      { key: 'memory_entries', description: 'The memory entries to move: id, scope, type, dates, title and body.' },
+    ],
+    template: `The memory entries below hold project knowledge (a rule, a recipe, a gotcha, a decision) that belongs in the project's agent docs, where every agent and teammate working here reads it. Memory reaches only this user. Move each one:
+
+1. Find where it belongs: the AGENTS.md, skill or module documentation an agent reads while doing the work the entry is about. Prefer an existing file and section over a new one. When the project has instructions for writing agent docs, follow them.
+2. Check the entry against the code before writing it. When part of it is no longer true, write what is true now; when it is wrong as a whole or turns out to be about the user rather than the project, skip it and keep it in memory.
+3. Add only what the file does not say yet, in that file's own style: no dates, no story of how it was learned, no people or private details.
+4. Delete each moved entry from memory with memory.delete and its memoryId.
+
+Do not commit: the changes stay in the working tree for the user to review. Reply with a short report in the language the user works in: each entry and the file it went to, and each skipped entry with one line on why.
+
+--- ENTRIES TO MOVE ---
 {{memory_entries}}`,
   },
 ] as const;
@@ -903,8 +949,47 @@ const LEGACY_PROMPT_KEY_MAP: Record<string, { visible: MagicPromptId; instructio
   },
 };
 
-let cachedOverrides: Record<string, string> | null = null;
-let inFlightOverridesRequest: Promise<Record<string, string>> | null = null;
+type MagicPromptOverrides = ReadonlyMap<string, string>;
+
+type MagicPromptScopeState =
+  | { status: 'ok' | 'missing'; overrides: MagicPromptOverrides }
+  | { status: 'invalid'; reason: string };
+
+export interface MagicPromptScopesView {
+  project: { id: string; path: string; file: string };
+  scopes: { global: MagicPromptScopeState; project: MagicPromptScopeState };
+}
+
+interface MagicPromptScopeSelector {
+  scope: 'global' | 'project';
+  projectId: string;
+}
+
+type MagicPromptSource = 'project' | 'global' | 'builtin';
+
+interface MagicPromptLayers {
+  project: MagicPromptOverrides | null;
+  global: MagicPromptOverrides;
+}
+
+interface ResolvedMagicPrompt {
+  template: string;
+  source: MagicPromptSource;
+}
+
+export interface MagicPromptSnapshot {
+  render: (id: MagicPromptId, variables?: Record<string, string>) => string;
+}
+
+class MagicPromptError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null = null) {
+    super(message);
+    this.name = 'MagicPromptError';
+    this.code = code;
+  }
+}
 
 const replaceTemplateVariables = (template: string, variables: Record<string, string>) => {
   return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => {
@@ -915,67 +1000,139 @@ const replaceTemplateVariables = (template: string, variables: Record<string, st
   });
 };
 
-const normalizeOverridesPayload = (payload: unknown): Record<string, string> => {
-  const overridesRaw = (payload as { overrides?: unknown } | null)?.overrides;
-  if (!overridesRaw || typeof overridesRaw !== 'object' || Array.isArray(overridesRaw)) {
-    return {};
-  }
-
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(overridesRaw as Record<string, unknown>)) {
-    if (typeof value !== 'string') {
-      continue;
-    }
-    result[key] = value;
-  }
-
+const expandLegacyKeys = (stored: Map<string, string>): MagicPromptOverrides => {
+  const result = new Map(stored);
   for (const [legacyKey, splitKeys] of Object.entries(LEGACY_PROMPT_KEY_MAP)) {
-    const legacyValue = result[legacyKey];
-    if (typeof legacyValue !== 'string') {
-      continue;
-    }
+    const legacyValue = stored.get(legacyKey);
+    if (legacyValue === undefined) continue;
 
     const firstNewlineIndex = legacyValue.indexOf('\n');
     const visible = (firstNewlineIndex === -1 ? legacyValue : legacyValue.slice(0, firstNewlineIndex)).trim();
     const instructions = (firstNewlineIndex === -1 ? '' : legacyValue.slice(firstNewlineIndex + 1)).trim();
 
-    if (!(splitKeys.visible in result) && visible.length > 0) {
-      result[splitKeys.visible] = visible;
+    if (!stored.has(splitKeys.visible) && visible.length > 0) {
+      result.set(splitKeys.visible, visible);
     }
-    if (!(splitKeys.instructions in result) && instructions.length > 0) {
-      result[splitKeys.instructions] = instructions;
+    if (!stored.has(splitKeys.instructions) && instructions.length > 0) {
+      result.set(splitKeys.instructions, instructions);
     }
   }
-
   return result;
 };
 
-export const fetchMagicPromptOverrides = async (): Promise<Record<string, string>> => {
-  if (cachedOverrides) {
-    return cachedOverrides;
-  }
+const overrideMapSchema = z.preprocess(
+  (value) => (value instanceof Object && !Array.isArray(value) ? Object.entries(value) : null),
+  z.array(z.tuple([z.string(), z.string()])),
+).transform((entries) => expandLegacyKeys(new Map(entries)));
 
-  if (!inFlightOverridesRequest) {
-    inFlightOverridesRequest = runtimeFetch(API_ENDPOINT, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error('Failed to load magic prompts');
-        }
-        const payload = await response.json().catch(() => ({}));
-        const normalized = normalizeOverridesPayload(payload);
-        cachedOverrides = normalized;
-        return normalized;
-      })
-      .finally(() => {
-        inFlightOverridesRequest = null;
-      });
-  }
+const globalPayloadSchema = z.object({
+  version: z.literal(1),
+  overrides: overrideMapSchema,
+});
 
-  return inFlightOverridesRequest;
+const scopeStateSchema = z.union([
+  z.object({ status: z.enum(['ok', 'missing']), overrides: overrideMapSchema }),
+  z.object({ status: z.literal('invalid'), reason: z.string() }),
+]);
+
+const scopesPayloadSchema = z.object({
+  version: z.literal(1),
+  project: z.object({ id: z.string().min(1), path: z.string(), file: z.string() }),
+  scopes: z.object({ global: scopeStateSchema, project: scopeStateSchema }),
+});
+
+const errorPayloadSchema = z.object({ error: z.string().min(1), code: z.string().optional() });
+
+const request = async <T>(
+  path: string,
+  init: {
+    method: 'GET' | 'PUT' | 'DELETE';
+    query?: { projectId: string; scope?: MagicPromptScopeSelector['scope'] } | { sessionDirectory: string };
+    body?: string;
+  },
+  schema: z.ZodType<T>,
+  failureMessage: string,
+): Promise<T> => {
+  const response = await runtimeFetch(path, {
+    method: init.method,
+    headers: init.body === undefined
+      ? { Accept: 'application/json' }
+      : { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: init.body,
+    query: init.query,
+    cache: 'no-store',
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = errorPayloadSchema.safeParse(payload);
+    throw new MagicPromptError(
+      error.success ? error.data.error : failureMessage,
+      error.success ? error.data.code ?? null : null,
+    );
+  }
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    throw new MagicPromptError(`${failureMessage}: unexpected response`);
+  }
+  return parsed.data;
 };
+
+const promptPath = (id: MagicPromptId) => `${API_ENDPOINT}/${encodeURIComponent(id)}`;
+
+const fetchOverrides = async (sessionDirectory?: string): Promise<MagicPromptOverrides> => (
+  (await request(
+    API_ENDPOINT,
+    { method: 'GET', query: sessionDirectory ? { sessionDirectory } : undefined },
+    globalPayloadSchema,
+    'Failed to load magic prompts',
+  )).overrides
+);
+
+export const fetchMagicPromptScopes = async (projectId: string): Promise<MagicPromptScopesView> => {
+  const view = await request(
+    API_ENDPOINT,
+    { method: 'GET', query: { projectId } },
+    scopesPayloadSchema,
+    'Failed to load magic prompts',
+  );
+  if (view.project.id !== projectId) {
+    throw new MagicPromptError('Magic prompts answered for another project');
+  }
+  return { project: view.project, scopes: view.scopes };
+};
+
+const mutateScoped = async (
+  path: string,
+  method: 'PUT' | 'DELETE',
+  selector: MagicPromptScopeSelector,
+  runtimeKey: string,
+  failureMessage: string,
+  body?: string,
+): Promise<MagicPromptScopesView> => {
+  assertMagicPromptRuntime(runtimeKey);
+  const view = await request(
+    path,
+    { method, query: { scope: selector.scope, projectId: selector.projectId }, body },
+    scopesPayloadSchema,
+    failureMessage,
+  );
+  if (view.project.id !== selector.projectId) {
+    throw new MagicPromptError('Magic prompts answered for another project');
+  }
+  return { project: view.project, scopes: view.scopes };
+};
+
+export const saveScopedMagicPromptOverride = (selector: MagicPromptScopeSelector, id: MagicPromptId, text: string, runtimeKey: string) => (
+  mutateScoped(promptPath(id), 'PUT', selector, runtimeKey, 'Failed to save magic prompt', JSON.stringify({ text }))
+);
+
+export const resetScopedMagicPromptOverride = (selector: MagicPromptScopeSelector, id: MagicPromptId, runtimeKey: string) => (
+  mutateScoped(promptPath(id), 'DELETE', selector, runtimeKey, 'Failed to reset magic prompt')
+);
+
+export const resetAllScopedMagicPromptOverrides = (selector: MagicPromptScopeSelector, runtimeKey: string) => (
+  mutateScoped(API_ENDPOINT, 'DELETE', selector, runtimeKey, 'Failed to reset all magic prompts')
+);
 
 export const getMagicPromptDefinition = (id: MagicPromptId): MagicPromptDefinition => {
   const definition = MAGIC_PROMPT_DEFINITION_BY_ID.get(id);
@@ -989,71 +1146,48 @@ export const getDefaultMagicPromptTemplate = (id: MagicPromptId): string => {
   return getMagicPromptDefinition(id).template;
 };
 
-const getEffectiveMagicPromptTemplate = async (id: MagicPromptId): Promise<string> => {
-  const overrides = await fetchMagicPromptOverrides().catch((): Record<string, string> => ({}));
-  const override = overrides[id];
-  if (typeof override === 'string') {
-    return override;
-  }
-  return getDefaultMagicPromptTemplate(id);
+export const resolveMagicPromptTemplate = (layers: MagicPromptLayers, id: MagicPromptId): ResolvedMagicPrompt => {
+  const projectTemplate = layers.project?.get(id);
+  if (projectTemplate !== undefined) return { template: projectTemplate, source: 'project' };
+  const globalTemplate = layers.global.get(id);
+  if (globalTemplate !== undefined) return { template: globalTemplate, source: 'global' };
+  return { template: getDefaultMagicPromptTemplate(id), source: 'builtin' };
 };
 
-export const renderMagicPrompt = async (id: MagicPromptId, variables: Record<string, string> = {}): Promise<string> => {
-  const template = await getEffectiveMagicPromptTemplate(id);
-  return replaceTemplateVariables(template, variables);
+const assertMagicPromptRuntime = (runtimeKey: string): void => {
+  if (getRuntimeKey() !== runtimeKey) {
+    throw new MagicPromptError('The runtime changed before the magic prompt change was sent', 'runtime_changed');
+  }
 };
 
-export const saveMagicPromptOverride = async (id: MagicPromptId, text: string): Promise<MagicPromptOverridesPayload> => {
-  const response = await runtimeFetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({ text }),
-  });
-  if (!response.ok) {
-    const errorPayload = await response.json().catch(() => ({}));
-    throw new Error((errorPayload as { error?: string })?.error || 'Failed to save magic prompt');
-  }
-  const payload = await response.json();
-  cachedOverrides = normalizeOverridesPayload(payload);
+export const loadMagicPrompts = async (directory: string | null): Promise<MagicPromptSnapshot> => {
+  const overrides = await fetchOverrides(directory ?? undefined);
   return {
-    version: typeof payload?.version === 'number' ? payload.version : 1,
-    overrides: cachedOverrides,
+    render: (id, variables = {}) => replaceTemplateVariables(overrides.get(id) ?? getDefaultMagicPromptTemplate(id), variables),
   };
 };
 
-export const resetMagicPromptOverride = async (id: MagicPromptId): Promise<MagicPromptOverridesPayload> => {
-  const response = await runtimeFetch(`${API_ENDPOINT}/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) {
-    const errorPayload = await response.json().catch(() => ({}));
-    throw new Error((errorPayload as { error?: string })?.error || 'Failed to reset magic prompt');
-  }
-  const payload = await response.json();
-  cachedOverrides = normalizeOverridesPayload(payload);
-  return {
-    version: typeof payload?.version === 'number' ? payload.version : 1,
-    overrides: cachedOverrides,
-  };
+
+const toRecord = (overrides: MagicPromptOverrides): Record<string, string> => Object.fromEntries(overrides);
+
+const mutateGlobal = async (path: string, method: 'PUT' | 'DELETE', runtimeKey: string, failureMessage: string, body?: string): Promise<MagicPromptOverridesPayload> => {
+  assertMagicPromptRuntime(runtimeKey);
+  const payload = await request(path, { method, body }, globalPayloadSchema, failureMessage);
+  return { version: payload.version, overrides: toRecord(payload.overrides) };
 };
 
-export const resetAllMagicPromptOverrides = async (): Promise<MagicPromptOverridesPayload> => {
-  const response = await runtimeFetch(API_ENDPOINT, {
-    method: 'DELETE',
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) {
-    const errorPayload = await response.json().catch(() => ({}));
-    throw new Error((errorPayload as { error?: string })?.error || 'Failed to reset all magic prompts');
-  }
-  const payload = await response.json();
-  cachedOverrides = normalizeOverridesPayload(payload);
-  return {
-    version: typeof payload?.version === 'number' ? payload.version : 1,
-    overrides: cachedOverrides,
-  };
-};
+export const fetchMagicPromptOverrides = async (): Promise<Record<string, string>> => (
+  toRecord(await fetchOverrides())
+);
+
+export const saveMagicPromptOverride = (id: MagicPromptId, text: string, runtimeKey: string): Promise<MagicPromptOverridesPayload> => (
+  mutateGlobal(promptPath(id), 'PUT', runtimeKey, 'Failed to save magic prompt', JSON.stringify({ text }))
+);
+
+export const resetMagicPromptOverride = (id: MagicPromptId, runtimeKey: string): Promise<MagicPromptOverridesPayload> => (
+  mutateGlobal(promptPath(id), 'DELETE', runtimeKey, 'Failed to reset magic prompt')
+);
+
+export const resetAllMagicPromptOverrides = (runtimeKey: string): Promise<MagicPromptOverridesPayload> => (
+  mutateGlobal(API_ENDPOINT, 'DELETE', runtimeKey, 'Failed to reset all magic prompts')
+);

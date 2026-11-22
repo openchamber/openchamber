@@ -52,6 +52,41 @@ const createApp = (overrides = {}) => {
 };
 
 describe('OpenCode upgrade routes', () => {
+  it.each([
+    ['/api/opencode/upgrade-status', 'available'],
+    ['/api/opencode/version', 'version'],
+  ])('answers %s when OpenCode accepts the request but never responds', async (route, field) => {
+    globalThis.fetch = vi.fn((url, init) => {
+      if (!String(url).endsWith('/api/info')) return Promise.resolve(jsonResponse({ version: '2.0.22' }));
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      });
+    });
+    const { app } = createApp();
+
+    const response = await request(app).get(route).timeout({ deadline: 5_000 }).expect(500);
+
+    expect(response.body).toEqual({ [field]: null, error: expect.any(String) });
+    expect(response.body.error).not.toBe('');
+  });
+
+  it('keeps the installed OpenCode version when the npm update check fails', async () => {
+    globalThis.fetch = vi.fn(async (input) => {
+      if (String(input).endsWith('/api/info')) return jsonResponse({ version: '2.2.6' });
+      throw new Error('registry unreachable');
+    });
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(200);
+
+    expect(response.body).toEqual({
+      available: null,
+      currentVersion: '2.2.6',
+      latestVersion: null,
+      upgrade: supportedCapability,
+    });
+  });
+
   it('uses the configured registry for the v2 package version without exposing URL credentials', async () => {
     const previousRegistry = process.env.npm_config_registry;
     const previousUserConfig = process.env.npm_config_userconfig;
@@ -95,11 +130,14 @@ describe('OpenCode upgrade routes', () => {
       : new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } })));
     const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
 
-    const response = await request(app).get('/api/opencode/upgrade-status').expect(500);
+    // A failed update check keeps the installed version and reports no latest one.
+    const response = await request(app).get('/api/opencode/upgrade-status').expect(200);
 
     expect(response.body).toEqual({
       available: null,
-      error: `OpenCode npm registry latest document exceeds ${OPENCODE_LATEST_VERSION_MAX_BYTES} bytes`,
+      currentVersion: '2.0.21',
+      latestVersion: null,
+      upgrade: supportedCapability,
     });
     expect(cancelled).toBe(true);
     // The reader may pull ahead of the cancelling read by a chunk or two;

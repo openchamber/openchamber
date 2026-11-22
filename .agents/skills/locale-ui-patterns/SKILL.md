@@ -11,13 +11,13 @@ User-facing UI text must go through `@/lib/i18n`; do not hardcode English string
 
 ## What the text says
 
-UI text tells the person what they get and what to do: what an option gives them, what happened, what fixes it. Engineering reasons (layout jumps, races, what the code avoids) belong in code comments and commit messages. Example: "Shows the model's thinking as it arrives. When off, the block stays folded and opens with a click." An error names the known cause and the action ("reconnect the repository's account in Settings"), never a generic "something went wrong" when the cause is known; correcting such text is ordinary implementation work, not a product decision.
+UI text tells the person what they get and what to do: what an option gives them, what happened, what fixes it. Engineering reasons (layout jumps, races, what the code avoids) belong in code comments and commit messages. Example: "Shows the model's thinking as it arrives. When off, the block stays folded and opens with a click." An error names the known cause and the action ("reconnect the repository's account in Settings"), never a generic "something went wrong" when the cause is known. An error that hides a known cause is a defect (root AGENTS.md, *Pull Request Handoff*), fixed without asking.
 
 ## Translate everything immediately (no English placeholders)
 
 Every key you add to a non-English dictionary MUST contain a real translation in that language — never the English source string as a stand-in. There is NO "leave it in English for now" convention in this project; if an agent told you there was, it was wrong. Copying the English value into `es.ts`/`fr.ts`/`ko.ts`/`pl.ts`/`pt-BR.ts`/`uk.ts`/`zh-CN.ts`/`zh-TW.ts` is a defect, not a deferral. The app ships every locale at once, so an untranslated key is a visible bug for those users.
 
-If you genuinely cannot translate a language, say so explicitly to the user instead of silently pasting English. Do not invent a fallback policy.
+If you genuinely cannot translate a language, say so explicitly to the user instead of silently pasting English.
 
 ## Required Flow
 
@@ -26,6 +26,7 @@ If you genuinely cannot translate a language, say so explicitly to the user inst
 3. In components, call `const { t } = useI18n()` from `@/lib/i18n` and render `t('key')`.
 4. For locale names or language picker labels, use `label(locale)` from `useI18n()`.
 5. Keep locale state in `packages/ui/src/lib/i18n/*`; do not add locale fields to broad stores like `useUIStore`.
+   A feature string file (`messages/<feature>.i18n.ts`) holds one `export const xI18n = { en: {...}, uk: {...}, ... }` and nothing else, and only locale dictionaries import it, each spreading its own locale. The web build gives each dictionary only that locale (`packages/web/vite-locale-slices.ts`); a file of another shape, or one imported from elsewhere, ships every locale in the startup chunk (several MB of the window's memory).
 6. Do not remount the app to update language. Components must re-render through `useI18n()`.
 
 ## Component Usage Rules
@@ -38,13 +39,7 @@ If you genuinely cannot translate a language, say so explicitly to the user inst
 
 ## Key Style
 
-Use stable semantic keys, not English text as keys.
-
-Keys should describe location + UI role + meaning. They should not encode current copy wording.
-
-Use existing nearby naming when extending a surface. If no nearby pattern exists, choose a short path that mirrors the UI ownership.
-
-Namespaces like `layout.*`, `settings.*`, `chat.*`, `git.*`, `session.*`, `toast.*`, and `dialog.*` are examples, not a fixed exhaustive list.
+Keys are stable and semantic: location + UI role + meaning (`settings.appearance.language.label`), never the English copy. Extend the naming already used nearby; with none, mirror the UI ownership in a short path.
 
 Good:
 ```ts
@@ -74,7 +69,7 @@ Use `{name}` placeholders for dynamic values.
 t('toast.language.changed', { language: label(locale) })
 ```
 
-Do not pass grammar fragments as params. Never use params like `{suffix}`, `{plural}`, `{article}`, `{prefix}`, `{dateSuffix}`, or pieces of words/sentences.
+Placeholders carry only real values (`{count}`, `{name}`, `{path}`), never grammar pieces such as `{suffix}`, `{plural}` or `{article}`.
 
 Bad:
 ```tsx
@@ -88,9 +83,7 @@ count === 1
   : t('dialog.delete.descriptionPlural', { count })
 ```
 
-Plural/count-dependent text must use separate complete-message keys unless all supported locales can use one identical complete sentence. Placeholders are only for real values (`{count}`, `{name}`, `{path}`), not grammar.
-
-Optional clauses must also be complete-message keys. Do not build a sentence by injecting a translated phrase into another translated sentence.
+Count-dependent text and optional clauses each get their own complete-message key; never inject one translated phrase into another. Count-dependent text can use one key if all supported locales use one identical complete sentence.
 
 Bad:
 ```tsx
@@ -108,17 +101,19 @@ date
 
 ## Desktop Native Menus
 
-The Electron app menu and the right-click context menu are native, outside `@/lib/i18n`. Their labels live in `packages/electron/menu-locales.mjs` (`MENU_LOCALE_DICTIONARIES`, `CONTEXT_MENU_LABEL_DICTIONARIES`), keyed by the same locale codes as the UI. A new menu item gets its label in every locale there, and a new UI language gets its own entry there in the same change; `menu-locales.test.mjs` checks key parity.
+The Electron app menu and the right-click context menu are native, outside `@/lib/i18n`. Their labels live in `packages/electron/menu-locales.mjs` (`MENU_LOCALE_DICTIONARIES`, `CONTEXT_MENU_LABEL_DICTIONARIES`), keyed by the same locale codes as the UI. A new menu item gets its label in every locale there, and a new UI language gets its own entry there in the same change; `menu-locales.test.mjs` checks key parity. The tray menu and tooltip labels live in `packages/electron/tray-locales.mjs` (`TRAY_LOCALE_DICTIONARIES`) under the same rule; `tray-menu.test.mjs` checks their parity.
 
 ## Adding a UI Language
+
+Russian is not added: a standing maintainer decision (`triage-prs`, template *russian-locale*).
 
 A new locale code lands in all of these in one change:
 
 - `packages/ui/src/lib/i18n/runtime.ts`: the `Locale` union, `LOCALES`, `LOCALE_LABEL_KEYS`, and `normalizeLocale` (include legacy tags the platforms still send, such as `iw` for Hebrew). A right-to-left language also joins `RTL_LOCALES`; the layout side is owned by `rtl-layout`.
 - `store.ts` (lazy import), `intl.ts` (Intl tag), `bootstrap.ts` (startup strings), `messages.test.ts`.
 - `messages/<locale>.ts` and `messages/<locale>.settings.ts`, a `<locale>` block in every `messages/*.i18n.ts`, and a `common.language.<name>` label in every existing dictionary.
-- `packages/electron/menu-locales.mjs` (see above).
-- `packages/web/server/lib/opencode/settings-helpers.js` `UI_LOCALE_VALUES`: without it the server drops the saved choice. `packages/web/server/lib/walkthrough/languages.js` names the language for walkthrough prompts.
+- `packages/electron/menu-locales.mjs` and `packages/electron/tray-locales.mjs` (see above).
+- `packages/web/server/lib/settings/settings-helpers.js` `UI_LOCALE_VALUES`: without it the server drops the saved choice. `packages/web/server/lib/walkthrough/languages.js` names the language for walkthrough prompts.
 
 ## Translation Boundary
 
@@ -135,7 +130,7 @@ Keep these literal:
 ## Completion Criteria
 
 - No new hardcoded user-facing English in changed UI files.
-- Every new key exists in all dictionaries with a real translation, including `packages/electron/menu-locales.mjs` for native menu labels.
+- Every new key exists in all dictionaries with a real translation, including `packages/electron/menu-locales.mjs` and `packages/electron/tray-locales.mjs` for native menu and tray labels.
 - All translated values are resolved inside a reactive render/hook boundary.
 - No locale state added to broad/shared stores.
 - No full app remount for locale changes.

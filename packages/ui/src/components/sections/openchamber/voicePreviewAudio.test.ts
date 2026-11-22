@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { disposePreviewAudio } from './voicePreviewAudio';
 
-type MockAudio = Pick<HTMLAudioElement, 'load' | 'pause' | 'removeAttribute' | 'src'> & {
+type MockAudio = Pick<HTMLAudioElement, 'load' | 'pause' | 'removeAttribute' | 'src' | 'onended' | 'onerror'> & {
     loadCalls: number;
     paused: boolean;
     removedAttributes: string[];
@@ -11,6 +11,8 @@ type MockAudio = Pick<HTMLAudioElement, 'load' | 'pause' | 'removeAttribute' | '
 const createMockAudio = (src: string): MockAudio => {
     const audio: MockAudio = {
         src,
+        onended: () => {},
+        onerror: () => {},
         loadCalls: 0,
         paused: false,
         removedAttributes: [],
@@ -53,6 +55,8 @@ describe('disposePreviewAudio', () => {
             disposePreviewAudio(audio as unknown as HTMLAudioElement);
 
             expect(audio.paused).toBe(true);
+            expect(audio.onended).toBeNull();
+            expect(audio.onerror).toBeNull();
             expect(revokedUrls).toEqual(['blob:https://example.test/preview']);
             expect(audio.removedAttributes).toEqual(['src']);
             expect(audio.loadCalls).toBe(1);

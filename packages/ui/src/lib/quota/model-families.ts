@@ -1,23 +1,18 @@
 import type { QuotaProviderId } from '@/types';
+import type { I18nKey } from '@/lib/i18n';
 
 export interface ModelFamily {
   id: string;
   label: string;
+  labelKey?: I18nKey;
   matcher: (modelName: string) => boolean;
   order: number;
 }
 
-/**
- * Strip auth source prefix from model name for display.
- * e.g., "gemini/gemini-2.5-flash" -> "gemini-2.5-flash"
- *       "antigravity/claude-sonnet" -> "claude-sonnet"
- */
 export function getDisplayModelName(modelName: string): string {
-  // Handle prefixes like "gemini/", "antigravity/"
   const slashIndex = modelName.indexOf('/');
   if (slashIndex !== -1) {
     const prefix = modelName.substring(0, slashIndex);
-    // Check if it's an auth source prefix
     if (prefix === 'gemini' || prefix === 'antigravity') {
       return modelName.substring(slashIndex + 1);
     }
@@ -57,9 +52,20 @@ const ANTIGRAVITY_MODEL_FAMILIES: ModelFamily[] = [
   },
 ];
 
+const OPENCODE_MODEL_FAMILIES: ModelFamily[] = [
+  {
+    id: 'opencode-models',
+    label: 'Zen',
+    labelKey: 'quota.family.zen',
+    matcher: () => true,
+    order: 1,
+  },
+];
+
 const PROVIDER_MODEL_FAMILIES: Partial<Record<QuotaProviderId, ModelFamily[]>> = {
   google: GOOGLE_MODEL_FAMILIES,
   antigravity: ANTIGRAVITY_MODEL_FAMILIES,
+  opencode: OPENCODE_MODEL_FAMILIES,
 };
 
 function getModelFamily(modelName: string, providerId: QuotaProviderId): ModelFamily | null {
@@ -80,9 +86,6 @@ export function sortModelFamilies(families: ModelFamily[]): ModelFamily[] {
   return [...families].sort((a, b) => a.order - b.order);
 }
 
-/**
- * Group models by family with custom getter function (for UsagePage.tsx)
- */
 export function groupModelsByFamilyWithGetter<T>(
   models: T[],
   getModelName: (model: T) => string,
@@ -104,39 +107,18 @@ export function groupModelsByFamilyWithGetter<T>(
   return groups;
 }
 
-/**
- * Match Gemini 3.x on the version token rather than on the separator that
- * follows it. Google writes the minor version with a dot
- * (`gemini-3.6-flash`), a few gateway providers write it with a hyphen
- * (`gemini-3-6-flash`), and the launch ids carry no minor version at all
- * (`gemini-3-flash`). Requiring a separator after `gemini-3` covers all
- * three, and the leading anchor keeps the earlier generations, the versionless
- * aliases, and the embedding models out.
- */
 const GEMINI_3_MODEL = /^gemini-3[.-]/;
 
-/**
- * Get default models for a provider based on simple patterns.
- * For Google provider with gemini/ and antigravity/ prefixes:
- * - Gemini 3.x models
- * - All Claude models
- * For the Claude provider: every model it reports a limit for.
- */
 export function getDefaultModels(
   providerId: QuotaProviderId,
   availableModels: string[]
 ): string[] {
   return availableModels.filter((model) => {
-    // Anthropic only reports a model here when that model has its own plan
-    // limit, so every one it names is worth showing by default.
     if (providerId === 'claude') return true;
+    if (providerId === 'opencode') return true;
     const lower = model.toLowerCase();
-    // Handle gemini/ and antigravity/ prefixes
     const modelName = lower.includes('/') ? lower.split('/')[1] : lower;
-    // Gemini 3.x, including the dotted (gemini-3.6-flash) and hyphenated
-    // (gemini-3-6-flash) minor versions
     if (GEMINI_3_MODEL.test(modelName)) return true;
-    // All Claude models
     if (modelName.startsWith('claude-')) return true;
     return false;
   });

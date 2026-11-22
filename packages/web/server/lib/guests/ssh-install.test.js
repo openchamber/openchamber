@@ -56,6 +56,8 @@ if (!process.env.GUEST_SSH_TEST_HOME) {
     const before = await Promise.all(protectedPaths.map(readProtected));
     const env = { ...process.env };
     for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+    // The child's data lives under its isolated HOME, not the runner's test dir.
+    delete env.OPENCHAMBER_DATA_DIR;
     Object.assign(env, {
       HOME: home,
       USERPROFILE: home,
@@ -183,6 +185,12 @@ describe('SSH extension installs', () => {
     expect(await updateGuest({ guest, origin: guest.gitOrigin, persistPath, lookup })).toMatchObject({ ok: false, code: 'clone-failed' });
     const [preserved] = await listInstalledGuests({ persistPath });
     expect(preserved.version).toBe('1.1.0');
+  });
+
+  test('an identity whose stored SSH key is not a path clones with the host SSH configuration', async () => {
+    await writeProfiles(42);
+    expect(await cloneGitRepository(source, path.join(root, 'non-path-key-clone'), { gitIdentityId: 'work', lookup })).toEqual({ ok: true });
+    expect((await sshCalls()).at(-1).args).toContain(globalKey);
   });
 });
 }

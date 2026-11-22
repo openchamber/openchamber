@@ -1,9 +1,9 @@
 import { applyTone, type Tone } from './badge.ts';
-import { el, ensureStyle, setText, type Handle } from './dom.ts';
+import { el, ensureStyle, setAttr, setText, type Handle } from './dom.ts';
+import { icon } from './icons.ts';
 import { UI_CSS } from './style.ts';
 
 export type ProgressProps = {
-  /** 0 to 100. Values outside that range are clamped. */
   value: number;
   tone?: Tone;
   label?: string;
@@ -12,7 +12,7 @@ export type ProgressProps = {
 export type ProgressHandle = Handle<ProgressProps>;
 
 export const clampProgress = (value: number): number => (
-  Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 0
+  Number.isFinite(value) ? Math.min(100, Math.max(0, Math.floor(value))) : 0
 );
 
 export const mountProgress = (root: Element, initial: ProgressProps): ProgressHandle => {
@@ -21,7 +21,10 @@ export const mountProgress = (root: Element, initial: ProgressProps): ProgressHa
   const node = el('div', 'oc-sdk oc-sdk-progress');
   const caption = el('div', 'oc-sdk-progress-label');
   const label = el('span');
-  const percent = el('span');
+  const percent = el('span', 'oc-sdk-progress-value');
+  const percentText = el('span');
+  const doneMark = icon('check', 14);
+  percent.append(doneMark, percentText);
   caption.append(label, percent);
   const track = el('div', 'oc-sdk-progress-track');
   track.setAttribute('role', 'progressbar');
@@ -39,7 +42,10 @@ export const mountProgress = (root: Element, initial: ProgressProps): ProgressHa
     track.setAttribute('aria-valuenow', String(value));
     if (props.label) track.setAttribute('aria-label', props.label); else track.removeAttribute('aria-label');
     setText(label, props.label);
-    setText(percent, `${value}%`);
+    setText(percentText, `${value}%`);
+    const done = value === 100 && (!props.tone || props.tone === 'neutral');
+    setAttr(node, 'data-done', done ? 'true' : null);
+    doneMark.style.display = done ? '' : 'none';
     caption.hidden = !props.label;
   };
   paint();

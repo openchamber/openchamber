@@ -5,6 +5,9 @@ import express from 'express';
  * (`store.js`), behind the same UI auth as `/api/config/settings`. There is no
  * route to read them back: only the agent tool reads the store
  * (`settings.devices`), so one client never sees another's reports.
+ *
+ * @param {import('express').Application} app
+ * @param {{ store: ReturnType<typeof import('./store.js').createDeviceSettingsStore> }} options
  */
 export const registerDeviceSettingsRoutes = (app, { store }) => {
   app.put('/api/config/device-settings', express.json({ limit: '128kb' }), (req, res) => {

@@ -15,7 +15,6 @@ import {
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-/** Body of `POST /api/guests/:id/files`. One request per host message type. */
 export type GuestFileRequest =
   | { op: 'read'; path: string }
   | { op: 'write'; path: string; content: string }
@@ -72,24 +71,17 @@ const parseGuestFileResponse = async (response: Response): Promise<GuestFileProx
   return { ok: true, result: parsed.data.result };
 };
 
-/**
- * Runs one guest file operation on the server. `directory` is the open
- * project; relative paths resolve against it, so it travels as the usual
- * `x-opencode-directory` header.
- */
 export const guestFileOperation = async (
   guestId: string,
   request: GuestFileRequest,
   directory: string | null,
 ): Promise<GuestFileProxyResult> => {
-  const headers = new Headers({ 'Content-Type': 'application/json' });
-  if (directory) {
-    headers.set('x-opencode-directory', directory);
-  }
   try {
     const response = await runtimeFetch(`/api/guests/${guestId}/files`, {
       method: 'POST',
-      headers,
+      headers: directory
+        ? { 'Content-Type': 'application/json', 'x-opencode-directory': directory }
+        : { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
     return parseGuestFileResponse(response);

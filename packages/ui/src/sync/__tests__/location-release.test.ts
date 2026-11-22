@@ -17,8 +17,10 @@ const CHAT = "/home/u/.config/openchamber/chats/2026-10-03/session-a"
 const OTHER_CHAT = "/home/u/.config/openchamber/chats/2026-10-03/session-b"
 const WORKTREE = "/repo/app-worktrees/feature"
 const PROJECT = "/repo/app"
+const OTHER_PROJECT = "/repo/other"
 const CHAT_DELAY = 30_000
 const WORKTREE_DELAY = 300_000
+const PROJECT_DELAY = 900_000
 
 type ManualTimer = { run: () => void; ms: number; cleared: boolean }
 
@@ -31,7 +33,7 @@ function harness(options: { busy?: Set<string>; unknown?: Set<string>; failRelea
   const release = createLocationRelease<ManualTimer>({
     releaseDelayMs: (directory) => {
       if (directory.includes("/chats/")) return CHAT_DELAY
-      return directory === WORKTREE ? WORKTREE_DELAY : null
+      return directory === WORKTREE ? WORKTREE_DELAY : PROJECT_DELAY
     },
     isCurrentDirectory: (directory) => directory === current.value,
     directoryUse: (directory): DirectoryUse => {
@@ -61,7 +63,8 @@ function harness(options: { busy?: Set<string>; unknown?: Set<string>; failRelea
   const fire = () => {
     for (const timer of timers.splice(0)) if (!timer.cleared) timer.run()
   }
-  return { release, released, fire, timers, busy, move }
+  const live = () => timers.filter((timer) => !timer.cleared).map((timer) => timer.ms)
+  return { release, released, fire, timers, live, busy, move }
 }
 
 describe("location release", () => {
@@ -70,7 +73,7 @@ describe("location release", () => {
     h.move(CHAT)
     h.move(PROJECT)
     expect(h.released).toEqual([])
-    expect(h.timers.map((timer) => timer.ms)).toEqual([CHAT_DELAY])
+    expect(h.live()).toEqual([CHAT_DELAY])
     h.fire()
     expect(h.released).toEqual([CHAT])
   })
@@ -79,16 +82,26 @@ describe("location release", () => {
     const h = harness()
     h.move(WORKTREE)
     h.move(PROJECT)
-    expect(h.timers.map((timer) => timer.ms)).toEqual([WORKTREE_DELAY])
+    expect(h.live()).toEqual([WORKTREE_DELAY])
     h.fire()
     expect(h.released).toEqual([WORKTREE])
   })
 
-  test("a project directory is never released", () => {
+  // A user switching between projects held a full MCP set for each of them
+  // until OpenCode's own hour-long sweep.
+  test("leaving a project releases it after the longest delay", () => {
+    const h = harness()
+    h.move(OTHER_PROJECT)
+    expect(h.live()).toEqual([PROJECT_DELAY])
+    h.fire()
+    expect(h.released).toEqual([PROJECT])
+  })
+
+  test("the directory the user is in is never released", () => {
     const h = harness()
     h.move(CHAT)
     h.fire()
-    expect(h.released).toEqual([])
+    expect(h.released).toEqual([PROJECT])
   })
 
   test("coming back before the delay keeps the directory running", () => {
@@ -99,7 +112,7 @@ describe("location release", () => {
     h.move(CHAT)
     h.fire()
     // Only the directories just left are released; the one returned to is not.
-    expect(h.released).toEqual([OTHER_CHAT, WORKTREE])
+    expect(h.released).toEqual([PROJECT, OTHER_CHAT, WORKTREE])
   })
 
   test("busy work is released once it settles, rechecked at the directory's own delay", () => {
@@ -123,7 +136,7 @@ describe("location release", () => {
     h.move(CHAT)
     h.busy.delete(CHAT)
     h.fire()
-    expect(h.released).toEqual([])
+    expect(h.released).toEqual([PROJECT])
   })
 
   // The server writes a left chat's recap a minute after its answer, reading

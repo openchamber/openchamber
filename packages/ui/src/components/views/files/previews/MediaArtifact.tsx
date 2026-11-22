@@ -1,31 +1,27 @@
 import React from 'react';
 
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { ContentState } from '@/components/ui/content-state';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactDimensions, formatArtifactDuration, formatArtifactSize } from './artifactMeta';
 
-/**
- * Native playback with the browser's own controls. The runtime's media engine
- * decides what it can decode; a codec it lacks surfaces as the element's error,
- * and the viewer says so instead of showing a dead player.
- */
+const RENEW_RETRY_WINDOW_MS = 10_000;
+
 export const MediaArtifact: React.FC<{
   kind: 'audio' | 'video';
   src: string;
+  renewSrc: () => Promise<string>;
   name: string;
   sizeBytes: number | null;
   download?: React.ReactNode;
-}> = ({ kind, src, name, sizeBytes, download }) => {
+}> = ({ kind, src, renewSrc, name, sizeBytes, download }) => {
   const { t } = useI18n();
   const [duration, setDuration] = React.useState<number | null>(null);
   const [dimensions, setDimensions] = React.useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = React.useState(false);
-
-  React.useEffect(() => {
-    setDuration(null);
-    setDimensions(null);
-    setFailed(false);
-  }, [src]);
+  const lastRenewAt = React.useRef(0);
+  const resume = React.useRef<{ time: number; rate: number; playing: boolean } | null>(null);
 
   const onLoadedMetadata = (event: React.SyntheticEvent<HTMLMediaElement>) => {
     const media = event.currentTarget;
@@ -33,6 +29,27 @@ export const MediaArtifact: React.FC<{
     if (media instanceof HTMLVideoElement) {
       setDimensions({ width: media.videoWidth, height: media.videoHeight });
     }
+    const saved = resume.current;
+    if (!saved) return;
+    resume.current = null;
+    media.currentTime = saved.time;
+    media.playbackRate = saved.rate;
+    if (saved.playing) void media.play().catch(() => {});
+  };
+
+  const onError = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+    const now = Date.now();
+    if (now - lastRenewAt.current < RENEW_RETRY_WINDOW_MS) {
+      setFailed(true);
+      return;
+    }
+    lastRenewAt.current = now;
+    const media = event.currentTarget;
+    resume.current = { time: media.currentTime, rate: media.playbackRate, playing: !media.paused };
+    const failedSrc = src;
+    renewSrc().then((renewed) => {
+      if (renewed === failedSrc) setFailed(true);
+    }, () => setFailed(true));
   };
 
   return (
@@ -45,14 +62,15 @@ export const MediaArtifact: React.FC<{
         ]}
       />
       {failed ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-          <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.artifact.media.unplayable')}</div>
-          {download}
-        </div>
+        <ContentState
+          icon={<FileTypeIcon filePath={name} className="size-10" />}
+          title={name}
+          description={t('filesView.artifact.media.unplayable')}
+          actions={download}
+        />
       ) : kind === 'video' ? (
         <div className="flex min-h-0 flex-1 items-center justify-center bg-[var(--surface-background)] p-3">
           <video
-            key={src}
             src={src}
             controls
             playsInline
@@ -60,21 +78,20 @@ export const MediaArtifact: React.FC<{
             title={name}
             className="max-h-full max-w-full rounded-md"
             onLoadedMetadata={onLoadedMetadata}
-            onError={() => setFailed(true)}
+            onError={onError}
           />
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6">
-          <div className="typography-ui-label truncate text-foreground">{name}</div>
+          <div dir="auto" className="typography-ui-label truncate text-foreground">{name}</div>
           <audio
-            key={src}
             src={src}
             controls
             preload="metadata"
             title={name}
             className="w-full max-w-lg"
             onLoadedMetadata={onLoadedMetadata}
-            onError={() => setFailed(true)}
+            onError={onError}
           />
         </div>
       )}

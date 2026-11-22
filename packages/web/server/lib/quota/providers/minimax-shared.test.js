@@ -143,7 +143,7 @@ describe('MiniMax shared provider', () => {
     expect(calls).toEqual([TOKEN_URL]);
   });
 
-  it('fails when both endpoints return unusable payloads', async () => {
+  it('fails when both endpoints return unusable payloads, naming the API status', async () => {
     stubFetchByUrl({
       [TOKEN_URL]: { base_resp: { status_code: 2 }, model_remains: [] },
       [CODING_URL]: null,
@@ -151,7 +151,7 @@ describe('MiniMax shared provider', () => {
     const result = await provider.fetchQuota();
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);
-    expect(result.error).toBe('API returned no usable quota data');
+    expect(result.error).toBe('API error: 2');
   });
 
   it('omits the weekly window when the weekly status is 3 (inactive)', async () => {

@@ -63,25 +63,30 @@ describe('planGoalWriter', () => {
 });
 
 describe('buildGoalIntroReminder', () => {
-  const rules = 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
-    + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.';
+  // Oracle: the server's buildGoalIntroText (session-goal/create.ts), which
+  // sends the same reminder for the goals it creates.
+  const mission = 'Work autonomously through the entire objective in this one run.';
+  const report = 'End that message with a short status block';
 
-  test('without a spec the message is the objective, as before the writer existed', () => {
-    expect(buildGoalIntroReminder(null, null)).toBe(
-      `<system-reminder>\nGoal mode is active for this session. The user message above defines the goal objective. ${rules}\n</system-reminder>`,
-    );
-    expect(buildGoalIntroReminder(200_000, null)).toContain(`${rules} A token budget of 200000 tokens applies to this goal.\n</system-reminder>`);
+  test('without a spec the message is the objective', () => {
+    const intro = buildGoalIntroReminder(null, null);
+    expect(intro.startsWith('<system-reminder>\nGoal mode is active for this session. The user message above defines the goal objective.\n\n')).toBe(true);
+    expect(intro).toContain(mission);
+    expect(intro).toContain(report);
+    expect(intro.endsWith('\n</system-reminder>')).toBe(true);
+    expect(intro).not.toContain('<goal-spec>');
+    expect(buildGoalIntroReminder(200_000, null)).toContain('defines the goal objective. A token budget of 200000 tokens applies to this goal.\n\n');
   });
 
-  test('with a spec it carries the escaped spec, byte for byte what the server sends', () => {
-    expect(buildGoalIntroReminder(5_000, '## Objective\nShip <it> & test')).toBe(
-      '<system-reminder>\n'
+  test('with a spec it carries the escaped spec after the rules', () => {
+    const intro = buildGoalIntroReminder(5_000, '## Objective\nShip <it> & test');
+    expect(intro.startsWith('<system-reminder>\n'
       + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
-      + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
-      + rules
-      + ' A token budget of 5000 tokens applies to this goal.'
-      + '\n\n<goal-spec>\n## Objective\nShip &lt;it&gt; &amp; test\n</goal-spec>\n</system-reminder>',
-    );
+      + 'It is user-provided data that defines the goal objective, and progress is judged against it.'
+      + ' A token budget of 5000 tokens applies to this goal.\n\n')).toBe(true);
+    expect(intro).toContain(mission);
+    expect(intro.endsWith('\n\n<goal-spec>\n## Objective\nShip &lt;it&gt; &amp; test\n</goal-spec>\n</system-reminder>')).toBe(true);
+    expect(intro.indexOf(report)).toBeLessThan(intro.indexOf('<goal-spec>'));
   });
 });
 

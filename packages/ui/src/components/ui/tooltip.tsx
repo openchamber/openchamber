@@ -176,7 +176,6 @@ function Tooltip({
 
   const handleOpenChange = React.useCallback((nextOpen: boolean, event: TooltipChangeEventDetails) => {
     onOpenChange?.(nextOpen, event)
-    // A caller that cancels the change keeps the tooltip as it was.
     if (!controlled && !event.isCanceled) {
       setLongPressOpen(nextOpen)
     }
@@ -258,6 +257,8 @@ type ContentProps = React.ComponentProps<typeof BaseTooltip.Popup> & {
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   showArrow?: boolean;
+  anchor?: React.ComponentProps<typeof BaseTooltip.Positioner>["anchor"];
+  surface?: "label" | "card";
 };
 
 function TooltipContent({
@@ -268,19 +269,19 @@ function TooltipContent({
   children,
   style,
   showArrow = false,
+  anchor,
+  surface = "label",
   ...props
 }: ContentProps) {
   return (
     <TooltipPartBoundary>
       <BaseTooltip.Portal>
-        <BaseTooltip.Positioner sideOffset={sideOffset} side={side} align={align} className="z-50">
+        <BaseTooltip.Positioner sideOffset={sideOffset} side={side} align={align} anchor={anchor} className="z-50">
           <BaseTooltip.Popup
             data-slot="tooltip-content"
             className={cn(
-              // data-instant is set when moving between grouped tooltips
-              // (shared TooltipProvider): reposition without replaying the
-              // full exit/enter animation.
-              "oc-glass-tooltip text-[var(--surface-elevated-foreground)] border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance",
+              surface === "card" ? "oc-glass-popover oc-glass-floating" : "oc-glass-tooltip border border-edge",
+              "text-[var(--surface-elevated-foreground)] oc-popup-motion data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance",
               showArrow ? "overflow-visible" : "overflow-hidden",
               className
             )}
@@ -291,7 +292,7 @@ function TooltipContent({
             <GlassRedrawGuard />
             {showArrow ? (
               // oxlint-disable-next-line openchamber/no-physical-sides -- Base UI reports the popup's side physically
-              <BaseTooltip.Arrow className="relative z-50 block h-1.5 w-3 overflow-clip data-[side=bottom]:top-[-6px] data-[side=left]:right-[-9px] data-[side=left]:rotate-90 data-[side=right]:left-[-9px] data-[side=right]:-rotate-90 data-[side=top]:bottom-[-6px] data-[side=top]:rotate-180 before:absolute before:bottom-0 before:left-1/2 before:block before:h-[calc(6px*sqrt(2))] before:w-[calc(6px*sqrt(2))] before:border before:border-border/60 before:bg-[var(--surface-elevated)] before:content-[''] before:[transform:translate(-50%,50%)_rotate(45deg)]" />
+              <BaseTooltip.Arrow className="relative z-50 block h-1.5 w-3 overflow-clip data-[side=bottom]:top-[-6px] data-[side=left]:right-[-9px] data-[side=left]:rotate-90 data-[side=right]:left-[-9px] data-[side=right]:-rotate-90 data-[side=top]:bottom-[-6px] data-[side=top]:rotate-180 before:absolute before:bottom-0 before:left-1/2 before:block before:h-[calc(6px*sqrt(2))] before:w-[calc(6px*sqrt(2))] before:border before:border-edge before:bg-[var(--surface-elevated)] before:content-[''] before:[transform:translate(-50%,50%)_rotate(45deg)]" />
             ) : null}
           </BaseTooltip.Popup>
         </BaseTooltip.Positioner>

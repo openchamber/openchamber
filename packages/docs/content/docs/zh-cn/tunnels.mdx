@@ -5,7 +5,7 @@ description: 安全地将 OpenChamber 开放给远程和移动访问。
 
 # 隧道
 
-隧道是指向你的 OpenChamber 的一个公开链接，让你可以在另一个网络上用普通浏览器访问它。使用 `openchamber tunnel` 为正在运行的实例创建一个隧道。
+隧道是指向你的 OpenChamber 的一个链接，让你可以在另一个网络上用普通浏览器访问它，或者通过 Tailscale Serve 从你 tailnet 中的任何设备访问。使用 `openchamber tunnel` 为正在运行的实例创建一个隧道。
 
 > 连接你**自己的设备**（移动应用、另一台桌面设备）通常不需要隧道 — 改为 [配对它们](/zh-cn/connect-devices/)，让端到端加密的 [Private Relay](/zh-cn/private-relay/) 零配置地处理外出访问。
 
@@ -17,6 +17,8 @@ OpenChamber 会在你的机器上启动隧道提供商的 CLI。请先安装你�
 brew install cloudflared
 brew install ngrok
 ```
+
+使用 Tailscale 时，请安装 [Tailscale 应用](https://tailscale.com/download)并登录。 在 Mac 上有应用就够了：OpenChamber 会在应用内找到它的命令行工具。
 
 Cloudflare 快速隧道可以通过 `cloudflared` 运行。Ngrok 需要 ngrok 账号，以及从 ngrok dashboard 获取的 authtoken：
 
@@ -46,6 +48,12 @@ openchamber tunnel start --provider cloudflare --mode quick
 openchamber tunnel start --provider ngrok --mode quick
 ```
 
+或者通过 Tailscale Serve 分享给你 tailnet 中的设备：
+
+```bash
+openchamber tunnel start --provider tailscale --mode serve
+```
+
 3. 查看状态：
 
 ```bash
@@ -60,6 +68,15 @@ openchamber tunnel status
 
 - `cloudflare`：quick、managed remote 和 managed local 模式
 - `ngrok`：quick 模式
+- `tailscale`：serve 模式，只有你 tailnet 中的设备可以访问；funnel 模式，整个互联网都可以访问
+
+## Tailscale
+
+两种模式都使用你电脑的 tailnet 地址，例如 `https://laptop.example.ts.net`。用 `--https-port` 选择端口：443（默认）、8443 或 10000。如果 Tailscale 已在 443 上分享其他内容，请更换。
+
+第一次使用时，Tailscale 会要求你为 tailnet 开启 HTTPS（用于 Serve）或 Funnel。OpenChamber 会停下并显示 Tailscale 的链接：打开它、批准，然后重新启动隧道。在 Linux 上，只有 root 或 Tailscale 的 operator 可以分享端口；用 `sudo tailscale set --operator=$USER` 把自己设为 operator，只需一次。
+
+停止隧道会移除 OpenChamber 通过 Tailscale 分享的内容，你的其他 Tailscale 设置保持不变。
 
 ## 托管模式
 
@@ -101,6 +118,7 @@ openchamber tunnel ready --provider cloudflare
 openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
 openchamber tunnel doctor --provider ngrok
+openchamber tunnel doctor --provider tailscale
 openchamber tunnel stop --port 3000
 ```
 

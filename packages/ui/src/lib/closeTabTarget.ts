@@ -1,36 +1,59 @@
 import { hasDesktopInvoke, invokeDesktop } from '@/lib/desktop';
 
-/**
- * What Cmd/Ctrl+W closes in the desktop app.
- *
- * The window menu owns the shortcut, so the page cannot catch the key itself.
- * A surface with a tab of its own (a file open in Files) registers here; the
- * desktop shell is told whether one is registered, and while one is, the
- * shortcut arrives as an `openchamber:close-tab` event instead of closing the
- * window. The last registered surface wins.
- */
-const handlers: Array<() => void> = [];
+type Target = { close: () => void; area: { current: Element | null }; usedAt: number; priority: number };
+
+const targets: Target[] = [];
+let clock = 0;
 let listening = false;
 
 const report = (): void => {
   if (!hasDesktopInvoke()) return;
-  void invokeDesktop('desktop_set_close_tab_target', { active: handlers.length > 0 });
+  void invokeDesktop('desktop_set_close_tab_target', { active: targets.length > 0 });
+};
+
+const placeOf = (element: Element): Element => element.closest('[data-context-zone]') ?? element;
+
+const handleUse = (event: Event): void => {
+  const node = event.target;
+  if (!(node instanceof Node)) return;
+  const hits: Array<{ target: Target; place: Element }> = [];
+  for (const target of targets) {
+    const area = target.area.current;
+    const place = area ? placeOf(area) : null;
+    if (place?.contains(node)) hits.push({ target, place });
+  }
+  for (const hit of hits) {
+    const outer = hits.some((other) => other.place !== hit.place && hit.place.contains(other.place));
+    if (!outer) hit.target.usedAt = ++clock;
+  }
 };
 
 const handleCloseTab = (): void => {
-  handlers[handlers.length - 1]?.();
+  let latest: Target | undefined;
+  for (const target of targets) {
+    if (!latest || target.priority > latest.priority) { latest = target; continue; }
+    if (target.priority === latest.priority && target.usedAt > latest.usedAt) latest = target;
+  }
+  latest?.close();
 };
 
-export const registerCloseTabTarget = (close: () => void): (() => void) => {
+export const registerCloseTabTarget = (
+  close: () => void,
+  area: { current: Element | null },
+  priority = 0,
+): (() => void) => {
   if (!listening) {
     window.addEventListener('openchamber:close-tab', handleCloseTab);
+    window.addEventListener('pointerdown', handleUse, true);
+    window.addEventListener('focus', handleUse, true);
     listening = true;
   }
-  handlers.push(close);
+  const target: Target = { close, area, usedAt: ++clock, priority };
+  targets.push(target);
   report();
   return () => {
-    const index = handlers.lastIndexOf(close);
-    if (index >= 0) handlers.splice(index, 1);
+    const index = targets.indexOf(target);
+    if (index >= 0) targets.splice(index, 1);
     report();
   };
 };

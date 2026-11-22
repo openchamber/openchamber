@@ -35,7 +35,7 @@ const openDraft = () => {
 };
 
 afterEach(() => {
-    useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+    useInlineCommentDraftStore.setState({ drafts: {} });
 });
 
 describe('mobileCommentQuotePreview', () => {
@@ -333,6 +333,67 @@ describe('createMobileCommentDraftController', () => {
         if (second.status !== 'open') throw new Error('expected open');
         expect(second.text).toBe('');
         expect(second.generation).not.toBe(first.generation);
+    });
+});
+
+describe('openEdit', () => {
+    const target = { directory: '/repo/main', sessionKey: 'session-1' };
+    const attachedDraft = () => {
+        const controller = openDraft();
+        const open = controller.getState();
+        if (open.status !== 'open') throw new Error('expected open');
+        controller.setText('first note', open.generation);
+        if (!controller.attach(open.generation)) throw new Error('attach rejected');
+        const [draft] = useInlineCommentDraftStore.getState().getDrafts(target);
+        return { controller, draft };
+    };
+    const editOf = (draft: { id: string; code: string; text: string }) => ({
+        target,
+        draftId: draft.id,
+        quote: quote({ plainText: draft.code, markdownText: draft.code, messageId: null }),
+        text: draft.text,
+    });
+
+    test('opens with the comment text; save updates that draft and adds none', () => {
+        const { controller, draft } = attachedDraft();
+        expect(controller.openEdit(editOf(draft))).toBe(true);
+        const open = controller.getState();
+        if (open.status !== 'open') throw new Error('expected open');
+        expect(open.text).toBe('first note');
+
+        controller.setText('second note', open.generation);
+        expect(controller.attach(open.generation)).not.toBeNull();
+        expect(controller.getState().status).toBe('closed');
+        const drafts = useInlineCommentDraftStore.getState().getDrafts(target);
+        expect(drafts).toHaveLength(1);
+        expect(drafts[0]).toMatchObject({ id: draft.id, text: 'second note', code: draft.code, fileLabel: draft.fileLabel, source: 'chat-quote' });
+    });
+
+    test('cancel leaves the draft as it was', () => {
+        const { controller, draft } = attachedDraft();
+        controller.openEdit(editOf(draft));
+        const open = controller.getState();
+        if (open.status !== 'open') throw new Error('expected open');
+        controller.setText('discarded', open.generation);
+        expect(controller.cancel(open.generation)).toBe(true);
+        expect(useInlineCommentDraftStore.getState().getDrafts(target)).toEqual([draft]);
+    });
+
+    test('refuses a draft outside the published scope', () => {
+        const { controller, draft } = attachedDraft();
+        expect(controller.openEdit({ ...editOf(draft), target: { ...target, sessionKey: 'session-2' } })).toBe(false);
+        expect(controller.getState().status).toBe('closed');
+    });
+
+    test('a draft removed while editing closes the shell without re-adding it', () => {
+        const { controller, draft } = attachedDraft();
+        controller.openEdit(editOf(draft));
+        const open = controller.getState();
+        if (open.status !== 'open') throw new Error('expected open');
+        useInlineCommentDraftStore.getState().removeDraft(target, draft.id);
+        expect(controller.attach(open.generation)).toBeNull();
+        expect(controller.getState().status).toBe('closed');
+        expect(useInlineCommentDraftStore.getState().getDrafts(target)).toEqual([]);
     });
 });
 

@@ -1,18 +1,4 @@
-/**
- * Timeline rows for the message roles that are not a conversation turn.
- *
- * OpenCode v2 promoted things that used to hide inside a user message — a
- * compaction, a shell command, injected context — to message roles of their
- * own. Only `user` and `assistant` carry parts, so the roles that have
- * something to show render here as small, self-contained rows instead of
- * going through `ChatMessage`. So does a background subagent run, which v2
- * reports as a synthetic message (see `@/lib/opencode/subagent-run`), the
- * result of a session the agent dispatched with `returnResult` (see
- * `@/lib/opencode/dispatched-session`), a message that another session or
- * the person sent through OpenCode messaging (see `@/lib/opencode/messaging`),
- * and a session notice that landed between turns (see
- * `@/lib/opencode/session-notices`).
- */
+
 
 import React from 'react';
 import { EntryTimes } from './EntryTimes';
@@ -22,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ReasoningTimelineBlock } from './parts/ReasoningPart';
 import ToolPart from './parts/ToolPart';
+import { QuietAction } from './parts/ToolResultParts';
+import { getLastOutputLine } from './parts/toolOutput';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
@@ -29,6 +17,8 @@ import { MESSAGING_USER, isMessagingSession, readMessagingNotice, type Messaging
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useMessagingStore } from '@/stores/useMessagingStore';
 import { useTopicLabel } from '@/components/messaging/messagingLabels';
+import { readWorkflowReport, type WorkflowReport } from '@/lib/workflows/report';
+import { readShareAnswer, type ShareAnswer } from '@/lib/share-pages/answer';
 import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
@@ -37,11 +27,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 
-/** The shared frame every notice row sits in, so they line up with messages. */
 const NoticeRow: React.FC<{ children: React.ReactNode; spacingClassName?: string; message: Message }> = ({ children, message, spacingClassName = 'pb-2' }) => (
     <div className={cn('w-full', spacingClassName)}>
         <div className="chat-message-column"><EntryTimes message={message} />{children}</div>
@@ -54,13 +44,16 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
     const running = message.status === 'running';
     const failed = message.status === 'failed';
     const summary = message.summary.trim();
+    const model = message.status === 'completed' && message.model
+        ? `${message.model.providerID}/${message.model.id}`
+        : undefined;
+    const title = (
+        <>
+            {running ? t('chat.compaction.running') : failed ? t('chat.compaction.failed') : t('chat.compaction.completed')}
+            {model ? <bdi className="font-normal break-all" style={{ color: 'var(--tools-description)' }} title={model}> · {model}</bdi> : null}
+        </>
+    );
 
-    // A compaction reads like a thinking row: one collapsible tool-style line
-    // whose body is the summary as Markdown. The summary streams in while the
-    // compaction runs; the reasoning setting decides whether the body opens and
-    // follows its end until it settles, or stays folded.
-    // The compaction opens a turn, and the activity row under it brings its own
-    // top margin, so the row spaces itself above to keep both gaps even.
     return (
         <NoticeRow message={message} spacingClassName="pt-1">
             <ReasoningTimelineBlock
@@ -71,11 +64,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 presentation={{
                     icon: failed ? 'error-warning' : 'scissors',
                     iconClassName: failed ? 'text-[var(--status-error)]' : undefined,
-                    title: running
-                        ? t('chat.compaction.running')
-                        : failed
-                            ? t('chat.compaction.failed')
-                            : t('chat.compaction.completed'),
+                    title,
                     expandLabel: t('chat.compaction.showSummary'),
                     collapseLabel: t('chat.compaction.hideSummary'),
                     markdownVariant: 'assistant',
@@ -83,13 +72,13 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 }}
             />
             {!running && !summary ? (
-                <div className="flex items-center gap-1.5 py-1.5 ps-px typography-meta" style={{ color: 'var(--tools-title)' }}>
+                <div className="flex items-center gap-1.5 py-1.5 ps-px typography-meta" style={{ color: 'var(--tools-description)' }}>
                     <Icon
                         name={failed ? 'error-warning' : 'scissors'}
                         className={cn('h-3.5 w-3.5 shrink-0', failed && 'text-[var(--status-error)]')}
                         style={failed ? undefined : { color: 'var(--tools-icon)' }}
                     />
-                    <span className="font-medium">{failed ? t('chat.compaction.failed') : t('chat.compaction.completed')}</span>
+                    <span>{title}</span>
                 </div>
             ) : null}
             {message.error ? (
@@ -99,16 +88,13 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
     );
 };
 
-/**
- * A `!command` run is shown as the shell tool the agent would have called, so
- * both read the same: the tool row renders it from a synthesized tool part.
- */
-const toShellToolPart = (message: Extract<Message, { role: 'shell' }>): ToolPartType => {
+type ShellRow = { part: ToolPartType; failureReason?: string };
+
+const toShellRow = (message: Extract<Message, { role: 'shell' }>): ShellRow => {
     const input = { command: message.command };
     const start = message.time.created;
     const end = message.time.completed ?? start;
     const output = message.output?.output ?? '';
-    // A command killed by a signal ends as "exited" with no exit code; the signal is what marks it failed.
     const failed = message.status === 'killed'
         || message.status === 'timeout'
         || message.signal !== undefined
@@ -122,35 +108,37 @@ const toShellToolPart = (message: Extract<Message, { role: 'shell' }>): ToolPart
         tool: OPENCODE_TOOLS.shell,
     };
     if (message.status === 'running') {
-        return { ...base, state: { status: 'running', input, metadata: { output }, time: { start } } };
+        return { part: { ...base, state: { status: 'running', input, metadata: { output }, time: { start } } } };
     }
     if (failed) {
         const detail = message.signal ?? message.exit;
         const reason = detail !== undefined ? `${message.status} (${detail})` : message.status;
-        return { ...base, state: { status: 'error', input, error: reason, output, time: { start, end } } };
+        const lastLineIsReason = message.status === 'exited'
+            && message.signal === undefined
+            && message.output?.truncated !== true;
+        return {
+            part: { ...base, state: { status: 'error', input, error: reason, output, time: { start, end } } },
+            failureReason: (lastLineIsReason ? getLastOutputLine(output) : undefined) ?? reason,
+        };
     }
-    return { ...base, state: { status: 'completed', input, output, time: { start, end } } };
+    return { part: { ...base, state: { status: 'completed', input, output, time: { start, end } } } };
 };
 
-const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }> }> = ({ message }) => {
+const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }>; isFirstRow: boolean }> = ({ message, isFirstRow }) => {
     const isMobile = useUIStore((state) => state.isMobile);
     const [expanded, setExpanded] = React.useState(false);
-    const part = React.useMemo(() => toShellToolPart(message), [message]);
+    const { part, failureReason } = React.useMemo(() => toShellRow(message), [message]);
     const toggle = React.useCallback(() => setExpanded((value) => !value), []);
 
     return (
-        <NoticeRow message={message}>
-            <ToolPart part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} />
+        <NoticeRow message={message} spacingClassName={cn('pb-2', isFirstRow && (isMobile ? 'pt-2' : 'pt-4'))}>
+            <ToolPart part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} failureReason={failureReason} />
         </NoticeRow>
     );
 };
 
 type SyntheticMessage = Extract<Message, { role: 'synthetic' }>;
 
-/**
- * A background subagent run is shown as the subagent tool call it stands in
- * for, so it reads like one and opens its child session the same way.
- */
 const toSubagentToolPart = (message: SyntheticMessage, run: SubagentRun, startedAt: number): ToolPartType => {
     const input = { agent: run.agent ?? 'subagent', description: run.description ?? '' };
     const metadata = { sessionID: run.childSessionID };
@@ -176,10 +164,6 @@ const toSubagentToolPart = (message: SyntheticMessage, run: SubagentRun, started
 
 const NOTICE_ACTION_BUTTON_CLASS = 'h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring';
 
-/**
- * Revert and fork, cut at this run the way the user message actions cut at a
- * prompt. A run still in progress has no message to cut at yet.
- */
 const SubagentRunActions: React.FC<{ message: SyntheticMessage; canFork: boolean; alwaysVisible: boolean }> = ({ message, canFork, alwaysVisible }) => {
     const { t } = useI18n();
     const handleRevert = React.useCallback(() => {
@@ -239,11 +223,9 @@ const SubagentRunNotice: React.FC<{ message: SyntheticMessage; run: SubagentRun 
     const chatSurfaceMode = useChatSurfaceMode();
     const [expanded, setExpanded] = React.useState(false);
     const child = useSession(run.childSessionID);
-    // The child session starts when the run does; the report lands when it ends.
     const startedAt = child?.time.created ?? message.time.created;
     const part = React.useMemo(() => toSubagentToolPart(message, run, startedAt), [message, run, startedAt]);
     const toggle = React.useCallback(() => setExpanded((value) => !value), []);
-    // Same rules as the prompt's own actions: none in peek, no fork in mini chat.
     const canCut = !isRunningSubagentRunMessage(message.id) && chatSurfaceMode !== 'peek';
 
     return (
@@ -277,11 +259,6 @@ const DISPATCHED_SESSION_ICONS: Record<DispatchedSessionResult['state'], IconNam
     cancelled: 'close-circle',
 };
 
-/**
- * The result of a session this one dispatched with `returnResult`: one
- * collapsed line saying how it ended, opening to its answer, like a
- * compaction summary. The agent's reaction renders below it as its own turn.
- */
 const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: DispatchedSessionResult }> = ({ message, result }) => {
     const { t } = useI18n();
     const handleOpen = React.useCallback(() => {
@@ -303,11 +280,68 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
                     maxHeightClassName: 'max-h-[60vh]',
                 }}
                 actions={(
-                    <Button type="button" variant="ghost" size="xs" onClick={handleOpen}>
-                        <Icon name="external-link" className="h-3.5 w-3.5" />
-                        {t('chat.dispatchedSession.open')}
-                    </Button>
+                    <HoverTooltip label={t('contextTooltips.chat.dispatchedOpen')}>
+                        <QuietAction icon="external-link" label={t('chat.dispatchedSession.open')} onClick={handleOpen} />
+                    </HoverTooltip>
                 )}
+            />
+        </NoticeRow>
+    );
+};
+
+const WORKFLOW_REPORT_ICONS = {
+    completed: 'flow-chart',
+    failed: 'error-warning',
+    stopped: 'stop',
+    declined: 'close-circle',
+} satisfies Record<WorkflowReport['state'], IconName>;
+
+const WORKFLOW_REPORT_TITLE_KEYS = {
+    completed: 'chat.workflow.report.completed',
+    failed: 'chat.workflow.report.failed',
+    stopped: 'chat.workflow.report.stopped',
+    declined: 'chat.workflow.report.declined',
+} as const satisfies Record<WorkflowReport['state'], string>;
+
+const WorkflowReportNotice: React.FC<{ message: SyntheticMessage; report: WorkflowReport }> = ({ message, report }) => {
+    const { t } = useI18n();
+    return (
+        <NoticeRow message={message}>
+            <ReasoningTimelineBlock
+                text={report.output}
+                blockId={message.id}
+                presentation={{
+                    icon: WORKFLOW_REPORT_ICONS[report.state],
+                    iconClassName: report.state === 'failed' ? 'text-[var(--status-error)]' : undefined,
+                    title: t(WORKFLOW_REPORT_TITLE_KEYS[report.state], { name: report.name }),
+                    expandLabel: t('chat.workflow.report.show'),
+                    collapseLabel: t('chat.workflow.report.hide'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+            />
+        </NoticeRow>
+    );
+};
+
+const ShareAnswerNotice: React.FC<{ message: SyntheticMessage; answer: ShareAnswer }> = ({ message, answer }) => {
+    const { t } = useI18n();
+    const summary = answer.summary?.replace(/\s+/g, ' ') ?? answer.title.trim();
+    return (
+        <NoticeRow message={message}>
+            <ReasoningTimelineBlock
+                text={answer.output}
+                blockId={message.id}
+                presentation={{
+                    icon: 'survey',
+                    title: summary
+                        ? t('chat.sharePage.answer.title', { label: answer.label, summary })
+                        : t('chat.sharePage.answer.titleUntitled', { label: answer.label }),
+                    expandLabel: t('chat.sharePage.answer.show'),
+                    collapseLabel: t('chat.sharePage.answer.hide'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
             />
         </NoticeRow>
     );
@@ -387,16 +421,16 @@ const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) =>
     const run = React.useMemo(() => readSubagentRun(message), [message]);
     const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
     const delivered = React.useMemo(() => (run || dispatched ? undefined : readMessagingNotice(message)), [dispatched, message, run]);
+    const workflow = React.useMemo(() => (run || dispatched ? undefined : readWorkflowReport(message)), [dispatched, message, run]);
+    const shareAnswer = React.useMemo(() => (run || dispatched || workflow ? undefined : readShareAnswer(message)), [dispatched, message, run, workflow]);
     if (run) return <SubagentRunNotice message={message} run={run} />;
     if (dispatched) return <DispatchedSessionNotice message={message} result={dispatched} />;
+    if (workflow) return <WorkflowReportNotice message={message} report={workflow} />;
+    if (shareAnswer) return <ShareAnswerNotice message={message} answer={shareAnswer} />;
     return delivered ? <MessagingNoticeRow message={message} notice={delivered} /> : null;
 };
 
-/**
- * The timeline row for a message, or `null` when the caller should render the
- * message itself.
- */
-export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
+export const TimelineNotice: React.FC<{ message: Message; isFirstRow?: boolean }> = ({ message, isFirstRow = false }) => {
     const notice = readSessionNotice(message);
     if (notice) {
         return (
@@ -411,7 +445,7 @@ export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
         case 'compaction':
             return <CompactionNotice message={message} />;
         case 'shell':
-            return <ShellNotice message={message} />;
+            return <ShellNotice message={message} isFirstRow={isFirstRow} />;
         default:
             return null;
     }

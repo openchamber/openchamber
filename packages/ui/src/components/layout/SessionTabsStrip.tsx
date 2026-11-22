@@ -1,4 +1,8 @@
 import React from 'react';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { scrollTabsWithWheel } from '@/components/ui/tab-strip-wheel';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo, getEffectiveShortcutPrefix, UNASSIGNED_SHORTCUT } from '@/lib/shortcuts';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import {
@@ -19,25 +23,28 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { ContextMenu } from '@base-ui/react/context-menu';
-import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
+import { ContextMenu as ContextMenuRoot, ContextMenuContent } from '@/components/ui/context-menu';
 import type { Session } from '@/lib/opencode/model';
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass } from '@/components/ui/dropdown-menu.styles';
+import { contextSessionMenuSlots, type SessionMenuSlots } from '@/components/session/sidebar/sessions/sessionMenuSlots';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
-import { useSessionTabsStore } from '@/stores/useSessionTabsStore';
-import { closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
+import { GLOBAL_SESSION_TAB_SCOPE, useSessionTabsStore } from '@/stores/useSessionTabsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { sessionTabChatsScope, sessionTabScopeFor, sessionTabSeedFor } from '@/lib/sessionTabScope';
+import { activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
+import { registerCloseTabTarget } from '@/lib/closeTabTarget';
+import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { toggleSessionRead } from '@/components/session/sessionReadActions';
+import { openSessionInSidePanel } from '@/components/session/sessionSidePanel';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
 import { SessionProjectIcon } from './SessionProjectIcon';
@@ -45,33 +52,7 @@ import { SESSION_TAB_EDGE_FADE_PX, sessionTabRevealDelta } from './sessionTabRev
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
-// Firefox can report wheel deltas in lines rather than pixels.
-const WHEEL_LINE_PIXELS = 16;
-
-/**
- * Mouse wheels scroll vertically, so the strip maps vertical wheel movement to
- * horizontal scrolling. Horizontal gestures (trackpad swipes, Shift+wheel)
- * already scroll it natively, and Ctrl/Cmd+wheel stays with zoom.
- */
-const scrollTabsWithWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-  if (event.shiftKey || event.ctrlKey || event.metaKey) return;
-  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-  const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * WHEEL_LINE_PIXELS : event.deltaY;
-  // Wheel down moves toward the later tabs, which lie to the left in RTL.
-  event.currentTarget.scrollLeft += isRightToLeft(event.currentTarget) ? -delta : delta;
-};
-
 type SessionTab = { id: string; session: Session };
-
-export type SessionTabMenuComponents = {
-  Item: React.ComponentType<{
-    className?: string;
-    disabled?: boolean;
-    onClick?: React.MouseEventHandler;
-    children?: React.ReactNode;
-  }>;
-  Separator: React.ComponentType<{ className?: string }>;
-};
 
 export type SessionTabMenuArgs = {
   session: Session;
@@ -79,38 +60,13 @@ export type SessionTabMenuArgs = {
   isActive: boolean;
   select: () => void;
   closeOtherTabs: () => void;
-  /** Menu primitives for the surface the menu opens in (dropdown or context menu). */
-  components: SessionTabMenuComponents;
+  components: SessionMenuSlots;
 };
 
-const dropdownComponents: SessionTabMenuComponents = {
-  Item: DropdownMenuItem,
-  Separator: DropdownMenuSeparator,
-};
-
-const contextComponents: SessionTabMenuComponents = {
-  Item: ({ className, ...props }) => (
-    <ContextMenu.Item className={cn(dropdownMenuItemClass, className)} {...props} />
-  ),
-  Separator: ({ className, ...props }) => (
-    <ContextMenu.Separator className={cn(dropdownMenuSeparatorClass, className)} {...props} />
-  ),
-};
-
-/**
- * One tab, active or not. The tab drags to reorder; the menu and close
- * controls sit in a hover-revealed overlay at the tab's end (menu first,
- * close after it). One session menu — supplied by the header via
- * `renderMenu` — backs both the "..." dropdown and the right-click context
- * menu, which opens under the cursor without changing the active tab. The
- * dropdown's anchor overlay stays mounted through the close animation so the
- * popup never flashes detached. While the active tab is renaming, the
- * overlay is suppressed entirely — only the rename controls show.
- */
 const SessionTabItem: React.FC<{
   tab: SessionTab;
+  tabNumber: number;
   isActive: boolean;
-  /** The replaceable preview tab: italic title, pinned by double-click. */
   isPreview: boolean;
   suppressControls: boolean;
   onSelect: (tab: SessionTab) => void;
@@ -119,34 +75,36 @@ const SessionTabItem: React.FC<{
   renderMenu: (args: SessionTabMenuArgs) => React.ReactNode;
   closeOtherTabs: (id: string) => void;
   onMenuOpenChangeComplete?: (open: boolean) => void;
+  menuReturnsFocus?: () => boolean;
   children?: React.ReactNode;
-}> = ({ tab, isActive, isPreview, suppressControls, onSelect, onPin, onClose, renderMenu, closeOtherTabs, onMenuOpenChangeComplete, children }) => {
+}> = ({ tab, tabNumber, isActive, isPreview, suppressControls, onSelect, onPin, onClose, renderMenu, closeOtherTabs, onMenuOpenChangeComplete, menuReturnsFocus, children }) => {
   const { t } = useI18n();
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  // Keeps the overlay (the dropdown's anchor) mounted through the close animation.
-  const [menuVisible, setMenuVisible] = React.useState(false);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const tabPrefix = getEffectiveShortcutPrefix('switch_session_tab', shortcutOverrides);
+  const tabShortcut = tabPrefix && tabPrefix !== UNASSIGNED_SHORTCUT && tabNumber <= 9
+    ? formatShortcutForDisplay(`${tabPrefix}+${tabNumber}`)
+    : undefined;
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tab.id });
 
   const title = tab.session.title?.trim() || t('sessions.sidebar.session.untitled');
-  const overlayVisible = !suppressControls && (menuOpen || menuVisible);
 
-  // Session state for the dot and the hover tooltip.
   const isAiRenaming = useIsSessionAiRenamePending(tab.id, resolveGlobalSessionDirectory(tab.session));
   const turnActivity = useSessionTurnActivity(tab.id);
   const isStreaming = turnActivity !== null;
-  const unseenCount = useSessionUnseenCount(tab.id);
-  const showUnread = unseenCount > 0 && !isActive && !isStreaming;
+  const isUnread = useSessionUnread(tab.id);
+  const markedUnread = useSessionMarkedUnread(tab.id);
+  const showUnread = isUnread && (!isActive || markedUnread) && !isStreaming;
   const showDot = isStreaming || showUnread;
 
-  const menuArgsFor = (components: SessionTabMenuComponents): SessionTabMenuArgs => ({
+  const menuArgs: SessionTabMenuArgs = {
     session: tab.session,
-    open: menuOpen || contextMenuOpen,
+    open: contextMenuOpen,
     isActive,
     select: () => onSelect(tab),
     closeOtherTabs: () => closeOtherTabs(tab.id),
-    components,
-  });
+    components: contextSessionMenuSlots,
+  };
 
   return (
     <div
@@ -163,6 +121,8 @@ const SessionTabItem: React.FC<{
         onOpenChange={setContextMenuOpen}
         onOpenChangeComplete={(open) => onMenuOpenChangeComplete?.(open)}
       >
+        <Tooltip>
+        <TooltipTrigger asChild>
         <ContextMenu.Trigger
               render={(triggerProps) => (
                 <div
@@ -170,7 +130,18 @@ const SessionTabItem: React.FC<{
                   role="tab"
                   aria-selected={isActive}
                   tabIndex={isActive ? undefined : 0}
-                  onClick={isActive ? undefined : () => onSelect(tab)}
+                  onClick={(event) => {
+                    if (event.altKey) {
+                      toggleSessionRead(tab.id, isUnread, t);
+                      return;
+                    }
+                    const directory = resolveGlobalSessionDirectory(tab.session);
+                    if (event.shiftKey && directory && !isVSCodeRuntime()) {
+                      openSessionInSidePanel(tab.id, directory, title);
+                      return;
+                    }
+                    if (!isActive) onSelect(tab);
+                  }}
                   onDoubleClick={isPreview ? () => onPin(tab.id) : undefined}
                   onKeyDown={isActive ? undefined : (event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
@@ -184,142 +155,77 @@ const SessionTabItem: React.FC<{
                       onClose(tab.id);
                     }
                   }}
-                  data-controls-open={overlayVisible ? 'true' : 'false'}
                   className={cn(
-                    // No color transition: activation must snap. A crossfade
-                    // here reads as the switch itself being slow, since the
-                    // old and new tab trade colors over several frames right
-                    // after the click.
                     'session-tab group/session-tab relative flex h-7 w-full min-w-0 select-none items-center rounded-md px-2',
                     isActive
                       ? 'bg-interactive-selection text-interactive-selection-foreground'
-                      : cn(
-                        'cursor-pointer text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
-                        overlayVisible && 'bg-interactive-hover text-foreground',
-                      ),
+                      : 'cursor-pointer text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
                   )}
                 >
-                  <div className={cn(
-                    'flex min-w-0 flex-1 items-center',
-                    !suppressControls && 'group-hover/session-tab:pe-10',
-                    overlayVisible && 'pe-10',
-                  )}
-                  >
-                    {/* Which project the session belongs to, so a strip of
-                        tabs from several projects stays readable. */}
-                    <SessionProjectIcon directory={resolveGlobalSessionDirectory(tab.session)} className="me-1.5" />
+                  <div className="flex min-w-0 flex-1 items-center">
+                    <span className="relative me-1.5 inline-flex size-3.5 shrink-0 items-center justify-center">
+                      <SessionProjectIcon
+                        directory={resolveGlobalSessionDirectory(tab.session)}
+                        className={cn(!suppressControls && 'group-hover/session-tab:opacity-0 group-has-[:focus-visible]/session-tab:opacity-0')}
+                      />
+                      {!suppressControls ? (
+                        <Tooltip>
+                        <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={t('header.sessionTabs.closeTab')}
+                          onClick={(event) => { event.stopPropagation(); onClose(tab.id); }}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          className="absolute inset-0 flex items-center justify-center rounded text-muted-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/session-tab:opacity-100"
+                        >
+                          <Icon name="close" className="size-3.5" />
+                        </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={t('header.sessionTabs.closeTab')} shortcut={isActive ? formatShortcutForDisplay(isDesktopShell() ? 'mod+w' : getEffectiveShortcutCombo('close_session_tab', shortcutOverrides), '') : undefined} /></TooltipContent>
+                        </Tooltip>
+                      ) : null}
+                    </span>
                     <div className={cn(
                       'min-w-0 flex-1 overflow-hidden whitespace-nowrap',
                       !suppressControls && 'session-tab-title',
-                      // Not while renaming: the rename field stays upright.
                       isPreview && !suppressControls && 'italic',
                     )}
                     >
-                      {/* Same box as the active content the header renders
-                          (a centered column with a block title), so the
-                          title sits at the same height before and after
-                          activation and does not jump when the tab swaps
-                          its content. */}
                       {isActive ? children : (
                         <div className="flex min-w-0 flex-col justify-center">
-                          <span dir="auto" className="block max-w-full overflow-hidden whitespace-nowrap oc-ui-start-align text-[13px] font-medium leading-4">{title}</span>
+                          <span dir="auto" className="block max-w-full overflow-hidden whitespace-nowrap oc-ui-start-align text-[0.8125rem] font-medium leading-4">{title}</span>
                         </div>
                       )}
                     </div>
                     {isAiRenaming ? (
                       <Icon name="loader-4" className="ms-1.5 size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
                     ) : showDot ? (
-                      <SessionActivityIndicator
-                        state={turnActivity ?? 'unread'}
-                        className={cn('ms-1.5 shrink-0', !suppressControls && 'group-hover/session-tab:opacity-0', overlayVisible && 'opacity-0')}
-                      />
+                      <SessionActivityIndicator state={turnActivity ?? 'unread'} className="ms-1.5 shrink-0" />
                     ) : null}
                   </div>
-                  {!suppressControls ? (
-                    <div
-                      onClick={(event) => event.stopPropagation()}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      className={cn(
-                        'absolute inset-e-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5',
-                        'opacity-0 transition-opacity duration-150',
-                        'group-hover/session-tab:flex group-hover/session-tab:opacity-100',
-                        overlayVisible && 'flex opacity-100',
-                      )}
-                    >
-                      <DropdownMenu
-                        open={menuOpen}
-                        onOpenChange={(open) => {
-                          setMenuOpen(open);
-                          if (open) setMenuVisible(true);
-                        }}
-                        onOpenChangeComplete={(open) => {
-                          if (!open) setMenuVisible(false);
-                          onMenuOpenChangeComplete?.(open);
-                        }}
-                      >
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            aria-label={t('header.sessionTabs.tabMenuAria')}
-                            className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                          >
-                            <Icon name="more" className="size-4" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="min-w-[190px]">
-                          {renderMenu(menuArgsFor(dropdownComponents))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <button
-                        type="button"
-                        aria-label={t('header.sessionTabs.closeTab')}
-                        onClick={() => onClose(tab.id)}
-                        className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                      >
-                        <Icon name="close" className="size-4" />
-                      </button>
-                    </div>
-                  ) : null}
                 </div>
               )}
         />
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner className="app-region-no-drag z-50">
-            <ContextMenu.Popup
-              data-slot="dropdown-menu-content"
-              style={{ color: 'var(--surface-elevated-foreground)' }}
-              className={cn(dropdownMenuPopupClass, 'min-w-[190px]')}
-            >
-              {renderMenu(menuArgsFor(contextComponents))}
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={title} shortcut={tabShortcut} /></TooltipContent>
+        </Tooltip>
+        <ContextMenuContent finalFocus={() => menuReturnsFocus?.() ?? true} className="min-w-[190px]">
+          {renderMenu(menuArgs)}
+        </ContextMenuContent>
       </ContextMenuRoot>
     </div>
   );
 };
 
-/**
- * The header's horizontal working set of sessions (web/desktop only).
- *
- * A session the user opens shows in the italic preview tab until pinned (see
- * `useSessionTabsStore`); the tab whose session is current renders `children` — the header's title/rename block — inside a
- * selected pill. Closing a tab only removes it from the strip; closing the
- * active one activates its neighbour. Ids whose session has not loaded (or
- * was archived/deleted) stay in the store but do not render, so a partial
- * session list never destroys the working set.
- */
 export const SessionTabsStrip: React.FC<{
-  /** Menu items for one tab's session, supplied by the header. */
   renderMenu: (args: SessionTabMenuArgs) => React.ReactNode;
-  /** Fires when a tab menu finishes opening/closing (deferred rename hook). */
   onMenuOpenChangeComplete?: (open: boolean) => void;
-  /** While the active tab renames, its hover controls stay hidden. */
   suppressActiveTabControls?: boolean;
+  menuReturnsFocus?: () => boolean;
   children: React.ReactNode;
-}> = ({ renderMenu, onMenuOpenChangeComplete, suppressActiveTabControls = false, children }) => {
+}> = ({ renderMenu, onMenuOpenChangeComplete, suppressActiveTabControls = false, menuReturnsFocus, children }) => {
   const { t, direction } = useI18n();
-  // The horizontal strategy assumes later tabs sit further right; RTL uses real rects.
+  // external: https://docs.dndkit.com/presets/sortable/sortable-strategies RTL uses rectangle sorting because horizontal-list sorting assumes later items are farther right.
   const isRtl = direction === 'rtl';
   const tabIds = useSessionTabsStore((state) => state.tabIds);
   const previewTabId = useSessionTabsStore((state) => state.previewTabId);
@@ -332,13 +238,39 @@ export const SessionTabsStrip: React.FC<{
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
 
-  // Opening a session anywhere (sidebar, palette, deep link) shows it in the
-  // preview tab. The lanes of one multi-run share a tab: opening another lane
-  // reuses it.
+  const perWorkspace = useUIStore((state) => state.sessionTabsPerWorkspace);
+  const enterScope = useSessionTabsStore((state) => state.enterScope);
+  const sessionsLoaded = useGlobalSessionsStore((state) => state.hasLoaded);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const draftOpen = useSessionUIStore((state) => state.newSessionDraft.open);
+  const workDraftId = useSessionUIStore((state) => state.newSessionDraft.workDraftId ?? null);
+  const draftIsChat = useSessionUIStore((state) => state.newSessionDraft.target === 'chat');
+  const draftDirectory = useSessionUIStore((state) => state.newSessionDraft.directoryOverride);
+  const draftProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
+  const draftProjectPath = useProjectsStore((state) => {
+    const projectId = draftProjectId ?? state.activeProjectId;
+    return state.projects.find((project) => project.id === projectId)?.path ?? null;
+  });
+
   const currentRunMemberIds = useMultiRunMemberIds(currentSessionId);
   React.useEffect(() => {
+    if (!perWorkspace) {
+      enterScope(GLOBAL_SESSION_TAB_SCOPE, () => []);
+    } else {
+      if (!sessionsLoaded) return;
+      const runtimeKey = getRuntimeKey();
+      const chatDraft = !currentSessionId && draftOpen && draftIsChat;
+      const directory = currentSessionId ? currentSessionDirectory : draftOpen && !draftIsChat ? draftDirectory ?? draftProjectPath : null;
+      const scope = chatDraft ? sessionTabChatsScope(runtimeKey) : sessionTabScopeFor(runtimeKey, directory);
+      if (!scope) return;
+      enterScope(scope, () => sessionTabSeedFor(
+        directory,
+        useGlobalSessionsStore.getState().activeSessions,
+        useProjectsStore.getState().projects.map((project) => project.path),
+      ));
+    }
     if (currentSessionId) ensureTab(currentSessionId, currentRunMemberIds);
-  }, [currentSessionId, currentRunMemberIds, ensureTab]);
+  }, [currentRunMemberIds, currentSessionDirectory, currentSessionId, draftDirectory, draftIsChat, draftOpen, draftProjectPath, ensureTab, enterScope, perWorkspace, sessionsLoaded]);
 
   const sessionsById = React.useMemo(() => {
     const map = new Map<string, Session>();
@@ -346,7 +278,6 @@ export const SessionTabsStrip: React.FC<{
     return map;
   }, [activeSessions]);
 
-  // Only tabs with a known live session render; unknown ids stay stored.
   const tabs = React.useMemo<SessionTab[]>(() => {
     const list: SessionTab[] = [];
     for (const id of tabIds) {
@@ -363,6 +294,30 @@ export const SessionTabsStrip: React.FC<{
   const handleClose = React.useCallback((id: string) => {
     closeSessionTabAndActivateNeighbour(id);
   }, []);
+
+  const showDraftTab = !currentSessionId && draftOpen;
+  const draftFirstLine = useSessionDraftsStore((state) => {
+    if (!showDraftTab || !workDraftId) return '';
+    const text = state.drafts.find((draft) => draft.id === workDraftId)?.text ?? '';
+    return text.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '';
+  });
+
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const openNewSessionHere = React.useCallback(() => {
+    const { currentSessionId: openId, newSessionDraft, openNewSessionDraft } = useSessionUIStore.getState();
+    const directory = openId ? useDirectoryStore.getState().currentDirectory : newSessionDraft.directoryOverride;
+    openNewSessionDraft(directory ? { directoryOverride: directory } : undefined);
+  }, []);
+
+  const hasClosableTab = tabs.some((tab) => tab.id === currentSessionId) || (showDraftTab && tabs.length > 0);
+  React.useEffect(() => {
+    if (!hasClosableTab) return;
+    return registerCloseTabTarget(() => {
+      const id = useSessionUIStore.getState().currentSessionId;
+      if (id) closeSessionTabAndActivateNeighbour(id);
+      else activateSessionTabByIndex(-1);
+    }, { current: document.body });
+  }, [hasClosableTab]);
 
   const handleCloseOthers = React.useCallback((id: string) => {
     closeOtherTabs(id);
@@ -384,14 +339,11 @@ export const SessionTabsStrip: React.FC<{
     }
   }, [reorderTabs]);
 
-  // Soft fade at the edges while more tabs hide behind them.
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const [edges, setEdges] = React.useState({ left: false, right: false });
   const updateEdges = React.useCallback(() => {
     const node = scrollRef.current;
     if (!node) return;
-    // The fade mask is physical, so measure from the physical left: in RTL
-    // scrollLeft runs from 0 at the right end down to -max at the left end.
     const max = node.scrollWidth - node.clientWidth;
     const fromLeft = isRightToLeft(node) ? max + node.scrollLeft : node.scrollLeft;
     const left = fromLeft > 2;
@@ -407,8 +359,6 @@ export const SessionTabsStrip: React.FC<{
     return () => observer.disconnect();
   }, [updateEdges, tabs.length]);
 
-  // Keep the active tab in view when it changes, stopping short of the edge
-  // fades so the tab's own controls stay readable.
   React.useEffect(() => {
     const node = scrollRef.current;
     const tab = node?.querySelector<HTMLElement>('[data-active-session-tab]');
@@ -429,9 +379,6 @@ export const SessionTabsStrip: React.FC<{
 
   const tabIdsInOrder = React.useMemo(() => tabs.map((tab) => tab.id), [tabs]);
 
-  // A draft has no session and so no tab: the strip shows sessions only, and
-  // the draft's first message creates the session and its tab. The pill covers
-  // just the moment a current session has not reached its tab yet.
   const showPendingTab = Boolean(currentSessionId) && !tabs.some((tab) => tab.id === currentSessionId);
 
   return (
@@ -440,7 +387,7 @@ export const SessionTabsStrip: React.FC<{
         ref={scrollRef}
         onScroll={updateEdges}
         onWheel={scrollTabsWithWheel}
-        className="session-tabs-scroll flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain"
+        className="session-tabs-scroll flex min-w-0 flex-initial items-center gap-1.5 overflow-x-auto overscroll-x-contain"
         style={maskImage ? { maskImage, WebkitMaskImage: maskImage } : undefined}
       >
         <DndContext
@@ -450,8 +397,9 @@ export const SessionTabsStrip: React.FC<{
           onDragEnd={handleDragEnd}
         >
           <SortableContext items={tabIdsInOrder} strategy={isRtl ? rectSortingStrategy : horizontalListSortingStrategy}>
-            {tabs.map((tab) => (
+            {tabs.map((tab, index) => (
               <SessionTabItem
+                tabNumber={index + 1}
                 key={tab.id}
                 tab={tab}
                 isActive={tab.id === currentSessionId}
@@ -463,12 +411,29 @@ export const SessionTabsStrip: React.FC<{
                 renderMenu={renderMenu}
                 closeOtherTabs={handleCloseOthers}
                 onMenuOpenChangeComplete={onMenuOpenChangeComplete}
+                menuReturnsFocus={menuReturnsFocus}
               >
                 {tab.id === currentSessionId ? children : null}
               </SessionTabItem>
             ))}
           </SortableContext>
         </DndContext>
+        {showDraftTab ? (
+          <div
+            role="tab"
+            aria-selected
+            className="app-region-no-drag session-tab-slot flex h-7 w-44 shrink-0 items-center rounded-md bg-interactive-selection px-2 text-interactive-selection-foreground"
+            data-active="true"
+            data-active-session-tab
+          >
+            <Icon name="edit" className="me-1.5 size-3.5 shrink-0" />
+            <div className="session-tab-title min-w-0 flex-1 overflow-hidden whitespace-nowrap italic">
+              <span dir="auto" className="block max-w-full overflow-hidden whitespace-nowrap oc-ui-start-align text-[0.8125rem] font-medium leading-4">
+                {draftFirstLine || t('sessions.switcher.draftTitle')}
+              </span>
+            </div>
+          </div>
+        ) : null}
         {showPendingTab ? (
           <div
             role="tab"
@@ -480,6 +445,21 @@ export const SessionTabsStrip: React.FC<{
           </div>
         ) : null}
       </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={openNewSessionHere}
+            aria-label={t('sessions.sidebar.header.actions.newSession')}
+            className="app-region-no-drag ms-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Icon name="add" className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>
+          <TooltipLabelWithShortcut label={t('sessions.sidebar.header.actions.newSession')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('new_chat', shortcutOverrides), '')} />
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 };

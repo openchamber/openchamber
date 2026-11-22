@@ -30,6 +30,7 @@ test('a generate answer that arrives after its panel closed reaches the reopened
   const answers: Array<(text: string) => void> = [];
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const target = String(input instanceof Request ? input.url : input);
+    if (target.includes('/frame-grant')) return Response.json({ grant: 'grant-test', expiresAt: Date.now() + 60_000 });
     if (target.includes('/auth/url-token')) return Response.json({ token: 'scoped-test', expiresAt: Date.now() + 60_000 });
     if (target.includes('/api/guests/writer/generate')) {
       return new Promise<Response>((resolve) => { answers.push((text) => resolve(Response.json({ ok: true, result: { text } }))); });

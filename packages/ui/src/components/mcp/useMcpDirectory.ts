@@ -28,9 +28,8 @@ export const useMcpDirectory = (active: boolean, selection?: ChatColumnSession):
     if (!active || draftId === null) return;
     let cancelled = false;
     void prepareDirectory().catch((error) => {
-      // The header dropdown and the status panel can both be mounted and
-      // catch the same failure; one id keeps it to one toast.
-      if (!cancelled) toast.error(error instanceof Error ? error.message : t('mcpDropdown.status.unknownError'), { id: 'mcp-draft-directory' });
+      // One id keeps repeated failures to one toast.
+      if (!cancelled) toast.error(error instanceof Error ? error.message : t('errorBoundary.state.unknownError'), { id: 'mcp-draft-directory' });
     });
     return () => { cancelled = true; };
   }, [active, draftId, prepareDirectory, t]);

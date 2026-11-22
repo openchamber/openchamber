@@ -57,6 +57,14 @@ beforeEach(async () => {
     globals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
+  // happy-dom lays nothing out; the list's scroller gets a menu's height so
+  // the virtual list mounts the rows in view, as it does in a browser.
+  for (const [name, size] of [['clientHeight', 400], ['clientWidth', 380]] as const) {
+    Object.defineProperty(dom.HTMLElement.prototype, name, {
+      configurable: true,
+      get(this: HTMLElement) { return this.classList.contains('overlay-scrollbar-target') ? size : 0; },
+    });
+  }
   // The stores this list reads start background loads; keep them pending.
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(() => undefined));
   restoreFetch = () => fetch.mockRestore();
@@ -122,7 +130,7 @@ const rowName = (row: Element) => (row.getAttribute('aria-labelledby') ?? '')
   .filter(Boolean)
   .join(' ');
 
-const highlightedRow = () => document.querySelector('[role="option"].bg-interactive-selection');
+const highlightedRow = () => document.querySelector('[role="option"].oc-selected');
 
 test('the search field is a combobox that points at the highlighted row as arrows move', async () => {
   await renderPicker();
@@ -153,8 +161,8 @@ test('a favorite row, which shows its provider only as a logo, names the provide
 
 test('the field never points at a row that is not in the page', async () => {
   await renderPicker();
-  // Up from the first row wraps to the last row of the long section, which is
-  // not mounted until the list scrolls to it.
+  // Up from the first row wraps to the last row of the list, which may not be
+  // mounted until the list scrolls to it.
   for (const key of ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowDown'] as const) {
     await press(key);
     const id = field().getAttribute('aria-activedescendant');

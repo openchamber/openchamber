@@ -38,7 +38,7 @@ describe('readOpenCodeServiceEnv', () => {
   it.skipIf(process.platform === 'win32')('rejects a FIFO without blocking', () => {
     const fifo = spawnSync('mkfifo', [path.join(configDir, 'service.json')]);
     expect(fifo.status).toBe(0);
-    const child = spawnSync(process.execPath, ['--input-type=module', '-e',
+    const child = spawnSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e',
       'const { readOpenCodeServiceEnv } = await import(process.argv[1]); console.log(JSON.stringify(readOpenCodeServiceEnv(process.argv[2])));',
       new URL('./opencode-service-env.js', import.meta.url).href, configDir],
     { encoding: 'utf8', timeout: 3000 });

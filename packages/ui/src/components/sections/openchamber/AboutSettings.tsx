@@ -1,35 +1,49 @@
 import React from 'react';
 import { checkConnectedServerForUpdates, useUpdateStore } from '@/stores/useUpdateStore';
 import type { UpdateInfo } from '@/lib/desktop';
-import { isCapacitorApp } from '@/lib/platform';
+import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
+import { openExternalUrl } from '@/lib/url';
 import { useShallow } from 'zustand/react/shallow';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo } from '@/lib/device';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { AboutLogo } from '@/components/ui/AboutLogo';
 import { Icon } from "@/components/icon/Icon";
 import { Spinner } from '@/components/ui/spinner';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { getDesktopUpdateChannel, setDesktopUpdateChannel } from '@/lib/desktop';
+import { formatCanaryBuild, parseCanaryVersion, type UpdateChannel } from '@/lib/updateChannel';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { openExternalUrl } from '@/lib/url';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeStatus } from '@/components/update/openCodeUpgrade';
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
+import { getUpdateCheckErrorMessage } from '@/lib/updateCheckError';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
+import { AboutReleaseNotes } from './AboutReleaseNotes';
+import { AboutUpdateBanners } from './AboutUpdateBanners';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
+  SettingsChipGroup,
   SettingsSection,
+  SettingsFieldRow,
   SETTINGS_BRAND_TITLE_CLASS,
-  SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
 const GITHUB_URL = 'https://github.com/developing-today-forks/openchamber';
 const DISCORD_URL = 'https://discord.gg/ZYRSdnwwKA';
 const X_URL = 'https://x.com/openchamber_dev';
 
-const MIN_CHECKING_DURATION = 800; // ms
+const MIN_CHECKING_DURATION = 800;
+
+const loadServerUpdateChannel = async (serverVersion: string): Promise<UpdateChannel | null> => {
+  const settings = await loadDesktopSettings();
+  if (!settings) return null;
+  return settings.serverUpdateChannel ?? (parseCanaryVersion(serverVersion) ? 'canary' : 'stable');
+};
 
 type ConnectedServerUpdate = {
   info: UpdateInfo | null;
@@ -40,13 +54,6 @@ type ConnectedServerUpdate = {
 
 const IDLE_SERVER_UPDATE: ConnectedServerUpdate = { info: null, checking: false, available: false, error: null };
 
-/**
- * The server this window is connected to, when that is not the app itself:
- * the native app's server, or a desktop app's remote host. The shared update
- * store checks the app build, so the server check lives here, in page-local
- * state, and installs through the server's own update route (the dialog's
- * `web` flow).
- */
 function useConnectedServerUpdate(enabled: boolean) {
   const [state, setState] = React.useState<ConnectedServerUpdate>(IDLE_SERVER_UPDATE);
 
@@ -61,7 +68,7 @@ function useConnectedServerUpdate(enabled: boolean) {
         info: null,
         checking: false,
         available: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? getUpdateCheckErrorMessage(error) : String(error),
       });
     }
   }, [enabled]);
@@ -75,11 +82,6 @@ type OpenCodeUpgradePhase =
   | { kind: 'installed'; version: string | null }
   | { kind: 'failed'; error: string };
 
-/**
- * OpenCode on the connected server, checked and upgraded through the same
- * routes as the OpenCode update toast. Separate from the OpenChamber update:
- * it replaces the OpenCode CLI, not OpenChamber.
- */
 function useOpenCodeUpgrade(failedFallback: string) {
   const [status, setStatus] = React.useState<OpenCodeUpgradeStatus | null>(null);
   const [phase, setPhase] = React.useState<OpenCodeUpgradePhase>({ kind: 'idle' });
@@ -90,8 +92,6 @@ function useOpenCodeUpgrade(failedFallback: string) {
       setStatus(next);
       return next;
     } catch {
-      // Best effort: About still shows the OpenChamber half. The stale status
-      // stays rather than turning into "no update".
       return null;
     }
   }, []);
@@ -110,12 +110,6 @@ function useOpenCodeUpgrade(failedFallback: string) {
     }
   }, [failedFallback]);
 
-  /**
-   * Restarts OpenCode after an upgrade, then re-reads the running version.
-   * The "installed, reload to use it" phase is a temporary stand-in: once the
-   * server reports the installed version as running, the authoritative status
-   * replaces it.
-   */
   const reloadAfterUpgrade = React.useCallback(async (reload: () => Promise<void>) => {
     await reload().catch(() => undefined);
     const next = await refresh();
@@ -130,7 +124,6 @@ function useOpenCodeUpgrade(failedFallback: string) {
   return { status, phase, refresh, upgrade, reloadAfterUpgrade };
 }
 
-/** Version of the installed native app build (Capacitor only). */
 function useNativeAppVersion(enabled: boolean): string | null {
   const [version, setVersion] = React.useState<string | null>(null);
 
@@ -175,16 +168,13 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     restartToUpdate: s.restartToUpdate,
   })));
   const { isMobile } = useDeviceInfo();
-  // Native app: the update store's own result is about the app build (a
-  // newer GitHub release of the app), while `update` below is reassigned to
-  // the connected server's update for native apps.
   const appUpdateInfo = useUpdateStore((s) => s.info);
   const appUpdateAvailable = useUpdateStore((s) => s.available);
   const appRuntimeType = useUpdateStore((s) => s.runtimeType);
   const isNativeApp = React.useMemo(() => isCapacitorApp(), []);
+  const isAndroidApp = isNativeApp && getClientPlatform() === 'android';
   const isDesktopRemote = useDesktopRemoteHostActive();
   const serverUpdate = useConnectedServerUpdate(isNativeApp || isDesktopRemote);
-  // A desktop app on a remote host updates itself and its server separately.
   const remoteHostUpdate = isDesktopRemote ? serverUpdate : null;
   const checkRemoteHost = serverUpdate.check;
   React.useEffect(() => {
@@ -221,33 +211,130 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       runtimeType: updateStore.runtimeType,
     };
 
-  const currentVersion = openChamberVersion || update.info?.currentVersion || 'unknown';
-  const appVersion = desktopAppVersion || updateStore.info?.currentVersion || 'unknown';
+  const describeVersion = (version: string, beside?: string | null) => {
+    const canary = parseCanaryVersion(version);
+    return canary
+      ? t('settings.openchamber.about.canaryVersion', {
+        version: canary.release,
+        date: formatCanaryBuild(canary, getCurrentIntlLocale(), parseCanaryVersion(beside)),
+      })
+      : version;
+  };
+  const offeredVersion = update.available ? update.info?.version : null;
+  const currentVersion = describeVersion(openChamberVersion || update.info?.currentVersion || 'unknown', offeredVersion);
+  const appVersion = describeVersion(desktopAppVersion || updateStore.info?.currentVersion || 'unknown', offeredVersion);
   const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
+
+  const renderReleaseNotes = (
+    installed: string | null | undefined,
+    offered: string | null | undefined,
+    owner: React.ComponentProps<typeof AboutReleaseNotes>['owner'],
+  ) => {
+    if (!installed) return null;
+    const leavesCanary = Boolean(offered && parseCanaryVersion(installed) && !parseCanaryVersion(offered));
+    return (
+      <AboutReleaseNotes
+        version={offered || installed}
+        since={offered && !leavesCanary ? installed : null}
+        describeVersion={describeVersion}
+        owner={owner}
+      />
+    );
+  };
+  const installedVersion = isDesktopRemote
+    ? desktopAppVersion || updateStore.info?.currentVersion
+    : openChamberVersion || update.info?.currentVersion;
+  const releaseNotes = (
+    <>
+      {isAndroidApp && renderReleaseNotes(
+        updateStore.info?.currentVersion,
+        updateStore.available ? updateStore.info?.version : null,
+        'app',
+      )}
+      {renderReleaseNotes(installedVersion, offeredVersion, isAndroidApp ? 'server' : 'installed')}
+    </>
+  );
+
+  const isDesktopApp = updateStore.runtimeType === 'desktop';
+  const [isWebServer, setIsWebServer] = React.useState(false);
+  const isNpmServer = updateStore.runtimeType === 'web' && isWebServer && openChamberVersion !== null;
+  const [updateChannel, setUpdateChannel] = React.useState<UpdateChannel | null>(null);
+  React.useEffect(() => {
+    if (!isDesktopApp && !isNpmServer) return;
+    let cancelled = false;
+    const load = isDesktopApp ? getDesktopUpdateChannel() : loadServerUpdateChannel(openChamberVersion ?? '');
+    void load.then((channel) => {
+      if (!cancelled) setUpdateChannel(channel);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDesktopApp, isNpmServer, openChamberVersion]);
   const openCode = useOpenCodeUpgrade(t('opencodeUpdate.toast.failed.description'));
   const openCodeVersion = openCode.status?.currentVersion ?? null;
   const openCodeUpdateVersion = openCode.phase.kind === 'installed' ? null : openCode.status?.availableVersion ?? null;
   const [commandCopied, setCommandCopied] = React.useState(false);
 
-  // The OpenChamber button names what it replaces. In the native app that is
-  // the server the phone is connected to (or the desktop app serving it),
-  // never the phone app itself, which updates through its store.
   const serverUpdateLabel = (info: UpdateInfo | null) => {
-    const version = info?.version || '';
+    const version = describeVersion(info?.version || '', info?.currentVersion);
     return info?.packageManager === 'electron'
       ? t('settings.openchamber.about.actions.updateDesktopToVersion', { version })
       : t('settings.openchamber.about.actions.updateServerToVersion', { version });
   };
   const openChamberUpdateLabel = (() => {
-    const version = update.info?.version || '';
+    const version = describeVersion(update.info?.version || '', update.info?.currentVersion);
     if (isNativeApp) return serverUpdateLabel(update.info);
     return isDesktopRemote
       ? t('settings.openchamber.about.actions.updateAppToVersion', { version })
       : t('settings.openchamber.about.actions.updateOpenChamberToVersion', { version });
   })();
-  const isInstallBlocked = (info: UpdateInfo | null) => Boolean(info?.installBlocked);
+  const needsNewerOpenCode = (info: UpdateInfo | null) => info?.installBlocked === 'opencode-version';
+  const isInstallBlocked = (info: UpdateInfo | null) => Boolean(info?.installBlocked) && !needsNewerOpenCode(info);
   const installBlocked = update.available && isInstallBlocked(update.info);
-  const remoteHostInstallBlocked = Boolean(remoteHostUpdate?.available && isInstallBlocked(remoteHostUpdate.info));
+
+  const appDownloadUrl = isAndroidApp && updateStore.runtimeType === 'mobile' && updateStore.available
+    ? updateStore.info?.downloadUrl ?? null
+    : null;
+  const appUpdateButton = appDownloadUrl ? (
+    <Button type="button" size="sm" variant="outline" onClick={() => void openExternalUrl(appDownloadUrl)}>
+      <Icon name="download" className="size-4" />
+      {t('settings.openchamber.about.actions.downloadAppVersion', {
+        version: describeVersion(updateStore.info?.version || '', nativeAppVersion),
+      })}
+    </Button>
+  ) : null;
+
+  const chooseUpdateChannel = async (channel: UpdateChannel) => {
+    if (channel === updateChannel) return;
+    const previous = updateChannel;
+    setUpdateChannel(channel);
+    const stored = isDesktopApp
+      ? await setDesktopUpdateChannel(channel) === channel
+      : (await updateDesktopSettings({ serverUpdateChannel: channel })).ok;
+    if (!stored) {
+      setUpdateChannel(previous);
+      toast.error(t('settings.openchamber.about.toast.updateChannelNotSaved'));
+      return;
+    }
+    void update.checkForUpdates();
+  };
+  const CANARY_COLOURS = 'bg-[var(--brand-canary)] text-[var(--brand-canary-foreground)] hover:bg-[var(--brand-canary)] hover:text-[var(--brand-canary-foreground)]';
+  const updateChannelControl = updateChannel && (
+    <SettingsChipGroup
+      value={updateChannel}
+      onChange={(channel) => void chooseUpdateChannel(channel)}
+      aria-label={t('settings.openchamber.about.field.updateChannel')}
+      className="flex-nowrap"
+      options={[
+        { value: 'stable', label: t('settings.openchamber.about.option.updateChannel.stable') },
+        {
+          value: 'canary',
+          label: t('settings.openchamber.about.option.updateChannel.canary'),
+          selectedClassName: CANARY_COLOURS,
+        },
+      ]}
+    />
+  );
 
   // A newer release of the phone app itself, when the shared store's check
   // found one. The button opens the release page; the signed APK there
@@ -273,6 +360,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     // lives in the shared store and needs its own trigger here.
     if (isNativeApp) void updateStore.checkForUpdates();
     if (remoteHostUpdate) void remoteHostUpdate.check();
+    if (isAndroidApp) void updateStore.checkForUpdates();
     void openCode.refresh();
   };
 
@@ -287,13 +375,26 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     void openCode.reloadAfterUpgrade(async () => {
       await reloadOpenCodeConfiguration({
         message: t('opencodeUpdate.toast.reload.message'),
-        mode: 'projects',
         scopes: ['all'],
       });
+    }).then(() => {
+      void update.checkForUpdates();
+      if (remoteHostUpdate) void remoteHostUpdate.check();
     });
   };
 
   const renderManualUpdateNotice = (info: UpdateInfo | null) => {
+    if (info?.installBlocked === 'opencode-version') {
+      return (
+        <p className="typography-meta text-[var(--status-warning)]">
+          {t('updateDialog.openCodeTooOld', {
+            version: describeVersion(info.version || ''),
+            required: info.requiredOpenCodeVersion || '',
+            current: info.openCodeVersion || '',
+          })}
+        </p>
+      );
+    }
     if (info?.installBlocked === 'desktop-host') {
       return (
         <p className="typography-meta text-muted-foreground">
@@ -301,11 +402,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         </p>
       );
     }
-    // No command updates a copy that no package manager installed.
     if (info?.installBlocked === 'manual-install') {
       return (
         <p className="typography-meta text-muted-foreground">
-          {t('settings.openchamber.about.manualInstallUpdate', { version: info.version || '' })}
+          {t('settings.openchamber.about.manualInstallUpdate', { version: describeVersion(info.version || '') })}
         </p>
       );
     }
@@ -313,10 +413,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     return (
       <div className="space-y-2">
         <p className="typography-meta text-muted-foreground">
-          {t('settings.openchamber.about.serviceManagerUpdate', { version: info?.version || '' })}
+          {t('settings.openchamber.about.serviceManagerUpdate', { version: describeVersion(info?.version || '') })}
         </p>
         <div className="flex items-center gap-2 oc-tile-inset rounded-md p-1 ps-3">
-          <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground">{command}</code>
+          <ScrollableOverlay as="code" outerClassName="overlay-scrollbar-wrapper--no-gutter flex-1 min-w-0" fillContainer={false} className="whitespace-nowrap font-mono text-sm text-foreground">{command}</ScrollableOverlay>
           <Button
             type="button"
             variant="ghost"
@@ -330,18 +430,24 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       </div>
     );
   };
-  const manualUpdateNotice = installBlocked ? renderManualUpdateNotice(update.info) : null;
+  const manualUpdateNotice = update.available && update.info?.installBlocked ? renderManualUpdateNotice(update.info) : null;
 
-  const remoteHostUpdateControls = (() => {
-    if (!remoteHostUpdate?.available || remoteHostUpdate.checking) return null;
-    if (remoteHostInstallBlocked) return renderManualUpdateNotice(remoteHostUpdate.info);
-    return (
-      <Button type="button" size="sm" variant="outline" onClick={() => setServerUpdateDialogOpen(true)}>
-        <Icon name="download" className="size-4" />
-        {serverUpdateLabel(remoteHostUpdate.info)}
-      </Button>
-    );
-  })();
+  const remoteHostOffered = Boolean(remoteHostUpdate?.available && !remoteHostUpdate.checking);
+  const remoteHostUpdateNotice = remoteHostOffered && remoteHostUpdate?.info?.installBlocked
+    ? renderManualUpdateNotice(remoteHostUpdate.info)
+    : null;
+  const remoteHostUpdateButton = remoteHostOffered && !isInstallBlocked(remoteHostUpdate?.info ?? null) ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      onClick={() => setServerUpdateDialogOpen(true)}
+      disabled={needsNewerOpenCode(remoteHostUpdate?.info ?? null)}
+    >
+      <Icon name="download" className="size-4" />
+      {serverUpdateLabel(remoteHostUpdate?.info ?? null)}
+    </Button>
+  ) : null;
   const remoteHostUpdateDialog = remoteHostUpdate ? (
     <UpdateDialog
       open={serverUpdateDialogOpen}
@@ -357,45 +463,56 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     />
   ) : null;
 
-  const openCodeUpdateControls = (() => {
+  const openCodeUpdate = (() => {
     const { phase } = openCode;
     if (phase.kind === 'installed') {
-      return (
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="typography-meta text-muted-foreground">
-            {phase.version
-              ? t('settings.openchamber.about.openCode.installedVersion', { version: phase.version })
-              : t('settings.openchamber.about.openCode.installed')}
-          </span>
+      return {
+        action: (
           <Button type="button" size="sm" variant="outline" onClick={reloadOpenCode}>
             {t('opencodeUpdate.toast.actions.reload')}
           </Button>
-        </div>
-      );
+        ),
+        note: (
+          <p className="typography-meta text-muted-foreground">
+            {phase.version
+              ? t('settings.openchamber.about.openCode.installedVersion', { version: phase.version })
+              : t('settings.openchamber.about.openCode.installed')}
+          </p>
+        ),
+      };
     }
     if (!openCodeUpdateVersion) return null;
     if (!openCode.status?.supported) {
-      return (
-        <p className="typography-meta text-muted-foreground">
-          {t('settings.openchamber.about.openCode.manualUpdate', { version: openCodeUpdateVersion })}
-        </p>
-      );
+      return {
+        action: null,
+        note: (
+          <p className="typography-meta text-muted-foreground">
+            {t('settings.openchamber.about.openCode.manualUpdate', { version: openCodeUpdateVersion })}
+          </p>
+        ),
+      };
     }
     const upgrading = phase.kind === 'upgrading';
-    return (
-      <div className="space-y-2">
+    return {
+      action: (
         <Button type="button" size="sm" variant="outline" onClick={() => void openCode.upgrade()} disabled={upgrading}>
           {upgrading ? <Spinner className="size-4" /> : <Icon name="download" className="size-4" />}
           {upgrading
             ? t('opencodeUpdate.toast.upgrading.title')
             : t('settings.openchamber.about.actions.updateOpenCodeToVersion', { version: openCodeUpdateVersion })}
         </Button>
-        {phase.kind === 'failed' && (
-          <p className="typography-meta text-[var(--status-error)]">{phase.error}</p>
-        )}
-      </div>
-    );
+      ),
+      note: phase.kind === 'failed'
+        ? <p className="typography-meta text-[var(--status-error)]">{phase.error}</p>
+        : null,
+    };
   })();
+  const openCodeUpdateControls = openCodeUpdate ? (
+    <div className="flex flex-col items-center gap-2">
+      {openCodeUpdate.note}
+      {openCodeUpdate.action}
+    </div>
+  ) : null;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -407,11 +524,14 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           headers: { Accept: 'application/json' },
         });
         if (!response.ok) return;
-        const data = await response.json().catch(() => null) as { openchamberVersion?: unknown } | null;
+        const data = await response.json().catch(() => null) as { openchamberVersion?: unknown; runtime?: unknown } | null;
         const version = typeof data?.openchamberVersion === 'string' && data.openchamberVersion.trim().length > 0
           ? data.openchamberVersion.trim()
           : null;
-        if (!cancelled) setOpenChamberVersion(version);
+        if (!cancelled) {
+          setOpenChamberVersion(version);
+          setIsWebServer(data?.runtime === 'web');
+        }
       } catch {
         if (!cancelled) setOpenChamberVersion(null);
       }
@@ -427,30 +547,30 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const remoteHostUpdateChecking = remoteHostUpdate?.checking ?? false;
   const remoteHostUpdateAvailable = remoteHostUpdate?.available ?? false;
 
-  // Track if we initiated a check to show toast on completion
   const didInitiateCheck = React.useRef(false);
+  const appChecking = isAndroidApp && updateStore.checking;
+  const appUpdateOffered = Boolean(appDownloadUrl);
 
-  // Ensure minimum visible duration for checking animation
   React.useEffect(() => {
     if (update.checking) {
       setShowChecking(true);
       didInitiateCheck.current = true;
-    } else if (showChecking) {
+    } else if (showChecking && !appChecking) {
       const timer = setTimeout(() => {
         setShowChecking(false);
-        // Show toast if check completed with no update available. On a remote
-        // host "latest" would be wrong while the server still has an update.
         const remoteHostPending = remoteHostUpdateChecking || remoteHostUpdateAvailable;
         if (didInitiateCheck.current && !update.available && !update.error && !remoteHostPending) {
-          toast.success(isNativeApp
-            ? t('settings.openchamber.about.toast.serverLatestVersion')
-            : t('settings.openchamber.about.toast.latestVersion'));
+          toast.success(appUpdateOffered
+            ? t('settings.openchamber.about.toast.serverLatestAppUpdate')
+            : isNativeApp
+              ? t('settings.openchamber.about.toast.serverLatestVersion')
+              : t('settings.openchamber.about.toast.latestVersion'));
           didInitiateCheck.current = false;
         }
       }, MIN_CHECKING_DURATION);
       return () => clearTimeout(timer);
     }
-  }, [t, isNativeApp, update.checking, showChecking, update.available, update.error, remoteHostUpdateChecking, remoteHostUpdateAvailable]);
+  }, [t, isNativeApp, update.checking, showChecking, update.available, update.error, remoteHostUpdateChecking, remoteHostUpdateAvailable, appChecking, appUpdateOffered]);
 
   const isChecking = update.checking || showChecking;
 
@@ -458,7 +578,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     return (
       <div className="w-full space-y-6 pb-2">
         <div className="flex flex-col items-center text-center">
-          <OpenChamberLogo width={72} height={72} />
+          <AboutLogo size={72} />
           <h2 className={`mt-4 ${SETTINGS_BRAND_TITLE_CLASS}`}>OpenChamber</h2>
           <div className="mt-2 space-y-1 typography-ui text-muted-foreground">
             {isNativeApp ? (
@@ -483,6 +603,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <InstanceServiceUrls />
         </div>
 
+        {updateChannelControl && <div className="flex justify-center">{updateChannelControl}</div>}
+
         <div className="flex justify-center">
           {!update.available && !update.error && (
             <Button
@@ -493,10 +615,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               disabled={isChecking}
               className="w-auto justify-center gap-2"
             >
-              {isChecking ? <Icon name="loader" className="size-4 animate-spin" /> : <Icon name="refresh" className="size-4" />}
+              {isChecking ? <Spinner className="size-4" /> : <Icon name="refresh" className="size-4" />}
               {isChecking
                 ? t('settings.openchamber.about.state.checking')
-                : isNativeApp
+                : isNativeApp && !isAndroidApp
                   ? t('settings.openchamber.about.actions.checkServerForUpdates')
                   : t('settings.openchamber.about.actions.checkForUpdates')}
             </Button>
@@ -508,6 +630,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               variant="default"
               size="sm"
               onClick={() => setUpdateDialogOpen(true)}
+              disabled={needsNewerOpenCode(update.info)}
               className="w-auto justify-center gap-2"
             >
               <Icon name="download" className="size-4" />
@@ -516,10 +639,15 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           )}
         </div>
 
+        {appUpdateButton && <div className="flex justify-center">{appUpdateButton}</div>}
+
         {manualUpdateNotice}
 
-        {remoteHostUpdateControls && (
-          <div className="flex justify-center text-center">{remoteHostUpdateControls}</div>
+        {(remoteHostUpdateButton || remoteHostUpdateNotice) && (
+          <div className="flex flex-col items-center gap-2 text-center">
+            {remoteHostUpdateButton}
+            {remoteHostUpdateNotice}
+          </div>
         )}
 
         {appReleaseControls && (
@@ -570,9 +698,11 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           </a>
         </div>
 
-        <p className="text-center typography-ui text-muted-foreground/60">
+        <p className="text-center typography-ui text-muted-foreground">
           {t('aboutDialog.footerNote')}
         </p>
+
+        {releaseNotes}
 
         <UpdateDialog
           open={updateDialogOpen}
@@ -592,114 +722,122 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     );
   }
 
-  // Desktop layout
+  const statusSeparator = <span aria-hidden="true" className="typography-meta text-muted-foreground/60">·</span>;
+  const openChamberStatus = isChecking ? (
+    <>
+      {statusSeparator}
+      <span className="flex items-center gap-1.5 typography-meta text-muted-foreground">
+        <Spinner className="size-4" />
+        {t('settings.openchamber.about.state.checking')}
+      </span>
+    </>
+  ) : !update.available && !update.error ? (
+    <>
+      {statusSeparator}
+      <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
+    </>
+  ) : null;
+  const versionValue = (version: string) => (
+    <span className="typography-meta font-mono text-muted-foreground">{version}</span>
+  );
+  const valueRow = { alignEnd: false, controlClassName: 'min-h-8 flex-wrap @xl:flex-initial' };
+  const notes = [
+    manualUpdateNotice,
+    remoteHostUpdateNotice,
+    openCodeUpdate?.note ?? null,
+    ...[update.error, remoteHostUpdate?.error].filter(Boolean).map((error) => (
+      <p key={error} className="rounded-lg bg-[var(--status-error-background)] px-3 py-2 typography-meta text-[var(--status-error)]">
+        {error}
+      </p>
+    )),
+  ].filter(Boolean);
+
   return (
-    <SettingsSection divider={false}>
-      <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-        <div className="flex flex-col @xl:flex-row @xl:items-center justify-between gap-4 px-4 py-3 border-b border-border/40">
+    <>
+      <SettingsSection>
+        <div className="flex items-center gap-4">
+          <AboutLogo size={48} />
+          <div className="min-w-0 space-y-1">
+            <h2 className={SETTINGS_BRAND_TITLE_CLASS}>OpenChamber</h2>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              {[
+                { href: GITHUB_URL, icon: 'github-fill' as const, label: 'GitHub' },
+                { href: DISCORD_URL, icon: 'discord-fill' as const, label: 'Discord' },
+                { href: X_URL, icon: 'twitter-xfill' as const, label: '@openchamber_dev' },
+              ].map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 typography-meta text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Icon name={link.icon} className="size-4" />
+                  <span>{link.label}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection contentClassName="space-y-4">
+        <AboutUpdateBanners describeVersion={describeVersion}
+          main={!isChecking && update.available && !installBlocked ? { info: update.info, owner: isDesktopRemote ? 'app' : isNativeApp ? 'server' : 'openchamber', onUpdate: () => setUpdateDialogOpen(true) } : null}
+          remoteHost={remoteHostUpdateButton ? { info: remoteHostUpdate?.info ?? null, onUpdate: () => setServerUpdateDialogOpen(true) } : null}
+          appDownload={appDownloadUrl ? { version: describeVersion(updateStore.info?.version || '', nativeAppVersion), url: appDownloadUrl } : null}
+        />
+        <div>
           {isDesktopRemote ? (
             <>
-              <div className="flex min-w-0 flex-col">
-                <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.appVersion')}</span>
-                <span className="typography-meta text-muted-foreground font-mono">{appVersion}</span>
-              </div>
-              <div className="flex min-w-0 flex-col">
-                <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.serverVersion')}</span>
-                <span className="typography-meta text-muted-foreground font-mono">{remoteHostVersion}</span>
-              </div>
+              <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} {...valueRow}>
+                {versionValue(appVersion)}
+                {openChamberStatus}
+              </SettingsFieldRow>
+              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} {...valueRow}>
+                {versionValue(remoteHostVersion)}
+              </SettingsFieldRow>
+            </>
+          ) : isNativeApp ? (
+            <>
+              {nativeAppVersion && (
+                <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} {...valueRow}>
+                  {versionValue(describeVersion(nativeAppVersion, updateStore.info?.version))}
+                </SettingsFieldRow>
+              )}
+              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} {...valueRow}>
+                {versionValue(currentVersion)}
+                {openChamberStatus}
+              </SettingsFieldRow>
             </>
           ) : (
-            <div className="flex min-w-0 flex-col">
-              <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.version')}</span>
-              <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
-            </div>
+            <SettingsFieldRow label={t('settings.openchamber.about.field.version')} {...valueRow}>
+              {versionValue(currentVersion)}
+              {openChamberStatus}
+            </SettingsFieldRow>
           )}
-          <div className="flex min-w-0 flex-col">
-            <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.openCodeVersion')}</span>
-            <span className="typography-meta text-muted-foreground font-mono">{openCodeVersion || t('settings.openchamber.about.state.unknown')}</span>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {update.checking && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Icon name="loader" className="h-4 w-4 animate-spin" />
-                <span className="typography-meta">{t('settings.openchamber.about.state.checking')}</span>
-              </div>
-            )}
-
-            {!update.checking && update.available && !installBlocked && (
-              <Button size="sm"
-                variant="default"
-                onClick={() => setUpdateDialogOpen(true)}
-              >
-                <Icon name="download" className="h-4 w-4 me-1" />
-                {openChamberUpdateLabel}
-              </Button>
-            )}
-
-            {!update.checking && !update.available && !update.error && (
-              <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
-            )}
-
-            <Button size="sm"
-              variant="outline"
-              onClick={checkAll}
-              disabled={update.checking}
-            >
+          <SettingsFieldRow
+            label={t('settings.openchamber.about.field.updateChannel')}
+            info={updateChannelControl ? t('settings.openchamber.about.field.updateChannelHint') : undefined}
+            {...valueRow}
+          >
+            {updateChannelControl}
+            <Button size="sm" variant="ghost" onClick={checkAll} disabled={isChecking}>
+              <Icon name="refresh" className="size-4" />
               {t('settings.openchamber.about.actions.checkForUpdates')}
             </Button>
-          </div>
+          </SettingsFieldRow>
+          <SettingsFieldRow label={t('settings.openchamber.about.field.openCodeVersion')} {...valueRow}>
+            {versionValue(openCodeVersion || t('settings.openchamber.about.state.unknown'))}
+            {openCodeUpdate?.action}
+          </SettingsFieldRow>
+          {appReleaseControls ? <div className="px-4 py-3">{appReleaseControls}</div> : null}
+          <InstanceServiceUrls label={t('settings.openchamber.about.field.instanceUrls')} />
         </div>
-        
-        {manualUpdateNotice && (
-          <div className="px-4 py-3 border-b border-border/40">{manualUpdateNotice}</div>
-        )}
+        {notes.length > 0 && <div className="space-y-3">{notes}</div>}
+      </SettingsSection>
 
-        {remoteHostUpdateControls && (
-          <div className="px-4 py-3 border-b border-border/40">{remoteHostUpdateControls}</div>
-        )}
-
-        {appReleaseControls && (
-          <div className="px-4 py-3 border-b border-border/40">{appReleaseControls}</div>
-        )}
-
-        {openCodeUpdateControls && (
-          <div className="px-4 py-3 border-b border-border/40">{openCodeUpdateControls}</div>
-        )}
-
-        {[update.error, remoteHostUpdate?.error].filter(Boolean).map((error) => (
-          <div key={error} className="px-3 py-2 border-b border-border/40">
-            <p className="typography-meta text-[var(--status-error)]">{error}</p>
-          </div>
-        ))}
-
-        <div className="flex flex-col gap-2 border-b border-border/40 px-4 py-3 @xl:flex-row @xl:items-center @xl:justify-between">
-          <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.instanceUrls')}</span>
-          <InstanceServiceUrls />
-        </div>
-
-        <div className="flex items-center gap-4 px-4 py-4">
-          <a
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
-          >
-            <Icon name="github-fill" className="h-4 w-4" />
-            <span>GitHub</span>
-          </a>
-
-            <a
-              href={X_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
-          >
-            <Icon name="twitter-xfill" className="h-4 w-4" />
-              <span>@openchamber_dev</span>
-            </a>
-        </div>
-      </div>
+      {releaseNotes}
 
       <UpdateDialog
         open={updateDialogOpen}
@@ -715,6 +853,6 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         runtimeType={update.runtimeType}
       />
       {remoteHostUpdateDialog}
-    </SettingsSection>
+    </>
   );
 };

@@ -46,7 +46,7 @@ const adoptable = {
 const readInChild = (reader, filePath) => {
   const moduleUrl = new URL('./managed-opencode-state.js', import.meta.url).href;
   const script = `import { ${reader} } from ${JSON.stringify(moduleUrl)}; process.stdout.write(JSON.stringify(${reader}(${JSON.stringify(filePath)})));`;
-  return execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 3000 });
+  return execFileSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script], { encoding: 'utf8', timeout: 3000 });
 };
 
 describe('decideManagedOpenCodeLaunch', () => {

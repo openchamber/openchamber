@@ -68,6 +68,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let root: Root | null = null;
 let snapshotSpy: ReturnType<typeof spyOn<typeof opencodeClient, 'getActiveSessionStatuses'>> | null = null;
+let sessionListSpy: ReturnType<typeof spyOn<typeof opencodeClient, 'listSessionsPage'>> | null = null;
 let setActive: ((directory: string, sessionID: string) => void) | null = null;
 
 beforeEach(() => {
@@ -77,6 +78,15 @@ beforeEach(() => {
   // A valid URL token lets the socket open without minting one.
   setRuntimeUrlAuthToken('fixture-url-token', Date.now() + 10 * 60_000);
   // The viewed session is running, so the directory has work a reconnect must repair.
+  // The directory lists the viewed session: bootstrap reads statuses only for sessions it holds.
+  sessionListSpy = spyOn(opencodeClient, 'listSessionsPage').mockImplementation(async (options = {}) => ({
+    sessions: options.parentID === undefined && options.directory === DIRECTORY ? [{
+      id: VIEWED_SESSION, projectID: 'project', directory: DIRECTORY, title: 'viewed',
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    }] : [],
+    cursor: {},
+  }));
   snapshotSpy = spyOn(opencodeClient, 'getActiveSessionStatuses').mockImplementation(async (directory?: string) => {
     snapshotReads.push(directory ?? '');
     return { [VIEWED_SESSION]: { type: 'busy' } };
@@ -88,6 +98,7 @@ afterEach(async () => {
   root = null;
   setActive?.('', '');
   snapshotSpy?.mockRestore();
+  sessionListSpy?.mockRestore();
   deactivateRelayTunnel();
   clearRuntimeUrlAuthToken();
 });

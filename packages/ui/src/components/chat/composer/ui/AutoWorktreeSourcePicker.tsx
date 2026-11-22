@@ -12,13 +12,14 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useGitHubReadContext } from '@/components/references/referenceSources';
+import { useRepositoryReadContext } from '@/components/references/referenceSources';
+import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { NewWorktreeBranchPicker, type BranchPickerSection } from '@/components/session/NewWorktreeBranchPicker';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SourceControlReadContext } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { normalizePath } from '@/lib/pathNormalization';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import {
     checkPullRequestSource,
@@ -60,7 +61,8 @@ export function AutoWorktreeSourcePicker({ projectId, projectPath, isMobile }: {
         ?? EMPTY_WORKTREES);
     const branches = useGitBranches(directory);
     const isLoading = useGitLoadingBranches(directory) && !branches;
-    const readContext = useGitHubReadContext(directory);
+    const readContext = useRepositoryReadContext(directory);
+    const descriptorOf = useSourceControlDescriptorOf();
     const context: SourceControlReadContext | null = readContext && readContext !== 'missing' ? readContext : null;
 
     const source = picked?.projectId === projectId ? picked.source : null;
@@ -69,10 +71,10 @@ export function AutoWorktreeSourcePicker({ projectId, projectPath, isMobile }: {
     const defaultLabel = defaultRef ? formatStartRefLabel(defaultRef) : rootBranch || t('chat.chatInput.projectRoot');
 
     const pullRequestLabel = React.useCallback((number: number) => (
-        context?.provider === 'gitlab'
-            ? formatChangeRequestReference('gitlab', number)
+        context && context.provider !== 'github'
+            ? formatChangeRequestReference(descriptorOf(context.provider), number)
             : t('session.newWorktree.prNumber', { number })
-    ), [context?.provider, t]);
+    ), [context, descriptorOf, t]);
 
     const groups = React.useMemo(() => groupStartSourceBranches(
         branches?.all ?? [],

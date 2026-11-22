@@ -5,18 +5,22 @@ export type FilesystemErrorReason =
   | 'already-exists'
   | 'not-found'
   | 'not-directory'
+  | 'too-large'
+  | 'outside-workspace'
   | 'invalid-response'
   | 'unknown';
 
 export class FilesystemError extends Error {
   readonly reason: FilesystemErrorReason;
   readonly status?: number;
+  readonly maxBytes?: number;
 
-  constructor(message: string, options: { reason?: FilesystemErrorReason; status?: number } = {}) {
+  constructor(message: string, options: { reason?: FilesystemErrorReason; status?: number; maxBytes?: number } = {}) {
     super(message);
     this.name = 'FilesystemError';
     this.reason = options.reason ?? 'unknown';
     this.status = options.status;
+    this.maxBytes = options.maxBytes;
   }
 }
 
@@ -26,7 +30,7 @@ export const isFilesystemError = (error: unknown): error is FilesystemError => (
     error
     && typeof error === 'object'
     && 'reason' in error
-    && typeof (error as { reason?: unknown }).reason === 'string'
+    && typeof error.reason === 'string'
   )
 );
 
@@ -36,6 +40,8 @@ export const parseFilesystemErrorReason = (value: unknown): FilesystemErrorReaso
     case 'already-exists':
     case 'not-found':
     case 'not-directory':
+    case 'too-large':
+    case 'outside-workspace':
     case 'invalid-response':
       return value;
     default:
@@ -43,8 +49,6 @@ export const parseFilesystemErrorReason = (value: unknown): FilesystemErrorReaso
   }
 };
 
-// Web rejects with an Error; the VS Code bridge rejects with a plain object
-// that carries the message.
 const messageCarrierSchema = z.object({ message: z.string() });
 
 export const isFileMissingError = (error: unknown): boolean => {
@@ -59,4 +63,3 @@ export const isFileMissingError = (error: unknown): boolean => {
     || normalized.includes('no such file')
     || normalized.includes('does not exist');
 };
-

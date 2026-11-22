@@ -24,6 +24,9 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 
 ## Commands
 
+With no folder open, new sessions start in Chats. Each chat has its own directory
+under `~/.config/openchamber/chats`. Open a workspace folder to use project sessions.
+
 | Command | Description |
 |---------|-------------|
 | `OpenChamber: Focus Chat` | Focus the chat panel |
@@ -31,7 +34,7 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 | `OpenChamber: Open Sidebar` | Open the OpenChamber sidebar |
 | `OpenChamber: Run on Several Models` | Open a new tab set up to run one prompt on several models |
 | `OpenChamber: Open Session in Editor` | Open current or new session in an editor tab |
-| `OpenChamber: Settings` | Open extension settings |
+| `OpenChamber: Settings` | Open Settings in an editor tab. Repeat invocations reveal the same tab and leave the chat sidebar unchanged. |
 | `OpenChamber: Restart API Connection` | Restart the OpenCode API process |
 | `OpenChamber: Show OpenCode Status` | Debug info for development or bug reports |
 | `OpenChamber: Generate Commit Message` | Fill VS Code's Source Control commit box from staged changes, or unstaged if nothing is staged |
@@ -43,7 +46,7 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 | Action | Description |
 |--------|-------------|
 | Add to Context | Attach selection to your next prompt |
-| Add Comment | Open a comment thread on the selected lines. The comment stays anchored in the editor and goes out with your next message as a context card. The gutter `+` does the same once the extension is active |
+| Add Comment | Open a comment thread on the selected lines (or, from a line number, on that line). The comment stays anchored in the editor and goes out with your next message as a context card. The gutter `+` does the same once the extension is active. With `openchamber.lineCommentPlacement` set to `chat`, the note is written in the chat composer instead |
 | Explain | Ask the agent to explain the selected code |
 | Improve Code | Ask the agent to improve the selection in-place |
 
@@ -53,6 +56,9 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 |---------|---------|-------------|
 | `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to auto-start a local instance. Authenticates with `OPENCODE_PASSWORD` (or the legacy `OPENCODE_SERVER_PASSWORD`); when both are unset and the URL points at OpenCode's background service (`opencode service start`), the service's own password is used. |
 | `openchamber.opencodeBinary` | _(empty)_ | Absolute path to the `opencode` CLI binary. Useful when PATH lookup fails. Requires window reload to apply. |
+| `openchamber.lineCommentPlacement` | `editor` | Where the text of a code comment is written: `editor` opens the native comment thread on the selected lines, `chat` files the comment as context in the chat composer and keeps the anchor in the editor. In `chat` placement the gutter `+` is not offered, because VS Code builds that thread itself with no extension hook to place its text in chat. |
+
+`openchamber.apiUrl` and `openchamber.opencodeBinary` belong to one machine. In a Remote-SSH window the extension ignores the values from your local User settings: set them in the Remote or Workspace tab of the Settings editor. With no value on the server, the extension finds `opencode` there on its own.
 
 npm metadata and OpenCode version checks use the registry from the extension host environment or the user's `.npmrc`, including scoped registries and authentication.
 
@@ -76,6 +82,7 @@ Optional overrides:
 - `OPENCHAMBER_VSCODE_BIN=cursor bun run vscode:dev`
 - `OPENCHAMBER_VSCODE_DEV_WORKSPACE=/path/to/workspace bun run vscode:dev`
 - `bun run vscode:dev /path/to/workspace`
+- `OPENCHAMBER_VSCODE_REMOTE_DEBUGGING_PORT=9334 bun run vscode:dev` runs the host as its own VS Code instance in a throwaway profile, with Chrome DevTools Protocol on that port, even while another VS Code is open. The OpenChamber webview is the `vscode-webview://` iframe target; its document is that target's inner `iframe`. Stopping the script closes the instance and removes the profile.
 
 To package manually:
 
@@ -85,6 +92,21 @@ cd packages/vscode && bunx vsce package --no-dependencies
 ```
 
 Install locally: `code --install-extension packages/vscode/openchamber-*.vsix`
+
+The Settings command regression check runs in the real extension host after
+`bun run vscode:build`. With an isolated home and OpenCode data directories, run:
+
+```bash
+OPENCHAMBER_DISABLE_WEBVIEW_HMR=1 code --disable-extensions --skip-welcome \
+  --user-data-dir=/path/to/temporary-profile \
+  --extensions-dir=/path/to/temporary-extensions \
+  --extensionDevelopmentPath="$PWD/packages/vscode" \
+  --extensionTestsPath="$PWD/packages/vscode/src/settings-command.integration.cjs"
+```
+
+It checks null and omitted arguments, valid navigation, repeated invocation,
+and rejection of malformed navigation. It is separate from `bun run test`
+because it needs VS Code's extension API and window.
 
 </details>
 

@@ -4,17 +4,20 @@
 This module provides notification message preparation utilities for the web server runtime, including text truncation and plain-text normalization for system notifications.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/notifications/index.js`: public entrypoint imported by `packages/web/server/index.js`.
-- `packages/web/server/lib/notifications/routes.js`: route registration for push, visibility, and session status/attention endpoints.
-- `packages/web/server/lib/notifications/push-runtime.js`: push subscription persistence, VAPID initialization, and UI visibility runtime.
-- `packages/web/server/lib/notifications/push-seal.js`: end-to-end sealing of native push text. A phone that registers with a `pushKey` (32 bytes, base64; made by the iOS shell in the App Group, by Android's `PushSealKey`) gets each notification as the generic scenario title, an empty body and `data.enc` = `v1.` + base64(nonce || AES-256-GCM ciphertext || tag) of `{ title, body }`. Each such device is its own relay send. The iOS Notification Service Extension and Android's `SealedPushMessagingService` open it; the relay sends a sealed push to Android as a data message (openchamber-website `apps/api/src/lib/fcm.ts`) so that service runs in the background. The sealed text is richer than the clear one: `runtime.js` passes `sealed` = the session name as title and what happened as body (the agent's reply; `Question:`, `Wants to run:` / `Wants to edit:` / `Wants to read:` / `Wants permission:`, `Error:` or the goal title before the detail), capped at 250 characters. When there is no such text, the phone opens the generic text. Phones without a key keep getting the generic text in the clear. Enterprise mode sends no `sealed` text and strips the session name, so the phone shows only the scenario title.
-- `packages/web/server/lib/notifications/session-key.js`: the key both push stores group registrations under, a `sha256:` hash of the UI session token, never the token. Files written before the hashing are rewritten with hashed keys on first read. Both stores are written `0600`.
-- `packages/web/server/lib/notifications/apns-runtime.js`: native iOS APNs device-token persistence + delivery. Two modes: **relay** (default — sign + POST tokens + generic text to the central Cloudflare relay `https://api.openchamber.dev/v1/push/send`, which holds the single project APNs key) and **direct** (fallback — sign ES256 JWT with Node crypto + HTTP/2, when `OPENCHAMBER_PUSH_RELAY_DISABLED=true`). Each server has an auto-generated ECDSA P-256 keypair (`getOrCreateRelayKeypair`, persisted in settings); it binds tokens on the relay (`/v1/push/register-token`) and signs every relay request, so the relay only delivers to tokens bound to that server. APNs is the native app's sole notification channel (no local notifications) and is NOT gated on UI visibility — iOS suppresses the foreground banner instead. Mobile push carries only generic text (scenario title + session name) — see `APNS.md`. In enterprise mode (`../enterprise-mode.js`) `fanoutPush` also drops the session name from APNs and sends web push with the scenario title, an empty body and the deep link only, since web push leaves through the browser vendor's push service. Desktop notifications and in-app toasts stay local and keep the full text.
-- `packages/web/server/lib/notifications/emitter-runtime.js`: desktop/stdout + UI SSE notification emission runtime.
-- `packages/web/server/lib/notifications/emit-route.js`: `POST /api/notifications/emit` for OpenCode plugins.
-- `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
-- `packages/web/server/lib/notifications/template-runtime.js`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
-- `packages/web/server/lib/notifications/message.js`: helper implementation module.
+- `packages/web/server/lib/notifications/index.ts`: public entrypoint imported by `packages/web/server/runtime.js`.
+- `packages/web/server/lib/notifications/routes.ts`: route registration for push, visibility, and session status endpoints.
+- `packages/web/server/lib/notifications/push-runtime.ts`: push subscription persistence, VAPID initialization, and UI visibility runtime.
+- `packages/web/server/lib/notifications/push-seal.ts`: end-to-end sealing of native push text. A phone that registers with a `pushKey` (32 bytes, base64; made by the iOS shell in the App Group, by Android's `PushSealKey`) gets each notification as the generic scenario title, an empty body and `data.enc` = `v1.` + base64(nonce || AES-256-GCM ciphertext || tag) of `{ title, body }`. Each such device is its own relay send. The iOS Notification Service Extension and Android's `SealedPushMessagingService` open it; the relay sends a sealed push to Android as a data message (openchamber-website `apps/api/src/lib/fcm.ts`) so that service runs in the background. The sealed text is richer than the clear one: `runtime.js` passes `sealed` = the session name as title and what happened as body (the agent's reply; `Question:`, `Wants to run:` / `Wants to edit:` / `Wants to read:` / `Wants permission:`, `Error:` or the goal title before the detail), capped at 250 characters. When there is no such text, the phone opens the generic text. Phones without a key keep getting the generic text in the clear. Enterprise mode sends no `sealed` text and strips the session name, so the phone shows only the scenario title.
+- `packages/web/server/lib/notifications/session-key.ts`: the key both push stores group registrations under, a `sha256:` hash of the UI session token, never the token. Files written before the hashing are rewritten with hashed keys on first read. Both stores are written `0600`.
+- `packages/web/server/lib/notifications/client-push-access.ts`: keeps push away from revoked and expired paired clients, see *Revoked and expired clients* below.
+- `packages/web/server/lib/notifications/apns-runtime.js`: native iOS APNs device-token persistence + delivery. Two modes: **relay** (default — sign + POST tokens + generic text to the central Cloudflare relay `https://api.openchamber.dev/v1/push/send`, which holds the single project APNs key) and **direct** (fallback — sign ES256 JWT with Node crypto + HTTP/2, when `OPENCHAMBER_PUSH_RELAY_DISABLED=true`). Each server has an auto-generated ECDSA P-256 keypair (`getOrCreateRelayKeypair`, persisted in settings); it binds tokens on the relay (`/v1/push/register-token`) and signs every relay request, so the relay only delivers to tokens bound to that server. The relay keeps one binding per token and server, so the phone registers its token with every saved instance and each of them reaches it; `DELETE /api/push/apns-token` removes this server's binding (`/v1/push/unregister-token`) when this server held the token and no UI session here still holds it, and leaves the other servers' bindings alone; a token it never stored, such as a home-network-only phone's, never reaches the relay. Every APNs and FCM payload carries `data.serverId` (the same derived identity) next to `data.sessionId`, so a tap switches to the sending instance before opening the session. APNs is the native app's sole notification channel (no local notifications) and is NOT gated on UI visibility — iOS suppresses the foreground banner instead. Mobile push carries only generic text (scenario title + session name) — see `APNS.md`. In enterprise mode (`../enterprise-mode.js`) `fanoutPush` also drops the session name from APNs and sends web push with the scenario title, an empty body and the deep link only, since web push leaves through the browser vendor's push service. Desktop notifications and in-app toasts stay local and keep the full text.
+- `packages/web/server/lib/notifications/emitter-runtime.ts`: desktop/stdout + UI SSE notification emission runtime.
+- `packages/web/server/lib/notifications/emit-route.ts`: `POST /api/notifications/emit` for OpenCode plugins.
+- `packages/web/server/lib/notifications/runtime.ts`: trigger runtime for OpenCode event-driven notification fanout.
+- `packages/web/server/lib/notifications/template-runtime.ts`: notification template variables and session text/title enrichment runtime. Zen-model helpers are retained as compatibility stubs only.
+- `packages/web/server/lib/notifications/template-locales.ts`: the notification text OpenChamber writes itself, per interface language. An empty template field means "no custom text", so the notification uses these defaults and the settings page shows them as placeholders. `settings-runtime.js` no longer seeds English template text into an install; it clears the seed older builds wrote. The server keeps its own list because it cannot import `packages/ui`; an unknown tag falls back to English.
+- `packages/web/server/lib/notifications/extension-channels.ts`: extension notification channels (`provides: ["notifications"]`), see *Extension notification channels* below. `channel-accounts.ts` is their account store, `channel-routes.js` the account card's routes.
+- `packages/web/server/lib/notifications/message.ts`: helper implementation module.
 - `packages/web/server/lib/notifications/message.test.js`: unit tests for notification message helpers.
 
 ## Public exports
@@ -37,27 +40,133 @@ This module provides notification message preparation utilities for the web serv
   - `GET /api/sessions/snapshot`
   - `GET /api/sessions/status`
   - `GET /api/sessions/:id/status`
-  - `GET /api/sessions/attention`
-  - `GET /api/sessions/:id/attention`
-  - `POST /api/sessions/:id/view`
-  - `POST /api/sessions/:id/unview`
-  - `POST /api/sessions/:id/message-sent`
+  - `POST /api/sessions/:id/view` and `POST /api/sessions/:id/message-sent`: reset the native push badge and clear the session's pushed notifications (*Clearing handled notifications*). Whether a session is unread is OpenCode's own `time.viewed`.
 
 ### Trigger runtime API (runtime.js)
+
+`notifyPullRequest({ item, event })` delivers user merge-follow events through the same native, UI, web-push, APNs and extension-channel fanout. `notifyOnPullRequests` is a profile setting, default on, independent of completion/error notifications. It is checked on the server before every delivery. Fixed event titles follow the interface locale (`pull-request-locales.js`); the body names the repository and PR number. Enterprise-mode push and extension deliveries strip that reference through the existing fanout boundary. Notifications have kind `pull-request`, no session id, and never wake an agent. Existing click routing accepts sessions only, so these notifications currently bring the app forward without selecting a PR.
+`notifyShareAnswer({ sessionId, label, title, summary })` announces an answer to a shared page (`../share-pages`) once OpenCode admitted it into its session. It obeys the completion toggle (`notifyOnCompletion`); there is no setting of its own. Answers delivered within 2 s of each other (at most 10 s in all, such as a night's picked up at start) collapse into one notification about the newest session: "<label> answered “<title>”" with the answer's summary, or "N answers to shared pages" with the names; both texts come from `template-locales.js` (`shareAnswerTitle`, `shareAnswersTitle`). Kind and push type `share-answer`, tag `share-<sessionId>`.
+- Every open window shows it as a toast, whatever the presence: the UI event always goes out, with `showWhenFocused` and `toastOnly`. `toastOnly` is true while another window is in use (`isAnyUiVisible`, the desktop's focus) or system notifications are off; a window then shows the toast and no system notification of its own (`packages/ui` `sync/share-answer-toast.ts`).
+- The desktop notification, web push, APNs and extension channels follow the usual presence and `notificationMode` rules, through `fanoutPush` and `sendToChannels`. The label and the page title are conversation content, like a session name: enterprise mode strips them from push and channels through that same boundary, and the desktop notification and toast keep them.
+- The tag clears like `ready-`: on view, a message sent, or a turn start. The answer's own delivery wakes the session, so the first turn start after the delivery is skipped, without comparing clocks (an external OpenCode can run on another machine's clock): an answer still waiting in the batch is marked woken by it, and a claim made before it carries `skipTurnStart` (saved with the open tags), which that turn start removes instead of clearing. The next turn, a view or a message clears the tag. When the session was busy and no new turn starts, the next turn start is the one skipped. A view, a message or a later turn during the collapse wait drops that session's waiting answers, so nothing already handled is announced.
+- The toast comes from the control stream, which every client opens whatever carries its main events (`packages/ui` `sync/control-stream-sync.ts`); the main-stream and web notification paths only hold back the system notification for `toastOnly`.
 - `createNotificationTriggerRuntime(dependencies)`: creates runtime-owned debounced trigger handling for OpenCode events.
 - Returned API:
   - `maybeSendPushForTrigger(payload)`
 - Owns:
   - completion/error/question/permission trigger routing (a page an agent shows that waits for the user's answer, `openchamber:page-waiting` from this server, notifies exactly like a form, with the page title as the ask); permission suppression consults the authoritative permission-auto-accept runtime
-  - where a permission or question notification opens: the highest session above the session that asked that still runs in the same directory, whose composer docks every request below it. In a tree that stays in one directory that is the top-level session. A subagent moved to another directory takes its requests to that directory, where no ancestor's dock reads them, so the walk stops before an ancestor in another directory. The walk reads each record's `parentID` and `location.directory` fresh from `GET /api/session/:id`, since a move changes a session's directory, and stops at the first record it cannot read. Native notifications, the UI broadcast, web push (`data.url`, `data.sessionId`) and APNs (`data.sessionId`) all carry that session, with the event's `directory`, which it shares. The text, the tag and `sessionName` still describe the session that asked. A waiting page opens its own session, the only one that draws it
+  - an interrupted step marked `aborted` after Stop, steering, or question dismissal emits no external error notification. Terminal execution failures through `session.error` still notify, including exhausted auto-resume attempts with error type `aborted`. In-app `SessionErrorNotice` diagnostics and VS Code's separate notification path are unchanged.
   - session parent cache for subtask suppression
+  - where a permission or question notification opens: the highest session above the session that asked that still runs in the same directory, whose composer docks every request below it. In a tree that stays in one directory that is the top-level session. A subagent moved to another directory takes its requests to that directory, where no ancestor's dock reads them, so the walk stops before an ancestor in another directory. The walk reads each record's `parentID` and `location.directory` fresh from `GET /api/session/:id`, since a move changes a session's directory, and stops at the first record it cannot read. Native notifications, the UI broadcast, web push (`data.url`, `data.sessionId`) and APNs (`data.sessionId`) all carry that session, with the event's `directory`, which it shares. The text, the tag and `sessionName` still describe the session that asked. A waiting page opens its own session, the only one that draws it
   - bounded per-process retention in the trigger runtime: notified permission requests and the ready/error per-session cooldowns are each capped at 500 entries with oldest-first eviction, so the process-lifetime runtime cannot grow them without limit; a permission key only has to outlive a plausible re-delivery of the same request
-  - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
+  - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). On OpenCode 2.2.6+ the check also reads the job list, which covers nested subagents and background images; background shells do not hold the notification, since a dev server never ends. Running direct child sessions are asked for in any case: OpenChamber's own child sessions (workflow agents) are no OpenCode jobs, an older OpenCode has no job list, and a space reaches only session routes. The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
   - an MCP elicitation form (session id `global`, owned by no session) notifies without a session: no session title lookup, and the deep link opens the app
-  - template resolution and fallback behavior
+  - template resolution and fallback behavior: an empty field in `settings.notificationTemplates` resolves to the default for `settings.locale` (`template-locales.js`), so notification text follows the interface language unless the user wrote their own
   - native notification fanout and web push payload fanout
   - push suppression while any fresh UI visibility heartbeat reports a focused client
+  - the same presence for open windows (`showInOpenClients`): a notification with `requireHidden` goes neither to the desktop shell nor to any connected UI while `isAnyUiVisible()` holds, so a hidden tab, phone browser or second computer stays quiet while the user works in another window. With `notificationMode: 'always'` every window still shows it. See *Why open windows follow the server's presence*
+  - no ready notification for a turn that is a step of an auto-review (`isInAutoReview`, answered by `../auto-review`'s `speaksFor`); `notifyAutoReviewEnded` sends the review's one notification when it ends, under the completion toggle, with `review*` texts from `template-locales.js` and APNs type `review`
+  - extension notification channels: `deliverToExtensionChannels({ notification, requireHidden })` is called where push is (`sendToChannels`), with the text push gets and the enterprise stripping push applies; see *Extension notification channels* below
   - chats of isolated spaces: `maybeSendPushForTrigger(payload, { spaceId })` reads such a chat's record (title, parent, goal), its last reply and its running subagents inside the space, through `spaceFetchFor(spaceId)`, a `fetch` over the spaces dispatcher (`../spaces/space-fetch.js`), and never asks the host's OpenCode or the host's permission policy about it, since neither knows the chat. What comes back is the space's text, shown as it is shown in the sidebar. A space that cannot be asked gives the generic text, as a host chat whose reads fail does. The host's auto-accept is not consulted for a space's permission request, so such a request notifies after the debounce unless its reply arrives first.
+
+### Clearing handled notifications (runtime.js, apns-runtime.js)
+
+A pushed notification is removed from the phones and browsers once its cause is handled anywhere. Every push has a tag that names its cause, and the same tag is the APNs collapse id, the Android notification tag, the web notification tag and `data.tag` on the phone:
+
+| Tag | Cleared when |
+|---|---|
+| `ready-<sessionId>`, `error-<sessionId>`, `goal-<sessionId>`, `review-<sessionId>`, `share-<sessionId>` | the session's next turn starts (`session.status` busy with `turnStartedAt`, which only `session.execution.started` carries), or the session is viewed or sent a message from any OpenChamber client (`POST /api/sessions/:id/view`, `/message-sent`) |
+| `question-<sessionId>` | the form it shows settles (`form.settled`) or the page it shows stops waiting (`openchamber:page-settled`), or as above |
+| `permission-<sessionId>` | the request it shows is replied to (`permission.replied`), or as above |
+
+A `share-` tag survives the turn its own answer woke (`skipTurnStart`, see `notifyShareAnswer`). Pull request notifications have no cause the server can see handled, and stay until dismissed.
+
+Opening a parent also clears the open tags of its descendants, including nested OpenCode subagents, workflow agents and operator children. Sending a message or starting a turn still clears only that session.
+
+`push-tags.ts` owns the open tags and the 20 most recently cleared ones. It serializes writes to `push-open-tags.json` so a notification can still be cleared after a restart. One tag can show several requests in turn, so a reply clears the tag only when it answers the request the tag shows now. A web-only replacement keeps the prior phone delivery ID until that banner is cleared or replaced. Clearing a phone banner also updates the badge count. The APNs runtime sends batches of at most 20 clearing entries.
+
+A parent view clears the delivery IDs it captured even if the open-tag limit evicts them while the server checks ancestry. A cleared ID can coexist with an open tag when that tag has a newer delivery. Later pushes for other tags repeat the cleared ID so a phone that missed the background clear can still dismiss the old banner.
+
+- **Nothing stale is sent.** A notification claims its tag before its text is prepared (`claimPushTag`), and a cause handled meanwhile takes the claim away, so the push is dropped: a form or page that settles inside the 500 ms debounce or while the session name is read, a permission replied to during the auto-accept lookup or later. A notification is also dropped when the session's notifications were cleared (`sessionClearedAt`) after its turn ended or its ask arrived.
+- **A late clearing never removes a newer notification.** Every push carries `nid` (in `data` for web push), a time-based id that rises with each push. A clearing names `tag@nid`, the newest push it covers, and the phone or browser keeps a notification under that tag whose `nid` is higher. A clearing push and a later visible push with the same tag can arrive in either order: background pushes and normal-priority FCM messages are delayed on their own schedule.
+- **iOS and Android:** `clearApnsNotifications` sends the entries and the remaining badge to every registered device through the relay's `POST /v1/push/clear`, signed over `ts.sortedTokens.clear.tags`. The relay sends an APNs background push (`content-available`, priority 5, no alert), which `AppDelegate` handles, and an FCM data message of type `clear` at normal priority, which `SealedPushMessagingService` handles. Direct mode sends the background push itself. A relay without the route answers 404, logged once.
+- **Every later push** carries the recently cleared entries (`clear`, comma-separated in `data` for the phones, an array for web push), minus its own tag. The iOS notification service extension, Android's messaging service and the service worker remove those before showing the new one.
+- **This browser:** opening a session closes its web-push notifications on the device that opened it (`markSessionViewed`), next to the desktop's own (`clearDesktopSessionNotifications`).
+
+#### Why a background push and not a visible push the phone hides
+
+iOS shows every alert push; a notification service extension cannot drop one without the filtering entitlement Apple grants by request. A background push shows nothing. It wakes the app unless the user swiped the app away, and iOS may hold or drop it to save power, which is why later pushes repeat the cleared tags.
+
+#### Why the open tags are saved to a file
+
+The desktop app's server stops whenever the app quits, and the phones keep what it pushed. Without the file, a question answered after a restart would stay on the phone until another push with its tag replaced it. The file holds tags and ids only (`ready-<sessionId>`, a request key), at most 500 entries.
+
+#### Why web push has no clearing push
+
+A push that shows no notification costs the subscription: Safari revokes it after a few, Chrome shows its own "updated in the background" notice. So browsers learn of handled notifications from the next push, and from the user opening the session.
+
+#### Why viewing a session clears its question and permission too
+
+The desktop already removes all of a session's notifications when it is viewed (`clearDesktopSessionNotifications`). The user has the request in front of them on that device, so the copy on the phone only duplicates it.
+
+#### Why a parent view starts from the open tags
+
+The server only needs the lineage of sessions with an open tag. It reads their parent links from the same OpenCode source, with a shared deadline, and leaves a tag alone if it cannot confirm the link. A space view needs ownership in the host's space session index. The view snapshots delivery IDs before reading lineage so it can dismiss the old banner without removing a newer push or a claim still preparing it.
+
+### Extension notification channels (extension-channels.js, channel-accounts.js, channel-routes.js)
+
+An installed extension whose service provides `notifications` (SDK `contributes.notifications`) is a delivery channel next to the desktop and the phone. `createExtensionNotificationChannels` owns which channels exist, their accounts and the delivery; `index.js` builds one, hands its `deliver` to `createNotificationTriggerRuntime` as `deliverToExtensionChannels`, and passes it to `feature-routes-runtime.js`, which registers the routes, reconciles it at start and from the guest activation and deactivation listeners.
+
+- The catalog is the authority (`isNotificationChannelGuest`: enabled, fully approved with an effective `service` grant, the role and a parsed contribution). Approving the extension and connecting an account is the switch; pausing it is the off; nothing on the Notifications page refers to a channel. `reconcile()` runs serialized and revokes the handles of a guest that left.
+- Accounts are OpenChamber's: one per channel in `{dataDir}/notification-channels.json` (`0o600`, temp file and rename, writes chained per file; a corrupt file is an error, never a disconnected channel). The token leaves the store only to mint a handle. `connect` probes a typed instance (`auth.probe`), verifies the token through the service (`auth.verify`, the handle carries the candidate token) and stores what the server said the account is; connecting again replaces the account. A `user` instance is an https origin or http on this machine; `fixed` is the contribution's origin. A `basic` username must be one the handle minter can send (`isProviderUsername`), refused as 400 `USERNAME_INVALID` before any call. When an update moves a `fixed` channel's server, `reconcile` writes the account off (`invalidReason: 'instance-changed'`) and `deliver` sends nothing to it: the token was given for the old server, and the card asks the user to connect again.
+- Every call to the service carries a fresh handle from `../source-control/outbound-handles.js`, bound to the account's origin and token, served on `/notifications/outbound` by the callback listener; the service never holds a token. A `status: 401` writes the account off only when the proxy saw the server answer 401 through that handle; the card then says the account needs attention, and the channel is skipped until the user connects again.
+- `deliver({ notification, requireHidden })` is called by `runtime.js` (`sendToChannels`) beside `fanoutPush`, after the kind's toggle, the debounces and the subagent, goal and auto-review suppressions, with the text push gets: in enterprise mode the kind's generic title (`message.js` `genericNotificationTitle`), no body, no session name, no directory, since the channel's server is outside the boundary. The channel rechecks enterprise mode immediately before forwarding, so a policy enabled during a queued call strips that call's content too. The module applies the visibility gate itself (`isAnyUiVisible`, unless `notificationMode` is `always`): the Electron focus gate the desktop branch reads does not exist on web. Delivery is at most once; a failed `notify` is warned once a minute per channel and never retried. Nothing here logs a notification's text.
+- Routes: `GET /api/notifications/channels`, `PUT /api/notifications/channels/:providerId/account` (`{ token, username?, instance? }`), `DELETE /api/notifications/channels/:providerId/account`; failures are `{ error, code }` with the module's status (404 `CHANNEL_UNKNOWN`, 400 `TOKEN_REQUIRED` / `USERNAME_REQUIRED` / `USERNAME_INVALID` / `INSTANCE_REQUIRED` / `UNSUPPORTED_INSTANCE`, 401 `TOKEN_REFUSED`, 409 `CONNECT_SUPERSEDED`, 503 `CHANNEL_UNAVAILABLE` / `CHANNEL_BUSY`, 502 `MALFORMED_PROVIDER_RESPONSE`). No answer carries a token.
+
+#### Why account changes use compare-and-set
+
+A Connect captures a per-channel operation identity before verification. Disconnect invalidates that identity even when no account exists, and the store checks it under its write lock before committing. Each stored connection also has a random revision, so a delayed invalidation compares the original account under the same lock and cannot mark a replacement invalid. Older records without a revision remain readable and acquire one on their next connection.
+
+#### Why calls share a bounded channel queue
+
+The SDK promises one notification-role call at a time, including authentication. Each channel serializes at most 200 outstanding calls; newer notifications are dropped with a rate-limited warning and Connect receives a busy error. Deactivation aborts the channel's active request, drops queued calls and revokes handles. Queued notifications recheck visibility and read the current account when their call starts.
+
+#### Why the channel's accounts have their own store and not the source-control auth store
+
+That store models forge users (an integer `id`, `origin#id` identities, Git transport credentials) in `source-control-auth.json`, and a package providing both roles would share one `ext-<id>` section. A channel's account is a string id with one token; a store of its own keeps the shapes honest and removal independent.
+
+#### Why delivery is gated on `isAnyUiVisible` here and not on the trigger runtime's focus check
+
+The desktop branches read `getIsWindowFocused`, which only the Electron shell sets; on web the gate lives inside `fanoutPush` (`isAnyInteractiveClientVisible`) and inside web push (`requireNoSse`). A channel hooked after `fanoutPush` would therefore deliver on web while the user reads the answer. The module reads the push runtime's visibility itself, so a channel behaves like push on every runtime.
+
+### Revoked and expired clients (client-push-access.js)
+
+A registration made with a paired client's token sits under `clientSessionKeyFor(id)`. Two things keep notifications off a client that is no longer valid:
+
+- Revoking a client, and clearing revoked clients from the list, removes the client's devices from both stores (`removeDevicesOfClients`). A failure while revoking is a log line, because the revocation is already written and the settings page acts on its success. The send check below still skips the client's own key, but a device also registered under another key keeps receiving through it until the client is cleared. Clearing removes the devices before the rows go, so a failure there keeps the rows, answers with an error the settings page shows, and can be retried.
+- Every send skips the keys of revoked and expired clients in the list, and of clients paired for the home network only (`invalidSessionKeys`). When the list cannot be read the send fails with a log line and nothing goes out.
+
+A valid client's device, a cookie session's device, and a phone that pairs again after being revoked keep or regain their notifications. The phone app registers again each time it connects with a token the server accepts. A browser subscribes only from the switch on the Notifications page, so a browser removed along with a revoked client gets no web push until that switch is turned off and on.
+
+A registration whose client row is gone cannot be stopped. Its key is a hash of an id that no longer exists, and it looks exactly like a cookie session's key, so the send has to deliver to it. That covers a row an older build cleared. A row replaced by pairing again is not left behind: the redeem route removes the replaced client's devices before it answers, so the phone receives again only after it registers under the new client. A client revoked by an older build whose device is also registered under a cookie session keeps delivering through that key until the client is cleared from the list.
+
+A server with no UI password accepts requests without any credential, so a revoked token does not lock the phone out: its next registration succeeds as a new cookie session and notifications resume. Revocation on such a server does not cut the device's API access either, and that is `../ui-auth`'s to change.
+
+#### Why a home-network-only device gets no push and not push without content
+
+A device paired with only LAN addresses (`localOnly` in `../client-auth/`) was set up so that nothing about it leaves the home network. Every push leaves it: the device token goes to the push relay and to Apple or Google, and a sealed push still tells them when the agent finished. So the send skips the client's key (`invalidSessionKeys`), `POST /api/push/apns-token` answers `{ ok: true, localOnly: true }` without storing the token or registering it with the relay, and `GET /api/push/delivery` tells the app, which then skips the permission prompt and shows why on its Notifications page. Web push to the same client is skipped by the same key check. Both routes judge the request by its paired-client bearer token before the UI session, because a cookie from an earlier password sign-in would otherwise hide the device behind a session key that is not local-only. A relay request clears the flag, and the app registers again on its next connection.
+
+#### Why a device leaves every key and not only the client's own
+
+Sends deduplicate by device, so a phone that signed in with a cookie session before it paired would keep receiving through the older key. A key of another valid client stays: that pairing still authenticates, and removing its entry would silence a valid device until its next launch. A cookie session's key cannot be told from a stale one, so it goes; a phone whose cookie session is still valid registers again when it next connects, and a browser through its Notifications switch.
+
+#### Why a send fails when the client list cannot be read
+
+Delivery is at most once already (`APNS.md`, *When the relay cannot be reached*), and an unreadable list must not read as "nobody was revoked". One lost notification with a log line costs less than a revoked phone getting the text.
+
+#### Why nothing is unbound on the relay
+
+The relay has no route for it, and sends only ever start from this server's list, so removing the local record stops delivery. The token stays bound to this server, which is what lets the same phone register again after it pairs.
 
 ### Push runtime API (push-runtime.js)
 - `createPushRuntime(dependencies)`: creates runtime for web push and UI visibility state.
@@ -67,6 +176,7 @@ This module provides notification message preparation utilities for the web serv
   - `setPushInitialized(value)`
   - `addOrUpdatePushSubscription(uiSessionToken, subscription, userAgent)`
   - `removePushSubscription(uiSessionToken, endpoint)`
+  - `removePushDevicesOfSessions(sessionKeys, keep)`
   - `sendPushToAllUiSessions(payload, options?)`
   - `updateUiVisibility(token, visible)`
   - `isAnyUiVisible()`
@@ -79,7 +189,9 @@ This module provides notification message preparation utilities for the web serv
   - `addOrUpdateApnsToken(uiSessionToken, deviceToken, userAgent, platform, environment)` — also binds a newly-seen token on the relay (signed `/v1/push/register-token`). `environment` is the APNs environment the token was minted for (`sandbox` for Xcode/dev-signed installs, `production` otherwise — reported by the client at registration); delivery groups tokens by it.
   - `removeApnsToken(uiSessionToken, deviceToken)`
   - `removeApnsTokenFromAllSessions(deviceToken)`
-  - `sendApnsToAllUiSessions(payload)` — `payload.sealed` (`{ title, body }`, optional) is what a phone with a push key opens; it is never sent in the clear. Signs + sends to all registered tokens (no UI-visibility gate; iOS suppresses the foreground banner). No-ops with a single warning when APNs is unconfigured. Drops tokens on `410` / `BadDeviceToken` / `Unregistered`.
+  - `removeApnsDevicesOfSessions(sessionKeys, keep)`
+  - `clearApnsNotifications({ tags, badge })` — removes the notifications with these tags from every registered device with a push that shows nothing; see *Clearing handled notifications*.
+  - `sendApnsToAllUiSessions(payload)` — `payload.sealed` (`{ title, body }`, optional) is what a phone with a push key opens; it is never sent in the clear. Adds `data.serverId` to the forwarded payload, the derived identity a tap uses to pick the instance that sent it. Signs + sends to all registered tokens (no UI-visibility gate; iOS suppresses the foreground banner). No-ops with a single warning when APNs is unconfigured. Drops tokens on `410` / `BadDeviceToken` / `Unregistered`. Relay sends run in parallel, each limited to 15 s and sent once more only when the request never left this machine, since the relay does not deduplicate (`APNS.md`, *When the relay cannot be reached*).
   - `resolveApnsConfig()`
 - The device-token store rides the shared durable-store primitive (`../shared/durable-json-store.js`, #976/#978): a file that is not a JSON object at version 1 is malformed and is preserved aside under the primitive's collision-proof name before any write replaces it; a serialized write whose preservation fails is refused. An absent or empty file is the empty store.
 - Configuration (env first, then `settings.apnsConfig`): `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8` (PEM contents; literal `\n` accepted) or `OPENCHAMBER_APNS_P8_PATH`, `OPENCHAMBER_APNS_BUNDLE_ID` (default `today.developing.openchamber`), `OPENCHAMBER_APNS_ENVIRONMENT` (optional override forcing every send to `sandbox` or `production`; when unset, each token is delivered to the environment it registered with, defaulting to `production` for tokens without one).
@@ -93,7 +205,7 @@ This module provides notification message preparation utilities for the web serv
 
 ### Plugin notification route (emit-route.js)
 - `createPluginNotificationEmitter(dependencies)` owns validation, the rate window and delivery; one instance is shared by the HTTP route and the `openchamber_notify` agent tool (`notify.send`).
-- `registerNotificationEmitRoutes(app, dependencies)` returns `registerPluginRoute()` and `registerApiRoute()`. Bootstrap calls the first before API auth and the second after it.
+- `registerNotificationEmitRoutes(app, dependencies)` returns `registerPluginRoute()` and `registerApiRoute(apiAuth)`. The plugin route is registered first and answers only a plugin-token request, otherwise it falls through. The API route carries the server's own `/api` gate (`requireApiAuth`, returned by `registerAuthAndAccessRoutes`) on the route, so its authorization does not depend on where the router was mounted. Registration without that gate throws.
 - Callers: a plugin in the managed OpenCode (agent-tool bearer token, the only reason for the pre-auth registration) or any client that passes regular API auth. No other auth path exists.
 - Body `{ title?, body?, tag?, sessionId?, directory?, showWhenFocused? }`, at least one of title/body; title ≤120, body ≤500 chars, 16kb JSON. `kind` is always `plugin` so callers cannot trigger kinds the UI treats specially.
 - One shared rate window: 10 notifications per 10s, then 429 with `Retry-After`.
@@ -112,7 +224,7 @@ This module provides notification message preparation utilities for the web serv
   - `extractLastMessageText(payload, maxLength?)`
   - `fetchLastAssistantMessageText(sessionId, messageId, maxLength?, source?)`
   - `maybeCacheSessionInfoFromEvent(payload, { spaceId }?)`: caches a host session's title; an event of a space (`spaceId` set) is not cached, and a space's chat is never read from these caches, so a session id a space names cannot set a host chat's title.
-  - `buildTemplateVariables(payload, sessionId, source?)`: `source` (`{ buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl }`, the host's OpenCode by default) is where the session's title and messages are read; `runtime.js` passes the space's for a chat of an isolated space. `{project_name}`, `{worktree}` and `{branch}` come from the event's `directory`, else the session record's `location.directory`; turn-end events carry no location, so they read the record. `{project_name}` is the label of the project the sidebar files that directory under: a directory registered as a project is that project, else its repository's primary worktree (`resolvePrimaryWorktreeRoot`) names it, so a session in a worktree shows its project; a directory under `chatRoots` is `Chats`, since a chat's folder name is a generated id; anything else is its folder name. The project open in the UI is used only when neither names one, as for a form owned by no session, and for a space's chat, whose directory is a path inside the space and is never matched against host projects or run git in on the host.
+  - `buildTemplateVariables(payload, sessionId, source?)`: `source` (`{ buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl, isSpace? }`, the host's OpenCode by default) is where the session's title and messages are read; `runtime.js` passes the space's, with `isSpace: true`, for a chat of an isolated space. `isSpace` alone tells the two apart: a source without it is the host, whichever object it is, so it uses the title and session caches, matches host projects and runs git on the host. A new kind of source that reads anything but the host's OpenCode must set `isSpace`, or its session ids reach those caches and its paths reach the host filesystem. `{project_name}`, `{worktree}` and `{branch}` come from the event's `directory`, else the session record's `location.directory`; turn-end events carry no location, so they read the record. `{project_name}` is the label of the project the sidebar files that directory under: a directory registered as a project is that project, else its repository's primary worktree (`resolvePrimaryWorktreeRoot`) names it, so a session in a worktree shows its project; a directory under `chatRoots` is `Chats`, since a chat's folder name is a generated id; anything else is its folder name. The project open in the UI is used only when neither names one, as for a form owned by no session, and for a space's chat, whose directory is a path inside the space and is never matched against host projects or run git in on the host.
   - `getCachedZenModels()`
 
 ## Constants
@@ -146,7 +258,168 @@ omit this additive field; they keep their existing behavior.
 - Normalizes markdown-like formatting to plain text before truncation.
 - Always applies `maxLastMessageLength` truncation to final result.
 
+## Invariants
+
+- A failed push-store write rejects its caller while allowing later registrations to write. A failed channel-catalog read preserves the registered channels, because a read failure establishes no removal.
+- A claim released without sending restores the previous notification under its tag, because the phone still shows that push. Restored tags load before current-process tags so a delayed store read cannot replace newer state; writes begin immediately and serialize because the desktop server can stop after any push.
+- The cross-project session snapshot comes from the server's single upstream stream so clients that do not initialize every directory still receive live status, waiting requests and context readings.
+
+## Decisions
+
+### Why channel delivery has a server-side notification kind
+
+The server already forwards `share-answer` to extension channels. The SDK's
+published kind list omits it, but its wire reader checks the input object
+without validating the kind. The server delivery and serialization types
+include `share-answer` while leaving the SDK contract and the wire unchanged.
+
+### Why trigger inputs keep their unchecked fields
+
+Event text and template variables retain their string checks. Session records
+need only be objects at the OpenCode read boundary; their title and goal are
+checked where used. Saved push tags retain the original truthiness checks and
+can contain non-string keys, causes or IDs. Missing session names on settlement
+pushes only affect presentation and never stop delivery.
+
+### Why channel results follow their schemas
+
+Provider responses use the SDK schemas' inferred result types. Verification
+requires a string login even though stored accounts permit null. The adapter
+keeps that distinction, and Basic accounts still retain the entered username.
+
+The outbound handle factory's declaration describes the credential it already
+uses and the attempts it records, including nullable logins and
+`{ method: string, status: number | null }`. The implementation remains in its
+owning source-control module.
+
+### Why template values keep their checked types
+
+Event session titles pass through without string validation, so
+`NotificationTemplateVariables.session_name` remains JSON. A text part is
+accepted when either `text` or `content` is a string; the other field remains
+unchecked and keeps its original truthy fallback and join coercion. Template
+variable lookups retain inherited-property behavior, including `constructor`.
+Session reads establish only an object, including arrays, and location fields
+are narrowed where used.
+
+### Why the simple-git declaration admits windowsHide
+
+The notification template runtime already supplies `spawnOptions.windowsHide`.
+The folder-local augmentation preserves that input without a cast. Installed
+simple-git 4.0.2 accepts the options object, forwards only `uid` and `gid` from
+it, and independently defaults process spawning to `windowsHide: true`.
+
+### Why relay failure messages retain their callable check
+
+A caught failure establishes neither a string message nor a string error code.
+Relay logging keeps the original message when no code is present and calls its
+`includes` method when a code is present. Checking callability preserves that
+behavior without coercing the message or claiming the method returns a boolean.
+
+### Why direct APNs uses bounded authentication and collapse ids
+
+Apple rejects JWTs older than 1 hour, so the runtime reuses them for 50 minutes.
+APNs collapse ids keep their 64-character slice. Background clearing pushes
+retain `content-available`, no alert, and priority 5.
+
+### Why push records keep their JSON type until entry validation
+
+Reading a JSON file establishes JSON values, not valid subscriptions. Hashing
+session keys preserves malformed records, and only two arrays concatenate when
+keys collide. The existing array and field checks remain at the subscription
+and delivery boundaries. Channel accounts instead use the store schema's
+inferred type, including its nullable login and optional name.
+
+### Why sealed content returns a JSON value
+
+Opening a sealed push authenticates and parses the plaintext. It does not
+validate a notification shape, so its return type makes no promise about a
+title or body.
+
+### Why optional callbacks use their declared availability
+
+Notification callbacks come from server composition and native host wiring.
+Their types establish callability; absence still selects the existing fallback.
+HTTP bodies, stored push entries, environment strings and caught failures keep
+their boundary checks in `inputs.ts`.
+
+### Why push keys are hashes and not stored credentials
+
+Push registrations can outlive their UI sessions. Their grouping key only needs stable equality, so hashing keeps the session credential out of persistent registration files.
+
+### Why badges count tags and not unread sessions
+
+Each tag identifies a banner, and one session can have several banners. The absolute badge counts pushed tags since user engagement; unread state arrives separately and can race the push trigger or remain viewed on a backgrounded client. A suppressed native push leaves the badge and the phone's previous tag state unchanged.
+
+### Why mobile push reads interactive-client presence and not phone visibility
+
+A suspended WKWebView cannot reliably report that it is hidden, so native and mobile-PWA push suppression uses fresh visibility from interactive clients. Native iOS suppresses its own foreground banner, and the PWA service worker checks focused clients; non-mobile web subscriptions use the any-visible gate. A heartbeat without a platform preserves the previous platform classification.
+
+### Why relay registrations repeat and not only for new tokens
+
+Every device registration rebinds its token and platform, because existing tokens need their bindings after relay or server changes. A failed registration write leaves later registration attempts usable.
+
+### Why relay signing uses the shared identity and not a separate push keypair
+
+Push and private relay requests identify the same server through the shared signing-key store. Cached keys follow its generation so resetting that identity also changes push signing; the public JWK contains only the 4 relay-schema fields that determine the server id, and the signature covers the platform to prevent routing changes in transit.
+
+### Why APNs batches separate environments and not just devices
+
+Sandbox and production endpoints know different tokens. Sending to the wrong endpoint produces `BadDeviceToken` and would incorrectly delete a live registration; registrations without an environment retain the production default used by released apps. Visible direct pushes set `mutable-content` so the notification service extension can refresh widgets even while the app is closed.
+
+### Why desktop delivery has a callback and not only stdout
+
+An in-process Electron shell receives a direct callback, which can be installed after runtime construction to fit the server's module wiring. Stdout remains the fallback protocol for other shells. A successful native delivery makes the UI event informational through `desktopNotificationDelivered`, preventing a second OS notification; `desktopStdoutActive` remains available to older clients.
+
+### Why Basic accounts retain the typed login and not a service-supplied login
+
+The typed username is the identity accepted by Basic authentication and is the one subsequent outbound handles must send. Instance input contains only an origin, because the service owns request paths; paths, queries, fragments and embedded credentials cannot become part of the stored instance.
+
+### Why partial updates preserve parentage and not clear it
+
+Only a full `session.created` record with no parent proves that a session has no parent. A partial `session.updated` record can omit `parentID` while changing usage or title, so treating that omission as parentless would bypass subagent-notification suppression.
+
+### Why readiness follows execution idle and not the final step
+
+An execution can drain steering input after a step ends with `stop`, so only its terminal idle announces readiness; an aborted idle announces nothing. The start and end of an assistant step contribute different metadata, which the runtime joins by message id and retains for the idle event's agent, model and reply text.
+
+### Why permission suppression runs before dispatch and not only on replies
+
+An auto-accepted permission's reply can take longer than the debounce, so the server mirrors the session and ancestor auto-accept state before dispatch and still lets the authoritative safety policy hold a request for the user. A reply without a request id clears the session debounce to avoid a stale alert. Permissions share custom question templates but retain permission-specific defaults when a field is empty.
+
+### Why goal and review loops announce settlement and not each turn
+
+Their intermediate turns are loop progress, so their settlement owns the completion notice; unreadable goal metadata falls through to normal notification behavior. The review check captures the turn-end time before awaiting reads so a review that settles during those reads remains distinguishable from a later turn. A user-stopped review stays quiet because the user already handled it.
+
+### Why pull-request tags use a digest and not a repository reference
+
+Tags reach every delivery channel even when enterprise mode strips the body. A digest prevents the tag itself from exposing the repository and pull-request reference.
+
+### Why default text renders locally and not through the template runtime
+
+Defaults must still render when template resolution fails. Missing, malformed or unknown locale tags use English so notifications retain text; error and question bodies preserve `{last_message}` because their purpose is to show the agent's detail.
+
+### Why plain-text emphasis matches word edges and not every marker
+
+Underscores inside identifiers and single stars in arithmetic are literal notification text. Word-edge matching preserves `user_id`, `snake_case` and `2 * 3` while removing emphasis.
+
+### Why branch lookup permits custom binaries and not the default safety refusal
+
+The git binary comes from the server's own resolver. Allowing that trusted custom binary preserves overrides whose paths contain spaces; refusing those paths would silently leave `{branch}` empty.
+
+### Why push sealing uses the combined layout and not a platform-specific envelope
+
+The `v1.` base64 payload contains a 12-byte nonce, ciphertext and a 16-byte authentication tag. That AES-256-GCM layout interoperates with CryptoKit's `AES.GCM.SealedBox.combined` and Android's `AES/GCM/NoPadding` after extracting the nonce; the phone registers its key through its own server connection, outside the push relay.
+
 ## Notes for contributors
+
+### Why open windows follow the server's presence
+
+Each window decides from its own focus, and a hidden one shows a notification because it is not focused, so every open tab and device used to alert while the user worked in one of them. The server already keeps every UI's visibility for push, so it skips the window broadcast while any UI is visible; old clients still cached on a phone follow it too. The alternative, sending only to the device used last, was rejected: it drops the notification when the user walks away with the phone. A visible client that disappears without saying so keeps the others quiet until its report expires (30 seconds), as it does for push.
+
+### Why interruption suppression is limited to steps
+
+OpenCode uses `aborted` for both interrupted steps and exhausted auto-resume attempts. Only the step event identifies the interruption this filter suppresses; filtering terminal `session.error` events by that type would hide a failure that requires the user's attention.
 
 ### Adding new notification helpers
 1. Add new helper functions to `packages/web/server/lib/notifications/message.js`.
@@ -177,7 +450,7 @@ The web hook preserves `tag`, `sessionId`, `kind`, and the remaining notificatio
 fields so the web notification API recognizes duplicate control-SSE and main-WS
 delivery. Its existing five-second claim suppresses duplicate native alerts.
 Native alerts remain best-effort live events, with no historical replay or
-synthetic catch-up alerts. Authoritative session attention is owned by sync.
+synthetic catch-up alerts. Unread marks are OpenCode session state (`packages/ui/src/sync/session-unread.ts`).
 
 This removes one persistent HTTP connection per browser tab in both main-WS and
 main-SSE modes. Two tabs use two control SSE connections, or four connections

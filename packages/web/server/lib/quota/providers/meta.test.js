@@ -97,6 +97,8 @@ describe('Meta quota provider configuration', () => {
     try {
       execFileSync('mkfifo', [filePath]);
       const output = execFileSync(process.execPath, [
+        '--import',
+        new URL('../../../../scripts/register-server-sources.mjs', import.meta.url).href,
         '--input-type=module',
         '-e',
         'import { readMuseAccountToken } from "./server/lib/quota/providers/meta.js"; process.stdout.write(String(readMuseAccountToken({ filePath: process.argv.at(-1) })));',

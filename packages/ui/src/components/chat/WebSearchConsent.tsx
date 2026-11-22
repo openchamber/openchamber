@@ -6,18 +6,10 @@ import { useI18n } from '@/lib/i18n';
 import type { FormRequest } from '@/lib/opencode/model';
 import type { WebSearchConsent, WebSearchConsentOption } from '@/lib/opencode/websearch';
 import * as sessionActions from '@/sync/session-actions';
+import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useSessions } from '@/sync/sync-context';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 
-/**
- * OpenCode's first-use web search question, as its own card instead of the
- * generic form. It answers the same form through the same reply path: one
- * click sends `{ [field]: option }`, "Not now" cancels the form (the search
- * fails and OpenCode asks again next time).
- *
- * The first step is allow / choose another provider / turn off; "choose"
- * makes OpenCode raise a second form listing the providers.
- */
 
 type ChoiceValue = 'allow' | 'choose' | 'disable';
 
@@ -39,25 +31,49 @@ const CHOICE_VARIANTS = {
 function useConsentReply(form: FormRequest, consent: WebSearchConsent) {
     const { t } = useI18n();
     const [pending, setPending] = React.useState(false);
+    const pendingRef = React.useRef(false);
 
     const answer = React.useCallback(async (value: string) => {
+        if (pendingRef.current) return;
+        pendingRef.current = true;
         setPending(true);
         try {
             await sessionActions.replyToForm(form.sessionID, form.id, { [consent.fieldKey]: value });
-        } catch {
+        } catch (error) {
+            if (isFormRequestNotFoundError(error)) return;
+            const unavailableAgent = agentUnavailableFrom(error instanceof Error ? error : null);
+            if (unavailableAgent) {
+                toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
+                return;
+            }
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
+                return;
+            }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            pendingRef.current = false;
             setPending(false);
         }
     }, [consent.fieldKey, form.id, form.sessionID, t]);
 
     const dismiss = React.useCallback(async () => {
+        if (pendingRef.current) return;
+        pendingRef.current = true;
         setPending(true);
         try {
             await sessionActions.cancelForm(form.sessionID, form.id);
-        } catch {
+        } catch (error) {
+            if (isFormRequestNotFoundError(error)) return;
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
+                return;
+            }
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            pendingRef.current = false;
             setPending(false);
         }
     }, [form.id, form.sessionID, t]);
@@ -87,7 +103,6 @@ const ConsentBody: React.FC<{
                 </Button>
             );
         }
-        // Provider names, or a choice this card does not know yet: OpenCode's label.
         return (
             <Button key={option.value} variant="outline" size="sm" disabled={pending} onClick={() => onAnswer(option.value)}>
                 {option.label}
@@ -107,7 +122,7 @@ const ConsentBody: React.FC<{
                 </Button>
                 {pending ? <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" /> : null}
             </div>
-            <p className="typography-micro text-muted-foreground/80">{t('chat.webSearchConsent.settingsHint')}</p>
+            <p className="typography-micro text-muted-foreground">{t('chat.webSearchConsent.settingsHint')}</p>
         </div>
     );
 };
@@ -115,7 +130,6 @@ const ConsentBody: React.FC<{
 const consentTitle = (consent: WebSearchConsent, t: ReturnType<typeof useI18n>['t']): string =>
     consent.step === 'choice' ? t('chat.webSearchConsent.title') : t('chat.webSearchConsent.providerTitle');
 
-/** Docked above the composer, in place of `FormDock`'s generic panel. */
 export const WebSearchConsentDock: React.FC<{ form: FormRequest; consent: WebSearchConsent }> = ({ form, consent }) => {
     const { t } = useI18n();
     const sessions = useSessions();
@@ -144,15 +158,14 @@ export const WebSearchConsentDock: React.FC<{ form: FormRequest; consent: WebSea
     );
 };
 
-/** Inline variant for the BTW sheet, which renders forms as cards. */
 export const WebSearchConsentCard: React.FC<{ form: FormRequest; consent: WebSearchConsent }> = ({ form, consent }) => {
     const { t } = useI18n();
     const { pending, answer, dismiss } = useConsentReply(form, consent);
     return (
         <div className="group w-full pt-0 pb-2">
             <div className="chat-column">
-                <div className="-mt-1 rounded-xl border border-border/30 bg-muted/10">
-                    <div className="flex items-center gap-2 border-b border-border/20 px-3 py-1.5">
+                <div className="-mt-1 rounded-xl border border-edge-muted bg-muted/10">
+                    <div className="flex items-center gap-2 border-b border-edge-muted px-3 py-1.5">
                         <Icon name="global" className="size-3.5 text-primary" />
                         <span className="typography-meta font-medium text-foreground">{consentTitle(consent, t)}</span>
                     </div>

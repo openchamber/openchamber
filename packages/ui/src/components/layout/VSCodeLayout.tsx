@@ -4,6 +4,7 @@ import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { ChatView } from '@/components/views/ChatView';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openSession } from '@/lib/router/openSessionFromRoute';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useSubagentCostRollup } from '@/components/chat/work-status/useSubagentCostRollup';
@@ -13,65 +14,41 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { buildSessionContextUsage, isSameContextUsage } from '@/stores/utils/tokenUtils';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { toContextUsageReading } from '@/components/ui/contextUsageReading';
-import { McpDropdown } from '@/components/mcp/McpDropdown';
 import { ArchiveAllDropdown } from '@/components/session/ArchiveAllDropdown';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionsTabTitle } from '@/components/session/SessionsTabTitle';
+import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
+import { describeSessionActionError } from '@/components/session/sidebar/sessions/sessionActionError';
+import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useChatViewReveal } from '@/hooks/useChatViewReveal';
 import { getVSCodeBootstrapConfig, getVSCodeBootstrapWorkspaceFolder } from '@/lib/vscodeBootstrap';
 import { cn } from '@/lib/utils';
 import { normalizePath } from '@/lib/pathNormalization';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useKeybinds } from '@/hooks/useKeybind';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
-import { isRightToLeft, useI18n } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { Icon } from "@/components/icon/Icon";
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS } from '@/lib/quota';
-import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { updateDesktopSettings } from '@/lib/persistence';
-import { formatTimeForPreference } from '@/lib/timeFormat';
-import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import type { Session } from '@/lib/opencode/model';
-import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
-import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
 import { RunOverview } from '@/components/multirun/RunOverview';
 import { RunAutoFusion } from '@/lib/multirun/autoFusion';
+import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
+import { beginLayoutAnimation, LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
+import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
+import { setChatCovered, setWorkStatusHost, useRightSlotStore } from './rightSlot';
+import { useVSCodeSidebarResize } from './useVSCodeSidebarResize';
 
-const loadSettingsView = () => import('@/components/views/SettingsView').then(m => m.SettingsView);
+const EXPANDED_LAYOUT_THRESHOLD = 280 + 520;
 
-const formatTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference) => {
-  if (!timestamp) return '-';
-  try {
-    return formatTimeForPreference(timestamp, timeFormatPreference, { fallback: '-' });
-  } catch {
-    return '-';
-  }
-};
-
-// Width threshold for mobile vs desktop layout in settings
-const MOBILE_WIDTH_THRESHOLD = 550;
-// Sessions sidebar width in expanded layout
-const SESSIONS_SIDEBAR_WIDTH = 280;
-// Keep enough room for the chat after adding the persistent sessions sidebar.
-const EXPANDED_LAYOUT_THRESHOLD = SESSIONS_SIDEBAR_WIDTH + 520;
-const SESSIONS_SIDEBAR_MIN_WIDTH = Math.round(SESSIONS_SIDEBAR_WIDTH * 0.7);
-const SESSIONS_SIDEBAR_MAX_WIDTH = 520;
-
-type VSCodeView = 'sessions' | 'chat' | 'settings';
+type VSCodeView = 'sessions' | 'chat';
 
 export const VSCodeLayout: React.FC = () => {
   const { t } = useI18n();
@@ -97,8 +74,6 @@ export const VSCodeLayout: React.FC = () => {
     return null;
   }, []);
 
-  // The "Run on several models" command opens a new-session tab whose draft
-  // starts in parallel mode.
   const initialParallelComposer = React.useMemo<boolean>(() => getVSCodeBootstrapConfig()?.initialComposer === 'parallel', []);
 
   const bootstrapWorkspaceFolder = React.useMemo<string | null>(() => {
@@ -116,17 +91,11 @@ export const VSCodeLayout: React.FC = () => {
   }, []);
 
   const [currentView, setCurrentView] = React.useState<VSCodeView>(() => (bootDraftOpen ? 'chat' : 'sessions'));
-  // Mirror currentView so the navigate event handler (registered once) can read the live value.
-  const currentViewRef = React.useRef(currentView);
-  // Snapshot of the view the user was on before opening Settings, so close restores it.
-  const viewBeforeSettingsRef = React.useRef<VSCodeView | null>(null);
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
-  const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
-  const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
+  const sidebarResize = useVSCodeSidebarResize();
+  const sessionsSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+  const toggleSessionsSidebar = useUIStore((state) => state.toggleSidebar);
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const expandedSidebarResizeStartXRef = React.useRef(0);
-  const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
-  const expandedSidebarResizePointerIdRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessions = useSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
@@ -149,14 +118,17 @@ export const VSCodeLayout: React.FC = () => {
       return state.session.find((session) => session.id === currentSessionId)?.title || null;
     }, [currentSessionId]),
   );
-  const initialSessionExists = useDirectorySync(
+  const initialGlobalSessionDirectory = useGlobalSessionsStore((state) => {
+    const session = initialSessionId ? state.entityById.get(initialSessionId) : null;
+    return session ? resolveGlobalSessionDirectory(session) : null;
+  });
+  const initialLocalSessionDirectory = useDirectorySync(
     React.useCallback((state) => {
-      if (!initialSessionId) {
-        return false;
-      }
-      return state.session.some((session) => session.id === initialSessionId);
+      const session = state.session.find((session) => session.id === initialSessionId);
+      return session ? resolveGlobalSessionDirectory(session) : null;
     }, [initialSessionId]),
   );
+  const initialSessionDirectory = initialGlobalSessionDirectory ?? initialLocalSessionDirectory;
 
   const activeSessionTitle = currentSessionId
     ? activeSessionTitleValue || t('vscodeLayout.title.sessionFallback')
@@ -190,17 +162,11 @@ export const VSCodeLayout: React.FC = () => {
   const [isInitializing, setIsInitializing] = React.useState<boolean>(false);
   const lastBootstrapAttemptAt = React.useRef<number>(0);
 
-  // Navigate to chat when a session is selected
   React.useEffect(() => {
     if (currentSessionId) {
       setCurrentView('chat');
     }
   }, [currentSessionId]);
-
-  // Keep currentViewRef in sync so the stable navigate handler reads the live view.
-  React.useEffect(() => {
-    currentViewRef.current = currentView;
-  }, [currentView]);
 
   React.useEffect(() => {
     const vscodeApi = runtimeApis.vscode;
@@ -224,7 +190,6 @@ export const VSCodeLayout: React.FC = () => {
     void vscodeApi.executeCommand('openchamber.updateSessionEditorTitle', currentSessionId, activeSessionTitle);
   }, [activeSessionTitle, currentSessionId, runtimeApis.vscode, viewMode]);
 
-  // If the active session disappears (e.g., deleted), go back to sessions list
   React.useEffect(() => {
     if (viewMode === 'editor') {
       return;
@@ -243,7 +208,7 @@ export const VSCodeLayout: React.FC = () => {
       const stillNoSession = !state.currentSessionId;
       const draftStillClosed = !state.newSessionDraft?.open;
       const stillSyncing = useViewportStore.getState().isSyncing;
-      const stillActiveWork = false; // sync bootstrap tracks session status
+      const stillActiveWork = false;
 
       if (stillNoSession && draftStillClosed && !stillSyncing && !stillActiveWork) {
         setCurrentView('sessions');
@@ -260,12 +225,8 @@ export const VSCodeLayout: React.FC = () => {
     setCurrentView('sessions');
   }, []);
 
-  // A run overview replaces the chat like any other surface: opening one shows
-  // the chat column, and selecting a session closes it.
   const runOverviewKey = useUIStore((state) => state.runOverviewKey);
-  React.useEffect(() => {
-    if (runOverviewKey) setCurrentView((view) => (view === 'sessions' ? 'chat' : view));
-  }, [runOverviewKey]);
+  useChatViewReveal(setCurrentView, runOverviewKey);
   React.useEffect(() => useSessionUIStore.subscribe((state, prev) => {
     if (state.currentSessionId && state.currentSessionId !== prev.currentSessionId) {
       useUIStore.getState().setRunOverviewKey(null);
@@ -297,7 +258,6 @@ export const VSCodeLayout: React.FC = () => {
     return Array.from(byId.values());
   }, [globalActiveSessions, globalArchivedSessions, sessions]);
 
-  /** Collect root session IDs and all descendants (subagent sessions). */
   const collectSessionIdsWithDescendants = React.useCallback(
     (allSessions: Session[], rootSessions: Session[]): string[] => {
       const byId = new Map<string, Session>();
@@ -315,12 +275,12 @@ export const VSCodeLayout: React.FC = () => {
 
       const ids = new Set<string>();
       const addDescendants = (sessionId: string, visited: Set<string>) => {
-        if (visited.has(sessionId)) return; // cycle guard
+        if (visited.has(sessionId)) return;
         visited.add(sessionId);
         const children = childrenMap.get(sessionId) ?? [];
         for (const childId of children) {
           const child = byId.get(childId);
-          if (child?.time?.archived) continue; // skip already-archived children
+          if (child?.time?.archived) continue;
           ids.add(childId);
           addDescendants(childId, visited);
         }
@@ -352,10 +312,7 @@ export const VSCodeLayout: React.FC = () => {
   }, [collectSessionIdsWithDescendants, isSessionInActiveWorkspace, traversalSessions, t]);
 
 
-  // Listen for connection status changes
   React.useEffect(() => {
-    // Catch up with the latest status even if the extension posted the connection message
-    // before this component registered the event listener.
     const current =
       (typeof window !== 'undefined'
         ? (window as { __OPENCHAMBER_CONNECTION__?: { status?: string } }).__OPENCHAMBER_CONNECTION__?.status
@@ -375,17 +332,11 @@ export const VSCodeLayout: React.FC = () => {
     return () => window.removeEventListener('openchamber:connection-status', handler as EventListener);
   }, []);
 
-  // Listen for navigation events from VS Code extension title bar buttons
   React.useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ view?: string }>).detail;
       const view = detail?.view;
-      if (view === 'settings') {
-        if (currentViewRef.current !== 'settings') {
-          viewBeforeSettingsRef.current = currentViewRef.current;
-        }
-        setCurrentView('settings');
-      } else if (view === 'chat') {
+      if (view === 'chat') {
         setCurrentView('chat');
       } else if (view === 'sessions') {
         setCurrentView('sessions');
@@ -395,7 +346,6 @@ export const VSCodeLayout: React.FC = () => {
     return () => window.removeEventListener('openchamber:navigate', handler as EventListener);
   }, []);
 
-  // Bootstrap config and sessions when connected
   React.useEffect(() => {
     const runBootstrap = async () => {
       if (isInitializing || hasInitializedOnce || connectionStatus !== 'connected') {
@@ -423,10 +373,7 @@ export const VSCodeLayout: React.FC = () => {
         }
         const configStore = useConfigStore.getState();
 
-        // Keep trying to fetch core datasets on cold starts.
         if (configStore.isConnected) {
-          // Loaded flags, not list lengths: a catalog shown from the
-          // persisted cache is not a live load.
           if (!configStore.providersLoaded) {
             await configStore.loadProviders({ source: 'vscodeLayout:bootstrap' });
           }
@@ -436,8 +383,6 @@ export const VSCodeLayout: React.FC = () => {
         }
 
         const configState = useConfigStore.getState();
-        // If OpenCode is still warming up, the initial provider/agent loads can fail and be swallowed by retries.
-        // Only mark bootstrap complete when core datasets are present so we keep retrying on cold starts.
         if (!configState.isInitialized || !configState.isConnected || !configState.providersLoaded || !configState.agentsLoaded) {
           return;
         }
@@ -466,7 +411,6 @@ export const VSCodeLayout: React.FC = () => {
       return;
     }
 
-    // No initialSessionId means open a new session draft
     if (!initialSessionId) {
       hasAppliedInitialSession.current = true;
       openNewSessionDraft({ automatic: true, directoryOverride: bootstrapWorkspaceFolder });
@@ -474,15 +418,14 @@ export const VSCodeLayout: React.FC = () => {
       return;
     }
 
-    if (!initialSessionExists) {
+    if (!initialSessionDirectory) {
       return;
     }
 
     hasAppliedInitialSession.current = true;
-    void useSessionUIStore.getState().setCurrentSession(initialSessionId);
-  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
+    void openSession(initialSessionId, { directory: initialSessionDirectory });
+  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionDirectory, initialSessionId, openNewSessionDraft, viewMode]);
 
-  // Track container width for responsive settings layout
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -494,66 +437,13 @@ export const VSCodeLayout: React.FC = () => {
     });
 
     observer.observe(container);
-    // Set initial width
     setContainerWidth(container.clientWidth);
 
     return () => observer.disconnect();
   }, []);
 
-  const usesMobileLayout = containerWidth > 0 && containerWidth < MOBILE_WIDTH_THRESHOLD;
   const usesExpandedLayout = containerWidth >= EXPANDED_LAYOUT_THRESHOLD;
 
-  const closeSettings = () => {
-    const previousView = viewBeforeSettingsRef.current;
-    viewBeforeSettingsRef.current = null;
-    setCurrentView(previousView ?? (usesExpandedLayout ? 'chat' : 'sessions'));
-  };
-  // A failed load returns to the previous view so the next open tries again.
-  const SettingsView = useOnDemandComponent(currentView === 'settings', loadSettingsView, closeSettings);
-
-  const clampExpandedSidebarWidth = React.useCallback((value: number) => {
-    return Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, value));
-  }, []);
-
-  const handleExpandedSidebarResizeStart = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // ignore
-    }
-    expandedSidebarResizePointerIdRef.current = event.pointerId;
-    expandedSidebarResizeStartXRef.current = event.clientX;
-    expandedSidebarResizeStartWidthRef.current = expandedSidebarWidth;
-    setIsResizingExpandedSidebar(true);
-    event.preventDefault();
-  }, [expandedSidebarWidth]);
-
-  const handleExpandedSidebarResizeMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (expandedSidebarResizePointerIdRef.current !== event.pointerId) {
-      return;
-    }
-    // The handle is on the sidebar's end edge: in RTL dragging left widens it.
-    const sign = isRightToLeft(event.currentTarget) ? -1 : 1;
-    const delta = (event.clientX - expandedSidebarResizeStartXRef.current) * sign;
-    const nextWidth = clampExpandedSidebarWidth(expandedSidebarResizeStartWidthRef.current + delta);
-    setExpandedSidebarWidth((current) => (current === nextWidth ? current : nextWidth));
-  }, [clampExpandedSidebarWidth]);
-
-  const handleExpandedSidebarResizeEnd = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (expandedSidebarResizePointerIdRef.current !== event.pointerId) {
-      return;
-    }
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // ignore
-    }
-    expandedSidebarResizePointerIdRef.current = null;
-    setIsResizingExpandedSidebar(false);
-  }, []);
-
-  // In expanded layout, always show chat (with sidebar alongside)
-  // Navigate to chat automatically when expanded layout is enabled and we're on sessions view
   React.useEffect(() => {
     if (usesExpandedLayout && currentView === 'sessions' && viewMode === 'sidebar') {
       setCurrentView('chat');
@@ -567,84 +457,65 @@ export const VSCodeLayout: React.FC = () => {
     <>
       <div ref={containerRef} className="h-full w-full bg-background text-foreground flex flex-col">
       {viewMode === 'editor' ? (
-        // Editor mode: just chat, no sidebar. A run launched here opens its
-        // overview over the chat, as in the other layouts.
         <div className="flex flex-col h-full">
           <VSCodeHeader
             title={activeSessionTitle || t('vscodeLayout.title.chat')}
-            showMcp
+            showWorkStatus
             showContextUsage
-            showRateLimits
             enableSessionSwitcher
           />
-          <div className="relative flex-1 overflow-hidden">
-            <ErrorBoundary>
-              <ChatView active={!runOverviewKey} />
-            </ErrorBoundary>
-            <ErrorBoundary><RunOverview /></ErrorBoundary>
-          </div>
+          <VSCodeChatArea active={!runOverviewKey} />
         </div>
-      ) : currentView === 'settings' ? (
-        // Settings view
-        SettingsView ? (
-          <SettingsView
-            onClose={closeSettings}
-            forceMobile={usesMobileLayout}
-          />
-        ) : null
       ) : usesExpandedLayout ? (
-        // Expanded layout: sessions sidebar + chat side by side
         <div className="flex h-full">
-          {/* Sessions sidebar */}
-          <div
-            className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
-            style={{ width: expandedSidebarWidth, minWidth: expandedSidebarWidth, maxWidth: expandedSidebarWidth }}
-          >
-            <SessionSidebar
-              mobileVariant
-              allowReselect
-              hideDirectoryControls
-            />
+          {sessionsSidebarOpen ? (
             <div
-              className={cn(
-                'absolute inset-e-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
-                isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
-              )}
-              onPointerDown={handleExpandedSidebarResizeStart}
-              onPointerMove={handleExpandedSidebarResizeMove}
-              onPointerUp={handleExpandedSidebarResizeEnd}
-              onPointerCancel={handleExpandedSidebarResizeEnd}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
-            />
-          </div>
-          {/* Chat content */}
+              className={cn('relative h-full border-e border-border overflow-hidden flex-shrink-0', sidebarResize.isResizing && 'select-none')}
+              style={{ width: sidebarResize.width, minWidth: sidebarResize.width, maxWidth: sidebarResize.width }}
+            >
+              <SessionSidebar
+                mobileVariant
+                allowReselect
+                hideDirectoryControls
+              />
+              <div
+                className={cn(
+                  'absolute inset-e-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+                  sidebarResize.isResizing && 'bg-[var(--interactive-border)]'
+                )}
+                ref={sidebarResize.handleRef}
+                onPointerDown={sidebarResize.onPointerDown}
+                onPointerMove={sidebarResize.onPointerMove}
+                onPointerUp={sidebarResize.onPointerEnd}
+                onPointerCancel={sidebarResize.onPointerEnd}
+                onLostPointerCapture={sidebarResize.onPointerEnd}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t('vscodeLayout.actions.resizeSessionsSidebarAria')}
+              />
+            </div>
+          ) : null}
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
               title={chatTitle}
-              showMcp
+              sessionsSidebarOpen={sessionsSidebarOpen}
+              onToggleSessionsSidebar={toggleSessionsSidebar}
+              showArchiveToggle
+              showWorkStatus
               showContextUsage
-              showRateLimits
               enableSessionSwitcher
             />
-            <div className="relative flex-1 overflow-hidden">
-              <ErrorBoundary>
-                <ChatView active={currentView === 'chat' && !runOverviewKey} />
-              </ErrorBoundary>
-              <ErrorBoundary><RunOverview /></ErrorBoundary>
-            </div>
+            <VSCodeChatArea active={currentView === 'chat' && !runOverviewKey} />
           </div>
         </div>
       ) : (
-        // Compact layout: drill-down between sessions list and chat
         <>
-          {/* Sessions list view */}
           {currentView === 'sessions' ? (
             <div className="flex flex-col h-full">
               <VSCodeHeader
                 title={t('vscodeLayout.title.sessions')}
                 onArchiveAll={handleArchiveAll}
+                borderless
               />
               <div className="flex-1 overflow-hidden">
                 <SessionSidebar
@@ -656,23 +527,17 @@ export const VSCodeLayout: React.FC = () => {
               </div>
             </div>
           ) : null}
-          {/* Chat view */}
           <div className={cn('flex flex-col h-full', currentView !== 'chat' && 'hidden')}>
             <VSCodeHeader
               title={chatTitle}
+              hidden={currentView !== 'chat'}
               showBack
               onBack={handleBackToSessions}
-              showMcp
+              showWorkStatus
               showContextUsage
-              showRateLimits
               enableSessionSwitcher
             />
-            <div className="relative flex-1 overflow-hidden">
-              <ErrorBoundary>
-                <ChatView active={currentView === 'chat' && !runOverviewKey} />
-              </ErrorBoundary>
-              <ErrorBoundary><RunOverview /></ErrorBoundary>
-            </div>
+            <VSCodeChatArea active={currentView === 'chat' && !runOverviewKey} />
           </div>
         </>
       )}
@@ -683,46 +548,143 @@ export const VSCodeLayout: React.FC = () => {
   );
 };
 
+const VSCodeChatArea: React.FC<{ active: boolean }> = ({ active }) => {
+  const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
+  const reserved = useRightSlotStore((state) => state.workStatusReserved);
+  const layoutAnimationMs = useLayoutAnimationMs();
+  React.useEffect(() => {
+    setChatCovered(runOverviewOpen);
+    return () => setChatCovered(false);
+  }, [runOverviewOpen]);
+  const column = reserved && !runOverviewOpen;
+  const columnRef = React.useRef(column);
+  React.useLayoutEffect(() => {
+    if (columnRef.current === column) return;
+    columnRef.current = column;
+    beginLayoutAnimation(layoutAnimationMs);
+  }, [column, layoutAnimationMs]);
+
+  return (
+    <div className="relative flex min-h-0 flex-1 overflow-hidden" data-chat-area="true">
+      <div className="relative min-w-0 flex-1 overflow-hidden">
+        <ErrorBoundary>
+          <ChatView active={active} />
+        </ErrorBoundary>
+        <ErrorBoundary><RunOverview /></ErrorBoundary>
+      </div>
+      <div
+        className="relative h-full shrink-0 overflow-clip transition-[width] motion-reduce:transition-none"
+        style={{
+          width: column ? WORK_STATUS_COLUMN_WIDTH : 0,
+          transitionDuration: `${layoutAnimationMs}ms`,
+          transitionTimingFunction: LAYOUT_ANIMATION_EASING,
+        }}
+      >
+        <div ref={setWorkStatusHost} className={cn('absolute inset-y-0 inset-e-0 flex', runOverviewOpen && 'invisible')} />
+      </div>
+    </div>
+  );
+};
+
 interface VSCodeHeaderProps {
   title: string;
   showBack?: boolean;
   onBack?: () => void;
   onArchiveAll?: () => void;
+  showArchiveToggle?: boolean;
   onNewSession?: () => void;
   onSettings?: () => void;
-  showMcp?: boolean;
+  showWorkStatus?: boolean;
+  sessionsSidebarOpen?: boolean;
+  onToggleSessionsSidebar?: () => void;
   showContextUsage?: boolean;
-  showRateLimits?: boolean;
   enableSessionSwitcher?: boolean;
+  hidden?: boolean;
+  borderless?: boolean;
 }
 
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showWorkStatus, sessionsSidebarOpen = false, onToggleSessionsSidebar, showContextUsage, enableSessionSwitcher, hidden = false, borderless }) => {
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  // Same rollup the work-status panel reports, so the header and the panel
-  // never disagree about what this session has cost.
   const { totalCost: sessionTotalCost } = useSubagentCostRollup(currentSessionId ?? null);
   const currentSessionMessages = useSessionMessages(currentSessionId ?? '');
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
-  const quotaResults = useQuotaStore((state) => state.results);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
-  const isQuotaLoading = useQuotaStore((state) => state.isLoading);
-  const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
-  const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
-  const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
-  const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
+  const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+  const setWorkStatusPanelEnabled = useUIStore((state) => state.setWorkStatusPanelEnabled);
+  const workStatusPanelFits = useUIStore((state) => state.workStatusPanelFits);
+  const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
+  const setWorkStatusOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
+  const workStatusOverlayForm = workStatusPanelEnabled && !workStatusPanelFits;
+  const workStatusToggleActive = workStatusOverlayForm ? workStatusOverlayOpen : workStatusPanelEnabled;
+  const handleWorkStatusToggle = () => {
+    if (workStatusOverlayForm) setWorkStatusOverlayOpen(!workStatusOverlayOpen);
+    else setWorkStatusPanelEnabled(!workStatusPanelEnabled);
+  };
+  const workStatusToggleTitle = workStatusToggleActive
+    ? t('header.workStatusPanel.hide')
+    : t(workStatusOverlayForm ? 'header.workStatusPanel.showOverlay' : 'header.workStatusPanel.show');
 
-  useQuotaAutoRefresh();
+  const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
+  const sessionTitle = useDirectorySync(
+    React.useCallback((state) => (
+      currentSessionId ? state.session.find((session) => session.id === currentSessionId)?.title ?? null : null
+    ), [currentSessionId]),
+  );
+  const [renamingSessionId, setRenamingSessionId] = React.useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = React.useState('');
+  const renameRequestedRef = React.useRef(false);
+  const renameFormRef = React.useRef<HTMLFormElement | null>(null);
+  const isRenaming = renamingSessionId !== null && renamingSessionId === currentSessionId;
 
   React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
+    setRenamingSessionId(null);
+  }, [currentSessionId]);
+
+  const beginRename = () => {
+    if (!currentSessionId) return;
+    setTitleDraft(sessionTitle?.trim() || title);
+    setRenamingSessionId(currentSessionId);
+  };
+
+  useKeybinds({
+    rename_current_session: () => {
+      if (!enableSessionSwitcher || hidden || !currentSessionId) return false;
+      beginRename();
+    },
+  });
+
+  const focusRenameInput = React.useCallback((node: HTMLInputElement | null) => {
+    node?.focus();
+    node?.select();
+  }, []);
+
+  const saveRename = React.useCallback(async () => {
+    if (!renamingSessionId) return;
+    const nextTitle = titleDraft.trim();
+    setRenamingSessionId(null);
+    if (!nextTitle || nextTitle === sessionTitle?.trim()) return;
+    try {
+      await updateSessionTitle(renamingSessionId, nextTitle);
+    } catch (error) {
+      console.error('[vscode-header] rename failed', error);
+      toast.error(t('sessions.sidebar.session.rename.error', {
+        detail: describeSessionActionError(error instanceof Error ? error : new Error(String(error)), t),
+      }));
+    }
+  }, [renamingSessionId, sessionTitle, t, titleDraft, updateSessionTitle]);
+
+  React.useEffect(() => {
+    if (!isRenaming) return;
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      if (!(event.target instanceof Node) || !renameFormRef.current?.contains(event.target)) void saveRename();
+    };
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+    return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
+  }, [isRenaming, saveRename]);
 
   const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId ?? null);
 
@@ -748,42 +710,8 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     }
   }, [contextUsage, currentSessionId, isContextUsageResolvedForSession]);
 
-  const rateLimitGroups = React.useMemo(() => {
-    const groups: Array<{
-      providerId: string;
-      providerName: string;
-      entries: Array<[string, UsageWindow]>;
-      error?: string;
-    }> = [];
-
-    for (const provider of QUOTA_PROVIDERS) {
-      if (!dropdownProviderIds.includes(provider.id)) {
-        continue;
-      }
-      const result = quotaResults.find((entry) => entry.providerId === provider.id);
-      const windows = (result?.usage?.windows ?? {}) as Record<string, UsageWindow>;
-      const entries = Object.entries(windows);
-      const error = (result && !result.ok && result.configured) ? result.error : undefined;
-      if (entries.length > 0 || error) {
-        groups.push({ providerId: provider.id, providerName: provider.name, entries, error });
-      }
-    }
-
-    return groups;
-  }, [dropdownProviderIds, quotaResults]);
-  const hasRateLimits = rateLimitGroups.length > 0;
-
-  const handleDisplayModeChange = React.useCallback(async (mode: 'usage' | 'remaining') => {
-    setQuotaDisplayMode(mode);
-    try {
-      await updateDesktopSettings({ usageDisplayMode: mode });
-    } catch (error) {
-      console.warn('Failed to update usage display mode:', error);
-    }
-  }, [setQuotaDisplayMode]);
-
   return (
-    <div className="flex items-center gap-1.5 ps-3 pe-2 py-1 border-b border-border bg-background shrink-0">
+    <div className={cn('flex items-center gap-1.5 ps-3 pe-2 py-1 bg-background shrink-0', !borderless && 'border-b border-border')}>
       {showBack && onBack && (
         <button
           onClick={onBack}
@@ -793,21 +721,96 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           <Icon name="arrow-left" className="h-5 w-5" />
         </button>
       )}
-      {enableSessionSwitcher ? (
-        <SessionSwitcherDropdown variant="compact" scopeProjectId={activeProjectId}>
+      {onToggleSessionsSidebar && (
+        <button
+          type="button"
+          onClick={onToggleSessionsSidebar}
+          className={cn(
+            '-ms-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            sessionsSidebarOpen ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+          )}
+          aria-label={t(sessionsSidebarOpen ? 'vscodeLayout.actions.hideSessionsAria' : 'vscodeLayout.actions.showSessionsAria')}
+          aria-pressed={sessionsSidebarOpen}
+          title={t(sessionsSidebarOpen ? 'vscodeLayout.actions.hideSessionsAria' : 'vscodeLayout.actions.showSessionsAria')}
+        >
+          <Icon name="panel-left" className="h-4 w-4" />
+        </button>
+      )}
+      {isRenaming ? (
+        <form
+          ref={renameFormRef}
+          data-session-rename-form="vscode-header"
+          className="flex min-w-0 flex-1 items-center gap-2 px-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveRename();
+          }}
+        >
+          <input
+            ref={focusRenameInput}
+            value={titleDraft}
+            onChange={(event) => setTitleDraft(event.target.value)}
+            onKeyDown={(event) => handleSessionRenameKeyDown(event, () => setRenamingSessionId(null))}
+            placeholder={t('sessions.sidebar.session.menu.rename')}
+            className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground"
+          />
+          <button
+            type="submit"
+            aria-label={t('sessions.sidebar.session.rename.save')}
+            title={t('sessions.sidebar.session.rename.save')}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <Icon name="check" className="size-4" />
+          </button>
           <button
             type="button"
-            aria-label={t('sessions.switcher.openAria')}
-            className="inline-flex min-w-0 max-w-full items-center rounded-md px-1 py-0.5 -my-0.5 text-start transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+            onClick={() => setRenamingSessionId(null)}
+            aria-label={t('sessions.sidebar.session.rename.cancel')}
+            title={t('sessions.sidebar.session.rename.cancel')}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
           >
-            <span dir="auto" className="oc-ui-start-align text-sm font-medium truncate" title={title}>{title}</span>
+            <Icon name="close" className="size-4" />
           </button>
-        </SessionSwitcherDropdown>
+        </form>
+      ) : enableSessionSwitcher ? (
+        <>
+          <SessionSwitcherDropdown variant="compact" scopeProjectId={activeProjectId}>
+            <button
+              type="button"
+              aria-label={t('sessions.switcher.openAria')}
+              className="inline-flex min-w-0 max-w-full items-center rounded-md px-1 py-0.5 -my-0.5 text-start transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+            >
+              <span dir="auto" className="oc-ui-start-align text-sm font-medium truncate" title={title}>{title}</span>
+            </button>
+          </SessionSwitcherDropdown>
+          {currentSessionId ? (
+            <DropdownMenu
+              onOpenChangeComplete={(open) => {
+                if (!open && renameRequestedRef.current) {
+                  renameRequestedRef.current = false;
+                  beginRename();
+                }
+              }}
+            >
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" className="w-6 shrink-0 px-0 text-muted-foreground hover:bg-transparent hover:text-foreground" aria-label={t('header.sessionActions.openAria')}>
+                  <Icon name="more" className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onClick={() => { renameRequestedRef.current = true; }}>
+                  <Icon name="pencil-ai" className="me-1 h-4 w-4" />
+                  {t('sessions.sidebar.session.menu.rename')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+        </>
       ) : (
         <SessionsTabTitle title={title} />
       )}
-      <div className="min-w-0 flex-1" />
-      {onArchiveAll && (
+      {isRenaming ? null : <div className="min-w-0 flex-1" />}
+      {showArchiveToggle && (
         <button
           type="button"
           onClick={toggleArchivedSessions}
@@ -832,140 +835,23 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           <Icon name="add" className="h-5 w-5" />
         </button>
       )}
-      {showMcp && (
-        <McpDropdown
-          headerIconButtonClass="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      )}
-      {showRateLimits && (
-        <DropdownMenu
-          onOpenChange={(open) => {
-            if (open && quotaResults.length === 0) {
-              fetchAllQuotas();
-            }
-          }}
+      {showWorkStatus && (
+        <button
+          type="button"
+          data-work-status-toggle="true"
+          onClick={handleWorkStatusToggle}
+          className={cn(
+            'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            workStatusToggleActive
+              ? 'oc-selected text-interactive-selection-foreground'
+              : 'text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground',
+          )}
+          aria-label={t('header.workStatusPanel.toggleAria')}
+          aria-pressed={workStatusToggleActive}
+          title={workStatusToggleTitle}
         >
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={t('vscodeLayout.quota.actions.rateLimitsAria')}
-              className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              disabled={isQuotaLoading}
-            >
-              <Icon name="timer" className="h-5 w-5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="w-80 max-h-[70vh] overflow-y-auto overflow-x-hidden bg-[var(--surface-elevated)] p-0"
-          >
-            <div className="sticky top-0 z-20 bg-[var(--surface-elevated)]">
-              <DropdownMenuLabel className="flex items-center justify-between gap-3 typography-ui-header font-semibold text-foreground">
-                <span>{t('vscodeLayout.quota.title')}</span>
-                <div className="flex items-center gap-1">
-                  <div className="flex items-center rounded-md border border-[var(--interactive-border)] p-0.5">
-                    <button
-                      type="button"
-                      className={
-                        `px-2 py-0.5 rounded-sm typography-micro text-[10px] transition-colors ${
-                          quotaDisplayMode === 'usage'
-                            ? 'bg-interactive-selection text-interactive-selection-foreground'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`
-                      }
-                      onClick={() => void handleDisplayModeChange('usage')}
-                      aria-label={t('vscodeLayout.quota.actions.showUsedAria')}
-                    >
-                      {t('vscodeLayout.quota.mode.used')}
-                    </button>
-                    <button
-                      type="button"
-                      className={
-                        `px-2 py-0.5 rounded-sm typography-micro text-[10px] transition-colors ${
-                          quotaDisplayMode === 'remaining'
-                            ? 'bg-interactive-selection text-interactive-selection-foreground'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`
-                      }
-                      onClick={() => void handleDisplayModeChange('remaining')}
-                      aria-label={t('vscodeLayout.quota.actions.showRemainingAria')}
-                    >
-                      {t('vscodeLayout.quota.mode.remaining')}
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => fetchAllQuotas()}
-                    disabled={isQuotaLoading}
-                    aria-label={t('vscodeLayout.quota.actions.refreshAria')}
-                  >
-                    <Icon name="refresh" className="h-4 w-4" />
-                  </button>
-                </div>
-              </DropdownMenuLabel>
-            </div>
-            <div className="border-b border-[var(--interactive-border)] px-2 pb-2 typography-micro text-muted-foreground text-[10px]">
-              {t('vscodeLayout.quota.lastUpdated', { time: formatTime(quotaLastUpdated, timeFormatPreference) })}
-            </div>
-            {!hasRateLimits && (
-              <DropdownMenuItem className="cursor-default" closeOnClick={false}>
-                <span className="typography-ui-label text-muted-foreground">{t('vscodeLayout.quota.noRateLimitsAvailable')}</span>
-              </DropdownMenuItem>
-            )}
-            {rateLimitGroups.map((group, index) => (
-              <React.Fragment key={group.providerId}>
-                <DropdownMenuLabel className="flex items-center gap-2 bg-[var(--surface-elevated)] typography-ui-label text-foreground">
-                  <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                  {group.providerName}
-                </DropdownMenuLabel>
-                {group.entries.length === 0 ? (
-                  <DropdownMenuItem
-                    key={`${group.providerId}-empty`}
-                    className="cursor-default"
-                    closeOnClick={false}
-                  >
-                    <span className="typography-ui-label text-muted-foreground">
-                      {group.error ?? t('vscodeLayout.quota.noRateLimitsReported')}
-                    </span>
-                  </DropdownMenuItem>
-                ) : (
-                  group.entries.map(([label, window]) => {
-                    const displayPercent = quotaDisplayMode === 'remaining'
-                      ? window.remainingPercent
-                      : window.usedPercent;
-                    const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
-                    return (
-                    <DropdownMenuItem
-                      key={`${group.providerId}-${label}`}
-                      className="cursor-default items-start"
-                      closeOnClick={false}
-                    >
-                      <span className="flex min-w-0 flex-1 flex-col gap-2">
-                              <span className="flex min-w-0 items-center justify-between gap-3">
-                                <span className="truncate typography-micro text-muted-foreground">{formatWindowLabel(label)}</span>
-                                <span className="typography-ui-label text-foreground tabular-nums">
-                                  {metricLabel === '-' ? '' : metricLabel}
-                                </span>
-                              </span>
-                              <UsageProgressBar
-                                percent={displayPercent}
-                                tonePercent={window.usedPercent}
-                                className="h-1"
-                              />
-                              <span className="flex items-center justify-between typography-micro text-muted-foreground text-[10px]">
-                                <span>{formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference)}</span>
-                              </span>
-                      </span>
-                    </DropdownMenuItem>
-                    );
-                  })
-                )}
-                {index < rateLimitGroups.length - 1 && <DropdownMenuSeparator />}
-              </React.Fragment>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          <Icon name="panel-card" className="h-4 w-4" />
+        </button>
       )}
       {onSettings && (
         <button

@@ -1,15 +1,3 @@
-/**
- * Microphone capture for dictation.
- *
- * Captures mono audio via getUserMedia, taps it with a ScriptProcessorNode
- * (universally supported, including iOS WKWebView), resamples Float32 to
- * 16 kHz PCM16LE, and emits ~1-second base64 chunks plus a normalized RMS
- * level for the waveform.
- *
- * The level is delivered by subscription rather than React state: it updates
- * on every audio callback (~12 Hz), and routing that through state re-rendered
- * the whole dictation overlay at the same rate.
- */
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
@@ -21,14 +9,13 @@ export interface DictationAudioSourceConfig {
 export type DictationLevelListener = (level: number) => void;
 
 export interface DictationAudioSource {
-    start: () => Promise<void>;
+    start: () => Promise<boolean>;
     stop: () => Promise<void>;
-    /** Subscribe to the normalized (0..1) mic level. Returns an unsubscribe. */
     subscribeLevel: (listener: DictationLevelListener) => () => void;
 }
 
 const OUTPUT_RATE = 16000;
-const CHUNK_SAMPLES = OUTPUT_RATE; // ~1s per chunk
+const CHUNK_SAMPLES = OUTPUT_RATE;
 
 const getAudioContextCtor = (): typeof AudioContext | null => {
     if (typeof window === 'undefined') {
@@ -121,6 +108,16 @@ const safeDisconnect = (node: AudioNode | null): void => {
     }
 };
 
+const stopTracks = (stream: MediaStream | null): void => {
+    stream?.getTracks().forEach((track) => {
+        try {
+            track.stop();
+        } catch {
+            // no-op
+        }
+    });
+};
+
 export const isDictationCaptureSupported = (): boolean => {
     if (typeof navigator === 'undefined' || typeof window === 'undefined') {
         return false;
@@ -154,9 +151,9 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
 
     const graphRef = useRef<CaptureGraph>(emptyGraph());
 
-    const start = useCallback(async () => {
-        if (graphRef.current.started) {
-            return;
+    const start = useCallback(async (): Promise<boolean> => {
+        if (graphRef.current.started || graphRef.current.context) {
+            return false;
         }
 
         if (
@@ -172,19 +169,29 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
             throw new Error('AudioContext unavailable');
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                channelCount: 1,
-                noiseSuppression: true,
-                echoCancellation: true,
-                autoGainControl: true,
-            },
-        });
-
         const context = new AudioContextCtor();
+        const graph = emptyGraph();
+        graph.context = context;
+        graphRef.current = graph;
         try {
-            if (context.state === 'suspended') {
-                await context.resume().catch(() => undefined);
+            const resumed = context.state === 'suspended'
+                ? context.resume().catch(() => undefined)
+                : Promise.resolve();
+            const acquired = navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    noiseSuppression: true,
+                    echoCancellation: true,
+                    autoGainControl: true,
+                },
+            }).then((stream) => {
+                graph.stream = stream;
+                return stream;
+            });
+            const [stream] = await Promise.all([acquired, resumed]);
+            if (graphRef.current !== graph) {
+                stopTracks(stream);
+                return false;
             }
 
             const source = context.createMediaStreamSource(stream);
@@ -192,18 +199,12 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
             const gain = context.createGain();
             gain.gain.value = 0;
 
-            graphRef.current = {
-                stream,
-                context,
-                source,
-                processor,
-                gain,
-                pending: new Int16Array(0),
-                started: true,
-            };
+            graph.source = source;
+            graph.processor = processor;
+            graph.gain = gain;
+            graph.started = true;
 
             processor.onaudioprocess = (event) => {
-                const graph = graphRef.current;
                 if (!graph.started) {
                     return;
                 }
@@ -229,26 +230,22 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
             source.connect(processor);
             processor.connect(gain);
             gain.connect(context.destination);
+            return true;
         } catch (error) {
-            stream.getTracks().forEach((track) => {
-                try {
-                    track.stop();
-                } catch {
-                    // no-op
-                }
-            });
-            try {
-                await context.close();
-            } catch {
-                // no-op
+            graph.started = false;
+            stopTracks(graph.stream);
+            if (graphRef.current !== graph) {
+                return false;
             }
             graphRef.current = emptyGraph();
+            void context.close().catch(() => undefined);
             throw error instanceof Error ? error : new Error(String(error));
         }
     }, [emitLevel]);
 
     const stop = useCallback(async () => {
         const graph = graphRef.current;
+        graphRef.current = emptyGraph();
         graph.started = false;
         emitLevel(0);
 
@@ -262,15 +259,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
         safeDisconnect(graph.processor);
         safeDisconnect(graph.source);
         safeDisconnect(graph.gain);
-        if (graph.stream) {
-            graph.stream.getTracks().forEach((track) => {
-                try {
-                    track.stop();
-                } catch {
-                    // no-op
-                }
-            });
-        }
+        stopTracks(graph.stream);
         const pending = graph.pending;
         graph.pending = new Int16Array(0);
         if (pending.length > 0) {
@@ -278,17 +267,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
         }
 
         if (graph.context) {
-            try {
-                await graph.context.close();
-            } catch {
-                // no-op
-            }
-        }
-
-        // A new capture may have started while the old context was closing;
-        // only clear the ref if it still points at the graph we tore down.
-        if (graphRef.current === graph) {
-            graphRef.current = emptyGraph();
+            void graph.context.close().catch(() => undefined);
         }
     }, [emitLevel]);
 
@@ -304,7 +283,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
         () => ({
             start: async () => {
                 try {
-                    await start();
+                    return await start();
                 } catch (err) {
                     const normalized = err instanceof Error ? err : new Error(String(err));
                     onErrorRef.current?.(normalized);

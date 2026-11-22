@@ -3,7 +3,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createGitIdentityStore } from './identity-storage.js';
+import { createGitIdentityStore, toPublicGitIdentityProfile } from './identity-storage.js';
 import { gitStorageProcess } from './storage-process.test-support.js';
 
 const roots = [];
@@ -51,7 +51,7 @@ describe('git identity storage', () => {
   });
 
   it('stores an identity as an account, a transport and a signature', async () => {
-    const { store } = await setup();
+    const { store, filePath } = await setup();
     const created = store.createProfile({ ...profile('work'), account, transport: 'account' });
     expect(created).toMatchObject({ account, transport: 'account' });
 
@@ -65,8 +65,12 @@ describe('git identity storage', () => {
     // A signature that pushes with the machine's own Git needs no account,
     // and may still name one so it answers for issues and change requests.
     expect(store.createProfile(profile('personal'))).toMatchObject({ account: null, transport: 'system' });
-    expect(store.createProfile({ ...profile('personal-with-account'), account, transport: 'system' }))
-      .toMatchObject({ account, transport: 'system' });
+    const externalAccount = { provider: 'ext-forge', instance: 'https://forge.example', accountId: 'https://forge.example#cli:alice ' };
+    expect(store.createProfile({ ...profile('personal-with-account'), account: externalAccount, transport: 'system' }))
+      .toMatchObject({ account: externalAccount, transport: 'system' });
+    const reopened = createGitIdentityStore({ filePath }).getProfile('personal-with-account');
+    expect(reopened.account).toEqual(externalAccount);
+    expect(toPublicGitIdentityProfile(reopened).account).toEqual(externalAccount);
   });
 
   it('refuses an identity whose transport and credentials disagree', async () => {
@@ -79,8 +83,15 @@ describe('git identity storage', () => {
       .toThrow(/Only an SSH transport names a managed key/i);
     expect(() => store.createProfile({ ...profile('d'), transport: 'made-up' }))
       .toThrow(/Invalid Git identity transport/i);
-    expect(() => store.createProfile({ ...profile('e'), account: { provider: 'bitbucket', instance: 'x', accountId: 'y' }, transport: 'account' }))
+    expect(() => store.createProfile({ ...profile('e'), account: { provider: 'Bit Bucket', instance: 'x', accountId: 'y' }, transport: 'account' }))
       .toThrow(/Invalid Git identity account/i);
+  });
+
+  it('keeps an identity naming a provider this build does not know, the way persisted ids stay open', async () => {
+    const { store } = await setup();
+    const account = { provider: 'sourcehut', instance: 'https://forge.example.com', accountId: 'occred:v1:sourcehut:one:r1' };
+    store.createProfile({ ...profile('f'), account, transport: 'account' });
+    expect(store.getProfiles().find((entry) => entry.id === 'f')?.account).toEqual(account);
   });
 
   it('retains server-only legacy fields while merging public author edits', async () => {

@@ -1,0 +1,376 @@
+
+import { StringDecoder } from 'node:string_decoder';
+import type nodePath from 'node:path';
+import type { spawn as nodeSpawn, ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
+
+import { isRecord, isString } from '../shared/guards.js';
+
+interface RipgrepText {
+  text?: unknown;
+  bytes?: unknown;
+}
+
+interface RipgrepEvent {
+  type?: unknown;
+  data?: unknown;
+}
+
+interface RipgrepMatchData {
+  path?: unknown;
+  lines?: unknown;
+  submatches?: unknown;
+  line_number?: unknown;
+}
+
+interface RipgrepSubmatch {
+  start: number;
+  end: number;
+}
+
+interface RipgrepMatch {
+  pathBytes: Buffer;
+  lineBytes: Buffer;
+  line: number;
+  submatches: RipgrepSubmatch[];
+}
+
+export interface ContentMatch {
+  path: string;
+  relativePath: string;
+  line: number;
+  column: number;
+  text: string;
+  ranges: [number, number][];
+  cutStart: boolean;
+}
+
+export type ContentSearchResult =
+  | { status: 'ok'; matches: ContentMatch[]; stopped: 'limit' | 'deadline' | null }
+  | { status: 'unavailable' }
+  | { status: 'invalid-pattern' | 'failed'; message: string }
+  | { status: 'aborted' };
+
+interface ContentSearchRuntimeOptions {
+  spawn: typeof nodeSpawn;
+  path: Pick<typeof nodePath, 'sep' | 'join'>;
+  resolveRipgrepBinary: () => Promise<string | null>;
+  deadlineMs?: number;
+}
+
+export interface ContentSearchOptions {
+  query: string;
+  regex: boolean;
+  includeHidden?: boolean;
+  respectGitignore?: boolean;
+  resultRoot?: string | null | undefined;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+const isRipgrepText = (value: unknown): value is RipgrepText => isRecord(value);
+const isRipgrepEvent = (value: unknown): value is RipgrepEvent => isRecord(value);
+const isRipgrepMatchData = (value: unknown): value is RipgrepMatchData => isRecord(value);
+const isRipgrepSubmatch = (value: unknown): value is RipgrepSubmatch => (
+  isRecord(value) && value !== null && typeof value === 'object'
+  && 'start' in value && Number.isInteger(value.start)
+  && 'end' in value && Number.isInteger(value.end)
+);
+const isLineNumber = (value: unknown): value is number => Number.isInteger(value);
+
+export const CONTENT_SEARCH_DEFAULT_LIMIT = 200;
+export const CONTENT_SEARCH_MAX_LIMIT = 500;
+export const CONTENT_SEARCH_MAX_QUERY_LENGTH = 1024;
+const CONTENT_SEARCH_DEADLINE_MS = 30_000;
+
+const PREVIEW_UNCUT_MATCH_START = 48;
+const PREVIEW_LEAD_CHARS = 24;
+const PREVIEW_MAX_CHARS = 200;
+const MAX_RANGES_PER_LINE = 32;
+const STDERR_MAX_BYTES = 64 * 1024;
+
+// One ripgrep `--json` line is accumulated whole before it can be parsed,
+// so a single file line sets the memory cost of a search. Lines longer than
+// this cap are skipped: their pieces are dropped as they arrive and the
+// search resumes at the next newline. A result preview shows 200 characters
+// of a line, so a cap of 1 MiB only ever costs a match deep inside a
+// minified or generated line, never a hand-written one.
+export const CONTENT_SEARCH_MAX_LINE_BYTES = 1 * 1024 * 1024;
+
+const decodeRipgrepText = (value: RipgrepText | null) => {
+  if (!value) return null;
+  if (isString(value.text)) return Buffer.from(String(value.text), 'utf8');
+  if (isString(value.bytes)) return Buffer.from(String(value.bytes), 'base64');
+  return null;
+};
+
+const readRipgrepMatch = (event: RipgrepEvent) => {
+  if (event.type !== 'match' || !isRipgrepMatchData(event.data)) return null;
+  const { data } = event;
+  const pathBytes = decodeRipgrepText(isRipgrepText(data.path) ? data.path : null);
+  const lineBytes = decodeRipgrepText(isRipgrepText(data.lines) ? data.lines : null);
+  const submatches = Array.isArray(data.submatches)
+    ? data.submatches.filter(isRipgrepSubmatch)
+    : [];
+  if (!pathBytes || !lineBytes || !isLineNumber(data.line_number) || data.line_number < 1 || submatches.length === 0) return null;
+  return { pathBytes, lineBytes, line: data.line_number, submatches };
+};
+
+const toCharRanges = (lineBytes: Buffer, submatches: RipgrepSubmatch[]) => {
+  const ranges: [number, number][] = [];
+  let byteCursor = 0;
+  let charCursor = 0;
+  const advance = (byteOffset: number) => {
+    const clamped = Math.min(Math.max(byteOffset, byteCursor), lineBytes.length);
+    charCursor += lineBytes.subarray(byteCursor, clamped).toString('utf8').length;
+    byteCursor = clamped;
+    return charCursor;
+  };
+  for (const submatch of submatches.slice(0, MAX_RANGES_PER_LINE)) {
+    const start = advance(submatch.start);
+    const end = advance(submatch.end);
+    if (end > start) ranges.push([start, end]);
+  }
+  return ranges;
+};
+
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+const buildPreview = (lineBytes: Buffer, submatches: RipgrepSubmatch[]) => {
+  const fullText = lineBytes.toString('utf8').replace(/\r?\n$/, '');
+  const fullRanges = toCharRanges(lineBytes, submatches);
+  const firstMatchStart = fullRanges[0]?.[0] ?? 0;
+
+  const indentation = /^\s*/.exec(fullText)?.[0].length ?? 0;
+  const rawCut = firstMatchStart - indentation > PREVIEW_UNCUT_MATCH_START
+    ? firstMatchStart - PREVIEW_LEAD_CHARS
+    : indentation;
+  // Never split a surrogate pair at either window edge (#2152): if the
+  // cut lands on a low surrogate, start one code unit later so the
+  // orphaned half is excluded whole; if the window would end on a high
+  // surrogate, end one code unit earlier. The window only ever shrinks,
+  // so the PREVIEW_MAX_CHARS cap holds and the ranges below, shifted by
+  // cut and clamped to text.length, stay correct.
+  const cut = rawCut > 0 && isLowSurrogate(fullText.charCodeAt(rawCut)) && isHighSurrogate(fullText.charCodeAt(rawCut - 1))
+    ? rawCut + 1
+    : rawCut;
+  const rawEnd = Math.min(fullText.length, cut + PREVIEW_MAX_CHARS);
+  const end = rawEnd < fullText.length && isHighSurrogate(fullText.charCodeAt(rawEnd - 1)) && isLowSurrogate(fullText.charCodeAt(rawEnd))
+    ? rawEnd - 1
+    : rawEnd;
+  const text = fullText.slice(cut, end);
+  const ranges: [number, number][] = [];
+  for (const [start, end] of fullRanges) {
+    const shiftedStart = Math.max(0, start - cut);
+    const shiftedEnd = Math.min(text.length, end - cut);
+    if (shiftedEnd > shiftedStart) ranges.push([shiftedStart, shiftedEnd]);
+  }
+
+  return {
+    column: firstMatchStart + 1,
+    text,
+    ranges,
+    cutStart: cut > indentation,
+  };
+};
+
+const INVALID_PATTERN_PATTERN = /regex parse error|error parsing|unrecognized escape/i;
+
+const failureMessage = (stderr: string, fallback: string) => {
+  const lines = stderr.split(/\r?\n/).map((part) => part.trim()).filter(Boolean);
+  const line = lines.find((candidate) => /^error:/i.test(candidate)) ?? lines[0];
+  return line ? line.replace(/^(?:rg|error):\s*/i, '') : fallback;
+};
+
+export const createContentSearchRuntime = ({
+  spawn,
+  path,
+  resolveRipgrepBinary,
+  deadlineMs = CONTENT_SEARCH_DEADLINE_MS,
+}: ContentSearchRuntimeOptions) => {
+  const ripgrepArguments = ({ query, regex, includeHidden, respectGitignore }: ContentSearchOptions) => {
+    const args = [
+      '--json',
+      '--no-config',
+      '--smart-case',
+      '--glob', '!.git',
+      '--glob', '!node_modules',
+    ];
+    if (includeHidden) args.push('--hidden');
+    if (!respectGitignore) args.push('--no-ignore');
+    if (!regex) args.push('--fixed-strings');
+    args.push('-e', query, '--', '.');
+    return args;
+  };
+
+  const toRelativePath = (ripgrepPath: string) => {
+    const trimmed = ripgrepPath.replace(/^\.[\\/]/, '');
+    return path.sep === '\\' ? trimmed.split('\\').join('/') : trimmed;
+  };
+
+  const searchFileContents = async (rootPath: string, options: ContentSearchOptions): Promise<ContentSearchResult> => {
+    const resultRoot = options.resultRoot || rootPath;
+    const binary = await resolveRipgrepBinary();
+    if (!binary) return { status: 'unavailable' };
+    if (options.signal?.aborted) return { status: 'aborted' };
+
+    const limit = Math.min(Math.max(1, options.limit ?? CONTENT_SEARCH_DEFAULT_LIMIT), CONTENT_SEARCH_MAX_LIMIT);
+
+    return new Promise<ContentSearchResult>((resolve) => {
+      let child: ChildProcessByStdio<null, Readable, Readable>;
+      try {
+        child = spawn(binary, ripgrepArguments(options), {
+          cwd: rootPath,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (error) {
+        resolve({ status: 'failed', message: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+
+      const matches: ContentMatch[] = [];
+      let stopped: 'limit' | 'deadline' | null = null;
+      let aborted = false;
+      let settled = false;
+      let stderr = '';
+      let stderrBytes = 0;
+      const stdoutDecoder = new StringDecoder('utf8');
+      const stderrDecoder = new StringDecoder('utf8');
+      let pending: string[] = [];
+      let pendingBytes = 0;
+      let lineOversized = false;
+
+      const finish = (result: ContentSearchResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(deadline);
+        options.signal?.removeEventListener('abort', onAbort);
+        resolve(result);
+      };
+
+      const stop = (reason: 'abort' | 'limit' | 'deadline') => {
+        if (stopped || aborted) return;
+        if (reason === 'abort') aborted = true;
+        else stopped = reason;
+        child.kill();
+      };
+
+      const onAbort = () => stop('abort');
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+      const deadline = setTimeout(() => stop('deadline'), deadlineMs);
+      deadline.unref?.();
+
+      const takeMatch = ({ pathBytes, lineBytes, line, submatches }: RipgrepMatch) => {
+        const relativePath = toRelativePath(pathBytes.toString('utf8'));
+        if (!relativePath) return;
+        matches.push({
+          path: path.join(resultRoot, relativePath),
+          relativePath,
+          line,
+          ...buildPreview(lineBytes, submatches),
+        });
+        if (matches.length >= limit) stop('limit');
+      };
+
+      const consume = (line: string) => {
+        if (!line || stopped || aborted) return;
+        let event: unknown;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          return;
+        }
+        const match = isRipgrepEvent(event) ? readRipgrepMatch(event) : null;
+        if (match) takeMatch(match);
+      };
+
+      // A single line can be tens of megabytes (a minified file). The pieces
+      // of an unfinished line wait in a list and only the new chunk is
+      // scanned, so a long line costs one join instead of a rescan per chunk.
+      // The accumulated bytes are counted as pieces arrive; once a line
+      // passes CONTENT_SEARCH_MAX_LINE_BYTES its pieces are dropped and the
+      // rest of the line is ignored, so an over-cap line is never joined or
+      // parsed whole and the search resumes at its newline.
+      const pushPiece = (piece: string) => {
+        if (!piece || lineOversized) return;
+        pendingBytes += Buffer.byteLength(piece, 'utf8');
+        if (pendingBytes > CONTENT_SEARCH_MAX_LINE_BYTES) {
+          lineOversized = true;
+          pending = [];
+          pendingBytes = 0;
+          return;
+        }
+        pending.push(piece);
+      };
+      const finishLine = () => {
+        if (!lineOversized) consume(pending.join(''));
+        pending = [];
+        pendingBytes = 0;
+        lineOversized = false;
+      };
+      // stderr is decoded the way stdout is: a multi-byte character can be
+      // split across chunks, and per-chunk decoding would corrupt it in the
+      // failure message. The cap counts bytes, not characters; a character
+      // that would cross it is dropped whole rather than sliced, and chunks
+      // keep being drained after the cap so ripgrep never blocks.
+      const appendStderr = (text: string) => {
+        if (!text || stderrBytes >= STDERR_MAX_BYTES) return;
+        const textBytes = Buffer.byteLength(text, 'utf8');
+        if (stderrBytes + textBytes <= STDERR_MAX_BYTES) {
+          stderr += text;
+          stderrBytes += textBytes;
+          return;
+        }
+        let remaining = STDERR_MAX_BYTES - stderrBytes;
+        let kept = '';
+        for (const character of text) {
+          const characterBytes = Buffer.byteLength(character, 'utf8');
+          if (characterBytes > remaining) break;
+          kept += character;
+          remaining -= characterBytes;
+          stderrBytes += characterBytes;
+        }
+        stderr += kept;
+      };
+      child.stdout.on('data', (chunk) => {
+        const text = stdoutDecoder.write(chunk);
+        let lineStart = 0;
+        let newline = text.indexOf('\n');
+        while (newline !== -1) {
+          pushPiece(text.slice(lineStart, newline));
+          finishLine();
+          lineStart = newline + 1;
+          newline = text.indexOf('\n', lineStart);
+        }
+        if (lineStart < text.length) pushPiece(text.slice(lineStart));
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        appendStderr(stderrDecoder.write(chunk));
+      });
+      child.on('error', (error) => finish({ status: 'failed', message: error.message }));
+      child.on('close', (code) => {
+        if (aborted) {
+          finish({ status: 'aborted' });
+          return;
+        }
+        pushPiece(stdoutDecoder.end());
+        appendStderr(stderrDecoder.end());
+        if (!lineOversized) consume(pending.join(''));
+        matches.sort((a, b) => (a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : a.line - b.line));
+        if (stopped || code === 0 || code === 1 || matches.length > 0) {
+          finish({ status: 'ok', matches, stopped });
+          return;
+        }
+        if (INVALID_PATTERN_PATTERN.test(stderr)) {
+          finish({ status: 'invalid-pattern', message: failureMessage(stderr, 'Invalid regular expression') });
+          return;
+        }
+        finish({ status: 'failed', message: failureMessage(stderr, `ripgrep exited with code ${code}`) });
+      });
+    });
+  };
+
+  return { searchFileContents };
+};

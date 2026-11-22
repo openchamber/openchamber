@@ -1,6 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-const { getPullRequestDiff, getPullRequestFileContents } = await import('./pull-request.js');
+import { describe, expect, it, vi } from 'vitest';
+import { getPullRequestDiff, getPullRequestFileContents, supportsChangeRequestPatch } from './pull-request.js';
 
 const PATCH = `diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -9,319 +8,82 @@ const PATCH = `diff --git a/src/a.ts b/src/a.ts
 +const added = true;
 `;
 
-
-const encoder = new TextEncoder();
-// The diff read asks Octokit for the raw body stream (parseSuccessResponseBody:
-// false), so mocks resolve a web stream of the body, not the body itself.
-const streamOf = (chunks) => new ReadableStream({
-  start(controller) {
-    for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
-    controller.close();
-  },
-});
-const diffResponse = (chunks, headers = {}) => ({ data: streamOf(chunks), headers });
-
-describe('getPullRequestDiff', () => {
-  let request;
-  let getOctokitForAccountId;
-  let resolveGitHubRepoFromDirectory;
-  let onAccountUnavailable;
-  let resolveRepoNetwork;
-  const readContext = {
-    provider: 'github',
-    instance: 'github.com',
-    accountId: 'github.com#7',
-    repositoryId: 'repo-1',
-    bindingRevision: 4,
-    directory: '/repo',
-    primaryRemote: 'upstream',
-  };
-
-  const read = (overrides = {}) => getPullRequestDiff('/repo', 2122, readContext, {
-    getOctokitForAccountId,
-    resolveGitHubRepoFromDirectory,
-    resolveRepoNetwork,
-    onAccountUnavailable,
-    ...overrides,
-  });
-
-  beforeEach(() => {
-    request = vi.fn().mockResolvedValue(diffResponse([PATCH]));
-    getOctokitForAccountId = vi.fn().mockResolvedValue({ octokit: { request } });
-    onAccountUnavailable = vi.fn();
-    // The bound repository is a fork of `upstream/project`: the same network the
-    // bound pull request list reads.
-    resolveRepoNetwork = vi.fn().mockResolvedValue([
-      { owner: 'openchamber', repo: 'openchamber', source: 'origin' },
-      { owner: 'upstream', repo: 'project', source: 'upstream' },
-    ]);
-    // The resolver hands back a wrapper, not the repo. Reading `.owner` off the
-    // wrapper made every repository look remote-less, which is what this suite
-    // exists to prevent.
-    resolveGitHubRepoFromDirectory = vi.fn().mockResolvedValue({
-      repo: { owner: 'openchamber', repo: 'openchamber' },
-      remoteUrl: 'git@github.com:openchamber/openchamber.git',
-    });
-  });
-
-  it('requests the diff for the resolved repository', async () => {
-    const result = await read();
-
-    expect(result.patch).toBe(PATCH);
-    expect(result.meta).toEqual({ owner: 'openchamber', repo: 'openchamber', number: 2122 });
-    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
-      owner: 'openchamber',
-      repo: 'openchamber',
-      pull_number: 2122,
-      headers: { accept: 'application/vnd.github.v3.diff' },
-      request: { parseSuccessResponseBody: false },
-    });
-    expect(getOctokitForAccountId).toHaveBeenCalledWith(readContext.accountId, expect.any(Object));
-    expect(resolveGitHubRepoFromDirectory).toHaveBeenCalledWith('/repo', 'upstream');
-  });
-
-  it('reports a missing GitHub remote only when there really is none', async () => {
-    resolveGitHubRepoFromDirectory.mockResolvedValue({ repo: null, remoteUrl: null });
-
-    await expect(read()).rejects.toMatchObject({
-      code: 'no-github-remote',
-      statusCode: 400,
-    });
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it('reads a named source repository when it is the bound one, without resolving the network', async () => {
-    const result = await read({ sourceRepo: { owner: 'OpenChamber', repo: 'OpenChamber' } });
-
-    expect(result.meta).toEqual({ owner: 'openchamber', repo: 'openchamber', number: 2122 });
-    expect(request).toHaveBeenCalledOnce();
-    expect(resolveRepoNetwork).not.toHaveBeenCalled();
-  });
-
-  it('reads an upstream pull request the bound repository was forked from', async () => {
-    const result = await read({ sourceRepo: { owner: 'upstream', repo: 'project' } });
-
-    expect(result.meta).toEqual({ owner: 'upstream', repo: 'project', number: 2122 });
-    expect(resolveRepoNetwork).toHaveBeenCalledWith(expect.anything(), '/repo', 'upstream', { strictErrors: true });
-    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/pulls/{pull_number}', expect.objectContaining({
-      owner: 'upstream', repo: 'project', pull_number: 2122,
-    }));
-  });
-
-  // The bound pull request list reads the repository and its upstream with this
-  // account. The diff keeps that boundary: a name outside it would reach a
-  // repository the binding never covered, and the same number there is a
-  // different pull request.
-  it('refuses a named repository outside the bound repository network', async () => {
-    await expect(read({ sourceRepo: { owner: 'stranger', repo: 'elsewhere' } })).rejects.toMatchObject({
-      code: 'PULL_REQUEST_REPOSITORY_MISMATCH',
-      statusCode: 409,
-    });
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it('allows an empty comparison but rejects malformed GitHub bodies', async () => {
-    request.mockResolvedValue(diffResponse(['']));
-    expect((await read({ allowEmpty: true })).patch).toBe('');
-    request.mockResolvedValue(diffResponse(['{"message":"Not a diff"}']));
-    await expect(read()).rejects.toThrow();
-  });
-
-  it('returns an at-cap diff byte-identically and rejects an over-cap diff', async () => {
-    const prefix = 'diff --git a/src/a.ts b/src/a.ts\n';
-    const atCap = prefix + 'x'.repeat(50 * 1024 * 1024 - prefix.length);
-    request.mockResolvedValue(diffResponse([atCap]));
-    expect((await read()).patch).toBe(atCap);
-
-    request.mockResolvedValue(diffResponse([atCap, 'x']));
-    await expect(read()).rejects.toMatchObject({ code: 'patch-too-large', statusCode: 413 });
-  });
-
-  it('stops pulling the body as soon as the streamed bytes cross the cap (#1456)', async () => {
-    const chunk = 'y'.repeat(10 * 1024 * 1024);
-    const chunks = ['diff --git a/src/a.ts b/src/a.ts\n', chunk, chunk, chunk, chunk, chunk, chunk, chunk, chunk];
-    let pulled = 0;
-    const body = new ReadableStream({
-      pull(controller) {
-        const next = chunks[pulled];
-        pulled += 1;
-        if (next === undefined) controller.close();
-        else controller.enqueue(encoder.encode(next));
-      },
-    });
-    request.mockResolvedValue({ data: body, headers: {} });
-
-    await expect(read()).rejects.toMatchObject({ code: 'patch-too-large', statusCode: 413 });
-    // The cap is crossed on the sixth chunk; the remaining chunks are never pulled.
-    expect(pulled).toBeLessThan(chunks.length);
-  });
-
-  it('refuses an over-cap declared Content-Length by cancelling the body unread (#1456)', async () => {
-    let pulled = 0;
-    let cancelled = false;
-    const body = new ReadableStream({
-      pull(controller) {
-        pulled += 1;
-        controller.enqueue(encoder.encode('diff --git a/src/a.ts b/src/a.ts\n'));
-      },
-      cancel() {
-        cancelled = true;
-      },
-    });
-    request.mockResolvedValue({
-      data: body,
-      headers: { 'content-length': String(50 * 1024 * 1024 + 1) },
-    });
-
-    await expect(read()).rejects.toMatchObject({ code: 'patch-too-large', statusCode: 413 });
-    expect(cancelled).toBe(true);
-    // Construction fills the stream's one-chunk internal queue; the body is
-    // cancelled from the declared length alone, never drained.
-    expect(pulled).toBeLessThanOrEqual(1);
-  });
-
-  it('requires the exact bound account before repository resolution', async () => {
-    getOctokitForAccountId.mockResolvedValue(null);
-
-    await expect(read()).rejects.toMatchObject({
-      code: 'github-not-connected',
-      statusCode: 401,
-    });
-    expect(resolveGitHubRepoFromDirectory).not.toHaveBeenCalled();
-  });
-
-  it('treats an empty diff as a missing pull request rather than an empty review', async () => {
-    request.mockResolvedValue(diffResponse(['   ']));
-
-    await expect(read()).rejects.toMatchObject({
-      code: 'empty-diff',
-      statusCode: 404,
-    });
-  });
-
-  it('reconciles only an exact-account 401', async () => {
-    getOctokitForAccountId.mockImplementation(async (_accountId, options) => {
-      await options.onUnauthorized({ provider: 'github', instance: 'github.com', accountId: readContext.accountId }, false);
-      throw Object.assign(new Error('bad credentials'), { status: 401 });
-    });
-
-    await expect(read()).rejects.toMatchObject({ status: 401 });
-    expect(onAccountUnavailable).toHaveBeenCalledWith({
-      provider: 'github', instance: 'github.com', accountId: readContext.accountId,
-    });
-  });
-
-  it.each([403, undefined])('does not reconcile a %s provider failure', async (status) => {
-    request.mockRejectedValue(Object.assign(new Error('provider failed'), status ? { status } : {}));
-
-    await expect(read()).rejects.toThrow('provider failed');
-    expect(onAccountUnavailable).not.toHaveBeenCalled();
-  });
+const contextOf = (provider) => ({
+  provider, instance: provider === 'github' ? 'github.com' : 'https://gitlab.com', accountId: 'account-1',
+  repositoryId: 'repo-1', bindingRevision: 2, directory: '/repo', primaryRemote: 'origin',
 });
 
-describe('getPullRequestFileContents', () => {
-  const HEAD = 'a'.repeat(40);
-  const BASE_TIP = 'b'.repeat(40);
-  const MERGE_BASE = 'c'.repeat(40);
-  const readContext = {
-    provider: 'github',
-    instance: 'github.com',
-    accountId: 'github.com#7',
-    repositoryId: 'repo-1',
-    bindingRevision: 4,
-    directory: '/repo',
-    primaryRemote: 'origin',
-  };
-  let request;
-  let dependencies;
-
-  // The bound repository is a fork of `upstream/project`; the named file's
-  // repository has to be inside that network.
-  const read = (sourceRepo, file) => getPullRequestFileContents('/repo', 7, readContext, {
-    ...file,
-    sourceRepo,
-    ...dependencies,
-  });
-
-  beforeEach(() => {
-    request = vi.fn(async (route, params) => {
-      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') return { data: { head: { sha: HEAD }, base: { sha: BASE_TIP } } };
-      if (route === 'GET /repos/{owner}/{repo}/compare/{basehead}') return { data: { merge_base_commit: { sha: MERGE_BASE } } };
-      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: `${params.path}@${params.ref}` };
-      throw new Error(`unexpected ${route}`);
-    });
-    dependencies = {
-      getOctokitForAccountId: vi.fn().mockResolvedValue({ octokit: { request } }),
-      resolveGitHubRepoFromDirectory: vi.fn().mockResolvedValue({ repo: { owner: 'o', repo: 'r' }, remoteUrl: null }),
-      resolveRepoNetwork: vi.fn().mockResolvedValue([
-        { owner: 'o', repo: 'r', source: 'origin' },
-        { owner: 'upstream', repo: 'project', source: 'upstream' },
-      ]),
-    };
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('reads the base side at the merge base and the head side at the PR head', async () => {
-    const result = await read({ owner: 'upstream', repo: 'project' }, { path: 'src/a.ts', status: 'M' });
-    expect(result).toEqual({ original: `src/a.ts@${MERGE_BASE}`, modified: `src/a.ts@${HEAD}` });
-    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/compare/{basehead}', {
-      owner: 'upstream', repo: 'project', basehead: `${BASE_TIP}...${HEAD}`,
-    });
-    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/contents/{path}', expect.objectContaining({
-      owner: 'upstream', repo: 'project', headers: { accept: 'application/vnd.github.raw+json' },
-    }));
-  });
-
-  it('skips the missing side of added and deleted files and follows renames', async () => {
-    expect(await read({ owner: 'o', repo: 'r' }, { path: 'new.ts', status: 'A' }))
-      .toEqual({ original: '', modified: `new.ts@${HEAD}` });
-    expect(await read({ owner: 'o', repo: 'r' }, { path: 'gone.ts', status: 'D' }))
-      .toEqual({ original: `gone.ts@${MERGE_BASE}`, modified: '' });
-    expect(await read({ owner: 'o', repo: 'r' }, { path: 'new.ts', previousPath: 'old.ts', status: 'R' }))
-      .toEqual({ original: `old.ts@${MERGE_BASE}`, modified: `new.ts@${HEAD}` });
-  });
-
-  it('rejects oversized files and malformed GitHub metadata', async () => {
-    request.mockImplementationOnce(async () => ({ data: { head: { sha: 'nope' }, base: { sha: BASE_TIP } } }));
-    await expect(read({ owner: 'o', repo: 'r' }, { path: 'a.ts', status: 'M' })).rejects.toThrow(/invalid pull request head/);
-
-    request.mockImplementation(async (route) => {
-      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') return { data: { head: { sha: HEAD }, base: { sha: BASE_TIP } } };
-      if (route === 'GET /repos/{owner}/{repo}/compare/{basehead}') return { data: { merge_base_commit: { sha: MERGE_BASE } } };
-      return { data: 'x'.repeat(5 * 1024 * 1024 + 1) };
-    });
-    await expect(read({ owner: 'o', repo: 'r' }, { path: 'a.ts', status: 'M' })).rejects.toMatchObject({ code: 'file-too-large', statusCode: 413 });
-  });
-});
-
-describe('GitLab merge requests', () => {
-  const context = {
-    provider: 'gitlab', instance: 'https://gitlab.com', accountId: 'occred:v1:gitlab:abc:r1',
-    repositoryId: 'repo-1', bindingRevision: 2, directory: '/repo', primaryRemote: 'origin',
-  };
-
-  it('hands the validated context to the GitLab reader and keeps the empty-diff rule', async () => {
-    const readGitLabChangeRequestPatch = vi.fn(async () => ({ patch: PATCH, meta: { owner: 'o', repo: 'r', number: 3 } }));
+describe('change request reads', () => {
+  it('hands the validated context to the provider-neutral reader and keeps the empty-diff rule in the provider\'s words', async () => {
+    const context = contextOf('gitlab');
+    const readChangeRequestPatch = vi.fn(async () => ({ patch: PATCH, meta: { owner: 'o', repo: 'r', number: 3 } }));
     const sourceRepo = { owner: 'o', repo: 'r' };
-    await expect(getPullRequestDiff('/repo', 3, context, { sourceRepo, readGitLabChangeRequestPatch }))
+    await expect(getPullRequestDiff('/repo', 3, context, { sourceRepo, readChangeRequestPatch }))
       .resolves.toEqual({ patch: PATCH, meta: { owner: 'o', repo: 'r', number: 3 } });
-    expect(readGitLabChangeRequestPatch).toHaveBeenCalledWith({ context, number: 3, sourceRepo });
+    expect(readChangeRequestPatch).toHaveBeenCalledWith({ context, number: 3, sourceRepo });
 
-    const empty = vi.fn(async () => ({ patch: '', meta: { owner: 'o', repo: 'r', number: 4 } }));
-    await expect(getPullRequestDiff('/repo', 4, context, { readGitLabChangeRequestPatch: empty }))
-      .rejects.toMatchObject({ code: 'empty-diff', message: 'Merge request !4 has no diff' });
-    await expect(getPullRequestDiff('/repo', 4, context, { allowEmpty: true, readGitLabChangeRequestPatch: empty }))
-      .resolves.toMatchObject({ patch: '' });
+    const empty = vi.fn(async () => ({ patch: '   ', meta: { owner: 'o', repo: 'r', number: 4 } }));
+    await expect(getPullRequestDiff('/repo', 4, context, { readChangeRequestPatch: empty }))
+      .rejects.toMatchObject({ code: 'empty-diff', statusCode: 404, message: 'Merge request !4 has no diff' });
+    await expect(getPullRequestDiff('/repo', 4, contextOf('github'), { readChangeRequestPatch: empty }))
+      .rejects.toMatchObject({ code: 'empty-diff', message: 'Pull request #4 has no diff' });
+    await expect(getPullRequestDiff('/repo', 4, context, { allowEmpty: true, readChangeRequestPatch: empty }))
+      .resolves.toMatchObject({ patch: '   ' });
   });
 
-  it('reads one file through the GitLab reader and fails plainly without one', async () => {
-    const readGitLabChangeRequestFile = vi.fn(async () => ({ original: 'a', modified: 'b' }));
-    await expect(getPullRequestFileContents('/repo', 3, context, { path: 'a.ts', status: 'M', readGitLabChangeRequestFile }))
+  it('reads one file through the reader and fails plainly without one', async () => {
+    const context = contextOf('github');
+    const readChangeRequestFile = vi.fn(async () => ({ original: 'a', modified: 'b' }));
+    await expect(getPullRequestFileContents('/repo', 3, context, { path: 'a.ts', status: 'M', readChangeRequestFile }))
       .resolves.toEqual({ original: 'a', modified: 'b' });
-    expect(readGitLabChangeRequestFile).toHaveBeenCalledWith({ context, number: 3, sourceRepo: null, path: 'a.ts', previousPath: undefined, status: 'M' });
+    expect(readChangeRequestFile).toHaveBeenCalledWith({ context, number: 3, sourceRepo: null, path: 'a.ts', previousPath: undefined, status: 'M' });
     await expect(getPullRequestDiff('/repo', 3, context)).rejects.toMatchObject({ statusCode: 501 });
+    await expect(getPullRequestFileContents('/repo', 3, context, { path: 'a.ts' })).rejects.toMatchObject({ statusCode: 501 });
+  });
+
+  it('offers walkthroughs for the providers whose descriptor serves change request patches only', () => {
+    expect(supportsChangeRequestPatch('github')).toBe(true);
+    expect(supportsChangeRequestPatch('gitlab')).toBe(true);
+    expect(supportsChangeRequestPatch('sourcehut')).toBe(false);
+    expect(supportsChangeRequestPatch(undefined)).toBe(false);
+  });
+
+  it('does not validate JSON patch fields when empty diffs are allowed', async () => {
+    for (const patch of [null, false, 42, [], { text: 'patch' }]) {
+      const meta = ['unchecked', null];
+      await expect(getPullRequestDiff('/repo', 3, contextOf('github'), {
+        allowEmpty: true,
+        readChangeRequestPatch: async () => ({ patch, meta }),
+      })).resolves.toEqual({ patch, meta });
+    }
+    await expect(getPullRequestDiff('/repo', 3, contextOf('github'), {
+      allowEmpty: true,
+      readChangeRequestPatch: async () => 42,
+    })).resolves.toEqual({ patch: undefined, meta: undefined });
+  });
+
+  it('retains trim and destructuring failures for malformed JSON results', async () => {
+    for (const patch of [null, undefined, false, 42, [], { trim: 'text' }]) {
+      const message = patch === null || patch === undefined
+        ? `Cannot read properties of ${patch} (reading 'trim')`
+        : 'patch.trim is not a function';
+      await expect(getPullRequestDiff('/repo', 3, contextOf('github'), {
+        readChangeRequestPatch: async () => ({ patch }),
+      })).rejects.toThrow(message);
+    }
+    await expect(getPullRequestDiff('/repo', 3, contextOf('github'), {
+      allowEmpty: true,
+      readChangeRequestPatch: async () => null,
+    })).rejects.toThrow(TypeError);
+  });
+
+  it('passes file JSON through without promising a file-content schema', async () => {
+    for (const result of [null, true, 42, 'text', [], { original: 3 }]) {
+      await expect(getPullRequestFileContents('/repo', 3, contextOf('github'), {
+        path: 'a.ts',
+        status: 'M',
+        readChangeRequestFile: async () => result,
+      })).resolves.toEqual(result);
+    }
   });
 });

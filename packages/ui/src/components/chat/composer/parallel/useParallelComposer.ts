@@ -4,13 +4,17 @@ import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useInputStore } from '@/sync/input-store';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
+import { attachmentWireName, attachmentsCitedIn } from '@/lib/attachmentIdentity';
 import { MULTIRUN_ISOLATION_UNAVAILABLE, useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { waitForPendingDraftWorktreeRequest } from '@/lib/worktrees/pendingDraftWorktree';
 import { selectWorktreeStartFrom } from '@/lib/worktrees/worktreeStartSource';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { CreateMultiRunParams } from '@/types/multirun';
+import type { ComposerText } from '../state/composerText';
 import type { PromptGenerationSession } from '@/lib/multirun/identity';
 
 export type ParallelModel = {
@@ -34,7 +38,6 @@ export type ParallelComposerState = {
   active: number;
   isolate: boolean;
   baseBranch: string;
-  /** Null until the project's commands are loaded. */
   setupCommands: string[] | null;
   fuse: ParallelFuseJudge | null;
   generationSessions?: PromptGenerationSession[];
@@ -53,43 +56,24 @@ const countParallelRuns = (state: ParallelComposerState): number => (
   state.variants.reduce((total, variant) => total + variant.models.reduce((sum, model) => sum + model.count, 0), 0)
 );
 
-/**
- * Where the lanes of a run that shares a directory work: the directory the
- * draft is aimed at, waiting for a worktree the draft is still making (Quick
- * worktree). A failed worktree rejects, so the run does not quietly start in
- * the project root instead.
- */
 const resolveDraftDirectory = async (): Promise<string | undefined> => {
   const draft = useSessionUIStore.getState().newSessionDraft;
   if (!draft.open) return undefined;
   if (draft.pendingWorktreeRequestId) return waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId);
   return draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? undefined;
 };
-
-/**
- * "Run in parallel" state of the composer. The editor keeps showing one
- * prompt, the active variant's: switching tabs stores the editor text in the
- * variant it leaves and loads the one it opens, so autocomplete, drafts and
- * attachments stay the composer's own. Only offered on a new-session draft.
- *
- * Every run starts on separate worktrees, whatever the draft is aimed at, each
- * branched from where Settings say parallel runs start; the launch settings
- * can switch to the draft's directory shared by every run.
- */
 export function useParallelComposer(input: {
   enabled: boolean;
   draftOpen: boolean;
   draftProjectId: string | null;
-  message: string;
+  text: ComposerText;
   setMessage: (text: string) => void;
 }) {
   const { t } = useI18n();
-  const { enabled, draftOpen, draftProjectId, message, setMessage } = input;
+  const { enabled, draftOpen, draftProjectId, text: composerText, setMessage } = input;
   const [state, setState] = React.useState<ParallelComposerState | null>(null);
   const [isLaunching, setIsLaunching] = React.useState(false);
   const launchingRef = React.useRef(false);
-  const messageRef = React.useRef(message);
-  messageRef.current = message;
 
   const enter = React.useCallback((text = '') => {
     const config = useConfigStore.getState();
@@ -105,12 +89,10 @@ export function useParallelComposer(input: {
 
   const exit = React.useCallback(() => setState(null), []);
 
-  // Leaving the draft (or a surface where the mode is not offered) ends it.
   React.useEffect(() => {
     if (!enabled || !draftOpen) setState(null);
   }, [draftOpen, enabled]);
 
-  // Launcher entry points (sidebar, palette, message actions) ask through the UI store.
   const request = useUIStore((store) => store.parallelComposerRequest);
   React.useEffect(() => {
     if (!request || !enabled || !draftOpen) return;
@@ -132,7 +114,6 @@ export function useParallelComposer(input: {
   const addModel = React.useCallback((model: ParallelComposerModelInput) => {
     if (isAutoModel(model.providerID, model.modelID)) return;
     updateActiveModels((models) => {
-      // The same model with another thinking effort is a separate lane.
       const existing = models.findIndex((entry) => entry.providerID === model.providerID && entry.modelID === model.modelID && entry.variant === model.variant);
       if (existing >= 0) return models.map((entry, index) => (index === existing ? { ...entry, count: entry.count + 1 } : entry));
       return [...models, { ...model, count: 1 }];
@@ -145,7 +126,6 @@ export function useParallelComposer(input: {
       if (!target) return models;
       const twin = models.findIndex((entry, i) => i !== index && entry.providerID === target.providerID && entry.modelID === target.modelID && entry.variant === variant);
       if (twin < 0) return models.map((entry, i) => (i === index ? { ...entry, variant } : entry));
-      // Choosing an effort another chip already has folds the two chips together.
       return models.flatMap((entry, i) => (i === index ? [] : i === twin ? [{ ...entry, count: entry.count + target.count }] : [entry]));
     });
   }, [updateActiveModels]);
@@ -163,17 +143,17 @@ export function useParallelComposer(input: {
 
   const addVariant = React.useCallback(() => {
     update((current) => {
-      const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+      const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
       const source = variants[current.active];
       const next: ParallelVariant = { id: variantId(variants.length), text: source.text, models: source.models.map((model) => ({ ...model })) };
       return { ...current, variants: [...variants, next], active: variants.length };
     });
-  }, [update]);
+  }, [composerText, update]);
 
   const addGeneratedVariants = React.useCallback((texts: string[]) => {
     const ready = texts.filter((text) => text.trim());
     if (ready.length === 0) return;
-    const originalText = messageRef.current;
+    const originalText = composerText.get();
     update((current) => {
       const existing = current.variants.map((variant, index) => index === current.active ? { ...variant, text: originalText } : variant);
       const source = existing[current.active];
@@ -184,8 +164,8 @@ export function useParallelComposer(input: {
       return { ...current, variants: [...variants, ...added].map((variant, index) => ({ ...variant, id: variantId(index) })), active: variants.length };
     });
     setMessage(ready[0]);
-  }, [setMessage, update]);
-  const getActivePrompt = React.useCallback(() => messageRef.current, []);
+  }, [composerText, setMessage, update]);
+  const getActivePrompt = React.useCallback(() => composerText.get(), [composerText]);
   const retainGenerationSessions = React.useCallback((sessions: readonly PromptGenerationSession[]) => {
     if (sessions.length === 0) return;
     update((current) => ({ ...current, generationSessions: [...new Map([...(current.generationSessions ?? []), ...sessions].map((session) => [session.sessionID, session])).values()] }));
@@ -194,20 +174,20 @@ export function useParallelComposer(input: {
   const switchVariant = React.useCallback((target: number) => {
     const current = state;
     if (!current || target === current.active || !current.variants[target]) return;
-    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
     setState({ ...current, variants, active: target });
     setMessage(variants[target].text);
-  }, [setMessage, state]);
+  }, [composerText, setMessage, state]);
 
   const removeVariant = React.useCallback((target: number) => {
     const current = state;
     if (!current || current.variants.length <= 1) return;
-    const withText = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+    const withText = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
     const variants = withText.filter((_, index) => index !== target).map((variant, index) => ({ ...variant, id: variantId(index) }));
     const active = Math.min(target <= current.active && current.active > 0 ? current.active - 1 : current.active, variants.length - 1);
     setState({ ...current, variants, active });
     setMessage(variants[active].text);
-  }, [setMessage, state]);
+  }, [composerText, setMessage, state]);
 
   const setIsolate = React.useCallback((isolate: boolean) => update((current) => ({ ...current, isolate })), [update]);
   const setBaseBranch = React.useCallback((baseBranch: string) => update((current) => ({ ...current, baseBranch })), [update]);
@@ -218,7 +198,7 @@ export function useParallelComposer(input: {
     const current = state;
     // A ref, so a second Enter before the re-render cannot start a second run.
     if (!current || launchingRef.current) return;
-    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
+    const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: composerText.get() } : variant));
     const ready = variants.filter((variant) => variant.text.trim() && variant.models.length > 0);
     if (ready.length !== variants.length) {
       toast.error(t('chat.parallel.toast.incomplete'));
@@ -233,8 +213,23 @@ export function useParallelComposer(input: {
     if (projectId !== projects.activeProjectId) projects.setActiveProjectIdOnly(projectId);
 
     const title = runTitleFrom(variants[0].text) || t('chat.parallel.defaultTitle');
-    const attachments = useInputStore.getState().attachedFiles;
+    const prompts = variants.map((variant) => variant.text).join('\n');
+    const cited = attachmentsCitedIn(prompts, useInputStore.getState().attachedFiles);
+    const projectPath = useProjectsStore.getState().projects.find((project) => project.id === projectId)?.path;
+    launchingRef.current = true;
+    setIsLaunching(true);
+    const draftKey = useInputStore.getState().attachmentDraftKey;
+    const isLaunchRuntime = captureRuntimeInstance();
+    const unsaved = await useInputStore.getState().saveAttachmentsHeldForSend(null, projectPath, new Set(cited.map((file) => file.id)));
+    if (unsaved.length > 0 || !isLaunchRuntime() || useInputStore.getState().attachmentDraftKey !== draftKey) {
+      if (unsaved.length > 0) toast.error(t('chat.chatInput.toast.imageCopySaveFailed', { files: unsaved.join(', ') }));
+      launchingRef.current = false;
+      setIsLaunching(false);
+      return;
+    }
+    const attachments = attachmentsCitedIn(prompts, useInputStore.getState().attachedFiles);
     const config = useConfigStore.getState();
+    const ui = useUIStore.getState();
     const params: CreateMultiRunParams = {
       name: title,
       title,
@@ -252,17 +247,18 @@ export function useParallelComposer(input: {
       worktreeBaseBranch: current.isolate ? current.baseBranch || undefined : undefined,
       worktreeStartFrom: current.isolate ? selectWorktreeStartFrom(config, 'parallel') : undefined,
       files: attachments.length > 0
-        ? attachments.map((file) => ({ mime: file.mimeType, filename: file.filename, url: file.dataUrl }))
+        ? attachments.map((file) => ({ mime: file.mimeType, filename: attachmentWireName(file), url: file.dataUrl }))
         : undefined,
       setupCommands: current.isolate ? current.setupCommands?.filter((command) => command.trim()) : undefined,
       autoFusion: current.fuse
         ? { providerID: current.fuse.providerID, modelID: current.fuse.modelID, variant: current.fuse.variant, agent: config.currentAgentName || undefined }
         : undefined,
+      goal: useSessionGoalArmStore.getState().armed
+        ? { tokenBudget: ui.sessionGoalDefaultBudgetEnabled ? ui.sessionGoalDefaultBudget : null }
+        : undefined,
       generationSessions: current.generationSessions,
     };
 
-    setIsLaunching(true);
-    launchingRef.current = true;
     try {
       let sharedDirectory: string | undefined;
       if (!current.isolate) {
@@ -283,12 +279,13 @@ export function useParallelComposer(input: {
       setMessage('');
       useInputStore.getState().clearAttachedFiles();
       setState(null);
+      if (params.goal) useSessionGoalArmStore.getState().setArmed(false);
       useUIStore.getState().setRunOverviewKey(result.groupKey);
     } finally {
       launchingRef.current = false;
       setIsLaunching(false);
     }
-  }, [draftProjectId, setMessage, state, t]);
+  }, [composerText, draftProjectId, setMessage, state, t]);
 
   return {
     state,

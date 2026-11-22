@@ -7,7 +7,7 @@ import type { IntegrationKeyRequest } from './ProviderApiKeyForm';
 const browser = new Window({ url: 'http://localhost' });
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 for (const [name, value] of Object.entries({
-  window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage,
+  window: browser, document: browser.document, CustomEvent: browser.CustomEvent, navigator: browser.navigator, localStorage: browser.localStorage,
   HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node, Event: browser.Event,
   MutationObserver: browser.MutationObserver, getComputedStyle: browser.getComputedStyle.bind(browser),
   IS_REACT_ACT_ENVIRONMENT: true,

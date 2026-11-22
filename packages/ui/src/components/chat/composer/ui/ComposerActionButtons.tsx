@@ -1,20 +1,16 @@
-/**
- * The composer's send / queue / stop control.
- *
- * Which one is shown depends on whether a turn is running: idle sends, a busy
- * session with content offers both a follow-up action (above) and stop, a busy
- * session without content offers only stop. The follow-up action does what
- * Enter does under the follow-up setting: it queues, or it steers and then
- * looks like the plain send button.
- */
 
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { StopIcon } from '@/components/icons/StopIcon';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 type ComposerActionButtonsProps = {
     isMobile: boolean;
@@ -28,8 +24,8 @@ type ComposerActionButtonsProps = {
     newSessionDraftOpen: boolean;
     onPrimaryAction: () => void;
     onAbort: () => void;
-    /** Replaces "Send message" as the accessible name and tooltip (parallel mode says how many runs start). */
     sendLabel?: string;
+    escapeStops?: boolean;
 };
 
 export const ComposerActionButtons = React.memo(function ComposerActionButtons(props: ComposerActionButtonsProps) {
@@ -46,74 +42,101 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
         onPrimaryAction,
         onAbort,
         sendLabel,
+        escapeStops = false,
     } = props;
     const { t } = useI18n();
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const queuesFollowUp = useMessageQueueStore((state) => state.followUpBehavior) === 'queue';
+    const escapeKey = escapeStops ? formatShortcutForDisplay(getEffectiveShortcutCombo('abort_run', shortcutOverrides), '') : '';
+    const abortShortcut = escapeKey ? `${escapeKey} ${escapeKey}` : undefined;
 
+    const discSized = !isMobile && !isVSCodeRuntime();
+    const actionSlotClass = cn(footerIconButtonClass, discSized && 'h-7 w-7', isMobile && 'justify-end');
+    const discClass = cn('oc-action-disc', isMobile ? 'size-7' : 'size-full');
+    const stopText = t('chat.chatInput.actions.stopGeneratingAria');
+
+    if (canAbort && !hasContent) {
+        return (
+            <Tooltip>
+            <TooltipTrigger asChild>
+            <button
+                type="button"
+                onClick={onAbort}
+                className={actionSlotClass}
+                aria-label={stopText}
+            >
+                <span className={discClass} data-idle="">
+                    <StopIcon className={cn(stopIconSizeClass, 'text-[var(--status-error)]')} />
+                </span>
+            </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}><TooltipLabelWithShortcut label={stopText} shortcut={abortShortcut} /></TooltipContent>
+            </Tooltip>
+        );
+    }
+
+    const followUp = canAbort;
+    const sendEnabled = followUp
+        ? Boolean(currentSessionId)
+        : canSend && Boolean(currentSessionId || newSessionDraftOpen);
+    const sendText = followUp
+        ? t(queuesFollowUp ? 'chat.chatInput.actions.queueMessageAria' : 'chat.chatInput.actions.sendMessageAria')
+        : sendLabel ?? t('chat.chatInput.actions.sendMessageAria');
     const sendButton = (
         <button
-            type={isMobile ? 'button' : 'submit'}
-            disabled={!canSend || (!currentSessionId && !newSessionDraftOpen)}
+            type={isMobile || followUp ? 'button' : 'submit'}
+            disabled={!sendEnabled}
             onClick={(event) => {
-                if (!isMobile) {
+                if (!isMobile && !followUp) {
                     return;
                 }
 
                 event.preventDefault();
                 onPrimaryAction();
             }}
-            className={cn(
-                footerIconButtonClass,
-                canSend && (currentSessionId || newSessionDraftOpen)
-                    ? 'text-primary hover:text-primary'
-                    : 'opacity-30'
-            )}
-            aria-label={sendLabel ?? t('chat.chatInput.actions.sendMessageAria')}
-            title={sendLabel}
+            className={actionSlotClass}
+            aria-label={sendText}
         >
-            <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
+            <span className={discClass} data-idle={sendEnabled ? undefined : ''}>
+                <Icon name="arrow-up" className={cn(sendIconSizeClass)} />
+            </span>
         </button>
     );
 
-    if (!canAbort) {
-        return sendButton;
-    }
-
-    return (
-        <div className="relative">
-            {hasContent ? (
+    const visibleStop = followUp && !escapeStops ? (
+        <Tooltip>
+            <TooltipTrigger asChild>
                 <button
                     type="button"
-                    disabled={!currentSessionId}
-                    onClick={(event) => {
-                        if (isMobile) {
-                            event.preventDefault();
-                        }
-                        onPrimaryAction();
-                    }}
-                    className={cn(
-                        footerIconButtonClass,
-                        'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
-                        currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
-                    )}
-                    aria-label={t(queuesFollowUp ? 'chat.chatInput.actions.queueMessageAria' : 'chat.chatInput.actions.sendMessageAria')}
+                    onClick={onAbort}
+                    className={footerIconButtonClass}
+                    aria-label={stopText}
                 >
-                    <Icon name="send-plane-2" className={cn(sendIconSizeClass, queuesFollowUp && '-rotate-90 rtl:rotate-90')} />
+                    <StopIcon className={cn(stopIconSizeClass, 'text-[var(--status-error)]')} />
                 </button>
-            ) : null}
-            <button
-                type="button"
-                onClick={onAbort}
-                className={cn(
-                    footerIconButtonClass,
-                    'text-[var(--status-error)] hover:text-[var(--status-error)]'
-                )}
-                aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
-            >
-                <StopIcon className={cn(stopIconSizeClass)} />
-            </button>
-        </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>{stopText}</TooltipContent>
+        </Tooltip>
+    ) : null;
+
+    if (isMobile) return visibleStop ? <>{visibleStop}{sendButton}</> : sendButton;
+    const sendWithTooltip = (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <span className="inline-flex">{sendButton}</span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+                {followUp && abortShortcut ? (
+                    <span className="inline-flex items-center gap-1.5">
+                        {sendText}
+                        <span aria-hidden="true" className="text-muted-foreground">·</span>
+                        <TooltipLabelWithShortcut label={stopText} shortcut={abortShortcut} />
+                    </span>
+                ) : sendText}
+            </TooltipContent>
+        </Tooltip>
     );
+    return visibleStop ? <>{visibleStop}{sendWithTooltip}</> : sendWithTooltip;
 }, (prev, next) => (
     prev.isMobile === next.isMobile
     && prev.footerIconButtonClass === next.footerIconButtonClass
@@ -127,4 +150,5 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     && prev.onPrimaryAction === next.onPrimaryAction
     && prev.onAbort === next.onAbort
     && prev.sendLabel === next.sendLabel
+    && prev.escapeStops === next.escapeStops
 ));

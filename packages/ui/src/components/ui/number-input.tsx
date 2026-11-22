@@ -118,16 +118,8 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       return 0
     }, [fallbackValue, min, value])
 
-    // Tracks the most recent user-committed snapshot so back-to-back clicks
-    // within the same render cycle operate on the latest value, not the stale
-    // `value` prop (which only updates after the parent re-renders in response
-    // to onValueChange). See packages/ui/src/components/ui/number-input.test.tsx.
     const committedValueRef = React.useRef<number>(baseValue)
 
-    // Assumes a well-behaved controlled parent: when the parent updates the
-    // `value` prop, the effect syncs the ref. If a parent ever rejects or
-    // debounces `onValueChange`, the ref can briefly lead the prop. Today no
-    // production caller rejects; revisit if a debounced caller is added.
     React.useEffect(() => {
       committedValueRef.current = baseValue
     }, [baseValue])
@@ -237,9 +229,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     const handleMobileTouchActivate = (handler: () => void) => (event: React.TouchEvent) => {
       event.preventDefault()
       event.stopPropagation()
-      // Touch on iOS often triggers a follow-up click; ignore it.
       ignoreNextClickRef.current = true
-      // Also swallow the synthetic click anywhere (prevents layout-shift clicks).
       swallowNextClick()
       handler()
     }
@@ -258,7 +248,6 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       return (
         <div
           className={cn(
-            // NOTE: mobile.css enforces min-height:36px on buttons; match it to avoid clipping.
             "oc-surface-elevated flex h-8 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-lg border border-border bg-surface-elevated select-none overscroll-contain",
             "[-webkit-user-select:none] [-webkit-touch-callout:none]",
             "disabled:pointer-events-none disabled:opacity-50",
@@ -284,7 +273,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           <div
             className={cn(
               "flex h-full min-w-0 flex-1 items-center justify-center bg-transparent px-1.5",
-              "text-center text-[16px] leading-none text-foreground [font-variant-numeric:tabular-nums]",
+              "text-center text-[1rem] leading-none text-foreground [font-variant-numeric:tabular-nums]",
               className
             )}
             aria-live="polite"

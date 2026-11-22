@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
-import { BlockLine } from './BlockLine';
+import { BlockBody, BlockLine } from './BlockLine';
 
 const DOM_GLOBAL_NAMES = [
   'window',
@@ -47,6 +47,18 @@ const installDomStub = () => {
 };
 
 describe('BlockLine', () => {
+  test('BlockBody owns the shared inset and renders content beside the line', () => {
+    const markup = renderToStaticMarkup(
+      <BlockBody onToggle={() => {}} style={{ opacity: 0.5 }}>
+        <p>Expanded content</p>
+      </BlockBody>,
+    );
+    expect(markup).toContain('class="relative ms-2 ps-3 pt-1 pb-2"');
+    expect(markup).toContain('style="opacity:0.5"');
+    expect(markup).toContain('width:12px');
+    expect(markup).toContain('</span><p>Expanded content</p></div>');
+  });
+
   test('renders a 12px hit strip with the 1px line centered on it', () => {
     const markup = renderToStaticMarkup(<BlockLine topOffset={1} />);
     expect(markup).toContain('width:12px');

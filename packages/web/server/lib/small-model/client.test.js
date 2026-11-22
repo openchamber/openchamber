@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  CATALOG_READ_TIMEOUT_MS,
-  getConfiguredSmallModelRef,
-  getDefaultModelInfo,
-  listModelInfos,
-  listProviderInfos,
-  resetOpenCodeRuntimeProviders,
-} from './client.js';
+import { CATALOG_READ_TIMEOUT_MS, getConfiguredSmallModelRef, getDefaultModelInfo, listModelInfos, listProviderInfos, resetOpenCodeRuntimeProviders, getTrustRefusal } from './client.js';
+
 
 // A transport that never answers: the promise settles only when the
 // caller's signal aborts it, which is how the SDK's fetch behaves against
@@ -104,5 +98,47 @@ describe('small-model catalog read deadlines', () => {
     await expect(listProviderInfos(client)).resolves.toEqual([{ id: 'p1' }]);
     await expect(getDefaultModelInfo(client)).resolves.toEqual({ id: 'm1' });
     await expect(getConfiguredSmallModelRef(client)).resolves.toEqual({ providerID: 'p1', modelID: 'm1' });
+  });
+});
+
+// ---- upstream tests ----
+
+describe('default model boundary', () => {
+  const read = (payload) => getDefaultModelInfo({ model: { default: async () => payload } });
+
+  it('accepts an enveloped model after checking only its id', async () => {
+    const model = { id: 'model', providerID: 17, settings: 'unchecked' };
+    expect(await read({ data: model })).toBe(model);
+  });
+
+  it('retains the direct-response fallback', async () => {
+    const model = { id: 'model', providerID: 'provider' };
+    expect(await read(model)).toBe(model);
+  });
+
+  it('retains an envelope with an id when its data is null', async () => {
+    const payload = { data: null, id: 'model' };
+    expect(await read(payload)).toBe(payload);
+  });
+
+  it.each([null, undefined, {}, { id: 17 }, { data: { id: 17 } }])('rejects a default without a string id: %j', async (payload) => {
+    expect(await read(payload)).toBeNull();
+  });
+});
+
+describe('trust refusal boundary', () => {
+  it('checks only the refusal code and keeps unchecked fields', () => {
+    const refusal = { code: 'opencode_trust_required', message: 17, directory: null };
+    expect(getTrustRefusal(refusal)).toBe(refusal);
+    expect(getTrustRefusal({ cause: refusal })).toBe(refusal);
+  });
+
+  it('retains inherited refusal codes', () => {
+    const refusal = Object.create({ code: 'opencode_trust_required' });
+    expect(getTrustRefusal(refusal)).toBe(refusal);
+  });
+
+  it.each([null, undefined, 17, 'failed', { code: 'constructor' }])('ignores unrelated failures: %j', (error) => {
+    expect(getTrustRefusal(error)).toBeNull();
   });
 });

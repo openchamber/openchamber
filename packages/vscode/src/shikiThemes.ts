@@ -117,7 +117,6 @@ const stripTrailingCommas = (input: string): string => {
     }
 
     if (ch === ',') {
-      // If the next non-whitespace character is a closing brace/bracket, drop this comma.
       let j = i + 1;
       while (j < input.length && /\s/.test(input[j] ?? '')) j++;
       const nextNonWs = input[j];
@@ -156,7 +155,6 @@ const labelVariants = (label: string): string[] => {
   const trimmed = label.trim();
   const variants = new Set<string>([trimmed]);
 
-  // VS Code sometimes uses "Default …" in settings while theme contributions omit it.
   if (trimmed.toLowerCase().startsWith('default ')) {
     variants.add(trimmed.slice('default '.length));
   }
@@ -214,8 +212,6 @@ export async function getWebviewShikiThemes(): Promise<WebviewShikiThemePayload 
       ? 'light'
       : 'dark';
 
-  // Use the actively selected theme for the current variant, and only fall back to preferred
-  // themes for the opposite variant (so we actually pick up user-selected theme changes).
   const lightLabel = themeVariant === 'light' ? current : preferredLight;
   const darkLabel = themeVariant === 'dark' ? current : preferredDark;
 
@@ -224,8 +220,6 @@ export async function getWebviewShikiThemes(): Promise<WebviewShikiThemePayload 
     darkLabel ? readThemeJsonByLabel(darkLabel) : Promise.resolve(null),
   ]);
 
-  // If we only managed to resolve one side, use it for both. This still gives correct highlighting
-  // for the currently active VS Code theme, and avoids falling back to Flexoki.
   const fallbackOneSide = lightRaw ?? darkRaw;
   const effectiveLight = lightRaw ?? fallbackOneSide;
   const effectiveDark = darkRaw ?? fallbackOneSide;

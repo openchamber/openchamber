@@ -1,0 +1,64 @@
+{
+  "zone": "ui-blocks",
+  "name": "Reply UI blocks",
+  "sources": ["packages/ui/src/components/chat/uiBlocks/"],
+  "features": [{
+    "id": "decisions",
+    "name": "Reply decisions",
+    "what": "Keep a partial set of decisions readable and editable on a phone.",
+    "reach": "Pick an option in a reply with multiple decision cards.",
+    "proof": "A picked question can use the full card width, and the partial selection survives leaving and returning to the conversation.",
+    "scenarios": [{
+      "id": "phone",
+      "kind": "path",
+      "title": "A phone can revisit and change a partial choice",
+      "steps": [
+        {"do": "session.create", "as": "decisions", "title": "Reply decisions"},
+        {"do": "session.create", "as": "other", "title": "Other conversation"},
+        {"do": "session.send", "session": "decisions", "prompt": "Show the verification decision cards."},
+        {"do": "open", "session": "decisions", "phone": true},
+        {"do": "click", "on": "chat.decisionButton", "text": "Use version 1.1 for conflicts"},
+        {"do": "see", "on": "chat.decisionButton", "text": "Change"},
+        {"do": "screenshot", "name": "selected-mobile"},
+        {"do": "click", "on": "phone.sessions"},
+        {"do": "click", "on": "phone.row", "session": "other"},
+        {"do": "gone", "on": "chat.decisionTitle"},
+        {"do": "click", "on": "phone.sessions"},
+        {"do": "click", "on": "phone.row", "session": "decisions"},
+        {"do": "see", "on": "chat.decisionButton", "text": "Change", "timeout": 5},
+        {"do": "reload"},
+        {"do": "see", "on": "chat.decisionButton", "text": "Change", "timeout": 5},
+        {"do": "style", "on": "chat.decisionTitle", "text": "Which document", "property": "flex-basis", "equals": "100%"},
+        {"do": "style", "on": "chat.foldedDecisionRow", "property": "flex-wrap", "equals": "wrap"},
+        {"do": "screenshot", "name": "restored-mobile"},
+        {"do": "click", "on": "chat.decisionButton", "text": "Change"},
+        {"do": "see", "on": "chat.decisionButton", "text": "Keep the old rules"},
+        {"do": "click", "on": "chat.decisionButton", "text": "Keep the old rules"},
+        {"do": "network.block", "urls": ["*/api/session/{decisions}/synthetic*"]},
+        {"do": "click", "on": "chat.decisionButton", "text": "On the return date"},
+        {"do": "see", "on": "chat.decisionStatus", "text": "Not sent. Try again."},
+        {"do": "network.allow"},
+        {"do": "reload"},
+        {"do": "see", "on": "chat.decisionStatus", "text": "2 of 2 chosen"},
+        {"do": "click", "on": "chat.sendDecisions", "text": "Send chosen"},
+        {"do": "session.idle", "session": "decisions"},
+        {"do": "reload"},
+        {"do": "see", "on": "chat.decisionStatus", "text": "Sent"},
+        {"do": "gone", "on": "chat.decisionButton", "text": "Change"}
+      ]
+    }, {
+      "id": "wide",
+      "kind": "path",
+      "title": "A wide folded decision stays on one row",
+      "steps": [
+        {"do": "session.create", "as": "decisions", "title": "Reply decisions"},
+        {"do": "session.send", "session": "decisions", "prompt": "Show the verification decision cards."},
+        {"do": "open", "session": "decisions"},
+        {"do": "click", "on": "chat.decisionButton", "text": "Use version 1.1 for conflicts"},
+        {"do": "style", "on": "chat.foldedDecisionRow", "property": "flex-wrap", "equals": "nowrap"},
+        {"do": "style", "on": "chat.decisionTitle", "text": "Which document", "property": "white-space", "equals": "nowrap"},
+        {"do": "screenshot", "name": "selected-desktop"}
+      ]
+    }]
+  }]
+}

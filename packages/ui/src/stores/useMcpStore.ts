@@ -3,6 +3,7 @@ import { devtools } from 'zustand/middleware';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 
 type McpStatusMap = Record<string, McpServerStatus>;
 type McpRuntimeDiagnostic = {
@@ -14,13 +15,6 @@ type McpRuntimeDiagnosticMap = Record<string, McpRuntimeDiagnostic>;
 const EMPTY_STATUS: McpStatusMap = {};
 const EMPTY_DIAGNOSTICS: McpRuntimeDiagnosticMap = {};
 
-type McpHealth = {
-  connected: number;
-  total: number;
-  hasFailed: boolean;
-  hasAuthRequired: boolean;
-};
-
 const normalizeDirectory = (directory: string | null | undefined): string | null => {
   if (typeof directory !== 'string') return null;
   const trimmed = directory.trim();
@@ -31,27 +25,13 @@ const normalizeDirectory = (directory: string | null | undefined): string | null
 
 const toKey = (directory: string | null | undefined): string => normalizeDirectory(directory) ?? '__global__';
 
-export const computeMcpHealth = (status: McpStatusMap | null | undefined): McpHealth => {
-  const entries = Object.entries(status ?? {});
-  const connected = entries.filter(([, s]) => s?.status.status === 'connected').length;
-  const total = entries.length;
-  const hasFailed = entries.some(([, s]) => s?.status.status === 'failed');
-  const hasAuthRequired = entries.some(([, s]) => s?.status.status === 'needs_auth');
-  return { connected, total, hasFailed, hasAuthRequired };
-};
-
 type RefreshOptions = {
   directory?: string | null;
   silent?: boolean;
 };
 
 const ensureFreshInFlight = new Map<string, Promise<void>>();
-// Bumped on every runtime switch. Status is keyed by directory alone and two
-// instances can hold the same project path, so a request already in flight for
-// the previous instance would otherwise write its servers over the new one's.
 let mcpGeneration = 0;
-// Bumped per directory when its status is forgotten, so a read that started
-// before OpenCode stopped the directory cannot write the status back.
 const forgetGenerations = new Map<string, number>();
 
 type TestConnectionResult = {
@@ -65,40 +45,19 @@ interface McpStore {
   diagnosticsByDirectory: Record<string, McpRuntimeDiagnosticMap>;
   loadingKeys: Record<string, boolean>;
   lastErrorKeys: Record<string, string | null>;
-  /** When each directory's status was last fetched successfully. */
   refreshedAtKeys: Record<string, number>;
 
   getStatusForDirectory: (directory?: string | null) => McpStatusMap;
   getDiagnosticForDirectory: (directory?: string | null) => McpRuntimeDiagnosticMap;
   getErrorForDirectory: (directory?: string | null) => string | null;
   refresh: (options?: RefreshOptions) => Promise<void>;
-  /**
-   * Refresh only when the directory has no status yet or the last successful
-   * fetch is older than `maxAgeMs`. Mount-time consumers use this so a panel
-   * that remounts on every session switch does not refetch on every switch.
-   */
   ensureFresh: (options: RefreshOptions & { maxAgeMs: number }) => Promise<void>;
-  /**
-   * Re-read a directory whose status is already held, after OpenCode announced
-   * a change there. A directory nobody asked about is left alone: reading it
-   * would make OpenCode start it, MCP servers included.
-   */
   refreshIfHeld: (directory: string) => Promise<void>;
-  /**
-   * OpenCode stopped this directory's servers. The held status describes
-   * servers that are gone, and keeping it would make the shutdown's own
-   * announcements re-read the directory, which starts it again. A surface that
-   * shows the directory later reads it afresh.
-   */
   forgetDirectory: (directory: string) => void;
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
+  setEnabled: (name: string, enabled: boolean, directory?: string | null) => Promise<void>;
   testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
-  /**
-   * MCP status is keyed by directory alone, and two instances can hold the same
-   * project path — so on a switch the previous instance's servers would be
-   * reported for the new one. Drop everything and let consumers re-ask.
-   */
   resetForRuntimeSwitch: () => void;
 }
 
@@ -201,8 +160,6 @@ export const useMcpStore = create<McpStore>()(
       const normalized = normalizeDirectory(directory);
       if (!normalized) return;
       const key = toKey(normalized);
-      // A read already in flight would write the status back, and the next
-      // announcement would then find it held and start the directory again.
       forgetGenerations.set(key, (forgetGenerations.get(key) ?? 0) + 1);
       ensureFreshInFlight.delete(key);
       const state = get();
@@ -248,11 +205,29 @@ export const useMcpStore = create<McpStore>()(
       await get().refresh({ directory: normalized, silent: true });
     },
 
+    setEnabled: async (name, enabled, directory) => {
+      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const configStore = useMcpConfigStore.getState();
+      const generation = mcpGeneration;
+      if (!await configStore.loadMcpConfigs({ force: true, directory: normalized })) {
+        throw new Error('Failed to load MCP configs');
+      }
+      if (generation !== mcpGeneration) return;
+      const configured = useMcpConfigStore.getState().getMcpByName(name, normalized);
+      const disabledInConfig = configured?.disabled === true;
+      if (configured && disabledInConfig === enabled) {
+        await configStore.updateMcp(name, { disabled: !enabled }, normalized);
+      }
+      if (enabled && !disabledInConfig) await get().connect(name, normalized);
+      else if (!enabled) await get().disconnect(name, normalized);
+      else await get().refresh({ directory: normalized, silent: true });
+    },
+
     testConnection: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const key = toKey(normalized);
       const previousStatus = get().getStatusForDirectory(normalized)[name];
-      const wasConnected = previousStatus?.status.status === 'connected';
+      const wasDisabled = previousStatus?.status.status === 'disabled';
       let errorMessage: string | undefined;
       let warningMessage: string | undefined;
 
@@ -275,7 +250,7 @@ export const useMcpStore = create<McpStore>()(
       const currentStatus = get().getStatusForDirectory(normalized)[name];
       const observedStatus = currentStatus;
 
-      if (!wasConnected && currentStatus?.status.status === 'connected') {
+      if (wasDisabled && currentStatus?.status.status === 'connected') {
         try {
           await opencodeClient.disconnectMcpServer(name, normalized);
         } catch (error) {

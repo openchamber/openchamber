@@ -8,10 +8,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { configureOpenCodeCredentials, credentialSourceUsesLocalStore, getProviderAuth, getStoredLogin, listStoredCredentials, openCodeCredentialSource, openCodeLocalCredentialSource, projectCredentialEntries, projectCredentialRows, projectEnvironmentKeys, readLocalOpenCodeCredentials, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 import { OpenCodeUpstreamAuthError, isOpenCodeUpstreamAuthRejection } from './credential-auth-error.js';
 
-const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
+const entry = (integrationID, active, value, label = 'default') => ({ id: `cred_${integrationID}_${active}`, integrationID, label, active, value });
 
 describe('projectCredentialEntries', () => {
-  it('keeps each integration’s active credential in the legacy entry shape', () => {
+  it('keeps each integration’s active credential in the legacy entry shape, with its label', () => {
     const projected = projectCredentialEntries([
       entry('zai-coding-plan', false, { type: 'key', key: 'old' }),
       entry('zai-coding-plan', true, { type: 'key', key: 'zai-key' }),
@@ -35,10 +35,26 @@ describe('projectCredentialEntries', () => {
     ]);
 
     expect(projected).toEqual({
-      'zai-coding-plan': { type: 'api', key: 'zai-key' },
-      openai: { type: 'oauth', access: 'at', refresh: 'rt', expires: 42, accountId: 'acc_1' },
-      'github-copilot': { type: 'oauth', access: 'gh', refresh: 'gh-r', expires: 0, enterpriseUrl: 'https://ghe.example' },
-      custom: { type: 'api', key: 'k', metadata: { region: 'eu' } },
+      'zai-coding-plan': { label: 'default', type: 'api', key: 'zai-key' },
+      openai: { label: 'default', type: 'oauth', methodID: 'chatgpt-browser', access: 'at', refresh: 'rt', expires: 42, accountId: 'acc_1' },
+      'github-copilot': { label: 'default', type: 'oauth', methodID: 'device', access: 'gh', refresh: 'gh-r', expires: 0, enterpriseUrl: 'https://ghe.example' },
+      custom: { label: 'default', type: 'api', key: 'k', metadata: { region: 'eu' } },
+    });
+  });
+
+  it('drops a missing, blank, or unnamed label instead of projecting it', () => {
+    const projected = projectCredentialEntries([
+      entry('opencode-go', true, { type: 'key', key: 'k1' }, 'solar tool'),
+      entry('opencode', true, { type: 'key', key: 'k2' }, '   '),
+      entry('kilo', true, { type: 'key', key: 'k3' }, ''),
+      entry('deepseek', true, { type: 'key', key: 'k4' }, 12345),
+    ]);
+
+    expect(projected).toEqual({
+      'opencode-go': { label: 'solar tool', type: 'api', key: 'k1' },
+      opencode: { type: 'api', key: 'k2' },
+      kilo: { type: 'api', key: 'k3' },
+      deepseek: { type: 'api', key: 'k4' },
     });
   });
 
@@ -49,7 +65,7 @@ describe('projectCredentialEntries', () => {
     ]);
     expect(Object.hasOwn(projected, '__proto__')).toBe(true);
     expect(Object.keys(projected)).toEqual(expect.arrayContaining(['__proto__', 'deepseek']));
-    expect(projected['__proto__']).toEqual({ type: 'api', key: 'proto-key' });
+    expect(projected['__proto__']).toEqual({ label: 'default', type: 'api', key: 'proto-key' });
     expect(Object.getPrototypeOf(projected)).toBe(Object.prototype);
   });
 
@@ -73,7 +89,9 @@ describe('projectCredentialEntries', () => {
 
     expect(projected).toEqual({
       opencode: {
+        label: 'default',
         type: 'oauth',
+        methodID: 'console',
         access: 'console-access',
         refresh: 'console-refresh',
         expires: 42,
@@ -94,8 +112,8 @@ describe('projectCredentialRows', () => {
     ]);
 
     expect(rows).toEqual([
-      { id: 'cred_openai_false', integrationID: 'openai', label: 'default', active: false, value: { type: 'oauth', access: 'legacy', refresh: 'rt', expires: 42, accountId: 'acc_1' } },
-      { id: 'cred_openai_true', integrationID: 'openai', label: 'default', active: true, value: { type: 'oauth', access: 'sharing', refresh: 'rt2', expires: 43 } },
+      { id: 'cred_openai_false', integrationID: 'openai', label: 'default', active: false, value: { type: 'oauth', methodID: 'chatgpt-browser', access: 'legacy', refresh: 'rt', expires: 42, accountId: 'acc_1' } },
+      { id: 'cred_openai_true', integrationID: 'openai', label: 'default', active: true, value: { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'sharing', refresh: 'rt2', expires: 43 } },
       { id: 'cred_x', integrationID: 'deepseek', label: null, active: true, value: { type: 'api', key: 'ds' } },
     ]);
   });
@@ -156,8 +174,8 @@ describe('readOpenCodeCredentials', () => {
   });
 
   it('asks the running OpenCode with its auth headers', async () => {
-    await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { type: 'api', key: 'ds' } });
-    await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
+    await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { label: 'default', type: 'api', key: 'ds' } });
+    await expect(getProviderAuth('deepseek')).resolves.toEqual({ label: 'default', type: 'api', key: 'ds' });
     await expect(getProviderAuth('openai')).resolves.toBeNull();
     expect(requests[0]).toEqual({ url: '/api/credential', authorization: 'Basic test' });
   });
@@ -166,7 +184,7 @@ describe('readOpenCodeCredentials', () => {
     for (const providerId of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
       await expect(getProviderAuth(providerId)).resolves.toBeNull();
     }
-    await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
+    await expect(getProviderAuth('deepseek')).resolves.toEqual({ label: 'default', type: 'api', key: 'ds' });
   });
 
   it('resolves a genuinely stored __proto__ credential', async () => {
@@ -174,7 +192,7 @@ describe('readOpenCodeCredentials', () => {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ data: [entry('__proto__', true, { type: 'key', key: 'proto-key' })] }));
     };
-    await expect(getProviderAuth('__proto__')).resolves.toEqual({ type: 'api', key: 'proto-key' });
+    await expect(getProviderAuth('__proto__')).resolves.toEqual({ label: 'default', type: 'api', key: 'proto-key' });
   });
 
   it('lists every stored credential row, not only the active one', async () => {
@@ -222,7 +240,7 @@ describe('readOpenCodeCredentials', () => {
     ];
     launchEnvironment = { DEEPSEEK_API_KEY: 'ds-env', ZHIPU_API_KEY: 'zk-env' };
     await expect(readOpenCodeCredentials()).resolves.toEqual({
-      deepseek: { type: 'api', key: 'ds' },
+      deepseek: { label: 'default', type: 'api', key: 'ds' },
       'zai-coding-plan': { type: 'api', key: 'zk-env' },
     });
     // A variable is not a stored login.
@@ -235,7 +253,7 @@ describe('readOpenCodeCredentials', () => {
 
   it('leaves variable keys out for an external OpenCode', async () => {
     integrations = [{ id: 'zai-coding-plan', connections: [{ type: 'env', name: 'ZHIPU_API_KEY' }] }];
-    await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { type: 'api', key: 'ds' } });
+    await expect(readOpenCodeCredentials()).resolves.toEqual({ deepseek: { label: 'default', type: 'api', key: 'ds' } });
     expect(requests.map((request) => request.url)).toEqual(['/api/credential']);
   });
 
@@ -522,7 +540,7 @@ describe('readLocalOpenCodeCredentials', () => {
       getLaunchEnvironment: () => storeEnv(launchData),
     }));
     await expect(readLocalOpenCodeCredentials()).resolves.toEqual({
-      google: { type: 'api', key: 'launch-key' },
+      google: { label: 'default', type: 'api', key: 'launch-key' },
     });
   });
 
@@ -608,7 +626,7 @@ describe('openCodeLocalCredentialSource', () => {
     ]);
     configureOpenCodeCredentials(openCodeLocalCredentialSource({ dbPath }));
     await expect(readOpenCodeCredentials()).resolves.toEqual({
-      deepseek: { type: 'api', key: 'live-key' },
+      deepseek: { label: 'default', type: 'api', key: 'live-key' },
     });
     const rows = await listStoredCredentials();
     expect(rows.map((row) => row.id)).toEqual(['cred_a']);

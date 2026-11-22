@@ -2,21 +2,18 @@ import React from 'react';
 
 import { toast } from '@/components/ui';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { BoundGitNetworkOperationError, GitOperationResultError } from '@/lib/boundGitNetworkOperation';
+import type { GitPushReviewIntent } from '@/lib/api/types';
+import { BoundGitNetworkOperationError, GitOperationResultError, runBoundReviewPush } from '@/lib/boundGitNetworkOperation';
 import { useI18n } from '@/lib/i18n';
 import { PendingGitOperationError } from '@/lib/source-control/git-operation-recovery';
 
 import { ContributorDestinationDialog } from './ContributorDestinationDialog';
 import { useContributorDestinationChooser } from './contributorDestination';
+import { gitRequestErrorMessage } from './gitRequestErrorMessage';
 import { PublishDialog } from './PublishDialog';
 import { useGitOperationRecovery } from './useGitOperationRecovery';
 import { useGitPublishChooser } from './useGitPublishChooser';
 
-/**
- * Pushes the current branch the way the Git view's Publish does: to its own
- * remote, or through the publish and contributor choosers when that is not
- * obvious, as a tracked network operation. `dialogs` renders those choosers.
- */
 export function useBranchPush(directory: string | null, branch: string | undefined) {
     const { git, sourceControl } = useRuntimeAPIs();
     const { t } = useI18n();
@@ -24,22 +21,22 @@ export function useBranchPush(directory: string | null, branch: string | undefin
     const chooser = useGitPublishChooser({ directory, branch, chooseContributor: contributor.choose });
     const recovery = useGitOperationRecovery(directory, git, sourceControl);
 
-    /** True once the branch is on its remote; false after a failure the user was told about. */
-    const push = async (): Promise<boolean> => {
+    type Operation = NonNullable<ReturnType<typeof recovery.start>>;
+    const run = async (failed: string, transfer: (operation: Operation) => Promise<void>): Promise<boolean> => {
         const operation = recovery.start();
         if (!operation) {
             toast.info(t('gitView.pr.toast.gitBusy'));
             return false;
         }
-        const failed = t('gitView.toast.syncActionFailed', { action: t('gitView.publish.title') });
         try {
-            const execute = await chooser.prepare('push', { onOperation: operation.onOperation });
-            await execute();
+            await transfer(operation);
             return operation.isCurrent();
         } catch (error) {
             if (error instanceof BoundGitNetworkOperationError) {
                 if (error.code === 'stale-runtime') return false;
-                const message = chooser.errorMessage(error);
+                const message = error.code === 'review-option-invalid'
+                    ? t('gitView.change.push.invalidOption')
+                    : chooser.errorMessage(error);
                 if (message) toast.info(message);
                 else toast.error(failed);
                 return false;
@@ -48,11 +45,26 @@ export function useBranchPush(directory: string | null, branch: string | undefin
                 toast.error(failed, { description: error.message || undefined });
                 return false;
             }
-            toast.error(failed, { description: error instanceof Error ? error.message : String(error) });
+            toast.error(failed, { description: error instanceof Error ? gitRequestErrorMessage(error, t) : String(error) });
             return false;
         } finally {
             operation.finish();
         }
+    };
+
+    const push = (): Promise<boolean> => run(
+        t('gitView.toast.syncActionFailed', { action: t('gitView.publish.title') }),
+        async (operation) => {
+            const execute = await chooser.prepare('push', { onOperation: operation.onOperation });
+            await execute();
+        },
+    );
+
+    const pushForReview = (review: GitPushReviewIntent): Promise<boolean> => {
+        if (!directory) return Promise.resolve(false);
+        return run(t('gitView.change.push.toast.failed'), async (operation) => {
+            await runBoundReviewPush({ directory, git, sourceControl, review, onOperation: operation.onOperation });
+        });
     };
 
     const dialogs = (
@@ -63,5 +75,5 @@ export function useBranchPush(directory: string | null, branch: string | undefin
         </>
     );
 
-    return { push, dialogs };
+    return { push, pushForReview, dialogs };
 }

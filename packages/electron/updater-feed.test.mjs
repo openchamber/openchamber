@@ -2,7 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  CANARY_MIRROR_UPDATER_FEED,
+  CANARY_UPDATER_FEED,
+  MIRROR_FAILURE_BACKOFF_MS,
   PRODUCTION_UPDATER_FEED,
+  STABLE_MIRROR_UPDATER_FEED,
+  pickUpdaterSource,
+  isCanaryVersion,
+  isUpdateChannel,
+  normalizeUpdateChannel,
   parseLoopbackUpdaterUrl,
   resolveUpdaterFeed,
 } from './updater-feed.mjs';
@@ -19,6 +27,30 @@ test('production updater feed is immutable GitHub configuration', () => {
     owner: 'developing-today',
     repo: 'openchamber',
   });
+});
+
+// The fork publishes only stable releases on its own GitHub releases, so a
+// fork build reads that feed on every channel and source (updater-feed.mjs).
+test('the Canary channel reads the fork release feed; on a release build every other stored value is Stable', () => {
+  assert.equal(resolveUpdaterFeed({ channel: 'canary' }), PRODUCTION_UPDATER_FEED);
+  assert.equal(CANARY_UPDATER_FEED.url, 'https://github.com/openchamber/openchamber/releases/download/canary/');
+  assert.equal(resolveUpdaterFeed({ channel: 'stable' }), PRODUCTION_UPDATER_FEED);
+  assert.equal(normalizeUpdateChannel('canary', '2.6.1'), 'canary');
+  for (const value of ['stable', undefined, null, 'beta', 'Canary', 1]) assert.equal(normalizeUpdateChannel(value, '2.6.1'), 'stable');
+  assert.deepEqual(['stable', 'canary', 'beta', undefined].map(isUpdateChannel), [true, true, false, false]);
+  // The loopback feed wins on either channel.
+  assert.equal(resolveUpdaterFeed({ environment: overrideEnvironment, testBuild: true, channel: 'canary' }).url, overrideEnvironment.OPENCHAMBER_UPDATER_E2E_URL);
+});
+
+test('a Canary build nobody picked a channel for stays on Canary; a stored pick wins', () => {
+  const canaryBuild = '2.6.2-canary.20261105.7';
+  for (const value of [undefined, null, 'beta']) assert.equal(normalizeUpdateChannel(value, canaryBuild), 'canary');
+  assert.equal(normalizeUpdateChannel('stable', canaryBuild), 'stable');
+});
+
+test('a Canary build is told by the canary pre-release part of its version', () => {
+  assert.equal(isCanaryVersion('2.5.4-canary.20261030.123'), true);
+  for (const version of ['2.5.4', '2.5.4-beta.1', 'canary', undefined]) assert.equal(isCanaryVersion(version), false);
 });
 
 test('requires the complete E2E environment and embedded build-marker conjunction', () => {
@@ -71,4 +103,17 @@ test('invalid URLs fall back to the production feed even with both test gates', 
       testBuild: true,
     }), PRODUCTION_UPDATER_FEED);
   }
+});
+
+test('the mirror is picked unless it failed in the last hour, and a fork build reads its release feed from either source', () => {
+  const now = 10 * MIRROR_FAILURE_BACKOFF_MS;
+  assert.equal(pickUpdaterSource({ now }), 'mirror');
+  assert.equal(pickUpdaterSource({ mirrorFailedAt: now - 1000, now }), 'github');
+  assert.equal(pickUpdaterSource({ mirrorFailedAt: now - MIRROR_FAILURE_BACKOFF_MS, now }), 'mirror');
+  for (const channel of ['stable', 'canary']) {
+    for (const source of ['mirror', 'github']) assert.equal(resolveUpdaterFeed({ channel, source }), PRODUCTION_UPDATER_FEED);
+  }
+  assert.equal(STABLE_MIRROR_UPDATER_FEED.url, 'https://downloads.openchamber.dev/desktop/stable/');
+  assert.equal(CANARY_MIRROR_UPDATER_FEED.url, 'https://downloads.openchamber.dev/desktop/canary/');
+  assert.equal(resolveUpdaterFeed({ environment: overrideEnvironment, testBuild: true, channel: 'stable', source: 'mirror' }).url, overrideEnvironment.OPENCHAMBER_UPDATER_E2E_URL);
 });

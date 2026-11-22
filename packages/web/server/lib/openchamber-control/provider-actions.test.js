@@ -126,7 +126,7 @@ describe('provider action contract', () => {
       expect(definition.title).toBeTruthy();
       expect(definition.description).toBeTruthy();
     }
-    const runtimeSource = fs.readFileSync(fileURLToPath(new URL('../agent-tool/runtime.js', import.meta.url)), 'utf8');
+    const runtimeSource = fs.readFileSync(fileURLToPath(new URL('../agent-tool/runtime.ts', import.meta.url)), 'utf8');
     const shared = runtimeSource.slice(runtimeSource.indexOf('const ALL_PARAMETER_PROPERTIES'), runtimeSource.indexOf('const pickParameters'));
     for (const [name, schema] of Object.entries(PROVIDER_PARAMETERS)) {
       expect(shared).not.toMatch(new RegExp(`^  ${name}:`, 'm'));

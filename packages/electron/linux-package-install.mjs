@@ -12,24 +12,22 @@ const isOnPath = (name, pathEnv = process.env.PATH) => (pathEnv || '').split(':'
   }
 });
 
-// The same commands electron-updater 6.8 runs for .deb and .rpm, as one call
-// each: its dpkg path retries a failed install with `apt-get install -f`,
-// which asks for the password a second time after a cancel.
+// external: https://github.com/electron-userland/electron-builder/tree/v26.0.12/packages/electron-updater Use one package-manager invocation; cancellation must not trigger a second password prompt, and downgrades need explicit flags.
 const RPM_INSTALLERS = [
-  ['zypper', (file) => ['zypper', '--non-interactive', '--no-refresh', 'install', '--allow-unsigned-rpm', '-f', file]],
-  ['dnf', (file) => ['dnf', 'install', '--nogpgcheck', '-y', file]],
-  ['yum', (file) => ['yum', 'install', '--nogpgcheck', '-y', file]],
-  ['rpm', (file) => ['rpm', '-Uvh', '--replacepkgs', '--replacefiles', '--nodeps', file]],
+  ['zypper', (file, downgrade) => ['zypper', '--non-interactive', '--no-refresh', 'install', '--allow-unsigned-rpm', '-f', ...(downgrade ? ['--oldpackage'] : []), file]],
+  ['dnf', (file, downgrade) => ['dnf', downgrade ? 'downgrade' : 'install', '--nogpgcheck', '-y', file]],
+  ['yum', (file, downgrade) => ['yum', downgrade ? 'downgrade' : 'install', '--nogpgcheck', '-y', file]],
+  ['rpm', (file, downgrade) => ['rpm', '-Uvh', ...(downgrade ? ['--oldpackage'] : []), '--replacepkgs', '--replacefiles', '--nodeps', file]],
 ];
 
-export const buildPackageInstallCommand = ({ packageType, file, hasCommand = isOnPath, isRoot = process.getuid?.() === 0 }) => {
+export const buildPackageInstallCommand = ({ packageType, file, downgrade = false, hasCommand = isOnPath, isRoot = process.getuid?.() === 0 }) => {
   let command;
   if (packageType === 'deb') {
     command = ['apt', 'install', '-y', '--allow-unauthenticated', '--allow-downgrades', '--allow-change-held-packages', file];
   } else if (packageType === 'rpm') {
     const installer = RPM_INSTALLERS.find(([name]) => hasCommand(name));
     if (!installer) throw new Error('No rpm package manager found (zypper, dnf, yum or rpm).');
-    command = installer[1](file);
+    command = installer[1](file, downgrade);
   } else {
     throw new Error(`Unsupported Linux package type: ${packageType}`);
   }
@@ -46,14 +44,8 @@ const execFileAsync = (file, args) => new Promise((resolve, reject) => {
   });
 });
 
-/**
- * Installs a downloaded .deb or .rpm without blocking the main process.
- * electron-updater runs the installer with spawnSync, which freezes every
- * window, the update dialog's spinner included, for the whole password prompt
- * and install. Rejects when the user cancels the prompt (pkexec exits 126).
- */
-export const installLinuxPackage = async ({ packageType, file, run = execFileAsync }) => {
+export const installLinuxPackage = async ({ packageType, file, downgrade = false, run = execFileAsync }) => {
   if (!file) throw new Error('The downloaded update file is missing.');
-  const [command, ...args] = buildPackageInstallCommand({ packageType, file });
+  const [command, ...args] = buildPackageInstallCommand({ packageType, file, downgrade });
   await run(command, args);
 };

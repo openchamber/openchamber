@@ -26,7 +26,7 @@ export interface WebFilesAPIOptions {
   urls?: unknown;
   getDirectory?: () => string | undefined;
   runtimeFetch?: typeof runtimeFetch;
-  /** File search; defaults to OpenCode's `file.find` through the shared client. */
+
   searchFiles?: SearchFiles;
 }
 
@@ -51,6 +51,7 @@ type WebFileMutationResponse = {
   path?: string;
   error?: string;
   reason?: FilesystemErrorReason;
+  maxBytes?: number;
 };
 
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
@@ -75,11 +76,7 @@ const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryL
   };
 };
 
-/**
- * The directory a request names: the caller's, else the folder open in the app. A path inside an
- * isolated space is served by that space only, so a request for one names the space when the open
- * folder is elsewhere: a draft waiting for a space shows the space's files from the project's.
- */
+
 const directoryHeaders = (getDirectory?: () => string | undefined, override?: string, path?: string): Record<string, string> | undefined => {
   const current = getDirectory?.();
   const pathSpace = spaceIdOfDirectory(path);
@@ -104,6 +101,10 @@ const contentSearchResponseSchema = z.object({
 const contentSearchErrorSchema = z.object({
   error: z.string().optional(),
   reason: z.string().optional(),
+});
+
+const fileSearchResponseSchema = z.object({
+  files: z.array(z.object({ path: z.string(), relativePath: z.string() })),
 });
 
 export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFiles, runtimeFetch: fetch = runtimeFetch }: WebFilesAPIOptions): FilesAPI => ({
@@ -141,9 +142,41 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
   },
 
   async search(payload: FileSearchQuery): Promise<FileSearchResult[]> {
-    // file.find answers file search on OpenCode 2.x; /api/find/file has no
-    // route there and falls through the generic proxy to a 404.
     const directory = normalizePath(payload.directory);
+    const includeHidden = Boolean(payload.includeHidden);
+    const respectGitignore = payload.respectGitignore !== false;
+
+    if (includeHidden || !respectGitignore) {
+      const params = new URLSearchParams();
+      params.set('query', payload.query);
+      if (directory) params.set('directory', directory);
+      if (typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)) {
+        params.set('limit', String(payload.maxResults));
+      }
+      if (includeHidden) params.set('includeHidden', 'true');
+      if (!respectGitignore) params.set('respectGitignore', 'false');
+
+      const response = await fetch('/api/fs/search', {
+        query: params,
+        signal: payload.signal,
+        headers: directoryHeaders(getDirectory, directory),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: response.statusText })) as { error?: string };
+        throw new Error(error.error || 'Failed to search files');
+      }
+      const result = fileSearchResponseSchema.safeParse(await response.json().catch(() => null));
+      if (!result.success) {
+        throw new FilesystemError('File search returned an invalid response', { reason: 'invalid-response' });
+      }
+      return result.data.files.map((file) => ({
+        path: normalizePath(file.path),
+        preview: [normalizePath(file.relativePath)],
+      }));
+    }
+
+
+
     const hits = await searchFiles(payload.query, {
       directory,
       limit: typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)
@@ -315,6 +348,7 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
       throw new FilesystemError(error.error || 'Failed to upload file', {
         reason: parseFilesystemErrorReason(error.reason),
         status: response.status,
+        maxBytes: error.maxBytes,
       });
     }
 

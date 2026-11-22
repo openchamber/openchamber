@@ -1,0 +1,298 @@
+# OpenCode folder trust
+
+## Ownership
+
+Whether OpenCode may open a folder. OpenCode imports a folder's plugins and
+starts the commands in its configuration (local MCP servers, language
+servers, formatters, a custom shell) the first time any request names that
+folder, before a prompt or a tool call. It also fills `{env:…}` and
+`{file:…}` in the configuration from the user's machine, so a remote MCP
+server or a provider the repository names receives those values on open, and
+it applies the permissions the configuration and its agent files allow over
+the user's own. A cloned repository or a pull request checked out for review
+would do all of that the moment OpenChamber shows it. This module refuses
+such a folder until the user trusts exactly the configuration it has, and
+asks again when that configuration changes.
+
+- `assessment.ts` finds what a folder's configuration would run, read and
+  allow, mirroring OpenCode 2.x discovery (`packages/core/src/config/discovery.ts`,
+  `config/plugin/source.ts`, `config/variable.ts` and
+  `config/plugin/agent.ts` in the OpenCode repository), and fingerprints it.
+- `store.ts` keeps the trusted fingerprints per repository in
+  `<dataDir>/opencode-trust.json`.
+- `index.ts` decides per request (`refusalFor`) and serves
+  `GET`/`POST /api/opencode/trust` (`handleRoute`) for every runtime.
+- `fetch-guard.ts` puts the same decision in front of every request the
+  server process sends OpenCode itself.
+- `session-directory.ts` names the folder of a session whose route runs in
+  the session's own location.
+
+The prompt lives in the shared UI (`packages/ui/src/lib/opencodeTrust.ts`,
+`components/projects/OpenCodeTrustDialog.tsx`): the OpenCode client hands a
+refusal to it, shows what would run, saves a "trust" answer here and sends the
+refused request again.
+
+An assessment is the contract the prompt renders: `items` holds one entry per
+plugin, package, MCP server, language server, formatter, shell, unreadable
+configuration, `{env:…}`/`{file:…}` value and counted allow. `source` is that
+file's path relative to the assessed folder, `name` is the plugin spec, server
+name, variable, file path or the agent an allow belongs to (`''` for every
+agent), and `detail` is the command or the `action resource` an allow covers.
+The fingerprint hashes `kind`, `source`, `name`, `detail` and a content hash,
+so a change to anything the prompt showed asks again.
+
+Session admission also uses this prompt before registering an unknown host
+destination as a project. A configuration that runs nothing or whose current
+fingerprint is trusted registers without another dialog. There is no separate
+folder-consent store. The destination registration route and VS Code workspace
+bridge recheck trust before changing the registry. Runtime switches dismiss
+pending UI prompts and invalidate their continuations.
+
+Where the check runs:
+
+| Runtime | Path to OpenCode | Check |
+|---|---|---|
+| Web, desktop, hosted and Capacitor mobile | UI through the server proxy | `opencode/proxy.js` middleware |
+| Same server | server features with their own clients | `guardOpenCodeFetch`, installed over `globalThis.fetch` in `server/index.js` |
+| VS Code | webview through the extension bridge | `vscode/src/bridge-proxy-runtime.ts`, same answers file |
+| An OpenCode the user runs on their own | not through OpenChamber | none; OpenCode itself has no trust prompt |
+
+## Invariants
+
+- A request that names a folder (`x-opencode-directory`, `?directory=`,
+  `location[directory]`) or acts on a session reaches OpenCode only when that
+  folder's configuration runs nothing or its current fingerprint is trusted.
+  A header is read the way OpenCode reads it: percent-decoded, or as it
+  arrived when decoding fails, so a folder named `1%72epo%ZZ` is checked under
+  that literal name. Routes that start no location (session list and detail, message pages, the
+  event stream, credentials, deleting or viewing a session, unloading a
+  location) pass, so a paused folder still lists and shows its sessions. Any
+  other route, including ones OpenCode adds later, is checked.
+- Moving a session (`POST /api/session/:id/move`) is checked against the
+  folder it moves into, read from the body and resolved the way OpenCode
+  resolves it (`~` from home, a relative path from the session's folder), and
+  against the session's current folder: OpenCode opens the destination to
+  validate it and the source to see whether it still runs. A source folder
+  that is gone opens nothing and passes, so sessions still move out of deleted
+  folders. A move whose body names no directory, or that the runtime cannot
+  read, answers 400 without reaching OpenCode. Every runtime hands the body to
+  `refusalFor` through `readBody`: the proxy parses it, `guardOpenCodeFetch`
+  reads a copy, the VS Code bridge decodes its base64 body. A streamed body
+  cannot be read without consuming the one that is sent, so the guard counts
+  it as unreadable.
+  The proxy's worktree checkout gate (`../opencode/proxy.js`) resolves the
+  destination with the same `readMoveDestination`, so both gates agree on
+  which folder a move opens.
+- A session route is checked against the session's folder as well, read from
+  OpenCode's session record. The `global` owner is the exception: OpenCode
+  files MCP elicitation forms under it, it has no session record, and its
+  routes, such as a form's reply and cancel, run in the folder the request
+  names, so only that folder is checked. A lookup of `global` answers 400, which would refuse
+  every reply to such a form.
+- Trust is per repository: every worktree of one repository shares the
+  answers, and a worktree whose configuration differs from every trusted one
+  asks. The latest 20 fingerprints per repository are kept, so switching
+  between branches that each carry trusted plugins does not ask again.
+- The projects already in the user's list when the check first runs are
+  trusted as they are, once (`seeded` in the answers file). OpenCode ran
+  their configuration before the check existed, so a prompt for each would
+  protect nothing. A project added later, a worktree whose configuration
+  differs, and any later change to a seeded project ask. A seeding that
+  cannot read the project list records nothing and runs again on the next
+  start. Every check waits for the seeding, so projects are read in parallel
+  and one that takes over 2 seconds (a network share that stopped answering)
+  is left out and asks when opened.
+- The walk reads `opencode.json(c)` at every level from the folder up to the
+  filesystem root and stops below the user's home. A level that is one of
+  OpenCode's global configuration directories is skipped, because OpenCode
+  reads no project configuration there; those directories, `~/.opencode`,
+  `OPENCODE_CONFIG` and `OPENCODE_CONFIG_CONTENT` supply only the user's own
+  rules. A folder that is one of them has nothing to assess, and a folder that
+  does not exist has no fingerprint and is trusted, as OpenCode cannot open it
+  either.
+- Agent files are read from `agent/` and `agents/` including subfolders, and
+  from `mode/` and `modes/` at that level only, skipping `node_modules`,
+  `.git`, `.venv`, `venv` and `__pycache__` as OpenCode's scan does
+  (`FSUtil.ignoredDirectories`). A directory whose real path the walk is
+  already inside is skipped, so a symbolic link back up cannot multiply the
+  walk.
+- A session's folder is read from OpenCode's global session route, which
+  starts no location, so the read itself is not gated; a session OpenCode does
+  not know answers null and a lookup that cannot answer throws. A move
+  resolves it fresh, because the destination is relative to where the session
+  is now.
+- Trust-store writes are serialized: each update re-reads the file, applies
+  its change and writes atomically, so answers saved at the same time all
+  land. A failed write leaves the previous file in place and the next update
+  starts from it.
+
+## Cost
+
+Measured on an M-series Mac: one check reads a folder in 0.2 to 0.5 ms
+without plugins and about 4 to 6 ms for 30 plugin files plus a configuration
+and a 200-repository answers file. Requests that name no folder, or name only
+global routes, read nothing. A session's folder is looked up once and cached
+for 60 seconds (500 sessions), and a move resolves it fresh.
+
+The server reads a folder once each time OpenCode opens it. A trusted answer
+holds until OpenCode reports the folder closed (`location.shutdown` on the
+event stream, through `forget`); the next opening reads it again, which is
+where a pull made while it was closed is caught. While the event stream is
+down closings go unreported, so answers last 2 seconds, and a new connection
+forgets them all (`followLocations`). Untrusted answers always last 2
+seconds, so a folder whose plugin was removed opens without a prompt.
+
+VS Code follows closings the same way: its global event watcher
+(`vscode/src/sessionActivityWatcher.ts`) runs while the extension is
+connected to OpenCode and reports `location.shutdown` to the shared instance
+in `vscode/src/opencodeTrust.ts`.
+- A store that cannot be read trusts nothing. The prompt returns rather than
+  code running unasked; the next answer rewrites the file.
+- `POST /api/opencode/trust` records only the fingerprint the user was shown.
+  When the configuration changed since, nothing is recorded and the answer
+  carries the current configuration to show instead.
+- Startup warming and the directory server-side reads fall back to
+  (`lifecycle.js` through `getWarmupDirectories` and `onLastDirectoryChanged`
+  in `server/index.js`) are trusted folders only, so features that read
+  OpenCode with no folder of their own keep working on a folder that may open.
+
+## Decisions
+
+### Why permission helpers receive parsed rules
+
+JSONC and YAML values are parsed into permission rules at their read boundary.
+Request bodies remain JSON values until the move schema validates them; trust
+route inputs are validated by their route schemas. The existing Zod schemas
+keep their acceptance and fallback rules. Error property guards retain
+messages and error codes from thrown objects and
+functions, including values that are not instances of `Error`.
+Internal assessment, permission and cache values have concrete types.
+
+The filesystem dependency uses the Node promise methods the folder calls.
+Environment defaults still select the same home and global configuration
+directories. A malformed percent-encoded directory header retains its raw value.
+
+### Why queued prompts read trust again
+
+Several worktrees can have untrusted assessments before the user answers the
+first prompt. Each queued prompt reads the server's current assessment when
+its turn arrives, so the first saved answer also opens unchanged worktrees
+without another confirmation. Already-trusted requests bypass the prompt queue;
+a failed assessment still leaves its folder closed.
+
+### Why a gate in OpenChamber and not a setting in OpenCode
+
+OpenCode 2.1 has no per-folder trust: the only switch,
+`OPENCODE_DISABLE_PROJECT_CONFIG`, turns off project configuration for every
+folder at once, including the agents and skills users rely on. Upstream
+reports of the same problem (#6361, #7163) were closed by a stale bot without
+a fix. The gate goes when OpenCode asks before loading a folder's code itself.
+
+### Why the fingerprint covers code, machine values and allows, not the whole configuration
+
+Three kinds of entry count. Entries that run code: plugin files and folders
+(content hashed), configured plugins (local ones content hashed, packages by
+name), and the commands of local MCP servers, language servers, formatters
+and the shell. Every `{env:…}` and `{file:…}` in a configuration file, by
+name: OpenCode substitutes them into the file's text wherever they stand, so
+one in a remote MCP header, a provider option or an instruction URL sends the
+value to an address the repository picked. Every rule that allows something
+one of the user's own ask or deny rules covers, in the configuration
+(`permission`, `permissions`, `tools`, and the same under `agent`, `agents`
+and `mode`) and in the agent files of `.opencode/` (`agent/`, `agents/`,
+`mode/`, `modes/`): a project's rules are evaluated after the user's, so such
+an allow silently overrides the user's ask.
+
+A folder with only models, skills, remote MCP servers without such values,
+or allows the user never restricted opens without a prompt, and editing
+those never asks again. Asks and denies only tighten the user's rules, so
+they do not count. Instruction URLs do not count: the repository's own
+`AGENTS.md` can say the same. A configuration file that does not parse
+counts as code, and so does an agent file that names permissions and that
+neither plain YAML nor OpenCode's colon fallback reads, since OpenCode may
+still read what these parsers reject. A `{env:…}` or `{file:…}` token after
+`//` on a line does not count, because OpenCode leaves it unsubstituted.
+
+### Why an allow counts only against the user's own rules
+
+OpenCode allows everything by default, so a repository allow changes nothing
+for a user who set no ask or deny. Counting every allow asked about nearly
+every repository with agent files, read-only reviewers included, and taught
+users to click through the dialog. The user's rules are read from OpenCode's
+global configuration directories, `~/.opencode` (documents and agent files)
+and `OPENCODE_CONFIG`/`OPENCODE_CONFIG_CONTENT`, and an allow counts when its
+action can match the action of one of them. Resources are not compared:
+shell patterns intersect in ways neither pattern shows (`git push *` and
+`git * --force`), OpenCode expands `~` in path resources and substitutes
+`{env:…}` before matching, so proving two resources never meet is not
+possible here, and a miss would let the repository win silently. An action
+pattern containing `{` is treated as possibly matching anything, because
+OpenCode's brace expansion is not reproduced. OpenCode's own `.env` read asks
+are left out: a repository agent that may read `*`
+would otherwise ask everywhere. The fingerprint holds only the counted
+allows, so adding an ask later asks again for folders whose allows override
+it.
+
+### Why a plugin's hash covers the local files it imports
+
+A trusted plugin that imports `../../scripts/helper.js` runs whatever that
+file holds, so a pull request could change the helper and keep the plugin's
+own hash. The local files a plugin's scripts import, and the files those
+import, are hashed into the plugin's hash, along with every local import that
+names no file yet. A plugin that imports nothing local keeps the hash of its
+own content, so answers given before imports were followed still hold.
+Package imports are left out: `node_modules` is installed, not committed.
+
+An import is resolved the way Bun resolves a plugin's import, since Bun is the
+runtime OpenCode loads plugins with: the literal path first, then the same
+name with `.js`, `.jsx`, `.mjs` or `.cjs` rewritten to its TypeScript source
+(plugins written in TypeScript import each other by their emitted names), then
+the extensions OpenCode accepts, then `index` files. An import the resolver
+cannot find counts as `missing`, so a file that appears later at that path
+asks again.
+
+### Why an agent file's frontmatter is parsed twice
+
+OpenCode reads agent frontmatter as YAML and, when that fails, retries with a
+sanitizer that turns a top-level value containing a colon (`description: Clean
+up: dead code`) into a block scalar (`config/markdown.ts`). Both parses expand
+`<<` merge keys, so an allow can hide in one. A file that neither parse reads
+counts as unreadable code when its frontmatter names `permission` or `tools`,
+because OpenCode may still read it.
+
+### Why the walk stops below home
+
+Levels from the user's home up hold the user's own setup and OpenCode's global
+configuration, which no repository writes. Counting them would ask about the
+user's own plugins in every project.
+
+### Why the server guards `fetch` globally
+
+Server features call OpenCode with folders the UI hands them, each through a
+client of its own (session titles, routing, dispatched sessions, scheduled
+runs, the agent's OpenChamber tool). A check per feature missed the session
+title lookup in testing and would miss the next feature too. One guard on the
+process's `fetch` covers all of them; requests to any other origin pass
+untouched. The proxy forwards through `http-proxy-middleware`, not `fetch`, so
+it keeps its own middleware.
+
+### Known limits
+
+- The agent's own `session_move` tool runs inside OpenCode and reaches no
+  OpenChamber runtime, so the gate does not see it. OpenCode opens the
+  destination from there as it would for the CLI.
+- A folder OpenCode already runs reloads its plugins when they change on disk.
+  The gate decides when a location starts; switching a running folder to a
+  branch with different plugins loads them as the OpenCode CLI would.
+- A plugin's imports are followed when they name a file by a literal relative
+  or absolute path. Package imports, `tsconfig` path aliases, computed import
+  specifiers and files a plugin reads and evaluates itself are not, so a
+  change behind one of them does not ask again.
+- A plugin folder past 500 files or 16 MB is hashed by path and size beyond
+  that budget, and its imports are followed within a budget of the same size.
+  The budget keeps a huge vendored tree from stalling the check, so a change
+  past it that keeps a file's size goes unnoticed.
+- A configuration entry whose shape the parser does not recognize is left out
+  of the fingerprint, because it starts nothing in the shapes OpenCode reads
+  (`config/normalize.ts`: a plugin name, a `[name, options]` tuple or a
+  `{ package }` object, and command arrays of strings).

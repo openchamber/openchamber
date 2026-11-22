@@ -21,7 +21,31 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Accept any type shared by another app; the page's attachment rules decide
+                 what can actually be attached and report the rest by name. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
         </activity>
+
+        <!-- Not a toggle: the tile starts a session, like the iOS Control Center control. -->
+        <service
+            android:name=".NewSessionTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_new_session"
+            android:label="@string/tile_new_session"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -30,6 +54,34 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <receiver android:name=".UsageWidgetProvider" android:exported="true"
+            android:label="@string/widget_usage_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/widget_usage_info" />
+        </receiver>
+        <receiver android:name=".SessionsWidgetProvider" android:exported="true"
+            android:label="@string/widget_sessions_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/widget_sessions_info" />
+        </receiver>
+
+        <receiver android:name=".WidgetRefreshReceiver" android:exported="false" />
+
+        <!-- Standard Android RemoteViews collection adapter for the Sessions widget.
+             The service reads only local, redacted snapshots, never network credentials. -->
+        <service android:name=".WidgetSessionsService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false" />
+        <service android:name=".WidgetUsageService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false" />
 
         <!-- Small icon shown in the status bar / notification shade for FCM notifications the
              system displays while the app is backgrounded. Must be a monochrome silhouette. -->

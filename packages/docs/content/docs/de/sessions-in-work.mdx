@@ -1,6 +1,6 @@
 ---
 title: Sitzungen in Arbeit
-description: Halte die Sitzungen, an denen du arbeitest, sichtbar in der Seitenleiste, bis du sie als erledigt markierst.
+description: Halte die Arbeit, an der du gerade bist, oben in der Seitenleiste, bis du sie als erledigt markierst.
 ---
 
 # Sitzungen in Arbeit
@@ -9,13 +9,13 @@ Der Bereich **In Arbeit** oben in der Seitenleiste hält die Sitzungen, an denen
 
 ## Wo du ihn findest
 
-Der Bereich **In Arbeit** liegt in der Seitenleiste unter den Chats und über deinen Projekten oder der Zeitleiste. Auf dem Handy ist er an derselben Stelle in der Sitzungsliste.
+Der Bereich **In Arbeit** liegt in der Seitenleiste unter den Chats und über deinen Projekten oder der Zeitleiste. Eine Arbeit darin verlässt ihr Projekt, so erscheint jede Arbeit nur einmal. Soll sie auch unter ihrem Projekt bleiben, schalte im Anzeigemenü der Seitenleiste **In Arbeit auch unter Projekten zeigen** ein. Die Suche zeigt sie einmal, im Bereich In Arbeit.
 
-Eine Sitzung in Arbeit bleibt auch in ihrem Projekt und Ordner und in der Zeitleiste unter ihrem Projekt, du siehst sie also an zwei Stellen. Ihre Untersitzungen kommen mit. Die Suche zeigt sie einmal, im Bereich In Arbeit.
+Jede Arbeit nimmt eine Zeile ein: Titel und Status, dazu eine farbige Markierung, wenn sie einen Pull Request oder ein Issue hat. Die Zeilen sind nach der letzten Aktivität sortiert, deshalb zeigen sie kein Datum. Fahre über eine Zeile, um Projekt, Branch, Zeit und Links zu sehen, oder schalte im Anzeigemenü **Ausführliche Zeilen** ein, um sie unter dem Titel anzuzeigen. Ausführliche Zeilen gelten auch unter deinen Projekten; die Sitzungen innerhalb einer Arbeit bleiben einzeilig.
 
-In der Baumansicht nimmt jede Sitzung im Bereich eine Zeile ein: Titel, Status und Zeit, dazu eine farbige Markierung, wenn sie einen Pull Request oder ein Issue hat. Fahre über eine Zeile, um Projekt, Branch und Links zu sehen, oder schalte im Anzeigemenü der Seitenleiste **Ausführliche Zeilen** ein, um sie unter dem Titel anzuzeigen. Die Listenansicht zeigt immer zwei Zeilen.
+Angeheftete Sitzungen haben einen eigenen Bereich **Angeheftet** über In Arbeit; sollen sie nur unter ihren Projekten stehen, schalte im selben Menü **Bereich Angeheftet anzeigen** aus. Eine angeheftete Sitzung in Arbeit steht nur unter Angeheftet.
 
-Wenn angeheftete Sitzungen einen eigenen Bereich **Angeheftet** über In Arbeit bekommen sollen, schalte im selben Menü **Bereich Angeheftet anzeigen** ein. Eine angeheftete Sitzung in Arbeit steht dann nur unter Angeheftet.
+Auf dem Handy ist die Sitzungsliste dieselbe, mit demselben Anzeigemenü. Ihre Zeilen sind zweizeilig, solange du **Ausführliche Zeilen** nicht ausschaltest, und der Pfeil, der eine Arbeit aufklappt, ist immer zu sehen, weil es dort nichts zum Darüberfahren gibt.
 
 ## Wie Sitzungen hineinkommen
 
@@ -29,25 +29,31 @@ Das gilt für jede Projektsitzung, auch für Sitzungen in Worktrees.
 
 Hattest du **Sitzungen in Arbeit anzeigen** selbst eingeschaltet, bevor es diese Einstellung gab, startet sie bei **Jede Nachricht**, so kamen Sitzungen bis dahin hinein. Sonst startet sie bei Aus.
 
-Chats, archivierte Sitzungen, Review-Sitzungen und Läufe [geplanter Aufgaben](/de/scheduled-tasks/) kommen nie hinein; forkst du einen Lauf, um daran weiterzuarbeiten, kommt der Fork hinein. Untersitzungen kommen nicht von allein hinein, sondern mit ihrer übergeordneten Sitzung.
+Chats, archivierte Sitzungen, Review-Sitzungen und Läufe [geplanter Aufgaben](/de/scheduled-tasks/) kommen nie hinein; forkst du einen Lauf, um daran weiterzuarbeiten, kommt der Fork hinein. Ein Subagent bringt seine übergeordnete Sitzung nie in Arbeit.
+
+## Namen von Aufgaben
+
+Der Agent benennt jede Arbeit nach ihrer Aufgabe, sobald die Aufgabe klar ist, in wenigen Worten wie „Login-Timeout beheben“. Ein Worktree speichert den Namen in der Beschreibung seines Branches, du siehst ihn also überall, wo du das Repository öffnest; eine Sitzung im Projektordner bekommt den Namen als Titel. Benennst du sie selbst um, bleibt dein Name: Der Agent benennt nie eine Aufgabe um, der du einen Namen gegeben hast.
 
 ## Sitzungen von Hand verfolgen und abschließen
 
-- **Verfolgen:** Fahre mit der Maus über eine Sitzung und klicke auf das Auge, oder wähle **Als in Arbeit verfolgen** im Sitzungsmenü.
-- **Abschließen:** Fahre im Bereich mit der Maus über eine Sitzung und klicke auf das Häkchen, oder wähle **Als erledigt markieren** im Menü.
+- **Verfolgen:** Fahre mit der Maus über eine Zeile und klicke auf das Auge, oder wähle **Als in Arbeit verfolgen** im Sitzungsmenü.
+- **Abschließen:** Fahre im Bereich mit der Maus über eine Zeile und klicke auf das Häkchen, oder wähle **Als erledigt markieren** im Menü. Das schließt die ganze Arbeit ab: jede Sitzung darin, die noch in Arbeit war.
 
-Auf dem Handy wischst du über die Sitzungszeile, um dieselbe Aktion zu erreichen, oder nutzt das Sitzungsmenü.
+Markierst du einen Worktree als erledigt, verlässt er den Bereich In Arbeit und bleibt, wo er ist. Soll er dabei auch archiviert werden, schalte **Worktree archivieren, wenn du ihn als erledigt markierst** unter **Einstellungen → Sitzungen** ein: Der Ordner verschwindet, und seine Sitzungen, Änderungen und sein Branch warten auf der Seite Archiv, bereit zum Wiederherstellen. Läuft dort noch eine Sitzung, bleibt der Worktree.
+
+Auf dem Handy wischst du eine Zeile zur Seite, um dieselbe Aktion zu erreichen.
 
 Chats bekommen kein Auge: Das sind einfache Unterhaltungen.
 
 ### „Diese Arbeit scheint erledigt.“
 
-Mit einem eingerichteten [Klassifizierungsanbieter](/de/classification-providers/) prüft Jev jeden Zug einer Sitzung in Arbeit. Sieht ein Zug nach dem Ende der Arbeit aus (du hast dich bedankt, um einen Commit gebeten, bestätigt, dass es funktioniert), schließt Jev nichts, sondern hinterlässt einen Hinweis:
+Mit einem eingerichteten [Klassifizierungsanbieter](/de/classification-providers/) prüft Jev jeden Zug einer Sitzung in Arbeit. Sieht ein Zug nach dem Ende der Arbeit aus (der Agent meldet erledigte Arbeit, macht nicht von selbst weiter, wartet nicht auf deine Antwort und bietet nichts weiter an), schließt Jev nichts, sondern hinterlässt einen Hinweis:
 
 - ein graues Häkchen an der Sitzungszeile in der Seitenleiste
 - einen Streifen über dem Eingabefeld: **Diese Arbeit scheint erledigt.** mit der Schaltfläche **Als erledigt markieren**
 
-Klicke auf **Als erledigt markieren**, wenn Jev recht hat. Wenn nicht, mach einfach weiter: Der Hinweis verschwindet mit deiner nächsten Nachricht. Ohne Klassifizierungsanbieter gibt es keinen Hinweis, und du markierst Sitzungen selbst als erledigt.
+Der Hinweis erscheint erst, wenn du nach dem Zug 10 Minuten nichts geschrieben hast, damit er nicht stört, während du von einem Schritt zum nächsten gehst. Klicke auf **Als erledigt markieren**, wenn Jev recht hat. Wenn nicht, mach einfach weiter: Der Hinweis verschwindet mit deiner nächsten Nachricht. Ohne Klassifizierungsanbieter gibt es keinen Hinweis, und du markierst Sitzungen selbst als erledigt.
 
 ## Zusammenfassung und Vorschlag für die nächste Nachricht
 
@@ -68,6 +74,8 @@ Ein- und ausschalten kannst du sie unter **Einstellungen → Chat → Sitzungshi
 - **Wann eine Sitzung in Arbeit kommt**: Aus, Jede Nachricht oder Jev entscheidet, wie oben beschrieben.
 
 Um nur den Bereich auszublenden, nutze **Bereich In Arbeit anzeigen** im Ansichtsmenü der Seitenleiste.
+
+Die Sitzungsbereinigung behält Sitzungen im Bereich In Arbeit. Damit sie wie jede andere Sitzung ablaufen, aktiviere **Sitzungen „In Arbeit“ einbeziehen** unter **Einstellungen → Sitzungen → Sitzungsaufbewahrung**. Das ist standardmäßig aus, und angeheftete Sitzungen bleiben in jedem Fall erhalten.
 
 ## Wo es funktioniert
 

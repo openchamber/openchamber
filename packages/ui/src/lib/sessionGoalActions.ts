@@ -2,7 +2,7 @@ import { abortCurrentOperation, patchSessionMetadata } from '@/sync/session-acti
 import { opencodeClient } from '@/lib/opencode/client';
 import type { Metadata } from '@/lib/opencode/model';
 import { distillGoalObjective } from '@/lib/smallModel';
-import { requestGoalSpec, type GoalWriterChoice } from '@/lib/goalWriter';
+import { buildGoalIntroReminder, requestGoalSpec, type GoalWriterChoice } from '@/lib/goalWriter';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { deleteGoalObjectiveFile, deleteGoalObjectiveVersion, fetchGoalObjectiveContent, fetchGoalObjectiveSnapshot, writeGoalObjectiveFile } from '@/lib/goalObjectiveFiles';
@@ -24,6 +24,7 @@ const writeGoal = (
   sessionId: string,
   directory: string | undefined,
   update: (currentGoal: Metadata | null) => Metadata | null,
+  expectedRuntimeKey?: string,
 ) =>
   patchSessionMetadata(sessionId, directory, (metadata) => {
     const namespace = isRecord(metadata.openchamber) ? metadata.openchamber : {};
@@ -36,7 +37,7 @@ const writeGoal = (
       delete nextNamespace.goal;
     }
     return { ...metadata, openchamber: nextNamespace };
-  });
+  }, expectedRuntimeKey);
 
 export interface SetSessionGoalInput {
   objective: string;
@@ -59,6 +60,9 @@ export interface SetSessionGoalInput {
   /** Cancels the save up to the moment anything is written. */
   signal?: AbortSignal;
 }
+
+/** The goal-mode reminder for a goal whose objective is the message itself. */
+export const sessionGoalIntro = (tokenBudget: number | null): string => buildGoalIntroReminder(tokenBudget, null);
 
 export type SetSessionGoalResult =
   /** `rewrittenSpec` is the spec the goal writer made the objective, or null when it is the text as given. */
@@ -230,7 +234,7 @@ export const nextGoalRecord = (input: {
       createdAt: now,
       updatedAt: now,
     },
-  };
+    };
 };
 
 /**
@@ -252,6 +256,7 @@ export async function setSessionGoal(
   directory: string | undefined,
   input: SetSessionGoalInput,
   existing: SessionGoalPayload | null,
+  expectedRuntimeKey?: string,
 ): Promise<SetSessionGoalResult> {
   const rawObjective = input.objective.trim();
   if (!rawObjective) {
@@ -316,7 +321,7 @@ export async function setSessionGoal(
       return currentGoal;
     }
     return next.record;
-  });
+  }, expectedRuntimeKey);
   if (changed && fileWrite.saved) {
     // The metadata write aborted: put the snapshotted objective file back —
     // but only while this save still owns the file. A save that committed
@@ -348,9 +353,6 @@ export async function setSessionGoalStatus(
   directory: string | undefined,
   status: Extract<SessionGoalStatus, 'active' | 'paused' | 'complete'>,
 ): Promise<void> {
-  // Pausing a goal also stops the agent's current turn — same mental model
-  // as the stop button, expressed through goal control. A no-op when the
-  // session is already idle.
   if (status === 'paused') {
     void abortCurrentOperation(sessionId);
   }
@@ -359,12 +361,8 @@ export async function setSessionGoalStatus(
     return {
       ...currentGoal,
       status,
-      // 'resumed' is the server's kickoff signal for an already-idle session.
       statusReason: status === 'active' ? 'resumed' : (status === 'complete' ? 'marked by user' : ''),
       blockedStreak: 0,
-      // An explicit resume grants a fresh auto-continuation allowance —
-      // otherwise a goal blocked on the turn cap would re-block on the very
-      // next tick and Resume would be a dead end.
       ...(status === 'active' ? { turnsUsed: 0 } : {}),
       updatedAt: Date.now(),
     };
@@ -378,8 +376,6 @@ export async function clearSessionGoal(sessionId: string, directory: string | un
     return null;
   });
   deleteGoalObjectiveFile(sessionId);
-  // Removing a running goal is a "stop" too — abort the current turn like
-  // pause does. A no-op when the session is idle.
   if (wasActive) {
     void abortCurrentOperation(sessionId);
   }

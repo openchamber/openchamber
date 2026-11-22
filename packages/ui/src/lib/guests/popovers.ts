@@ -24,14 +24,35 @@ type PopoverPositionRequest = Pick<GuestPopoverRequest, 'anchor' | 'width' | 'he
 
 const GUTTER = 8;
 const GAP = 6;
-export const GUEST_POPOVER_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+const GUEST_POPOVER_MODAL_SELECTOR = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
+const GUEST_POPOVER_OVERLAY_SELECTOR = '[data-guest-popover-overlay]';
+const HIDDEN_SELECTOR = '[inert],[aria-hidden="true"],[data-base-ui-inert]';
 
-/** A guest preview must never cover a host permission or modal dialog. */
 export const guestPopoverOwnerBlocked = (frame: HTMLIFrameElement): boolean => (
-  !frame.isConnected || frame.closest('[inert],[aria-hidden="true"],[data-base-ui-inert]') !== null
+  !frame.isConnected || frame.closest(HIDDEN_SELECTOR) !== null
   || frame.ownerDocument.documentElement.classList.contains('oc-dialog-open')
-  || Array.from(frame.ownerDocument.querySelectorAll(GUEST_POPOVER_MODAL_SELECTOR)).some((element) => element.getClientRects().length > 0)
+  || Array.from(frame.ownerDocument.querySelectorAll(GUEST_POPOVER_MODAL_SELECTOR)).some((element) => (
+    element.getClientRects().length > 0 && element.closest(HIDDEN_SELECTOR) === null
+    && !element.contains(frame) && !element.querySelector(GUEST_POPOVER_OVERLAY_SELECTOR)
+  ))
 );
+
+export const watchGuestPopoverOwner = (ownerFrame: HTMLIFrameElement, onBlocked: () => void): (() => void) => {
+  const view = ownerFrame.ownerDocument.defaultView;
+  if (!view) return () => {};
+  const observer = new view.MutationObserver((records) => {
+    const modalChanged = records.some((record) => {
+      if (record.type === 'attributes' && record.attributeName !== 'aria-modal') return record.target.contains(ownerFrame);
+      const candidates = record.type === 'attributes' ? [record.target] : Array.from(record.addedNodes);
+      return candidates.some((node) => node instanceof view.Element
+        && (node.matches(GUEST_POPOVER_MODAL_SELECTOR) || node.querySelector(GUEST_POPOVER_MODAL_SELECTOR)));
+    });
+    if (modalChanged && guestPopoverOwnerBlocked(ownerFrame)) onBlocked();
+  });
+  observer.observe(ownerFrame.ownerDocument.body, { childList: true, subtree: true, attributes: true,
+    attributeFilter: ['aria-modal', 'aria-hidden', 'inert', 'data-base-ui-inert'] });
+  return () => observer.disconnect();
+};
 
 export type GuestPopoverActivation = {
   id: string;
@@ -39,7 +60,6 @@ export type GuestPopoverActivation = {
   close: (reason: 'escape' | 'outside' | 'anchor' | 'owner' | 'closed' | 'replaced') => void;
 };
 
-/** One document-owned lease. A stale owner may never release a replacement. */
 export class GuestPopoverController {
   #active: GuestPopoverActivation | null = null;
 
@@ -82,7 +102,6 @@ export const getGuestPopoverController = (ownerDocument: Document): GuestPopover
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 
-/** Converts an owner-frame CSS-pixel anchor into a host viewport position. */
 export const positionGuestPopover = (request: PopoverPositionRequest): GuestPopoverPosition | null => {
   const { anchor, frame, viewport } = request;
   if (frame.clientWidth <= 0 || frame.clientHeight <= 0 || viewport.width <= GUTTER * 2 || viewport.height <= GUTTER * 2) return null;

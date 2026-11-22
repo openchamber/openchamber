@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const spawnSync = vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' }));
 const packageManager = await import('./package-manager.js');
-const { checkForUpdates, detectPackageManager, executeUpdate, getCurrentVersion } = packageManager;
+const { checkForUpdates, detectPackageManager, executeUpdate, fetchRequiredOpenCodeVersion, getCurrentVersion } = packageManager;
 const getUpdateCommand = (pm, options) => packageManager.getUpdateCommand(pm, { ...options, spawnSync });
 
 /** Helper: create a fetch mock that routes by URL pattern */
@@ -363,5 +363,29 @@ describe('checkForUpdates for the Android app', () => {
 
     expect(result.available).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('registry.npmjs.org'))).toBe(false);
+  });
+});
+
+describe('fetchRequiredOpenCodeVersion', () => {
+  let originalFetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('reads the oldest OpenCode from engines.opencode of the published release', async () => {
+    const cases = [
+      [{ opencode: '>=2.3.0' }, '2.3.0'],
+      [{ node: '>=24.14.0' }, null],
+      [{ opencode: '^2.3.0' }, null],
+    ];
+    for (const [engines, expected] of cases) {
+      globalThis.fetch = createFetchMock().when('@openchamber%2Fweb/2.7.1', { ok: true, json: async () => ({ version: '2.7.1', engines }) });
+      expect(await fetchRequiredOpenCodeVersion('2.7.1')).toBe(expected);
+    }
+    globalThis.fetch = createFetchMock().when('@openchamber%2Fweb/2.7.1', { ok: false, status: 404 });
+    expect(await fetchRequiredOpenCodeVersion('2.7.1')).toBeNull();
   });
 });

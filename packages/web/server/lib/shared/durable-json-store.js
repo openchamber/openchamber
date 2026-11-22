@@ -181,10 +181,25 @@ const readBoundedRawSync = (filePath, options) => {
  * that is an object (not null, not an array). Pass it as `validateValue`
  * to the reader or the preserve helper; stores with another shape pass
  * their own predicate.
+ *
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
  */
 export const isJsonObject = (value) =>
   value !== null && !Array.isArray(value) && Object.prototype.toString.call(value) === '[object Object]';
 
+/**
+ * @typedef {{ state: 'missing' } | { state: 'malformed', raw: string } | { state: 'valid', value: any, raw: string }} DurableJsonRead
+ * @typedef {{ preserved: true, outcome: 'preserved', preservedPath: string } | { preserved: false, outcome: 'missing' | 'failed' | 'replaced' }} DurablePreserveResult
+ * @typedef {{ fs?: any, validateValue?: (value: unknown) => boolean, maxBytes?: number }} DurableReadOptions
+ * @typedef {{ fs?: any, mode?: number }} DurableWriteOptions
+ */
+
+/**
+ * @param {unknown} raw
+ * @param {((value: unknown) => boolean) | undefined} validateValue
+ * @returns {DurableJsonRead}
+ */
 const judgeRaw = (raw, validateValue) => {
   const text = String(raw);
   if (text.trim() === '') return { state: 'missing' };
@@ -222,6 +237,11 @@ const judgeForPreserve = (raw, validateValue) => {
  * `options.maxBytes` (default DEFAULT_DURABLE_JSON_MAX_BYTES) or not a
  * regular file throws a coded refusal, never a 'malformed' answer.
  */
+/**
+ * @param {string} filePath
+ * @param {DurableReadOptions} [options]
+ * @returns {Promise<DurableJsonRead>}
+ */
 export const readDurableJsonFile = async (filePath, options = {}) => {
   let raw;
   try {
@@ -234,6 +254,11 @@ export const readDurableJsonFile = async (filePath, options = {}) => {
 };
 
 /** Sync spelling of readDurableJsonFile; the answers are identical. */
+/**
+ * @param {string} filePath
+ * @param {DurableReadOptions} [options]
+ * @returns {DurableJsonRead}
+ */
 export const readDurableJsonFileSync = (filePath, options = {}) => {
   let raw;
   try {
@@ -270,6 +295,11 @@ const preservedCandidate = (filePath) =>
  * read, check, or rename answers `{ preserved: false,
  * outcome: 'failed' }` — the fail-closed answer, on which the caller
  * must refuse its write.
+ */
+/**
+ * @param {string} filePath
+ * @param {DurableReadOptions} [options]
+ * @returns {Promise<DurablePreserveResult>}
  */
 export const preserveMalformedJsonFile = async (filePath, options = {}) => {
   const fs = options.fs ?? fsPromises;
@@ -359,6 +389,11 @@ export const preserveMalformedJsonFile = async (filePath, options = {}) => {
 };
 
 /** Sync spelling of preserveMalformedJsonFile; the answers are identical. */
+/**
+ * @param {string} filePath
+ * @param {DurableReadOptions} [options]
+ * @returns {DurablePreserveResult}
+ */
 export const preserveMalformedJsonFileSync = (filePath, options = {}) => {
   const fs = options.fs ?? fsSync;
   let raw;
@@ -443,6 +478,12 @@ const tempCandidate = (filePath) =>
  * renameWithRetry; a failed write removes its temp file before the
  * error surfaces.
  */
+/**
+ * @param {string} filePath
+ * @param {string} contents
+ * @param {DurableWriteOptions} [options]
+ * @returns {Promise<void>}
+ */
 export const writeDurableJsonFile = async (filePath, contents, options = {}) => {
   requireStatedMode(options.mode, 'writeDurableJsonFile');
   const fs = options.fs ?? fsPromises;
@@ -463,6 +504,12 @@ export const writeDurableJsonFile = async (filePath, contents, options = {}) => 
 };
 
 /** Sync spelling of writeDurableJsonFile; the behaviour is identical. */
+/**
+ * @param {string} filePath
+ * @param {string} contents
+ * @param {DurableWriteOptions} [options]
+ * @returns {void}
+ */
 export const writeDurableJsonFileSync = (filePath, contents, options = {}) => {
   requireStatedMode(options.mode, 'writeDurableJsonFileSync');
   const fs = options.fs ?? fsSync;

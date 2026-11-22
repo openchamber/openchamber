@@ -153,6 +153,24 @@ export const getToolOutput = (
     return undefined;
 };
 
+const MAX_LAST_LINE_LENGTH = 300;
+const LAST_LINE_TAIL_LENGTH = 16_384;
+
+export const getLastOutputLine = (output: string): string | undefined => {
+    const tail = output.length > LAST_LINE_TAIL_LENGTH ? output.slice(-LAST_LINE_TAIL_LENGTH) : output;
+    const lastLine = renderTerminalOutput(tail)
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .pop();
+    if (!lastLine) {
+        return undefined;
+    }
+    return lastLine.length > MAX_LAST_LINE_LENGTH
+        ? `${lastLine.slice(0, MAX_LAST_LINE_LENGTH).trimEnd()}…`
+        : lastLine;
+};
+
 export const getStreamingOutputAppend = (previous: string, next: string): string | undefined => {
     return next.startsWith(previous) ? next.slice(previous.length) : undefined;
 };

@@ -46,7 +46,7 @@ describe('getRowBottom', () => {
 });
 
 describe('resolveRealContentEndOffset', () => {
-    test('puts the last row bottom just above the composer overlay', () => {
+    test('puts the last row bottom on the viewport end', () => {
         const state = buildState({
             positions: [0, 1000],
             sizes: [1000, 200],
@@ -54,7 +54,7 @@ describe('resolveRealContentEndOffset', () => {
             scrollLength: 700,
         });
 
-        expect(resolveRealContentEndOffset({ state, composerOverlayHeight: 180 })).toBe(680);
+        expect(resolveRealContentEndOffset({ state })).toBe(500);
     });
 
     test('ignores content length inflated by reserved end space or stale sizes', () => {
@@ -67,28 +67,28 @@ describe('resolveRealContentEndOffset', () => {
             scrollLength: 700,
         });
 
-        expect(resolveRealContentEndOffset({ state, composerOverlayHeight: 180 })).toBe(0);
+        expect(resolveRealContentEndOffset({ state })).toBe(0);
     });
 
-    test('counts the footer rendered after the last row as real content', () => {
+    test('lands where the scroll node ends: header, rows and footer', () => {
+        // A 120-turn session as measured: a 48 px header above rows that end
+        // at 34100, a 196 px footer, a 952 px viewport; scrollHeight 34344.
         const state = buildState({
-            positions: [0, 1000],
-            sizes: [1000, 200],
-            scrollLength: 700,
+            positions: [0, 29248],
+            sizes: [29248, 4852],
+            scrollLength: 952,
         });
 
-        expect(resolveRealContentEndOffset({ state, composerOverlayHeight: 180, footerSize: 120 })).toBe(800);
+        expect(resolveRealContentEndOffset({ state, headerSize: 48, footerSize: 196 })).toBe(34344 - 952);
     });
 
     test('returns null for an empty timeline and for unmeasured last rows', () => {
         expect(resolveRealContentEndOffset({
             state: buildState({ positions: [], sizes: [] }),
-            composerOverlayHeight: 180,
         })).toBeNull();
 
         expect(resolveRealContentEndOffset({
             state: buildState({ positions: [0, 100], sizes: [100] }),
-            composerOverlayHeight: 180,
         })).toBeNull();
     });
 });

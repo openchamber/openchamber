@@ -10,25 +10,11 @@ import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/short
 import { invokeDesktop } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { publishTitlebarControlsWidth } from './titlebarControlsWidth';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 
-// Like the icon rail: muted at rest, full strength on hover or while what it
-// controls is on, and no hover fill.
 const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-6 w-6 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors';
 
-/**
- * Persistent titlebar controls at the start of the line (app menu on frameless
- * chrome + sidebar toggle): top left, or top right in a right-to-left locale.
- *
- * Rendered exactly once as an absolutely-positioned overlay above both the
- * sidebar and the header, so the buttons never migrate / re-mount between the
- * two while the sidebar animates open or closed — the panels slide *underneath*
- * a fixed control cluster instead. Its height tracks `--oc-header-height` and
- * its start padding clears the OS window controls via `--oc-titlebar-start-inset`.
- * The cluster's measured width is published as `--oc-titlebar-controls-width`
- * onto the elements that reserve room for it (`titlebarControlsWidth.ts`), so
- * the header can reserve matching space when the sidebar is collapsed.
- */
 export const TitlebarLeftControls: React.FC = () => {
   const { t, locale, direction } = useI18n();
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
@@ -37,12 +23,16 @@ export const TitlebarLeftControls: React.FC = () => {
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
-  // Starting a session shares the titlebar row with the sidebar toggle, so it
-  // stays in one place whether the sidebar is open or collapsed.
   const handleNewSession = React.useCallback(() => {
     useUIStore.getState().closeMainSurfaces();
     useSessionUIStore.getState().openNewSessionDraft();
   }, []);
+  const tabsShown = useUIStore((state) => state.sessionTabsEnabled && !(
+    state.isScheduledTasksDialogOpen || state.isArchivePageOpen || state.isIntegrationsCatalogOpen
+    || state.isUsageStatsPageOpen || state.isSourceBoardOpen || state.isOverviewOpen
+    || state.worktreesPageProjectId !== null || (state.isolatedSpacesEnabled && state.spacesPageProjectId !== null)
+    || state.runOverviewKey !== null || state.openGuestPageId !== null
+  ));
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -66,8 +56,6 @@ export const TitlebarLeftControls: React.FC = () => {
     }
 
     const publishWidth = () => {
-      // Prefer scrollWidth so negative child margins / overflow cannot under-report
-      // the space the overlay actually occupies over the header.
       const width = Math.max(node.getBoundingClientRect().width, node.scrollWidth);
       publishTitlebarControlsWidth(width);
     };
@@ -85,21 +73,12 @@ export const TitlebarLeftControls: React.FC = () => {
   }, []);
 
   return (
-    // The overlay is a CSS no-drag zone so its buttons stay clickable. The
-    // header / sidebar strip beneath carve a matching no-drag region under it
-    // and remain drag regions everywhere else, so window dragging still works
-    // in the empty parts of the strip.
     <div
+      data-titlebar-left-controls=""
       className="app-region-no-drag absolute inset-s-0 top-0 z-30 flex select-none items-center pe-2"
       style={{
         height: 'var(--oc-header-height, 3rem)',
         paddingInlineStart: 'var(--oc-titlebar-start-inset, 0.75rem)',
-        // The overlay floats above the sidebar rather than inside it, so it is
-        // sized by its own content: the icon buttons and the "New session" label
-        // are rem-sized and grow with Interface Font Size, while the sidebar and
-        // the macOS window-controls clearance are fixed pixels. Left uncapped the
-        // cluster runs past the sidebar edge and paints over the chat pane, so
-        // cap it here and let the label truncate.
         maxWidth: isSidebarOpen ? 'var(--oc-left-sidebar-width, 100%)' : undefined,
       }}
     >
@@ -136,7 +115,7 @@ export const TitlebarLeftControls: React.FC = () => {
               aria-pressed={isSidebarOpen}
               className={cn(ICON_BUTTON_CLASS, 'shrink-0', isSidebarOpen && 'text-foreground')}
             >
-              <Icon name="layout-left" className="h-4 w-4" />
+              <Icon name="panel-left" className="h-4 w-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent>
@@ -144,18 +123,7 @@ export const TitlebarLeftControls: React.FC = () => {
           </TooltipContent>
         </Tooltip>
 
-        {/* Labelled while the sidebar is open; collapses to an icon with a
-            tooltip so the cluster stays compact over the header otherwise. */}
-        {isSidebarOpen ? (
-          <button
-            type="button"
-            onClick={handleNewSession}
-            className={cn(ICON_BUTTON_CLASS, '-ms-1 w-auto min-w-0 px-1.5 font-normal')}
-          >
-            <Icon name="chat-new" className="h-4 w-4 shrink-0" />
-            <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
-          </button>
-        ) : (
+        {tabsShown ? null : (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -164,11 +132,11 @@ export const TitlebarLeftControls: React.FC = () => {
                 aria-label={t('sessions.sidebar.header.actions.newSession')}
                 className={cn(ICON_BUTTON_CLASS, '-ms-1 shrink-0')}
               >
-                <Icon name="chat-new" className="h-4 w-4" />
+                <Icon name="edit-box" className="h-4 w-4" />
               </button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>{t('sessions.sidebar.header.actions.newSession')}</p>
+              <TooltipLabelWithShortcut label={t('sessions.sidebar.header.actions.newSession')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('new_chat', shortcutOverrides), '')} />
             </TooltipContent>
           </Tooltip>
         )}

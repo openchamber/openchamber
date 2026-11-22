@@ -3,34 +3,31 @@ import { Window } from 'happy-dom';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
-  window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage,
-  Node: browser.Node, Element: browser.Element, HTMLElement: browser.HTMLElement,
+  window: browser,
+  document: browser.document,
+  navigator: browser.navigator,
+  localStorage: browser.localStorage,
+  Node: browser.Node,
+  Element: browser.Element,
+  HTMLElement: browser.HTMLElement,
   HTMLInputElement: browser.HTMLInputElement,
-  Event: browser.Event, CustomEvent: browser.CustomEvent,
-  MutationObserver: browser.MutationObserver, ResizeObserver: browser.ResizeObserver,
+  Event: browser.Event,
+  CustomEvent: browser.CustomEvent,
+  MutationObserver: browser.MutationObserver,
   getComputedStyle: browser.getComputedStyle.bind(browser),
-  requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
-  cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser), IS_REACT_ACT_ENVIRONMENT: true,
+  IS_REACT_ACT_ENVIRONMENT: true,
 });
 
-type RecordedRequest = { url: string; method: string; body: unknown };
-const requests: RecordedRequest[] = [];
-const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-  const url = String(input instanceof Request ? input.url : input);
-  const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-  requests.push({ url, method, body: init?.body ?? null });
-  return Response.json({ configured: false });
-});
-
+// React's input-event support is detected when react-dom loads.
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
-const { QUOTA_PROVIDERS } = await import('@/lib/quota');
 const { QuotaCredentials } = await import('./QuotaCredentials');
 
 const container = document.createElement('div');
 document.body.appendChild(container);
 const root = createRoot(container);
+const fetchSpy = spyOn(globalThis, 'fetch');
 
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -38,44 +35,76 @@ afterEach(async () => {
   browser.close();
 });
 
-test('opendesign is listed and its unconfigured form saves cookie and workspace id', async () => {
-  expect(QUOTA_PROVIDERS.some((provider) => provider.id === 'opendesign' && provider.name === 'Open Design')).toBe(true);
-
-  await act(async () => {
-    root.render(<I18nProvider><QuotaCredentials providerId="opendesign" providerName="Open Design" /></I18nProvider>);
+test('a token typed before the saved status arrives stays, and each provider starts with empty fields', async () => {
+  type Status = { configured: boolean; secretMasked?: string };
+  const statusReads = new Map<string, (status: Status) => void>();
+  const writes: Array<(status: Status) => void> = [];
+  fetchSpy.mockImplementation(async (input, init) => {
+    const request = new Request(input instanceof Request ? input : new URL(input, window.location.href), init);
+    const provider = /^\/api\/quota\/credentials\/([a-z-]+)$/.exec(new URL(request.url).pathname)?.[1];
+    if (!provider) throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+    return new Promise<Response>((resolve) => {
+      const finish = (status: Status) => resolve(Response.json(status));
+      if (request.method === 'GET') statusReads.set(provider, finish);
+      else writes.push(finish);
+    });
   });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-
-  // The status read went to the managed-credential route and reports unconfigured.
-  expect(requests.some((request) => request.method === 'GET' && request.url.includes('/api/quota/credentials/opendesign'))).toBe(true);
-  expect(container.textContent).toContain('Session cookie');
-  expect(container.textContent).toContain('Workspace ID');
-
-  const inputs = [...container.querySelectorAll<HTMLInputElement>('input')];
-  const cookieInput = inputs.find((input) => input.type === 'password');
-  const workspaceInput = inputs.find((input) => input.type === 'text');
-  if (!cookieInput || !workspaceInput) throw new Error('Missing opendesign credential fields');
+  const settle = async () => {
+    for (let turn = 0; turn < 5; turn += 1) await act(async () => { await Promise.resolve(); });
+  };
+  const show = async (providerId: 'cursor' | 'exe-dev') => {
+    await act(async () => { root.render(<I18nProvider><QuotaCredentials providerId={providerId} providerName={providerId} /></I18nProvider>); });
+    await settle();
+  };
+  const fields = () => [...container.querySelectorAll<HTMLInputElement>('input[type="password"]')];
   const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-  if (!setValue) throw new Error('Missing input setter');
-  await act(async () => { setValue.call(cookieInput, 'better-auth.session_token=test-token'); cookieInput.dispatchEvent(new Event('input', { bubbles: true })); });
-  await act(async () => { setValue.call(workspaceInput, 'ws-123'); workspaceInput.dispatchEvent(new Event('input', { bubbles: true })); });
+  if (!setValue) throw new Error('Missing native input setter');
+  const type = async (field: HTMLInputElement, value: string) => {
+    await act(async () => {
+      setValue.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  const answer = async (provider: string, status: Status) => {
+    const finish = statusReads.get(provider);
+    if (!finish) throw new Error(`No status read for ${provider}`);
+    await act(async () => { finish(status); });
+    await settle();
+  };
 
-  const saveButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.startsWith('Save'));
-  if (!saveButton) throw new Error('Missing save button');
-  await act(async () => { saveButton.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await show('cursor');
+  await type(fields()[0], 'typed-access');
+  await answer('cursor', { configured: true, secretMasked: 'cur•••' });
+  expect(fields().map((field) => field.value)).toEqual(['typed-access', '']);
+  expect(fields()[1].placeholder).toBe('cur•••');
 
-  const put = requests.find((request) => request.method === 'PUT');
-  if (!put) throw new Error('Save did not PUT the credential');
-  expect(put.url.includes('/api/quota/credentials/opendesign')).toBe(true);
-  expect(JSON.parse(String(put.body ?? '{}'))).toEqual({ cookie: 'better-auth.session_token=test-token', workspaceId: 'ws-123' });
-});
+  await show('exe-dev');
+  expect(fields().map((field) => field.value)).toEqual(['']);
+  await show('cursor');
+  expect(fields().map((field) => field.value)).toEqual(['', '']);
 
-test('google quota provider carries the Code Assist per-model label (#1042)', () => {
-  // The Usage surfaces take the displayed name from this static metadata, so
-  // the clarified label has to live here, not only in the server response.
-  expect(QUOTA_PROVIDERS.some((provider) => provider.id === 'google' && provider.name === 'Google (Code Assist, per-model)')).toBe(true);
-});
+  // The exe.dev read is still open; its late answer must not describe Cursor.
+  await answer('exe-dev', { configured: true, secretMasked: 'exe•••' });
+  expect(fields().map((field) => field.placeholder)).not.toContain('exe•••');
 
-test('mistral quota provider is listed for the Usage page', () => {
-  expect(QUOTA_PROVIDERS.some((provider) => provider.id === 'mistral' && provider.name === 'Mistral AI')).toBe(true);
+  // A save still running when the user leaves and returns keeps the form busy.
+  // Its answer never lands on another provider's form, keeps a draft typed
+  // after it was sent, and wins over a status read that started before it.
+  const buttons = () => [...container.querySelectorAll('button')];
+  await type(fields()[0], 'new-access');
+  await act(async () => { buttons()[0].click(); });
+  await show('exe-dev');
+  expect(buttons().every((button) => button.disabled)).toBe(true);
+  await show('cursor');
+  await type(fields()[1], 'later-refresh');
+  await act(async () => { writes[0]({ configured: true, secretMasked: 'new•••' }); });
+  await settle();
+  await answer('cursor', { configured: false });
+  expect(fields().map((field) => field.value)).toEqual(['', 'later-refresh']);
+  expect(fields().map((field) => field.placeholder)).toEqual(['new•••', 'new•••']);
+  expect(buttons().some((button) => button.disabled)).toBe(false);
+
+  await show('exe-dev');
+  await answer('exe-dev', { configured: false });
+  expect(fields().map((field) => field.placeholder)).not.toContain('new•••');
 });

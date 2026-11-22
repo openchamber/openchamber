@@ -5,7 +5,7 @@ description: 원격 및 모바일 접근을 위해 OpenChamber를 안전하게 �
 
 # 터널
 
-터널은 OpenChamber로 연결되는 공개 링크로, 다른 네트워크의 일반 브라우저에서 접근할 수 있게 해줍니다. 실행 중인 인스턴스에 터널을 만들려면 `openchamber tunnel`을 사용하세요.
+터널은 OpenChamber로 연결되는 링크로, 다른 네트워크의 일반 브라우저에서, 또는 Tailscale Serve라면 tailnet 안의 어떤 기기에서든 접근할 수 있게 해줍니다. 실행 중인 인스턴스에 터널을 만들려면 `openchamber tunnel`을 사용하세요.
 
 > **자신의 기기**(모바일 앱, 다른 데스크톱)를 연결할 때는 보통 터널이 필요 없습니다. 대신 [기기를 페어링](/ko/connect-devices/)하고, 설정이 전혀 필요 없는 종단 간 암호화 [Private Relay](/ko/private-relay/)에 집 밖 접속을 맡기세요.
 
@@ -17,6 +17,8 @@ OpenChamber는 사용자의 컴퓨터에서 터널 공급자 CLI를 실행합니
 brew install cloudflared
 brew install ngrok
 ```
+
+Tailscale을 쓰려면 [Tailscale 앱](https://tailscale.com/download)을 설치하고 로그인하세요. Mac에서는 앱만 있으면 됩니다. OpenChamber가 앱 안의 명령줄 도구를 찾습니다.
 
 Cloudflare 빠른 터널은 `cloudflared`로 실행할 수 있습니다. Ngrok은 ngrok 계정과 ngrok 대시보드의 authtoken이 필요합니다:
 
@@ -46,6 +48,12 @@ openchamber tunnel start --provider cloudflare --mode quick
 openchamber tunnel start --provider ngrok --mode quick
 ```
 
+또는 Tailscale Serve로 tailnet 안의 기기와 공유합니다:
+
+```bash
+openchamber tunnel start --provider tailscale --mode serve
+```
+
 3. 상태를 확인합니다:
 
 ```bash
@@ -60,6 +68,15 @@ openchamber tunnel status
 
 - `cloudflare`: quick, managed remote, managed local 모드
 - `ngrok`: quick 모드
+- `tailscale`: tailnet 안의 기기에서만 열 수 있는 serve 모드와 인터넷 전체에서 열 수 있는 funnel 모드
+
+## Tailscale
+
+두 모드 모두 `https://laptop.example.ts.net` 같은 컴퓨터의 tailnet 주소를 씁니다. 포트는 `--https-port`로 443(기본값), 8443, 10000 중에서 고릅니다. Tailscale이 이미 443에서 다른 것을 공유하고 있으면 바꾸세요.
+
+처음에는 Tailscale이 tailnet에서 HTTPS(Serve용) 또는 Funnel을 켜라고 요청합니다. OpenChamber는 멈추고 Tailscale의 링크를 보여 줍니다. 링크를 열어 승인한 뒤 터널을 다시 시작하세요. Linux에서는 root나 Tailscale 운영자만 포트를 공유할 수 있습니다. `sudo tailscale set --operator=$USER`로 한 번 운영자가 되세요.
+
+터널을 멈추면 OpenChamber가 Tailscale로 공유한 것만 제거되고 나머지 Tailscale 설정은 그대로입니다.
 
 ## 관리형 모드
 
@@ -101,6 +118,7 @@ openchamber tunnel ready --provider cloudflare
 openchamber tunnel ready --provider ngrok
 openchamber tunnel doctor --provider cloudflare
 openchamber tunnel doctor --provider ngrok
+openchamber tunnel doctor --provider tailscale
 openchamber tunnel stop --port 3000
 ```
 

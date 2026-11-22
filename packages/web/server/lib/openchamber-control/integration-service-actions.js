@@ -5,8 +5,9 @@
  * and tools are ./integration-actions.js.)
  *
  * Every action runs the same operation its Settings route runs: the route
- * modules return those operations (`accounts` from ../github/routes.js and
- * ../gitlab/routes.js, `bindingOperations` from ../source-control/routes.js,
+ * modules return those operations (`accountOperations` and `bindingOperations`
+ * from ../source-control/routes.js, which reach the provider registry's
+ * GitHub and GitLab implementations,
  * the return of ../linear/routes.js and ../guests/routes.js), and
  * ../opencode/feature-routes-runtime.js hands them out once the routes are
  * registered.
@@ -239,6 +240,17 @@ export const createIntegrationServiceActions = (deps) => {
     return found;
   };
 
+  // GitHub and GitLab account operations come from the source-control
+  // provider registry (../source-control/routes.js accountOperations); a
+  // server without them answers 501 instead of failing on a null.
+  const providerOps = (name, label) => {
+    const found = operations()[name];
+    if (!found) throw new OpenChamberControlError(`${label} account actions are not available on this server`, 501);
+    return found;
+  };
+  const githubOps = () => providerOps('github', 'GitHub');
+  const gitlabOps = () => providerOps('gitlab', 'GitLab');
+
   const resolveDirectory = (input, ctx) => asNonEmptyString(input.directory) || asNonEmptyString(ctx?.contextDirectory) || null;
 
   const requireAccountId = (input, action) => {
@@ -249,14 +261,14 @@ export const createIntegrationServiceActions = (deps) => {
 
   // ---- GitHub
 
-  const githubStatus = () => operations().github.status();
+  const githubStatus = () => githubOps().status();
 
-  const githubActivate = async (input) => unwrap(await operations().github.activate(requireAccountId(input, 'github.activate')));
+  const githubActivate = async (input) => unwrap(await githubOps().activate(requireAccountId(input, 'github.activate')));
 
   const githubRemove = async (input) => {
     const accountId = requireAccountId(input, 'github.remove');
     requireConfirm(input, `Removing ${accountId} signs the user out of that GitHub account`);
-    return unwrap(await operations().github.remove(accountId));
+    return unwrap(await githubOps().remove(accountId));
   };
 
   const requireTokenReference = (input, action) => {
@@ -265,14 +277,14 @@ export const createIntegrationServiceActions = (deps) => {
     return reference;
   };
 
-  const githubAddFromVault = async (input) => unwrap(await operations().github.addFromVault(requireTokenReference(input, 'github.addFromVault')));
+  const githubAddFromVault = async (input) => unwrap(await githubOps().addFromVault(requireTokenReference(input, 'github.addFromVault')));
 
-  const githubCli = (input) => operations().github.setCliDisabled(requireBoolean(input, 'disabled', 'github.cli'));
+  const githubCli = (input) => githubOps().setCliDisabled(requireBoolean(input, 'disabled', 'github.cli'));
 
   // ---- GitLab
 
   const knownGitLabInstances = async () => {
-    const stored = await operations().gitlab.listInstances();
+    const stored = await gitlabOps().listInstances();
     return [...new Set([GITLAB_DEFAULT_INSTANCE, ...stored])];
   };
 
@@ -297,33 +309,33 @@ export const createIntegrationServiceActions = (deps) => {
 
   const gitlabStatus = async (input) => {
     const origin = await requireInstance(input, 'gitlab.status', { optional: true });
-    if (origin) return operations().gitlab.status(origin);
-    const stored = await operations().gitlab.listInstances();
-    const instances = await Promise.all(stored.map((instance) => settledSection(() => operations().gitlab.status(instance))
+    if (origin) return gitlabOps().status(origin);
+    const stored = await gitlabOps().listInstances();
+    const instances = await Promise.all(stored.map((instance) => settledSection(() => gitlabOps().status(instance))
       .then((status) => ({ instance, ...status }))));
     return { instances, note: stored.length ? undefined : 'No GitLab account is stored; the user signs in from Settings' };
   };
 
   const gitlabActivate = async (input) => {
     const origin = await requireInstance(input, 'gitlab.activate');
-    return unwrap(await operations().gitlab.activate(origin, requireAccountId(input, 'gitlab.activate')));
+    return unwrap(await gitlabOps().activate(origin, requireAccountId(input, 'gitlab.activate')));
   };
 
   const gitlabAddFromVault = async (input) => {
     const origin = await requireInstance(input, 'gitlab.addFromVault');
-    return unwrap(await operations().gitlab.addFromVault(origin, requireTokenReference(input, 'gitlab.addFromVault')));
+    return unwrap(await gitlabOps().addFromVault(origin, requireTokenReference(input, 'gitlab.addFromVault')));
   };
 
   const gitlabRemove = async (input) => {
     const origin = await requireInstance(input, 'gitlab.remove');
     const accountId = requireAccountId(input, 'gitlab.remove');
     requireConfirm(input, `Removing ${accountId} signs the user out of that GitLab account`);
-    return unwrap(await operations().gitlab.remove(origin, accountId));
+    return unwrap(await gitlabOps().remove(origin, accountId));
   };
 
   const gitlabCli = async (input) => {
     const origin = await requireInstance(input, 'gitlab.cli');
-    return operations().gitlab.setCliDisabled(origin, requireBoolean(input, 'disabled', 'gitlab.cli'));
+    return gitlabOps().setCliDisabled(origin, requireBoolean(input, 'disabled', 'gitlab.cli'));
   };
 
   // ---- Linear

@@ -541,7 +541,7 @@ describe('direct local-store read (readLocalOpenCodeCredentials)', () => {
       };
       configureOpenCodeCredentials(primary);
       await expect(readLocalOpenCodeCredentials()).resolves.toEqual({
-        google: { type: 'api', key: 'managed-store-key' },
+        google: { label: 'default', type: 'api', key: 'managed-store-key' },
       });
     } finally {
       configureOpenCodeCredentials(null);

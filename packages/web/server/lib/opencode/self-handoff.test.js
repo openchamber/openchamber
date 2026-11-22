@@ -87,7 +87,7 @@ describe('canTakeOver', () => {
     version: '2.6.0',
     handoffProtocol: 2,
     stateVersion: 1,
-    opencode: { decision: 'adopt', reason: 'matches-state', version: '2.0.26' },
+    opencode: { decision: 'adopt', reason: 'matches-state', version: '2.2.4' },
     ...overrides,
   });
 
@@ -96,7 +96,7 @@ describe('canTakeOver', () => {
   });
 
   it('accepts an OpenCode handoff decision, which the drain protects', () => {
-    expect(canTakeOver(hello({ opencode: { decision: 'handoff', reason: 'binary-changed', version: '2.0.26' } }))).toEqual({ ok: true });
+    expect(canTakeOver(hello({ opencode: { decision: 'handoff', reason: 'binary-changed', version: '2.2.4' } }))).toEqual({ ok: true });
   });
 
   it('refuses a protocol outside the accepted range', () => {
@@ -116,7 +116,7 @@ describe('canTakeOver', () => {
   it('refuses a running OpenCode version this build does not support', () => {
     const verdict = canTakeOver(hello(), { isSupportedOpenCodeVersion: () => false });
     expect(verdict.ok).toBe(false);
-    expect(verdict.detail).toContain('2.0.26');
+    expect(verdict.detail).toContain('2.2.4');
   });
 
   it('refuses a malformed hello', () => {
@@ -146,7 +146,7 @@ describe('createSelfHandoffRuntime protocol 2', () => {
     version: '2.0.0',
     handoffProtocol: 2,
     stateVersion: 1,
-    opencode: { decision: 'adopt', reason: 'matches-state', version: '2.0.26' },
+    opencode: { decision: 'adopt', reason: 'matches-state', version: '2.2.4' },
   };
 
   const probeChild = ({ hello = validHello, abort = null } = {}) => {

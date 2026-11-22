@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const webDir = path.join(repoRoot, 'packages', 'web');
+const sdkDir = path.join(repoRoot, 'packages', 'sdk');
 const electronDir = path.join(repoRoot, 'packages', 'electron');
 
 const resourcesDir = path.join(electronDir, 'resources');
@@ -77,14 +78,22 @@ const copyDir = async (src, dst) => {
 
 const bunExe = resolveBun();
 
+console.log('[electron] building @openchamber/sdk dist...');
+run(bunExe, ['run', 'build'], sdkDir);
+
 console.log('[electron] building web UI dist...');
 run(bunExe, ['run', 'build'], webDir);
 
 console.log('[electron] staging packaged resources...');
 await fs.mkdir(resourcesDir, { recursive: true });
 const stagedWebDistDir = await fs.mkdtemp(path.join(resourcesDir, 'web-dist-staging-'));
-await copyDir(webDistDir, stagedWebDistDir);
-await removeDir(resourcesWebDistDir);
-await fs.rename(stagedWebDistDir, resourcesWebDistDir);
+try {
+  await copyDir(webDistDir, stagedWebDistDir);
+  await removeDir(resourcesWebDistDir);
+  await fs.rename(stagedWebDistDir, resourcesWebDistDir);
+} catch (error) {
+  await removeDir(stagedWebDistDir);
+  throw error;
+}
 
 console.log(`[electron] web assets ready: ${resourcesWebDistDir}`);

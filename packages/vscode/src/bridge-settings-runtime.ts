@@ -8,6 +8,10 @@ import type { BridgeContext } from './bridge';
 import { filterPersistableSettingsChanges, withoutSecretSettings } from './settings-registry-gate';
 import { renameSyncWithRetry, renameWithRetry } from './bridge-atomic-write';
 import { readOpenCodeSkillsPayload } from './opencode-skills-response';
+import { createProjectSetupStore } from './bridge-project-setup-runtime';
+import { execGit } from './bridge-git-process-runtime';
+import { createMagicPromptService, repositoryOfGitResult, workspaceProjectsOf } from './magic-prompts';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -26,33 +30,36 @@ const SETTINGS_KEY = 'openchamber.settings';
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
 const OPENCHAMBER_PREFERENCES_PATH = preferencesFilePathFor(OPENCHAMBER_SHARED_SETTINGS_PATH);
 const OPENCHAMBER_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'magic-prompts.json');
-const MAGIC_PROMPTS_FILE_VERSION = 1;
-const MAGIC_PROMPT_ID_PATTERN = /^[a-z0-9._-]{1,160}$/;
-const MAGIC_PROMPT_TEXT_MAX_LENGTH = 200_000;
 
-// The three shared JSON stores this module reads (settings.json,
-// preferences.json, magic-prompts.json) are read synchronously on bridge hot
-// paths in a single-threaded extension host, so every read goes through the
-// handle-bounded readCappedFileSync (opencodeConfig.ts): the file is opened
-// with O_NONBLOCK on POSIX, judged regular and within its cap from the
-// handle, and never buffered past the cap — a FIFO or an oversized file can
-// neither freeze nor flood the host. Caps are sized from each file's
-// legitimate shape: settings.json carries instance facts and legacy keys
-// (8 MiB matches MAX_OPENCHAMBER_SETTINGS_BYTES in opencode.ts and the web
-// reader's cap for the same file); preferences.json holds only bounded
-// registry profile fields; magic-prompts.json holds overrides whose text is
-// already capped at MAGIC_PROMPT_TEXT_MAX_LENGTH per entry on save, so
-// 4 MiB is roughly twenty maximum-size overrides.
+// The shared JSON stores this module reads (settings.json, preferences.json)
+// are read synchronously on bridge hot paths in a single-threaded extension
+// host, so every read goes through the handle-bounded readCappedFileSync
+// (opencodeConfig.ts): the file is opened with O_NONBLOCK on POSIX, judged
+// regular and within its cap from the handle, and never buffered past the
+// cap — a FIFO or an oversized file can neither freeze nor flood the host.
+// settings.json carries instance facts and legacy keys (8 MiB matches
+// MAX_OPENCHAMBER_SETTINGS_BYTES in opencode.ts and the web reader's cap for
+// the same file); preferences.json holds only bounded registry profile fields.
 const SHARED_SETTINGS_MAX_BYTES = 8 * 1024 * 1024;
 const PREFERENCES_MAX_BYTES = 4 * 1024 * 1024;
-const MAGIC_PROMPTS_MAX_BYTES = 4 * 1024 * 1024;
 
 const readSharedStoreSync = (filePath: string, maxBytes: number): string =>
   readCappedFileSync(filePath, maxBytes, {
     tooLarge: (target) => new Error(`${target} exceeds the ${maxBytes}-byte limit and was not read`),
     notRegular: (target) => new Error(`${target} is not a regular file and was not read`),
   });
-const isVisiblePromptId = (id: string): boolean => id.endsWith('.visible');
+
+export const projectSetupStore = createProjectSetupStore();
+
+export const magicPrompts = createMagicPromptService({
+  globalFilePath: OPENCHAMBER_MAGIC_PROMPTS_PATH,
+  sharedFiles: projectSetupStore,
+  listProjects: () => workspaceProjectsOf(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? [])),
+  repositoryOf: async (directory) => {
+    const result = await execGit(['worktree', 'list', '--porcelain'], directory, { env: { LC_ALL: 'C', LANGUAGE: '' } });
+    return repositoryOfGitResult(result);
+  },
+});
 
 const isPathInside = (candidatePath: string, parentPath: string): boolean => {
   const relative = path.relative(parentPath, candidatePath);
@@ -143,7 +150,6 @@ export const fetchOpenCodeSkillsFromApi = async (
   try {
     const url = new URL('/api/skill', apiUrl);
 
-    // OpenCode 2.x resolves the directory from this header, not a query param.
     const response = await fetch(url.toString(), {
       method: 'GET',
       headers: {
@@ -167,13 +173,8 @@ export const fetchOpenCodeSkillsFromApi = async (
     return skills
       .map((item) => {
         const name = typeof item?.name === 'string' ? item.name.trim() : '';
-        // OpenCode v1's skill payload used `location`; v2 renamed the field
-        // to `path`. Accept both, or the whole authoritative list is dropped
-        // and the panel falls back to the (smaller) local disk scan.
         const rawLocation = typeof item?.path === 'string' ? item.path : (typeof item?.location === 'string' ? item.location : '');
-        // v1 marked built-in skills with `<built-in>`; v2 gives them a synthetic
-        // `/builtin/<id>.md` path. Normalize so they stay read-only in the panel.
-        const location = rawLocation.startsWith('/builtin/') ? BUILT_IN_SKILL_LOCATION : rawLocation;
+        const location = rawLocation.startsWith('/builtin/') || rawLocation.startsWith('skill://') ? BUILT_IN_SKILL_LOCATION : rawLocation;
         const description = typeof item?.description === 'string' ? item.description : '';
         const content = typeof item?.content === 'string' ? item.content : '';
         if (!name || !location) {
@@ -181,6 +182,7 @@ export const fetchOpenCodeSkillsFromApi = async (
         }
         if (location === BUILT_IN_SKILL_LOCATION) {
           return {
+            id: String(item?.id || name),
             name,
             path: location,
             scope: 'user',
@@ -205,14 +207,6 @@ export const fetchOpenCodeSkillsFromApi = async (
   }
 };
 
-// Settings live in two files beside each other (see `settings-files.ts`):
-// `settings.json` holds instance facts and legacy keys, `preferences.json`
-// holds the profile keys with their `updatedAt` stamps. Reads return the
-// merged view; writes split a merged document back into the two files.
-//
-// A settings.json parse failure (corrupt or non-object file) is still coerced
-// to `{}`, which lets the next write replace it; tracked in the settings-scopes
-// plan. preferences.json already fails closed below.
 const readSettingsJsonFromDisk = (): Record<string, unknown> => {
   try {
     const raw = readSharedStoreSync(OPENCHAMBER_SHARED_SETTINGS_PATH, SHARED_SETTINGS_MAX_BYTES);
@@ -233,9 +227,6 @@ type PreferencesReadResult =
   | { status: 'missing' }
   | { status: 'unreadable'; reason: string };
 
-// True after preferences.json was found but could not be read or parsed. While
-// set, the file is left alone: reads return settings.json only and writes drop
-// profile keys instead of replacing a file whose content we cannot see.
 let preferencesUnavailable = false;
 let preferencesUnavailableLogged = false;
 
@@ -264,9 +255,6 @@ const readPreferencesFromDisk = (): PreferencesReadResult => {
   return result;
 };
 
-// Atomic write: tmp file + rename, so readers never see a partial JSON. Throws
-// on failure (after removing the tmp file) so a failed save is reported, not
-// mistaken for success.
 const writeJsonAtomic = async (filePath: string, text: string): Promise<void> => {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -295,9 +283,6 @@ const writeJsonAtomicSync = (filePath: string, text: string): void => {
   }
 };
 
-// Merged view of both files. A missing preferences.json is seeded once from the
-// profile keys settings.json still carries; every write keeps a copy of the
-// profile's base values in settings.json, so an older build can still read it.
 const readSharedSettingsFromDisk = (): Record<string, unknown> => {
   const settings = readSettingsJsonFromDisk();
   let preferences = readPreferencesFromDisk();
@@ -316,9 +301,6 @@ const readSharedSettingsFromDisk = (): Record<string, unknown> => {
   return { ...settings, ...flattenPreferences(preferences.fields, VSCODE_SETTINGS_SURFACE) };
 };
 
-// Write a complete merged document: profile keys go to preferences.json (keeping
-// the stamps of unchanged values), everything else to settings.json. A key the
-// document no longer carries leaves whichever file owned it.
 const writeSharedSettingsToDisk = async (
   document: Record<string, unknown>,
   changedKeys: Iterable<string> | null = null,
@@ -326,7 +308,6 @@ const writeSharedSettingsToDisk = async (
   const preferences = readPreferencesFromDisk();
   if (preferencesUnavailable) {
     console.warn('[OpenChamber] preferences.json is unreadable; profile settings were not saved.');
-    // settings.json keeps whatever legacy profile copy it already holds.
     const onDisk = readSettingsJsonFromDisk();
     await writeJsonAtomic(OPENCHAMBER_SHARED_SETTINGS_PATH, JSON.stringify({
       ...instancePartOf(document),
@@ -335,129 +316,15 @@ const writeSharedSettingsToDisk = async (
     return;
   }
   const previousFields = preferences.status === 'ok' ? preferences.fields : {};
-  // This host is always the VS Code surface kind: per-surface profile keys it
-  // changed land under `surfaces.vscode`; keys it did not change keep their entry.
   const nextFields = buildPreferencesFields(previousFields, document, Date.now(), {
     surface: VSCODE_SETTINGS_SURFACE,
     changedKeys,
   });
   await writeJsonAtomic(OPENCHAMBER_PREFERENCES_PATH, serializePreferencesDocument(nextFields));
-  // The legacy copy of the profile's base values rides along for older builds.
   await writeJsonAtomic(OPENCHAMBER_SHARED_SETTINGS_PATH, JSON.stringify(legacySettingsDocumentOf(document, nextFields), null, 2));
 };
 
-// Fields derived from runtime context — never persisted, always recomputed.
 const DERIVED_FIELDS = new Set(['themeVariant', 'lastDirectory']);
-
-const sanitizeMagicPromptOverrides = (input: unknown): Record<string, string> => {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return {};
-  }
-
-  const next: Record<string, string> = {};
-  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    if (!MAGIC_PROMPT_ID_PATTERN.test(key) || typeof value !== 'string') {
-      continue;
-    }
-    next[key] = value;
-  }
-  return next;
-};
-
-const emptyMagicPromptState = (): { version: number; overrides: Record<string, string> } => ({
-  version: MAGIC_PROMPTS_FILE_VERSION,
-  overrides: {},
-});
-
-// A torn or otherwise unparseable magic-prompts file is user data, not an
-// empty store: move its bytes aside before any later write can overwrite
-// them, and name the preserved copy so the loss is recoverable. Returns the
-// preserved path, or null when the rename failed.
-const preserveCorruptMagicPromptFile = (error: unknown): string | null => {
-  const preservedPath = `${OPENCHAMBER_MAGIC_PROMPTS_PATH}.corrupt-${Date.now()}`;
-  try {
-    renameSyncWithRetry(OPENCHAMBER_MAGIC_PROMPTS_PATH, preservedPath, (from, to) => fs.renameSync(from, to));
-    console.warn(
-      `[OpenChamber] ${OPENCHAMBER_MAGIC_PROMPTS_PATH} could not be parsed (${error instanceof Error ? error.message : String(error)}); preserved the unreadable file at ${preservedPath}.`,
-    );
-    return preservedPath;
-  } catch (preserveError) {
-    console.warn(
-      `[OpenChamber] Failed to preserve the unreadable magic prompts file at ${preservedPath}:`,
-      preserveError instanceof Error ? preserveError.message : String(preserveError),
-    );
-    return null;
-  }
-};
-
-// True after magic-prompts.json was found but could not be read (over its
-// byte cap, not a regular file, or another read error). While set, the file
-// is left alone: reads return the empty store and writes refuse, instead of
-// replacing bytes whose content we cannot see — the preferencesUnavailable
-// contract above, and #891's preservation rule extended to files that are
-// unreadable rather than unparseable.
-let magicPromptsUnavailable = false;
-
-const readMagicPromptFile = (): { version: number; overrides: Record<string, string> } => {
-  let raw: string;
-  try {
-    raw = readSharedStoreSync(OPENCHAMBER_MAGIC_PROMPTS_PATH, MAGIC_PROMPTS_MAX_BYTES);
-    magicPromptsUnavailable = false;
-  } catch (error) {
-    // ENOENT is the normal first-run case: an empty store, silently.
-    const code = (error as NodeJS.ErrnoException | null)?.code;
-    if (code === 'ENOENT') {
-      magicPromptsUnavailable = false;
-    } else {
-      magicPromptsUnavailable = true;
-    }
-    if (code !== 'ENOENT') {
-      console.warn(
-        `[OpenChamber] ${OPENCHAMBER_MAGIC_PROMPTS_PATH} could not be read (${error instanceof Error ? error.message : String(error)}); treating it as an empty store.`,
-      );
-    }
-    return emptyMagicPromptState();
-  }
-  try {
-    const parsed = JSON.parse(raw) as { overrides?: unknown };
-    return {
-      version: MAGIC_PROMPTS_FILE_VERSION,
-      overrides: sanitizeMagicPromptOverrides(parsed?.overrides),
-    };
-  } catch (error) {
-    // A mutation must never overwrite bytes whose preservation just
-    // failed: they are the only copy of the user's overrides. Abort
-    // instead; the caller can retry once the file is movable.
-    const preservedPath = preserveCorruptMagicPromptFile(error);
-    if (!preservedPath) {
-      throw new Error(
-        `Failed to preserve the unreadable magic prompts file at ${OPENCHAMBER_MAGIC_PROMPTS_PATH}; refusing to overwrite it`,
-        { cause: error },
-      );
-    }
-    return emptyMagicPromptState();
-  }
-};
-
-const writeMagicPromptFile = async (state: { version: number; overrides: Record<string, string> }): Promise<void> => {
-  if (magicPromptsUnavailable) {
-    throw new Error(
-      `Refusing to overwrite ${OPENCHAMBER_MAGIC_PROMPTS_PATH}: its current contents could not be read within the ${MAGIC_PROMPTS_MAX_BYTES}-byte limit`,
-    );
-  }
-  // The per-entry save cap counts characters, but the read cap counts
-  // bytes: enough maximum-length multi-byte overrides would serialize past
-  // MAGIC_PROMPTS_MAX_BYTES and produce a file this module's own reader
-  // refuses (and, once unreadable, whose writes all refuse). Enforce the
-  // byte cap on the serialized document so a save can never lock the store.
-  const serialized = JSON.stringify(state, null, 2);
-  if (Buffer.byteLength(serialized, 'utf8') > MAGIC_PROMPTS_MAX_BYTES) {
-    throw new Error(
-      `Refusing to write ${OPENCHAMBER_MAGIC_PROMPTS_PATH}: the document exceeds the ${MAGIC_PROMPTS_MAX_BYTES}-byte limit`,
-    );
-  }
-  await writeJsonAtomic(OPENCHAMBER_MAGIC_PROMPTS_PATH, serialized);
-};
 
 const stripDerived = (source: Record<string, unknown>): Record<string, unknown> => {
   const next: Record<string, unknown> = { ...source };
@@ -469,13 +336,6 @@ const stripDerived = (source: Record<string, unknown>): Record<string, unknown> 
 
 let eagerMigrationAttempted = false;
 
-// Read the merged persisted settings: shared file is canonical (synced with
-// Desktop and Web clients), globalState is kept as a migration fallback for
-// users upgrading from the pre-shared-sync era. Disk wins on conflicts.
-//
-// On first read per process, if globalState has keys that are missing on
-// disk, copy them to disk so other clients see them immediately — without
-// waiting for the user to save again.
 const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => {
   const fromGlobalState = stripDerived(
     ctx?.context?.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {},
@@ -491,7 +351,6 @@ const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => 
       }
     }
     if (Object.keys(missingFromDisk).length > 0) {
-      // Fire-and-forget; readers already have an in-memory merged view.
       void writeSharedSettingsToDisk({ ...fromDisk, ...missingFromDisk }).catch((error: unknown) => {
         console.warn('[OpenChamber] Failed to migrate settings from globalState:', error instanceof Error ? error.message : String(error));
       });
@@ -501,8 +360,6 @@ const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => 
   return { ...fromGlobalState, ...fromDisk };
 };
 
-// Everything the webview may see: the persisted document minus the keys the
-// registry marks `secret` (a UI password, tunnel tokens), which are write-only.
 export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
   const persisted = withoutSecretSettings(readPersistedSettings(ctx));
   const persistedOpencodeBinary =
@@ -524,12 +381,11 @@ export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
 
 export const persistSettings = async (changes: Record<string, unknown>, ctx?: BridgeContext): Promise<Record<string, unknown>> => {
   const current = readSettings(ctx);
-  // Only keys the settings registry knows as stored shared fields reach disk.
   const restChanges = filterPersistableSettingsChanges(stripDerived({ ...(changes || {}) }));
 
   const keysToClear = new Set<string>();
 
-  for (const key of ['defaultModel', 'defaultVariant', 'defaultAgent', 'defaultGitIdentityId', 'opencodeBinary', 'smallModelOverride', 'walkthroughModelOverride']) {
+  for (const key of ['defaultModel', 'defaultVariant', 'defaultAgent', 'defaultGitIdentityId', 'opencodeBinary', 'smallModelOverride', 'smallModelVariant', 'walkthroughModelOverride', 'walkthroughModelVariant']) {
     const value = restChanges[key];
     if (typeof value === 'string' && value.trim().length === 0) {
       keysToClear.add(key);
@@ -572,20 +428,15 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     restChanges.opencodeBinary = restChanges.opencodeBinary.trim();
   }
 
-  // Persistable state = current persisted (no derived fields) + sanitized changes.
   const persistedCurrent = readPersistedSettings(ctx);
   const persistable: Record<string, unknown> = { ...persistedCurrent, ...restChanges };
   for (const key of keysToClear) {
     delete persistable[key];
   }
 
-  // Write to the shared files (canonical, cross-client); a failed write rejects
-  // so the webview reports the save as failed. Also mirror into globalState so
-  // older builds can still read recent values if a user downgrades the extension.
   await writeSharedSettingsToDisk(persistable, [...Object.keys(restChanges), ...keysToClear]);
   await ctx?.context?.globalState.update(SETTINGS_KEY, persistable);
 
-  // Return the same shape as readSettings (derived fields re-applied, secrets withheld).
   return {
     ...withoutSecretSettings(persistable),
     themeVariant: current.themeVariant,
@@ -595,68 +446,4 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
         ? persistable.opencodeBinary
         : undefined,
   };
-};
-
-export const readMagicPromptOverrides = (): { version: number; overrides: Record<string, string> } => {
-  return readMagicPromptFile();
-};
-
-export const saveMagicPromptOverride = async (id: string, text: string): Promise<{ version: number; overrides: Record<string, string> }> => {
-  const normalizedId = typeof id === 'string' ? id.trim() : '';
-  if (!MAGIC_PROMPT_ID_PATTERN.test(normalizedId)) {
-    throw new Error('Invalid prompt id');
-  }
-  if (typeof text !== 'string') {
-    throw new Error('Prompt text must be a string');
-  }
-  if (isVisiblePromptId(normalizedId) && text.trim().length === 0) {
-    throw new Error('Visible prompt text cannot be empty');
-  }
-  if (text.length > MAGIC_PROMPT_TEXT_MAX_LENGTH) {
-    throw new Error('Prompt text is too long');
-  }
-
-  const current = readMagicPromptFile();
-  const next = {
-    version: MAGIC_PROMPTS_FILE_VERSION,
-    overrides: {
-      ...current.overrides,
-      [normalizedId]: text,
-    },
-  };
-  await writeMagicPromptFile(next);
-  return next;
-};
-
-export const resetMagicPromptOverride = async (id: string): Promise<{ version: number; overrides: Record<string, string> }> => {
-  const normalizedId = typeof id === 'string' ? id.trim() : '';
-  if (!MAGIC_PROMPT_ID_PATTERN.test(normalizedId)) {
-    throw new Error('Invalid prompt id');
-  }
-
-  const current = readMagicPromptFile();
-  if (!Object.prototype.hasOwnProperty.call(current.overrides, normalizedId)) {
-    return current;
-  }
-  const nextOverrides = { ...current.overrides };
-  delete nextOverrides[normalizedId];
-  const next = {
-    version: MAGIC_PROMPTS_FILE_VERSION,
-    overrides: nextOverrides,
-  };
-  await writeMagicPromptFile(next);
-  return next;
-};
-
-export const resetAllMagicPromptOverrides = async (): Promise<{ version: number; overrides: Record<string, string> }> => {
-  // Read first (discarding the result) so a corrupt existing file is
-  // preserved — or the reset aborts — instead of being silently
-  // overwritten by the empty state below.
-  readMagicPromptFile();
-  const next = {
-    version: MAGIC_PROMPTS_FILE_VERSION,
-    overrides: {},
-  };
-  await writeMagicPromptFile(next);
-  return next;
 };

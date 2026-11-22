@@ -6,7 +6,104 @@ This document describes backend runtime modules used by the VS Code extension br
 
 Keep `bridge.ts` as a thin orchestration layer that delegates message handling to cohesive domain runtimes while preserving API behavior.
 
+## Invariants
+
+### Webview delivery and editor context
+
+- Extension activation starts OpenCode asynchronously. Waiting for startup delays webview resolution and leaves the panel blank. Sidebar focus commands register after their view provider, and startup reveal waits until activation finishes so it does not take focus during startup.
+- Connection status and focus payloads are idempotent. Hosts resend cached connected state at staggered delays because a message posted before the webview bridge runs can be lost permanently. Retries read the current target and stop when the original panel is replaced.
+- Inline-comment delivery waits for an inbound webview message, which proves its script runs. Pending comments form a list so a second submission during startup cannot discard the first.
+- Draft absence disposes an editor thread only after its owning composer has reported holding that draft at least once. An earlier snapshot can describe the composer before delivery lands. Unknown thread ids never give the host ownership of in-app viewer comments.
+- Removing a comment clears pending holds before notifying every chat webview. A draft can belong to an inactive panel or still await delivery; clearing only the visible thread allows a delayed chip to reappear. Removal does not reveal or focus a chat.
+- The comment-controller id matches the literal menu condition in `package.json`, which cannot import the TypeScript constant.
+- Both inline-comment entry points require a workspace-relative target. A document outside the workspace would attach a path the composer cannot resolve. A lost thread range cannot anchor a submission, and an empty reply cancels the thread.
+- Diff identity is captured before the first await because opening a Git document can change tab focus. Selected text comes from the chosen pane, while the attachment names the real file from a `git:` document's query. A selection ending at the next line's start excludes that line because only its preceding newline is highlighted.
+- Editor comment bodies remain plain text because Markdown consumes underscores and asterisks that are literal code-related prose.
+- Context attachment paths use the same workspace-relative spelling as active-editor broadcasts so attachment deduplication recognizes the pin-selection suggestion.
+- Right-click actions prefer the focused session panel, then the most recently focused one. Callers verify that its id still identifies a live panel.
+- A single resolved Shiki theme supplies both variants when the opposite theme cannot be found, preserving the active editor's highlighting. Active-theme lookup wins for the current variant; preferred themes supply the opposite variant. Theme resolution also listens for configuration changes because `workbench.colorTheme` can update after the active-theme event.
+- The logo between the `brand:flat-logo` markers in `webviewHtml.ts` belongs to `scripts/brand/generate.mjs` and shares its drawing with `OpenChamberLogo.tsx`.
+
+### Why the splash uses discrete updates and not a smooth animation
+
+The loading logo advances its lit roof tier once per second because a smooth CSS animation repaints the logo on every frame. Reduced-motion mode leaves the logo static.
+
+### Why the splash shows errors and not connection progress text
+
+The animated logo already indicates startup activity, so normal connection states leave the status text empty. Errors populate that text so a startup failure remains visible.
+
+### Bridge reads and configuration
+
+- Config tests import `opencodeConfigTestHome` before `opencodeConfig` or `opencodeConfigPaths`. Config paths freeze at module load, so later isolation leaves reads and writes pointed at the user's real OpenCode config directory.
+- Proxy coalescing shares only overlapping, identical, allowlisted GET requests. Bootstrap and configuration stores issue duplicate reads that otherwise delay session creation on the single OpenCode process. Each caller receives its own payload copy, and settled requests leave the coalescer immediately.
+- A coalescing key includes every forwarded header with canonicalized header names, because directory and authentication scope travel in headers. A caller's abort cannot cancel a shared read and strand other callers.
+- A failed authoritative OpenCode skill list marks the filesystem supplement partial. Caching the supplement as a complete answer hides skills. Built-ins normalize both legacy `location` and current `path` records, including `/builtin/` and `skill://` paths, and retain OpenCode's id because policy ids can differ from display names.
+- File searches with a query continue to the tree or inspection ceiling so shallow weak matches cannot exhaust the budget before exact deeper matches are visited.
+- Model overrides split `provider/model` at the first slash because model ids can contain more slashes. Wrong-typed bridge model fields count as absent, and a cold or unreachable catalog cannot invalidate a saved variant.
+- Utility generation retries only a pre-dispatch catalog rejection, which costs no tokens. Plugin model activation can outlast readiness, so the bounded retry schedule spans about 31 seconds; other generation errors do not retry. Missing or still-loading title agents supply no configured model.
+- A present Magic Prompt override wins even when its value is empty. Only an absent key selects built-in text.
+- Config-file mutations report success without a managed restart because OpenCode watches those files. Binary, port and external-server changes still use the reload flow. A command prefers the webview's full reload flow and falls back to a manager restart when no webview can drive it.
+- Agent markdown writes contain only native v2 keys because one legacy key sends the whole file through the v1 decoder and loses native permission arrays. Legacy field deletion reaches its v2 location, and partial updates copy request overlays so clearing a field cannot mutate the caller's entity.
+- Agent and command `{file:...}` references keep their reference and edit the referenced file. Markdown parsing accepts a closing frontmatter fence at end of file because an empty system prompt has no following body.
+- Plugin layers concatenate declarations in OpenCode load order, with legacy entries before native entries within a file. Later duplicate declarations are the editable entry; unparseable entries survive writes. Control denials stay bare strings because an object-shaped denial becomes a package installation request.
+- `OPENCODE_CONFIG` adds a file layer without relocating the global config directory or creating a neighbouring plugin discovery directory. A folder file that aliases this layer remains one user-scope declaration. Switch conflict checks use the earliest-loaded matching policy, including the managed layer's position.
+- Skill scans skip hidden directories and `node_modules`, stop descending when a directory owns `SKILL.md`, and follow directory links only at the scanned root to prevent loops. Linked skill files count only when their targets resolve; an unreadable link does not fail unrelated skills.
+- Skill invocation writes both `disable-model-invocation` and `metadata.opencode/autoinvoke` for supported OpenCode versions; the OpenCode-specific field wins. Enabling removes exact denials from every readable layer, while an unreadable layer remains untouched.
+- Snippet names and aliases share one namespace. Scope moves preserve file bytes across volumes; a case-only rename can target its own file on a case-insensitive disk, while another snippet's file is never overwritten.
+- Structural JSONC array removals run from the highest index down so later removals retain their indices. Appending a line-separated element preserves earlier text because the parser's generic insertion reformats its target line. Write-boundary JSON normalization makes absent keys match serialized removals.
+- Settings migration takes disk values over legacy `globalState` values and copies missing legacy keys to disk on the first process read. Saves also mirror into `globalState` for older extensions. Registry-secret values are write-only to webviews, and derived runtime fields are recomputed instead of persisted.
+- Per-surface preference writes preserve the base and every other surface's value. A key absent from the writer's resolved view can still belong to another surface, so absence alone cannot clear it. A newly surface-owned key can have no base value.
+
+### Worktree and Git ownership
+
+- Repository probes use English Git diagnostics to distinguish a missing repository from an execution failure. Bare repositories still own linked worktrees, but their bare list entry is never a session checkout. A separate Git directory has no inferred primary checkout.
+- Raw status deliberately lists individual untracked files with `-uall`; this runtime does not use the web server's collapsed-directory bound. The Git API accepts the shared status-options shape without computing heavyweight diff statistics.
+- Status-path classification distinguishes missing files, nested repositories and submodules from an empty successful diff. Exact index entries alone count because a directory pathspec also matches children; a nested repository needs its own `.git` or `rev-parse` answers for its parent.
+- Patch reconstruction restores the common indentation OpenCode strips from stored edit diffs, using the current file to recover a consistent prefix. Unaligned patches retain the stored old lines, and a deleted file compares its old content with an empty right side.
+- Creation propagates worktree-root config failures so it cannot choose a directory the user did not select. Read-only and removal paths can tolerate the failure and use the managed root. A configured root can contain unrelated projects, so orphan deletion there requires this repository's prior Git registration.
+- Worktree create commands own checkout population and hooks, can resolve to a symlink-backed path, and finish before the request returns that actual path. Their admin-folder marker survives a failed command so a locked checkout stays removable; both runtimes interpret the marker and extra force flag identically.
+- Teardown runs while the checkout and its OpenCode instance still exist. Failure preserves both; missing or failed-bootstrap checkouts have nothing to stop. Contributor-fork checkouts never execute teardown, and an unreadable server classification keeps the worktree untouched.
+- Branch-conflict classification reads refs before creation because a failed attempt can leave its own new branch behind. Rollback deletes only a branch made by that attempt and held by no checkout. A freshly fetched upstream supplies the start only when it still contains all local commits; unpublished commits and force-push divergence preserve the local ref, which is never moved.
+- Fetch failure leaves upstream tracking unset so branch config cannot refer to a ref that was never fetched. Project start-command lookup uses the requesting directory to avoid starting another OpenCode location.
+- Worktree disposal reads the current API URL and credentials on every call because managed restarts move the connection. Removal matching resolves the nearest existing parent so missing paths and symlink spellings still match. Busy-folder retry applies only to Windows, where another process can temporarily hold the directory open.
+- Background Git and setup commands receive EOF on stdin because no user can answer their prompts. Payload-derived remote values stay positional after `--` so a leading hyphen cannot become a Git option.
+- OpenCode owns sandbox registration when a location boots. The extension never writes OpenCode storage JSON to register a worktree. Run snapshots use private refs so Git keeps them reachable without displaying them as branches or tags.
+- Batch staging retries unmatched paths individually because queued optimistic mutations can already have staged a deleted file, and one unmatched path would fail the whole batch. Stash apply first restores the index split and falls back to plain apply when that split cannot be reinstated.
+- Stash file counts use `stash show --include-untracked --name-only`, matching the server. The flag includes the third parent's untracked files without another Git process per stash.
+- Log base resolution prefers a local ref and falls back to `origin/<ref>` only when the local ref is missing. A newly initialized branch without commits has empty history. Remote URL parsing accepts CRLF and ignores suffix decorations after the URL-kind marker, preserves the first URL, and uses Git's name-as-URL fallback when no fetch URL exists.
+- Branch listing returns `defaultBranches` like the web server: each remote's default as its local `refs/remotes/<remote>/HEAD` records it, without contacting the remote or guessing one for a remote with no known HEAD. The raw `git branch` path (no Git extension) names remote branches `remotes/<remote>/<branch>` like the extension path and leaves out a remote's HEAD symref, so the shared UI can split local from remote and lift the defaults in the New Worktree base picker.
+
+### Process, session and quota state
+
+- API forwarding waits for connected readiness because a URL exists before startup health checks finish and can point at a stale port during restart. Permanent startup errors fail promptly; the bounded wait returns unavailable when startup remains stuck.
+- Windows command shims run directly through `cmd.exe` with a separate shim-path argument and `shell: false`; shell command construction breaks paths containing spaces. CLI path normalization removes one wrapping quote pair, and POSIX discovery avoids interactive login shells.
+- Managed servers start in a neutral working directory and receive workspace context explicitly through API parameters. Provider environment reads use the child's captured launch environment, while user `OPENCODE_CONFIG` ownership is captured before the managed layer rewrites the child environment.
+- Managed authentication uses username `opencode` and prefers `OPENCODE_PASSWORD` over its legacy name. Background-service credentials are sent only to the matching service origin, with equivalent loopback hosts accepted. The output channel is shared across restarts; Output-panel logging persists diagnostics that extension-host console output does not retain.
+- Shared process-registry, provider-alias, injected-environment and config-shape modules remain thin re-exports of the server implementation. Cross-runtime orphan cleanup depends on a byte-compatible registry and matching ownership checks. POSIX child groups exclude the extension host's group, and Windows enumerates descendants before losing their parent.
+- Session-state file reads distinguish missing data from I/O failure. Unparseable bytes move aside before a future write, and an unreadable unread-baseline file stays untouched because recreating it would mark earlier turns seen. Legacy archive entries use null for explicit restore and absence for preserving upstream state.
+- Session activity derives from live execution events and the authoritative active-session endpoint. Reconciliation clears sessions missing from that endpoint; normal turns can emit no status or idle event. New execution events reset the turn start on the host clock, avoiding remote clock skew, and completion passes through cooldown. The first frame proves stream connection, and a healthy stream clears reconnect backoff.
+- Project setup writers take the personal-file chain before the shared-checkout chain, while single-key writers take only the shared chain. Canonical checkout paths unify symlink aliases, preventing inverted lock order and concurrent writes to one file. Single-key updates refuse invalid setup files; setup repair preserves unrelated keys in a valid version-1 document. Unknown `__proto__` keys remain own properties.
+- Shared setup trust covers executable commands in canonical order; absent teardown contributes nothing so existing answers still match. Personal-only tool choices stay out of team config because teammates may not have the tool. Shared setup merges and sanitization follow the server's project contract.
+- Quota credentials chmod only a directory created by that write so existing ACLs survive. Obsolete Ollama cookies are deleted without reading them, and non-missing cleanup failures appear in the Output panel. Credential discovery failure remains an error, preserving the distinction from no configured providers.
+- Quota reads leave rotating xAI and Claude refresh tokens to OpenCode, because refreshing without updating its credential store invalidates the token it still holds. Fixed-origin bearer requests refuse redirects, and Copilot Enterprise credentials require a valid bare origin before requesting its quota endpoint.
+- OpenCode Go prefers a renewable Console sign-in and falls back to an API key. Console sign-ins require a Console credential with a `wrk_` or legacy `org_` workspace id; an OAuth token and a service key are not interchangeable. The Console meters preserve fractions that the legacy usage API floors. A failed supplementary billing read drops the credits row without fabricating zero or failing the meters; one dollar is 100,000,000 micro-cents.
+- Go quota parsing isolates malformed meters, rejects unusable limits and resets, and treats `access: null` as no subscription. A Console key's 403 means no Go subscription; only `api_key_expired` identifies an expired key. When a connected Console account also fails, its failure supplies the actionable error.
+- Codex CLI fallback usage identifies the CLI account by email because OpenCode's token-sharing credential cannot establish whose quota the CLI returns. An access-enforcement 401 on that token is distinct from expiry; without a CLI sign-in the user needs the ChatGPT usage page. Claude tokens with no expiry remain unknown, expired tokens are checked before a 429 cooldown, and `Retry-After: 0` ends that cooldown.
+- Kimi ratio-based `usages` takes precedence over duplicated counted limits, omits the code-only share of the monthly total, and skips non-finite ratios. Legacy blocks can supply used or remaining counts. A pay-as-you-go Moonshot key reads balance because the Kimi Code usage endpoint refuses it.
+- OpenRouter quota uses the configured gateway base that receives chat credentials. Native and legacy config sections are read independently so a native entry without an address cannot hide a legacy address; a config failure still permits the default-endpoint lookup. Monthly spending from `usage_monthly` and `byok_usage_monthly` stays beside any cap as `monthly_total`, `monthly_credits`, and `monthly_byok`; the raw amounts are summed before display rounding, unreadable counters including blank strings stay unknown, and only exact-zero categories are omitted. A set cap whose `limit_remaining` is unreadable stays as a cap window with an unknown spent amount.
+- Z.ai and BigModel business errors can arrive in HTTP 200 envelopes. Credit limits use total `usage` and consumed `currentValue`; token-only limits can supply just a percentage. Gift reset metadata never fails quota refresh, interprets timestamps as UTC+8, and selects the nearest unexpired claimable reset. Activation sends the listed grant kind with `GLOBAL` as the missing-kind fallback.
+- Quota windows preserve provider-specific limits: a null current daily quota means no cap, kWh annual subscriptions still reset monthly without an invented duration, allowance ceilings include the remaining credit wallet, and Cline calendar months carry no fixed duration. Fixed 30-day and 365-day approximations belong only to display labels. A blank DeepInfra balance remains missing data.
+
 ## Runtime modules
+
+Session admission uses the shared UI's OpenCode fingerprint trust dialog before
+adding an unknown destination through `api:workspace:addFolder`. The extension
+host rechecks its current fingerprint before changing workspace folders, so a
+changed configuration cannot be added on a stale answer. Empty configurations
+and trusted fingerprints add without a prompt. Only a deliberate session open
+adds a folder; a session moving to another folder and the session list never
+change the workspace on their own. Declining leaves the workspace
+unchanged; raw global session records remain available for cleanup.
 
 - `bridge.ts`
   - Entry orchestration layer for bridge messages.
@@ -16,18 +113,17 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - Standard Git message handlers.
 
 - `bridge-git-special-runtime.ts`
-  - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.
-  - Generation runs through OpenCode's `POST /api/experimental/generate`, which answers with the finished text. There is no throwaway session to create, poll and delete any more.
-  - Generation model choice lives in `bridge-git-generation-model.ts`: request model first, then the user's small-model override (`smallModelUseDefault === false` plus `smallModelOverride` as `provider/model`), then the model OpenCode's `title` agent is configured with (`agents.title.model`, read through `GET /api/agent/title`, the same step the server-side small-model resolver honors, skipped when the catalog lists that model as disabled), then the zen fallback; the catalog rule for every step is the one below. The old `gitProviderId`/`gitModelId` pair is no longer read.
-  - A catalog rejects a model only when it lists that model as disabled, which is the rule the server-side resolver applies: a config can outlive the login behind it, but a model the catalog does not list at all — a plugin provider still loading, or a cold location that answered before its providers did — is kept. Gating on "listed" dropped the user's configured small model on a cold start, sent generation to the zen default they cannot use, and the `Model unavailable` retry loop then retried that wrong model until it gave up.
+  - Hosts the SCM commit-message generator (`generateBridgeCommitMessage`), which the Source Control title-bar command runs directly on the extension host. No bridge handler remains: commit-message, pr-description and conflict-details were dead webview surface.
+  - Generation runs through OpenCode's `POST /api/experimental/generate/text`, which answers with the finished text. There is no throwaway session to create, poll and delete any more.
+  - Generation model choice lives in `bridge-git-generation-model.ts`: request model first, then the user's small-model override (`smallModelUseDefault === false` plus `smallModelOverride` as `provider/model` and `smallModelVariant` as its thinking level), then the model and variant OpenCode's `title` agent is configured with (`agents.title.model`, read through `GET /api/agent/title`, the same step the server-side small-model resolver honors, skipped when the catalog lists that model as disabled), then the zen fallback; the catalog rule for every step is the one below. A saved variant is dropped only when the catalog knows the model and does not list it; an unlisted model keeps the chosen variant. The old `gitProviderId`/`gitModelId` pair is no longer read.
+  - A catalog rejects a model only when it lists that model as disabled, or as one of zen's free models without a login (`settings.apiKey` is OpenCode's `"public"` placeholder; the generate route refuses them), which is the rule the server-side resolver applies: a config can outlive the login behind it, but a model the catalog does not list at all — a plugin provider still loading, or a cold location that answered before its providers did — is kept. Gating on "listed" dropped the user's configured small model on a cold start, sent generation to the zen default they cannot use, and the `Model unavailable` retry loop then retried that wrong model until it gave up.
   - Catalog reads, the title-agent read, and generation all name the flow's directory through the `x-opencode-directory` header, and the model catalog cache is keyed by that directory. OpenCode resolves models per location, so an unscoped read would answer for OpenCode's own working directory and reject models that work in the repository.
-  - Specialized Git flows (`commit-message`, `pr-description`, `conflict-details`) and generation helpers.
+  - Commit message prompt templates stay aligned with `git.commit.generate.*` in `packages/ui/src/lib/magicPrompts.ts`; the caller hands the generator the overrides (`readPromptOverrides` in `scmCommitMessage.ts`).
   - `conflict-details` rejects with the git error when `status --porcelain`, `diff --name-only --diff-filter=U` or `diff` exits non-zero: `execGit` reports failure through the exit code, so an ignored one would answer a non-repository as an empty merge with no conflicts. The `MERGE_HEAD`/`REBASE_HEAD` probes keep exit code 0/1 as existence, so an idle repository still answers successfully.
-  - Commit message prompt templates stay aligned with `git.commit.generate.*` in `packages/ui/src/lib/magicPrompts.ts`, including on-disk magic-prompt overrides.
 
 - `bridge-small-model-runtime.ts`
   - Answers `GET /api/small-model`, which the web server serves elsewhere and OpenCode does not know. The webview routes the path to `api:small-model:get` before the generic proxy.
-  - Returns `authenticatedProviders` only, computed like the server's `listAuthenticatedProviders`: every provider with an enabled model, OpenCode's provider order first. The Small Model and walkthrough pickers list models from it. `available` and `model` are not computed here, so the small-model availability store stays "unknown" in VS Code.
+  - Returns `authenticatedProviders` only, computed like the server's `listAuthenticatedProviders`: every provider with an enabled model other than zen's free models without a login (`settings.apiKey` is OpenCode's `"public"` placeholder), OpenCode's provider order first. The Small Model and walkthrough pickers list models from it. `available` and `model` are not computed here, so the small-model availability store stays "unknown" in VS Code.
   - Both reads name the request's directory through `x-opencode-directory`. A failed read answers an error; the picker then keeps its previous list.
 
 - `git-commit-message.ts`
@@ -36,9 +132,16 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `scmCommitMessage.ts`
   - Source Control title-bar command. Resolves the git repo, prefers staged files then unstaged/untracked, writes the result into `Repository.inputBox` only if that box still matches the value captured when generation started. Light theme reuses `icon.svg`. Dark theme uses `icon-scm-titlebar.svg` (`#C5C5C5`) because that slot does not theme `currentColor` and `icon-titlebar.svg` is mint. A blank icon over SSH/DevPod is [vscode-remote-release#11686](https://github.com/microsoft/vscode-remote-release/issues/11686), not a missing asset.
+  - Magic Prompts come from the project that owns the picked repository, not the project selected in the webview, so each root of a multi-root window uses its own file.
+
+- `magic-prompts.ts`
+  - Host side of `/api/magic-prompts` (no `vscode` import). It runs the server's `runtime.js` and `service.js` (`packages/web/server/lib/magic-prompts/DOCUMENTATION.md` is the contract) and adds what differs here: the bridge payload, the project list and owner resolution.
+  - Registered projects are the window's workspace folders with the ids the UI gives them; `settings.projects` is ignored. The global file is always `~/.config/openchamber/magic-prompts.json`; `OPENCHAMBER_DATA_DIR` does not move it.
+  - Owner resolution maps a linked worktree onto its primary checkout through `git worktree list --porcelain`. Only git's "not a git repository" means no repository; any other git failure fails the read, so a worktree never silently gets the global prompts.
 
 - `bridge-git-process-runtime.ts`
   - Git process execution and environment setup (`execGit`), including SSH agent socket resolution. Both bridge helpers and `gitService.ts` use this executor; the latter passes the Git binary selected by VS Code's Git extension.
+  - Reads both output streams and gives commands EOF on stdin, after optional `input` bytes. A signal exit is a failure, never exit code zero. File ignore checks pass their deadline to this executor so timeout terminates the child tree rather than abandoning a live command behind `Promise.race`. Other Git commands have no new time limit.
   - Reads both output streams as incremental UTF-8 and gives commands EOF on stdin. A character split across pipe chunks stays intact; if the byte cap cuts through a character, the incomplete tail is dropped. A signal exit is a failure, never exit code zero. File ignore checks pass their deadline to this executor so timeout terminates the child tree rather than abandoning a live command behind `Promise.race`. Every command runs under a default deadline from `createGitExecTimeoutMs` (10 minutes, `OPENCHAMBER_GIT_EXEC_TIMEOUT_MS`); a caller deadline wins, and a caller that passes 0 runs with no deadline. Each stream is capped at `createGitExecMaxOutputBytes` (20 MiB, `OPENCHAMBER_GIT_EXEC_OUTPUT_MAX_BYTES`, or a caller `maxOutputBytes`; bulk call sites can pass a larger value such as 50 MiB). A command that passes the cap is terminated and resolves with exit code 1: stdout is truncated to the cap and stderr is replaced with an `output-too-large` message, so an over-cap stderr is not returned for inspection.
   - Tracks outstanding commands through completion and timeout cleanup. Extension deactivation awaits `stopGitProcesses`, which terminates active work and rejects later launches. Operations delegated to VS Code's built-in Git API remain owned by that extension.
 
@@ -61,22 +164,25 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
+  - Reads `worktree.directory` through the web server's `config-files.js` reader on the canonical checkout. Both runtimes merge ancestor files and checkout-local configs in OpenCode order, with project files overriding `OPENCODE_CONFIG`; malformed or unreadable configs fail creation before choosing a folder.
+  - Preview and creation follow the [worktree path identity rule](../../web/server/lib/git/DOCUMENTATION.md#why-preview-and-creation-resolve-the-parent-after-creating-it), returning canonical paths. Workspace admission stays unchanged.
+  - `api:git/diff` and `api:git/file-diff` classify the status path first through `gitPathDiff.ts`, matching the web server's diff routes. The host answers `{ kind: 'diff' | 'file-diff', ..., submodule }` or `{ kind: 'unavailable', reason: 'path_not_found' | 'nested_repository', message }`. Their bridge handlers were dead surface (DiffView is not mounted in VS Code) and are gone; `getGitDiff` remains on the host only for the SCM commit-message generator, and the gitPathDiff contract is covered by `gitPathDiff.test.ts`.
+  - `api:git/status` rows carry a rename's or copy's source as `previousPath`, as the web server's status does: from the Git API change's `originalUri`, or from the source entry `git status -z` lists after the destination in the raw fallback. The Changes view that reads it is not mounted here; the field keeps the status contract the same on every runtime.
   - `revertGitFile` validates before it deletes: the directory must resolve to a repository root (`rev-parse --show-toplevel`), the target must sit inside that root and be neither the root nor the requested directory itself, and the `git clean` / recursive `fs.rm` removal path runs only for a path `ls-files --others --error-unmatch` affirmatively lists as untracked. Any other git failure throws and deletes nothing, because the old fallback read every `ls-files` failure as 'untracked' and recursively deleted ordinary files outside a repository - the whole directory for `.` (#734).
-  - `setGitIdentity` checks the exit code of every `git config` write and throws with Git's own error. A directory that is not a repository, a locked config file, or a write that fails partway is reported as a failure, so the caller never receives an identity the repository does not have. The Git extension path and the raw-Git fallback write the same keys in the same order.
-  - `api:git/diff` and `api:git/file-diff` classify the status path first through `gitPathDiff.ts`, matching the web server's diff routes. The host answers `{ kind: 'diff' | 'file-diff', ..., submodule }` or `{ kind: 'unavailable', reason: 'path_not_found' | 'nested_repository' | 'file_too_large', message }`, and `webview/api/git.ts` parses that into the shared contract, throwing `GitPathUnavailableError` for unavailable paths. A failing `git diff` rejects instead of returning an empty patch. These handlers are currently dead bridge surface (see below), so the contract is covered by `gitPathDiff.test.ts` and `webview/api/git.test.ts` rather than by a reachable screen.
   - Fetches the current tracked source branch once before worktree creation. Fetch failure falls back to the local branch and reports it to the shared UI.
   - A new worktree first runs the project's start command, read from the running OpenCode through the web server's `lib/opencode/project-start-command.js` (wired in `extension.ts`), then the start command the request names.
   - Fast worktree creation reports bootstrap phases explicitly: `directory-created`, then `git-ready` after Git population/upstream work, and `setup-ready` after setup commands. Existing worktrees without tracked bootstrap state fall back to `ready`/`setup-ready`; shared webview consumers also accept legacy responses without `phase`.
+  - A failed bootstrap keeps Git's message in `error`, except a branch name that clashes with an existing branch: like the web server, it is read from refs and recorded as `errorCode: 'BRANCH_NAME_CONFLICT'` with the server's fixed sentence, which the shared UI shows in the selected language.
+  - Worktree removal keeps the local branch when another checkout holds it or a remote's `refs/remotes/<remote>/HEAD` names it, and `deleteRemoteBranch` refuses the branch the remote's own `ls-remote --symref` HEAD names, as the web server does (packages/web/server/lib/git/DOCUMENTATION.md, `removeWorktree` and *Why the remote is asked and not `refs/remotes/<remote>/HEAD`*).
   - Worktree removal waits for an active create/bootstrap task for the same directory so background Git and setup work cannot race deletion or restore stale bootstrap state. It then releases the removed worktree's OpenCode instance through the bridge-injected `disposeInstance` hook, after git confirms the linked worktree and before `git worktree remove`, while the path still resolves. The hook evicts the worktree root and every running OpenCode location inside it (`debug.location.list`), such as `<worktree>/ai` for a project opened on a folder of its repository; when the list cannot be read it still evicts the root. Disposal is best-effort: failures (including an unavailable managed runtime or a timed-out request) are logged as a warning and never fail the removal. The primary workspace and the orphan fallback are never disposed. From the release until the removal settles, `api:proxy` and `api:session:message` hold every request naming a folder inside the worktree (`waitForWorktreeRemoval`, at most 60 seconds), and a busy failure releases the instance again before the next attempt, as the web server does: a request that reaches OpenCode then would start the folder again with its MCP servers, which keep Windows from deleting it (packages/web/server/lib/git/DOCUMENTATION.md, *Worktree removal and the folder's OpenCode location*).
   - Worktree population enables Git `core.longpaths` (local repo config plus `-c core.longpaths=true` on `git reset --hard`) so deeply nested checkouts under the managed data-dir worktree root do not fail on Windows MAX_PATH with "Filename too long".
-  - Selective commit (`createGitCommit` with `files` and `stageFiles`) aborts on any staging failure. Reading the staged index, unstaging files outside the selection, and staging the selection all check their exit codes and throw Git's error before a commit runs; the raw add-all/add-files fallback does the same. The final restore of temporarily unstaged files runs after the commit, where a failure is logged because the commit already exists. Unchecked steps let a failed unstage or stage produce a successful commit containing files the user did not select (`gitService.commit-staging.test.js`).
 
 - `bridge-fs-runtime.ts`
   - Bridge handlers for filesystem-related message routes.
   - Uses shared FS helpers via injected dependencies.
-  - `api:fs:exec` caps each output stream at `createFsExecOutputMaxBytes` (`OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES`, default 4 MiB), the same cap as web `/api/fs/exec`. A command that passes the cap is killed and resolves with an `output-too-large` error and the streams truncated to the cap.
 
 - `bridge-fs-helpers-runtime.ts`
+  - Search ignore checks use `git check-ignore --stdin -z` to match original Unicode, whitespace and newline-containing names. Quoted line output would miss those ignored entries.
   - Filesystem/path/search helper functions:
     - path normalization and resolution
     - directory listing
@@ -85,8 +191,16 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
     - active-directory selection across multi-root workspaces
     - dropped-file parsing and attachment reading
     - models metadata fetch helper
-  - File search walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`), mirroring the web server's `search.js`; an empty query still stops at the result limit. At most 50,000 directories are ever enqueued to be visited (`FILE_SEARCH_MAX_VISITED_DIRS`, root included), which also bounds the empty-query path that passes no time budget; directories already queued are still read, so their candidates are returned. The module imports `vscode`, which the isolated runner cannot resolve, so `bridge-fs-helpers-runtime.test.ts` pins the ceiling and the two runtimes' agreement on the source text.
+   - File search walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`), mirroring the web server's `search.js`; an empty query still stops at the result limit. The module imports `vscode`, which the isolated runner cannot resolve, so `bridge-fs-helpers-runtime.test.ts` pins the ceiling and the two runtimes' agreement on the source text.
+   - Non-default hidden/gitignore flags request a workspace supplement directly
+     from the filesystem, including generated directories such as `build`.
+     This walk excludes only `.git` and `node_modules`, has no inspected-file
+     ceiling, and fails after its 30-second deadline rather than returning a
+     partial answer. The shared store retains OpenCode's indexed hits first.
+     A webview that moved on stops the walk with `api:fs:search:abort`.
+   - File search walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`), mirroring the web server's `search.js`; an empty query still stops at the result limit. At most 50,000 directories are ever enqueued to be visited (`FILE_SEARCH_MAX_VISITED_DIRS`, root included), which also bounds the empty-query path that passes no time budget; directories already queued are still read, so their candidates are returned. The module imports `vscode`, which the isolated runner cannot resolve, so `bridge-fs-helpers-runtime.test.ts` pins the ceiling and the two runtimes' agreement on the source text.
   - Read paths are authorized in the requested workspace path space before symlink resolution, matching the web runtime; directly requested outside-workspace paths remain denied.
+  - Workspace containment normalizes Windows drive-letter case: VS Code supplies lowercase drives while OpenCode supplies uppercase drives. The remaining path casing and directory-separator boundary stay significant.
 
 The sidebar installs a script-free CSP bootstrap document before changing webview options, so VS Code does not diagnose the transient blank document as an extension webview without CSP. The final webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
 
@@ -115,14 +229,17 @@ The webview build emits each worker as one self-contained file. VS Code webviews
     `PLUGIN_FILE_TOO_LARGE`; PUT leaves the existing file unchanged. Missing
     files keep the `Plugin file not found` response.
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
+  - Plugin lists carry `policyResource` and `switchState`, and `PUT /api/config/plugins/{entry,file}/:id/enabled` writes the extension's switch store and refreshes the managed OpenCode config layer. See *Plugin switches* below.
+   - Plugin lists omit project configs already represented at user scope; global/custom aliases retain custom precedence for relative targets. Local declarations expose `resolvedPath`. File-only discovery records keep the original `absolutePath` for runtime status and a canonical `resolvedPath` for display deduplication, so symlink aliases still match OpenCode's reports. The shared grid hides only redundant package cards, so VS Code's editable file cards remain visible even when declared in config. Discovery capabilities and mutation rules are unchanged.
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) and reject files over 4 MiB (`CONFIG_FILE_TOO_LARGE`) from a handle-bounded read that never buffers past the cap, so mutations cannot rewrite an unreadable config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Project config size errors propagate through websearch override detection. Writes apply the same size check to the existing file before reading, backing it up, or replacing it.
   - `writeConfig` and the agent/command markdown writer replace their file atomically through `writeFileAtomic` from `packages/web/server/lib/opencode/atomic-write.js`, the same function the web server uses, so OpenCode's watcher never reads a partial file.
   - Agent discovery in `opencodeConfig.ts` caps each synchronous directory walk at `AGENT_WALK_MAX_DIRS` (5000, root included). Each seed root gets its own budget, and a capped root returns the agents found in visited directories. The web runtime mirrors this cap and partial-result behavior.
-  - Config writes through `writeConfig` are structural, not whole-file re-serializations: the parsed file is diffed against the desired config and each change is applied with `jsonc-parser` edits (property removal locates the separator comma with the scanner so surrounding comments survive and no stray comma is left behind). Comments, formatting, and line endings outside the changed values are preserved; changed arrays are replaced whole; comment-only files keep their comments with the serialized config appended below. The edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite, so a structural edit can never corrupt the file.
+  - Config writes through `writeConfig` are structural: the parsed file is diffed against the desired config and each change is applied with `jsonc-parser` edits. Property and array element removal locates the separator comma with the scanner so surrounding comments survive and no stray comma is left behind. Comments, formatting, and line endings outside the changed values are preserved. Equal-length arrays are diffed by index, including objects and nested arrays, unless a retained value moves between changed positions; an array that only grew at its end or only lost elements is edited per element, and other resized arrays are replaced whole. This follows the server writer's position rule in `packages/web/server/lib/opencode/DOCUMENTATION.md`. Comment-only files keep their comments with the serialized config appended below. The edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite.
 
 - `bridge-project-setup-runtime.ts`
   - Personal config reads use an open handle and the shared 1 MiB cap, reject non-regular files, and fail on over-cap files. The missing-file case still returns the empty personal setup.
   - Extension-host side of `GET/PUT /api/projects/:projectId/config` (the webview handles the route locally and bridges `api:project-setup:get` / `api:project-setup:update`). Reads and writes the client-owned keys of `~/.config/openchamber/projects/<projectId>.json` (worktree setup commands, project actions, draft starters) with the rules in `project-setup.ts`, a mirror of the server's `packages/web/server/lib/projects/project-setup.js`; keep the two in sync. The file name follows the server's bounded rule (`projectConfigFileStemOf`, mirrored from `packages/web/server/lib/projects/project-id.js`): an id over 200 characters is stored as `path_sha256_<digest>.json` so a deeply nested checkout does not exceed the file name limit. A file an older build wrote under the long name is still read when the bounded one is missing and is removed once a write has moved its content. Writes to one file are chained; server-owned and unknown keys survive. The read also merges the team's optional `<workspace>/.openchamber/project.json` (checkout path decoded from the `path_<base64url>` id) by the same rules as the server, so the webview sees one view with `shared` / `personal` blocks. The shared UI (`openchamberConfig.ts`) no longer composes that path or reads it through the fs bridge.
+  - The store also follows the server's two-writer rules for that shared file (`packages/web/server/lib/projects/DOCUMENTATION.md`, *Writing the shared file*); `updateSharedEntry` is the Magic Prompts writer. Its write chain covers this extension host only.
 - `bridge-settings-runtime.ts`
   - Settings read/write and OpenCode skills discovery via API for bridge consumers.
   - `GET /api/skill` is read through the bounded response reader with a 16 MiB cap. An oversized or unreadable skills payload returns `null`, leaving the existing local skill scan available.
@@ -134,22 +251,31 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - The extension host is always the `vscode` surface kind: per-surface profile keys it changes land under `surfaces.vscode` in `preferences.json` and reads resolve `vscode` first, base otherwise (mirrors the server's header-driven behaviour).
 
 - `bridge-system-runtime.ts`
+  - Cursor Enterprise quota shares `providers/cursor-summary.js` with the web server for individual dollar allowances when the older APIs expose no billing-cycle meter. Cookie handling, personal scope and cents conversion follow the quota module's "Cursor individual dollar allowance fallback" contract.
   - System/editor/provider/quota/notification/update-check message handlers.
   - The `api:opencode/version` `/api/info` probe uses a 1 MiB response cap. Oversized responses return the existing version error shape.
   - `api:notifications:show` hands the webview's notification to `openchamber.internal.showNotification` in `extension.ts`, which shows it through `sessionNotifications.ts` and answers `{ shown }`. Chromium never displays a `new Notification()` from a webview frame, so the extension host is the only place a VS Code notification can come from.
+  - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`, and `/api/sessions/status`, where busy phases become the host status seed the shared UI reads for unopened directories). A busy entry also carries how long its turn has been running, measured by the extension host, so a webview that attaches later counts the sidebar timer from the turn's start instead of from the moment it opened.
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`, and `/api/sessions/status`, where busy phases become the host status seed the shared UI reads for unopened directories). The snapshot is the session-activity v1 envelope (design #612, #621): `{ version: 1, serverTime, watcherReady, sessions }` with per-session `{ type, lastActivityAt, status, model, toolInFlight }`; the host sources type and lastActivityAt from its phase map and sends status, model and toolInFlight as explicit nulls, and watcherReady turns true when the host event stream delivers its first frame. Entries leave the phase map when the session is deleted (the `session.deleted` event prunes the entry and its pending cooldown timer) or when an entry has sat idle past a 24-hour TTL that the reconcile pass prunes, so the snapshot does not report deleted sessions as idle forever (#999).
   - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
   - MCP secret prompt: `webview/main.tsx` answers `GET /api/mcpx/secret-requests`, `GET /api/mcpx/secrets`, `PUT /api/mcpx/secrets/:name` and `DELETE /api/mcpx/secret-requests/:id` through `bridge-mcpx-runtime.ts`. The host calls the mcpx daemon with the operations of `opencode/mcpx-secrets.js` and answers with the web server's status and body, and enterprise mode refuses them with 403 `enterprise_mode`. Without this bridge those `/api` calls would go to OpenCode.
   - Enterprise mode: the extension runs no OpenChamber server, so it reads the same machine policy through the bundled `packages/web/server/lib/enterprise-mode.js` (policy file, or `OPENCHAMBER_ENTERPRISE_MODE` in the editor's environment). `api:openchamber:enterprise-policy` answers the webview's `/api/openchamber/enterprise-policy`; with the mode on, `api:provider:upsert` is refused, the update check never reports usage, and `bridge-proxy-runtime.ts` answers the provider-connect OpenCode routes (`isProviderConnectRequest`) with 403 `enterprise_mode` instead of forwarding them; MCP server sign-in passes, as on the web server. Jev, relay, tunnels, push and cloud speech do not exist here. A policy file `opencodeBinary` pin (with or without the mode) wins over `openchamber.opencodeBinary`, the shared settings and the environment in `opencode.ts`, never falls back when unusable, and turns off install-v2 and CLI upgrade (`opencode-upgrade-runtime.ts`, `reason: 'policy'`).
   - Stored credentials: `bridge-proxy-runtime.ts` answers `GET /api/credential` (`isCredentialListRequest`, any spelling OpenCode routes the same way) with 403 `credential_list_refused` in and out of enterprise mode. It returns every key with its secret; the extension host reads it for itself through `opencodeAuth.ts`, and the webview never gets it. Both this check and the provider-connect one run on the path as OpenCode receives it: the webview path is resolved as a URL first (so `/http:api/credential` counts as `/api/credential`), and a path that would resolve to another origin gets 400.
   - Git initialization: `POST /api/vcs/init` in the home directory, at a disk root, or without a directory gets the same 400 `InvalidRequestError` the web server answers (`vcsInitRefusal` from `web/server/lib/git/repository-root.js`), checked on the resolved path before anything reaches OpenCode.
+  - Folder trust: `api:proxy` and `api:session:message` refuse a folder whose OpenCode configuration runs code with the same 403 `opencode_trust_required` the web server answers, and `api:proxy` serves `/api/opencode/trust` itself (`web/server/lib/opencode-trust`). The answers file is `~/.config/openchamber/opencode-trust.json`, shared with the desktop app, so a folder trusted in one is trusted in the other. One instance lives in `opencodeTrust.ts`; the global event watcher (`sessionActivityWatcher.ts`) tells it when OpenCode closes a folder, so a trusted folder is read again only on its next opening. Extension-host features that call OpenCode directly (git commit messages, the small model) are not behind the check yet.
   - Owns managed OpenCode upgrade status handlers and capability reporting.
-  - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API). Updates preserve existing provider, option, and retained-model fields that the form does not manage while honoring explicit model, header, and env removal. Legacy `providers` entries migrate to the canonical `provider` key when edited.
+  - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API). As on the web server, the `user` scope of source lookup, upsert and removal is the global file that holds the provider: `opencode.jsonc` beside `opencode.json` when the entry lives there. Updates preserve existing provider, option, and retained-model fields that the form does not manage while honoring explicit model, header, and env removal. Entries under the legacy `provider` key move to `providers` when edited. Validation and the merge are the web server's own `validateCustomProviderConfig` and `mergeCustomProviderConfig` from `packages/web/server/lib/opencode/providers.js`, so a model's limits, capabilities and reasoning levels land in the file exactly as on the web server. Do not copy them back here: a copy falls behind the form without any test noticing.
   - `api:provider:discover-models` runs the shared server discovery module in the extension host, so the webview never sends provider credentials or custom headers through the generic OpenCode proxy. In edit mode the host reads the provider's OpenCode-stored key when the form leaves it blank; a replacement key typed into the form wins. Enterprise mode refuses discovery before any network request.
   - Quota handlers keep managed exe.dev, Cursor, and ZenMux credentials in the extension data directory with the same private-file contract as the web runtime. exe.dev uses one command-scoped usage token for the aggregate billing shared by every `exe-*` model provider. ZenMux usage uses an optional Platform API key (`platformApiKey`) and does not read the OpenCode chat key. If that Platform API key is missing, ZenMux quota is not configured and the balance endpoint is not called. Kilo Code usage reads the OpenCode `auth.json` entry and also sends `x-kilocode-organizationid` when an organization id is on that entry or in `provider.kilo.options`. Keep those fetchers in sync with `packages/web/server/lib/quota/providers/zenmux.js` and `kilo.js`.
   - Local quota credential files are read through the handle-bounded `readCappedFileSync`: managed credentials are capped at 64 KiB, Muse and Antigravity auth JSON at 1 MiB, and the Kilo `opencode.json` lookup at the existing 4 MiB config limit. The reader opens once, rejects non-regular files, and reads at most one byte beyond the cap; each quota reader keeps its existing `null` fallback for missing, unreadable, malformed, non-regular, or over-cap files. On POSIX, `O_NONBLOCK` lets the handle check refuse a FIFO without freezing the extension host.
   - `quotaProviders.ts` owns the Ollama Cloud `/api/balance` request and parser used by quota refresh. It authenticates with the `ollama-cloud` API key from OpenCode's credential store, so there is no cookie to paste and the tracker follows the active account. It rejects 401/403 as auth failures, other HTTP errors as such, an unreadable body as transport, and a body carrying no usable credit pool as an unusable shape, with a 15-second request timeout. Current plans carry a monthly pool of credits, not the session/weekly limits of older plans: `included.allowance_usd` is the month's total and `included.balance_usd` what remains, so the used percent is `(allowance_usd - balance_usd) / allowance_usd`, accepted as numbers or numeric strings and clamped to 100, with the reset at `included.period.until`. An allowance that is absent, non-numeric, or not positive yields no window rather than a guessed percentage. `purchased.balance_usd` is surfaced as a `purchased_credits` money row only while positive. `included` has two documented shapes: a credits plan reports `allowance_usd`/`balance_usd` (the `monthly` window) and a legacy plan reports `session`/`weekly`, each a `remaining_percent` with a `resets_at`; whichever the account serves is rendered, at `(allowance - balance) / allowance` and `100 - remaining_percent` respectively. The account's plan tier (`free`, `pro`, `max`) is read best-effort from `POST /api/me` and surfaced as `planLabel`; a failure there drops the label rather than the usage reading. That parse is a deliberate second copy of `packages/web/server/lib/quota/providers/ollama-cloud.js`, so the two runtimes must agree on every one of those rules; the shared cases are pinned in both suites. The obsolete cookie file and per-account directory are removed on the first refresh.
   - Google quota refresh uses `packages/web/server/lib/quota/providers/google/oauth.js` for OAuth client selection and safe refresh errors. Gemini credentials keep their `gemini/` quota names and daily windows after an Antigravity client fallback. Standalone Antigravity quota uses its own client without fallback, and takes its request headers from `packages/web/server/lib/quota/providers/antigravity/client.js`, the module the web provider uses, so both runtimes send the same client identity.
+  - OpenCode Zen quota refresh uses the shared `packages/web/server/lib/quota/providers/opencode-zen.js` reader for Console requests, parsing and window construction. Its contract is in `packages/web/server/lib/quota/DOCUMENTATION.md`, section "OpenCode Zen credential and quota semantics". Each service-account budget stays in its own named window; the request counters and model rows cover only the `opencode` provider, so a workspace that also serves OpenCode Go does not put Go usage on the Zen card, and model reads include every page of each range. Windows carry structured `value` data for shared UI localization without another Console request. The extension owns credential discovery and result envelopes. OpenCode Go meters remain on the separate `opencode-go` provider.
+  - Codex quota refresh mirrors `packages/web/server/lib/quota/providers/codex.js` by hand and shares its reader of the Codex CLI's sign-in, `providers/codex-cli.js` (`$CODEX_HOME/auth.json`, read-only), for the "Sign in with ChatGPT" case; the contract is in the same `DOCUMENTATION.md`, section "Codex credit balance semantics".
+
+### Why Kimi deadlines use an AbortController
+
+Kimi quota requests combine the 25-second refresh deadline and a 5-second request deadline through an `AbortController`. VS Code 1.85 runs Node 18.15, which lacks `AbortSignal.any`; both deadlines must still abort response body reads. Listeners detach when either deadline expires.
 
 - `openchamberSessionState.ts`
   - Owns the VS Code mirror of the shared archive and legacy session-metadata files. Reads open each file once, require a regular file, and read at most `MAX_SESSION_STATE_FILE_BYTES` (32 MiB, matching the web durable JSON store). Over-cap, non-regular, and other I/O failures return unknown (`null`), so writes preserve state they could not read. Missing files remain empty, and malformed JSON keeps the existing rename-aside behavior.
@@ -162,8 +288,9 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions and latest-version checks.
   - Its `/api/info` version probe uses the same 1 MiB response cap as the system bridge. Oversized responses report an unavailable upgrade status with an error.
-  - Managed runtimes run the resolved CLI with `upgrade` through the manager's operation queue and the shared `packages/web/server/lib/opencode/cli-upgrade.js` executor. The queued action resolves the CLI with the same fallback as capability reporting; it does not require a live server process just to update the binary. OpenCode chooses its installer. Concurrent webviews share one installation; failures allow another attempt. The existing Reload action restarts the server afterwards. The bridge waits for command completion without its default 30-second timeout. External connections and missing CLIs reject upgrades before spawning. Version checks remain available for external connections.
+  - Managed runtimes run the resolved CLI with `upgrade` through the manager's operation queue and the shared `packages/web/server/lib/opencode/cli-upgrade.js` executor. The queued action resolves the CLI with the same fallback as capability reporting; it does not require a live server process just to update the binary. OpenCode chooses its installer. On Windows a running managed server stops for the install and starts again afterwards, because a running `opencode.exe` cannot be replaced (see `packages/web/server/lib/opencode/DOCUMENTATION.md`). Concurrent webviews share one installation; failures allow another attempt. The existing Reload action restarts the server afterwards. The bridge waits for command completion without its default 30-second timeout. External connections and missing CLIs reject upgrades before spawning. Version checks remain available for external connections.
 
+- Plugin metadata and OpenCode version checks use `packages/web/server/lib/npm/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers.
 - Plugin metadata and OpenCode version checks use `packages/web/server/lib/opencode/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers. The plugin packument body is bounded at a mirrored 16 MiB cap with `readBoundedResponseText`; keep it in sync with `NPM_PACKUMENT_MAX_BYTES` in `packages/web/server/lib/opencode/npm-registry.js`.
 
 - `sessionNotifications.ts`
@@ -181,19 +308,75 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 ## Git in the webview
 
-VS Code manages Git hosting providers and Git credentials itself, so the extension host exposes only the standard Git operations in `gitService.ts` and `bridge-git-runtime.ts`. Push, pull, fetch and remote-branch deletion run as plain Git commands with whatever credentials the user's Git setup provides. The extension host stores no source-control bindings, provider accounts, transport credentials or author profiles.
+VS Code manages Git hosting providers and Git credentials itself, so the extension host exposes only the standard Git operations in `gitService.ts` and `bridge-git-runtime.ts`. Remote-branch deletion runs as a plain `git push --delete` with whatever credentials the user's Git setup provides; commit, history, merge, rebase and network write operations have no bridge handler (their surfaces are not mounted in VS Code). That is a product decision, not missing wiring: the extension gets no git write actions, because VS Code's own Source Control already does them. Mounting the Git view's commit, push, history, merge or rebase surfaces here, or restoring their bridge handlers, needs the maintainer's call first. The extension host stores no source-control bindings, provider accounts, transport credentials or author profiles.
 
-The shared UI reads a repository context and binding before every Git network operation and drives push, pull, fetch, sync and remote-branch deletion through the `planNetworkOperation` / `executeNetworkOperation` lifecycle. `webview/api/git-remotes.ts` and `webview/api/source-control.ts` satisfy that contract without a store: they project the repository's remotes, read through `api:git/remotes` and redacted of userinfo, as a `bound` binding whose every remote is a ready System-transport grant. `webview/api/git.ts` keeps planned operations in webview memory and maps `executeNetworkOperation` onto `api:git/push`, `api:git/pull`, `api:git/fetch` and `api:git/remote-branches`; a bridge failure becomes a `failed` snapshot with `TRANSPORT_FAILED` and the Git error text, and sync records per-step results. Plans never reach the extension host, cancellation only affects a plan that has not started, and operation snapshots do not survive a webview reload.
+The shared UI reads a repository context and binding before every Git network operation and drives push, pull, fetch, sync and remote-branch deletion through the `planNetworkOperation` / `executeNetworkOperation` lifecycle. `webview/api/git-remotes.ts` and `webview/api/source-control.ts` satisfy that contract without a store: they project the repository's remotes, read through `api:git/remotes` and redacted of userinfo, as a `bound` binding whose every remote is a ready System-transport grant. `providers()` answers an empty list, an authoritative answer rather than a failure, so the shared provider registry holds no provider and every provider operation stays unsupported. That includes Git hosts added by extensions whose service provides `source-control` (`ext-<guestId>`): VS Code leaves them out on purpose, since the guest catalog is unsupported here and there is no OpenChamber server to run their service. `createVSCodeAPIs` leaves out `RuntimeAPIs.trackers`, so tracker cards, pickers and board tabs do not appear. The only network-operation kind a mounted VS Code surface can plan is remote-branch deletion (the worktree delete flow); `webview/api/git.ts` keeps planned operations in webview memory and maps `executeNetworkOperation` onto `api:git/remote-branches`, a bridge failure becoming a `failed` snapshot with `TRANSPORT_FAILED` and the Git error text. Push, pull, fetch and sync plans need the Git view's binding strip, which is not mounted, so their `api:git/push` / `api:git/pull` / `api:git/fetch` bridge handlers are gone. Plans never reach the extension host, cancellation only affects a plan that has not started, and operation snapshots do not survive a webview reload.
 
-Provider authentication, capabilities, issues, change requests, contributor destinations (`{ kind: 'ordinary' }`), clone, checkout hydration, worktrees created from a change request or with `ensureRemoteUrl`, and transport or auxiliary binding configuration are unsupported in the webview adapters and never reach the OpenCode proxy. The shared Git view therefore hides the repository binding strip in VS Code, and the Git settings page hides provider and managed SSH sections. Author profiles live in webview memory for the lifetime of the view and are not persisted; applying one sends the profile's author fields through the standard `api:git/identity` message.
+Provider authentication, capabilities, issues, change requests, contributor destinations (`{ kind: 'ordinary' }`), clone, checkout hydration, worktrees created from a change request or with `ensureRemoteUrl`, and transport or auxiliary binding configuration are unsupported in the webview adapters and never reach the OpenCode proxy. The shared Git view therefore hides the repository binding strip in VS Code, and the Git settings page hides provider and managed SSH sections. Author profiles live in webview memory for the lifetime of the view and are not persisted; the git settings page that would apply one is VS Code-gated and never mounts.
 - `InlineCommentThreads.ts`
   - Owns the `openchamber.inlineComments` comment controller: the gutter `+` range, the thread opened by `openchamber.addLineComment`, and every thread a submitted comment leaves anchored in the editor until the message goes out.
-  - A thread never owns a draft. It mints the draft id, hands the payload to a chat webview with the same routing as Add to Context (the active session panel when one exists, else the sidebar, revealed if needed), and follows the webview's whole-draft-list `inlineComments:sync` snapshots: present means show, absent after having been seen means dispose. A snapshot is tagged with the surface that produced it (a panel id or `sidebar`) and only decides that surface's own threads, because every webview runs its own draft store.
-  - A comment the composer never confirms holding within 30 s is retracted from every surface's pending hold, its thread disposed, and the user told, so a thread cannot promise a send that will never happen.
+  - A `+` clicked in the gutter is not the thread described above: the workbench creates that template thread itself (`commentService.createCommentThreadTemplate`), renders its own header ("Start discussion"), its delete action and its input, and calls the extension back only on submit, through the `comments/commentThread/context` menu. The comment API has no event for such a thread and no way to style it, so the only control over it is whether a commenting range is offered at all. `editor` placement keeps that native affordance; `chat` placement withdraws it, since the text belongs in the composer.
+  - A thread never owns a draft. It mints the draft id, hands the payload to a chat webview with the same routing as Add to Context (the active session panel when one exists, else the sidebar, revealed if needed), and follows the webview's whole-draft-list `inlineComments:sync` snapshots: present means show, absent after having been seen means dispose. A thread whose text is written in the composer is the exception to the first half: an empty body keeps the draft, so the thread leaves the screen and its anchor waits for the next text instead of ending the comment, and only an absent draft disposes it. A snapshot is tagged with the surface that produced it (a panel id or `sidebar`) and only decides that surface's own threads, because every webview runs its own draft store.
+  - A comment the composer never confirms holding within 30 s is retracted from every surface's pending hold, its thread disposed, and the user told, so a thread cannot promise a send that will never happen. The thread's "not sent yet" label stays until the message carrying the comment is sent and the draft leaves the store, which disposes the thread.
+  - `lineCommentCommand.ts` registers `openchamber.addLineComment` for the editor context menu, the line-number menu and the keybinding. The line-number menu passes `{ uri, lineNumber }` (1-based) while the other entries pass only the resource or nothing, so the clicked line is read from the argument and the comment quotes that line's own text; without a usable line the command warns and falls back to the editor selection. The chosen range then goes to `composeInChat` or `openThread` by the setting.
   - `inlineCommentSelection.ts` holds the pure pieces (line ranges, the diff-side and real-path resolution for `git:` documents, the pending hold, removal broadcast, thread fate) without the `vscode` import so they are unit-tested directly.
   - Webview side: `webview/inlineCommentTarget.ts` decides where a delivered comment is filed. A session panel stamps its session on every comment it delivers and the webview waits until it shows that session; the sidebar files on its current session or open draft. Filing on the first snapshot with a directory put the draft under `draft` while a fresh panel was still loading its session list, a key that composer never reads. `webview/inlineCommentRemovals.ts` remembers removals that arrive before a delayed delivery lands, so a comment dropped while its panel was still booting does not appear as a chip later. The extension is not activated on startup for this; the right-click command activates it, and the gutter `+` appears from then on.
+  - `openchamber.lineCommentPlacement` decides where the text is written. `editor` (the default) opens the thread above. `chat` files an empty draft and opens its row in the composer; no thread is created until a snapshot shows the draft with text, because the composer reads an empty body as removed. The thread is created from that snapshot, keeps the diff identity captured before the chat reveal, and is given up on after the same 30 s deadline if no snapshot ever shows the draft. A thread already on screen follows the field: emptying the field takes the thread away and parks its anchor (current lines, diff identity, surface), and the next text re-creates the thread there. `editor` keeps the native gutter `+` (which runs the workbench's own template thread, see above); `chat` withdraws that range, so the editor menu, the line-number menu and the keybinding are the entries that reach the composer. The line-number menu passes the clicked line and the comment quotes that line's text, so the entry anchors there instead of at the caret. Until the thread exists the extension follows the document's changes and moves the pending anchor with them; an edit that rewrites the anchored lines themselves moves the comment to the start of the rewrite. The pending anchor is an inclusive line interval, not a `Range`, because a range ending at column zero of its last line reads back one line short; the edits of one change event all name lines of the document before it, so they apply bottom-up. The sidebar may be showing its session list when the command runs, with neither a session nor a new-session draft to file into, and the chat comes forward only once a draft is stored; so a composer comment without a target session opens a new-session draft itself, the same way the New Session command does, and files into it. A session panel's comment stays pinned to its own session. The draft arrives marked `composing`, which opens its field, and `VSCodeLayout` brings the chat forward when the draft arrives (also out of a run overview).
+
+### Why a code comment can be written in the chat composer
+
+A comment is context for the next message, and on a narrow surface the chat composer is where the user can see what is attached and edit it with the field they already know. Writing it in the VS Code thread means a second, poorer input box: the thread takes only text, while the composer's comment field handles image paste and `#snippets` already. The editor still owns the anchor, so the setting changes where the note is typed, never what it is attached to. `editor` stays the default because reading the comment on the code is the more direct path when the editor is wide enough.
+
+### Why an emptied composer field parks the thread instead of ending the comment
+
+The draft is the comment and the field holds its text, so an empty field means a comment with nothing written yet, not a cancelled one. The composer discards an empty body only when the user cancels the field, which is also the moment the draft leaves the store. Ending the thread instead hides the anchor while the draft still exists, and a later snapshot with text then has nothing to attach the thread to, which is how a comment could disappear from the editor for good.
+
+The rejected alternative is keeping the thread with no comments. VS Code renders that as an empty header box on the line, and its own comment UI treats an empty body as a removed comment, so the anchor looks like a broken comment rather than a comment being written.
+
+The parked anchor outlives a chat webview that is closed while its field is empty. Dropping it with the surface would be wrong: the draft store is persisted and a reopened session tab brings the draft back, but the lines it was attached to live only in the extension.
 
 ## Shared webview message ordering
+
+### Chats in empty windows
+
+With no workspace folder, sidebar and editor drafts use the shared managed Chats
+creation flow. The filesystem home bridge names the host's
+`~/.config/openchamber/chats` root and its canonical path when it exists.
+Reading home does not create directories. Empty-window directory bootstrap
+creates the shared root before publishing it as ready for OpenCode reads; a
+failed root allocation leaves bootstrap retryable. The draft owner allocates
+a separate directory per Chat, and a failed draft allocation blocks only that draft.
+The workspace folder list stays empty; the Chats root is never a workspace project.
+Editor tabs resolve the requested session through the global index before selecting
+its directory. The sidebar's archived toggle exposes a Chats archive bucket with
+top-level sessions; restoring one uses the shared subtree restore action.
+
+The filesystem bridge runs on the extension host. An external OpenCode on another
+host does not receive these directories, so projectless Chats require OpenCode
+to share the extension host's filesystem. No remote directory transport is provided.
+
+### Why Chats is limited to empty windows
+
+The approved no-folder flow needs a session directory without asking the user to
+open a project. Windows with workspace folders keep their project-only behavior.
+Shared draft and visibility rules read the host's workspace list, so a previous
+session's directory cannot select the wrong mode.
+
+The editor-panel host owns a singleton Settings tab separately from its session panels. `openchamber.showSettings` reveals that tab, including when the sidebar has never resolved or no folder is open. Settings receives theme, connection, settings-save and permission-policy broadcasts through the same panel bridge, but is excluded from chat attention, attachment routing and active-editor selection broadcasts. Closing or reloading its webview aborts only its own SSE streams.
+
+A settings-save broadcast invalidates the recipient's cached server document before its existing settings synchronization runs. Reusing the short-lived GET cache hid a peer's save from an already-open tab. Synchronization keeps its normal mutation reconciliation and preserves the webview's editor-derived theme. Pending bridge replies post only while their original panel owner remains current; disposal cleanup uses the webview reference captured while the panel was alive, because VS Code's panel getter throws after disposal.
+
+### Why the Settings command accepts null without relaxing navigation validation
+
+VS Code can pass `null` as the view-title action context, so the command treats it like an omitted argument. Other supplied values still pass through the navigation schema: silently discarding malformed navigation would open the wrong settings page and hide a caller error.
+
+### Why Settings uses a separate panel and not the sidebar view
+
+Settings needs the editor area's width while the sidebar keeps its current chat or session list. Sharing the existing panel host preserves its bridge and lifecycle behavior without copying another provider. The Settings root loads configuration pages on demand and does not mount the session layout, global session poller or background queue/cleanup effects.
+
+Navigation waits for `openchamber.settingsReady`, sent by the mounted Settings root and handled only by its originating panel. A closed panel's readiness cannot release navigation in its replacement. `webview:ready` proves only that the bridge runs, before React owns navigation. The host keeps the newest pending target through that interval and consumes it once, so a reload does not replay an old page selection. `openchamber.closeSettings` disposes the specific Settings panel rather than whichever editor currently has focus. The parsed navigation contract lives in `packages/ui/src/lib/settings/vscodeNavigation.ts`.
+
+The default Ctrl+, / Cmd+, Settings shortcut belongs to VS Code while an OpenChamber webview has focus. Native keybindings reveal Settings from chat webviews and close it from the Settings webview; the shared shortcut handler yields that default key. VS Code forwards webview key events to its workbench even after the renderer handles them, so browser-only handling opened both Settings pages. `settingsShortcutFocus.ts` owns the keyboard target, distinct from chat attention: parsed document focus reports claim the sender's host-stamped kind, a late blur releases only that sender, and hiding, reloading or disposing a webview clears its claim. VS Code's ordinary `editorFocus`/`focusedView` keys do not identify focus inside its webview overlays. Custom OpenChamber shortcut overrides retain their shared handler, and other VS Code views retain the editor's own Settings binding.
 
 The bridge sends `webview:ready` once per document, before its first outbound
 message. Sidebar and session-editor hosts abort that panel's old
@@ -233,11 +416,11 @@ Two webview hosts, both rendering `renderVSCodeApp` → `VSCodeApp`
 (`packages/ui/src/apps/VSCodeApp.tsx`):
 
 - `ChatViewProvider.ts` — sidebar view, `viewMode: 'sidebar'`.
-- `SessionEditorPanelProvider.ts` — editor tab, `viewMode: 'editor'`. A tab opened by `openchamber.openAgentManager` (titled "Run on Several Models"; the id predates multi-run and stays for existing keybindings) carries `initialComposer: 'parallel'`, so its new-session draft starts in parallel mode.
+- `SessionEditorPanelProvider.ts` — editor tabs, `viewMode: 'editor'`. Session tabs use `panelType: 'chat'`. The singleton Settings tab uses `panelType: 'settings'`. A tab opened by `openchamber.openAgentManager` (titled "Run on Several Models"; the id predates multi-run and stays for existing keybindings) carries `initialComposer: 'parallel'`, so its new-session draft starts in parallel mode.
 
 The old Agent Manager panel (its own provider, `AgentManagerView` and group store) is gone. It listed worktree sessions it never bootstrapped into sync, so its chats missed live events; runs now use the shared sidebar rows, run overview and composer.
 
-`VSCodeLayout` has exactly three views: `sessions`, `chat`, `settings`
+`VSCodeLayout` has two views: `sessions` and `chat`
 (`packages/ui/src/components/layout/VSCodeLayout.tsx:76`). There is no
 `MainLayout`, no `ContextPanel`, and no `ContextPanelRail` in this runtime, so
 every surface reached only through those is unreachable.
@@ -247,28 +430,29 @@ every surface reached only through those is unreachable.
 | Surface | Status | Mount chain / cut-off |
 |---|---|---|
 | Chat timeline | MOUNTED | `VSCodeLayout` → `ChatView` → `ChatContainer` → `MessageList` |
-| Composer | MOUNTED | `ChatContainer` → `ChatInput` (model/agent controls, autocomplete, attachments, dictation, GitHub issue/PR pickers, `ReviewFlowDialog`, `PendingChangesBar`) |
-| Work status panel | NOT MOUNTED | `ChatContainer` skips `WorkStatusPanel` when `isVSCodeRuntime()` (`workStatusPanelMountable`) |
+| Composer | MOUNTED | `ChatContainer` → `ChatInput` (model/agent controls, autocomplete, attachments, dictation, issue/PR pickers, `ReviewFlowDialog`, `PendingChangesBar`) |
+| Work status panel | MOUNTED | Inline beside the chat in `VSCodeChatArea` where it fits, otherwise the overlay; `VSCodeHeader` carries the toggle |
 | Permission / form cards | MOUNTED | `ChatContainer` → `PermissionCard`, `FormCard` |
 | Timeline dialog | MOUNTED | `ChatContainer` → `TimelineDialog` |
 | Tool output / inline diff preview | MOUNTED | `MessageList` → `ToolPart`, `ToolOutputDialog` (`DiffViewToggle`, not `DiffView`) |
 | Sessions sidebar | MOUNTED | `VSCodeLayout` → `SessionSidebar` with `mobileVariant hideDirectoryControls` |
 | Session dialogs | MOUNTED | `VSCodeLayout` → `SessionDialogs` |
 | Session switcher | MOUNTED | `VSCodeHeader` → `SessionSwitcherDropdown` |
-| MCP dropdown | MOUNTED | `VSCodeHeader` `showMcp` → `McpDropdown` |
-| Context usage / rate limits | MOUNTED | `VSCodeHeader` `showContextUsage` / `showRateLimits` → `ContextUsageDisplay`, `UsageProgressBar` |
+| MCP servers | MOUNTED | Work status panel's MCP section; the separate header dropdown is gone |
+| Context usage | MOUNTED | `VSCodeHeader` `showContextUsage` → `ContextUsageDisplay` |
+| Rate limits | MOUNTED | Work status panel's Usage section; the separate header dropdown is gone |
 | Multi-run | MOUNTED | `SessionSidebar` run rows; `RunOverview` over the chat in every layout (sidebar, expanded, editor tab); composer parallel mode from the model picker and the `openchamber.openAgentManager` tab |
-| Settings | PARTIAL | `VSCodeLayout` → lazy `SettingsView`. `metadata.ts` `isAvailable: (ctx) => !ctx.isVSCode` hides `remote-instances`, `git`, `shortcuts`, `magic-prompts`, `voice`, `tunnel`, `about` |
+| Settings | PARTIAL | Settings editor tab → `VSCodeApp` → on-demand `SettingsView`. Page availability remains defined by `metadata.ts`; moving the host does not enable unsupported pages. |
 | Usage / quota page | MOUNTED | `SettingsView` → `UsagePage` (slug `usage`, no VS Code gate) |
 | Notifications settings | MOUNTED | `SettingsView` → slug `notifications` (no VS Code gate) |
 | MCP settings | MOUNTED | `SettingsView` → `McpSidebar` / `McpPage` |
 | Agents / commands / skills / plugins / providers / projects settings | MOUNTED | `SettingsView` page registry |
 | Worktrees | PARTIAL | Create/remove reachable via `SessionSidebar` → `NewWorktreeDialog` and `sessionWorktreeMenu`. `WorktreesView` is `MainLayout`-only |
-| Git | PARTIAL | Read-only status/branches/log via `useGitStore` in `SessionSidebar`, `ChatInput`, `WorkStatusPrimaryGroup`. Stage/commit/push/history/merge/rebase live in `GitView` + `views/git/*`, cut off with `ContextPanel` |
+| Git | PARTIAL | Read-only status and branches via `useGitStore` in `SessionSidebar`, `ChatInput`, `WorkStatusPrimaryGroup`. Stage, commit, push, history, merge and rebase live in `GitView` + `views/git/*`, cut off with `ContextPanel`; the bridge has no handlers for them and the shared Git API rejects them as unsupported |
 | Voice / dictation | PARTIAL | `ComposerDictation` renders in `ChatInput`; the `voice` settings page is VS Code-gated |
-| Command palette | PARTIAL | `useKeyboardShortcuts` runs from `SyncAppEffects` and `open_command_palette` toggles `isCommandPaletteOpen`, but `CommandPalette` renders only in `MainLayout` — the shortcut opens nothing |
+| Command palette | NOT MOUNTED | `CommandPalette` renders only in `MainLayout`; `useKeyboardShortcuts` gates `open_command_palette` off in the VS Code runtime, so Cmd/Ctrl+P stays with VS Code's own Quick Open |
 | ContextPanel / project context (notes, todos, plans tabs) | NOT MOUNTED | `ContextPanel`, `ContextPanelRail`, `RightSidebarTabs` imported only by `MainLayout` and `MobileWorkspaceDrawer` |
-| Terminal | NOT MOUNTED | `TerminalView` imported only by `ContextPanel` and `MobileWorkspaceDrawer`. `webview/api/index.ts` ships `createStubTerminalAPI()` whose every method throws unsupported |
+| Terminal | NOT MOUNTED | `TerminalView` imported only by `ContextPanel` and `MobileWorkspaceDrawer`. `webview/api/index.ts` ships `createStubTerminalAPI()` whose every method throws unsupported; `useKeyboardShortcuts` gates `toggle_terminal` off in the VS Code runtime, leaving Cmd/Ctrl+J to VS Code, which toggles its bottom panel on whichever tab was last open |
 | Files view | NOT MOUNTED | lazy `FilesView` in `ContextPanel`; `SidebarFilesTree` is `MainLayout`-only |
 | Diff view | NOT MOUNTED | lazy `DiffView` in `ContextPanel` |
 | Git view | NOT MOUNTED | lazy `GitView` in `ContextPanel` |
@@ -283,25 +467,17 @@ every surface reached only through those is unreachable.
 
 ### Dead bridge surface
 
-Handlers with no reachable caller in the VS Code webview.
-
-| Handler | Why unreachable |
-|---|---|
-| `api:git/ignore-openchamber` | No reference anywhere in `packages/vscode/webview` |
-| `api:git/commit`, `api:git/commit-files`, `api:git/commit-file-diff` | Only `GitView` and `views/git/*` call them |
-| `api:git/log` (write paths), `api:git/checkout`, `api:git/checkout-commit`, `api:git/reset-to-commit`, `api:git/revert-commit`, `api:git/cherry-pick` | `views/git/HistoryCommitRow.tsx` only |
-| `api:git/merge`, `api:git/merge/abort`, `api:git/merge/continue`, `api:git/rebase`, `api:git/rebase/abort`, `api:git/rebase/continue`, `api:git/conflict-details` | `GitView` only |
-| `api:git/push`, `api:git/pull`, `api:git/fetch` | `GitView` and `MobileChangesSurface` only |
-| `api:git/diff`, `api:git/file-diff` | `DiffView` only |
-| `api:git/commit-message` | Wired from `webview/api/git.ts`. GitView is still unmounted, so no VS Code webview UI calls it. The SCM title-bar command uses the same generator on the extension host. |
-| `api:git/pr-description` | `views/git/PullRequestSection.tsx` only |
-| `api:git/identity` | `git` settings page is VS Code-gated |
-| `api:github/pr:create`, `api:github/pr:merge`, `api:github/pr:ready`, `api:github/pr:update` | `views/git/PullRequestSection.tsx` only. `api:github/pr:status` and `api:github/pr:summaries` stay reachable through `useGitHubPrStatusStore` in the sidebar and answer with the disabled-backend error |
-| `api:fs:write`, `api:fs:rename`, `api:fs:delete`, `api:fs:reveal`, `api:fs:mkdir` | `FilesView`, `SidebarFilesTree`, `PlanView` only |
-| `api:fs:exec` | Terminal API is a throwing stub; no other caller |
+No mounted VS Code surface reaches these: `api:git/*` commit, history, merge,
+rebase, network-write, diff and identity write handlers were removed with
+their surfaces, as were the filesystem write handlers (`api:fs:write`,
+`api:fs:rename`, `api:fs:delete`) that served `FilesView`, `SidebarFilesTree`
+and `PlanView`, which never mount here.
 
 Reachable filesystem routes: `api:fs:read` (attachments), `api:fs:search`
-(`useFileSearchStore` behind composer file mentions), `api:fs:list`, `api:fs:stat`.
+(`useFileSearchStore` behind composer file mentions), `api:fs:list`,
+`api:fs:stat`, `api:fs:home` and `api:fs:mkdir` (empty-window Chats root
+bootstrap through `/api/fs/mkdir` in the webview), and `api:fs:reveal` (the
+session sidebar's export "Reveal" action).
 
 Maintenance: reviews, changelog entries, and parity claims consult this map;
 whoever mounts or unmounts a surface updates it in the same change.
@@ -331,6 +507,31 @@ by `GET /api/info` (OpenCode 2.0.8 removed `/api/health`). A 200 is the whole
 readiness answer; the payload carries `{ version, pid, urls, paths }` and no
 `healthy` field.
 
+## Machine-specific settings
+
+`openchamber.apiUrl` and `openchamber.opencodeBinary` describe one machine. In a
+remote window a value set only in the local User settings never applies: both
+settings are read through `readMachineSetting` (`machine-settings.ts`), and a value
+for the server comes from the Remote or Workspace settings.
+
+### Why `machine-overridable` and not `machine` or `window`
+
+`window` hands the client's path to the server. `machine` drops the project folder
+override that `window` allowed. `machine-overridable` keeps that override, stops
+Settings Sync from copying the value, and sends a Global write in a remote window
+to the Remote settings.
+
+### Why a read helper on top of the scope
+
+The scope alone leaves a gap. While a remote window starts, VS Code reports the
+local User value until it applies the scope about 2 seconds later, and an open
+OpenChamber panel activates the extension inside that gap. Waiting for a later
+configuration event has no signal to wait for: the event that drops the value
+reports `affectsConfiguration` as false. `inspect` names the level the value came
+from, so the helper can decide on the first read. `globalLocalValue` is outside the
+public types; 1.98 has it and 1.95 does not. A build without it falls through to
+`get` and keeps the gap.
+
 ## Global OpenCode paths
 
 `opencodeConfigPaths.ts` owns the global config directory for config CRUD,
@@ -355,6 +556,34 @@ command lookup that reaches the global files reports the same error.
 No files are migrated. The behavior GET bridge response includes the effective
 `path` for both existing and missing AGENTS.md files; shared Settings uses it
 in the warning.
+
+### Plugin switches
+
+The Plugins page's on/off switches exist in VS Code too. The extension keeps
+its state in `<extension global storage>/plugin-switches.json`, separate from
+the web server's data-dir store, so each OpenChamber runtime applies only its
+own switches to the OpenCode it starts. The rule that maps a spec to the
+`plugin:` resource OpenCode matches, and the check for an allow that beats the
+denial, are the web server's `plugin-switches.js`, so both surfaces decide alike.
+`plugin-switches.ts` holds what is the extension's own: its store location and
+its managed layer.
+
+The bridge exposes `PUT /api/config/plugins/entry/:id/enabled` and
+`/file/:id/enabled`, and the list payload carries `policyResource` and
+`switchState` so the shared UI can render the same switch. Before spawning the
+managed `opencode serve`, `opencode.ts` writes `opencode.managed.json` in the
+extension storage and passes it as `OPENCODE_CONFIG` in the child's environment
+only; the user's own config and `process.env.OPENCODE_CONFIG` are untouched.
+When the user already owns `OPENCODE_CONFIG`, the denials merge into
+`OPENCODE_CONFIG_CONTENT` and the route reports `requiresManualRestart`, since
+the running child only reads that value at launch. A rewrite that fails after the
+store write also answers saved with `requiresManualRestart`. An unreadable store
+leaves the managed file as it was and fails a fresh launch, because starting
+without the denials would load the plugins the user switched off. A rule that
+beats the denial reports `overridden` and refuses the change with
+`SWITCH_OVERRIDDEN`. An external OpenCode server (`openchamber.apiUrl`) owns
+neither the process nor its config layer, so every row reports the switch as
+unavailable and a change is refused with `SWITCH_UNAVAILABLE`.
 
 ## OpenCode 2 config shapes
 
@@ -404,17 +633,50 @@ Bridge surface (`bridge-config-runtime.ts`), matching the web routes:
 - `api:config/warming` — `PUT /api/config/warming`; `{ enabled }` turns session
   warming on (`true`, keeping a hand-tuned object) or off (removes the key),
   written with the shared `writeWarmingEnabled` to the same file.
+- `api:config/compaction` — `PUT /api/config/compaction`; `{ auto, buffer,
+  keepTokens, background }` (each optional) parsed by the shared
+  `compactionUpdateSchema` and written with `writeCompactionSettings` to the
+  same file.
+- `api:config/skill-switch` — `PUT /api/config/skill-switch`; `{ id, enabled,
+  scope, directory }` turns a skill off or on with the shared
+  `writeSkillDisabled`, in the same files the web route edits
+  (`setSkillEnabled` in `opencodeConfig.ts` mirrors `skill-switch.js`).
+- `api:config/skills:catalog` — `GET /api/config/skills/catalog`; answers
+  `{ ok, sources, itemsBySource: {} }` without scanning anything, like the web
+  route. The shared UI asks for it on every Skills catalog open and on every
+  OpenCode `skill` or `config` catalog event, catalog page open or not.
+- `api:config/skills:catalog/source` — `GET /api/config/skills/catalog/source`;
+  `{ sourceId, refresh }` scans that one source (`skillsCatalog.ts`) and answers
+  `{ ok, items }` or `{ ok: false, error }`. Results stay cached for 30 minutes,
+  and requests for a source whose scan is still running wait for that scan,
+  `refresh` included.
+
+### Why the catalog list does not scan the sources
+Until #5446 `api:config/skills:catalog` scanned every source one after another
+in the same request, skipping the cache when asked to refresh. A scan of a large
+source outlasted the webview's 30 second bridge timeout, so the page showed
+"timed out" and the next open or catalog event started more scans beside the
+ones still running. Per-source requests are what the web server already
+offers, so the shared UI needs no VS Code branch.
 
 ## Session archive and metadata
 
-OpenCode 2.x has no route that archives a session, so archive flags are
-OpenChamber-owned state. `openchamberSessionState.ts` keeps the same
-`sessions-archive.json` the OpenChamber server keeps, in the shared OpenChamber
-config directory (`~/.config/openchamber`, `%APPDATA%\openchamber` on
-Windows), which is also the web server's default data directory: a session
-archived from VS Code is archived in the desktop app on the same machine, and
-the other way round. Nothing is cached between calls because two processes can
-write the file; every write re-reads first and replaces the file atomically.
+OpenCode holds archive state since 2.1, and `openchamberSessionState.ts` sends
+every archive and restore there first (`PATCH /api/session/{id}` with
+`archived`), so VS Code, the desktop app and the TUI share one archive.
+Since 2.2 that also works for a session whose directory was deleted. The
+`sessions-archive.json` the OpenChamber server keeps, in the shared OpenChamber config directory
+(`~/.config/openchamber`, `%APPDATA%\openchamber` on Windows), which is also
+the web server's default data directory, still holds entries an older version
+wrote. They win over OpenCode's record, so archiving or restoring a session
+drops its entry, and the web server pushes the rest. Nothing is cached between calls
+because two processes can write the file; every write re-reads first and
+replaces the file atomically.
+
+The unread baseline (`sessions-unread.json`, `{ since }`) is shared the same
+way: whichever of the server and the extension reads it first creates it, and
+both serve turns that ended before it as seen (`time.viewed` up to
+`time.idle`). Once read, it is cached, because nothing rewrites it.
 
 Session metadata lives on the OpenCode record (`PATCH /api/session/{id}`,
 OpenCode 2.0.15+). OpenCode replaces the whole object, so a write reads the
@@ -423,6 +685,9 @@ features sharing the `openchamber` namespace do not erase each other. An entry
 an older version left in `sessions-metadata.json` is laid over the record on
 reads and pushed to OpenCode on that session's next write, then dropped from
 the file; the web server sweeps the rest.
+The extension serializes metadata writes per session. A conditional write
+compares the expected metadata within that queue and returns the current value
+on conflict. This queue does not serialize writes from another process.
 
 The webview answers `POST /api/openchamber/sessions/archive|unarchive` and
 `GET|POST /api/openchamber/sessions/:id/metadata` through the

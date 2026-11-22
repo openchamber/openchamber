@@ -4,9 +4,8 @@ import type { IconName } from '@/components/icon/icons';
 import {
   SettingsChipGroup,
   SettingsFieldRow,
-  SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
-import { JevAccessNote, SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
+import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
 import { openClassificationProviders, useClassifierSourceName } from '@/components/sections/classification/classifierSources';
 import { useI18n } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -16,7 +15,6 @@ import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingSt
 import { useUIStore } from '@/stores/useUIStore';
 import { displayedPermissionMode, type PermissionMode } from '@/stores/utils/permissionAutoAccept';
 
-/** The composer's shield, so the setting and the button read as one thing. */
 const MODE_ICON = {
   ask: { icon: 'shield-user', color: undefined },
   safety: { icon: 'shield-star', color: 'var(--status-success)' },
@@ -24,19 +22,9 @@ const MODE_ICON = {
 } satisfies Record<PermissionMode, { icon: IconName; color: string | undefined }>;
 
 interface PermissionDefaultModeFieldProps {
-  /** The default agent on this page; its permissions decide what "Ask" covers. */
   agentName?: string;
 }
 
-/**
- * The permission mode the server writes onto each new top-level session, as
- * three chips. Each explains itself on hover and the chosen one below the
- * row, with a link to where its behaviour is configured: agent permissions for
- * Ask and Accept, classification providers for the safety net. The safety net
- * chip is disabled while no classification provider can run it, and a saved
- * `safety` default then shows as Ask, which is what such a session does. VS
- * Code has no server to apply a default, so this row is not shown there.
- */
 export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProps> = ({ agentName }) => {
   const { t } = useI18n();
   const mode = useUIStore((state) => state.permissionDefaultMode);
@@ -57,7 +45,6 @@ export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProp
   }, [agentName]);
 
   const explanation = (value: PermissionMode): React.ReactNode => {
-    // The disabled chip says why and where to fix it.
     if (value === 'safety' && !safetyAvailable) {
       return (
         <>
@@ -87,8 +74,18 @@ export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProp
     );
   };
 
+  const explanationText = (value: PermissionMode): string => {
+    if (value === 'safety') {
+      return providerName
+        ? t('settings.sessions.permissions.explain.safetyVia', { provider: providerName })
+        : t('settings.sessions.permissions.explain.safety');
+    }
+    return value === 'auto' ? t('settings.sessions.permissions.explain.auto') : t('settings.sessions.permissions.explain.ask');
+  };
+
   const chip = (value: PermissionMode, label: string) => {
-    const { icon, color } = MODE_ICON[value];
+    const { icon } = MODE_ICON[value];
+    const color = value === shown ? MODE_ICON[value].color : undefined;
     return {
       value,
       label: (
@@ -103,26 +100,26 @@ export const PermissionDefaultModeField: React.FC<PermissionDefaultModeFieldProp
   };
 
   return (
-    <div className="space-y-1">
-      <SettingsFieldRow
-        settingsItem="sessions.permission-default"
-        label={t('settings.sessions.permissions.defaultMode')}
-        info={t('settings.sessions.permissions.defaultModeInfo')}
-      >
-        <SettingsChipGroup
-          aria-label={t('settings.sessions.permissions.defaultMode')}
-          value={shown}
-          onChange={handleChange}
-          options={[
-            chip('ask', t('settings.sessions.permissions.mode.ask')),
-            chip('safety', t('settings.sessions.permissions.mode.safety')),
-            chip('auto', t('settings.sessions.permissions.mode.auto')),
-          ]}
-        />
-      </SettingsFieldRow>
-      {/* The chosen mode explains itself where touch users can read it too. */}
-      <p className={SETTINGS_HELPER_CLASS}>{explanation(shown)}</p>
-      {safetyAvailable ? null : <JevAccessNote />}
-    </div>
+    <SettingsFieldRow
+      settingsItem="sessions.permission-default"
+      label={t('settings.sessions.permissions.defaultMode')}
+      info={(
+        <>
+          <p>{explanationText(shown)}</p>
+          <p className="mt-1.5">{t('settings.sessions.permissions.defaultModeInfo')}</p>
+        </>
+      )}
+    >
+      <SettingsChipGroup
+        aria-label={t('settings.sessions.permissions.defaultMode')}
+        value={shown}
+        onChange={handleChange}
+        options={[
+          chip('ask', t('settings.sessions.permissions.mode.ask')),
+          chip('safety', t('settings.sessions.permissions.mode.safety')),
+          chip('auto', t('settings.sessions.permissions.mode.auto')),
+        ]}
+      />
+    </SettingsFieldRow>
   );
 };

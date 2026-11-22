@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
+import { Window } from 'happy-dom';
 import type { Message } from '@/lib/opencode/model';
 
 import {
@@ -101,6 +102,7 @@ describe('loadHistoryUntilMessage', () => {
     const renderHarness = (options: {
         pages: ChatMessageEntry[][];
         complete?: boolean;
+        hasMessageRow?: (messageId: string, messages: ChatMessageEntry[]) => boolean;
     }) => {
         const dom = installMinimalDom();
         Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, writable: true, value: false });
@@ -108,11 +110,18 @@ describe('loadHistoryUntilMessage', () => {
         let messages: ChatMessageEntry[] = [userMessage('msg_9', 9)];
         let calls = 0;
         let controller!: UseChatTimelineControllerResult;
+        const { hasMessageRow } = options;
+        // SAFETY: the history search reads only `hasMessageRow` from the list.
+        const messageListRef: React.RefObject<MessageListHandle | null> = {
+            current: hasMessageRow
+                ? { hasMessageRow: (messageId: string) => hasMessageRow(messageId, messages) } as MessageListHandle
+                : null,
+        };
         const Harness = () => {
             controller = useChatTimelineController({
                 sessionId: 'session', sessionKey: 'runtime\n/repo\nsession', messages,
                 historyMeta: { limit: messages.length, complete: options.complete === true, loading: false },
-                scrollRef: { current: null }, messageListRef: { current: null }, isPinned: true, showScrollButton: false,
+                scrollRef: { current: null }, messageListRef, isPinned: true, showScrollButton: false,
                 loadMoreMessages: async () => {
                     const page = options.pages[calls] ?? [];
                     calls += 1;
@@ -146,6 +155,26 @@ describe('loadHistoryUntilMessage', () => {
         }
     });
 
+    test('keeps loading while the message is in the store without a row', async () => {
+        // A batch can end inside a turn: the reply is loaded, but the list
+        // gives it a row only once the prompt that opens its turn is loaded.
+        const reply: Message = {
+            id: 'msg_4', sessionID: 'session', role: 'assistant',
+            time: { created: 4, completed: 5 }, providerID: 'test', modelID: 'test', agent: 'build',
+        };
+        const harness = renderHarness({
+            pages: [[{ info: reply, parts: [] }], [userMessage('msg_3', 3)]],
+            hasMessageRow: (messageId, messages) => messageId === 'msg_4' && messages.some((message) => message.info.id === 'msg_3'),
+        });
+        try {
+            await harness.ready();
+            expect(await harness.controller.loadHistoryUntilMessage('msg_4', { maxBatches: 3 })).toBe(true);
+            expect(harness.calls).toBe(2);
+        } finally {
+            harness.dispose();
+        }
+    });
+
     test('gives up after the batch limit when the message never arrives', async () => {
         const harness = renderHarness({ pages: [[userMessage('msg_5', 5)], [userMessage('msg_4', 4)], [userMessage('msg_3', 3)], [userMessage('msg_2', 2)]] });
         try {
@@ -170,6 +199,113 @@ describe('loadHistoryUntilMessage', () => {
 });
 
 describe('useChatTimelineController identity lifecycle', () => {
+    test('cancels the mobile prepend watchdog on hide and recreates it for a new prepend', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        const previousRequest = window.requestAnimationFrame;
+        const previousCancel = window.cancelAnimationFrame;
+        const frames = new Map<number, FrameRequestCallback>();
+        let nextFrame = 0;
+        window.requestAnimationFrame = (callback) => { frames.set(++nextFrame, callback); return nextFrame; };
+        window.cancelAnimationFrame = (id) => { frames.delete(id); };
+        window.location.search = '?surface=mobile';
+        const browser = new Window();
+        Object.defineProperty(globalThis, 'document', { configurable: true, writable: true, value: browser.document });
+        const container = document.createElement('div');
+        let height = 1000;
+        Object.defineProperties(container, { scrollHeight: { get: () => height }, clientHeight: { value: 500 } });
+        container.scrollTop = 100;
+        let messages: ChatMessageEntry[] = [{ info: { id: 'new', sessionID: 'session', role: 'user', time: { created: 3 } }, parts: [] }];
+        let controller!: UseChatTimelineControllerResult;
+        const list: MessageListHandle = {
+            resolveUiPageMessageId: (messageId) => messageId,
+            scrollToUiPageRow: () => false,
+            captureViewportAnchor: () => null, restoreViewportAnchor: () => false, alignViewportAnchor: () => 'missing',
+            hasMessageRow: () => false,
+            isHistoryVirtualized: () => false, scrollToTurnId: () => false, scrollToMessageId: () => false,
+            holdViewportAnchor: () => {}, scrollToBottom: () => {},
+        };
+        const Harness = () => {
+            controller = useChatTimelineController({
+                sessionId: 'session', sessionKey: 'runtime\n/repo\nsession', messages,
+                historyMeta: { limit: 1, complete: false, loading: false },
+                scrollRef: { current: container }, messageListRef: { current: list }, isPinned: false, showScrollButton: false,
+                loadMoreMessages: async () => {}, goToBottom: () => {}, releaseAutoFollow: () => {},
+            });
+            return null;
+        };
+        const render = (mode: 'visible' | 'hidden') => root.render(React.createElement(React.Activity, { mode, children: React.createElement(Harness) }));
+        try {
+            await act(async () => render('visible'));
+            let load!: Promise<void>;
+            act(() => { load = controller.loadEarlier(); });
+            height = 1200;
+            messages = [{ info: { id: 'older', sessionID: 'session', role: 'user', time: { created: 2 } }, parts: [] }, ...messages];
+            await act(async () => render('visible'));
+            await act(async () => { await load; });
+            expect(frames.size).toBe(1);
+            const stale = [...frames.values()];
+            await act(async () => render('hidden'));
+            expect(frames.size).toBe(0);
+            container.scrollTop = 0;
+            for (const callback of stale) callback(0);
+            expect(container.scrollTop).toBe(0);
+            expect(frames.size).toBe(0);
+            await act(async () => render('visible'));
+            act(() => { load = controller.loadEarlier(); });
+            height = 1400;
+            messages = [{ info: { id: 'oldest', sessionID: 'session', role: 'user', time: { created: 1 } }, parts: [] }, ...messages];
+            await act(async () => render('visible'));
+            await act(async () => { await load; });
+            expect(frames.size).toBe(1);
+        } finally {
+            await act(async () => root.unmount());
+            window.requestAnimationFrame = previousRequest;
+            window.cancelAnimationFrame = previousCancel;
+            dom.restore();
+            await browser.happyDOM.close();
+        }
+    });
+    test('retires an in-flight history search on effect cleanup and permits a fresh same-key action', async () => {
+        const dom = installMinimalDom();
+        const root = createRoot(dom.container);
+        const pending = deferred();
+        let messages: ChatMessageEntry[] = [{ info: { id: 'new', sessionID: 'session', role: 'user', time: { created: 2 } }, parts: [] }];
+        let controller!: UseChatTimelineControllerResult;
+        let calls = 0;
+        const Harness = () => {
+            controller = useChatTimelineController({
+                sessionId: 'session', sessionKey: 'runtime\n/repo\nsession', messages,
+                historyMeta: { limit: 1, complete: false, loading: false },
+                scrollRef: { current: null }, messageListRef: { current: null }, isPinned: false, showScrollButton: false,
+                loadMoreMessages: async () => { calls += 1; if (calls === 1) await pending.promise; },
+                goToBottom: () => {}, releaseAutoFollow: () => {},
+            });
+            return null;
+        };
+        const render = (mode: 'visible' | 'hidden') => root.render(React.createElement(React.Activity, { mode, children: React.createElement(Harness) }));
+        try {
+            await act(async () => render('visible'));
+            let search!: Promise<boolean>;
+            act(() => { search = controller.loadHistoryUntilMessage('target', { maxBatches: 3 }); });
+            expect(calls).toBe(1);
+            await act(async () => render('hidden'));
+            messages = [{ info: { id: 'older', sessionID: 'session', role: 'user', time: { created: 1 } }, parts: [] }, ...messages];
+            await act(async () => render('visible'));
+            expect(controller.isLoadingOlder).toBe(false);
+            await act(async () => { pending.resolve(); });
+            await act(async () => { expect(await search).toBe(false); });
+            expect(calls).toBe(1);
+            let fresh!: Promise<void>;
+            act(() => { fresh = controller.loadEarlier(); });
+            await act(async () => { await fresh; });
+            expect(calls).toBe(2);
+            expect(controller.isLoadingOlder).toBe(false);
+        } finally {
+            await act(async () => root.unmount());
+            dom.restore();
+        }
+    });
     test('one history action delegates one batch even when rendering has no new user turn', async () => {
         const dom = installMinimalDom();
         const root = createRoot(dom.container);
@@ -217,6 +353,7 @@ describe('useChatTimelineController identity lifecycle', () => {
 
     test('preserves the new identity while an old load is waiting for its render', async () => {
         const dom = installMinimalDom();
+        jest.useFakeTimers();
         const root: Root = createRoot(dom.container);
         const pendingA = deferred();
         const pendingB = deferred();
@@ -312,10 +449,10 @@ describe('useChatTimelineController identity lifecycle', () => {
             // another A page after its render wait without the second token gate.
             messages = [message, assistantMessage];
             startBOnLayout = true;
-            await act(async () => {
+            act(() => {
                 root.render(React.createElement(Harness));
-                await loadA;
             });
+            await act(async () => { await loadA; });
             expect(calls).toEqual(['A', 'B']);
             expect(controller.isLoadingOlder).toBe(true);
             expect(capturedAnchors).toContain('anchor-B');
@@ -323,7 +460,7 @@ describe('useChatTimelineController identity lifecycle', () => {
 
             await act(async () => {
                 pendingB.resolve();
-                await new Promise((resolve) => setTimeout(resolve, 0));
+                await Promise.resolve();
             });
             messages = [olderMessage, message, assistantMessage];
             scrollMetrics.scrollHeight = 1200;
@@ -338,6 +475,7 @@ describe('useChatTimelineController identity lifecycle', () => {
             expect(restoredAnchors).toEqual(['anchor-B']);
         } finally {
             await act(async () => root.unmount());
+            jest.useRealTimers();
             dom.restore();
         }
     });

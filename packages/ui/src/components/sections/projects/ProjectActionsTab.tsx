@@ -4,6 +4,7 @@ import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { SettingsCardPill, type SettingsCardAction } from '@/components/sections/shared/SettingsCards';
 import { cn } from '@/lib/utils';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
@@ -31,8 +32,6 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
   const entries = listProjectActions(setup);
   const shareable = canWriteShared(setup);
 
-  // Every change ends with a fresh read, so the grid shows what is on disk
-  // even after a move whose second write failed.
   const settle = async (ok: boolean): Promise<boolean> => {
     if (!ok) toast.error(t('settings.projects.actions.toast.saveFailed'));
     await reload();
@@ -74,13 +73,13 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
           {t('settings.projects.shared.invalid', { path: setup.shared.path, reason: setup.shared.reason ?? '' })}
         </p>
       ) : null}
-      {/* One quiet list: the name and command say what an action is, the
-          chip says where it lives; everything else is in the editor. */}
       <ul className="max-w-[44rem] divide-y divide-[var(--interactive-border)] overflow-hidden rounded-xl border border-[var(--interactive-border)]">
         {entries.map((entry) => {
           const platforms = entry.action.platforms ?? [];
+          const menu = menuFor(entry);
           return (
-            <li key={`${entry.source}:${entry.action.id}`} className="flex items-center gap-2 pe-2 transition-colors hover:bg-[var(--interactive-hover)]">
+            <ContextMenu key={`${entry.source}:${entry.action.id}`}>
+            <ContextMenuTrigger render={<li className="flex items-center gap-2 pe-2 transition-colors hover:bg-[var(--interactive-hover)]" />}>
               <button
                 type="button"
                 onClick={() => setEditing({ target: { action: entry.action, source: entry.source }, entry })}
@@ -88,8 +87,8 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
               >
                 <Icon name={projectActionIconName(entry.action.icon)} className={cn('size-4 shrink-0 text-muted-foreground', entry.hidden && 'opacity-60')} />
                 <span className={cn('min-w-0 flex-1', entry.hidden && 'opacity-60')}>
-                  <span className="block truncate typography-ui-label text-foreground">{entry.action.name}</span>
-                  <span className="block truncate font-mono typography-micro text-muted-foreground" title={entry.action.command}>{entry.action.command}</span>
+                  <span dir="auto" className="oc-ui-start-align block truncate typography-ui-label text-foreground">{entry.action.name}</span>
+                  <span dir="ltr" className="oc-ui-start-align block truncate font-mono typography-micro text-muted-foreground" title={entry.action.command}>{entry.action.command}</span>
                 </span>
                 {platforms.length > 0 ? (
                   <span className="hidden shrink-0 typography-micro text-muted-foreground @xl:inline">
@@ -102,11 +101,11 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground" aria-label={t('settings.projects.actions.menuAria')}>
-                    <Icon name="more-2" className="size-4" />
+                    <Icon name="more" className="size-4" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-fit min-w-40">
-                  {menuFor(entry).map((item) => (
+                  {menu.map((item) => (
                     <DropdownMenuItem key={item.label} variant={item.destructive ? 'destructive' : 'default'} onClick={item.onSelect}>
                       {item.icon ? <Icon name={item.icon} className="size-4" /> : null}
                       {item.label}
@@ -114,7 +113,16 @@ const ActionsGrid: React.FC<{ setup: ProjectSetup; setupState: ProjectSetupState
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-            </li>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-fit min-w-40">
+              {menu.map((item) => (
+                <ContextMenuItem key={item.label} className={item.destructive ? 'text-destructive focus:text-destructive' : undefined} onClick={item.onSelect}>
+                  {item.icon ? <Icon name={item.icon} className="size-4" /> : null}
+                  {item.label}
+                </ContextMenuItem>
+              ))}
+            </ContextMenuContent>
+            </ContextMenu>
           );
         })}
         <li>
@@ -149,7 +157,6 @@ export const ProjectActionsTab: React.FC<{ setupState: ProjectSetupState }> = ({
       title={t('settings.projects.actions.title')}
       info={t('settings.projects.actions.info')}
       settingsItem="projects.actions"
-      divider={false}
     >
       {setupState.load.state === 'ready'
         ? <ActionsGrid setup={setupState.load.setup} setupState={setupState} />

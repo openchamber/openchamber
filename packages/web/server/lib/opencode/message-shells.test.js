@@ -39,7 +39,7 @@ describe('parsePartShellsHeader', () => {
 
 describe('shellMessagePage', () => {
   test('replaces a finished result with a marker and keeps what the collapsed row reads', () => {
-    const result = shellMessagePage(page([tool('shell', completed(), { providerState: { a: 1 }, providerResultState: { b: 2 } })]), new Set());
+    const result = shellMessagePage(page([tool('shell', completed(), { native: { a: 1, b: 2 } })]), new Set());
     const part = result.data[0].content[0];
     expect(part.state.content).toEqual([{ type: 'text', text: '' }]);
     expect(part.state.input).toEqual({ command: 'ls -la', path: '/repo' });
@@ -49,7 +49,7 @@ describe('shellMessagePage', () => {
       [CONTENT_SHELL_METADATA_KEY]: { chars: 17 },
     });
     expect(part.time).toEqual({ created: 1, ran: 2, completed: 3 });
-    expect('providerState' in part).toBe(false);
+    expect('native' in part).toBe(false);
     expect('providerResultState' in part).toBe(false);
     expect(result.cursor).toEqual({ next: 'c1' });
   });
@@ -73,6 +73,32 @@ describe('shellMessagePage', () => {
     expect(parts[3].state).toEqual(completed());
   });
 
+  test('keeps whole the results the chat draws a card from: a proposed workflow run and generated images', () => {
+    const envelope = (action, ok = true) => [{ type: 'text', text: JSON.stringify({ schemaVersion: 1, ok, action, data: { runId: 'wf_1', images: [{ path: '/a.png' }] } }) }];
+    const workflow = tool('openchamber_workflow', completed({ content: envelope('workflow.run') }));
+    const image = tool('openchamber_image', completed({ content: envelope('image.generate') }));
+    const status = tool('openchamber_workflow', completed({ content: envelope('workflow.status') }));
+    const failed = tool('openchamber_workflow', completed({ content: envelope('workflow.run', false) }));
+    const parts = shellMessagePage(page([workflow, image, status, failed]), new Set()).data[0].content;
+    expect(parts[0].state).toEqual(workflow.state);
+    expect(parts[1].state).toEqual(image.state);
+    expect(parts[2].state.metadata[CONTENT_SHELL_METADATA_KEY].envelope).toEqual({ ok: true, action: 'workflow.status' });
+    expect(parts[3].state.metadata[CONTENT_SHELL_METADATA_KEY].envelope).toEqual({ ok: false, action: 'workflow.run' });
+  });
+
+  test('keeps which action an OpenChamber envelope answers and whether it succeeded', () => {
+    const envelope = (ok) => JSON.stringify({ schemaVersion: 1, ok, action: 'memory.save', data: { memory: { title: 'Uses bun' } } });
+    const marker = (name, text) => shellMessagePage(page([tool(name, completed({ content: [{ type: 'text', text }], metadata: {} }))]), new Set())
+      .data[0].content[0].state.metadata[CONTENT_SHELL_METADATA_KEY];
+    expect(marker('execute', envelope(true)).envelope).toEqual({ ok: true, action: 'memory.save' });
+    expect(marker('execute', JSON.stringify(envelope(false))).envelope).toEqual({ ok: false, action: 'memory.save' });
+    expect(marker('openchamber_memory', JSON.stringify(JSON.parse(envelope(true)), null, 2)).envelope).toEqual({ ok: true, action: 'memory.save' });
+    // A script's own answer, another tool, or text that only looks like one stays a plain marker.
+    expect(marker('execute', '{"saved":true}')).toEqual({ chars: 14 });
+    expect(marker('shell', envelope(true)).envelope).toBeUndefined();
+    expect(marker('execute', '{"schemaVersion":1, broken').envelope).toBeUndefined();
+  });
+
   test('does not mark a call that had no result to leave out', () => {
     const part = shellMessagePage(page([tool('glob', completed({ content: [], metadata: { count: 0 } }))]), new Set()).data[0].content[0];
     expect(part.state.metadata).toEqual({ count: 0 });
@@ -80,15 +106,17 @@ describe('shellMessagePage', () => {
 
   test('drops fields no client reads and leaves other parts alone', () => {
     const text = { type: 'text', text: 'hello' };
-    const reasoning = { type: 'reasoning', text: 'thinking', state: { encrypted: 'x'.repeat(100) }, time: { created: 1 } };
+    const signedText = { type: 'text', text: 'signed', native: { itemId: 'i' } };
+    const reasoning = { type: 'reasoning', text: 'thinking', native: { encrypted: 'x'.repeat(100) }, time: { created: 1 } };
     const result = shellMessagePage(
-      page([text, reasoning], { providerState: { responseId: 'r' }, rawFinish: 'stop', snapshot: { start: 'a', end: 'b' } }),
+      page([text, signedText, reasoning], { native: { responseId: 'r' }, rawFinish: 'stop', snapshot: { start: 'a', end: 'b' } }),
       new Set(),
     );
     const message = result.data[0];
     expect(message.content[0]).toBe(text);
-    expect(message.content[1]).toEqual({ type: 'reasoning', text: 'thinking', time: { created: 1 } });
-    expect('providerState' in message || 'rawFinish' in message || 'snapshot' in message).toBe(false);
+    expect(message.content[1]).toEqual({ type: 'text', text: 'signed' });
+    expect(message.content[2]).toEqual({ type: 'reasoning', text: 'thinking', time: { created: 1 } });
+    expect('native' in message || 'rawFinish' in message || 'snapshot' in message).toBe(false);
   });
 
   test('passes through anything that is not a message page', () => {

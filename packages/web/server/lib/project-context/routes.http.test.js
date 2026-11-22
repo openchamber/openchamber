@@ -76,18 +76,18 @@ const createApp = (overrides = {}) => {
 
 const BASE = '/api/project-context/path_dGVzdA';
 
-describe('todo item routes', () => {
-  const withRuntime = async (run) => {
-    const projectsDirPath = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-context-todos-http-'));
-    try {
-      let counter = 0;
-      const runtime = createProjectContextRuntime({ fsPromises, path, projectsDirPath, createId: () => `item-${++counter}` });
-      await run({ runtime, app: createApp(runtime).app });
-    } finally {
-      await fsPromises.rm(projectsDirPath, { recursive: true, force: true });
-    }
-  };
+const withRuntime = async (run) => {
+  const projectsDirPath = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-context-todos-http-'));
+  try {
+    let counter = 0;
+    const runtime = createProjectContextRuntime({ fsPromises, path, projectsDirPath, createId: () => `item-${++counter}` });
+    await run({ runtime, app: createApp(runtime).app });
+  } finally {
+    await fsPromises.rm(projectsDirPath, { recursive: true, force: true });
+  }
+};
 
+describe('todo item routes', () => {
   it('keeps a todo an agent added after the panel read when the panel changes another one', () => withRuntime(async ({ runtime, app }) => {
     const created = await request(app).post(`${BASE}/todos`).send({ text: 'A' }).expect(201);
     const a = created.body.todos[0].id;
@@ -133,6 +133,80 @@ describe('todo item routes', () => {
     await request(app).patch(`${BASE}/todos/x`).send({ completed: 'yes' }).expect(400);
     await request(app).patch(`${BASE}/todos/x`).send({}).expect(400);
     expect((await request(app).get(BASE).expect(200)).body.todos).toEqual([]);
+  }));
+
+  it('refuses a whole list read from the other store with 409', () => withRuntime(async ({ app }) => {
+    await request(app).post(`${BASE}/todos`).send({ id: 'a', text: 'A' }).expect(201);
+    const read = (await request(app).get(BASE).expect(200)).body;
+    expect(read.notesTodosStore).toMatch(/^local:/);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: 'repository:other.0' }).expect(409);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: 'elsewhere' }).expect(400);
+    expect((await request(app).get(BASE).expect(200)).body.todos.map((todo) => todo.id)).toEqual(['a']);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: read.notesTodosStore }).expect(200);
+  }));
+
+  it('checks the original store value after the route coerces it for its prefix check', () => withRuntime(async ({ app }) => {
+    await request(app).post(`${BASE}/todos`).send({ id: 'a', text: 'A' }).expect(201);
+    const read = (await request(app).get(BASE).expect(200)).body;
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: [read.notesTodosStore] }).expect(409);
+    await request(app).put(`${BASE}/todos`).send({ todos: [], store: ['elsewhere'] }).expect(400);
+    expect((await request(app).get(BASE).expect(200)).body.todos.map((todo) => todo.id)).toEqual(['a']);
+  }));
+});
+
+describe('plan links over HTTP', () => {
+  const PROJECT_ID = 'path_dGVzdA';
+  const todoOf = (response, id) => response.body.todos.find((todo) => todo.id === id);
+
+  it('forwards todo plan links and dependencies; omission keeps them, null and [] clear them', () => withRuntime(async ({ runtime, app }) => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
+    await request(app).post(`${BASE}/todos`).send({ id: 'a', text: 'A', planId: plan.id }).expect(201);
+    const created = await request(app).post(`${BASE}/todos`).send({ id: 'b', text: 'B', planId: plan.id, dependsOn: ['a'] }).expect(201);
+    expect(todoOf(created, 'b')).toMatchObject({ planId: plan.id, dependsOn: ['a'] });
+
+    // A text patch and a whole-list write from a client that never saw the fields keep them.
+    await request(app).patch(`${BASE}/todos/b`).send({ text: 'B2' }).expect(200);
+    const legacy = (await request(app).get(BASE)).body.todos.map(({ id, text, completed, createdAt }) => ({ id, text, completed, createdAt }));
+    const reordered = await request(app).put(`${BASE}/todos`).send({ todos: legacy.reverse() }).expect(200);
+    expect(todoOf(reordered, 'b')).toMatchObject({ text: 'B2', planId: plan.id, dependsOn: ['a'] });
+
+    await request(app).patch(`${BASE}/todos/a`).send({ planId: 3 }).expect(400);
+    await request(app).patch(`${BASE}/todos/b`).send({ dependsOn: [] }).expect(200);
+    const unlinked = await request(app).patch(`${BASE}/todos/b`).send({ planId: null }).expect(200);
+    expect(todoOf(unlinked, 'b')).toEqual({ id: 'b', text: 'B2', completed: false, createdAt: expect.any(Number) });
+  }));
+
+  it('deletes a referenced todo or a linked plan by unlinking what pointed at it', () => withRuntime(async ({ runtime, app }) => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
+    await request(app).post(`${BASE}/todos`).send({ id: 'a', text: 'A', planId: plan.id }).expect(201);
+    await request(app).post(`${BASE}/todos`).send({ id: 'b', text: 'B', planId: plan.id, dependsOn: ['a'] }).expect(201);
+    await request(app).post(`${BASE}/todos`).send({ id: 'c', text: 'C', planId: plan.id, dependsOn: ['b'] }).expect(201);
+
+    const deleted = await request(app).delete(`${BASE}/todos/a`).expect(200);
+    expect(deleted.body.todos.find((todo) => todo.id === 'b').dependsOn).toBeUndefined();
+    const saved = await request(app).put(`${BASE}/todos`).send({ todos: [{ id: 'c', text: 'C' }] }).expect(200);
+    expect(saved.body.todos).toEqual([{ id: 'c', text: 'C', completed: false, createdAt: expect.any(Number), planId: plan.id }]);
+    await request(app).delete(`${BASE}/plans/${plan.id}`).expect(200);
+    expect((await runtime.readContext(PROJECT_ID)).todos).toEqual([{ id: 'c', text: 'C', completed: false, createdAt: expect.any(Number) }]);
+  }));
+
+  it('links a note to a plan, keeps the link through a pin and unlinks it with null', () => withRuntime(async ({ runtime, app }) => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
+    const created = await request(app).post(`${BASE}/notes`).send({ body: 'N', planId: plan.id }).expect(201);
+    expect(created.body.note.planId).toBe(plan.id);
+    const pinned = await request(app).patch(`${BASE}/notes/${created.body.note.id}`).send({ pinned: true }).expect(200);
+    expect(pinned.body.note).toMatchObject({ pinned: true, planId: plan.id });
+    const unlinked = await request(app).patch(`${BASE}/notes/${created.body.note.id}`).send({ planId: null }).expect(200);
+    expect(unlinked.body.note).not.toHaveProperty('planId');
+  }));
+
+  it('sets and clears the plan session, refusing a body without a string or null', () => withRuntime(async ({ runtime, app }) => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Plan', body: '' });
+    const linked = await request(app).put(`${BASE}/plans/${plan.id}/session`).send({ sessionId: 'ses_1' }).expect(200);
+    expect(linked.body.plan.session).toMatchObject({ sessionId: 'ses_1' });
+    const cleared = await request(app).put(`${BASE}/plans/${plan.id}/session`).send({ sessionId: null }).expect(200);
+    expect(cleared.body.plan).not.toHaveProperty('session');
+    await request(app).put(`${BASE}/plans/${plan.id}/session`).send({ sessionId: 3 }).expect(400);
   }));
 });
 
@@ -223,16 +297,6 @@ describe('project context routes over HTTP', () => {
     expect(received.planRaw).toEqual({ raw: '# A\n\nx' });
   });
 
-  it('deletes a note', async () => {
-    const { app } = createApp();
-    await request(app).delete(`${BASE}/notes/n1`).expect(200);
-  });
-
-  it('deletes a plan', async () => {
-    const { app } = createApp();
-    await request(app).delete(`${BASE}/plans/p1`).expect(200);
-  });
-
   it('still rejects a genuinely malformed body', async () => {
     const { app } = createApp();
 
@@ -249,6 +313,21 @@ describe('project context routes over HTTP', () => {
       .put(`${BASE}/todos`)
       .send({ todos: [{ id: 1, text: 'bad id type' }] })
       .expect(400);
+  });
+
+  it('accepts finite negative todo timestamps and leaves link validation to the runtime', async () => {
+    const { app, received } = createApp();
+    const todos = [{ id: 't1', text: 'one', createdAt: -1, planId: 3, dependsOn: 'unchecked' }];
+    await request(app).put(`${BASE}/todos`).send({ todos }).expect(200);
+    expect(received.todos).toEqual(todos);
+  });
+
+  it('maps inherited error status fields without requiring an Error instance', async () => {
+    for (const status of [400, 404, 409]) {
+      const { app } = createApp({ readContext: async () => { throw Object.create({ status }); } });
+      const response = await request(app).get(BASE).expect(status);
+      expect(response.body).toEqual({ error: 'Failed to read project context' });
+    }
   });
 
   it('rejects an unknown note source', async () => {

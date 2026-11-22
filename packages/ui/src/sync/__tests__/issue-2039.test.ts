@@ -10,7 +10,7 @@ const applyDefaultModelAgentSelectionCalls: Array<{
   projectDefaultAgent?: string | null
   projectDefaultModel?: string | null
   projectDefaultVariant?: string | null
-}> = []
+} | undefined> = []
 const activateDirectoryCalls: Array<string | null | undefined> = []
 const activationOptions: Array<{ preserveManualModel?: boolean } | undefined> = []
 let configVariantOverride: string | null | undefined
@@ -102,6 +102,8 @@ const deferredStorage: Storage = {
 
 mock.module("@/stores/utils/safeStorage", () => ({
   getSafeStorage: () => deferredStorage,
+  flushDeferredStorage: () => {},
+  listStorageKeys: () => [],
   getDeferredSafeStorage: () => deferredStorage,
   getSafeSessionStorage: () => deferredStorage,
   createDeferredSafeJSONStorage: () => ({
@@ -132,6 +134,8 @@ mock.module("@/stores/permissionStore", () => ({
 }))
 
 mock.module("@/stores/useConfigStore", () => ({
+  selectCatalogLoadedForDirectory: () => false,
+  selectConfigAgentsForDirectory: () => [],
   useConfigStore: {
     getState: () => ({
       currentAgentName: "agent-default",
@@ -145,7 +149,7 @@ mock.module("@/stores/useConfigStore", () => ({
         activationOptions.push(options)
         await activationPending
       }),
-      applyDefaultModelAgentSelection: mock((selection: {
+      applyDefaultModelAgentSelection: mock((selection?: {
         projectDefaultAgent?: string | null
         projectDefaultModel?: string | null
         projectDefaultVariant?: string | null
@@ -215,6 +219,7 @@ mock.module("@/stores/useSkillsStore", () => ({
     }),
   },
   selectSkillsForDirectory: () => [],
+  selectAvailableSkillsForDirectory: () => [],
 }))
 
 mock.module("@/components/ui", () => ({
@@ -338,11 +343,14 @@ mock.module("../session-actions", () => ({
       sessionDirectoryRegistry.set(session.id, sessionDirectory)
     }
     const { useSessionUIStore: store } = await import("../session-ui-store")
-    store.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    store.getState().setCurrentSession(session.id, sessionDirectory, { transition: selectionTransition })
     store.getState().markSessionAsOpenChamberCreated(session.id)
     return session
   }),
   forkAfterMessage: mock(async () => undefined),
+  adoptSessionMove: () => undefined,
+  markSessionStatus: () => undefined,
+  openPendingSessionTranscript: () => undefined,
   deleteSession: mock(async () => true),
   deleteSessions: mock(async () => ({ deletedIds: [], failedIds: [] })),
   archiveSession: mock(async () => true),
@@ -354,6 +362,9 @@ mock.module("../session-actions", () => ({
   unshareSession: mock(async () => undefined),
   optimisticSend: mock(async () => undefined),
   sendMessage: mock(async () => undefined),
+  commitStagedRevert: mock(async () => undefined),
+  commitSessionRevert: mock(async () => undefined),
+  waitForPendingRevert: mock(async () => undefined),
   refetchSessionMessages: mock(async () => undefined),
   revertToMessage: mock(async () => undefined),
   unrevertSession: mock(async () => undefined),
@@ -366,20 +377,24 @@ mock.module("../session-actions", () => ({
 
 mock.module("@/lib/git/branchNameGenerator", () => ({
   generateBranchName: () => "generated-branch",
+  generatedBranchPrefix: (name: string) => (name === "generated-branch" ? "" : null),
 }))
 
 mock.module("@/lib/openchamberConfig", () => ({
+  getWorktreeCreateCommand: async () => "",
   getWorktreeSetupCommands: async () => [],
   getWorktreeSetupWaitEnabled: async () => false,
   substituteCommandVariables: (command: string) => command,
 }))
 mock.module("@/lib/sharedTrustConfirmation", () => ({
   resolveWorktreeSetupCommands: async () => [],
+  resolveWorktreeTeardownCommands: async () => [],
 }))
 
 mock.module("@/lib/worktrees/worktreeBootstrap", () => ({
   waitForWorktreeBootstrap: async () => undefined,
   clearWorktreeBootstrapState: () => undefined,
+  getWorktreeBootstrapState: () => null,
   markWorktreeBootstrapPending: () => undefined,
   setWorktreeBootstrapState: () => undefined,
   startWorktreeBootstrapWatcher: () => undefined,
@@ -623,7 +638,7 @@ describe("issue 2039 draft auto-accept", () => {
     expect(applyDefaultModelAgentSelectionCalls).toEqual([])
   })
 
-  test("loads the selected worktree's config when a project draft changes directories", async () => {
+  test("loads the selected worktree's config when a project draft changes directories", () => {
     const project = { id: "project-1", path: "/repo" }
     projectsState.projects = [project]
 
@@ -632,7 +647,6 @@ describe("issue 2039 draft auto-accept", () => {
       selectedProjectId: project.id,
       directoryOverride: project.path,
     })
-    await new Promise((resolve) => setTimeout(resolve, 0))
     activateDirectoryCalls.length = 0
     activationOptions.length = 0
 
@@ -640,7 +654,6 @@ describe("issue 2039 draft auto-accept", () => {
       projectId: project.id,
       directoryOverride: "/repo-worktree",
     })
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(activateDirectoryCalls).toEqual(["/repo-worktree"])
     expect(activationOptions).toEqual([{ preserveManualModel: true }])
@@ -702,17 +715,15 @@ describe("issue 2039 draft auto-accept", () => {
     expect(applyDefaultModelAgentSelectionCalls).toHaveLength(appliedBeforeClose)
   })
 
-  test("reapplies global defaults when opening a fresh no-project draft", async () => {
+  test("reapplies the Chats scope defaults when opening a fresh no-project draft", async () => {
     useSessionUIStore.getState().openNewSessionDraft()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(activateDirectoryCalls).toEqual([null])
-    expect(applyDefaultModelAgentSelectionCalls.at(-1)).toEqual({
-      projectDefaultAgent: undefined,
-      projectDefaultModel: undefined,
-      projectDefaultVariant: undefined,
-    })
+    expect(activateDirectoryCalls).toEqual(["/home/test/.config/openchamber/chats"])
+    expect(applyDefaultModelAgentSelectionCalls.length).toBeGreaterThan(0)
+    expect(applyDefaultModelAgentSelectionCalls.at(-1)).toBeUndefined()
   })
+
 
   test("restores project defaults when the next draft restores the previous project target", async () => {
     const project = {
@@ -801,6 +812,7 @@ describe("issue 2039 draft auto-accept", () => {
   })
 
   test("uses the server-authoritative directory after worktree session creation", async () => {
+    projectsState.projects = [{ id: "canonical", path: "/canonical/worktree" }]
     createdSessionDirectory = "/canonical/worktree"
     useSessionUIStore.getState().openNewSessionDraft({
       directoryOverride: "/requested/worktree",

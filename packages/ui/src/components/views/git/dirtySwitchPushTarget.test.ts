@@ -14,7 +14,10 @@ describe('dirty branch switch push target', () => {
 
   test('publishes an untracked branch under its own name on the fallback remote', () => {
     expect(dirtySwitchPushTarget('fresh', null, ['origin'], 'origin')).toEqual({ remoteName: 'origin', destinationRef: 'refs/heads/fresh' });
-    expect(dirtySwitchPushTarget('fresh', 'gone/fresh', ['origin'], 'origin')).toEqual({ remoteName: 'origin', destinationRef: 'refs/heads/fresh' });
     expect(dirtySwitchPushTarget('fresh', null, [], null)).toBeNull();
+  });
+
+  test('never publishes a branch elsewhere when its upstream is on a remote not in the list', () => {
+    expect(dirtySwitchPushTarget('fresh', 'backup/fresh', ['origin'], 'origin')).toBeNull();
   });
 });

@@ -6,7 +6,8 @@ import { execFile } from 'node:child_process';
 import express from 'express';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGitRepositoryCredentialRuntime } from './repository-credential-runtime.js';
-import { createHttpsCredentialReference } from './credential-resolver.js';
+import { createGitCredentialResolver, createHttpsCredentialReference } from './credential-resolver.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
 const GITHUB = 'https://github.com/owner/repo.git';
 const endpoint = (displayUrl) => ({ displayUrl, fingerprint: `fp:${displayUrl}` });
@@ -119,6 +120,39 @@ describe('createGitRepositoryCredentialRuntime', () => {
       expect((await ask(runtime, { secret: (await readEndpoint(dataDir)).secret, body })).answer).toEqual({ mode: 'none' });
       expect(resolved).toHaveLength(0);
     }
+  });
+
+  it('answers a provider\'s loopback HTTP instance under the managed transfer rule, and no other plain HTTP host', async () => {
+    const localRead = (url, provider, instance) => {
+      const credentialId = createHttpsCredentialReference({ provider, instance, credentialId: 'cred', credentialRevision: 1, providerUserId: `${instance}#7` });
+      return {
+        status: 'bound', revision: 1,
+        repository: { repositoryId: 'repo_one', configRevision: 'c1', remotes: [{ name: 'origin', fetch: endpoint(url), push: endpoint(url) }] },
+        binding: { repositoryId: 'repo_one', revision: 1, providers: [], auxiliary: [], remotes: [grant({ credentialId, fetch: endpoint(url), push: endpoint(url) })] },
+      };
+    };
+    // The real resolver: it decides whether this provider may be reached over loopback HTTP.
+    const resolver = createGitCredentialResolver({
+      describeProvider: sourceControlProviderDescriptors.get,
+      readTransportCredential: async ({ instance }) => ({
+        credentialId: 'cred', credentialRevision: 1, providerUserId: `${instance}#7`, status: 'valid', secret: 'local-secret', user: { login: 'alice' },
+      }),
+    });
+    const askFor = async (binding, query) => {
+      const { runtime, dataDir } = await setup({ binding, resolve: (input) => resolver.resolve(input) });
+      await runtime.publish();
+      return (await ask(runtime, { secret: (await readEndpoint(dataDir)).secret, body: { cwd: '/repo', query } })).answer;
+    };
+
+    const gitea = localRead('http://localhost:3000/team/repo.git', 'gitea', 'http://localhost:3000');
+    await expect(askFor(gitea, 'protocol=http\nhost=localhost:3000\npath=team/repo.git\n'))
+      .resolves.toEqual({ mode: 'managed', username: 'alice', password: 'local-secret' });
+    // GitHub never allows loopback HTTP instances, so its credential is not handed out there.
+    const github = localRead('http://localhost:3000/team/repo.git', 'github', 'github.com');
+    await expect(askFor(github, 'protocol=http\nhost=localhost:3000\npath=team/repo.git\n')).resolves.toEqual({ mode: 'none' });
+    // Plain HTTP to any other host is never answered.
+    const remote = localRead('http://gitea.example.com/team/repo.git', 'gitea', 'https://gitea.example.com');
+    await expect(askFor(remote, 'protocol=http\nhost=gitea.example.com\npath=team/repo.git\n')).resolves.toEqual({ mode: 'none' });
   });
 
   it('selects the grant by repository path, so an origin and a fork on one host keep their own accounts', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Metadata, Session } from '@/lib/opencode/model';
-import { getSessionWork, isDoneSuggested, isReviewSuggested, isSessionInWork, withSessionWorkState } from './sessionWorkMetadata';
+import { getSessionWork, isDoneSuggested, isReviewSuggested, isSessionInWork, withSessionWorkClosed, withSessionWorkState } from './sessionWorkMetadata';
 
 // SAFETY: fixture carries the identity fields and what the work helpers read.
 const session = (metadata: Metadata, idle = 100): Session => ({
@@ -54,5 +54,14 @@ describe('session work metadata', () => {
 
     // Asking for the state it already has changes nothing.
     expect(withSessionWorkState(closed, 'done', 30)).toBe(closed);
+  });
+
+  test('closing for a pin closes only work that is open, and gives a session never in work no record', () => {
+    const open: Metadata = { openchamber: { pinned: { at: 1 }, work: { state: 'open', openedAt: 5, openedBy: 'auto' } } };
+    expect(withSessionWorkClosed(open, 9)).toEqual({ openchamber: { pinned: { at: 1 }, work: { state: 'done', doneAt: 9, openedAt: 5, openedBy: 'auto' } } });
+    const never: Metadata = { openchamber: { pinned: { at: 1 } } };
+    expect(withSessionWorkClosed(never, 9)).toBe(never);
+    const done: Metadata = { openchamber: { work: { state: 'done', doneAt: 3 } } };
+    expect(withSessionWorkClosed(done, 9)).toBe(done);
   });
 });

@@ -12,6 +12,7 @@ import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { CreateMultiRunParams } from '@/types/multirun';
+import { createComposerText } from '../state/composerText';
 import { useParallelComposer, type ParallelComposer } from './useParallelComposer';
 
 type Capture = { composer: ParallelComposer | null };
@@ -39,14 +40,14 @@ async function withComposer(run: (input: {
       return { groupSlug: 'g', groupKey: 'id:g', sessionIds: ['a', 'b'], firstSessionId: 'a', failedCount: 0 };
     },
   });
-  let message = initialMessage;
+  const text = createComposerText(initialMessage);
   const Harness = () => {
     capture.composer = useParallelComposer({
       enabled: true,
       draftOpen: true,
       draftProjectId: 'p1',
-      message,
-      setMessage: (text) => { message = text; },
+      text,
+      setMessage: (next) => { text.set(next); },
     });
     return null;
   };

@@ -1,11 +1,6 @@
 import type { I18nKey } from '@/lib/i18n';
-import type { SourceControlProvider } from '@/lib/api/types';
+import type { ChangeRequestTerm } from './providers/descriptor';
 
-/**
- * GitLab calls a change request a merge request and numbers it with `!`. The
- * change-request copy (Git view, comparison, walkthrough) is written for GitHub; this names the GitLab
- * wording for each of those messages so one component speaks both.
- */
 const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['gitView.header.openPullRequest', 'gitView.mr.openMergeRequest'],
   ['gitView.pr.actions.createPr', 'gitView.mr.actions.createMr'],
@@ -29,6 +24,7 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['gitView.pr.actions.pushAndCreatePr', 'gitView.mr.actions.pushAndCreateMr'],
   ['gitView.pr.actions.pushAndCreateDraftPr', 'gitView.mr.actions.pushAndCreateDraftMr'],
   ['pullRequestComparison.pickAbove', 'gitView.mr.comparison.pickAbove'],
+  ['pullRequestComparison.diffUnavailable', 'gitView.mr.comparison.diffUnavailable'],
   ['pullRequestComparison.partial', 'gitView.mr.comparison.partial'],
   ['session.githubPrPicker.searchPlaceholder', 'gitView.mr.comparison.searchPlaceholder'],
   ['session.githubPrPicker.loading.pullRequests', 'gitView.mr.comparison.loading'],
@@ -44,27 +40,83 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['session.newWorktree.start.fromItemUnavailable', 'session.newWorktree.mr.fromItemUnavailable'],
   ['session.newWorktree.error.changeRequestAuthorityMissing', 'session.newWorktree.mr.authorityMissing'],
   ['chat.generatedResult.pullRequest.title', 'chat.generatedResult.mergeRequest.title'],
-  ['chat.chatInput.linked.pr.openInBrowserAria', 'chat.chatInput.linked.mr.openInBrowserAria'],
-  ['chat.chatInput.linked.pr.removeAria', 'chat.chatInput.linked.mr.removeAria'],
-  ['sessions.mergedCleanup.toast.removedTitle', 'sessions.mergedCleanup.toast.mr.removedTitle'],
   ['sessions.mergedCleanup.toast.archivedTitle', 'sessions.mergedCleanup.toast.mr.archivedTitle'],
-  ['sessions.mergedCleanup.toast.archivedDescription', 'sessions.mergedCleanup.toast.mr.archivedDescription'],
   ['sessions.mergedCleanup.toast.failedTitle', 'sessions.mergedCleanup.toast.mr.failedTitle'],
   ['sessions.sidebar.group.pr.status.open', 'sessions.sidebar.group.mr.status.open'],
   ['sessions.sidebar.group.pr.status.draft', 'sessions.sidebar.group.mr.status.draft'],
   ['chat.chatInput.prCheckContext', 'chat.chatInput.mrCheckContext'],
-  ['chat.chatInput.prCommentContext', 'chat.chatInput.mrCommentContext'],
   ['chat.message.context.prComment', 'chat.message.context.mrComment'],
   ['chat.message.context.prCheck', 'chat.message.context.mrCheck'],
   ['chat.workStatus.pr.untitled', 'chat.workStatus.mr.untitled'],
   ['chat.workStatus.action.openPr', 'chat.workStatus.action.openMr'],
   ['chat.workStatus.breakdown.prCountSingle', 'chat.workStatus.breakdown.mrCountSingle'],
   ['chat.workStatus.breakdown.prCountPlural', 'chat.workStatus.breakdown.mrCountPlural'],
+  ['chat.prWatch.title', 'chat.prWatch.mr.title'],
+  ['chat.prWatch.count', 'chat.prWatch.mr.count'],
+  ['chat.sessionNotice.pullRequest.title', 'chat.sessionNotice.mergeRequest.title'],
 ]);
 
-/**
- * The message to show for `key` on a project hosted by `provider`: its GitLab
- * wording where one exists, else the key itself.
- */
-export const changeRequestCopy = (key: I18nKey, provider: SourceControlProvider | null | undefined): I18nKey =>
-  provider === 'gitlab' ? mergeRequestCopy.get(key) ?? key : key;
+const changeCopy = new Map<I18nKey, I18nKey>([
+  ['gitView.header.openPullRequest', 'gitView.change.openChange'],
+  ['gitView.pr.actions.createPr', 'gitView.change.actions.create'],
+  ['gitView.pr.actions.openOnProviderAria', 'gitView.change.actions.openOnProviderAria'],
+  ['gitView.pr.actions.refresh', 'gitView.change.actions.refresh'],
+  ['gitView.pr.actions.refreshAria', 'gitView.change.actions.refreshAria'],
+  ['gitView.pr.checkingStatus', 'gitView.change.checkingStatus'],
+  ['gitView.pr.history.closed', 'gitView.change.history.closed'],
+  ['gitView.pr.history.merged', 'gitView.change.history.merged'],
+  ['gitView.pr.placeholder.main', 'gitView.change.placeholder.main'],
+  ['gitView.pr.placeholder.title', 'gitView.change.placeholder.title'],
+  ['gitView.pr.statusUnavailable', 'gitView.change.statusUnavailable'],
+  ['gitView.pr.toast.createPrFailed', 'gitView.change.toast.createFailed'],
+  ['gitView.pr.toast.generateDescriptionFailed', 'gitView.change.toast.generateDescriptionFailed'],
+  ['gitView.pr.toast.prCreated', 'gitView.change.toast.created'],
+  ['gitView.pullRequest.availableOnFeatureBranches', 'gitView.change.availableOnFeatureBranches'],
+  ['gitView.pullRequest.title', 'gitView.change.title'],
+  ['session.githubIntegration.tabs.pullRequests', 'gitView.change.comparison.mode'],
+  ['pullRequestComparison.select', 'gitView.change.comparison.select'],
+  ['gitView.pr.actions.createDraftPr', 'gitView.change.actions.createDraft'],
+  ['gitView.pr.actions.pushAndCreatePr', 'gitView.change.actions.pushAndCreate'],
+  ['gitView.pr.actions.pushAndCreateDraftPr', 'gitView.change.actions.pushAndCreateDraft'],
+  ['pullRequestComparison.pickAbove', 'gitView.change.comparison.pickAbove'],
+  ['pullRequestComparison.partial', 'gitView.change.comparison.partial'],
+  ['pullRequestComparison.diffUnavailable', 'gitView.change.comparison.diffUnavailable'],
+  ['session.githubPrPicker.searchPlaceholder', 'gitView.change.comparison.searchPlaceholder'],
+  ['session.githubPrPicker.loading.pullRequests', 'gitView.change.comparison.loading'],
+  ['session.githubPrPicker.empty.noPullRequestsFound', 'gitView.change.comparison.empty'],
+  ['session.githubPrPicker.empty.notConnected', 'gitView.change.comparison.notConnected'],
+  ['session.githubPrPicker.error.runtimeUnavailable', 'gitView.change.comparison.runtimeUnavailable'],
+  ['session.githubPrPicker.toast.loadMoreFailed', 'gitView.change.comparison.loadMoreFailed'],
+  ['walkthrough.scope.pullRequest', 'gitView.change.walkthroughScope'],
+  ['gitView.pullRequest.createHint', 'gitView.change.createHint'],
+  ['session.newWorktree.mode.fromItem', 'session.newWorktree.change.item'],
+  ['session.newWorktree.item.title', 'session.newWorktree.change.item'],
+  ['session.newWorktree.start.fromItemHint', 'session.newWorktree.change.fromItemHint'],
+  ['session.newWorktree.start.fromItemUnavailable', 'session.newWorktree.change.fromItemUnavailable'],
+  ['session.newWorktree.error.changeRequestAuthorityMissing', 'session.newWorktree.change.authorityMissing'],
+  ['chat.generatedResult.pullRequest.title', 'chat.generatedResult.change.title'],
+  ['sessions.mergedCleanup.toast.archivedTitle', 'sessions.mergedCleanup.toast.change.archivedTitle'],
+  ['sessions.mergedCleanup.toast.failedTitle', 'sessions.mergedCleanup.toast.change.failedTitle'],
+  ['sessions.sidebar.group.pr.status.open', 'sessions.sidebar.group.change.status.open'],
+  ['sessions.sidebar.group.pr.status.draft', 'sessions.sidebar.group.change.status.draft'],
+  ['chat.chatInput.prCheckContext', 'chat.chatInput.changeCheckContext'],
+  ['chat.message.context.prComment', 'chat.message.context.changeComment'],
+  ['chat.message.context.prCheck', 'chat.message.context.changeCheck'],
+  ['chat.workStatus.pr.untitled', 'chat.workStatus.change.untitled'],
+  ['chat.workStatus.action.openPr', 'chat.workStatus.change.openChange'],
+  ['chat.workStatus.breakdown.prCountSingle', 'chat.workStatus.change.countSingle'],
+  ['chat.workStatus.breakdown.prCountPlural', 'chat.workStatus.change.countPlural'],
+  ['chat.prWatch.title', 'chat.prWatch.change.title'],
+  ['chat.prWatch.count', 'chat.prWatch.change.count'],
+  ['chat.sessionNotice.pullRequest.title', 'chat.sessionNotice.change.title'],
+]);
+
+const TERM_COPY = {
+  mergeRequest: mergeRequestCopy,
+  change: changeCopy,
+} satisfies Record<Exclude<ChangeRequestTerm, 'pullRequest'>, ReadonlyMap<I18nKey, I18nKey>>;
+
+export const changeRequestCopyKeys = (term: Exclude<ChangeRequestTerm, 'pullRequest'>): I18nKey[] => [...TERM_COPY[term].keys()];
+
+export const changeRequestCopy = (key: I18nKey, term: ChangeRequestTerm): I18nKey =>
+  term === 'pullRequest' ? key : TERM_COPY[term].get(key) ?? key;

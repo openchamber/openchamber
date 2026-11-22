@@ -3,7 +3,7 @@ import { toast } from '@/components/ui';
 import { parseModelIdentifier, type ParsedModelIdentifier } from '@/lib/modelIdentifier';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
-import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useProjectsStore, resolveUploadMime } from '@/stores/useProjectsStore';
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
 
@@ -33,7 +33,6 @@ type EditableProject = Pick<
   'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultAgent' | 'defaultModel' | 'defaultVariant' | 'iconImage' | 'path'
 >;
 
-/** The editable identity fields, in the shape the form state holds them. */
 type ProjectIdentity = {
   label: string;
   icon: string | null;
@@ -103,12 +102,6 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
 
   const projectId = project?.id ?? null;
 
-  // What the form shows versus what the store holds. The form follows the
-  // store only while it still matches what it was last seeded with; a form
-  // the user has changed keeps their text. The store hands out a fresh
-  // project object on every settings round trip, including the echo of this
-  // form's own auto-save, and re-seeding on each of those wiped the name
-  // mid-typing (#3552).
   const formIdentityRef = React.useRef<ProjectIdentity>(EMPTY_IDENTITY);
   formIdentityRef.current = { label: name, icon, color, iconBackground, defaultAgent, defaultModel, defaultVariant };
   const seededRef = React.useRef<{ projectId: string | null; identity: ProjectIdentity }>({ projectId: null, identity: EMPTY_IDENTITY });
@@ -130,12 +123,10 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     const switchedProject = seeded.projectId !== project.id;
     if (!switchedProject) {
       if (sameIdentity(formIdentityRef.current, incoming)) {
-        // The store caught up with the form (a save landed): new baseline.
         seededRef.current = { projectId: project.id, identity: incoming };
         return;
       }
       if (!sameIdentity(formIdentityRef.current, seeded.identity)) {
-        // The user is editing; an external change does not overwrite them.
         return;
       }
     }
@@ -187,8 +178,6 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
 
   const handleDefaultModelChange = React.useCallback((providerId: string, modelId: string) => {
     setDefaultModel(providerId && modelId ? `${providerId}/${modelId}` : undefined);
-    // Variants belong to a model. Carrying the old one over would pin a name
-    // the new model may not have.
     setDefaultVariant(undefined);
   }, []);
 
@@ -201,6 +190,20 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       return;
     }
 
+    const mime = resolveUploadMime(file);
+    if (!mime) {
+      toast.error(t('settings.projects.page.toast.iconUnsupportedFormat'));
+      return;
+    }
+    if (!Number.isFinite(file.size) || file.size <= 0) {
+      toast.error(t('settings.projects.page.toast.iconEmpty'));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error(t('settings.projects.page.toast.iconTooLarge'));
+      return;
+    }
+
     setPendingRemoveImageIcon(false);
     setPreviewImageFailed(false);
     setPendingUploadIconFile(file);
@@ -210,7 +213,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       }
       return URL.createObjectURL(file);
     });
-  }, [isUploadingIcon, project]);
+  }, [isUploadingIcon, project, t]);
 
   const handleRemoveImageIcon = React.useCallback(() => {
     if (!project || !hasRemovableImageIcon || isRemovingCustomIcon) {
@@ -261,7 +264,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     }
   }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, project, t]);
 
-  const prepareSaveData = React.useCallback(async (options?: { silent?: boolean }): Promise<ProjectIdentitySaveData | null> => {
+  const prepareSaveData = React.useCallback(async (options?: { silent?: boolean; skipIconChanges?: boolean }): Promise<ProjectIdentitySaveData | null> => {
     const silent = options?.silent === true;
     if (!project) {
       return null;
@@ -272,7 +275,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       return null;
     }
 
-    if (pendingUploadIconFile) {
+    if (pendingUploadIconFile && !options?.skipIconChanges) {
       setIsUploadingIcon(true);
       const uploadResult = await uploadProjectIcon(project.id, pendingUploadIconFile);
       setIsUploadingIcon(false);
@@ -289,7 +292,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
 
     const willRemoveImageIcon = pendingRemoveImageIcon && Boolean(project.iconImage);
 
-    if (willRemoveImageIcon) {
+    if (willRemoveImageIcon && !options?.skipIconChanges) {
       setIsRemovingCustomIcon(true);
       const removeResult = await removeProjectIcon(project.id);
       setIsRemovingCustomIcon(false);

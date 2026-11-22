@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'crypto';
 import os from 'os';
 import path from 'path';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
@@ -25,20 +26,24 @@ const emptyPersonal = {
   setupWorktree: [],
   setupWorktreeWait: null,
   setupWorktreeMode: 'append',
+  teardownWorktree: [],
+  createWorktreeCommand: '',
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
   hiddenSharedActionIds: [],
   sharedTrust: null,
+  notesTodosInRepository: false,
 };
 
-const createRuntime = async () => {
+const createRuntime = async (deps = {}) => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-project-setup-'));
   const runtime = createProjectConfigRuntime({
     fsPromises: await import('fs/promises'),
     path,
     projectsDirPath: path.join(tempRoot, 'projects'),
     createTaskID: () => 'task-fixed-id',
+    ...deps,
   });
   return {
     runtime,
@@ -110,21 +115,27 @@ describe('project setup sanitizers', () => {
       'setup-worktree': ['bun install'],
       'setup-worktree-wait': true,
       setupWorktreeMode: 'replace',
+      teardownWorktree: [' docker compose down ', ''],
+      createWorktreeCommand: ' git parhel add "$WORKTREE_PATH" "$WORKTREE_BRANCH" ',
       projectActions: [{ id: 'a', name: 'A', command: 'x' }],
       projectActionsPrimaryId: 'missing',
       draftStarters: [{ type: 'skill', name: 's' }],
       hiddenSharedActionIds: ['dev', '', 'dev', 7],
       sharedTrust: { hash: 'sha256:abc', trustedAt: 5 },
+      notesTodosInRepository: true,
       scheduledTasks: [{ id: 't' }],
     })).toEqual({
       setupWorktree: ['bun install'],
       setupWorktreeWait: true,
       setupWorktreeMode: 'replace',
+      teardownWorktree: ['docker compose down'],
+      createWorktreeCommand: 'git parhel add "$WORKTREE_PATH" "$WORKTREE_BRANCH"',
       projectActions: [{ id: 'a', name: 'A', command: 'x', icon: null }],
       projectActionsPrimaryId: null,
       draftStarters: [{ type: 'skill', name: 's' }],
       hiddenSharedActionIds: ['dev'],
       sharedTrust: { hash: 'sha256:abc', trustedAt: 5 },
+      notesTodosInRepository: true,
     });
     expect(projectSetupViewOf(null)).toEqual(emptyPersonal);
   });
@@ -142,6 +153,12 @@ describe('project setup sanitizers', () => {
       setupWorktreeMode: 'replace',
     });
     expect(projectSetupPatchToStored({})).toEqual({});
+    expect(projectSetupPatchToStored({ teardownWorktree: [' docker compose down ', ''] })).toEqual({ teardownWorktree: ['docker compose down'] });
+    expect(() => projectSetupPatchToStored({ teardownWorktree: 'docker compose down' })).toThrow('teardownWorktree must be');
+    expect(projectSetupPatchToStored({ createWorktreeCommand: ' git parhel add "$WORKTREE_PATH" ' })).toEqual({ createWorktreeCommand: 'git parhel add "$WORKTREE_PATH"' });
+    // An empty command removes the key, back to the built-in creation.
+    expect(projectSetupPatchToStored({ createWorktreeCommand: '  ' })).toEqual({ createWorktreeCommand: undefined });
+    expect(() => projectSetupPatchToStored({ createWorktreeCommand: ['git'] })).toThrow('createWorktreeCommand must be');
     expect(() => projectSetupPatchToStored({ setupWorktree: 'a' })).toThrow('setupWorktree must be');
     expect(() => projectSetupPatchToStored({ setupWorktreeWait: 'yes' })).toThrow('setupWorktreeWait must be');
     expect(() => projectSetupPatchToStored({ projectActions: {} })).toThrow('projectActions must be');
@@ -150,6 +167,10 @@ describe('project setup sanitizers', () => {
     expect(() => projectSetupPatchToStored({ setupWorktreeMode: 'merge' })).toThrow('setupWorktreeMode must be');
     expect(() => projectSetupPatchToStored({ sharedTrustHash: '' })).toThrow('sharedTrustHash must be');
     expect(projectSetupPatchToStored({ sharedTrustHash: null })).toEqual({ sharedTrust: undefined });
+    expect(projectSetupPatchToStored({ notesTodosInRepository: true })).toEqual({ notesTodosInRepository: true });
+    // Off removes the key: the personal file holds only what the user turned on.
+    expect(projectSetupPatchToStored({ notesTodosInRepository: false })).toEqual({ notesTodosInRepository: undefined });
+    expect(() => projectSetupPatchToStored({ notesTodosInRepository: 'yes' })).toThrow('notesTodosInRepository must be');
     expect(projectSetupPatchToStored({ sharedTrustHash: 'sha256:x' }).sharedTrust).toMatchObject({ hash: 'sha256:x' });
     expect(() => projectSetupPatchToStored([])).toThrow('patch must be');
   });
@@ -168,18 +189,23 @@ describe('shared project config', () => {
   });
 
   it('parses a version-1 file and sanitizes its lists', () => {
-    expect(parseSharedProjectConfig(JSON.stringify({
+    const document = {
       version: 1,
       setupWorktree: ['bun install', ''],
       setupWorktreeWait: true,
+      teardownWorktree: ['docker compose down', ' '],
       projectActions: [{ id: 'dev', name: 'Dev', command: 'bun run dev' }, { id: '', name: 'x', command: 'y' }],
       draftStarters: [{ type: 'skill', name: 's' }],
       plansDir: 'docs/plans',
-    }))).toEqual({
+      magicPrompts: { 'git.commit.generate.instructions': '' },
+    };
+    expect(parseSharedProjectConfig(JSON.stringify(document))).toEqual({
       status: 'ok',
+      document,
       config: {
         setupWorktree: ['bun install'],
         setupWorktreeWait: true,
+        teardownWorktree: ['docker compose down'],
         projectActions: [{ id: 'dev', name: 'Dev', command: 'bun run dev', icon: null }],
         draftStarters: [{ type: 'skill', name: 's' }],
         plansDir: 'docs/plans',
@@ -187,7 +213,8 @@ describe('shared project config', () => {
     });
     expect(parseSharedProjectConfig('{"version":1}')).toEqual({
       status: 'ok',
-      config: { setupWorktree: [], setupWorktreeWait: null, projectActions: [], draftStarters: [], plansDir: null },
+      document: { version: 1 },
+      config: { setupWorktree: [], setupWorktreeWait: null, teardownWorktree: [], projectActions: [], draftStarters: [], plansDir: null },
     });
   });
 
@@ -196,6 +223,7 @@ describe('shared project config', () => {
     expect(parseSharedProjectConfig('[]')).toEqual({ status: 'invalid', reason: 'not an object' });
     expect(parseSharedProjectConfig('{"version":2}').reason).toMatch(/unsupported version/);
     expect(parseSharedProjectConfig('{"version":1,"setupWorktree":"bun install"}').reason).toMatch(/setupWorktree must be/);
+    expect(parseSharedProjectConfig('{"version":1,"teardownWorktree":"docker compose down"}').reason).toMatch(/teardownWorktree must be/);
     expect(parseSharedProjectConfig('{"version":1,"plansDir":"/etc"}').reason).toMatch(/plansDir/);
   });
 
@@ -205,6 +233,7 @@ describe('shared project config', () => {
       config: {
         setupWorktree: ['bun install'],
         setupWorktreeWait: true,
+        teardownWorktree: ['docker compose down'],
         projectActions: [
           { id: 'dev', name: 'Dev', command: 'bun run dev', icon: null },
           { id: 'test', name: 'Test', command: 'bun test', icon: null },
@@ -217,6 +246,7 @@ describe('shared project config', () => {
     const personal = {
       ...emptyPersonal,
       setupWorktree: ['cp .env.example .env'],
+      teardownWorktree: ['rm -f .dev.pid'],
       projectActions: [{ id: 'test', name: 'My test', command: 'bun test --watch', icon: null }],
       projectActionsPrimaryId: 'test',
       draftStarters: [{ type: 'command', name: 'both' }, { type: 'command', name: 'mine' }],
@@ -226,6 +256,7 @@ describe('shared project config', () => {
     const merged = mergeProjectSetup(personal, shared);
     expect(merged.setupWorktree).toEqual(['bun install', 'cp .env.example .env']);
     expect(merged.setupWorktreeWait).toBe(true);
+    expect(merged.teardownWorktree).toEqual(['docker compose down', 'rm -f .dev.pid']);
     expect(merged.projectActions).toEqual([
       { id: 'dev', name: 'Dev', command: 'bun run dev', icon: null, source: 'shared' },
       { id: 'test', name: 'My test', command: 'bun test --watch', icon: null, source: 'personal' },
@@ -242,9 +273,17 @@ describe('shared project config', () => {
   });
 
   it('hashes the executable parts of the shared config, order-independent for actions', () => {
-    const base = { setupWorktree: ['bun install'], projectActions: [{ id: 'b', name: 'B', command: 'y', icon: null }, { id: 'a', name: 'A', command: 'x', icon: null }], draftStarters: [], plansDir: null, setupWorktreeWait: null };
+    const base = { setupWorktree: ['bun install'], teardownWorktree: [], projectActions: [{ id: 'b', name: 'B', command: 'y', icon: null }, { id: 'a', name: 'A', command: 'x', icon: null }], draftStarters: [], plansDir: null, setupWorktreeWait: null };
     const hash = sharedTrustHashOf(base);
     expect(hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    // A trust answer recorded before teardown commands existed still matches.
+    const legacy = createHash('sha256').update(JSON.stringify({
+      setupWorktree: ['bun install'],
+      projectActions: [{ id: 'a', command: 'x' }, { id: 'b', command: 'y' }],
+    })).digest('hex');
+    expect(hash).toBe(`sha256:${legacy}`);
+    expect(sharedTrustHashOf({ ...base, teardownWorktree: ['docker compose down'] })).not.toBe(hash);
+    expect(sharedTrustHashOf({ ...base, setupWorktree: [], projectActions: [], teardownWorktree: ['docker compose down'] })).toMatch(/^sha256:/);
     expect(sharedTrustHashOf({ ...base, projectActions: [...base.projectActions].reverse() })).toBe(hash);
     // Renaming or re-describing does not change what runs; changing a command does.
     expect(sharedTrustHashOf({ ...base, projectActions: base.projectActions.map((a) => ({ ...a, name: 'Renamed', icon: 'rocket' })) })).toBe(hash);
@@ -254,7 +293,7 @@ describe('shared project config', () => {
   });
 
   it('reports trust: nothing to trust without executable shared parts, trusted only for the recorded hash', () => {
-    const inert = { status: 'ok', config: { setupWorktree: [], setupWorktreeWait: null, projectActions: [], draftStarters: [{ type: 'skill', name: 's' }], plansDir: null } };
+    const inert = { status: 'ok', config: { setupWorktree: [], setupWorktreeWait: null, teardownWorktree: [], projectActions: [], draftStarters: [{ type: 'skill', name: 's' }], plansDir: null } };
     expect(mergeProjectSetup(emptyPersonal, inert).trust).toEqual({ hash: null, trusted: true });
     expect(mergeProjectSetup(emptyPersonal, { status: 'missing' }).trust).toEqual({ hash: null, trusted: true });
 
@@ -265,11 +304,12 @@ describe('shared project config', () => {
     expect(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: 'sha256:stale', trustedAt: 1 } }, risky).trust.trusted).toBe(false);
   });
 
-  it('lets the personal wait flag and replace mode win over shared', () => {
-    const shared = { status: 'ok', config: { setupWorktree: ['bun install'], setupWorktreeWait: true, projectActions: [], draftStarters: [], plansDir: null } };
+  it('lets the personal wait flag and replace mode win over shared, and keeps the shared teardown in replace mode', () => {
+    const shared = { status: 'ok', config: { setupWorktree: ['bun install'], setupWorktreeWait: true, teardownWorktree: ['docker compose down'], projectActions: [], draftStarters: [], plansDir: null } };
     const merged = mergeProjectSetup({ ...emptyPersonal, setupWorktree: ['mine'], setupWorktreeWait: false, setupWorktreeMode: 'replace' }, shared);
     expect(merged.setupWorktree).toEqual(['mine']);
     expect(merged.setupWorktreeWait).toBe(false);
+    expect(merged.teardownWorktree).toEqual(['docker compose down']);
   });
 
   it('carries an invalid shared read through with its reason and merges nothing from it', () => {
@@ -282,7 +322,7 @@ describe('shared project config', () => {
 });
 
 describe('shared project config writes', () => {
-  const empty = { setupWorktree: [], setupWorktreeWait: null, projectActions: [], draftStarters: [], plansDir: null };
+  const empty = { setupWorktree: [], setupWorktreeWait: null, teardownWorktree: [], projectActions: [], draftStarters: [], plansDir: null };
 
   it('applies a patch over the current config and refuses wrong shapes', () => {
     const next = applySharedProjectSetupPatch({ ...empty, setupWorktree: ['old'] }, {
@@ -315,6 +355,16 @@ describe('shared project config writes', () => {
     ].join('\n'));
     expect(isSharedProjectConfigEmpty(empty)).toBe(true);
     expect(isSharedProjectConfigEmpty({ ...empty, setupWorktreeWait: false })).toBe(false);
+    expect(isSharedProjectConfigEmpty({ ...empty, teardownWorktree: ['docker compose down'] })).toBe(false);
+  });
+
+  it('writes teardown commands through a patch and back out of the file', () => {
+    const next = applySharedProjectSetupPatch(empty, { teardownWorktree: [' docker compose down ', ''] });
+    expect(next.teardownWorktree).toEqual(['docker compose down']);
+    expect(() => applySharedProjectSetupPatch(empty, { teardownWorktree: 'x' })).toThrow('teardownWorktree must be');
+    const text = serializeSharedProjectConfig(next);
+    expect(JSON.parse(text)).toEqual({ version: 1, teardownWorktree: ['docker compose down'] });
+    expect(parseSharedProjectConfig(text).config.teardownWorktree).toEqual(['docker compose down']);
   });
 });
 
@@ -389,6 +439,43 @@ describe('project setup runtime', () => {
       await runtime.updateProjectSetup('project-a', { projectActionsPrimaryId: null });
       expect(await readRaw('project-a')).not.toHaveProperty('projectActionsPrimaryId');
       expect((await runtime.readProjectSetup('project-a')).projectActionsPrimaryId).toBeNull();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('turns repository notes and todos on per project through the switch, which commits the option', async () => {
+    const switched = [];
+    const { runtime, tempRoot, cleanup } = await createRuntime({
+      switchNotesTodosStorage: async (id, { enabled, file, commit }) => {
+        switched.push({ id, enabled, file });
+        await commit();
+      },
+    });
+    try {
+      const projectID = createProjectIdFromPath(path.join(tempRoot, 'repo'));
+      const file = path.join(tempRoot, 'repo', '.openchamber', 'notes-todos.json');
+      expect(await runtime.resolveNotesTodosFile(projectID)).toBeNull();
+      await runtime.updateProjectSetup(projectID, { notesTodosInRepository: true });
+      expect((await runtime.readProjectSetup(projectID)).personal.notesTodosInRepository).toBe(true);
+      expect(await runtime.resolveNotesTodosFile(projectID)).toBe(file);
+      await runtime.updateProjectSetup(projectID, { notesTodosInRepository: true });
+      await runtime.updateProjectSetup(projectID, { notesTodosInRepository: false });
+      expect(await runtime.resolveNotesTodosFile(projectID)).toBeNull();
+      expect(switched).toEqual([{ id: projectID, enabled: true, file }, { id: projectID, enabled: false, file }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the option when the switch fails', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime({
+      switchNotesTodosStorage: async () => { throw new Error('move failed'); },
+    });
+    try {
+      const projectID = createProjectIdFromPath(path.join(tempRoot, 'repo'));
+      await expect(runtime.updateProjectSetup(projectID, { notesTodosInRepository: true })).rejects.toThrow('move failed');
+      expect((await runtime.readProjectSetup(projectID)).personal.notesTodosInRepository).toBe(false);
     } finally {
       await cleanup();
     }
@@ -631,5 +718,79 @@ describe('project-setup clamp surrogate-pair boundary (#1990)', () => {
   it('a setup command straddling the 4,000-char cut is dropped whole', () => {
     const [command] = sanitizeSetupCommands([`${'a'.repeat(3999)}${EMOJI}x`]);
     expect(command).toBe('a'.repeat(3999));
+  });
+});
+
+describe('shared file keys owned by other writers', () => {
+  const setupRepo = async (tempRoot, content) => {
+    const repo = path.join(tempRoot, 'repo');
+    await mkdir(path.join(repo, '.openchamber'), { recursive: true });
+    const sharedPath = path.join(repo, '.openchamber', 'project.json');
+    if (content !== undefined) await writeFile(sharedPath, content);
+    return { repo, sharedPath, projectId: createProjectIdFromPath(repo) };
+  };
+
+  it('keeps Magic Prompts and unknown keys through setup saves, repairs and the last setup removal', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const { sharedPath, projectId } = await setupRepo(tempRoot, JSON.stringify({
+        version: 1,
+        setupWorktree: ['bun install'],
+        magicPrompts: { 'plan.todo.instructions': '' },
+        futureKey: [1],
+      }));
+      await runtime.updateSharedProjectSetup(projectId, { setupWorktree: [] });
+      expect(JSON.parse(await readFile(sharedPath, 'utf8'))).toEqual({ version: 1, magicPrompts: { 'plan.todo.instructions': '' }, futureKey: [1] });
+
+      // A wrongly shaped setup key is repaired; the keys around it stay.
+      await writeFile(sharedPath, JSON.stringify({ version: 1, setupWorktree: 'oops', magicPrompts: { 'a.visible': 'A' } }));
+      await runtime.updateSharedProjectSetup(projectId, { setupWorktree: ['x'] });
+      expect(JSON.parse(await readFile(sharedPath, 'utf8'))).toEqual({ version: 1, setupWorktree: ['x'], magicPrompts: { 'a.visible': 'A' } });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('changes one foreign key without touching setup or the personal file, and refuses a file it would have to repair', async () => {
+    const { runtime, tempRoot, readRaw, cleanup } = await createRuntime();
+    try {
+      const { repo, sharedPath, projectId } = await setupRepo(tempRoot);
+      await runtime.updateSharedProjectSetup(projectId, { setupWorktree: ['bun install'] });
+      const personalBefore = await readRaw(projectId);
+      // Hand-written setup with entries the sanitizer would drop goes back out as written.
+      const handWritten = { version: 1, setupWorktree: ['bun install', ''], futureKey: true };
+      await writeFile(sharedPath, JSON.stringify(handWritten));
+
+      await runtime.updateSharedProjectEntry(projectId, repo, 'magicPrompts', () => ({ 'a.visible': 'A' }));
+      expect(JSON.parse(await readFile(sharedPath, 'utf8'))).toEqual({ ...handWritten, magicPrompts: { 'a.visible': 'A' } });
+      expect(await readRaw(projectId)).toEqual(personalBefore);
+
+      for (const content of ['{ broken', '{"version":1,"setupWorktree":"x"}']) {
+        await writeFile(sharedPath, content);
+        await expect(runtime.updateSharedProjectEntry(projectId, repo, 'magicPrompts', () => ({ 'a.visible': 'A' }))).rejects.toMatchObject({ code: 'shared_config_invalid' });
+        expect(await readFile(sharedPath, 'utf8')).toBe(content);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('serializes setup and foreign-key writes from two runtimes sharing a projects dir', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const other = createProjectConfigRuntime({ fsPromises: await import('fs/promises'), path, projectsDirPath: path.join(tempRoot, 'projects') });
+      const { repo, sharedPath, projectId } = await setupRepo(tempRoot);
+      const writes = [];
+      for (let index = 0; index < 6; index += 1) {
+        writes.push(runtime.updateSharedProjectSetup(projectId, { setupWorktree: [`cmd-${index}`] }));
+        writes.push(other.updateSharedProjectEntry(projectId, repo, 'magicPrompts', (current) => ({ ...(current ?? {}), [`p${index}.visible`]: `P${index}` })));
+      }
+      await Promise.all(writes);
+      const document = JSON.parse(await readFile(sharedPath, 'utf8'));
+      expect(Object.keys(document.magicPrompts)).toHaveLength(6);
+      expect(document.setupWorktree).toEqual(['cmd-5']);
+    } finally {
+      await cleanup();
+    }
   });
 });

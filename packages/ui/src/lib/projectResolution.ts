@@ -2,6 +2,7 @@ import type { ProjectEntry } from "@/lib/api/types";
 import type { WorktreeMetadata } from "@/types/worktree";
 
 import { normalizePath } from "@/lib/pathNormalization";
+import { spaceProjectDirectoryOf } from "@/lib/spaces/spaces-store";
 export const normalizeProjectPath = normalizePath;
 
 export const resolveProjectForDirectory = (
@@ -58,7 +59,9 @@ export const resolveProjectForSessionDirectory = (
   projects: ProjectEntry[],
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
   directory: string | null,
+  spaceProjectDirectory: string | null = spaceProjectDirectoryOf(directory),
 ): ProjectEntry | null => {
+  if (spaceProjectDirectory) return resolveProjectForDirectory(projects, spaceProjectDirectory);
   const directProject = resolveProjectForDirectory(projects, directory);
   const worktreeResolution = resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory);
   if (!directProject) return worktreeResolution?.project ?? null;

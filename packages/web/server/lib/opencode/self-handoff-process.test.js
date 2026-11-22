@@ -22,7 +22,7 @@ const cliRuntime = process.versions.bun ? 'node' : process.execPath;
 const fakeOpenCodeSource = `
   const http = require('node:http');
   const args = process.argv.slice(2);
-  if (args.includes('--version')) { console.log('2.0.26'); process.exit(0); }
+  if (args.includes('--version')) { console.log('2.3.2'); process.exit(0); }
   const host = args[args.indexOf('--hostname') + 1];
   const port = Number(args[args.indexOf('--port') + 1]);
   // Every fake records its pid, so teardown can stop the ones a failing handoff left behind.
@@ -30,7 +30,7 @@ const fakeOpenCodeSource = `
   const server = http.createServer((req, res) => {
     if (req.url === '/api/info' || req.url === '/global/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ healthy: true, version: '2.0.26', pid: process.pid }));
+      res.end(JSON.stringify({ healthy: true, version: '2.3.2', pid: process.pid }));
       return;
     }
     if (req.url === '/api/event') {
@@ -701,7 +701,7 @@ const validHello = (protocol) => ({
   version: '2.6.0',
   handoffProtocol: protocol,
   stateVersion: 1,
-  opencode: { decision: 'adopt', reason: 'matches-state', version: '2.0.26' },
+  opencode: { decision: 'adopt', reason: 'matches-state', version: '2.2.4' },
 });
 
 const stubHelloSource = (hello, { afterGo }) => `
@@ -942,6 +942,7 @@ describe('upgrade handoff across installs', () => {
   it('re-claims OpenCode ownership after a successor that claimed it hangs', async () => {
     const installA = await buildInstall('a', '2.4.0');
     const registryModule = path.join(webPackageRoot, 'server', 'lib', 'opencode', 'managed-process-registry.js');
+    const sourceHook = path.join(webPackageRoot, 'scripts', 'register-server-sources.mjs');
     const claimStub = `
       (async () => {
         const fs = require('node:fs');
@@ -949,6 +950,8 @@ describe('upgrade handoff across installs', () => {
         const { pathToFileURL } = require('node:url');
         const configHome = process.env.XDG_CONFIG_HOME || path.join(process.env.HOME, '.config');
         const state = JSON.parse(fs.readFileSync(path.join(configHome, 'openchamber', 'managed-opencode', 'state.json'), 'utf8'));
+        // The registry is TypeScript; the source hook lets this plain node stub import it.
+        await import(pathToFileURL(${JSON.stringify(sourceHook)}).href);
         const { registerManagedProcess } = await import(pathToFileURL(${JSON.stringify(registryModule)}).href);
         await registerManagedProcess({ pid: state.pid, ownerPid: process.pid, port: state.port, binary: 'stub', runtime: 'web' });
         if (state.instanceDir) fs.writeFileSync(path.join(state.instanceDir, 'owner'), String(process.pid));

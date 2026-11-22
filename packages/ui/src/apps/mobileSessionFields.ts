@@ -1,4 +1,8 @@
 import type { Session } from '@/lib/opencode/model';
+import { getChatsRoot, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { memoizeSessionListProjection } from '@/stores/sessionListProjection';
+import type { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 
 import { getSessionActivityTime } from '@/sync/session-ordering';
 
@@ -34,3 +38,10 @@ export const formatRelativeShort = (timestamp: number): string => {
   if (days < 7) return `${days}d`;
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(timestamp));
 };
+
+const hasChats = memoizeSessionListProjection((sessions: Session[], _root: string | null, _runtime: string) =>
+  sessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
+
+/** Whether any active session lives under the chats root; memoized per session list, root and runtime. */
+export const selectHasChats = (state: ReturnType<typeof useGlobalSessionsStore.getState>): boolean =>
+  hasChats(state.activeSessions, getChatsRoot(), getRuntimeKey());

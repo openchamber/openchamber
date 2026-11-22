@@ -1,6 +1,6 @@
 ---
 title: Sesje w toku
-description: Trzymaj sesje, nad którymi pracujesz, na widoku w pasku bocznym, dopóki nie oznaczysz ich jako gotowe.
+description: Trzymaj pracę, którą się zajmujesz, na górze paska bocznego, dopóki nie oznaczysz jej jako gotowej.
 ---
 
 # Sesje w toku
@@ -9,13 +9,13 @@ Blok **W toku** na górze paska bocznego trzyma sesje, nad którymi pracujesz, d
 
 ## Gdzie go znaleźć
 
-Blok **W toku** jest w pasku bocznym pod czatami, nad Twoimi projektami albo osią czasu. Na telefonie jest w tym samym miejscu listy sesji.
+Blok **W toku** jest w pasku bocznym pod czatami, nad Twoimi projektami albo osią czasu. Praca, która do niego trafi, znika ze swojego projektu, więc każdą pracę widać raz. Żeby została też pod swoim projektem, włącz **Pokazuj też prace w toku pod projektami** w menu wyświetlania paska bocznego. Wyszukiwanie pokazuje ją raz, w bloku W toku.
 
-Sesja w toku zostaje też w swoim projekcie i folderze, a na osi czasu pod swoim projektem, więc widzisz ją w dwóch miejscach. Jej podsesje idą razem z nią. Wyszukiwanie pokazuje ją raz, w bloku W toku.
+Każda praca zajmuje jeden wiersz: tytuł i jego stan, z kolorowym znacznikiem, gdy ma pull request albo issue. Wiersze są ułożone według ostatniej aktywności, więc nie pokazują daty. Najedź na wiersz, żeby zobaczyć projekt, gałąź, czas i linki, albo włącz **Szczegółowe wiersze** w menu wyświetlania, żeby pokazać je pod tytułem. Szczegółowe wiersze działają też pod Twoimi projektami; sesje wewnątrz pracy zostają w jednym wierszu.
 
-W widoku drzewa każda sesja w bloku zajmuje jeden wiersz: tytuł, stan i czas, z kolorowym znacznikiem, gdy ma pull request albo issue. Najedź na wiersz, żeby zobaczyć projekt, gałąź i linki, albo włącz **Szczegółowe wiersze** w menu wyświetlania paska bocznego, żeby pokazać je pod tytułem. Widok listy zawsze ma dwa wiersze.
+Przypięte sesje mają własny blok **Przypięte** nad W toku; żeby zostały tylko pod swoimi projektami, wyłącz **Pokaż sekcję Przypięte** w tym samym menu. Przypięta sesja w toku jest tylko w Przypiętych.
 
-Żeby przypięte sesje miały własny blok **Przypięte** nad W toku, włącz **Pokaż sekcję Przypięte** w tym samym menu. Przypięta sesja w toku jest wtedy tylko w Przypiętych.
+Na telefonie lista sesji jest taka sama, z tym samym menu wyświetlania. Jej wiersze zajmują dwie linie, chyba że wyłączysz **Szczegółowe wiersze**, a strzałka rozwijająca pracę jest zawsze widoczna, bo nie da się tam na nic najechać kursorem.
 
 ## Jak sesje tam trafiają
 
@@ -29,25 +29,31 @@ Dotyczy to każdej sesji projektu, także sesji w worktree.
 
 Jeśli przed pojawieniem się tej opcji sam włączyłeś **Pokazuj sesje w toku**, zaczyna się ona od **Każda wiadomość**, bo tak sesje trafiały tam do tej pory. W przeciwnym razie zaczyna się od Wyłączone.
 
-Czaty, zarchiwizowane sesje, sesje przeglądu i uruchomienia [zaplanowanych zadań](/pl/scheduled-tasks/) nigdy tam nie trafiają; jeśli zrobisz fork uruchomienia, żeby dalej nad nim pracować, fork tam trafi. Podsesje nie trafiają tam same; idą razem ze swoją sesją nadrzędną.
+Czaty, zarchiwizowane sesje, sesje przeglądu i uruchomienia [zaplanowanych zadań](/pl/scheduled-tasks/) nigdy tam nie trafiają; jeśli zrobisz fork uruchomienia, żeby dalej nad nim pracować, fork tam trafi. Subagent nigdy nie przenosi swojej sesji nadrzędnej do toku.
+
+## Nazwy zadań
+
+Agent nazywa każdą pracę od jej zadania, gdy tylko zadanie jest jasne, kilkoma słowami, na przykład „Poprawka limitu czasu logowania”. Worktree trzyma nazwę w opisie swojej gałęzi, więc widzisz ją wszędzie, gdzie otwierasz repozytorium; sesja w folderze projektu dostaje tę nazwę jako tytuł. Zmień nazwę sam, a Twoja nazwa zostanie: agent nigdy nie zmienia nazwy zadania, które nazwałeś.
 
 ## Śledź i kończ sesje ręcznie
 
-- **Śledzenie:** najedź na sesję i kliknij oko albo wybierz **Śledź jako w toku** w menu sesji.
-- **Zakończenie:** najedź na sesję w bloku i kliknij ptaszek albo wybierz **Oznacz jako gotowe** w menu.
+- **Śledzenie:** najedź na wiersz i kliknij oko albo wybierz **Śledź jako w toku** w menu sesji.
+- **Zakończenie:** najedź na wiersz w bloku i kliknij ptaszek albo wybierz **Oznacz jako gotowe** w menu. To kończy całą pracę: każdą jej sesję, która była jeszcze w toku.
 
-Na telefonie przesuń wiersz sesji, żeby dostać się do tej samej akcji, albo użyj menu sesji.
+Oznaczenie worktree jako gotowego zabiera go z W toku i zostawia na miejscu. Żeby przy tym go archiwizować, włącz **Archiwizuj worktree po oznaczeniu go jako gotowy** w **Ustawienia → Sesje**: folder znika, a jego sesje, zmiany i gałąź czekają na stronie Archiwum, gotowe do przywrócenia. Jeśli działa w nim jeszcze sesja, worktree zostaje.
+
+Na telefonie przesuń wiersz w bok, żeby dostać się do tej samej akcji.
 
 Czaty nie mają oka: to zwykłe rozmowy.
 
 ### „Ta praca wygląda na skończoną.”
 
-Gdy masz skonfigurowanego [dostawcę klasyfikacji](/pl/classification-providers/), Jev sprawdza każdą turę sesji w toku. Gdy tura wygląda na koniec pracy (podziękowałeś, poprosiłeś o commit, potwierdziłeś, że działa), Jev niczego nie zamyka, tylko zostawia wskazówkę:
+Gdy masz skonfigurowanego [dostawcę klasyfikacji](/pl/classification-providers/), Jev sprawdza każdą turę sesji w toku. Gdy tura wygląda na koniec pracy (agent zgłasza skończoną pracę, nie kontynuuje sam, nie czeka na Twoją odpowiedź i nie proponuje nic więcej), Jev niczego nie zamyka, tylko zostawia wskazówkę:
 
 - szary ptaszek przy wierszu sesji w pasku bocznym
 - pasek nad polem wiadomości: **Ta praca wygląda na skończoną.** z przyciskiem **Oznacz jako gotowe**
 
-Kliknij **Oznacz jako gotowe**, jeśli Jev ma rację. Jeśli nie, po prostu pracuj dalej: wskazówka zniknie z Twoją następną wiadomością. Bez dostawcy klasyfikacji wskazówki nie ma, a sesje oznaczasz jako gotowe sam.
+Wskazówka pojawia się dopiero po 10 minutach bez Twojej wiadomości po turze, żeby nie przeszkadzała, gdy przechodzisz od kroku do kroku. Kliknij **Oznacz jako gotowe**, jeśli Jev ma rację. Jeśli nie, po prostu pracuj dalej: wskazówka zniknie z Twoją następną wiadomością. Bez dostawcy klasyfikacji wskazówki nie ma, a sesje oznaczasz jako gotowe sam.
 
 ## Podsumowanie i podpowiedź następnej wiadomości
 
@@ -68,6 +74,8 @@ Otwórz **Ustawienia → Sesje → Sesje w toku**:
 - **Dodawanie do sesji w toku**: Wyłączone, Każda wiadomość albo Decyduje Jev, jak opisano wyżej.
 
 Żeby ukryć tylko blok, użyj **Pokaż sekcję W toku** w menu widoku paska bocznego.
+
+Czyszczenie sesji zachowuje sesje z bloku W toku. Żeby wygasały jak każda inna sesja, włącz **Uwzględniaj sesje „W toku”** w **Ustawienia → Sesje → Przechowywanie sesji**. Ta opcja jest domyślnie wyłączona, a przypięte sesje zostają w każdym przypadku.
 
 ## Gdzie to działa
 

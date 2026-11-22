@@ -87,6 +87,19 @@ describe('relay e2ee', () => {
     await expect(dec.decrypt(first)).rejects.toThrow('frame counter regression');
   });
 
+  it('rejects a counter gap (a dropped frame)', async () => {
+    const keyBytes = new Uint8Array(32);
+    globalThis.crypto.getRandomValues(keyBytes);
+    const key = await subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    const enc = createFrameEncryptor(key);
+    const dec = createFrameDecryptor(key);
+    const first = await enc.encrypt(new Uint8Array([1]));
+    await enc.encrypt(new Uint8Array([2]));
+    const third = await enc.encrypt(new Uint8Array([3]));
+    await dec.decrypt(first);
+    await expect(dec.decrypt(third)).rejects.toThrow('frame counter gap');
+  });
+
   it('re-sends ready on identical re-hello and fails on rekey', async () => {
     const hostKeys = await generateEcdhKeyPair();
     const hostPubJwk = await exportPublicKeyJwk(hostKeys.publicKey);

@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import type { FilePart } from '@/lib/opencode/model';
+import type { RuntimeAPIs } from '@/lib/api/types';
+import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import {
     collectOpenableAttachmentNames,
     decodeDataUrlText,
     findAttachmentPart,
+    getIssueLinkKind,
+    getTrackerItemLinkProvider,
     isOpenableAttachmentName,
     isTextLikeFile,
     resolveAttachmentOpenTarget,
+    trackerItemLinkMime,
 } from './attachmentPreview';
 
 const file = (over: Partial<FilePart> = {}): FilePart => ({
@@ -76,11 +81,38 @@ describe('what opening a sent attachment does', () => {
         expect(resolveAttachmentOpenTarget(issue, [issue])).toEqual({ kind: 'external', url: issue.url });
     });
 
-    test('nothing opens for what the app cannot show', () => {
+    test('a tracker item link names its tracker; a Linear link from before trackers reads as Linear', () => {
+        expect(getTrackerItemLinkProvider({ mime: trackerItemLinkMime('linear') })).toBe('linear');
+        expect(getTrackerItemLinkProvider({ mime: 'application/vnd.openchamber.linear-issue-link' })).toBe('linear');
+        expect(getTrackerItemLinkProvider({ mime: 'application/vnd.github.issue-link' })).toBeNull();
+        expect(getIssueLinkKind({ mime: 'application/vnd.openchamber.linear-issue-link' })).toBe('tracker-item');
+        const item = file({ mime: trackerItemLinkMime('linear'), filename: 'ENG-1: Login', url: 'https://linear.app/x/issue/ENG-1' });
+        expect(resolveAttachmentOpenTarget(item, [item])).toEqual({ kind: 'external', url: item.url });
+    });
+
+    test('a pdf sent inline opens the document dialog', () => {
         const pdf = file({ mime: 'application/pdf', filename: 'spec.pdf', url: 'data:application/pdf;base64,JVBERg==' });
+        expect(resolveAttachmentOpenTarget(pdf, [pdf])).toEqual({
+            kind: 'popup',
+            popup: { open: true, title: 'spec.pdf', content: '', document: { url: pdf.url, filename: 'spec.pdf' } },
+        });
+    });
+
+    test('a pdf stays a label in VS Code, whose webview blocks the preview', () => {
+        const pdf = file({ mime: 'application/pdf', filename: 'spec.pdf', url: 'data:application/pdf;base64,JVBERg==' });
+        registerRuntimeAPIs({ runtime: { platform: 'vscode', isDesktop: false, isVSCode: true } } as RuntimeAPIs);
+        try {
+            expect(resolveAttachmentOpenTarget(pdf, [pdf])).toBeNull();
+        } finally {
+            registerRuntimeAPIs(null);
+        }
+    });
+
+    test('nothing opens for what the app cannot show', () => {
+        const zip = file({ mime: 'application/zip', filename: 'build.zip', url: 'data:application/zip;base64,UEsDBA==' });
         const folder = file({ mime: 'application/x-directory', filename: 'src', url: 'file:///repo/src' });
         const remoteText = file({ url: 'https://example.com/notes.txt' });
-        expect(resolveAttachmentOpenTarget(pdf, [pdf])).toBeNull();
+        expect(resolveAttachmentOpenTarget(zip, [zip])).toBeNull();
         expect(resolveAttachmentOpenTarget(folder, [folder])).toBeNull();
         expect(resolveAttachmentOpenTarget(remoteText, [remoteText])).toBeNull();
         expect(resolveAttachmentOpenTarget(file({ url: '' }), [])).toBeNull();
@@ -89,6 +121,19 @@ describe('what opening a sent attachment does', () => {
 });
 
 describe('matching a citation to its attachment', () => {
+    for (const filename of ['/Users/me/Documents/report.txt', 'C:\\Users\\me\\report.txt', '/Users/me/Documents/photo.heic', '/home/me/weird\\name.txt']) {
+        test(`opens a basename citation for the sent path ${filename}`, () => {
+            const name = filename.startsWith('C:') ? 'report.txt' : filename.slice(filename.lastIndexOf('/') + 1);
+            const sent = file({ filename, mime: filename.endsWith('.heic') ? 'image/jpeg' : 'text/plain' });
+            const openable = collectOpenableAttachmentNames([sent]);
+
+            expect(isOpenableAttachmentName(openable, name)).toBe(true);
+            expect(findAttachmentPart(name, [sent])).toBe(sent);
+            expect(resolveAttachmentOpenTarget(findAttachmentPart(name, [sent]), [sent])?.kind).toBe('popup');
+            expect(sent.filename).toBe(filename);
+        });
+    }
+
     test('finds the file a citation names, ignoring case and spaces like citations do', () => {
         const pasted = file();
         expect(findAttachmentPart('  Pasted-Context-1.TXT ', [pasted])).toBe(pasted);
@@ -98,10 +143,10 @@ describe('matching a citation to its attachment', () => {
 
     test('lists only the names whose chips open something', () => {
         const pasted = file();
-        const pdf = file({ mime: 'application/pdf', filename: 'spec.pdf', url: 'data:application/pdf;base64,JVBERg==' });
-        const openable = collectOpenableAttachmentNames([pasted, pdf]);
+        const zip = file({ mime: 'application/zip', filename: 'build.zip', url: 'data:application/zip;base64,UEsDBA==' });
+        const openable = collectOpenableAttachmentNames([pasted, zip]);
         expect(isOpenableAttachmentName(openable, 'PASTED-CONTEXT-1.txt')).toBe(true);
-        expect(isOpenableAttachmentName(openable, 'spec.pdf')).toBe(false);
+        expect(isOpenableAttachmentName(openable, 'build.zip')).toBe(false);
     });
 
     test('the text test and the data URL decoder keep their contracts', () => {

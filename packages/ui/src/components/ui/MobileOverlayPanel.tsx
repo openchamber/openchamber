@@ -6,6 +6,8 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { isInsideOpenPopup, isTopmostBackLayer, registerBackLayer } from '@/lib/mobileBackLayers';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { useMobileChatInsets } from '@/lib/mobileChatInsets';
+import { KEYBOARD_SHOW_MS, keyboardKeyframes } from '@/lib/mobileKeyboardTiming';
 
 interface MobileOverlayPanelProps {
   open: boolean;
@@ -15,11 +17,13 @@ interface MobileOverlayPanelProps {
   footer?: React.ReactNode;
   className?: string;
   contentMaxHeightClassName?: string;
+  contentRef?: React.Ref<HTMLElement>;
   renderHeader?: (closeButton: React.ReactNode) => React.ReactNode;
+  subheader?: React.ReactNode;
+  scrollContent?: boolean;
 }
 
 const OVERLAY_ROOT_ID = 'mobile-overlay-root';
-// Entrance animation: classic slide up from the bottom + scrim fade.
 const ENTER_DELAY_MS = 16;
 const ENTER_DURATION_MS = 200;
 
@@ -42,23 +46,23 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   footer,
   className,
   contentMaxHeightClassName,
+  contentRef,
   renderHeader,
+  subheader,
+  scrollContent = true,
 }) => {
   const { t } = useI18n();
+  const chatInsets = useMobileChatInsets();
   const overlayRootRef = React.useRef<HTMLElement | null>(null);
   const [entered, setEntered] = React.useState(false);
-  // True once the enter transition has finished. While entering, the panel's
-  // keyboard-inset bottom anchor must NOT animate: opening an overlay usually
-  // closes the keyboard at the same moment, and a transitioning `bottom` under
-  // the panel's own rise made the entrance jerky / offset. During the enter the
-  // anchor snaps to its final value and only the rise animates.
   const [enterSettled, setEnterSettled] = React.useState(false);
+  const surfaceRef = React.useRef<HTMLDivElement | null>(null);
+  const sheetRef = React.useRef<HTMLDivElement | null>(null);
 
   if (typeof document !== 'undefined' && !overlayRootRef.current) {
     overlayRootRef.current = ensureOverlayRoot();
   }
 
-  // Replay the enter transition on each open (rise + scrim fade).
   React.useEffect(() => {
     if (!open) {
       setEntered(false);
@@ -76,11 +80,6 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
     };
   }, [open]);
 
-  // Synchronous close signal: this layout-effect cleanup runs inside the same
-  // React flush as the user click that closed the panel, so listeners (e.g.
-  // the keyboard-restore in ChatInput) can refocus an input while iOS still
-  // considers the gesture active — a deferred focus() would not raise the
-  // keyboard in an installed PWA.
   React.useLayoutEffect(() => {
     if (!open) return;
     window.dispatchEvent(new Event('oc:mobile-overlay-opened'));
@@ -89,19 +88,43 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
     };
   }, [open]);
 
-  // One stable closer per panel: it is this panel's identity in the back
-  // layer stack, and always calls the latest onClose.
   const onCloseRef = React.useRef(onClose);
   React.useLayoutEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
   const closeLayer = React.useCallback(() => onCloseRef.current(), []);
 
-  // The Android back button closes the newest open panel first.
   React.useEffect(() => {
     if (!open) return;
     return registerBackLayer(closeLayer);
   }, [open, closeLayer]);
+
+  React.useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!open || !enterSettled || !surface) return;
+    const readInset = () => Number.parseFloat(getComputedStyle(surface).getPropertyValue('--oc-keyboard-inset')) || 0;
+    let inset = readInset();
+    let slide: Animation | null = null;
+    const follow = () => {
+      const next = readInset();
+      const delta = next - inset;
+      inset = next;
+      const sheet = sheetRef.current;
+      if (!sheet || Math.abs(delta) < 1 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+      const current = slide ? Number.parseFloat(getComputedStyle(sheet).translate.split(' ')[1] ?? '0') || 0 : 0;
+      slide?.cancel();
+      const from = current + delta;
+      slide = sheet.animate(
+        keyboardKeyframes((position) => ({ translate: `0 ${from * (1 - position)}px` })),
+        { duration: KEYBOARD_SHOW_MS, easing: 'linear' },
+      );
+    };
+    window.addEventListener('oc:keyboard-anim', follow);
+    return () => {
+      window.removeEventListener('oc:keyboard-anim', follow);
+      slide?.cancel();
+    };
+  }, [enterSettled, open]);
 
   React.useEffect(() => {
     if (!open) {
@@ -109,8 +132,6 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
     }
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    // Escape belongs to the newest layer: a select or dialog open inside the
-    // panel closes itself, and a panel under another panel stays open.
     const handleKeyDown = (event: KeyboardEvent) => {
       if (isIMECompositionEvent(event)) return;
       if (event.key === 'Escape' && isTopmostBackLayer(closeLayer) && !isInsideOpenPopup(event.target)) {
@@ -133,27 +154,23 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   const content = (
     <div
       className={cn(
-        'oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-[60] flex flex-col bg-surface-overlay transition-opacity duration-200 ease-out',
-        !enterSettled && 'oc-keyboard-inset-snap',
+        'oc-keyboard-inset-surface oc-keyboard-inset-snap oc-bottom-safe-surface fixed inset-0 z-[60] flex flex-col bg-surface-overlay transition-opacity duration-200 ease-out',
         entered ? 'opacity-100' : 'opacity-0',
       )}
+      ref={surfaceRef}
       role="dialog"
       aria-label={title}
       aria-modal="true"
       onClick={onClose}
-      // The panel centers over the CHAT column, not the whole app: on a tablet
-      // the shell keeps a persistent sessions sidebar, and a sheet centered on
-      // the window reads as belonging to nothing. The shell publishes the
-      // column's insets; on phones they are 0 and this is a no-op. The scrim
-      // deliberately still covers everything.
       style={{
-        paddingLeft: 'var(--oc-chat-inset-left, 0px)',
-        paddingRight: 'var(--oc-chat-inset-right, 0px)',
+        paddingLeft: `calc(${chatInsets.left}px + var(--oc-safe-area-left, 0px))`,
+        paddingRight: `calc(${chatInsets.right}px + var(--oc-safe-area-right, 0px))`,
       }}
     >
         <div
+          ref={sheetRef}
           className={cn(
-            'oc-surface-elevated mt-auto flex max-h-[calc(100dvh-0.75rem)] min-h-0 w-full flex-col rounded-t-xl border-x border-t border-border/50 bg-surface-elevated shadow-none pwa-overlay-panel',
+            'oc-surface-elevated mt-auto flex max-h-[calc(100dvh-0.75rem)] min-h-0 w-full flex-col rounded-t-xl border-x border-t border-edge bg-surface-elevated shadow-none pwa-overlay-panel',
             'mx-auto max-w-lg',
             className
           )}
@@ -180,26 +197,29 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
           }
 
           return (
-            <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
-              <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
+            <div className="flex items-center justify-between ps-4 pe-3 py-2 border-b border-edge-muted">
+              <h2 dir="auto" className="typography-ui-label font-semibold text-foreground">{title}</h2>
               {closeButton}
             </div>
           );
         })()}
-        <ScrollableOverlay
+        {subheader ? <div className="shrink-0 px-2 pt-2">{subheader}</div> : null}
+        {scrollContent ? <ScrollableOverlay
+          ref={contentRef}
           useScrollShadow
           disableHorizontal
-          // Contain the scroll inside the panel: without this, iOS chains the
-          // rubber-band overscroll to the page behind the sheet, which reads
-          // as a weird content bounce while scrolling the overlay.
           preventOverscroll
           outerClassName={cn('min-h-0 flex-1', contentMaxHeight)}
-          className="px-2 py-2 pwa-overlay-scroll"
+          className={cn('px-2 pt-2 pwa-overlay-scroll', footer ? 'pb-2' : 'pb-4')}
         >
           {children}
-        </ScrollableOverlay>
+        </ScrollableOverlay> : (
+          <div className={cn('flex min-h-0 flex-1 flex-col px-2 pt-2', footer ? 'pb-2' : 'pb-4', contentMaxHeight)}>
+            {children}
+          </div>
+        )}
         {footer ? (
-          <div className="shrink-0 border-t border-border/40 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="shrink-0 border-t border-edge-muted px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             {footer}
           </div>
         ) : null}

@@ -1,23 +1,21 @@
-# Shared Guards Documentation
+# Shared server helpers
 
 ## Purpose
 
-`packages/web/server/lib/shared/guards.js` holds the small value predicates and
-coercions that several feature modules used to define privately. It is neutral:
-it knows nothing about git, OpenCode, projects, or any other domain, and it
-imports nothing. Consolidating the copies means a value can no longer be a
-string on one route and not a string on another because two files spelled the
-check differently.
+`guards.ts` exposes the small value predicates and coercions that several
+feature modules used to define privately. It re-exports from `object-guards.ts`,
+which has no imports or feature dependencies. Sharing the predicates keeps
+the acceptance rules the same across routes.
 
 Only the dominant, behavior-defining spelling of each guard belongs here.
 Variants that answer differently for real inputs stay with their owner.
 
 ## Public exports
 
-- `isString(value)`: `Object.prototype.toString.call(value) === '[object String]'`.
-  True for primitive strings and boxed `String` objects. This is wider than
-  `typeof value === 'string'`, which is why callers that only accept primitives
-  keep their own `typeof` check.
+- `isString(value)`: `typeof value === 'string'`, a type predicate. True only
+  for primitive strings, so a caller may use string methods on the value. Boxed
+  `String` objects and objects with `Symbol.toStringTag` set to `"String"` are
+  rejected: neither arrives through JSON, and the second has no string methods.
 - `isPlainObject(value)`: true only for a plain `{}`-shaped object. Rejects
   `null`, arrays, boxed primitives, `Date`, `Map`, class instances, functions,
   and null-prototype objects (`Object.create(null)`).
@@ -43,7 +41,7 @@ Variants that answer differently for real inputs stay with their owner.
 | `'   '` | true | false | false | false | `null` |
 | `true` / `false` | false | false | false | true | `null` |
 | `new Boolean(true)` | false | false | true | false | `null` |
-| `new String('s')` | true | false | true | false | `null` (not a primitive) |
+| `new String('s')` | false | false | true | false | `null` (not a primitive) |
 | `42` / `NaN` | false | false | false | false | `null` |
 | `null` / `undefined` | false | false | false | false | `null` |
 | `{}` | false | true | true | false | `null` |
@@ -80,12 +78,12 @@ copy:
 
 - `terminal/runtime.js` and `terminal/shells.js` use `String(value) === value`,
   which rejects boxed strings and throws on null-prototype objects.
-- `guests/oauth.js`, `opencode/settings-files.js`, and `opencode/shared.js`
+- `guests/oauth.js`, `settings/settings-files.js`, and `opencode/config-files.js`
   expose a loose `isPlainObject` that uses `typeof value === 'object'` and so
   accepts values the strict predicate rejects. They keep their own name and
   shape; only modules asking for `isRecord` were migrated.
 - `source-control/mutation-executor.js` accepts null-prototype objects under an
-  `isPlainObject` name, and `github/routes.js` /
+  `isPlainObject` name, and `github/mappers.js` /
   `github/repo/fork-detection.js` classify by `[object Object]`; all three are
   divergent and stay put.
 - `quota/utils/transformers.js` exports an array-accepting `asObject`; it is not
@@ -349,7 +347,7 @@ passkeys.
 | model choices (`model-choices.json` — `model-choices/store.js` `read`) | async | none — covered-by-open-issue #1610 | malformed → coded store error, never an empty history (a read-modify-write never seeds from it) | covered-by-open-issue (#1610, bound) |
 | relay identity (`relay-identity.json` — `relay/key-store.js` `readStore`) | async | none — covered-by-open-issue #1614 | excepted: throw-and-stop, a human repairs the file (named under "What stays out" in the durable-store section above) | covered-by-open-issue (#1614, bound); disposition excepted-with-reason |
 | managed OpenCode state (`state.json`, `draining.json` — `opencode/managed-opencode-state.js` `readManagedOpenCodeState` / `readDrainingOpenCodeRecords`) | sync | none — covered-by-open-issue #1622 | read-as-empty hazard: any failure → null / [], no distinction between missing and malformed | covered-by-open-issue (#1622, bound); disposition hazard recorded for phase 3 |
-| merged settings, sync (`settings.json` + `preferences.json` — `opencode/settings-files.js` `readMergedSettingsSync`) | sync | none — covered-by-open-issue #1631 | read-as-empty by design on a read-only hot path (missing or unreadable contributes nothing); the settings family carries its own migration semantics (see the durable-store "What stays out" note) | covered-by-open-issue (#1631, bound) |
+| merged settings, sync (`settings.json` + `preferences.json` — `settings/settings-files.ts` `readMergedSettingsSync`) | sync | none — covered-by-open-issue #1631 | read-as-empty by design on a read-only hot path (missing or unreadable contributes nothing); the settings family carries its own migration semantics (see the durable-store "What stays out" note) | covered-by-open-issue (#1631, bound) |
 | skills installed sources (`skills-installed-sources.json` — `skills-catalog/installed-sources.js`) | sync | none — covered-by-open-issue #1627 | split: the lenient reader reads malformed as an empty map (read-only provenance badge); the strict for-update reader is three-state in place — missing → empty, malformed → coded `MALFORMED` throw (#936) | covered-by-open-issue (#1627, bound) |
 | skills disk cache (`skills-catalog/disk-cache.js` `readDiskCache`) | sync | none — covered-by-open-issue #1627 | cache semantics: missing / unreadable / malformed → null (a cache miss) | covered-by-open-issue (#1627, bound); disposition excepted-with-reason (cache) |
 | space records (`spaces/records/<id>.json` — `spaces/space-records.js` `read`) | sync | none — covered-by-open-issue #1628 | three-state by status: `missing` / `ok` / `unreadable`; an update refuses to write over an unreadable record; unreadable grants/setup fragments are dropped with a warning | covered-by-open-issue (#1628, bound) |
@@ -518,7 +516,7 @@ per-root counter and a threaded `{ visitedDirs }` object in
 `findGitDirectories` walks onto it with their values and behaviour
 unchanged. The `opencode/agents.js` walks keep their spelling until
 their own phase. The skill walks followed in #1465:
-`opencode/shared.js` `walkSkillMdFiles` (5,000 directories, enumerate)
+`opencode/skill-files.ts` `walkSkillMdFiles` (5,000 directories, enumerate)
 and `listSkillSupportingFiles` (5,000 directories and 5,000 files,
 enumerate with the result's `truncated` flag read from the budget)
 consult one budget object each, and their VS Code twins in
@@ -592,8 +590,88 @@ The contract (rules 1–5 of #1391):
 
 - Add a predicate here only when two or more feature modules need the exact
   same behavior. If a caller needs a stricter or looser answer, keep the
-  variant local and name the difference in a comment.
+  variant local and document the difference with its owner.
 - Do not add feature imports to this module. It must stay free of domain
   dependencies so every runtime can safely depend on it.
 - When a guard's answer changes, update the behavior matrix test beside this
   file; the test is the contract.
+
+## Bounded mapping
+
+`map-limited.ts` owns the identical worker loop used by Gitea and Gerrit resource
+reads. `mapLimited(items, limit, task)` runs at most `limit` tasks at once and
+returns results in input order. Callers supply a positive integer limit. A task
+receives only its item. A rejection stops that worker and rejects the returned
+promise; other workers continue taking items. It adds no retries or cancellation.
+
+Provider-specific limits and error handling stay in the resource modules.
+`map-limited.test.js` covers ordering, concurrency, empty inputs and failures.
+
+### Why task inputs include undefined
+
+The worker reads every index, including holes in sparse arrays, and passes that
+value to the task. Its input type includes `undefined` to preserve this behavior
+without skipping holes or asserting that an indexed item exists. The helper
+imports nothing and reads only the supplied items, limit and task.
+
+## Typed guards and parsers
+
+`object-guards.ts` owns `isPlainObject`, `isRecord`, `isBoolean`, `isString`
+and `asNonEmptyString`.
+The `guards.js` entry re-exports the same functions, preserving identity for
+Linear, GitLab and OpenCode consumers. Unknown inputs narrow to
+`Record<string, unknown>` or `boolean`. An already typed object uses a boolean
+overload: retaining its existing shape avoids inventing unknown properties in a
+discriminated union or replacing optional fields in a weak interface.
+
+The dictionary lint rule permits unknown field values inside a type predicate
+result because the predicate proves only the container. Ordinary dictionary
+parameters, return values and storage contracts still require a value contract.
+
+### Why parsers accept unknown input
+
+`asNonEmptyString(value: unknown): string | null` parses arbitrary external
+input. Its primitive-string check keeps non-string inputs away from `.trim()`.
+The `allowInParsers` option in `anti-slop/no-unknown-parameters` and
+`anti-slop/no-runtime-typeof` admits this boundary alongside type predicates.
+The configured path pattern covers only TypeScript files directly in this
+shared folder. A parser must be directly exported, take exactly one plain
+`unknown` parameter and declare a union return containing `null`. Unknown and
+any return branches, internal helpers, extra parameters and nested callbacks
+do not receive the exception.
+
+### Why the entry has only re-exports
+
+`guards.ts` re-exports the original functions, so callers keep their `.js`
+import paths and function identity. The standalone Node fixture in
+`fs/routes.test.js` compiles `object-guards.ts` and copies `guards.ts` as
+`guards.js`. The entry has no type syntax, so the copy runs as JavaScript
+without the source resolver.
+
+## HTTP and WebSocket contracts
+
+`json-values.ts` describes decoded JSON and in-memory JSON documents that may
+omit a property with explicit undefined. Settings and activity declarations use
+that syntax-level vocabulary without claiming any field has been validated.
+Markdown frontmatter remains unknown because YAML can decode other values;
+the markdown writer accepts an enumerable metadata object and delegates value
+serialization to YAML.
+
+`http-contracts.ts` owns the shared structural Express contracts. The installed
+Express package has no bundled declarations and `@types/express` is absent.
+`express.d.ts` types its existing default factory, JSON middleware and router
+without replacing the runtime import. Folder workers import request, response,
+handler and app types from `http-contracts.js`. Requests expose unchecked JSON
+and parsed query values; these contracts perform no validation.
+
+`websocket-contracts.ts` owns the installed `ws` constructors, upgrade callback,
+raw frame union and socket/server events. `ws.d.ts` connects the bare import to
+those type-only contracts. Runtime constructors still import from `ws`.
+Protocol arrays retain unchecked elements because `ws` validates
+them itself. These declarations do not alter authentication, origins or transport.
+
+`contracts.test.ts` exercises Express over HTTP and a WebSocket upgrade and
+frames. The compiler includes ES2023 array declarations while retaining the
+existing ES2022 emit target and browser web API types. Native fetch's explicit
+undefined body and the DOM/Node `Readable.fromWeb` type mismatch remain separate
+platform declaration boundaries.

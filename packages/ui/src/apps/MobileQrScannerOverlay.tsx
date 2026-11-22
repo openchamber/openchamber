@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { useI18n } from '@/lib/i18n';
 
+import { qrScanDrawsOwnScreen } from './mobileQrScan';
+
 export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onCancel }) => {
   const { t } = useI18n();
   const overlayRef = React.useRef<HTMLDivElement>(null);
@@ -19,18 +21,9 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
       value: document.body.style.getPropertyValue('background-color'),
       priority: document.body.style.getPropertyPriority('background-color'),
     };
-    // The app's reduced-transparency theme deliberately uses an !important
-    // background. Use an inline important color while CameraX is behind the
-    // WebView; the CSS minifier collapses `background: transparent` in a way
-    // that does not reset that important background color on Android WebView.
     document.documentElement.style.setProperty('background-color', 'rgba(0, 0, 0, 0)', 'important');
     document.body.style.setProperty('background-color', 'rgba(0, 0, 0, 0)', 'important');
 
-    // startScan() places CameraX behind the WebView. OpenChamber has several
-    // independent portal roots, so hiding only #root (or relying on inherited
-    // visibility) can leave a sheet/sidebar painted over the preview. Opacity on
-    // each top-level sibling is composited for its whole subtree and cannot be
-    // overridden by descendants.
     const hidden = new Map<HTMLElement, { opacity: string; pointerEvents: string }>();
     const hideBodySibling = (node: Node) => {
       if (!(node instanceof HTMLElement) || node === overlayRef.current || hidden.has(node)) return;
@@ -71,6 +64,10 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [onCancel]);
 
+  if (!qrScanDrawsOwnScreen()) {
+    return createPortal(<div ref={overlayRef} className="fixed inset-0 z-[1000] bg-background" aria-hidden />, document.body);
+  }
+
   return createPortal(
     <div
       ref={overlayRef}
@@ -81,7 +78,7 @@ export const MobileQrScannerOverlay: React.FC<{ onCancel: () => void }> = ({ onC
     >
       <div className="flex flex-1 flex-col items-center justify-center gap-6">
         <div className="aspect-square w-full max-w-72 rounded-[28px] border-2 border-foreground/90 shadow-[0_0_0_9999px_color-mix(in_srgb,var(--surface-background)_18%,transparent)]" aria-hidden />
-        <p className="max-w-sm rounded-[16px] border border-border/60 bg-background px-4 py-3 text-center typography-markdown text-foreground shadow-sm">
+        <p className="max-w-sm rounded-[16px] border border-edge bg-background px-4 py-3 text-center typography-markdown text-foreground shadow-sm">
           {t('mobile.connect.welcome.scanHint')}
         </p>
       </div>

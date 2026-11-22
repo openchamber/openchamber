@@ -7,6 +7,7 @@ import path from 'path';
 import { registerLinearRoutes } from './routes.js';
 import { setLinearAuth, setLinearSessionCommentsEnabled, configureLinearVaultReader, getLinearAuth, getLinearAuthByWorkspaceId, clearLinearAuth, getLinearAuthFilePath } from './auth.js';
 import { toGuestAuthResponse } from '../guests/host-session.js';
+import { createTrackerRegistry } from '../trackers/registry.js';
 import { fetchLinearGraphql } from './client.js';
 
 const makeTempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-linear-routes-'));
@@ -804,6 +805,7 @@ describe('Linear vault account route (#304)', () => {
     const guest = await toGuestAuthResponse(
       { name: 'Linear', description: 'Issues', host: { provider: 'linear' } },
       null,
+      createTrackerRegistry(),
     );
     expect(guest.connected).toBe(true);
     expect(guest.account).toBe('Ada Lovelace');

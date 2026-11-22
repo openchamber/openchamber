@@ -15,9 +15,6 @@ function Command({
   return (
     <CommandPrimitive
       data-slot="command"
-      // Let the parent (DropdownMenuContent, DialogContent, etc.) paint the
-      // background and provide elevation. Overriding bg here would cover the
-      // parent's inset shadows (our inner light ring) and flatten the edge.
       style={{
         color: 'var(--surface-elevated-foreground)',
         ...style,
@@ -37,11 +34,11 @@ const CommandInput = React.forwardRef<
 >(({ className, ...props }, ref) => {
   return (
     <div
-       data-slot="command-input-wrapper"
-       className="flex h-8 items-center gap-2 border-b px-3"
-     >
-       <Icon name="search" className="size-4 shrink-0 opacity-50" />
-       <CommandPrimitive.Input
+      data-slot="command-input-wrapper"
+      className="flex h-8 items-center gap-2 border-b px-3"
+    >
+      <Icon name="search" className="size-4 shrink-0 opacity-50" />
+      <CommandPrimitive.Input
         ref={ref}
         data-slot="command-input"
         className={cn(
@@ -134,11 +131,6 @@ function CommandItem({
   )
 }
 
-/**
- * A command's shortcut as the shared formatter writes it ("⌘ + ⇧ + N"), in
- * the same muted interface text tooltips use, so a shortcut looks the same
- * wherever it appears.
- */
 function CommandShortcut({
   className,
   ...props

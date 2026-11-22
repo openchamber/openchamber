@@ -85,10 +85,6 @@ beforeEach(() => {
   fs.mkdirSync(path.join(root, 'home'), { recursive: true });
 });
 
-afterEach(() => {
-  delete process.env.OPENCHAMBER_MEMORY_ENABLE;
-});
-
 afterAll(() => {
   fs.rmSync(root, { recursive: true, force: true });
   if (originalHome === undefined) delete process.env.HOME;
@@ -331,6 +327,7 @@ describe('tools.list', () => {
     expect(result.openchamber).toEqual([
       expect.objectContaining({ tool: 'openchamber', enabled: true }),
       expect.objectContaining({ tool: 'openchamber_web', enabled: false }),
+      expect.objectContaining({ tool: 'openchamber_memory', enabled: false }),
       expect.objectContaining({ tool: 'openchamber_notify', enabled: false }),
     ]);
     expect(result.opencodeBuiltin).toContain('shell');
@@ -340,8 +337,7 @@ describe('tools.list', () => {
     ]);
   });
 
-  it('includes the memory tool only when this build has it', async () => {
-    process.env.OPENCHAMBER_MEMORY_ENABLE = '1';
+  it('lists the memory tool as on when its setting is on', async () => {
     const { actions, ctx } = createActions({ settings: { agentMemoryToolEnabled: true } });
     const result = await actions.execute('tools.list', {}, ctx);
     expect(result.openchamber).toContainEqual(expect.objectContaining({ tool: 'openchamber_memory', enabled: true }));
@@ -356,13 +352,12 @@ describe('tools.toggle', () => {
     expect(persistSettings).toHaveBeenCalledWith({ agentNotifyToolEnabled: true });
   });
 
-  it('needs confirm to turn off the control tool, and refuses memory where it does not exist', async () => {
+  it('needs confirm to turn off the control tool', async () => {
     const { actions, ctx, persistSettings } = createActions();
     await expectError(actions.execute('tools.toggle', { toolName: 'openchamber', disabled: true }, ctx), 400, /confirm/);
     expect(persistSettings).not.toHaveBeenCalled();
     await actions.execute('tools.toggle', { toolName: 'openchamber', disabled: true, confirm: true }, ctx);
     expect(persistSettings).toHaveBeenCalledWith({ agentControlToolEnabled: false });
-    await expectError(actions.execute('tools.toggle', { toolName: 'openchamber_memory', disabled: false }, ctx), 409, /not available/);
   });
 
   it('turns an OpenCode tool off with a permission rule and back on', async () => {

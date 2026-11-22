@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createPushRuntime } from './push-runtime.js';
 
-const createRuntime = () => createPushRuntime({
-  fsPromises: {
+const createRuntime = ({ fsPromises } = {}) => createPushRuntime({
+  fsPromises: fsPromises ?? {
     mkdir: vi.fn(async () => {}),
     readFile: vi.fn(async () => JSON.stringify({ version: 1, subscriptionsBySession: {} })),
     writeFile: vi.fn(async () => {}),
@@ -21,7 +21,7 @@ const createRuntime = () => createPushRuntime({
   }),
   PUSH_SUBSCRIPTIONS_FILE_PATH: '/tmp/push-subscriptions.json',
   readSettingsFromDiskMigrated: vi.fn(async () => ({})),
-  writeSettingsToDisk: vi.fn(async () => {}),
+  updateSettingsFromDisk: vi.fn(async (mutate) => mutate({})),
 });
 
 afterEach(() => {
@@ -272,7 +272,7 @@ describe('push runtime VAPID subject loopback judgement', () => {
       }),
       PUSH_SUBSCRIPTIONS_FILE_PATH: '/tmp/push-subscriptions.json',
       readSettingsFromDiskMigrated: vi.fn(async () => ({})),
-      writeSettingsToDisk: vi.fn(async () => {}),
+      updateSettingsFromDisk: vi.fn(async (update) => update({})),
     });
     await runtime.ensurePushInitialized();
     expect(setVapidDetails).toHaveBeenCalledOnce();
@@ -290,5 +290,38 @@ describe('push runtime VAPID subject loopback judgement', () => {
     for (const origin of ['http://localhost:3000', 'http://127.0.0.2:3000', 'http://[::1]:3000']) {
       expect(await subjectForOrigin(origin), origin).toBe('mailto:openchamber@localhost');
     }
+  });
+});
+
+describe('push subscription persistence', () => {
+  it('saves the next subscription after a write fails on a full disk', async () => {
+    let content = JSON.stringify({ version: 1, subscriptionsBySession: {} });
+    let failNextWrite = true;
+    let pending = null;
+    const runtime = createRuntime({
+      fsPromises: {
+        mkdir: vi.fn(async () => {}),
+        readFile: vi.fn(async () => content),
+        // Writes go to a temp file that is renamed into place.
+        writeFile: vi.fn(async (_path, data) => {
+          if (failNextWrite) {
+            failNextWrite = false;
+            const error = new Error('ENOSPC: no space left on device, write');
+            error.code = 'ENOSPC';
+            throw error;
+          }
+          pending = data;
+        }),
+        rename: vi.fn(async () => { content = pending; }),
+        rm: vi.fn(async () => {}),
+      },
+    });
+    const subscription = (endpoint) => ({ endpoint, p256dh: 'p256dh', auth: 'auth' });
+
+    await expect(runtime.addOrUpdatePushSubscription('ui-token', subscription('https://push.test/a'))).rejects.toThrow('ENOSPC');
+    await expect(runtime.addOrUpdatePushSubscription('ui-token', subscription('https://push.test/b'))).resolves.toBeUndefined();
+
+    const stored = JSON.parse(content);
+    expect(Object.values(stored.subscriptionsBySession).flat().map((entry) => entry.endpoint)).toEqual(['https://push.test/b']);
   });
 });

@@ -10,7 +10,6 @@ export const guestStorageOperation = async (guestId: string, request: GuestStora
     if (!device || !globalThis.indexedDB) throw new HostRequestError('UNSUPPORTED', 'Device storage is unavailable for this installation.');
     return runDeviceGuestStorage({ runtimeKey: device.runtimeKey, guestId, storageId: device.storageId }, request, device.authorize);
   }
-  // Keep the existing instance-storage wire shape for older connected servers.
   const payload = { ...request };
   delete payload.scope;
   const response = await runtimeFetch(`/api/guests/${encodeURIComponent(guestId)}/storage`, {

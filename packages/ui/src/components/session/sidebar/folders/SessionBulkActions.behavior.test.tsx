@@ -7,6 +7,7 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import { installHookTestDom } from '../test-utils/testDom';
 import { restoreModuleMock } from '../test-utils/moduleMocks';
 import * as bulkActionBarModule from './BulkActionBar';
+import * as deviceModule from '@/lib/device';
 
 type BulkActionCapture = {
   onCreateFolderAndMove: () => void;
@@ -15,6 +16,7 @@ type BulkActionCapture = {
 let bulkActionCapture: BulkActionCapture | null = null;
 
 const realBulkActionBar = { ...bulkActionBarModule };
+const realDevice = { ...deviceModule };
 
 mock.module('./BulkActionBar', () => ({
   BulkActionBar: (props: BulkActionCapture) => {
@@ -23,10 +25,18 @@ mock.module('./BulkActionBar', () => ({
   },
 }));
 
+// Dialogs read the device and its tablet layout as they render; this fixture has no real page to read them from.
+mock.module('@/lib/device', () => ({
+  ...realDevice,
+  useDeviceInfo: () => ({ isMobile: false }),
+  useTabletLayout: () => ({ enabled: false, roomyForPanels: false }),
+}));
+
 const { SessionBulkActions } = await import('./SessionBulkActions');
 
 afterAll(async () => {
   await restoreModuleMock('@/components/session/sidebar/folders/BulkActionBar', realBulkActionBar, () => import('./BulkActionBar'));
+  await restoreModuleMock('@/lib/device', realDevice, () => import('@/lib/device'));
 });
 
 describe('SessionBulkActions public behavior', () => {

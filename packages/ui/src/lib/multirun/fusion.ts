@@ -1,8 +1,10 @@
 import { opencodeClient } from '@/lib/opencode/client';
+import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
+import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import type { Session } from '@/lib/opencode/model';
 import type { GitWorktreeSnapshotResult } from '@/lib/api/types';
 import { getGitRangeDiff, snapshotGitWorktree } from '@/lib/gitApi';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { loadMagicPrompts } from '@/lib/magicPrompts';
 import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
@@ -26,9 +28,7 @@ export type FusionJudge = {
   modelID: string;
   variant?: string;
   agent?: string;
-  /** Display name for the fusion session title. */
   modelName?: string;
-  /** Context window of the judge model, when the provider reports it. */
   contextLimit?: number;
 };
 
@@ -65,7 +65,7 @@ type FusionEffects = {
   createWorktree: typeof createWorktreeWithDefaults;
   waitBootstrap: typeof waitForWorktreeBootstrap;
   startDirectory: typeof resolveCreatedWorktreeStartDirectory;
-  renderPrompt: typeof renderMagicPrompt;
+  loadPrompts: typeof loadMagicPrompts;
   createSession: typeof createMultiRunSession;
   publish: typeof registerMultiRunSession;
   attachWorktree: ReturnType<typeof useSessionUIStore.getState>['setWorktreeMetadata'];
@@ -81,17 +81,14 @@ const fusionEffects: FusionEffects = {
   snapshot: snapshotGitWorktree, rangeDiff: getGitRangeDiff,
   setupCommands: resolveWorktreeSetupCommands, setupWait: getWorktreeSetupWaitEnabled,
   createWorktree: createWorktreeWithDefaults, waitBootstrap: waitForWorktreeBootstrap,
-  startDirectory: resolveCreatedWorktreeStartDirectory, renderPrompt: renderMagicPrompt,
+  startDirectory: resolveCreatedWorktreeStartDirectory, loadPrompts: loadMagicPrompts,
   createSession: createMultiRunSession, publish: registerMultiRunSession,
   attachWorktree: (...args) => useSessionUIStore.getState().setWorktreeMetadata(...args),
   send: (input) => opencodeClient.sendMessage(input),
   isBusy: (id) => useGlobalSessionStatusStore.getState().activeSessionIds.has(id),
 };
 
-// Diffs are inlined only while all of them together stay under this share of
-// the judge's context window; otherwise the judge reads them with git.
 const INLINE_DIFF_CONTEXT_SHARE = 0.1;
-// Rough token cost of one changed line (content plus diff framing).
 const TOKENS_PER_DIFF_LINE = 12;
 
 /** Code results keep their original base even after their work has been committed. */
@@ -101,7 +98,6 @@ export const fusionModeFor = (stats: ReadonlyArray<{ hasWorktree: boolean; diff:
     : 'answers'
 );
 
-/** Whether every diff together fits in the inline budget of the judge's context window. */
 export const shouldInlineDiffs = (changedLines: number, contextLimit: number | undefined): boolean => (
   contextLimit !== undefined && contextLimit > 0
   && changedLines * TOKENS_PER_DIFF_LINE <= contextLimit * INLINE_DIFF_CONTEXT_SHARE
@@ -113,11 +109,6 @@ const laneLabel = (identity: MultiRunIdentity, variantCount: number): string => 
   return `${identity.providerID}/${identity.modelID}${index}${variant}`;
 };
 
-/**
- * Revalidates each selected lane and reads its latest reply. A read failure
- * stops the fusion rather than silently dropping a source; a lane that has
- * not answered is left out.
- */
 async function loadFusionSources(
   run: MultiRunSummary,
   sourceIds: readonly string[],
@@ -177,13 +168,6 @@ const taskBlocks = (prompts: ReadonlyMap<string, string>): string[] => (
   ))
 );
 
-/**
- * Starts a fusion session for the selected lanes and opens it. Answers mode
- * fuses the lanes' final replies in the project directory. Code mode snapshots
- * every lane, gives the judge its own worktree at the lanes' starting commit
- * and a manifest (answers, diffstats, snapshot commits), inlining the diffs
- * only when they are small next to the judge's context window.
- */
 export async function startRunFusion(input: {
   run: MultiRunSummary;
   sourceIds: readonly string[];
@@ -198,6 +182,8 @@ export async function startRunFusion(input: {
   const assertCurrent = () => {
     if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) throw new Error('Runtime changed');
   };
+  const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => undefined);
+  assertCurrent();
 
   const sources = await loadFusionSources(run, input.sourceIds, input.sessionById, assertCurrent, io);
   if (sources.length === 0) throw new NoFusionOutputsError();
@@ -221,6 +207,8 @@ export async function startRunFusion(input: {
   const scope = scopeOf(first);
   if (sources.some((source) => scopeOf(source) !== scope)) throw new Error('Fusion sources resolve to different projects');
   const projectDirectory = project?.path ?? first.session.directory;
+  const magicPrompts = await io.loadPrompts(projectDirectory);
+  assertCurrent();
 
   let directory = projectDirectory;
   const context: Array<{ text: string }> = [];
@@ -250,7 +238,6 @@ export async function startRunFusion(input: {
 
     const setupCommands = await io.setupCommands(project);
     assertCurrent();
-    // A run can be fused more than once; each fusion gets its own branch.
     const worktreeName = `${run.groupSlug}/fusion-${passID}`;
     createdWorktree = await io.createWorktree(project, {
       preferredName: worktreeName,
@@ -269,7 +256,7 @@ export async function startRunFusion(input: {
     directory = await io.startDirectory(project, createdWorktree);
     assertCurrent();
 
-    context.push({ text: await io.renderPrompt('session.fusion.codeInstructions', {
+    context.push({ text: magicPrompts.render('session.fusion.codeInstructions', {
       baseCommit,
       attemptCount: String(sources.length),
     }) });
@@ -294,7 +281,7 @@ export async function startRunFusion(input: {
     });
     context.push({ text: '\n\n--- FUSION INPUTS END ---\nNow build the fused result in this worktree.' });
   } else {
-    context.push({ text: await io.renderPrompt('session.fusion.instructions') });
+    context.push({ text: magicPrompts.render('session.fusion.instructions') });
     context.push(...taskBlocks(prompts).map((text) => ({ text })));
     sources.forEach((source, index) => {
       context.push({ text: `\n\n--- RESULT ${index + 1}: ${source.label} ---\nSession: ${source.session.id}\n${source.reply}\n--- END RESULT ${index + 1} ---` });
@@ -318,8 +305,7 @@ export async function startRunFusion(input: {
   }
   assertCurrent();
 
-  const visiblePrompt = await io.renderPrompt('session.fusion.visible');
-  assertCurrent();
+  const visiblePrompt = magicPrompts.render('session.fusion.visible');
   const fusionSession = await io.createSession({
     title: `${run.title} · ${judge.modelName ?? judge.modelID}`,
     directory,
@@ -345,6 +331,7 @@ export async function startRunFusion(input: {
   }
 
   assertCurrent();
+  await syncSessionKnowledge(directory, fusionSession.id, responseStyleInstruction, runtimeKey);
   await io.send({
     runtimeKey,
     id: fusionSession.id,

@@ -1,12 +1,7 @@
-/**
- * Extension-host bootstrap config injected into the VS Code webview HTML
- * before any bundled module evaluates. Prefer this over RuntimeAPIs for
- * early VS Code detection during store module initialization.
- */
 export interface VSCodeBootstrapConfig {
   workspaceFolder?: string;
   workspaceFolders?: unknown;
-  /** "parallel" on the tab the "Run on several models" command opens. */
+  panelType?: 'chat' | 'settings';
   initialComposer?: unknown;
 }
 
@@ -19,6 +14,14 @@ export const getVSCodeBootstrapConfig = (): VSCodeBootstrapConfig | null => {
 
 export const getVSCodeBootstrapWorkspaceFolder = (): string | null => {
   return getVSCodeBootstrapConfig()?.workspaceFolder?.trim() || null;
+};
+
+export const isVSCodeWithoutWorkspace = (): boolean => {
+  const config = getVSCodeBootstrapConfig();
+  if (!config) return false;
+  return Array.isArray(config.workspaceFolders)
+    ? config.workspaceFolders.length === 0
+    : !config.workspaceFolder?.trim();
 };
 
 export const isVSCodeBootstrapPresent = (

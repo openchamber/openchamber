@@ -6,6 +6,7 @@ import { mergeIncompleteSourceControlPage, sourceControlReadContextParts } from 
 import type { PageResult } from '@/lib/source-control/types';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestDiffServing, useChangeRequestTerm, useSourceControlProviderServing } from '@/lib/source-control/providers/registry';
 import { useRepositoryHost } from '@/components/references/referenceSources';
 import { useGitStore } from '@/stores/useGitStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
@@ -17,6 +18,7 @@ import {
 } from '@/stores/useGitHubPrStatusStore';
 import { useRuntimeAPIs } from './useRuntimeAPIs';
 import { useDebouncedValue } from './useDebouncedValue';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 type PullRequestList =
   | { key: string; status: 'loading' }
@@ -27,7 +29,6 @@ type PullRequestList =
     page: number;
     hasMore: boolean;
     error: string | null;
-    /** Projects (an upstream beside a fork) whose pull requests could not be read this time. */
     incompleteProjectIds: string[];
   }
   | { key: string; status: 'error'; message: string };
@@ -36,13 +37,9 @@ const NO_PROJECT_IDS: string[] = [];
 
 type ReadyList = Extract<PullRequestList, { status: 'ready' }>;
 
-// Lists already read, shared by every comparison surface (Changes, Walkthrough,
-// mobile Changes): reopening one shows the last list at once, and one older
-// than this is read again in the background, replaced when the answer lands.
 const LIST_FRESH_MS = 60_000;
 const MAX_SHARED_LISTS = 30;
 const sharedLists = new Map<string, { list: ReadyList; readAt: number }>();
-/** Forgets every shared list; for scenarios that must start from nothing. */
 export const forgetSharedPullRequestLists = () => sharedLists.clear();
 const rememberList = (list: ReadyList) => {
   sharedLists.delete(list.key);
@@ -54,13 +51,8 @@ const sourceOf = (pr: ChangeRequest): PullRequestSource => ({
   kind: 'pr', number: pr.number, sourceRepo: { owner: pr.project.owner, repo: pr.project.name },
 });
 
-const pullRequestKey = (pr: ChangeRequest) => `${pr.project.owner}/${pr.project.name}#${pr.number}`;
+const pullRequestKey = (pr: ChangeRequest) => `${joinProjectPath(pr.project.owner, pr.project.name)}#${pr.number}`;
 
-/**
- * Folds one page of pull requests into what the picker already shows. A
- * project the server could not read keeps the records it showed before rather
- * than reading as having none; the page still says which ones failed.
- */
 export const mergePullRequestPage = (
   shown: ChangeRequest[],
   result: PageResult<ChangeRequest>,
@@ -71,12 +63,6 @@ export const mergePullRequestPage = (
   return { prs: [...merged.values()], incompleteProjectIds: result.incompleteProjectIds ?? [] };
 };
 
-/**
- * Lists and remembers the pull request a comparison reviews. Every read goes
- * through the checkout's bound GitHub or GitLab context, so the list and the branch's
- * own pull request come from the account and repository the binding grants,
- * never from whichever account happens to be active.
- */
 export function usePullRequestComparison(
   directory: string | null,
   branch: string | null,
@@ -87,18 +73,18 @@ export function usePullRequestComparison(
   const { sourceControl } = useRuntimeAPIs();
   const { t } = useI18n();
   const runtimeKey = useGitStore((state) => state.runtimeKey);
-  // The server publishes pull request diffs for GitHub and GitLab only.
-  const latestContext = readContext?.provider === 'github' || readContext?.provider === 'gitlab' ? readContext : null;
+  const serving = useSourceControlProviderServing(readContext?.provider);
+  const providersUnknown = readContext !== null && serving === 'unknown';
+  const diffServing = useChangeRequestDiffServing(readContext?.provider);
+  const diffUnavailable = serving === 'served' && diffServing === 'not-served';
+  const latestContext = serving === 'served' ? readContext : null;
   const contextKey = latestContext ? JSON.stringify(sourceControlReadContextParts(latestContext)) : '';
-  // Callers may hand over a fresh object each render; effects and callbacks key
-  // on `contextKey` and read the object through this ref.
   const contextRef = useRef(latestContext);
   contextRef.current = latestContext;
   const context = latestContext;
-  // Known even with no working account, so the messages name the right host.
   const hostProvider = useRepositoryHost(directory)?.provider;
   const provider = context?.provider ?? hostProvider ?? null;
-  // A rebind to another repository must not carry a selection across.
+  const changeRequestTerm = useChangeRequestTerm(provider);
   const selectionKey = JSON.stringify([runtimeKey, directory, branch, context?.repositoryId ?? null]);
   const selection = usePullRequestSelectionStore((state) => state.selections.get(selectionKey) ?? null);
   const selectedSource = selection?.source ?? null;
@@ -124,8 +110,6 @@ export function usePullRequestComparison(
   const branchStatus = useGitHubPrStatusStore((state) => context && branch
     ? getFreshestSourceControlStatusForBranch(state.entries, context, branch) : null);
 
-  // Ask for this branch's own pull request through the same bound context.
-  // The status store dedupes by signature and throttles by TTL.
   useEffect(() => {
     const context = contextRef.current;
     if (!enabled || !context || !branch || selectedSource || !auth.authChecked || !auth.connected) return;
@@ -158,7 +142,7 @@ export function usePullRequestComparison(
   }, [acceptHandoff, preferredSource, selectionKey]);
 
   const refresh = useCallback(async (previous?: ReadyList) => {
-    if (!directory || !enabled || owner.current.key !== key || !owner.current.enabled) return;
+    if (!directory || !enabled || providersUnknown || owner.current.key !== key || !owner.current.enabled) return;
     const id = ++requestId.current;
     const runtime = getRuntimeKey();
     const shownList = listRef.current;
@@ -167,13 +151,12 @@ export function usePullRequestComparison(
     if (previous) setLoadingMore(true);
     else {
       setLoadingMore(false);
-      // A list already on screen stays while it is read again.
       if (!shownReady) setList({ key, status: 'loading' });
     }
     try {
       const context = contextRef.current;
-      if (!sourceControl) throw new Error(t(changeRequestCopy('session.githubPrPicker.error.runtimeUnavailable', provider)));
-      if (!context || !auth.connected) throw new Error(t(changeRequestCopy('session.githubPrPicker.empty.notConnected', provider)));
+      if (!sourceControl) throw new Error(t(changeRequestCopy('session.githubPrPicker.error.runtimeUnavailable', changeRequestTerm)));
+      if (!context || !auth.connected) throw new Error(t(changeRequestCopy('session.githubPrPicker.empty.notConnected', changeRequestTerm)));
       const page = previous ? previous.page + 1 : 1;
       const result = await sourceControl.changeRequestsList(context, { page, query: search || undefined });
       if (requestId.current !== id || getRuntimeKey() !== runtime || owner.current.key !== key || !owner.current.enabled) return;
@@ -183,15 +166,14 @@ export function usePullRequestComparison(
       setList(ready);
     } catch (error) {
       if (requestId.current === id && getRuntimeKey() === runtime && owner.current.key === key && owner.current.enabled) {
-        const message = error instanceof Error ? error.message : t(changeRequestCopy('session.githubPrPicker.toast.loadMoreFailed', provider));
+        const message = error instanceof Error ? error.message : t(changeRequestCopy('session.githubPrPicker.toast.loadMoreFailed', changeRequestTerm));
         setList(previous ? { ...previous, error: message } : { key, status: 'error', message });
       }
     } finally {
       if (requestId.current === id) setLoadingMore(false);
     }
-  }, [auth.connected, directory, enabled, key, provider, search, sourceControl, t]);
+  }, [auth.connected, changeRequestTerm, directory, enabled, key, providersUnknown, search, sourceControl, t]);
 
-  // Shows a list another surface read, and reads again only what is stale.
   const revalidate = useCallback(() => {
     const shared = sharedLists.get(key);
     if (shared && listRef.current !== shared.list) setList(shared.list);
@@ -207,20 +189,17 @@ export function usePullRequestComparison(
   return {
     enabled,
     readContext: context,
-    /** The host the change requests come from, for wording and numbering. */
     provider,
-    selectedSource: pendingPreference ?? selectedSource,
+    diffUnavailable,
+    selectedSource: providersUnknown ? null : pendingPreference ?? selectedSource,
     prs: current?.status === 'ready' ? current.prs : NO_PULL_REQUESTS,
     query, setQuery,
-    loading: enabled && (!current || current.status === 'loading' || search !== query.trim()),
+    loading: enabled && (providersUnknown || !current || current.status === 'loading' || search !== query.trim()),
     loadingMore,
     hasMore: current?.status === 'ready' && current.hasMore,
-    /** Projects whose pull requests failed to load; non-empty means the list is partial. */
     incompleteProjectIds: current?.status === 'ready' ? current.incompleteProjectIds : NO_PROJECT_IDS,
     error: current?.status === 'error' ? current.message : current?.status === 'ready' ? current.error : null,
-    /** Reads the list again now: retry and refresh buttons. */
     refresh: () => refresh(),
-    /** Opening the picker: shows what is known and reads again only when stale. */
     revalidate,
     loadMore: () => current?.status === 'ready' && current.hasMore && !loadingMore ? refresh(current) : Promise.resolve(),
     select: (pr: ChangeRequest) => saveSelection(selectionKey, sourceOf(pr)),

@@ -159,6 +159,19 @@ const toPublicJob = (job) => {
   };
 };
 
+/**
+ * @param {{
+ *   messageQueue: any,
+ *   globalEventHub?: { subscribeEvent: (subscriber: (event: any) => void) => () => void } | null,
+ *   broadcastGlobalUiEvent?: ((event: any) => void) | null,
+ *   dataDir: string,
+ *   writeSpec?: typeof writeGoalSpec,
+ *   waitForOpenCode?: () => Promise<unknown>,
+ *   now?: () => number,
+ *   createId?: () => string,
+ *   fs?: typeof fsPromises,
+ * }} options
+ */
 export function createGoalSpecJobRuntime({
   messageQueue,
   globalEventHub = null,

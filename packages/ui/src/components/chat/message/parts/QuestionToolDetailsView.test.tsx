@@ -1,11 +1,18 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { I18nProvider } from '@/lib/i18n';
 import { questionPrompts, type QuestionAnswer } from '@/lib/opencode/question';
-import { type LateAnswer, QuestionAnswerForm, QuestionToolDetailsView, type QuestionToolDetailsViewProps } from './QuestionToolDetailsView';
+import type { LateAnswer, QuestionToolDetailsViewProps } from './QuestionToolDetailsView';
+
+// Once the lazy Markdown renderer has loaded, it reads the chat's directory
+// for file links, which needs a SyncProvider; these renders have none, and
+// their links need no directory.
+const realEffectiveDirectory = { ...(await import('@/hooks/useEffectiveDirectory')) };
+mock.module('@/hooks/useEffectiveDirectory', () => ({ ...realEffectiveDirectory, useEffectiveDirectory: () => undefined }));
+const { QuestionAnswerForm, QuestionToolDetailsView } = await import('./QuestionToolDetailsView');
 
 // Static renders, as in FormMarkdown.test.tsx: question text is Markdown,
 // whose renderer loads lazily through a Vite worker import that `bun test`
@@ -224,6 +231,9 @@ describe('QuestionToolDetailsView, opened and closed', () => {
       HTMLElement: windowInstance.HTMLElement,
       Element: windowInstance.Element,
       Node: windowInstance.Node,
+      // The form's scroll box measures itself on the next frame.
+      requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+      cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
       IS_REACT_ACT_ENVIRONMENT: true,
     });
     host = document.createElement('div');

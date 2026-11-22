@@ -4,7 +4,8 @@ import type { SessionNode } from '../types';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
-import { useNotificationStore } from '@/sync/notification-store';
+import { isSessionUnread } from '@/sync/session-unread';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 
 // Ordered by how much the user is needed: a blocked turn outranks a running
 // one, which outranks something merely unread.
@@ -107,10 +108,10 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
-  const unread = useNotificationStore(React.useCallback((state): CollapsedActivityState => {
+  const unread = useGlobalSessionsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.unread) {
-      if ((state.index.session.unseenCount[sessionId] ?? 0) > 0) return 'unread';
+      if (isSessionUnread(state.entityById.get(sessionId))) return 'unread';
     }
     return null;
   }, [enabled, ids.unread]));

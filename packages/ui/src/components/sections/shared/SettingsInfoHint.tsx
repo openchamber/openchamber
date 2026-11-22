@@ -7,16 +7,9 @@ import { cn } from '@/lib/utils';
 interface SettingsInfoHintProps {
   children: React.ReactNode;
   className?: string;
-  /** Tooltip panel width cap. @default 'max-w-sm' */
   contentClassName?: string;
 }
 
-/**
- * Info icon revealing helper text on hover or click (click covers touch
- * devices, where hover tooltips never open). Clicking outside closes it.
- * Settings pages hide secondary descriptions behind this to keep the
- * default view quiet.
- */
 export const SettingsInfoHint: React.FC<SettingsInfoHintProps> = ({
   children,
   className,
@@ -45,10 +38,6 @@ export const SettingsInfoHint: React.FC<SettingsInfoHintProps> = ({
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger
         asChild
-        // The toggle lives on the trigger, not the button: Base UI runs its own
-        // "close on trigger press" on pointerdown and again after our click
-        // handler, which turned a tap into open-then-close and made the hint
-        // unreachable on touch. Only our click may change the open state.
         onPointerDown={(event) => event.preventBaseUIHandler()}
         onClick={(event) => {
           event.preventBaseUIHandler();
@@ -63,7 +52,7 @@ export const SettingsInfoHint: React.FC<SettingsInfoHintProps> = ({
           aria-label={t('settings.common.infoAria')}
           aria-expanded={open}
           className={cn(
-            'inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             className,
           )}
         >

@@ -3,26 +3,18 @@ import type { JsonValue } from '@openchamber/sdk';
 
 import { useI18n } from '@/lib/i18n';
 import { readPath, stringifyTemplateValue } from '@/lib/guests/tool-presentation';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/** Rows drawn for an `output: "table"` rule; the rest is a count line. */
 const GUEST_TOOL_TABLE_ROWS_MAX = 200;
-/** Characters per cell; the column paths are short by contract, values are not. */
 const GUEST_TOOL_TABLE_CELL_MAX = 200;
 
-// Same classes the markdown decorator puts on assistant tables
-// (`components/chat/markdown/decorate.ts`), minus the copy/download toolbar.
-const TABLE_CELL_CLASS = 'min-w-[120px] max-w-[320px] whitespace-normal [overflow-wrap:anywhere] border-e border-border/60 px-4 py-2.5 align-middle last:border-e-0';
+const TABLE_CELL_CLASS = 'min-w-[120px] max-w-[320px] whitespace-normal [overflow-wrap:anywhere] border-e border-edge px-4 py-2.5 align-middle last:border-e-0';
 
 interface GuestToolTableProps {
     rows: readonly JsonValue[];
     columns: readonly string[];
 }
 
-/**
- * The expanded body of a tool call an extension declared as a table: one
- * column per declared path, one row per output item, cells read with the
- * same dotted-path reader the header templates use.
- */
 export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns }) => {
     const { t } = useI18n();
     const visibleRows = rows.length > GUEST_TOOL_TABLE_ROWS_MAX ? rows.slice(0, GUEST_TOOL_TABLE_ROWS_MAX) : rows;
@@ -30,10 +22,10 @@ export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns })
 
     return (
         <div className="flex w-fit max-w-full flex-col gap-1">
-            <div className="oc-tile overflow-x-auto rounded-lg">
+            <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter oc-tile rounded-lg" fillContainer={false}>
                 <table className="w-max border-collapse text-sm">
                     <thead>
-                        <tr className="border-b border-border/60">
+                        <tr className="border-b border-edge">
                             {columns.map((column) => (
                                 <th key={column} className={`${TABLE_CELL_CLASS} text-start font-semibold text-foreground`}>
                                     {column}
@@ -43,7 +35,7 @@ export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns })
                     </thead>
                     <tbody>
                         {visibleRows.map((row, rowIndex) => (
-                            <tr key={rowIndex} className={rowIndex === visibleRows.length - 1 ? 'border-0' : 'border-b border-border/60'}>
+                            <tr key={rowIndex} className={rowIndex === visibleRows.length - 1 ? 'border-0' : 'border-b border-edge'}>
                                 {columns.map((column) => (
                                     <td key={column} className={`${TABLE_CELL_CLASS} text-foreground/90`}>
                                         {stringifyTemplateValue(readPath(row, column), GUEST_TOOL_TABLE_CELL_MAX)}
@@ -53,7 +45,7 @@ export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns })
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </ScrollableOverlay>
             {hiddenCount > 0 ? (
                 <div className="typography-micro text-muted-foreground">
                     {t('chat.toolPart.moreRows', { count: hiddenCount })}

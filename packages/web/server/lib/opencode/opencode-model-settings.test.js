@@ -27,7 +27,7 @@ const run = (body, cwd) => {
   const env = { ...process.env, OPENCODE_CONFIG_DIR: configDir, HOME: isolatedHome };
   delete env.OPENCODE_CONFIG;
   delete env.OPENCODE_CONFIG_PATH;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env, encoding: 'utf8', cwd });
+  const result = spawnSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script], { env, encoding: 'utf8', cwd });
   if (result.status !== 0) throw new Error(result.stderr);
   return JSON.parse(result.stdout.trim().split('\n').pop());
 };
@@ -120,7 +120,7 @@ describe('the model settings route', () => {
     delete env.OPENCODE_CONFIG;
     delete env.OPENCODE_CONFIG_PATH;
     delete env.OPENCHAMBER_ENTERPRISE_MODE;
-    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env, encoding: 'utf8', cwd: path.dirname(routesModule), timeout: 60_000 });
+    const result = spawnSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script], { env, encoding: 'utf8', cwd: path.dirname(routesModule), timeout: 60_000 });
     if (result.status !== 0) throw new Error(result.stderr);
     const answer = JSON.parse(result.stdout.trim().split('\n').pop());
     expect([answer.put, answer.get]).toEqual([200, 200]);

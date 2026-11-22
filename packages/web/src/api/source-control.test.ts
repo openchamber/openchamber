@@ -4,6 +4,7 @@ import type {
   CreateChangeRequestInput,
   MergeChangeRequestInput,
   ReadyChangeRequestInput,
+  DraftChangeRequestInput,
   SourceControlCreateMutationTarget,
   SourceControlExistingMutationTarget,
   SourceControlIdentity,
@@ -11,9 +12,13 @@ import type {
   SourceControlReadContext,
   UpdateChangeRequestInput,
 } from '@openchamber/ui/lib/api/types';
+import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
+import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
+import { buildManagedAccountOptions } from '@openchamber/ui/lib/source-control/identity';
+import { githubLikeDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor.fixture';
 import { configureWebTransportBinding, createWebSourceControlAPI, removeWebTransportBinding } from './source-control';
 
-const runtimeFetchMock = vi.fn(async (): Promise<Response> => Response.json({}));
+const runtimeFetchMock = vi.fn(async (_input?: string, _init?: RuntimeFetchOptions): Promise<Response> => Response.json({}));
 const identity: SourceControlIdentity = { provider: 'github', instance: 'https://GitHub.com/' };
 const readContext: SourceControlReadContext = {
   ...identity,
@@ -35,9 +40,11 @@ const createMutationContext: SourceControlMutationContext<SourceControlCreateMut
 };
 
 interface MutationTestResult {
+  outcome?: string;
   merged?: boolean | string;
   message?: string;
   ready?: boolean;
+  draft?: boolean | string;
   commented?: boolean | string;
   state?: string;
   unexpected?: boolean;
@@ -60,32 +67,49 @@ const mutationReceipt = (result: MutationTestResult = {}) => ({
   result,
 });
 
+const githubIdentity = { provider: 'github', instance: 'github.com' };
+const githubUser = (id: string, username: string) => ({ ...githubIdentity, id, username });
+const githubProject = (owner: string, name: string) => ({
+  ...githubIdentity, id: `${owner}/${name}`, owner, name, url: `https://github.com/${owner}/${name}`,
+});
+
 afterEach(() => {
   runtimeFetchMock.mockReset();
 });
 
 describe('createWebSourceControlAPI', () => {
+  it('keeps extension user IDs as strings in auth and accepts their exact mutation actor', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const extension = { provider: 'ext-forge', instance: 'https://forge.example' };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, user: { id: ' ', login: 'mona' }, accounts: [] }));
+    expect(await api.authStatus(extension)).toMatchObject({ user: { id: ' ', username: 'mona' } });
+    const receipt = { ...mutationReceipt(), actor: { ...extension, providerAccountId: `${extension.instance}#member:mona` } };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(receipt));
+    expect(await api.issueComment({ ...mutationContext, ...extension, body: 'Synthetic comment' })).toEqual(receipt);
+  });
   it('posts across-search contexts and parses items with their directory and folder outcomes', async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     const payload = { items: [{ kind: 'issue', number: 1, title: 'Issue', url: 'https://github.com/acme/app/issues/1',
       body: '', bodyTruncated: false, createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 0,
       sourceRepo: { owner: 'acme', repo: 'app', source: 'origin' }, state: 'open', directory: readContext.directory,
     }], cursor: null, hasMore: false, total: 1,
-    repositories: [{ directory: readContext.directory, status: 'included', repo: { owner: 'acme', repo: 'app', url: 'https://github.com/acme/app' } },
+    repositories: [{ directory: readContext.directory, status: 'included', repo: { owner: 'acme', repo: 'app', host: 'github.com', url: 'https://github.com/acme/app' } },
       { directory: '/missing', status: 'no-repo' }],
     };
     runtimeFetchMock.mockResolvedValueOnce(Response.json(payload));
-    expect(await api.githubReferencesAcross?.([readContext], { kind: 'issue', query: ' fix ' })).toEqual(payload);
+    // Each item is stamped with the provider it was read from.
+    expect(await api.referencesAcross?.([readContext], { kind: 'issue', query: ' fix ' }))
+      .toEqual({ ...payload, items: payload.items.map((item) => ({ ...item, provider: 'github' })) });
     expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/references/across', {
       method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ contexts: [readContext], kind: 'issue', query: 'fix' }),
     });
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ ...payload, items: payload.items.map(({ directory: _directory, ...item }) => item) }));
-    await expect(api.githubReferencesAcross?.([readContext], { kind: 'issue' })).rejects.toThrow();
+    await expect(api.referencesAcross?.([readContext], { kind: 'issue' })).rejects.toThrow();
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ ...payload, repositories: [{ directory: '/missing', status: 'unknown' }] }));
-    await expect(api.githubReferencesAcross?.([readContext], { kind: 'issue' })).rejects.toThrow();
+    await expect(api.referencesAcross?.([readContext], { kind: 'issue' })).rejects.toThrow();
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'GitHub rate limited' }, { status: 503 }));
-    await expect(api.githubReferencesAcross?.([readContext], { kind: 'issue' })).rejects.toThrow('GitHub rate limited');
+    await expect(api.referencesAcross?.([readContext], { kind: 'issue' })).rejects.toThrow('GitHub rate limited');
   });
   it('rejects failed and malformed transport configuration responses without retry or an applied empty binding', async () => {
     const intent = { directory: '/repo', expectedRepositoryId: 'repo_one', expectedRevision: 0,
@@ -337,13 +361,16 @@ describe('createWebSourceControlAPI', () => {
   });
 
   it('serializes immutable bound context for status reads', async () => {
-    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, branch: 'feature', repo: null, pr: null }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      identity: githubIdentity, project: null, branch: 'feature', changeRequest: null, ci: null, fetchedAt: 42,
+    }));
     const context = {
       directory: '/repo', repositoryId: 'repo_one', provider: 'github' as const, instance: 'github.com',
       accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream',
     };
 
-    await createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestStatus(context, 'feature', { force: true });
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestStatus(context, 'feature', { force: true }))
+      .resolves.toEqual({ identity: githubIdentity, project: null, branch: 'feature', changeRequest: null, ci: null, fetchedAt: 42 });
 
     expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/pr/status', {
       query: new URLSearchParams({
@@ -356,19 +383,28 @@ describe('createWebSourceControlAPI', () => {
 
   it.each([
     ['invalid GitHub CI counts', {
-      connected: true,
+      identity: githubIdentity,
+      project: null,
       branch: 'feature',
-      repo: null,
-      pr: null,
-      checks: { state: 'success', total: 1, success: -1, failure: 0, pending: 0 },
-    }],
+      changeRequest: null,
+      ci: { summary: { state: 'success', total: 1, success: -1, failure: 0, pending: 0 } },
+    }, 'invalid CI summary'],
     ['invalid GitHub change-request URL', {
-      connected: true,
+      identity: githubIdentity,
+      project: githubProject('acme', 'app'),
       branch: 'feature',
-      repo: { owner: 'acme', repo: 'app', url: 'https://github.com/acme/app' },
-      pr: { number: 3, title: 'Feature', url: 'javascript:alert(1)', state: 'open', draft: false, base: 'main', head: 'feature' },
-    }],
-  ])('rejects %s in a successful status response', async (_label, payload) => {
+      changeRequest: {
+        ...githubIdentity, id: 'acme/app#3', number: 3, project: githubProject('acme', 'app'),
+        title: 'Feature', url: 'javascript:alert(1)', state: 'open', draft: false, base: 'main', head: 'feature',
+      },
+    }, 'invalid change request'],
+    ['a GitHub status of another instance', {
+      identity: { provider: 'github', instance: 'ghe.example.com' },
+      project: null,
+      branch: 'feature',
+      changeRequest: null,
+    }, 'invalid change request status'],
+  ])('rejects %s in a successful status response', async (_label, payload, message) => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json(payload));
     const context = {
       directory: '/repo', repositoryId: 'repo_one', provider: 'github' as const, instance: 'github.com',
@@ -376,7 +412,7 @@ describe('createWebSourceControlAPI', () => {
     };
 
     await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestStatus(context, 'feature'))
-      .rejects.toThrow('invalid');
+      .rejects.toThrow(message);
   });
 
   it.each([
@@ -460,20 +496,20 @@ describe('createWebSourceControlAPI', () => {
 
   it('calls the canonical issue alias and normalizes repository, user, labels, and pagination', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true,
-      repo: { owner: 'openchamber', repo: 'openchamber', url: 'https://github.com/openchamber/openchamber' },
-      issues: [{
+      items: [{
+        ...githubIdentity,
+        id: 'openchamber/openchamber#17',
         number: 17,
+        project: githubProject('openchamber', 'openchamber'),
         title: 'Migrate source control',
         url: 'https://github.com/openchamber/openchamber/issues/17',
         state: 'open',
-        author: { login: 'octocat', id: 7, avatarUrl: 'https://avatars.example/7' },
+        author: { ...githubUser('7', 'octocat'), avatarUrl: 'https://avatars.example/7' },
         labels: [{ name: 'migration', color: '123456' }],
-        sourceRepo: { owner: 'openchamber', repo: 'openchamber', source: 'origin' },
       }],
       page: 2,
       hasMore: true,
-      failedRepos: [{ owner: 'upstream', repo: 'openchamber' }],
+      incompleteProjectIds: ['upstream/openchamber'],
     }));
 
     const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock })
@@ -526,9 +562,10 @@ describe('createWebSourceControlAPI', () => {
 
   it('serializes immutable bound context and selectors for issue and project reads', async () => {
     runtimeFetchMock
-      .mockResolvedValueOnce(Response.json({ connected: true, repo: null, issue: null }))
-      .mockResolvedValueOnce(Response.json({ connected: true, repo: null, comments: [] }))
-      .mockResolvedValueOnce(Response.json({ connected: true, isFork: false, upstream: null }))
+      // Null is an issue outside the bound repository network.
+      .mockResolvedValueOnce(Response.json(null))
+      .mockResolvedValueOnce(Response.json([]))
+      .mockResolvedValueOnce(Response.json({ identity: githubIdentity, isFork: false, upstream: null }))
       .mockResolvedValueOnce(Response.json({ branches: ['main'] }));
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
 
@@ -560,28 +597,88 @@ describe('createWebSourceControlAPI', () => {
     });
   });
 
+  it('asks for an issue\'s cross-references only when the caller does', async () => {
+    const issue = {
+      ...githubIdentity, id: 'acme/app#1', number: 1, project: githubProject('acme', 'app'),
+      title: 'First issue', url: 'https://github.com/acme/app/issues/1', state: 'open',
+      references: [{
+        kind: 'issue', number: 5, title: 'Mentioning issue', url: 'https://github.com/acme/app/issues/5',
+        repo: 'acme/app', createdAt: '2026-11-12T16:47:27Z', author: { login: 'gaojunran' }, willCloseTarget: false,
+      }],
+    };
+    const queries: string[] = [];
+    let call = 0;
+    const fetch = vi.fn(async (_input?: string, init?: RuntimeFetchOptions): Promise<Response> => {
+      queries.push(String(init?.query ?? ''));
+      call += 1;
+      return Response.json(call === 1 ? issue : { ...issue, references: undefined });
+    });
+    const api = createWebSourceControlAPI({ fetch });
+
+    const asked = await api.issueGet(readContext, 1, { owner: 'acme', name: 'app' }, { includeReferences: true });
+    expect(asked?.references).toHaveLength(1);
+    expect(asked?.references?.[0]).toMatchObject({ kind: 'issue', number: 5, repo: 'acme/app', author: { login: 'gaojunran' } });
+    expect(queries[0]).toContain('references=1');
+
+    const plain = await api.issueGet(readContext, 1, { owner: 'acme', name: 'app' });
+    expect(plain).not.toHaveProperty('references');
+    expect(queries[1]).not.toContain('references=1');
+  });
+
+  it('drops malformed cross-references and leaves the field out when none survive', async () => {
+    const link = {
+      kind: 'issue', number: 5, url: 'https://github.com/acme/app/issues/5', createdAt: '2026-11-12T16:47:27Z',
+    };
+    const malformed = [{ ...link, kind: 'sticky' }, { ...link, url: 'javascript:alert(1)' }];
+    const issue = {
+      ...githubIdentity, id: 'acme/app#1', number: 1, project: githubProject('acme', 'app'),
+      title: 'First issue', url: 'https://github.com/acme/app/issues/1', state: 'open',
+    };
+    const pull = {
+      ...githubIdentity, id: 'acme/app#2', number: 2, project: githubProject('acme', 'app'), title: 'Fix', url: 'https://github.com/acme/app/pull/2',
+      state: 'open', draft: false, base: 'main', head: 'fix', headSha: 'abc',
+    };
+    const context = {
+      identity: githubIdentity, project: githubProject('acme', 'app'), changeRequest: pull,
+      issueComments: [], reviewComments: [], files: [], diff: '', ci: null, fetchedAt: 1,
+    };
+    const answers = [
+      { ...issue, references: malformed },
+      { ...context, references: malformed },
+      { ...context, references: [...malformed, link] },
+    ];
+    const api = createWebSourceControlAPI({ fetch: vi.fn(async () => Response.json(answers.shift())) });
+
+    expect(await api.issueGet(readContext, 1, undefined, { includeReferences: true })).not.toHaveProperty('references');
+    expect(await api.changeRequestContext(readContext, 2, { includeReferences: true })).not.toHaveProperty('references');
+    expect((await api.changeRequestContext(readContext, 2, { includeReferences: true })).references).toEqual([link]);
+  });
+
   it('rejects malformed issue and project read payloads', async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
 
-    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, page: 1, hasMore: false }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ page: 1, hasMore: false }));
     await expect(api.issuesList(readContext)).rejects.toThrow('invalid issues');
 
-    runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true, repo: null, issues: [], page: 1, hasMore: false, failedRepos: [{ owner: '', repo: 'repo' }],
-    }));
-    await expect(api.issuesList(readContext)).rejects.toThrow('invalid incomplete repository');
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ items: [], page: 0, hasMore: false }));
+    await expect(api.issuesList(readContext)).rejects.toThrow('invalid pagination');
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ items: [], page: 1, hasMore: 'no' }));
+    await expect(api.issuesList(readContext)).rejects.toThrow('invalid pagination');
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ items: [], page: 1, hasMore: false, incompleteProjectIds: [''] }));
+    await expect(api.issuesList(readContext)).rejects.toThrow('invalid incomplete projects');
 
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true,
-      repo: { owner: 'team', repo: 'repo', url: 'https://github.com/team/repo' },
-      issue: { number: 1, title: '', url: 'https://github.com/team/repo/issues/1', state: 'open' },
+      ...githubIdentity, id: 'team/repo#1', number: 1, project: githubProject('team', 'repo'),
+      title: '', url: 'https://github.com/team/repo/issues/1', state: 'open',
     }));
     await expect(api.issueGet(readContext, 1)).rejects.toThrow('invalid issue');
 
-    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, repo: null }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ items: [] }));
     await expect(api.issueComments(readContext, 1)).rejects.toThrow('invalid comments');
 
-    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, isFork: true, upstream: null }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ identity: githubIdentity, isFork: true, upstream: null }));
     await expect(api.projectUpstream(readContext)).rejects.toThrow('invalid upstream');
 
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ branches: ['main', 7] }));
@@ -617,16 +714,18 @@ describe('createWebSourceControlAPI', () => {
     });
   });
 
-  it('normalizes connected auth accounts and CLI identity', async () => {
+  it('parses the neutral github.com auth status with its accounts and CLI identity', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      ...githubIdentity,
+      status: 'connected',
       connected: true,
-      user: { login: 'octocat', id: 7 },
+      user: githubUser('7', 'octocat'),
       scope: 'repo',
       accounts: [
-        { id: 'oauth-account', credentialId: 'oauth-account', credentialRevision: 1, providerUserId: 'github.com#7', providerUserStatus: 'available', user: { login: 'octocat', id: 7 }, current: true, source: 'oauth' },
-        { id: 'gh-cli', credentialId: 'gh-cli', credentialRevision: 1, providerUserId: 'github.com#8', providerUserStatus: 'available', user: { login: 'cli-user', id: 8 }, current: false, source: 'gh-cli' },
+        { id: 'oauth-account', credentialId: 'oauth-account', credentialRevision: 1, providerUserId: 'github.com#7', providerUserStatus: 'available', user: githubUser('7', 'octocat'), current: true, source: 'oauth', status: 'valid' },
+        { id: 'gh-cli', credentialId: 'gh-cli', credentialRevision: 1, providerUserId: 'github.com#8', providerUserStatus: 'available', user: githubUser('8', 'cli-user'), current: false, source: 'cli', status: 'valid' },
       ],
-      ghCli: { available: true, disabled: false, active: false, user: { login: 'cli-user', id: 8 } },
+      cli: { available: true, disabled: false, active: false, user: githubUser('8', 'cli-user') },
     }));
 
     await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).authStatus(identity)).resolves.toEqual({
@@ -649,11 +748,52 @@ describe('createWebSourceControlAPI', () => {
     });
   });
 
+  it('keeps every usable gh login selectable from the adapter into the account picker', async () => {
+    // An older server leaves `usable` out entirely; a newer one states it.
+    const olderCliAccount = (id: string, login: string, current: boolean) => ({
+      id: `github.com#cli:${id}`, credentialId: `github.com#cli:${id}`, credentialRevision: 1,
+      providerUserId: `github.com#${id}`, providerUserStatus: 'available', user: githubUser(id, login),
+      current, source: 'cli', status: 'valid',
+    });
+    const cliAccount = (id: string, login: string, current: boolean, usable: boolean) => ({
+      ...olderCliAccount(id, login, current), usable,
+    });
+    const statusWith = (accounts: unknown[]) => Response.json({
+      ...githubIdentity, status: 'disconnected', connected: false, accounts,
+      cli: { available: true, disabled: false, active: true, user: githubUser('8', 'personal') },
+    });
+    const githubPickerIdentity = { provider: 'github', instance: 'github.com' } as const;
+    const githubWithGhTransport = githubLikeDescriptor();
+    githubWithGhTransport.auth = { ...githubWithGhTransport.auth, cliTransport: true };
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const pickable = async (accounts: unknown[]) => {
+      runtimeFetchMock.mockResolvedValueOnce(statusWith(accounts));
+      const status = await api.authStatus(identity);
+      return buildManagedAccountOptions(githubPickerIdentity, githubWithGhTransport, status.accounts ?? [], () => 'CLI')
+        .map((option) => option.reference.accountId);
+    };
+
+    // Two logins on one host, both usable, only one current: both stay pickable.
+    await expect(pickable([cliAccount('8', 'personal', true, true), cliAccount('9', 'work', false, true)]))
+      .resolves.toEqual(['github.com#cli:8', 'github.com#cli:9']);
+    // An explicit false is kept, even on the current login.
+    await expect(pickable([cliAccount('8', 'personal', true, false), cliAccount('9', 'work', false, true)]))
+      .resolves.toEqual(['github.com#cli:9']);
+    // An older server that does not state `usable` keeps the current-only rule.
+    await expect(pickable([olderCliAccount('8', 'personal', true), olderCliAccount('9', 'work', false)]))
+      .resolves.toEqual(['github.com#cli:8']);
+    // Anything but a boolean is a broken response, not a guess.
+    runtimeFetchMock.mockResolvedValueOnce(statusWith([{ ...olderCliAccount('8', 'personal', true), usable: 'yes' }]));
+    await expect(api.authStatus(identity)).rejects.toThrow('Source control response contained an invalid auth credential');
+  });
+
   it('keeps gh CLI metadata when GitHub is disconnected', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      ...githubIdentity,
+      status: 'disconnected',
       connected: false,
       accounts: [],
-      ghCli: { available: true, disabled: true, active: false },
+      cli: { available: true, disabled: true, active: false },
     }));
 
     await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).authStatus(identity)).resolves.toEqual({
@@ -668,17 +808,19 @@ describe('createWebSourceControlAPI', () => {
 
   it('rejects auth inventory that does not preserve exact credential identity', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      ...githubIdentity,
+      status: 'connected',
       connected: true,
-      user: { login: 'octocat', id: 7 },
+      user: githubUser('7', 'octocat'),
       accounts: [{
         id: 'credential-one', credentialId: 'credential-two', credentialRevision: 1,
         providerUserId: 'github.com#7', providerUserStatus: 'available',
-        user: { login: 'octocat', id: 7 }, current: true, source: 'oauth', status: 'valid',
+        user: githubUser('7', 'octocat'), current: true, source: 'oauth', status: 'valid',
       }],
     }));
 
     await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).authStatus(identity))
-      .rejects.toThrow('Source control response contained an invalid GitHub auth credential');
+      .rejects.toThrow('Source control response contained an invalid auth credential');
   });
 
   it('keeps device grants opaque and maps unavailable flows to terminal expiry', async () => {
@@ -711,13 +853,49 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
+  it('reads github.com device-flow users, activation and the CLI switch through the neutral auth routes', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const user = { ...githubUser('7', 'octocat'), avatarUrl: 'https://avatars.example/7' };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, user, scope: 'repo' }));
+    await expect(api.authComplete(identity, 'oauth_opaque')).resolves.toEqual({ status: 'connected', user, scope: 'repo' });
+
+    // A user stamped with another instance is not this instance's user.
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      connected: true, user: { ...user, instance: 'ghe.example.com' }, scope: 'repo',
+    }));
+    await expect(api.authComplete(identity, 'oauth_opaque')).rejects.toThrow('invalid user');
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      ...githubIdentity, status: 'connected', connected: true, user: githubUser('7', 'octocat'), accounts: [{
+        id: 'oauth-account', credentialId: 'oauth-account', credentialRevision: 2, providerUserId: 'github.com#7',
+        providerUserStatus: 'available', user: githubUser('7', 'octocat'), current: true, source: 'oauth', status: 'valid',
+      }],
+    }));
+    await expect(api.authActivate(identity, 'oauth-account')).resolves.toMatchObject({
+      ...githubIdentity, status: 'connected', user: githubUser('7', 'octocat'),
+      accounts: [{ id: 'oauth-account', credentialRevision: 2, current: true }],
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/activate', expect.objectContaining({
+      body: JSON.stringify({ accountId: 'oauth-account' }), query: new URLSearchParams({ instance: 'github.com' }),
+    }));
+
+    // github.com switches its CLI on the same route as every instance; /auth/gh-cli is only a server alias.
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ available: true, disabled: true }));
+    await expect(api.authSetCliDisabled(identity, true)).resolves.toEqual({ disabled: true });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/cli', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled: true }),
+      query: new URLSearchParams({ instance: 'github.com' }),
+    });
+  });
+
   it('serializes immutable bound context for change-request lists', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true,
-      prs: [],
+      items: [],
       page: 2,
       hasMore: false,
-      failedRepos: [{ owner: 'upstream', repo: 'openchamber' }],
+      incompleteProjectIds: ['upstream/openchamber'],
     }));
     const context = {
       ...identity,
@@ -729,7 +907,7 @@ describe('createWebSourceControlAPI', () => {
     };
 
     await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestsList(context, { page: 2, query: 'fix' }))
-      .resolves.toMatchObject({ incompleteProjectIds: ['upstream/openchamber'] });
+      .resolves.toEqual({ items: [], page: 2, hasMore: false, incompleteProjectIds: ['upstream/openchamber'] });
 
     expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/pulls/list', {
       query: new URLSearchParams({
@@ -742,11 +920,14 @@ describe('createWebSourceControlAPI', () => {
 
   it('normalizes pull-request context, files, comments, and detailed checks', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true,
+      identity: githubIdentity,
       fetchedAt: 42,
-      repo: { owner: 'openchamber', repo: 'openchamber', url: 'https://github.com/openchamber/openchamber' },
-      pr: {
+      project: githubProject('openchamber', 'openchamber'),
+      changeRequest: {
+        ...githubIdentity,
+        id: 'openchamber/openchamber#4',
         number: 4,
+        project: githubProject('openchamber', 'openchamber'),
         title: 'Generic adapter',
         body: 'Body',
         url: 'https://github.com/openchamber/openchamber/pull/4',
@@ -755,21 +936,24 @@ describe('createWebSourceControlAPI', () => {
         base: 'main',
         head: 'source-control',
         headSha: 'abc',
-        author: { login: 'octocat', id: 7 },
+        author: githubUser('7', 'octocat'),
       },
-      issueComments: [{ id: 10, url: 'https://example/comment/10', body: 'Looks good', author: { login: 'reviewer', id: 9 } }],
-      reviewComments: [{ id: 11, url: 'https://example/comment/11', body: 'Nit', path: 'api.ts', line: 5, position: null }],
-      files: [{ filename: 'api.ts', status: 'modified', additions: 8, deletions: 2, changes: 10, patch: '@@' }],
+      issueComments: [{ ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', author: githubUser('9', 'reviewer'), canUpdate: true, canDelete: false }],
+      reviewComments: [{ ...githubIdentity, id: '11', url: 'https://example/comment/11', body: 'Nit', path: 'api.ts', line: 5, position: null }],
+      files: [{ path: 'api.ts', status: 'modified', additions: 8, deletions: 2, changes: 10, patch: '@@' }],
       diff: 'diff text',
-      checks: { state: 'pending', total: 1, success: 0, failure: 0, pending: 1, inProgress: 1 },
-      checkRuns: [{
-        id: 99,
-        name: 'test',
-        status: 'in_progress',
-        detailsUrl: 'https://github.com/actions/runs/1',
-        job: { runId: 1, jobId: 2, name: 'unit', steps: [{ name: 'run', status: 'in_progress' }] },
-        annotations: [{ path: 'api.ts', startLine: 5, message: 'Failure' }],
-      }],
+      ci: {
+        summary: { state: 'pending', total: 1, success: 0, failure: 0, pending: 1, inProgress: 1 },
+        runs: [{
+          ...githubIdentity,
+          id: '99',
+          name: 'test',
+          status: 'in_progress',
+          detailsUrl: 'https://github.com/actions/runs/1',
+          job: { runId: '1', jobId: '2', name: 'unit', steps: [{ name: 'run', status: 'in_progress' }] },
+          annotations: [{ path: 'api.ts', startLine: 5, message: 'Failure' }],
+        }],
+      },
     }));
 
     const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(
@@ -785,96 +969,133 @@ describe('createWebSourceControlAPI', () => {
       }),
       headers: { Accept: 'application/json' },
     });
-    expect(result.changeRequest).toMatchObject({ id: 'openchamber/openchamber#4', headSha: 'abc' });
-    expect(result.issueComments[0]).toMatchObject({ id: '10', author: { id: '9', username: 'reviewer' } });
+    expect(result).toMatchObject({ identity: githubIdentity, fetchedAt: 42, diff: 'diff text', project: { id: 'openchamber/openchamber' } });
+    expect(result.changeRequest).toMatchObject({ id: 'openchamber/openchamber#4', headSha: 'abc', author: { id: '7', username: 'octocat' } });
+    expect(result.issueComments[0]).toMatchObject({ id: '10', author: { id: '9', username: 'reviewer' }, canUpdate: true, canDelete: false });
     expect(result.reviewComments[0]).toMatchObject({ id: '11', path: 'api.ts', line: 5, position: null });
     expect(result.files).toEqual([{ path: 'api.ts', status: 'modified', additions: 8, deletions: 2, changes: 10, patch: '@@' }]);
     expect(result.ci).toMatchObject({
       summary: { state: 'pending', total: 1, inProgress: 1 },
       runs: [{ id: '99', name: 'test', job: { runId: '1', jobId: '2' }, annotations: [{ message: 'Failure', path: 'api.ts', startLine: 5 }] }],
     });
+
+    // A selector outside the bound network reads as no project and no change request.
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      identity: githubIdentity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [],
+    }));
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(
+      { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream' },
+      4,
+      { project: { owner: 'elsewhere', name: 'app' } },
+    )).resolves.toEqual({
+      identity: githubIdentity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [], ci: null,
+    });
+  });
+
+  it('parses per-person reviewer state, skips an entry it cannot read, and leaves it out when the host did not say', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const ctx = { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'origin' };
+    const contextPayload = () => ({
+      identity: githubIdentity,
+      project: null,
+      changeRequest: null,
+      issueComments: [],
+      reviewComments: [],
+      files: [],
+    });
+    const reviewedContext = (reviewerStates: { user: ReturnType<typeof githubUser>; state: string }[]) => ({
+      ...contextPayload(),
+      reviewerStates,
+    });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(reviewedContext([
+      { user: githubUser('9', 'ann'), state: 'approved' },
+      { user: githubUser('10', 'bo'), state: 'pending' },
+    ])));
+    const result = await api.changeRequestContext(ctx, 4);
+    expect(result.reviewerStates).toEqual([
+      { user: expect.objectContaining({ id: '9', username: 'ann' }), state: 'approved' },
+      { user: expect.objectContaining({ id: '10', username: 'bo' }), state: 'pending' },
+    ]);
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(contextPayload()));
+    expect(await api.changeRequestContext(ctx, 4)).not.toHaveProperty('reviewerStates');
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(reviewedContext([
+      { user: githubUser('9', 'ann'), state: 'rejected' },
+      { user: githubUser('10', 'bo'), state: 'approved' },
+    ])));
+    expect((await api.changeRequestContext(ctx, 4)).reviewerStates).toEqual([
+      { user: expect.objectContaining({ id: '10', username: 'bo' }), state: 'approved' },
+    ]);
+  });
+
+  it('rejects a comment whose capabilities are not booleans', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json([
+      { ...githubIdentity, id: '10', url: 'https://example/comment/10', body: 'Looks good', canUpdate: 'yes' },
+    ]));
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).issueComments(readContext, 4)).rejects.toThrow('invalid comment');
   });
 
   it('carries annotationsTruncated from the server payload to the CI run', async () => {
-    runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true,
-      repo: { owner: 'openchamber', repo: 'openchamber', url: 'https://github.com/openchamber/openchamber' },
-      pr: {
-        number: 4, title: 'Generic adapter', url: 'https://github.com/openchamber/openchamber/pull/4',
-        state: 'open', draft: false, base: 'main', head: 'source-control',
+    const ciWith = (annotationsTruncated: unknown) => ({
+      identity: githubIdentity, project: null, changeRequest: null, issueComments: [], reviewComments: [], files: [],
+      ci: {
+        summary: { state: 'failure', total: 1, success: 0, failure: 1, pending: 0, inProgress: 0 },
+        runs: [{ ...githubIdentity, id: '99', name: 'test', annotationsTruncated }],
       },
-      issueComments: [],
-      reviewComments: [],
-      files: [],
-      checks: { state: 'failure', total: 1, success: 0, failure: 1, pending: 0 },
-      checkRuns: [{ id: 99, name: 'test', annotationsTruncated: true }],
-    }));
-
-    const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(
-      { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream' },
-      4,
-      { includeCIDetails: true, project: { owner: 'openchamber', name: 'openchamber' } },
-    );
-
+    });
+    const ctx = { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream' };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(ciWith(true)));
+    const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(ctx, 4, { includeCIDetails: true });
     expect(result.ci?.runs?.[0]?.annotationsTruncated).toBe(true);
-  });
 
-  it('rejects a non-boolean annotationsTruncated flag', async () => {
-    runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true,
-      repo: null,
-      pr: null,
-      issueComments: [],
-      reviewComments: [],
-      files: [],
-      checkRuns: [{ id: 99, name: 'test', annotationsTruncated: 'yes' }],
-    }));
-
-    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(
-      { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'origin' },
-      4,
-      { includeCIDetails: true },
-    )).rejects.toThrow('invalid GitHub check-run details');
+    // A flag that is not a boolean is a malformed answer, not a missing one.
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(ciWith('yes')));
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(ctx, 4, { includeCIDetails: true }))
+      .rejects.toThrow('invalid CI run fields');
   });
 
   it('rejects malformed nested GitHub check details', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true,
-      repo: { owner: 'openchamber', repo: 'openchamber', url: 'https://github.com/openchamber/openchamber' },
-      pr: {
-        number: 4, title: 'Generic adapter', url: 'https://github.com/openchamber/openchamber/pull/4',
+      identity: githubIdentity,
+      project: githubProject('openchamber', 'openchamber'),
+      changeRequest: {
+        ...githubIdentity, id: 'openchamber/openchamber#4', number: 4, project: githubProject('openchamber', 'openchamber'),
+        title: 'Generic adapter', url: 'https://github.com/openchamber/openchamber/pull/4',
         state: 'open', draft: false, base: 'main', head: 'source-control',
       },
       issueComments: [],
       reviewComments: [],
       files: [],
-      checks: { state: 'failure', total: 1, success: 0, failure: 1, pending: 0 },
-      checkRuns: [{ id: 99, name: 'test', output: 'unsafe' }],
+      ci: {
+        summary: { state: 'failure', total: 1, success: 0, failure: 1, pending: 0 },
+        runs: [{ ...githubIdentity, id: '99', name: 'test', output: 'unsafe' }],
+      },
     }));
 
     await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(
       { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'origin' },
       4,
       { includeCIDetails: true, project: { owner: 'openchamber', name: 'openchamber' } },
-    )).rejects.toThrow('invalid GitHub check-run output');
+    )).rejects.toThrow('invalid CI output');
   });
 
   it('rejects malformed GitHub check-run containers', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
-      connected: true,
-      repo: null,
-      pr: null,
+      identity: githubIdentity,
+      project: null,
+      changeRequest: null,
       issueComments: [],
       reviewComments: [],
       files: [],
-      checkRuns: false,
+      ci: { summary: { state: 'pending', total: 1, success: 0, failure: 0, pending: 1 }, runs: false },
     }));
 
     await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).changeRequestContext(
       { ...identity, directory: '/workspace', repositoryId: 'repo_one', accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'origin' },
       4,
       { includeCIDetails: true },
-    )).rejects.toThrow('invalid GitHub check-run details');
+    )).rejects.toThrow('invalid CI runs');
   });
 
   it('serializes mutation authority and parses compact receipts for every operation', async () => {
@@ -882,7 +1103,8 @@ describe('createWebSourceControlAPI', () => {
       .mockResolvedValueOnce(Response.json(mutationReceipt()))
       .mockResolvedValueOnce(Response.json(mutationReceipt()))
       .mockResolvedValueOnce(Response.json(mutationReceipt({ merged: true, message: 'Merged' })))
-      .mockResolvedValueOnce(Response.json(mutationReceipt({ ready: true })));
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ ready: true })))
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ draft: true })));
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     const createContext = createMutationContext;
 
@@ -898,6 +1120,7 @@ describe('createWebSourceControlAPI', () => {
     await expect(api.changeRequestMerge({ ...mutationContext, method: 'squash' }))
       .resolves.toEqual(mutationReceipt({ merged: true, message: 'Merged' }));
     await expect(api.changeRequestReady(mutationContext)).resolves.toEqual(mutationReceipt({ ready: true }));
+    await expect(api.changeRequestDraft(mutationContext)).resolves.toEqual(mutationReceipt({ draft: true }));
 
     const authority = {
       provider: 'github', instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one',
@@ -917,6 +1140,39 @@ describe('createWebSourceControlAPI', () => {
     }));
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(4, '/api/source-control/github/pr/ready', expect.objectContaining({
       body: JSON.stringify(authority),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(5, '/api/source-control/github/pr/draft', expect.objectContaining({
+      body: JSON.stringify(authority),
+    }));
+  });
+
+  it.each(['queued', 'merging', 'auto-merge', 'cancelled'])('accepts a waiting or cancelled merge receipt (%s)', async (outcome) => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(mutationReceipt({ merged: false, outcome })));
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    await expect(api.changeRequestMerge({ ...mutationContext, method: 'squash', cancel: outcome === 'cancelled' }))
+      .resolves.toEqual(mutationReceipt({ merged: false, outcome }));
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/pr/merge', expect.objectContaining({
+      body: expect.stringContaining(`"cancel":${outcome === 'cancelled'}`),
+    }));
+  });
+
+  it('sends an issue and a discussion edit to their own routes', async () => {
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()));
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const authority = {
+      provider: 'github', instance: 'github.com', directory: '/workspace/a b', repositoryId: 'repo_one',
+      accountId: 'github.com#7', bindingRevision: 4, primaryRemote: 'upstream', idempotencyKey: 'mutation-1',
+      target: mutationContext.target,
+    };
+    await expect(api.issueUpdate({ ...mutationContext, title: 'New title', body: '' })).resolves.toEqual(mutationReceipt());
+    await expect(api.discussionUpdate({ ...mutationContext, title: 'New title' })).resolves.toEqual(mutationReceipt());
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/issues/update', expect.objectContaining({
+      body: JSON.stringify({ ...authority, title: 'New title', body: '' }),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/discussions/update', expect.objectContaining({
+      body: JSON.stringify({ ...authority, title: 'New title' }),
     }));
   });
 
@@ -1037,6 +1293,7 @@ describe('createWebSourceControlAPI', () => {
     ['update number', 'changeRequestUpdate', 'number'],
     ['merge number', 'changeRequestMerge', 'number'],
     ['ready number', 'changeRequestReady', 'number'],
+    ['draft number', 'changeRequestDraft', 'number'],
   ])('rejects a mutation missing its required %s target field', async (_label, method, field) => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     let operation: Promise<unknown>;
@@ -1056,6 +1313,10 @@ describe('createWebSourceControlAPI', () => {
       const payload: MergeChangeRequestInput = { ...mutationContext, target: { ...mutationContext.target }, method: 'merge' };
       Object.defineProperty(payload.target, field, { value: undefined, enumerable: true });
       operation = api.changeRequestMerge(payload);
+    } else if (method === 'changeRequestDraft') {
+      const payload: DraftChangeRequestInput = { ...mutationContext, target: { ...mutationContext.target } };
+      Object.defineProperty(payload.target, field, { value: undefined, enumerable: true });
+      operation = api.changeRequestDraft(payload);
     } else {
       const payload: ReadyChangeRequestInput = { ...mutationContext, target: { ...mutationContext.target } };
       Object.defineProperty(payload.target, field, { value: undefined, enumerable: true });
@@ -1119,6 +1380,8 @@ describe('createWebSourceControlAPI', () => {
     ['a mismatched instance', { ...mutationReceipt(), actor: { provider: 'github', instance: 'github.example.com', providerAccountId: 'github.com#7' } }],
     ['a credential-shaped actor field', { ...mutationReceipt(), actor: { provider: 'github', instance: 'github.com', providerAccountId: 'occred:v1:github:credential:r1' } }],
     ['a legacy actor field', { ...mutationReceipt(), actor: { provider: 'github', instance: 'github.com', accountId: 'github.com#7' } }],
+    ['a provider user of another instance', { ...mutationReceipt(), actor: { provider: 'github', instance: 'github.com', providerAccountId: 'ghe.example.com#7' } }],
+    ['a non-numeric provider user', { ...mutationReceipt(), actor: { provider: 'github', instance: 'github.com', providerAccountId: 'github.com#octocat' } }],
     ['a mismatched repository', { ...mutationReceipt(), target: { ...mutationReceipt().target, repositoryId: 'repo_other' } }],
     ['a mismatched binding revision', { ...mutationReceipt(), target: { ...mutationReceipt().target, bindingRevision: 5 } }],
     ['a mismatched primary remote', { ...mutationReceipt(), target: { ...mutationReceipt().target, primaryRemote: 'origin' } }],
@@ -1130,6 +1393,7 @@ describe('createWebSourceControlAPI', () => {
     ['an invalid operation result', mutationReceipt({ merged: 'yes' })],
     ['a non-empty create result', mutationReceipt({ unexpected: true })],
     ['an invalid ready result', mutationReceipt({ ready: false, unexpected: true })],
+    ['an invalid draft result', mutationReceipt({ draft: 'yes' })],
     ['an extra receipt field', { ...mutationReceipt(), providerPayload: { private: true } }],
   ])('rejects %s returned with HTTP success', async (_label, payload) => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json(payload));
@@ -1138,6 +1402,8 @@ describe('createWebSourceControlAPI', () => {
       ? api.changeRequestMerge({ ...mutationContext, method: 'merge' })
       : _label === 'an invalid ready result'
         ? api.changeRequestReady(mutationContext)
+        : _label === 'an invalid draft result'
+          ? api.changeRequestDraft(mutationContext)
         : _label === 'a mismatched expected target'
           ? api.changeRequestUpdate({ ...mutationContext, title: 'Update' })
       : api.changeRequestCreate({ ...createMutationContext, title: 'Create' });
@@ -1184,7 +1450,69 @@ describe('createWebSourceControlAPI', () => {
       body: JSON.stringify({ token: 'secret-token' }), query: new URLSearchParams({ instance: 'https://gitlab.example.com' }),
     }));
 
-    await expect(api.authStatus({ provider: 'github', instance: 'github.example.com' })).rejects.toThrow('only github.com is available');
+    // A GitHub Enterprise host is a GHE instance; the request goes to the github
+    // provider with the host as the instance and the neutral auth status.
+    const gheUser = { provider: 'github', instance: 'github.example.com', id: '42', username: 'ghe-user' };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      provider: 'github',
+      instance: 'github.example.com',
+      status: 'connected',
+      connected: true,
+      user: gheUser,
+      accounts: [{
+        id: 'github.example.com#cli:42', credentialId: 'github.example.com#cli:42', credentialRevision: 1,
+        providerUserId: 'github.example.com#42', providerUserStatus: 'available',
+        user: gheUser, current: true, source: 'cli', status: 'valid',
+      }],
+      cli: { available: true, disabled: false, active: true, user: gheUser },
+    }));
+    await expect(api.authStatus({ provider: 'github', instance: 'github.example.com' })).resolves.toMatchObject({
+      status: 'connected', user: { provider: 'github', instance: 'github.example.com', id: '42', username: 'ghe-user' },
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/status', expect.objectContaining({
+      query: new URLSearchParams({ instance: 'github.example.com' }),
+    }));
+  });
+
+  it('saves an instance SSH address and returns the stored value', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ sshUrl: 'ssh://giteassh.example.com:2222' }));
+
+    await expect(api.authSetSshUrl(
+      { provider: 'gitea', instance: 'https://gitea.example.com/' },
+      'ssh://git@giteassh.example.com:2222',
+    )).resolves.toEqual({ sshUrl: 'ssh://giteassh.example.com:2222' });
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/gitea/auth/ssh-url', expect.objectContaining({
+      method: 'POST',
+      query: new URLSearchParams({ instance: 'https://gitea.example.com' }),
+      body: JSON.stringify({ sshUrl: 'ssh://git@giteassh.example.com:2222' }),
+    }));
+  });
+
+  it('lists an instance with its aliases and saves them through the instances route', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      instances: [{ provider: 'gitlab', instance: 'https://code.internal.net', instanceAliases: ['https://domain-a.internal-a.net'] }],
+    }));
+    await expect(api.authInstances()).resolves.toEqual([
+      { provider: 'gitlab', instance: 'https://code.internal.net', instanceAliases: ['https://domain-a.internal-a.net'] },
+    ]);
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ aliases: ['https://domain-a.internal-a.net'] }));
+    await expect(api.setInstanceAliases({ provider: 'gitlab', instance: 'code.internal.net' }, ['domain-a.internal-a.net']))
+      .resolves.toEqual({ aliases: ['https://domain-a.internal-a.net'] });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/instances/aliases', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ provider: 'gitlab', instance: 'https://code.internal.net', aliases: ['domain-a.internal-a.net'] }),
+    }));
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'taken', code: 'INSTANCE_ALIAS_TAKEN', alias: 'https://other.internal.net' },
+      { status: 409 },
+    ));
+    await expect(api.setInstanceAliases({ provider: 'gitlab', instance: 'https://code.internal.net' }, ['other.internal.net']))
+      .rejects.toMatchObject({ name: 'SourceControlInstanceAliasError', reason: 'taken', alias: 'https://other.internal.net' });
   });
 
   it('sends a GitHub token to the vault route as a reference, not to the token route', async () => {
@@ -1245,12 +1573,264 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
-  it('preserves transport failures and disconnected data as errors', async () => {
+  it('preserves transport failures and an unavailable account as errors', async () => {
     const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
     runtimeFetchMock.mockRejectedValueOnce(new Error('network down'));
     await expect(api.issuesList(readContext)).rejects.toThrow('network down');
 
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'GitHub account is unavailable' }, { status: 401 }));
+    await expect(api.issuesList(readContext)).rejects.toThrow('GitHub account is unavailable');
+
+    // A disconnected envelope is never read as an empty list.
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: false }));
-    await expect(api.issuesList(readContext)).rejects.toThrow('GitHub is not connected');
+    await expect(api.issuesList(readContext)).rejects.toThrow('invalid issues');
+  });
+});
+
+describe('GitHub Enterprise (GHE) auth flows', () => {
+  const gheIdentity: SourceControlIdentity = { provider: 'github', instance: 'https://ghe.example.com/' };
+  const providerUser = (id: string | number, username: string) => ({ id: String(id), username, provider: 'github', instance: 'ghe.example.com' });
+  const gheContext: SourceControlReadContext = {
+    ...gheIdentity, directory: '/repo', repositoryId: 'repo_one', accountId: 'ghe.example.com#7', bindingRevision: 4, primaryRemote: 'origin',
+  };
+  const gheProject = {
+    provider: 'github', instance: 'ghe.example.com', id: 'team/app', owner: 'team', name: 'app', url: 'https://ghe.example.com/team/app',
+  };
+
+  it('reads capabilities for a GHE instance against the github route with the host instance', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      identity: { provider: 'github', instance: 'ghe.example.com' },
+      authentication: true,
+      authenticationMethods: {
+        device: { available: false },
+        pat: { available: true },
+        cli: { available: true },
+      },
+      multipleAccounts: true,
+      projects: true,
+      issues: true,
+      changeRequests: true,
+      draftChangeRequests: true,
+      draftConversion: true,
+      mergeChangeRequests: true,
+      mergeMethods: ['merge', 'squash'],
+      ci: true,
+    }));
+
+    const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).capabilities(gheIdentity);
+    expect(result.identity).toEqual({ provider: 'github', instance: 'ghe.example.com' });
+    expect(result.draftConversion).toBe(true);
+    expect(result.authenticationMethods.pat).toEqual({ available: true });
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/capabilities', {
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('connects a GHE personal access token and reads the neutral auth status', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const statusDto = {
+      provider: 'github',
+      instance: 'ghe.example.com',
+      status: 'connected',
+      connected: true,
+      user: providerUser(42, 'ghe-user'),
+      scope: 'repo',
+      accounts: [
+        {
+          id: 'pat-account', credentialId: 'pat-account', credentialRevision: 1,
+          providerUserId: 'ghe.example.com#42', providerUserStatus: 'available',
+          user: providerUser(42, 'ghe-user'), current: true, source: 'pat', status: 'valid',
+        },
+        {
+          id: 'ghe.example.com#cli:7', credentialId: 'ghe.example.com#cli:7', credentialRevision: 1,
+          providerUserId: 'ghe.example.com#7', providerUserStatus: 'available',
+          user: providerUser(7, 'cli-user'), current: false, source: 'cli', status: 'valid',
+        },
+      ],
+      cli: { available: true, disabled: false, active: false, user: providerUser(7, 'cli-user') },
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, user: providerUser(42, 'ghe-user') }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(statusDto));
+
+    const result = await api.authSetToken(gheIdentity, 'ghp_ghe_token');
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/auth/token', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'ghp_ghe_token' }),
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    });
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/auth/status', expect.objectContaining({
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    }));
+    expect(result).toMatchObject({
+      provider: 'github',
+      instance: 'ghe.example.com',
+      status: 'connected',
+      connected: true,
+      user: { provider: 'github', instance: 'ghe.example.com', id: '42', username: 'ghe-user' },
+    });
+    expect(result.accounts).toBeDefined();
+    expect(result.accounts!).toHaveLength(2);
+    expect(result.accounts![0]).toMatchObject({ source: 'pat', status: 'valid', current: true });
+    expect(result.accounts![1]).toMatchObject({ source: 'cli', status: 'valid' });
+  });
+
+  it('surfaces a refused GHE token as INVALID_TOKEN', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'GitHub token is invalid', code: 'INVALID_TOKEN' }, { status: 401 }));
+
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).authSetToken(gheIdentity, 'bad-token'))
+      .rejects.toMatchObject({ code: 'INVALID_TOKEN' });
+  });
+
+  it('names the provider whose card a refused instance belongs on', async () => {
+    const forgejo = { provider: 'forgejo', instance: 'https://codeberg.org' };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      error: 'https://codeberg.org belongs on the Gitea card', code: 'SOURCE_CONTROL_INSTANCE_OTHER_PROVIDER', provider: 'gitea',
+    }, { status: 409 }));
+
+    const refusal = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).authSetToken(forgejo, 'pat').catch((error) => error);
+
+    expect(refusal).toBeInstanceOf(SourceControlInstanceOtherProviderError);
+    expect(refusal).toMatchObject({ provider: 'gitea', message: 'https://codeberg.org belongs on the Gitea card' });
+  });
+
+  it('reads a disconnected GHE auth status with its cli account and activates it', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const disconnected = {
+      provider: 'github',
+      instance: 'ghe.example.com',
+      status: 'disconnected',
+      connected: false,
+      accounts: [
+        {
+          id: 'ghe.example.com#cli:7', credentialId: 'ghe.example.com#cli:7', credentialRevision: 1,
+          providerUserId: 'ghe.example.com#7', providerUserStatus: 'available',
+          user: providerUser(7, 'cli-user'), current: false, source: 'cli', status: 'valid',
+        },
+      ],
+      cli: { available: true, disabled: false, active: false, user: providerUser(7, 'cli-user') },
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(disconnected));
+    await expect(api.authStatus(gheIdentity)).resolves.toMatchObject({
+      provider: 'github', instance: 'ghe.example.com', status: 'disconnected', connected: false,
+      cli: { available: true, disabled: false, active: false },
+      accounts: [{ id: 'ghe.example.com#cli:7', source: 'cli', current: false }],
+    });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ ...disconnected, status: 'connected', connected: true, user: providerUser(7, 'cli-user') }));
+    await expect(api.authActivate(gheIdentity, 'ghe.example.com#cli:7')).resolves.toMatchObject({
+      provider: 'github', instance: 'ghe.example.com', status: 'connected', user: { username: 'cli-user' },
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/activate', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId: 'ghe.example.com#cli:7' }),
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    });
+  });
+
+  it('disconnects an account and toggles the gh cli through the shared cli route', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ removed: true }));
+    await expect(api.authDisconnect(gheIdentity, 'ghe.example.com#7')).resolves.toEqual({ removed: true });
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/auth', {
+      method: 'DELETE',
+      query: new URLSearchParams({ instance: 'ghe.example.com', accountId: 'ghe.example.com#7' }),
+      headers: { Accept: 'application/json' },
+    });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ available: false, disabled: true }));
+    await expect(api.authSetCliDisabled(gheIdentity, true)).resolves.toEqual({ disabled: true });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/cli', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled: true }),
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    });
+  });
+
+  it('reads github.com auth status on the same route and neutral parser as an enterprise host', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      provider: 'github',
+      instance: 'github.com',
+      status: 'disconnected',
+      connected: false,
+      accounts: [],
+      cli: { available: true, disabled: true, active: false },
+    }));
+
+    const result = await api.authStatus({ provider: 'github', instance: 'github.com' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/auth/status', {
+      query: new URLSearchParams({ instance: 'github.com' }),
+      headers: { Accept: 'application/json' },
+    });
+    expect(result).toMatchObject({
+      provider: 'github', instance: 'github.com', status: 'disconnected', connected: false,
+      cli: { available: true, disabled: true, active: false },
+    });
+  });
+
+  it('reads enterprise DTOs that carry the enterprise host as their identity', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const changeRequest = {
+      provider: 'github', instance: 'ghe.example.com', id: 'team/app#3', number: 3, project: gheProject,
+      title: 'Feature', url: 'https://ghe.example.com/team/app/pull/3', state: 'open', draft: false,
+      base: 'main', head: 'feature', author: providerUser(7, 'octocat'),
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      identity: { provider: 'github', instance: 'ghe.example.com' }, project: gheProject, branch: 'feature', changeRequest, ci: null,
+    }));
+    await expect(api.changeRequestStatus(gheContext, 'feature')).resolves.toMatchObject({
+      identity: { provider: 'github', instance: 'ghe.example.com' },
+      project: { instance: 'ghe.example.com', id: 'team/app', url: 'https://ghe.example.com/team/app' },
+      changeRequest: { instance: 'ghe.example.com', id: 'team/app#3', author: { instance: 'ghe.example.com', id: '7' } },
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/pr/status', expect.objectContaining({
+      query: new URLSearchParams({
+        instance: 'ghe.example.com', directory: '/repo', repositoryId: 'repo_one', accountId: 'ghe.example.com#7',
+        bindingRevision: '4', primaryRemote: 'origin', branch: 'feature',
+      }),
+    }));
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ items: [changeRequest], page: 1, hasMore: false, incompleteProjectIds: ['upstream/app'] }));
+    await expect(api.changeRequestsList(gheContext)).resolves.toMatchObject({
+      items: [{ instance: 'ghe.example.com', id: 'team/app#3' }], incompleteProjectIds: ['upstream/app'],
+    });
+
+    // A DTO that names github.com is not an answer about the enterprise host.
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      items: [{ ...changeRequest, instance: 'github.com', project: { ...gheProject, instance: 'github.com' } }], page: 1, hasMore: false,
+    }));
+    await expect(api.changeRequestsList(gheContext)).rejects.toThrow('invalid change request');
+  });
+
+  it('accepts an enterprise mutation receipt only when its actor is a user of that host', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const gheMutation: SourceControlMutationContext<SourceControlExistingMutationTarget> = {
+      ...gheContext, idempotencyKey: 'mutation-ghe', target: { project: { owner: 'team', name: 'app' }, number: 3 },
+    };
+    const receipt = (providerAccountId: string) => ({
+      status: 'succeeded',
+      actor: { provider: 'github', instance: 'ghe.example.com', providerAccountId },
+      target: { repositoryId: 'repo_one', bindingRevision: 4, primaryRemote: 'origin', project: { id: 'team/app', owner: 'team', name: 'app' }, number: 3 },
+      replayed: false,
+      result: { ready: true },
+    });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(receipt('ghe.example.com#7')));
+    await expect(api.changeRequestReady(gheMutation)).resolves.toMatchObject({
+      actor: { provider: 'github', instance: 'ghe.example.com', providerAccountId: 'ghe.example.com#7' },
+      target: { number: 3 },
+      result: { ready: true },
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/pr/ready', expect.objectContaining({
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    }));
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(receipt('github.com#7')));
+    await expect(api.changeRequestReady(gheMutation)).rejects.toThrow('invalid mutation receipt');
   });
 });

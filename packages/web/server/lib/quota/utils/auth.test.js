@@ -48,6 +48,10 @@ describe('resolveConfigApiKey', () => {
     execFileSync('mkfifo', [fifoPath]);
     expect(resolveConfigApiKey('{file:./fifo-key}', options)).toBeNull();
   });
+  it('resolves a key when the caller omits the directories, as provider config reads do', () => {
+    expect(resolveConfigApiKey(' plain-key ')).toBe('plain-key');
+    expect(resolveConfigApiKey('{env:ZHIPU_KEY}', { env: options.env })).toBe('env-token');
+  });
 });
 
 describe('readJsonFile', () => {

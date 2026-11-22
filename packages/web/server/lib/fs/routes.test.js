@@ -6,11 +6,12 @@ import { constants as fsConstants } from 'node:fs';
 import * as nativeFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawn as nodeSpawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createCommandTimeoutMs, createExecOutputMaxBytes, createGitReadCacheTtlMs, createUploadMaxBytes, registerFsRoutes } from './routes.js';
-import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
+import { createProjectDirectoryRuntime } from '../projects/project-directory-runtime.js';
 
 // The fs/write identical-content check opens with O_NONBLOCK on POSIX so a
 // FIFO target cannot block the save (#1533); Windows keeps the 'r' string.
@@ -199,6 +200,26 @@ const registerRead = (fsPromises, resolveProjectDirectory = async () => ({ direc
     openchamberUserConfigRoot: '/home/user/.config',
   });
   return getRoute('GET', '/api/fs/read');
+};
+
+const registerStat = (fsPromises, resolveProjectDirectory = async () => ({ directory: '/repo' })) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory,
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/stat');
 };
 
 const registerRaw = (fsPromises) => {
@@ -836,6 +857,157 @@ describe('fs write', () => {
   });
 });
 
+describe('fs write, delete, rename and mkdir stay inside the workspace through a directory link', () => {
+  const registerReal = (workspace) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => workspace },
+      path,
+      fsPromises: nativeFs,
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: workspace }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: path.join(workspace, '.config'),
+    });
+    return getRoute;
+  };
+
+  let root;
+  let workspace;
+  let outside;
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'oc-fs-link-'));
+    workspace = path.join(root, 'workspace');
+    outside = path.join(root, 'outside');
+    await mkdir(workspace, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await nativeFs.writeFile(path.join(outside, 'keep.txt'), 'outside');
+    // A junction needs no elevated rights on Windows; the escape is identical.
+    await nativeFs.symlink(outside, path.join(workspace, 'link'), process.platform === 'win32' ? 'junction' : 'dir');
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('refuses a write whose parent leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/write')({
+      body: { path: path.join(workspace, 'link', 'created.txt'), content: 'escaped' },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    await expect(nativeFs.readFile(path.join(outside, 'created.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a delete whose parent leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({
+      body: { path: path.join(workspace, 'link', 'keep.txt') },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(await nativeFs.readFile(path.join(outside, 'keep.txt'), 'utf8')).toBe('outside');
+  });
+
+  it('refuses a rename whose source leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/rename')({
+      body: {
+        oldPath: path.join(workspace, 'link', 'keep.txt'),
+        newPath: path.join(workspace, 'moved.txt'),
+      },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(await nativeFs.readFile(path.join(outside, 'keep.txt'), 'utf8')).toBe('outside');
+    await expect(nativeFs.lstat(path.join(workspace, 'moved.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a rename whose destination leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    await nativeFs.writeFile(path.join(workspace, 'inside.txt'), 'inside');
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/rename')({
+      body: {
+        oldPath: path.join(workspace, 'inside.txt'),
+        newPath: path.join(workspace, 'link', 'moved.txt'),
+      },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(await nativeFs.readFile(path.join(workspace, 'inside.txt'), 'utf8')).toBe('inside');
+    await expect(nativeFs.lstat(path.join(outside, 'moved.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a mkdir whose parent leaves the workspace through a link', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/mkdir')({
+      body: { path: path.join(workspace, 'link', 'newdir') },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    await expect(nativeFs.lstat(path.join(outside, 'newdir'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('creates inside a link to a workspace folder whose name starts with two dots', async () => {
+    const getRoute = registerReal(workspace);
+    await mkdir(path.join(workspace, '..notes'));
+    await nativeFs.symlink(path.join(workspace, '..notes'), path.join(workspace, 'notes'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    const writeRes = createMockResponse();
+    await getRoute('POST', '/api/fs/write')({ body: { path: path.join(workspace, 'notes', 'a.txt'), content: 'note' } }, writeRes);
+    expect(writeRes.statusCode).toBe(200);
+    expect(await nativeFs.readFile(path.join(workspace, '..notes', 'a.txt'), 'utf8')).toBe('note');
+
+    const mkdirRes = createMockResponse();
+    await getRoute('POST', '/api/fs/mkdir')({ body: { path: path.join(workspace, 'notes', 'sub') } }, mkdirRes);
+    expect(mkdirRes.statusCode).toBe(200);
+    expect((await nativeFs.stat(path.join(workspace, '..notes', 'sub'))).isDirectory()).toBe(true);
+  });
+
+  it('accepts mkdir of the workspace root when the root is reached through a link', async () => {
+    const alias = path.join(root, 'alias');
+    await nativeFs.symlink(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const getRoute = registerReal(alias);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/mkdir')({ body: { path: alias } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.path).toBe(alias);
+  });
+
+  it('still writes a nested file, deletes it, and removes only a symlink leaf', async () => {
+    const getRoute = registerReal(workspace);
+    const nested = path.join(workspace, 'src', 'deep', 'file.txt');
+
+    const writeRes = createMockResponse();
+    await getRoute('POST', '/api/fs/write')({ body: { path: nested, content: 'inside' } }, writeRes);
+    expect(writeRes.statusCode).toBe(200);
+    expect(await nativeFs.readFile(nested, 'utf8')).toBe('inside');
+
+    const deleteRes = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: nested } }, deleteRes);
+    expect(deleteRes.statusCode).toBe(200);
+
+    const leafLink = path.join(workspace, 'linked-folder');
+    await nativeFs.symlink(outside, leafLink, process.platform === 'win32' ? 'junction' : 'dir');
+    const linkRes = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: leafLink } }, linkRes);
+    expect(linkRes.statusCode).toBe(200);
+    await expect(nativeFs.lstat(leafLink)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await nativeFs.readFile(path.join(outside, 'keep.txt'), 'utf8')).toBe('outside');
+  });
+});
+
 describe('fs rename', () => {
   const registerRename = (fsPromises) => {
     const { app, getRoute } = createRouteRegistry();
@@ -1043,7 +1215,21 @@ describe('fs upload', () => {
     const res = await callUpload(handler, { path: '/repo/link/file.bin' });
 
     expect(res.statusCode).toBe(403);
-    expect(res.body).toEqual({ error: 'Access denied' });
+    expect(res.body).toEqual({ error: 'Access denied', reason: 'outside-workspace' });
+    expect(fsPromises.open).not.toHaveBeenCalled();
+  });
+
+  it('rejects an existing target that resolves outside the workspace', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath === '/repo/file.bin' ? '/outside/file.bin' : targetPath),
+      open: vi.fn(async () => ({ write: vi.fn(), close: vi.fn() })),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied', reason: 'outside-workspace' });
     expect(fsPromises.open).not.toHaveBeenCalled();
   });
 
@@ -1065,7 +1251,11 @@ describe('fs upload', () => {
       });
 
       expect(res.statusCode).toBe(413);
-      expect(res.body).toEqual({ error: 'File exceeds maximum size of 5 bytes' });
+      expect(res.body).toEqual({
+        error: 'File exceeds maximum size of 5 bytes',
+        reason: 'too-large',
+        maxBytes: 5,
+      });
       expect(write).toHaveBeenCalledWith(Buffer.from('123'), 0, 3, null);
       expect(fsPromises.link).not.toHaveBeenCalled();
       expect(fsPromises.unlink).toHaveBeenCalledWith(expect.stringMatching(/^\/repo\/file\.bin\.upload-/));
@@ -1086,7 +1276,11 @@ describe('fs upload', () => {
       const res = await callUpload(handler, { body: Buffer.from('123456') });
 
       expect(res.statusCode).toBe(413);
-      expect(res.body).toEqual({ error: 'File exceeds maximum size of 5 bytes' });
+      expect(res.body).toEqual({
+        error: 'File exceeds maximum size of 5 bytes',
+        reason: 'too-large',
+        maxBytes: 5,
+      });
       expect(fsPromises.open).not.toHaveBeenCalled();
     } finally {
       if (previous === undefined) delete process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
@@ -1185,6 +1379,42 @@ describe('fs rename on a real disk', () => {
 });
 
 describe('fs read', () => {
+  it('preserves edge-space filenames through read normalization', async () => {
+    for (const filePath of ['/repo/  report.md', '/repo/report.md  ']) {
+      for (const allowOutsideWorkspace of [undefined, 'true']) {
+        const { app, getRoute } = createRouteRegistry();
+        const bytes = Buffer.from('edge-space file');
+        const textHandle = await openText('edge-space file')();
+        const rawHandle = await openBytes(bytes)();
+        // fs/read reads through a bounded handle, fs/raw streams one.
+        const open = vi.fn(async () => ({ ...textHandle, createReadStream: rawHandle.createReadStream }));
+        registerFsRoutes(app, {
+          os: { homedir: () => '/home/user' },
+          path: path.posix,
+          fsPromises: {
+            realpath: async (targetPath) => targetPath,
+            stat: async () => ({ isFile: () => true, size: 15 }),
+            open,
+          },
+          normalizeDirectoryPath: (value) => value.trim(),
+          resolveProjectDirectory: async () => ({ directory: '/repo' }),
+          openchamberUserConfigRoot: '/home/user/.config',
+        });
+        const res = createMockResponse();
+        await getRoute('GET', '/api/fs/read')({ query: { path: filePath, allowOutsideWorkspace } }, res);
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toBe('edge-space file');
+        expect(open).toHaveBeenCalledWith(filePath, expect.anything());
+        const statRes = createMockResponse();
+        await getRoute('GET', '/api/fs/stat')({ query: { path: filePath, allowOutsideWorkspace } }, statRes);
+        expect(statRes.body.path).toBe(filePath);
+        const rawRes = await callRaw(getRoute('GET', '/api/fs/raw'), { path: filePath, allowOutsideWorkspace });
+        expect(rawRes.statusCode).toBe(200);
+        expect(open).toHaveBeenLastCalledWith(filePath, expect.anything());
+      }
+    }
+  });
+
   it('reads workspace files through symlinks that resolve outside the workspace', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => {
@@ -1330,6 +1560,76 @@ describe('fs read', () => {
     const res = await callRead(getRoute('GET', '/api/fs/stat'), { path: '/tmp/plan.txt', allowOutsideWorkspace: 'true' });
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ path: '/tmp/plan.txt', isFile: true, size: 100, mtimeMs: 123 });
+  });
+
+  it.each(['realpath', 'stat'].flatMap((operation) =>
+    ['ENOENT', 'ENOTDIR', 'EINVAL', 'ENAMETOOLONG'].map((code) => [operation, code])
+  ))('returns an optional missing result for %s %s without logging', async (operation, code) => {
+    const error = Object.assign(new Error(code), { code });
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const res = await callRead(registerStat({ [operation]: async () => { throw error; } }), {
+        path: '/repo/app.asar',
+        optional: 'true',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toEqual({ path: '/repo/app.asar', exists: false });
+      expect(logError).not.toHaveBeenCalled();
+    } finally {
+      logError.mockRestore();
+    }
+  });
+
+  it('logs and returns 500 for non-optional non-ENOENT filesystem errors', async () => {
+    const error = Object.assign(new Error('Invalid package'), { code: 'EINVAL' });
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const res = await callRead(registerStat({ realpath: async () => { throw error; } }), {
+        path: '/repo/app.asar',
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body).toEqual({ error: 'Invalid package' });
+      expect(logError).toHaveBeenCalledWith('Failed to stat file:', error);
+    } finally {
+      logError.mockRestore();
+    }
+  });
+
+  it.each(['EACCES', 'EPERM'])('keeps %s denied when the stat is optional', async (code) => {
+    const error = Object.assign(new Error('denied'), { code });
+
+    const res = await callRead(registerStat({ realpath: async () => { throw error; } }), {
+      path: '/repo/protected.asar',
+      optional: 'true',
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access to file denied', reason: 'os-permission' });
+  });
+
+  it.each(['realpath', 'stat', 'workspace'].flatMap((operation) =>
+    ['EIO', 'EMFILE', undefined].map((code) => [operation, code])
+  ).concat([['workspace', 'EINVAL']]))('logs and returns 500 for optional %s failure %s', async (operation, code) => {
+    const error = Object.assign(new Error('Unexpected failure'), { code });
+    const fail = async () => { throw error; };
+    const handler = operation === 'workspace'
+      ? registerStat({}, fail)
+      : registerStat({ [operation]: fail });
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const res = await callRead(handler, { path: '/repo/app.asar', optional: 'true' });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body).toEqual({ error: 'Unexpected failure' });
+      expect(logError).toHaveBeenCalledWith('Failed to stat file:', error);
+    } finally {
+      logError.mockRestore();
+    }
   });
 
   it.each([
@@ -2021,7 +2321,7 @@ describe('fs list symlink path space (issue 2627)', () => {
     return res;
   };
 
-  it('keeps entry paths in the requested path space when listing through a symlink', async () => {
+  it.each(['/real/pkg', '/workspace/pkg'])('keeps requested entry paths when the directory resolves to %s', async (realDirectory) => {
     const dirents = [
       {
         name: 'src',
@@ -2038,7 +2338,7 @@ describe('fs list symlink path space (issue 2627)', () => {
     ];
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => (
-        targetPath === '/workspace/pkg' ? '/real/pkg' : targetPath
+        targetPath === '/workspace/pkg' ? realDirectory : targetPath
       )),
       stat: vi.fn(async () => ({ isDirectory: () => true })),
       readdir: vi.fn(async () => dirents),
@@ -2065,7 +2365,7 @@ describe('fs list symlink path space (issue 2627)', () => {
         isSymbolicLink: false,
       },
     ]);
-    expect(fsPromises.readdir).toHaveBeenCalledWith('/real/pkg', { withFileTypes: true });
+    expect(fsPromises.readdir).toHaveBeenCalledWith(realDirectory, { withFileTypes: true });
   });
 
   for (const code of ['EACCES', 'EPERM']) {
@@ -2218,21 +2518,6 @@ describe('fs git-dirs', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.repositories).toEqual([{ path: '/workspace/outer', name: 'outer' }]);
     expect(readdir).not.toHaveBeenCalledWith('/workspace/outer/inner', { withFileTypes: true });
-  });
-
-  it('does not descend past the depth cap', async () => {
-    const { handler } = registerGitDirs({
-      '/workspace': [['a', 'dir']],
-      '/workspace/a': [['b', 'dir']],
-      '/workspace/a/b': [['c', 'dir']],
-      '/workspace/a/b/c': [['.git', 'dir'], ['d', 'dir']],
-      '/workspace/a/b/c/d': [['.git', 'dir']],
-    });
-
-    const res = await callGitDirs(handler, { path: '/workspace' });
-
-    expect(res.statusCode).toBe(200);
-    expect(res.body.repositories).toEqual([{ path: '/workspace/a/b/c', name: 'c' }]);
   });
 
   it('skips junk directories', async () => {
@@ -2459,24 +2744,26 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
       await mkdir(path.join(directory, 'shared'));
-      await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
-      await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
-      await copyFile(new URL('./preview-bridge.js', import.meta.url), path.join(directory, 'fs/preview-bridge.js'));
-      await copyFile(new URL('./workspace-file-names.js', import.meta.url), path.join(directory, 'fs/workspace-file-names.js'));
-      await copyFile(new URL('./content-search.js', import.meta.url), path.join(directory, 'fs/content-search.js'));
-      await copyFile(new URL('./search.js', import.meta.url), path.join(directory, 'fs/search.js'));
-      await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
-      await copyFile(new URL('../git/redaction.js', import.meta.url), path.join(directory, 'git/redaction.js'));
-      await copyFile(new URL('../shared/guards.js', import.meta.url), path.join(directory, 'shared/guards.js'));
-      await copyFile(new URL('../shared/atomic-rename.js', import.meta.url), path.join(directory, 'shared/atomic-rename.js'));
+      const helpers = ['routes', 'canonical-path', 'workspace-target', 'byte-range', 'preview-bridge', 'workspace-file-names', 'content-search', 'search'];
+      const require = createRequire(import.meta.url);
+      const compiler = path.join(path.dirname(require.resolve('typescript/package.json')), 'bin/tsc');
+      execFileSync(process.execPath, [
+        compiler, '--ignoreConfig', '--noCheck', '--noResolve', '--target', 'ES2022', '--module', 'ESNext',
+        '--rootDir', fileURLToPath(new URL('../', import.meta.url)),
+        '--outDir', directory,
+        ...helpers.map((name) => fileURLToPath(new URL(`./${name}.ts`, import.meta.url))),
+        fileURLToPath(new URL('../git/redaction.ts', import.meta.url)),
+         fileURLToPath(new URL('../shared/object-guards.ts', import.meta.url)),
+         fileURLToPath(new URL('../path-realpath-cache.ts', import.meta.url)),
+         ...['atomic-rename', 'traversal-budget', 'bounded-file-read'].map((name) => fileURLToPath(new URL(`../shared/${name}.ts`, import.meta.url))),
+      ], { cwd: directory, stdio: 'pipe' });
+      await copyFile(new URL('../shared/guards.ts', import.meta.url), path.join(directory, 'shared/guards.js'));
       await copyFile(new URL('../shared/parse-int.js', import.meta.url), path.join(directory, 'shared/parse-int.js'));
-      await copyFile(new URL('../shared/traversal-budget.js', import.meta.url), path.join(directory, 'shared/traversal-budget.js'));
-      await copyFile(new URL('../shared/bounded-file-read.js', import.meta.url), path.join(directory, 'shared/bounded-file-read.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',
         'await import(process.argv[1])',
-        pathToFileURL(path.join(directory, 'fs/routes.mjs')).href,
+        pathToFileURL(path.join(directory, 'fs/routes.js')).href,
       ], { cwd: directory, stdio: 'pipe' })).not.toThrow();
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -2575,7 +2862,14 @@ describe('fs stat directory error handling', () => {
     registerFsRoutes(app, {
       os: { homedir: () => '/home/user' },
       path: path.posix,
-      fsPromises: { realpath: async (targetPath) => targetPath, stat, readdir: vi.fn(async () => []) },
+      fsPromises: {
+        realpath: async (targetPath) => {
+          if (targetPath === '/unresolvable') throw new Error('loop');
+          return targetPath === '/link' ? '/repo' : targetPath;
+        },
+        stat,
+        readdir: vi.fn(async () => []),
+      },
       spawn: vi.fn(),
       crypto: { randomUUID: () => 'job-0' },
       normalizeDirectoryPath: (p) => p,
@@ -2587,10 +2881,12 @@ describe('fs stat directory error handling', () => {
     const handler = getRoute('POST', '/api/fs/directory-stats');
 
     const response = createMockResponse();
-    await handler({ body: { paths: ['/repo', '/gone', '/file'] } }, response);
+    await handler({ body: { paths: ['/repo', '/link', '/unresolvable', '/gone', '/file'] } }, response);
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ results: [
-      { path: '/repo', isDirectory: true },
+      { path: '/repo', isDirectory: true, realPath: '/repo' },
+      { path: '/link', isDirectory: true, realPath: '/repo' },
+      { path: '/unresolvable', isDirectory: true },
       { path: '/gone', isDirectory: false, reason: 'not-found' },
       { path: '/file', isDirectory: false, reason: 'not-directory' },
     ] });
@@ -2711,7 +3007,13 @@ describe('fs managed chats root', () => {
       fsPromises: {
         realpath: async directory => {
           if (directory === '/srv/chat-alias') return '/storage/chats';
-          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+          if (directory.startsWith('/home/user/.config/openchamber')) {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+          }
+          if (directory.startsWith('/storage/chats/')) {
+            throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          }
+          return directory;
         },
       },
     });
@@ -2719,6 +3021,26 @@ describe('fs managed chats root', () => {
     await mkdir({ body: { path: '/storage/chats/day/session-a' } }, response);
     expect(response.statusCode).toBe(200);
     expect(response.body.path).toBe('/storage/chats/day/session-a');
+  });
+
+  it('stops mkdir when the parent inside the chats root cannot be resolved', async () => {
+    const mkdirCalls = [];
+    const { mkdir } = registerWithChatsRoot({
+      managedChatsRoot: '/srv/openchamber-chats',
+      fsPromises: {
+        realpath: async directory => {
+          if (directory === '/srv/openchamber-chats/day') {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+          }
+          return directory;
+        },
+        mkdir: async (targetPath) => { mkdirCalls.push(targetPath); },
+      },
+    });
+    const response = createMockResponse();
+    await mkdir({ body: { path: '/srv/openchamber-chats/day/session-a' } }, response);
+    expect(response.statusCode).toBe(403);
+    expect(mkdirCalls).toEqual([]);
   });
 
   it('still rejects mkdir outside the workspace and all managed roots', async () => {
@@ -3155,6 +3477,158 @@ describe('GET /api/fs/find-by-name', () => {
   });
 });
 
+describe('GET /api/fs/search', () => {
+  let repo;
+  beforeEach(async () => {
+    repo = await mkdtemp(path.join(tmpdir(), 'oc-file-search-route-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    await mkdir(path.join(repo, 'build'));
+    await nativeFs.writeFile(path.join(repo, 'build/needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, '.needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, 'needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, '.gitignore'), 'build/\n');
+  });
+  afterEach(async () => {
+    await rm(repo, { recursive: true, force: true });
+  });
+
+  const register = async (overrides = {}) => {
+    const { spawn } = await import('node:child_process');
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' }, path, fsPromises: nativeFs, spawn,
+      crypto: { randomUUID: () => 'job-0' }, normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: repo }),
+      buildAugmentedPath: () => '/usr/bin', resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+      ...overrides,
+    });
+    return async (query) => {
+      const response = createMockResponse();
+      await getRoute('GET', '/api/fs/search')({ query, headers: {} }, response);
+      return response;
+    };
+  };
+
+  it('honors both toggles including gitignored build directories', async () => {
+    const ask = await register();
+    expect((await ask({ query: 'needle' })).body.files.map((file) => file.relativePath)).toEqual(['needle.ts']);
+    expect((await ask({ query: 'needle', includeHidden: 'true' })).body.files.map((file) => file.relativePath).sort())
+      .toEqual(['.needle.ts', 'needle.ts']);
+    const expanded = await ask({ query: 'needle', respectGitignore: 'false' });
+    expect(expanded.body.files.map((file) => file.relativePath).sort()).toEqual(['build/needle.ts', 'needle.ts']);
+    expect(expanded.getHeader('cache-control')).toBe('no-store');
+    expect((await ask({ query: 'needle', includeHidden: 'true', respectGitignore: 'false', limit: '1' })).body.files).toHaveLength(1);
+  });
+
+  it('stops the walk and sends nothing once the client closes the response', async () => {
+    let reads = 0;
+    let closeResponse;
+    const fsPromises = {
+      ...nativeFs,
+      stat: nativeFs.stat,
+      realpath: nativeFs.realpath,
+      readdir: async (...args) => {
+        reads += 1;
+        closeResponse();
+        return nativeFs.readdir(...args);
+      },
+    };
+    await nativeFs.mkdir(path.join(repo, 'src/deep'), { recursive: true });
+    const { app, getRoute } = createRouteRegistry();
+    const { spawn } = await import('node:child_process');
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' }, path, fsPromises, spawn,
+      crypto: { randomUUID: () => 'job-0' }, normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: repo }),
+      buildAugmentedPath: () => '/usr/bin', resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const response = createMockResponse();
+    response.on = (event, listener) => {
+      if (event === 'close') closeResponse = listener;
+      return response;
+    };
+    await getRoute('GET', '/api/fs/search')({ query: { query: 'needle', respectGitignore: 'false' }, headers: {} }, response);
+    expect(reads).toBe(1);
+    expect(response.body).toBeNull();
+
+    // Already gone before the route got this far: no walk at all.
+    reads = 0;
+    const gone = createMockResponse();
+    gone.destroyed = true;
+    await getRoute('GET', '/api/fs/search')({ query: { query: 'needle', respectGitignore: 'false' }, headers: {} }, gone);
+    expect(reads).toBe(0);
+    expect(gone.body).toBeNull();
+  });
+
+  it('returns paths under the requested symlink and reports missing directories', async () => {
+    const link = `${repo}-link`;
+    await nativeFs.symlink(repo, link);
+    try {
+      const ask = await register();
+      const response = await ask({ directory: link, query: 'needle', respectGitignore: 'false' });
+      expect(response.body.files.every((file) => file.path.startsWith(`${link}${path.sep}`))).toBe(true);
+      expect((await ask({ directory: path.join(repo, 'absent') })).statusCode).toBe(404);
+    } finally {
+      await rm(link, { force: true });
+    }
+  });
+
+  it('reads Git ignores once per repository and preserves nested rules and tracked files', async () => {
+    const { spawn } = await import('node:child_process');
+    const gitReads = [];
+    const ask = await register({ spawn: (...args) => { gitReads.push(args[2].cwd); return spawn(...args); } });
+    for (let index = 0; index < 12; index++) {
+      const directory = path.join(repo, `dir-${index}`);
+      await mkdir(directory);
+      await nativeFs.writeFile(path.join(directory, 'ordinary.txt'), '');
+    }
+    await mkdir(path.join(repo, 'src'));
+    await nativeFs.writeFile(path.join(repo, 'src/.gitignore'), '*.ts\n!keep-needle.ts\n');
+    await nativeFs.writeFile(path.join(repo, 'src/keep-needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, 'src/drop-needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, 'build/tracked-needle.ts'), '');
+    execFileSync('git', ['add', '-f', 'build/tracked-needle.ts'], { cwd: repo });
+    const nested = path.join(repo, 'nested');
+    await mkdir(nested);
+    execFileSync('git', ['init', '-q'], { cwd: nested });
+    await nativeFs.writeFile(path.join(nested, '.gitignore'), '*.ts\n!keep-needle.ts\n');
+    await nativeFs.writeFile(path.join(nested, 'keep-needle.ts'), '');
+    await nativeFs.writeFile(path.join(nested, 'drop-needle.ts'), '');
+
+    const files = (await ask({ query: 'needle', includeHidden: 'true' })).body.files;
+    expect(files.map((file) => file.relativePath)).toEqual([
+      'needle.ts', '.needle.ts', 'src/keep-needle.ts', 'nested/keep-needle.ts', 'build/tracked-needle.ts',
+    ]);
+    expect(gitReads.sort()).toEqual((await Promise.all([repo, nested].map((directory) => nativeFs.realpath(directory)))).sort());
+  });
+
+  it('refreshes ignore rules on the next query and isolates requested directories', async () => {
+    const other = await mkdtemp(path.join(tmpdir(), 'oc-file-search-other-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: other });
+      await nativeFs.writeFile(path.join(other, 'needle.ts'), '');
+      const ask = await register();
+      expect((await ask({ query: 'needle' })).body.files.map((file) => file.relativePath)).toEqual(['needle.ts']);
+      await nativeFs.writeFile(path.join(repo, '.gitignore'), 'build/\nneedle.ts\n');
+      expect((await ask({ query: 'needle' })).body.files).toEqual([]);
+      expect((await ask({ directory: other, query: 'needle' })).body.files.map((file) => file.relativePath)).toEqual(['needle.ts']);
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it('respects an ignored search root while retaining tracked exceptions', async () => {
+    const ask = await register();
+    const query = { directory: path.join(repo, 'build'), query: 'needle' };
+    expect((await ask(query)).body.files).toEqual([]);
+    await nativeFs.writeFile(path.join(repo, 'build/other-needle.ts'), '');
+    execFileSync('git', ['add', '-f', 'build/needle.ts'], { cwd: repo });
+    expect((await ask(query)).body.files.map((file) => file.relativePath)).toEqual(['needle.ts']);
+  });
+});
+
 describe('GET /api/fs/find-in-files', () => {
   let repo;
   beforeEach(async () => {
@@ -3237,7 +3711,7 @@ describe('GET /api/fs/find-in-files', () => {
 
   it('builds result paths under the root the client asked for when it is a symlink', async () => {
     const link = `${repo}-link`;
-    await nativeFs.symlink(repo, link);
+    await nativeFs.symlink(repo, link, 'junction');
     try {
       const ask = await register({
         resolveProjectDirectory: async () => ({ directory: repo, requestedDirectory: link }),

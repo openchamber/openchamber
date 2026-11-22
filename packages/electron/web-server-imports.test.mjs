@@ -114,12 +114,23 @@ const thenDestructures = (source) => {
   return out;
 };
 
+// The server sources are TypeScript emitted as `.js`, so a `.js` specifier
+// names a `.ts` source unless a `.js` one exists.
+const sourceCandidates = (base) => [
+  base,
+  base.replace(/\.js$/, '.ts'),
+  `${base}.js`,
+  `${base}.ts`,
+  `${base}/index.js`,
+  `${base}/index.ts`,
+];
+
 const resolveServerFile = (specifier, webDir = WEB_DIR) => {
   const subpath = specifier.replace(
     '@openchamber/web/server',
     `${webDir}/server`,
   );
-  const candidates = [subpath, `${subpath}.js`, `${subpath}/index.js`];
+  const candidates = sourceCandidates(subpath);
   for (const candidate of candidates) {
     try {
       if (statSync(candidate).isFile()) return candidate;
@@ -147,6 +158,16 @@ const sourceExports = (file, visited = new Set()) => {
     while ((match = re.exec(source)) !== null) names.add(match[1]);
   }
 
+  // `export const { a, b: c } = module` exposes a and c.
+  const destructureRe = /export\s+const\s*{([^}]*)}\s*=/g;
+  let destructure;
+  while ((destructure = destructureRe.exec(source)) !== null) {
+    for (const part of destructure[1].split(',')) {
+      const binding = part.split(':').at(-1).split('=')[0].trim();
+      if (binding) names.add(binding);
+    }
+  }
+
   const blockRe = /export\s*{([\s\S]*?)}\s*(?:from\s*['"]([^'"]+)['"])?/g;
   let block;
   while ((block = blockRe.exec(source)) !== null) {
@@ -157,7 +178,7 @@ const sourceExports = (file, visited = new Set()) => {
         // the bindings this re-export selects (under their declared
         // aliases) — not everything the target module exports.
         const relTarget = path.resolve(path.dirname(real), from);
-        const relCandidates = [relTarget, `${relTarget}.js`, `${relTarget}/index.js`];
+        const relCandidates = sourceCandidates(relTarget);
         for (const candidate of relCandidates) {
           try {
             if (statSync(candidate).isFile()) {
@@ -192,7 +213,7 @@ const sourceExports = (file, visited = new Set()) => {
   while ((star = starRe.exec(source)) !== null) {
     if (!star[1].startsWith('.')) continue;
     const relTarget = path.resolve(path.dirname(real), star[1]);
-    const relCandidates = [relTarget, `${relTarget}.js`, `${relTarget}/index.js`];
+    const relCandidates = sourceCandidates(relTarget);
     for (const candidate of relCandidates) {
       try {
         if (statSync(candidate).isFile()) {

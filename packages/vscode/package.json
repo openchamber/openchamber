@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "2.5.0",
+  "version": "2.8.0",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -175,6 +175,26 @@
         "label": "OpenChamber"
       }
     ],
+    "keybindings": [
+      {
+        "command": "openchamber.showSettings",
+        "key": "ctrl+,",
+        "mac": "cmd+,",
+        "when": "openchamber.settingsShortcutTarget == chat && !inQuickOpen"
+      },
+      {
+        "command": "openchamber.closeSettings",
+        "key": "ctrl+,",
+        "mac": "cmd+,",
+        "when": "openchamber.settingsShortcutTarget == settings && !inQuickOpen"
+      },
+      {
+        "command": "openchamber.addLineComment",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorTextFocus"
+      }
+    ],
     "menus": {
       "scm/title": [
         {
@@ -210,6 +230,12 @@
       "editor/context": [
         {
           "submenu": "openchamber.submenu",
+          "group": "navigation"
+        }
+      ],
+      "editor/lineNumber/context": [
+        {
+          "command": "openchamber.addLineComment",
           "group": "navigation"
         }
       ],
@@ -269,12 +295,28 @@
         "openchamber.apiUrl": {
           "type": "string",
           "default": "",
+          "scope": "machine-overridable",
           "description": "%configuration.apiUrl.description%"
         },
         "openchamber.opencodeBinary": {
           "type": "string",
           "default": "",
+          "scope": "machine-overridable",
           "description": "%configuration.opencodeBinary.description%"
+        },
+        "openchamber.lineCommentPlacement": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "chat"
+          ],
+          "enumDescriptions": [
+            "%configuration.lineCommentPlacement.editor%",
+            "%configuration.lineCommentPlacement.chat%"
+          ],
+          "default": "editor",
+          "scope": "window",
+          "description": "%configuration.lineCommentPlacement.description%"
         }
       }
     }
@@ -288,7 +330,7 @@
     "dev:webview": "vite --host localhost --port 5173 --strictPort",
     "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch --sourcemap --main-fields=module,main",
     "watch:webview": "vite build --watch",
-    "type-check": "tsc --noEmit -p tsconfig.json && tsc -b tsconfig.webview.json",
+    "type-check": "bun check -p tsconfig.json && bun check -b -p tsconfig.webview.json",
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src webview",
     "test": "node ../../scripts/run-isolated-tests.mjs src webview",
     "package": "vsce package --no-dependencies"
@@ -296,15 +338,15 @@
   "devDependencies": {
     "@types/vscode": "^1.85.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "@vscode/vsce": "^3.2.1",
-    "concurrently": "^9.2.1",
+    "@vscode/vsce": "^4.0.0",
+    "concurrently": "^10.0.0",
     "esbuild": "^0.28.0",
     "typescript": "~7.0.2",
-    "vite": "^7.1.2"
+    "vite": "^7.3.2"
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode/client": "2.0.32",
+    "@opencode/client": "2.3.2",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

@@ -1,9 +1,13 @@
+import { registerPlugin } from '@capacitor/core';
 import React from 'react';
 
 import { observeNativeKeyboardHeight, resetHardwareKeyboardDetection, startHardwareKeyboardBridge } from '@/lib/hardwareKeyboard';
-import { KEYBOARD_EASING_CSS, KEYBOARD_HIDE_MS, KEYBOARD_SHOW_MS } from '@/lib/mobileKeyboardTiming';
+import { hasOpenBackLayer, subscribeBackLayers } from '@/lib/mobileBackLayers';
+import { KEYBOARD_EASING_CSS, KEYBOARD_HIDE_MS, KEYBOARD_SHOW_MS, keyboardKeyframes } from '@/lib/mobileKeyboardTiming';
+import { writeMobileKeyboardVar } from '@/lib/mobileKeyboardInsets';
+import { isBackGuardEntry, pushBackGuard } from '@/lib/router/backGuard';
+import { useUIStore } from '@/stores/useUIStore';
 
-/** True when running inside the native Capacitor shell (iOS/Android app). */
 export const isCapacitorMobileApp = (): boolean => {
   if (typeof window === 'undefined') return false;
   const maybeCapacitor = (window as typeof window & {
@@ -13,15 +17,11 @@ export const isCapacitorMobileApp = (): boolean => {
   return window.location.protocol === 'capacitor:';
 };
 
-/**
- * True on Android 14 and older, where the app (targetSdk 35) is not forced edge-to-edge
- * and StatusBar.setOverlaysWebView({ overlay: false }) really moves the WebView below the
- * status bar. Android WebView keeps the OS version in its user agent.
- */
-export const isAndroidBeforeEdgeToEdge = (userAgent = navigator.userAgent): boolean => {
-  const major = Number(/\bAndroid (\d+)/.exec(userAgent)?.[1]);
-  return Number.isInteger(major) && major < 15;
-};
+interface WindowLayoutPlugin {
+  get(): Promise<{ edgeToEdge: boolean }>;
+}
+
+const WindowLayout = registerPlugin<WindowLayoutPlugin>('WindowLayout');
 
 export const useNativeMobileChrome = (): void => {
   React.useEffect(() => {
@@ -30,51 +30,33 @@ export const useNativeMobileChrome = (): void => {
     let disposed = false;
     const cleanup: Array<() => void> = [];
     const root = document.documentElement;
-    // Marks the Capacitor shell so keyboard-inset CSS only applies here, not in
-    // the browser-hosted PWA (which handles the keyboard via dvh / interactive-widget).
     root.classList.add('oc-capacitor-app');
-    // Platform marker: Android resizes the window for the keyboard natively (no manual
-    // inset/choreography — the keyboard listeners below skip Android entirely).
     const capacitorPlatform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
     if (capacitorPlatform === 'android') {
       root.classList.add('oc-platform-android');
     }
 
-    // iOS reports hardware keyboards natively (GCKeyboard); adopting that
-    // answer switches the layout off its keyboard-event inference entirely.
     cleanup.push(startHardwareKeyboardBridge());
 
     const setInset = (px: number) => {
-      root.style.setProperty('--oc-keyboard-inset', `${Math.max(0, Math.round(px))}px`);
+      writeMobileKeyboardVar('--oc-keyboard-inset', px);
     };
 
     void import('@capacitor/status-bar').then(async ({ StatusBar, Style }) => {
       if (disposed) return;
-      // Keep the status bar transparent over the WebView. A custom UIScene lifecycle
-      // (iOS 26) plus returning from background can silently drop the overlay state,
-      // letting an opaque status-bar background flash in at the top — so re-assert it
-      // on mount, once shortly after (startup race), and whenever the app re-activates.
       const platform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
       const applyStatusBar = async () => {
         if (platform === 'android') {
-          // Inset the WebView below the bar and paint it with the resolved theme background
-          // (the splash colours the theme system persists). On Android 15+ edge-to-edge is
-          // enforced and both calls are no-ops — there the app pads itself via the
-          // Capacitor-injected --safe-area-inset-* CSS vars (see mobile.css, oc-platform-android).
           const isDark = document.documentElement.classList.contains('dark');
           const themeBg =
             (isDark ? localStorage.getItem('splashBgDark') : localStorage.getItem('splashBgLight')) ||
             (isDark ? '#171515' : '#fffdf4');
           const overlayOff = await StatusBar.setOverlaysWebView({ overlay: false }).then(() => true, () => false);
-          // Before Android 15 that call moves the WebView below the status bar natively, so
-          // the page must not reserve the strip again. Marked only once the call succeeded:
-          // until then the WebView still sits under the bar and needs the injected inset.
-          if (overlayOff && isAndroidBeforeEdgeToEdge()) {
+          const edgeToEdge = await WindowLayout.get().then(({ edgeToEdge }) => edgeToEdge, () => true);
+          if (overlayOff && !edgeToEdge) {
             root.classList.add('oc-android-below-status-bar');
           }
           await StatusBar.setBackgroundColor({ color: themeBg }).catch(() => undefined);
-          // Capacitor Style is named for the CONTENT: Style.Light = dark text (light bg),
-          // Style.Dark = light text (dark bg). So dark theme → Style.Dark, light theme → Style.Light.
           await StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light }).catch(() => undefined);
           await StatusBar.show().catch(() => undefined);
           return;
@@ -87,11 +69,6 @@ export const useNativeMobileChrome = (): void => {
       const retry = window.setTimeout(() => void applyStatusBar(), 400);
       cleanup.push(() => window.clearTimeout(retry));
 
-      // Theme toggles must reach the status bar without an app restart: re-run
-      // whenever the root dark/light class flips — the one signal every theme
-      // path converges on (settings toggle, synced settings, storage events,
-      // system-preference changes while in system mode). splashBg* colors are
-      // per-variant values, so they are stable across mode toggles.
       if (platform === 'android') {
         let wasDark = root.classList.contains('dark');
         const themeClassObserver = new MutationObserver(() => {
@@ -121,31 +98,17 @@ export const useNativeMobileChrome = (): void => {
 
     void import('@capacitor/keyboard').then(async ({ Keyboard }) => {
       if (disposed) return;
-      // iOS (WKWebView, resize: 'none') keeps 100dvh at full height with the keyboard
-      // overlaying, so we lift the UI manually via --oc-keyboard-inset. Android resizes the
-      // window for the keyboard (dvh already shrinks), so applying the inset on top would
-      // double-count — Android gets only the class/event signals below.
       const platform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
       if (platform === 'android') {
-        // Android resizes the WebView natively, so no inset/transform
-        // choreography — but the UI still needs the open/closed signal:
-        // oc-keyboard-open drives CSS (draft starters, composer padding), and
-        // the settled event gives the chat its one deterministic re-pin after
-        // the native resize (the auto-follow idle gate ignores it otherwise).
         const willShowHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
           observeNativeKeyboardHeight(info.keyboardHeight);
           root.classList.add('oc-keyboard-open');
-          // The composer already expanded on tap — re-pin the chat to it now,
-          // so the native resize that follows is the only remaining movement.
           window.dispatchEvent(new CustomEvent('oc:keyboard-settled', { detail: { open: true } }));
         });
         const didShowHandle = await Keyboard.addListener('keyboardDidShow', () => {
           window.dispatchEvent(new CustomEvent('oc:keyboard-settled', { detail: { open: true } }));
         });
         const willHideHandle = await Keyboard.addListener('keyboardWillHide', () => {
-          // Same single-motion trick as iOS: collapse the composer into the
-          // pill synchronously (flushSync in ChatInput) so the native window
-          // growth and the composer shrink land together, not as two steps.
           window.dispatchEvent(new CustomEvent('oc:keyboard-intent', { detail: { open: false } }));
           root.classList.remove('oc-keyboard-open');
         });
@@ -165,20 +128,8 @@ export const useNativeMobileChrome = (): void => {
         cleanup.push(removeAll);
         return;
       }
-      // No WebKit form accessory bar (prev/next arrows + Done) above the keyboard —
-      // there's a single input, so it only eats vertical space.
       await Keyboard.setAccessoryBarVisible({ isVisible: false }).catch(() => undefined);
 
-      // Keyboard slide choreography (see the "Native (Capacitor) keyboard handling"
-      // block in mobile.css for the full picture). `keyboardWillShow` fires at the
-      // START of the iOS keyboard animation and carries the final height; the
-      // visible motion is transform-only (inline styles on the kb-movers), and the shell's layout
-      // height (--oc-kb-layout) snaps exactly once per open/close at the moment the
-      // resize is invisible. visualViewport tracking was tried but doesn't shrink
-      // under WKWebView's `resize: 'none'`, so these events are the reliable signal.
-      // Durations and curve are shared with the composer morph and the
-      // scroller inset tween (mobileKeyboardTiming.ts); the hide leg is also
-      // mirrored by the .oc-kb-hide transition-duration override in mobile.css.
       const KB_ANIM_MS = KEYBOARD_SHOW_MS;
       const KB_HIDE_MS = KEYBOARD_HIDE_MS;
       const KB_ANIM_EASING = KEYBOARD_EASING_CSS;
@@ -188,9 +139,10 @@ export const useNativeMobileChrome = (): void => {
       let layoutApplied = false;
       let safeBottomPx = 0;
       let keyboardOpen = false;
+      let keyboardInShell = true;
 
-      const setVar = (name: string, px: number) => {
-        root.style.setProperty(name, `${Math.max(0, Math.round(px))}px`);
+      const setVar = (name: '--oc-kb-layout' | '--oc-kb-surface' | '--oc-kb-scroll-inset', px: number) => {
+        writeMobileKeyboardVar(name, px);
       };
       const clearSettle = () => {
         if (settleTimer !== null) {
@@ -201,78 +153,105 @@ export const useNativeMobileChrome = (): void => {
       const dispatchKb = (type: 'oc:keyboard-intent' | 'oc:keyboard-anim' | 'oc:keyboard-settled', detail: Record<string, unknown>) => {
         window.dispatchEvent(new CustomEvent(type, { detail }));
       };
-      // Elements that ride the keyboard slide, with their travel factor. Driven
-      // by INLINE styles from here: WebKit does not reliably start a transition
-      // when the transform's value changes via a CSS custom property, which
-      // left the composer parked until the keyboard finished.
-      const getKbMovers = (): Array<{ el: HTMLElement; factor: number }> => {
-        const movers: Array<{ el: HTMLElement; factor: number }> = [];
-        const composer = document.querySelector<HTMLElement>('.oc-mobile-composer');
-        if (composer) movers.push({ el: composer, factor: 1 });
-        // Status row, recap hint and scroll-to-end button sit on the slot's
-        // top edge outside the form; they ride the same slide.
-        const riders = document.querySelector<HTMLElement>('.oc-composer-riders');
-        if (riders) movers.push({ el: riders, factor: 1 });
-        // The centered draft title moves half the shift — exactly where the
-        // center lands after the shell snap (see mobile.css notes).
-        const draftCenter = document.querySelector<HTMLElement>('.oc-draft-center');
-        if (draftCenter) movers.push({ el: draftCenter, factor: 0.5 });
+      type KbMover = { el: HTMLElement; factor: number; base: 'shell' | 'keyboard' };
+      const getKbMovers = (): KbMover[] => {
+        const movers: KbMover[] = [];
+        const composer = keyboardInShell ? document.querySelector<HTMLElement>('.oc-mobile-composer') : null;
+        if (composer) movers.push({ el: composer, factor: 1, base: 'shell' });
+        const riders = keyboardInShell ? document.querySelector<HTMLElement>('.oc-composer-riders') : null;
+        if (riders) movers.push({ el: riders, factor: 1, base: 'shell' });
+        const draftCenter = keyboardInShell ? document.querySelector<HTMLElement>('.oc-draft-center') : null;
+        if (draftCenter) movers.push({ el: draftCenter, factor: 0.5, base: 'shell' });
+        for (const el of document.querySelectorAll<HTMLElement>('[data-keyboard-rider]')) {
+          const inShell = el.closest('.oc-mobile-app-shell') !== null;
+          if (inShell && !keyboardInShell) continue;
+          movers.push({ el, factor: Number(el.dataset.keyboardRider) || 1, base: inShell ? 'shell' : 'keyboard' });
+        }
         return movers;
+      };
+      const travel = (mover: KbMover, slide: number) => (mover.base === 'shell' ? slide : keyboardHeight) * mover.factor;
+      const moverAnimations = new WeakMap<HTMLElement, Animation>();
+      const moverShift = (el: HTMLElement): number => {
+        const transform = getComputedStyle(el).transform;
+        return transform && transform !== 'none' ? new DOMMatrixReadOnly(transform).m42 : 0;
+      };
+      const slideMovers = (durationMs: number, from: (mover: KbMover) => number, to: (mover: KbMover) => number) => {
+        const movers = getKbMovers();
+        const starts = movers.map((mover) => from(mover));
+        movers.forEach((mover, index) => {
+          const { el } = mover;
+          moverAnimations.get(el)?.cancel();
+          const start = starts[index];
+          const end = to(mover);
+          el.style.transition = '';
+          el.style.transform = `translateY(${end}px)`;
+          if (Math.abs(end - start) < 0.5) return;
+          moverAnimations.set(el, el.animate(
+            keyboardKeyframes((position) => ({ transform: `translateY(${start + (end - start) * position}px)` })),
+            { duration: durationMs, easing: 'linear' },
+          ));
+        });
       };
       const clearKbMovers = () => {
         for (const { el } of getKbMovers()) {
+          moverAnimations.get(el)?.cancel();
           el.style.transition = '';
           el.style.transform = '';
         }
       };
 
       const showHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
-        clearSettle();
         observeNativeKeyboardHeight(info.keyboardHeight);
+        const inShell = document.activeElement?.closest('.oc-mobile-app-shell') != null;
+        if (keyboardOpen && layoutApplied && settleTimer === null && inShell === keyboardInShell) {
+          if (Math.abs(info.keyboardHeight - keyboardHeight) >= 1) {
+            keyboardHeight = info.keyboardHeight;
+            setInset(keyboardHeight);
+            setVar('--oc-kb-surface', keyboardHeight);
+            if (keyboardInShell) {
+              setVar('--oc-kb-layout', keyboardHeight);
+              setVar('--oc-kb-scroll-inset', Math.max(0, keyboardHeight - safeBottomPx));
+            }
+            dispatchKb('oc:keyboard-settled', { open: true });
+          }
+          revealFocusedField('landed');
+          return;
+        }
+        clearSettle();
+        dropRevealRoom();
+        if (keyboardOpen && keyboardInShell && !inShell) {
+          clearKbMovers();
+          setVar('--oc-kb-layout', 0);
+          setVar('--oc-kb-scroll-inset', 0);
+        }
         keyboardOpen = true;
         keyboardHeight = info.keyboardHeight;
+        keyboardInShell = inShell;
         if (!layoutApplied) {
-          // The shell's resolved padding-bottom while the keyboard is down IS the
-          // bottom safe padding it gives up when open — measure it so the slide
-          // distance lands the composer exactly where the final layout puts it.
           const shell = document.querySelector('.oc-mobile-app-shell');
           safeBottomPx = shell ? parseFloat(getComputedStyle(shell).paddingBottom) || 0 : 0;
         }
         const slide = Math.max(0, keyboardHeight - safeBottomPx);
         root.classList.remove('oc-kb-hide');
-        // WKWebView renders the caret as a native layer that doesn't ride CSS
-        // transforms — after the rise it visibly "flies" from the pre-keyboard
-        // position to the final one. Hide it for the transition (plus the lag
-        // window where UIKit animates it into place) and pop it back in.
         if (caretTimer !== null) {
           window.clearTimeout(caretTimer);
           caretTimer = null;
         }
         root.classList.add('oc-keyboard-open', 'oc-kb-animating', 'oc-kb-caret-hold');
         setInset(keyboardHeight);
-        for (const { el, factor } of getKbMovers()) {
-            el.style.transition = `transform ${KB_ANIM_MS}ms ${KB_ANIM_EASING}`;
-            el.style.transform = `translateY(${-slide * factor}px)`;
-        }
-        // Reserve the keyboard strip inside the chat scroller NOW, in one
-        // write: the transcript's geometry is final from the first frame and
-        // the chat's follow glide (keyboardFollowGlide, started by the anim
-        // event below) moves scrollTop to the new end on the keyboard curve.
-        // `slide` (keyboard minus the safe inset the shell gives up) is exactly
-        // the strip the scroller loses at settle, so the glide's destination
-        // and the settle snap stay geometry-neutral.
-        setVar('--oc-kb-scroll-inset', slide);
-        dispatchKb('oc:keyboard-anim', { phase: 'show', slide, durationMs: KB_ANIM_MS, easing: KB_ANIM_EASING });
+        slideMovers(KB_ANIM_MS, (mover) => moverShift(mover.el), (mover) => -travel(mover, slide));
+        if (keyboardInShell) setVar('--oc-kb-scroll-inset', slide);
+        dispatchKb('oc:keyboard-anim', { phase: 'show', slide, durationMs: KB_ANIM_MS, easing: KB_ANIM_EASING, inShell: keyboardInShell });
+        revealFocusedField('start');
         settleTimer = window.setTimeout(() => {
           settleTimer = null;
-          // Invisible swap: transition off, layout takes the keyboard height (one
-          // reflow), shift returns to 0 in the same frame.
           root.classList.remove('oc-kb-animating');
-          setVar('--oc-kb-layout', keyboardHeight);
+          setVar('--oc-kb-surface', keyboardHeight);
+          if (keyboardInShell) setVar('--oc-kb-layout', keyboardHeight);
           layoutApplied = true;
           clearKbMovers();
           dispatchKb('oc:keyboard-settled', { open: true });
-          // Reveal the caret only after UIKit's own caret reposition window.
+          revealFocusedField('landed');
           caretTimer = window.setTimeout(() => {
             caretTimer = null;
             root.classList.remove('oc-kb-caret-hold');
@@ -280,20 +259,11 @@ export const useNativeMobileChrome = (): void => {
         }, KB_ANIM_MS + 20);
       });
 
-      // Shared hide choreography. The bridge's `keyboardWillHide` can arrive a
-      // beat AFTER the native dismiss animation has already started (WKWebView +
-      // resize: 'none'), which made the composer begin its down-slide only once
-      // the keyboard was gone. The earliest reliable signal for the common
-      // dismissal path (tap outside the input) is the textarea's focusout — so
-      // both trigger this, and `keyboardOpen` makes the second call a no-op.
       const runHide = () => {
         if (!keyboardOpen) return;
         keyboardOpen = false;
         clearSettle();
-        // Fired BEFORE any layout change: lets the composer collapse into its
-        // pill synchronously (flushSync in ChatInput), so the keyboard hide
-        // compensation below measures keyboard + composer shrink as ONE delta
-        // instead of two staggered steps.
+        dropRevealRoom();
         dispatchKb('oc:keyboard-intent', { open: false });
         if (caretTimer !== null) {
           window.clearTimeout(caretTimer);
@@ -303,34 +273,16 @@ export const useNativeMobileChrome = (): void => {
         const slide = Math.max(0, keyboardHeight - safeBottomPx);
         root.classList.remove('oc-keyboard-open');
         setInset(0);
-        // The scroller keeps its keyboard padding until the keyboard has
-        // landed: the follow glide moves scrollTop down to where the end will
-        // be, and the settle write below then only clamps it to the value it
-        // already has. Releasing the padding here would drop the transcript
-        // at frame 0 while the composer was still sliding.
+        const wasSettledOpen = layoutApplied;
         if (layoutApplied) {
-          // Settled-open → restore the full-height layout NOW (still hidden behind
-          // the keyboard) and FLIP the movers to their raised position without
-          // transitioning, so the next frame looks unchanged.
           root.classList.remove('oc-kb-animating');
           setVar('--oc-kb-layout', 0);
+          setVar('--oc-kb-surface', 0);
           layoutApplied = false;
-          for (const { el, factor } of getKbMovers()) {
-            el.style.transition = 'none';
-            el.style.transform = `translateY(${-slide * factor}px)`;
-          }
-          // Force the style/layout flush so the transition below starts from the
-          // FLIP position instead of coalescing both writes into one frame.
-          void (document.querySelector('.oc-mobile-app-shell') as HTMLElement | null)?.offsetHeight;
         }
-        // If the hide interrupted a show mid-animation (layout not applied yet),
-        // the movers transition back down from wherever they currently are.
-        dispatchKb('oc:keyboard-anim', { phase: 'hide', slide, durationMs: KB_HIDE_MS, easing: KB_ANIM_EASING });
+        dispatchKb('oc:keyboard-anim', { phase: 'hide', slide, durationMs: KB_HIDE_MS, easing: KB_ANIM_EASING, inShell: keyboardInShell });
         root.classList.add('oc-kb-animating', 'oc-kb-hide');
-        for (const { el } of getKbMovers()) {
-            el.style.transition = `transform ${KB_HIDE_MS}ms ${KB_ANIM_EASING}`;
-            el.style.transform = 'translateY(0px)';
-        }
+        slideMovers(KB_HIDE_MS, (mover) => (wasSettledOpen ? -travel(mover, slide) : moverShift(mover.el)), () => 0);
         settleTimer = window.setTimeout(() => {
           settleTimer = null;
           root.classList.remove('oc-kb-animating', 'oc-kb-hide');
@@ -342,14 +294,50 @@ export const useNativeMobileChrome = (): void => {
 
       const hideHandle = await Keyboard.addListener('keyboardWillHide', runHide);
 
-      // Early hide trigger: blurring the focused text field is what starts the
-      // native dismiss animation, and it happens in-page — no bridge latency.
-      // Deferred a task so a synchronous refocus (focus moving to another text
-      // input, or a control that restores focus) doesn't false-trigger; in that
-      // case the keyboard never hides and `keyboardWillHide` never fires either.
       const isTextInput = (node: unknown): boolean =>
         node instanceof HTMLElement
         && (node.tagName === 'TEXTAREA' || node.tagName === 'INPUT' || node.isContentEditable);
+      let revealRoom: { scroller: HTMLElement; padding: string } | null = null;
+      function dropRevealRoom() {
+        if (!revealRoom) return;
+        revealRoom.scroller.style.paddingBottom = revealRoom.padding;
+        revealRoom = null;
+      }
+      function revealFocusedField(phase: 'start' | 'landed') {
+        const field = document.activeElement;
+        if (!(field instanceof HTMLElement) || !isTextInput(field)) return;
+        if (field.closest('[data-terminal-owner]')) return;
+        const box = field.getBoundingClientRect();
+        if (box.width < 2 || box.height < 2 || getComputedStyle(field).opacity === '0') return;
+        if (phase === 'start' && field.closest('.oc-mobile-composer, [data-keyboard-rider], .oc-keyboard-inset-snap, .chat-scroll')) return;
+        let bottom = field.getBoundingClientRect().bottom;
+        if (field.isContentEditable) {
+          const selection = window.getSelection();
+          const caret = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).getBoundingClientRect() : null;
+          if (!caret || caret.height === 0) return;
+          bottom = caret.bottom;
+        }
+        const visibleBottom = window.innerHeight - keyboardHeight - 12;
+        const overlap = bottom - visibleBottom;
+        if (overlap <= 0) return;
+        for (let node = field.parentElement; node; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+            const missing = overlap - (node.scrollHeight - node.clientHeight - node.scrollTop);
+            if (phase === 'start' && missing > 0) {
+              const fieldBottom = field.getBoundingClientRect().bottom;
+              revealRoom = { scroller: node, padding: node.style.paddingBottom };
+              node.style.paddingBottom = `${(Number.parseFloat(style.paddingBottom) || 0) + missing}px`;
+              if (Math.abs(field.getBoundingClientRect().bottom - fieldBottom) > 1) {
+                dropRevealRoom();
+                return;
+              }
+            }
+            node.scrollBy({ top: overlap, behavior: 'smooth' });
+            return;
+          }
+        }
+      }
       const handleFocusOut = (event: FocusEvent) => {
         if (!keyboardOpen) return;
         if (!isTextInput(event.target)) return;
@@ -361,16 +349,22 @@ export const useNativeMobileChrome = (): void => {
         }, 0);
       };
       document.addEventListener('focusout', handleFocusOut, true);
+      const handleResize = () => {
+        if (keyboardOpen && !isTextInput(document.activeElement)) runHide();
+      };
+      window.addEventListener('resize', handleResize);
 
       if (disposed) {
         clearSettle();
         document.removeEventListener('focusout', handleFocusOut, true);
+        window.removeEventListener('resize', handleResize);
         void showHandle.remove();
         void hideHandle.remove();
         return;
       }
       cleanup.push(
         clearSettle,
+        dropRevealRoom,
         () => {
           if (caretTimer !== null) {
             window.clearTimeout(caretTimer);
@@ -378,6 +372,7 @@ export const useNativeMobileChrome = (): void => {
           }
         },
         () => document.removeEventListener('focusout', handleFocusOut, true),
+        () => window.removeEventListener('resize', handleResize),
         () => void showHandle.remove(),
         () => void hideHandle.remove(),
       );
@@ -388,10 +383,10 @@ export const useNativeMobileChrome = (): void => {
       cleanup.forEach((remove) => remove());
       resetHardwareKeyboardDetection();
       root.classList.remove('oc-capacitor-app', 'oc-keyboard-open', 'oc-kb-animating', 'oc-kb-hide', 'oc-kb-caret-hold', 'oc-platform-android', 'oc-android-below-status-bar');
-      root.style.removeProperty('--oc-keyboard-inset');
-      root.style.removeProperty('--oc-kb-shift');
-      root.style.removeProperty('--oc-kb-layout');
-      root.style.removeProperty('--oc-kb-scroll-inset');
+      writeMobileKeyboardVar('--oc-keyboard-inset', null);
+      writeMobileKeyboardVar('--oc-kb-layout', null);
+      writeMobileKeyboardVar('--oc-kb-surface', null);
+      writeMobileKeyboardVar('--oc-kb-scroll-inset', null);
     };
   }, []);
 };
@@ -410,10 +405,6 @@ export const useNativeMobileLifecycle = (onResume: () => void): void => {
       onResume();
     };
 
-    // Belt-and-suspenders resume detection. Capacitor's `appStateChange` is the
-    // primary signal, but on iOS it can be missed after a long suspend, so the
-    // webview's own `visibilitychange` is a second trigger — either one flips
-    // wasInactiveRef and fires onResume exactly once per background→foreground.
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         wasInactiveRef.current = true;
@@ -450,7 +441,28 @@ export const useNativeMobileLifecycle = (onResume: () => void): void => {
   }, [onResume]);
 };
 
-export const useNativeAndroidBackButton = (onBack: () => boolean): void => {
+export const handleAndroidParentBack = (overviewOpen: boolean, returnToParent: (() => void) | null): boolean => {
+  if (overviewOpen || !returnToParent) return false;
+  returnToParent();
+  return true;
+};
+
+export const useMobileBackHandlers = () => {
+  const settingsBackRef = React.useRef<(() => boolean) | null>(null);
+  const previewBackRef = React.useRef<(() => boolean) | null>(null);
+  const parentSessionBackRef = React.useRef<(() => void) | null>(null);
+  const registerSettingsBackHandler = React.useCallback((handler: (() => boolean) | null) => { settingsBackRef.current = handler; }, []);
+  const registerPreviewBackHandler = React.useCallback((handler: (() => boolean) | null) => { previewBackRef.current = handler; }, []);
+  const registerParentSessionBack = React.useCallback((handler: (() => void) | null) => { parentSessionBackRef.current = handler; }, []);
+  return { settingsBackRef, previewBackRef, parentSessionBackRef, registerSettingsBackHandler, registerPreviewBackHandler, registerParentSessionBack };
+};
+
+export const useAndroidParentSessionBack = (onBack: () => boolean, parentRef: React.RefObject<(() => void) | null>): void => {
+  const handleBack = React.useCallback(() => onBack() || handleAndroidParentBack(useUIStore.getState().runOverviewKey !== null, parentRef.current), [onBack, parentRef]);
+  useNativeAndroidBackButton(handleBack);
+};
+
+const useNativeAndroidBackButton = (onBack: () => boolean): void => {
   React.useEffect(() => {
     if (!isCapacitorMobileApp()) return;
 
@@ -475,4 +487,52 @@ export const useNativeAndroidBackButton = (onBack: () => boolean): void => {
       remove?.();
     };
   }, [onBack]);
+};
+
+export const useMobileWebBackButton = (
+  handleBack: () => boolean,
+  shellLayerOpen: boolean,
+): void => {
+  const shellLayerOpenRef = React.useRef(shellLayerOpen);
+  const onGuardRef = React.useRef(false);
+  const retiringGuardRef = React.useRef(false);
+
+  const reconcileGuard = React.useCallback(() => {
+    if (retiringGuardRef.current) return;
+    const onGuard = isBackGuardEntry();
+    const layerOpen = shellLayerOpenRef.current || hasOpenBackLayer();
+    onGuardRef.current = onGuard || layerOpen;
+    if (layerOpen && !onGuard) {
+      pushBackGuard();
+    } else if (!layerOpen && onGuard) {
+      retiringGuardRef.current = true;
+      window.history.back();
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (isCapacitorMobileApp()) return;
+    shellLayerOpenRef.current = shellLayerOpen;
+    reconcileGuard();
+    return subscribeBackLayers(reconcileGuard);
+  }, [reconcileGuard, shellLayerOpen]);
+
+  React.useEffect(() => {
+    if (isCapacitorMobileApp()) return;
+
+    const handlePopState = () => {
+      const pressedBack = onGuardRef.current && !retiringGuardRef.current && !isBackGuardEntry();
+      retiringGuardRef.current = false;
+      if (pressedBack && !handleBack()) {
+        onGuardRef.current = false;
+        return;
+      }
+      reconcileGuard();
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [handleBack, reconcileGuard]);
 };

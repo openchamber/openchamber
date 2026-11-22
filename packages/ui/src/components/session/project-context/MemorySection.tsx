@@ -1,27 +1,26 @@
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
+import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { toast } from '@/components/ui';
+import { AttachedOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { KnowledgeCard } from './KnowledgeCard';
 import { KnowledgeEntryView } from './KnowledgeEntryView';
 import { KnowledgeSplit } from './KnowledgeSplit';
 import { KnowledgeMenu } from './KnowledgeActions';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { memoryDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 import { Icon } from '@/components/icon/Icon';
-import { useI18n } from '@/lib/i18n';
-import { AGENT_MEMORY_BODY_MAX_LENGTH, AGENT_MEMORY_TITLE_MAX_LENGTH, type AgentMemoryEntry, type AgentMemoryScope } from '@/lib/agentMemoryApi';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { AGENT_MEMORY_BODY_MAX_LENGTH, AGENT_MEMORY_TITLE_MAX_LENGTH, type AgentMemoryDream, type AgentMemoryEntry, type AgentMemoryScope } from '@/lib/agentMemoryApi';
 import { classifyMemory, memoryViewKey, type MemoryBadge } from '@/lib/agentMemoryBadges';
 import { cn } from '@/lib/utils';
 import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { startMemoryTidy } from './memoryTidy';
+import { startMemoryTidy, startMemoryToDocs } from './memoryTidy';
 
-/**
- * Starts the tidy-up session. Offered only while both scopes are loaded for
- * this project: a store that failed to load would reach the agent as empty,
- * and it would tidy against half the data.
- */
 const MemoryTidyButton: React.FC<{ projectPath: string | null }> = ({ projectPath }) => {
   const { t } = useI18n();
   const [starting, setStarting] = React.useState(false);
@@ -58,17 +57,101 @@ const MemoryTidyButton: React.FC<{ projectPath: string | null }> = ({ projectPat
   };
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size="xs"
-      disabled={!ready || starting}
-      onClick={() => void handleClick()}
-      className="ms-auto shrink-0 gap-1 border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)] hover:bg-[var(--status-info-background)] hover:text-[var(--status-info)]"
-    >
-      <Icon name={starting ? 'loader-4' : 'brush'} className={cn('size-3.5', starting && 'animate-spin')} />
-      {t('rightSidebar.contextNotesTodo.memory.tidy.action')}
-    </Button>
+    <ButtonTooltip label={t('contextTooltips.workspace.memory.tidy')} className="ms-auto shrink-0">
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        disabled={!ready || starting}
+        onClick={() => void handleClick()}
+        className="gap-1 border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)] hover:bg-[var(--status-info-background)] hover:text-[var(--status-info)]"
+      >
+        <Icon name={starting ? 'loader-4' : 'brush'} className={cn('size-3.5', starting && 'animate-spin')} />
+        {t('rightSidebar.contextNotesTodo.memory.tidy.action')}
+      </Button>
+    </ButtonTooltip>
+  );
+};
+
+const DreamLine: React.FC<{ dream: AgentMemoryDream; onUndo: () => void; undoing: boolean }> = ({ dream, onUndo, undoing }) => {
+  const { t } = useI18n();
+  const date = new Intl.DateTimeFormat(getCurrentIntlLocale(), { day: 'numeric', month: 'long' }).format(dream.finishedAt);
+  const changed = dream.merged + dream.removed + dream.rewritten > 0;
+  const summary = dream.undone
+    ? t('rightSidebar.contextNotesTodo.memory.dream.undone', { date })
+    : dream.status === 'failed'
+      ? t('rightSidebar.contextNotesTodo.memory.dream.failed', { date })
+      : changed
+        ? t('rightSidebar.contextNotesTodo.memory.dream.tidied', { date })
+        : t('rightSidebar.contextNotesTodo.memory.dream.nothing', { date });
+  const counts = dream.undone || !changed ? [] : [
+    dream.merged > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.merged', { count: dream.merged }) : null,
+    dream.removed > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.removed', { count: dream.removed }) : null,
+    dream.rewritten > 0 ? t('rightSidebar.contextNotesTodo.memory.dream.rewritten', { count: dream.rewritten }) : null,
+  ].filter((part): part is string => part !== null);
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 typography-micro text-muted-foreground">
+      <Icon name="moon" className="size-3 shrink-0" />
+      <span>{summary}</span>
+      {counts.map((part) => (
+        <React.Fragment key={part}>
+          <span aria-hidden="true">·</span>
+          <span>{part}</span>
+        </React.Fragment>
+      ))}
+      {dream.canUndo ? (
+        <>
+          <span aria-hidden="true">·</span>
+          <button
+            type="button"
+            disabled={undoing}
+            onClick={onUndo}
+            className="text-foreground/80 hover:text-foreground disabled:opacity-50"
+          >
+            {t('rightSidebar.contextNotesTodo.memory.dream.undo')}
+          </button>
+        </>
+      ) : null}
+    </p>
+  );
+};
+
+const DocsLine: React.FC<{ projectPath: string; entries: AgentMemoryEntry[] }> = ({ projectPath, entries }) => {
+  const { t } = useI18n();
+  const [starting, setStarting] = React.useState(false);
+  const handleMove = async () => {
+    setStarting(true);
+    try {
+      const outcome = await startMemoryToDocs({
+        projectPath,
+        title: t('rightSidebar.contextNotesTodo.memory.toDocs.sessionTitle'),
+        entries,
+      });
+      if (!outcome.ok) {
+        toast.error(t(outcome.reason === 'no-model'
+          ? 'rightSidebar.contextNotesTodo.memory.tidy.noModel'
+          : 'rightSidebar.contextNotesTodo.memory.toDocs.failed'));
+      }
+    } catch {
+      toast.error(t('rightSidebar.contextNotesTodo.memory.toDocs.failed'));
+    } finally {
+      setStarting(false);
+    }
+  };
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 typography-micro text-muted-foreground">
+      <Icon name="file-text" className="size-3 shrink-0" />
+      <span>{t('rightSidebar.contextNotesTodo.memory.toDocs.summary', { count: entries.length })}</span>
+      <span aria-hidden="true">·</span>
+      <button
+        type="button"
+        disabled={starting}
+        onClick={() => void handleMove()}
+        className="text-foreground/80 hover:text-foreground disabled:opacity-50"
+      >
+        {t('rightSidebar.contextNotesTodo.memory.toDocs.action')}
+      </button>
+    </p>
   );
 };
 
@@ -91,7 +174,6 @@ const MemoryBadgePill: React.FC<{ badge: MemoryBadge }> = ({ badge }) => {
   );
 };
 
-/** Type and the withheld warning: the card footer and the open entry's toolbar. */
 const MemoryMeta: React.FC<{ entry: AgentMemoryEntry; scopeLabel?: string }> = ({ entry, scopeLabel }) => {
   const { t } = useI18n();
   const typeLabel = t(`rightSidebar.contextNotesTodo.memory.type.${entry.type}` as Parameters<typeof t>[0]);
@@ -105,8 +187,6 @@ const MemoryMeta: React.FC<{ entry: AgentMemoryEntry; scopeLabel?: string }> = (
       ) : null}
       <span>{typeLabel}</span>
       {entry.flagged ? (
-        // Shown rather than hidden: an entry withheld from the agent is
-        // exactly the one the user needs to look at.
         <span className="flex items-center gap-1 text-[var(--status-error)]">
           <Icon name="error-warning" className="h-3 w-3 flex-shrink-0" />
           {t('rightSidebar.contextNotesTodo.memory.flagged')}
@@ -116,13 +196,6 @@ const MemoryMeta: React.FC<{ entry: AgentMemoryEntry; scopeLabel?: string }> = (
   );
 };
 
-/**
- * One stored memory in the list. A click opens it.
- *
- * There is no confirm button. A badge that the user has to dismiss by hand asks
- * them to do work that tells the agent nothing — the agent already has the
- * memory either way — so the badge clears itself once they have looked.
- */
 const MemoryCard: React.FC<{
   entry: AgentMemoryEntry;
   badge: MemoryBadge;
@@ -131,6 +204,12 @@ const MemoryCard: React.FC<{
   selected: boolean;
 }> = ({ entry, badge, onOpen, onDelete , selected}) => {
   const { t } = useI18n();
+  const menuItems = [{
+    id: 'delete',
+    label: t('rightSidebar.contextNotesTodo.memory.actions.delete'),
+    destructive: true,
+    onSelect: onDelete,
+  }];
   return (
     <KnowledgeCard
       selected={selected}
@@ -145,16 +224,8 @@ const MemoryCard: React.FC<{
           </span>
         </>
       )}
-      actions={(
-        <KnowledgeMenu
-          items={[{
-            id: 'delete',
-            label: t('rightSidebar.contextNotesTodo.memory.actions.delete'),
-            destructive: true,
-            onSelect: onDelete,
-          }]}
-        />
-      )}
+      actions={<KnowledgeMenu items={menuItems} />}
+      menuItems={menuItems}
       footer={<MemoryMeta entry={entry} />}
     >
       <p className="line-clamp-2 whitespace-pre-wrap break-words typography-meta text-muted-foreground" dir="auto">
@@ -164,15 +235,6 @@ const MemoryCard: React.FC<{
   );
 };
 
-/**
- * An open memory, in place of the list, with its title and text editable.
- *
- * Editable on purpose. A memory worded badly enough to mislead should be
- * fixable where it is read; deleting it and hoping the agent learns it again,
- * better, is not a repair. Changes save when a field loses focus and when the
- * entry is left. A rewrite by the agent is adopted while the user has not
- * changed anything since the last version they saw.
- */
 const MemoryView: React.FC<{
   entry: AgentMemoryEntry;
   badge: MemoryBadge;
@@ -197,12 +259,13 @@ const MemoryView: React.FC<{
     }
   }, [bodyDraft, entry.body, entry.title, titleDraft]);
 
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+  const [bodyScroller, setBodyScroller] = React.useState<HTMLTextAreaElement | null>(null);
+  const emojiPicker = useEmojiPicker(bodyRef);
   const commitRef = React.useRef<() => void>(() => {});
   commitRef.current = () => {
     const title = titleDraft.trim();
     const body = bodyDraft.trim();
-    // An emptied field is a rejected write, not a delete: restore it rather
-    // than sending something the server will refuse.
     if (!title || !body) {
       setTitleDraft(entry.title);
       setBodyDraft(entry.body);
@@ -248,33 +311,32 @@ const MemoryView: React.FC<{
           dir="auto"
           className="w-full flex-shrink-0 bg-transparent typography-ui-header font-semibold text-foreground outline-none focus-visible:outline-none"
         />
-        <textarea
-          value={bodyDraft}
-          onChange={(event) => setBodyDraft(event.target.value.slice(0, AGENT_MEMORY_BODY_MAX_LENGTH))}
-          onBlur={() => commitRef.current()}
-          aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editBody')}
-          dir="auto"
-          className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent typography-ui-label leading-relaxed text-foreground outline-none focus-visible:outline-none"
-        />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <textarea
+            ref={(node) => {
+              bodyRef.current = node;
+              setBodyScroller(node);
+            }}
+            value={bodyDraft}
+            onChange={(event) => setBodyDraft(event.target.value.slice(0, AGENT_MEMORY_BODY_MAX_LENGTH))}
+            onBlur={() => commitRef.current()}
+            aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editBody')}
+            dir="auto"
+            className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent typography-ui-label leading-relaxed text-foreground outline-none focus-visible:outline-none"
+          />
+          <AttachedOverlayScrollbar scroller={bodyScroller} disableHorizontal />
+        </div>
+        {emojiPicker}
       </div>
     </KnowledgeEntryView>
   );
 };
 
-/**
- * What the agent has chosen to remember, in the two scopes it writes to.
- *
- * The scopes are a switch rather than one merged list: a claim about the user
- * reaches every project, so which store a memory sits in is the most important
- * thing about it and must never be something the reader has to infer.
- */
 export const MemorySection: React.FC<{
   projectPath: string | null;
   query: string;
-  /** The open entry, owned by the panel so its back control can close it. */
   openMemoryId: string | null;
   onOpenMemory: (memoryId: string | null) => void;
-  /** Wide panel: the list and the open entry side by side. */
   split: boolean;
 }> = ({ projectPath, query, openMemoryId, onOpenMemory, split }) => {
   const { t } = useI18n();
@@ -282,9 +344,6 @@ export const MemorySection: React.FC<{
 
   const globalEntries = useAgentMemoryStore((state) => state.global);
   const projectEntries = useAgentMemoryStore((state) => selectProjectMemoryForPath(state, projectPath));
-  // Opens on the scope that has something to show. Starting on an empty
-  // Project scope read as "no memory at all" while About you had entries.
-  // Once the user picks a scope, it stays theirs.
   const scopePickedRef = React.useRef(false);
   React.useEffect(() => {
     if (scopePickedRef.current) return;
@@ -303,11 +362,6 @@ export const MemorySection: React.FC<{
   const viewKey = memoryViewKey(scope, projectPath);
   const storedViewedAt = useUIStore((state) => state.agentMemoryViewedAt[viewKey] ?? 0);
 
-  /**
-   * The mark is frozen for the length of the visit and only advanced on the way
-   * out. Reading the live value would clear every badge the instant the tab
-   * opened, which is the one moment the user is trying to read them.
-   */
   const baselineRef = React.useRef(storedViewedAt);
   const [baseline, setBaseline] = React.useState(storedViewedAt);
   React.useEffect(() => {
@@ -325,10 +379,6 @@ export const MemorySection: React.FC<{
     [entries, pendingDeletes, query, scope],
   );
 
-  // The section strip counts both scopes, so a search whose hits are all in
-  // the other one would open on "no matches". Follow the search there, the
-  // way the strip follows it between sections.
-  // Only when the query changes, so a scope picked by hand stays picked.
   const followedQueryRef = React.useRef('');
   React.useEffect(() => {
     const trimmed = query.trim();
@@ -347,7 +397,6 @@ export const MemorySection: React.FC<{
     [entries, openMemoryId],
   );
 
-  // An entry forgotten elsewhere (the agent, another window) closes if open.
   React.useEffect(() => {
     if (openMemoryId && !openEntry) onOpenMemory(null);
   }, [onOpenMemory, openEntry, openMemoryId]);
@@ -358,7 +407,6 @@ export const MemorySection: React.FC<{
       key: memoryDeleteKey(scope, memoryId),
       message: t('rightSidebar.contextNotesTodo.deleted.memory'),
       undoLabel: t('rightSidebar.contextNotesTodo.undo'),
-      // Asked in this project; the panel may have moved on by the time it runs.
       run: () => deleteEntry(scope, memoryId, projectPath),
       onFailure: () => {
         const detail = useAgentMemoryStore.getState().error;
@@ -380,9 +428,35 @@ export const MemorySection: React.FC<{
     }
   }, [saveEntry, scope, t]);
 
-  const scopeOptions: Array<{ id: AgentMemoryScope; label: string; count: number }> = [
-    { id: 'project', label: t('rightSidebar.contextNotesTodo.memory.scope.project'), count: projectEntries.length },
-    { id: 'global', label: t('rightSidebar.contextNotesTodo.memory.scope.global'), count: globalEntries.length },
+  const dream = useAgentMemoryStore((state) => state.dream);
+  const undoDream = useAgentMemoryStore((state) => state.undoDream);
+  const dreamOwner = useAgentMemoryStore((state) => state.projectPath);
+  const scopeDream = scope === 'global' ? dream.global : dreamOwner === projectPath ? dream.project : null;
+  const toDocsEntries = React.useMemo(() => {
+    const ids = new Set(scope === 'project' ? scopeDream?.toDocs ?? [] : []);
+    return projectEntries.filter((entry) => ids.has(entry.id));
+  }, [projectEntries, scope, scopeDream]);
+  const [undoing, setUndoing] = React.useState(false);
+  const handleUndoDream = React.useCallback(async () => {
+    setUndoing(true);
+    const undone = await undoDream(scope, projectPath);
+    setUndoing(false);
+    if (!undone) toast.error(t('rightSidebar.contextNotesTodo.memory.dream.undoFailed'));
+  }, [projectPath, scope, t, undoDream]);
+
+  const scopeOptions: Array<{ id: AgentMemoryScope; label: string; tooltip: string; count: number }> = [
+    {
+      id: 'project',
+      label: t('rightSidebar.contextNotesTodo.memory.scope.project'),
+      tooltip: t('contextTooltips.workspace.memory.scope.project'),
+      count: projectEntries.length,
+    },
+    {
+      id: 'global',
+      label: t('rightSidebar.contextNotesTodo.memory.scope.global'),
+      tooltip: t('contextTooltips.workspace.memory.scope.global'),
+      count: globalEntries.length,
+    },
   ];
 
   const openView = openEntry ? (
@@ -400,39 +474,40 @@ export const MemorySection: React.FC<{
 
   const list = (
     <div className="flex flex-col gap-2">
-      {/* Chips rather than a tab strip: these pick which store you are reading,
-          not which view you are in, and the chip's pressed state says which one
-          is selected far more plainly than a pill sitting on a matching
-          background did. */}
       <div className="flex items-center gap-1">
         <div role="group" aria-label={t('rightSidebar.contextNotesTodo.memory.scope.label')} className="flex items-center gap-1">
           {scopeOptions.map((option) => (
-            <Button
-              key={option.id}
-              type="button"
-              variant="chip"
-              size="xs"
-              aria-pressed={scope === option.id}
-              className="!font-normal"
-              onClick={() => {
-                scopePickedRef.current = true;
-                setScope(option.id);
-              }}
-            >
-              {`${option.label} ${option.count}`}
-            </Button>
+            <Tooltip key={option.id}>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="chip"
+                  size="xs"
+                  aria-pressed={scope === option.id}
+                  className="!font-normal"
+                  onClick={() => {
+                    scopePickedRef.current = true;
+                    setScope(option.id);
+                  }}
+                >
+                  {`${option.label} ${option.count}`}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>{option.tooltip}</TooltipContent>
+            </Tooltip>
           ))}
         </div>
         <MemoryTidyButton projectPath={projectPath} />
       </div>
+
+      {scopeDream ? <DreamLine dream={scopeDream} undoing={undoing} onUndo={() => void handleUndoDream()} /> : null}
+      {scope === 'project' && projectPath && toDocsEntries.length > 0 ? <DocsLine projectPath={projectPath} entries={toDocsEntries} /> : null}
 
       {scope === 'project' && !projectPath ? (
         <p className="typography-meta text-muted-foreground">
           {t('rightSidebar.contextNotesTodo.memory.empty.noProject')}
         </p>
       ) : scopeFailed ? (
-        // Said plainly rather than shown as an empty list: an empty tab would
-        // read as the agent having forgotten everything it knew.
         <p className="typography-meta text-muted-foreground">
           {t('rightSidebar.contextNotesTodo.memory.empty.unavailable')}
         </p>

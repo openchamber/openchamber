@@ -18,6 +18,10 @@ const setup = (overrides = {}) => {
     createPlan: vi.fn(async () => ({ plan: context.plans[0], context })),
     updatePlan: vi.fn(async () => ({ plan: context.plans[0], context })),
     deletePlan: vi.fn(async () => ({ deleted: true, context })),
+    setPlanSession: vi.fn(async (projectId, planId, { sessionId }) => ({
+      plan: sessionId === null ? context.plans[0] : { ...context.plans[0], session: { sessionId, linkedAt: 5 } },
+      context,
+    })),
     plansDirFor: vi.fn(() => '/data/plans'),
   };
   const resolveProjectContextId = createMemoryProjectResolver({
@@ -121,7 +125,7 @@ describe('project knowledge control actions', () => {
     const owner = createProjectIdFromPath('/repo');
     const call = (action, input = {}) => service.execute(action, input, '/repo', { contextSessionId: 'ses_caller' });
 
-    await call('knowledge.save', { kind: 'note', body: 'New', source: 'manual', origin: { sessionId: 'spoof' }, sessionId: 'spoof' });
+    await call('knowledge.save', { kind: 'note', body: 'New', source: 'manual', origin: { sessionId: 'spoof' } });
     expect(runtime.createNote).toHaveBeenCalledWith(owner, { body: 'New', source: 'agent', origin: { sessionId: 'ses_caller' } });
     await call('knowledge.save', { kind: 'note', id: 'note-1', body: 'Edit', expected: 'Note' });
     expect(runtime.updateNote).toHaveBeenCalledWith(owner, 'note-1', { body: 'Edit' }, { expectedBody: 'Note' });
@@ -142,6 +146,98 @@ describe('project knowledge control actions', () => {
     for (const [kind, method] of [['note', 'deleteNote'], ['todo', 'deleteTodo'], ['plan', 'deletePlan']]) {
       expect(await call('knowledge.delete', { kind, id: 'x' })).toEqual({ projectId: owner, deleted: true });
       expect(runtime[method]).toHaveBeenCalledWith(owner, 'x');
+    }
+  });
+
+  it('forwards plan links and dependencies, null and [] included, and allows link-only updates', async () => {
+    const { service, runtime } = setup();
+    const owner = createProjectIdFromPath('/repo');
+    const call = (input) => service.execute('knowledge.save', input, '/repo', { contextSessionId: 'ses_caller' });
+
+    await call({ kind: 'note', body: 'New', planId: 'plan-1' });
+    expect(runtime.createNote).toHaveBeenCalledWith(owner, { body: 'New', source: 'agent', origin: { sessionId: 'ses_caller' }, planId: 'plan-1' });
+    await call({ kind: 'note', id: 'note-1', planId: null, expected: 'Note' });
+    expect(runtime.updateNote).toHaveBeenLastCalledWith(owner, 'note-1', { planId: null }, { expectedBody: 'Note' });
+
+    await call({ kind: 'todo', body: 'Step', planId: 'plan-1', dependsOn: ['todo-1'] });
+    expect(runtime.createTodo).toHaveBeenCalledWith(owner, { text: 'Step', completed: false, planId: 'plan-1', dependsOn: ['todo-1'] });
+    await call({ kind: 'todo', id: 'todo-1', dependsOn: [] });
+    expect(runtime.updateTodo).toHaveBeenLastCalledWith(owner, 'todo-1', { dependsOn: [] });
+    await call({ kind: 'todo', id: 'todo-1', planId: null });
+    expect(runtime.updateTodo).toHaveBeenLastCalledWith(owner, 'todo-1', { planId: null });
+  });
+
+  it('lists one plan with its notes and todos, and the todos ready to start', async () => {
+    const { service, runtime, context } = setup();
+    const todo = (id, completed, planId, dependsOn) => ({ id, text: id, completed, createdAt: 1, planId, dependsOn });
+    const todos = [
+      todo('a', true, 'plan-1'), todo('b', false, 'plan-1', ['a']), todo('c', false, 'plan-1', ['b']),
+      todo('d', false, 'plan-1', ['gone']), todo('e', false, 'plan-2'), todo('f', false),
+    ];
+    runtime.readContext.mockImplementation(async () => ({
+      ...context,
+      notes: [{ id: 'n1', body: 'In plan', planId: 'plan-1' }, { id: 'n2', body: 'Standalone' }],
+      todos,
+      plans: [{ ...context.plans[0], session: { sessionId: 'ses_w', linkedAt: 5 } }, { id: 'plan-2', title: 'Other', file: 'other.md', source: 'personal', createdAt: 2 }],
+    }));
+    const list = async (input) => {
+      const result = await service.execute('knowledge.list', input, '/repo');
+      return { notes: result.notes.map((note) => note.id), todos: result.todos.map((entry) => entry.id), plans: result.plans.map((plan) => plan.id) };
+    };
+
+    expect(await list({ ready: true })).toEqual({ notes: ['n1', 'n2'], todos: ['b', 'e', 'f'], plans: ['plan-1', 'plan-2'] });
+    expect(await list({ ready: false })).toEqual(await list({}));
+    expect(await list({ planId: 'plan-1' })).toEqual({ notes: ['n1'], todos: ['a', 'b', 'c', 'd'], plans: ['plan-1'] });
+    expect(await list({ planId: 'plan-1', ready: true })).toEqual({ notes: ['n1'], todos: ['b'], plans: ['plan-1'] });
+    expect((await service.execute('knowledge.list', { planId: 'plan-1' }, '/repo')).plans[0].session).toEqual({ sessionId: 'ses_w', linkedAt: 5 });
+    // Readiness follows the stored state: reopening a holds b back, completing a and b frees c.
+    todos[0].completed = false;
+    expect(await list({ planId: 'plan-1', ready: true })).toMatchObject({ todos: ['a'] });
+    todos[0].completed = true;
+    todos[1].completed = true;
+    expect(await list({ planId: 'plan-1', ready: true })).toMatchObject({ todos: ['c'] });
+  });
+
+  it('sets, replaces and clears a plan session in a call of its own', async () => {
+    const { service, runtime } = setup();
+    const owner = createProjectIdFromPath('/repo');
+    const call = (input) => service.execute('knowledge.save', { kind: 'plan', ...input }, '/repo', { contextSessionId: 'ses_caller' });
+
+    const linked = await call({ id: 'plan-1', sessionId: 'ses_worker' });
+    expect(runtime.setPlanSession).toHaveBeenLastCalledWith(owner, 'plan-1', { sessionId: 'ses_worker' });
+    expect(linked).toEqual({ projectId: owner, plan: { id: 'plan-1', title: 'Plan', source: 'personal', createdAt: 1, path: '/data/plans/plan.md', session: { sessionId: 'ses_worker', linkedAt: 5 } } });
+    expect(await call({ id: 'plan-1', sessionId: null })).not.toHaveProperty('plan.session');
+    expect(runtime.setPlanSession).toHaveBeenLastCalledWith(owner, 'plan-1', { sessionId: null });
+    expect(runtime.updatePlan).not.toHaveBeenCalled();
+
+    runtime.setPlanSession.mockResolvedValue(null);
+    await expect(call({ id: 'gone', sessionId: 'ses_worker' })).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it.each([
+    [{ id: 'plan-1', sessionId: 'ses_worker', body: '# Plan\n' }],
+    [{ id: 'plan-1', sessionId: null, expected: '# Plan\n' }],
+    [{ sessionId: 'ses_worker', body: '# New\n' }],
+    [{ id: 'plan-1', sessionId: '' }],
+    [{ id: 'plan-1', sessionId: 3 }],
+  ])('refuses a plan session save %j before any write', async (input) => {
+    const { service, runtime } = setup();
+    await expect(service.execute('knowledge.save', { kind: 'plan', ...input }, '/repo')).rejects.toMatchObject({ statusCode: 400 });
+    for (const method of ['setPlanSession', 'updatePlan', 'createPlan']) expect(runtime[method]).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['note', { body: 'New', sessionId: 'ses_target' }],
+    ['note', { id: 'note-1', dependsOn: [] }],
+    ['todo', { id: 'todo-1', sessionId: 'ses_target' }],
+    ['plan', { id: 'plan-1', planId: 'plan-2' }],
+    ['plan', { body: '# New\n', dependsOn: [] }],
+  ])('refuses a field that does not apply to a %s before any write', async (kind, input) => {
+    const { service, runtime } = setup();
+    await expect(service.execute('knowledge.save', { kind, ...input }, '/repo', { contextSessionId: 'ses_caller' }))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('does not apply') });
+    for (const method of ['createNote', 'updateNote', 'updateTodo', 'createPlan', 'updatePlan', 'setPlanSession']) {
+      expect(runtime[method]).not.toHaveBeenCalled();
     }
   });
 
@@ -169,13 +265,15 @@ describe('project knowledge control actions', () => {
     ['knowledge.save', { kind: 'plan', body: 'a'.repeat(200001) }], ['knowledge.save', { kind: 'plan', body: 'Release\n\nShip it' }],
     ['knowledge.save', { kind: 'todo', body: 'Done', completed: 'yes' }], ['knowledge.delete', { kind: 'note' }],
     ['knowledge.show', { kind: 'note', id: 'note-1' }], ['knowledge.show', { kind: 'plan' }],
+    ['knowledge.save', { kind: 'note', id: 'note-1' }],
+    ['knowledge.list', { planId: '' }], ['knowledge.list', { planId: null }], ['knowledge.list', { ready: 'yes' }],
   ])('returns validation errors for %s %j', async (action, input) => {
     await expect(setup().service.execute(action, input, '/repo', { contextSessionId: 'ses_1' })).rejects.toMatchObject({ statusCode: 400 });
   });
 
   it('requires callback provenance to create notes', async () => {
     const { service, runtime } = setup();
-    await expect(service.execute('knowledge.save', { kind: 'note', body: 'Note', sessionId: 'spoof' }, '/repo')).rejects.toMatchObject({ statusCode: 400 });
+    await expect(service.execute('knowledge.save', { kind: 'note', body: 'Note' }, '/repo')).rejects.toMatchObject({ statusCode: 400 });
     expect(runtime.createNote).not.toHaveBeenCalled();
   });
 
@@ -209,6 +307,8 @@ describe('project knowledge control actions', () => {
     await expect(service.execute('knowledge.save', { kind: 'plan', id: 'plan-1', body: '# P', expected: '' }, '/repo')).rejects.toMatchObject({ statusCode: 409 });
     runtime.updateNote.mockRejectedValue(Object.assign(new Error('Note changed'), { status: 409 }));
     await expect(service.execute('knowledge.save', { kind: 'note', id: 'note-1', body: 'New', expected: 'Note' }, '/repo')).rejects.toMatchObject({ statusCode: 409 });
+    runtime.deleteTodo.mockRejectedValue(Object.assign(new Error('Dependencies cannot form a cycle'), { status: 409 }));
+    await expect(service.execute('knowledge.delete', { kind: 'todo', id: 'todo-1' }, '/repo')).rejects.toMatchObject({ statusCode: 409 });
     runtime.readContext.mockRejectedValue(new Error('Stored project context is malformed'));
     await expect(service.execute('knowledge.list', {}, '/repo')).rejects.toMatchObject({ statusCode: 500, message: 'Stored project context is malformed' });
   });

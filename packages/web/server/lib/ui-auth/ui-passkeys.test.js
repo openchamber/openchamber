@@ -7,9 +7,10 @@ import path from 'node:path';
 import { createUiPasskeys } from './ui-passkeys.js';
 
 // Registration verification runs through a stubbed WebAuthn server so the
-// stored label can be checked end to end without a real authenticator.
-mock.module('@simplewebauthn/server', () => ({
-  generateRegistrationOptions: async () => ({ challenge: 'registration-challenge' }),
+// stored label can be checked end to end without a real authenticator; option
+// generation stays real so the transports test sees the options it builds.
+mock.module('@simplewebauthn/server', async (importOriginal) => ({
+  ...(await importOriginal()),
   verifyRegistrationResponse: async () => ({
     verified: true,
     registrationInfo: {
@@ -74,6 +75,24 @@ const readStoredPasskey = (storeFile) => {
   const store = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
   return store.passkeys[0];
 };
+
+describe('ui-passkeys stored transports', () => {
+  it('preserves unrecognized transport strings when generating WebAuthn options', async () => {
+    const transports = ['usb', 'future-transport'];
+    const storeFile = createStoreFile([passkey({ transports: [...transports, null, 123] })]);
+    const controller = createController(storeFile);
+
+    try {
+      const authentication = await controller.beginAuthentication(requestFor());
+      expect(authentication.optionsJSON.allowCredentials[0].transports).toEqual(transports);
+
+      const registration = await controller.beginRegistration(requestFor());
+      expect(registration.optionsJSON.excludeCredentials[0].transports).toEqual(transports);
+    } finally {
+      controller.dispose();
+    }
+  });
+});
 
 describe('ui-passkeys rename', () => {
   it('lists the auto-generated name with no custom label', () => {

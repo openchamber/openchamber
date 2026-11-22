@@ -24,6 +24,7 @@ export type InputHistoryAttachment = {
   mimeType: string;
   size: number;
   reference: string;
+  path?: string;
 };
 
 export type InputHistorySubmission = {
@@ -123,6 +124,7 @@ const attachmentSchema = z.object({
   mimeType: z.string().min(1),
   size: z.number().finite().nonnegative(),
   reference: z.string().min(1),
+  path: z.string().min(1).optional(),
 });
 
 const entrySchema = z.object({
@@ -208,8 +210,6 @@ const readDurableSnapshot = (): InputHistorySnapshot => {
   }
 };
 
-// Failed writes remain local authority, but unrelated writes from another tab
-// still participate in the next mutation. Keep bounded snapshots, not a retry log.
 let pendingWrite: { base: InputHistorySnapshot; value: InputHistorySnapshot } | null = null;
 let lastDurableSnapshot = createEmptySnapshot();
 
@@ -357,7 +357,6 @@ const writeSnapshot = (snapshot: InputHistorySnapshot): InputHistorySnapshot => 
     pendingWrite = null;
   } catch {
     pendingWrite = { base: lastDurableSnapshot, value: emptySnapshot };
-    // The in-memory copy remains the only fallback.
   }
   inMemoryStorageValue = emptySerialized;
   return emptySnapshot;
@@ -407,7 +406,9 @@ const buildAttachmentKey = (attachment: AttachedFile): string => {
 
 const toRestorableAttachment = (attachment: AttachedFile): InputHistoryAttachment | null => {
   const reference = getAttachmentReference(attachment);
-  if (!reference || !canRestoreReference(reference)) return null;
+  if (!reference) return null;
+  const path = attachment.agentPath && attachment.serverPath === attachment.agentPath ? attachment.agentPath : undefined;
+  if (!path && !canRestoreReference(reference)) return null;
   if (attachment.source === 'vscode' && attachment.vscodeSource === 'file') {
     return {
       key: buildAttachmentKey(attachment),
@@ -425,6 +426,7 @@ const toRestorableAttachment = (attachment: AttachedFile): InputHistoryAttachmen
     mimeType: attachment.mimeType,
     size: attachment.size,
     reference,
+    path,
   };
 };
 
@@ -452,7 +454,8 @@ const areAttachmentsEqual = (
       && attachment.filename === candidate.filename
       && attachment.mimeType === candidate.mimeType
       && attachment.size === candidate.size
-      && attachment.reference === candidate.reference;
+      && attachment.reference === candidate.reference
+      && attachment.path === candidate.path;
   })
 );
 

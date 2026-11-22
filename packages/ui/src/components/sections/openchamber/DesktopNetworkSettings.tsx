@@ -20,19 +20,11 @@ import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 
 import { saveDesktopRestartDrafts, useDesktopRestartDrafts } from './desktopRestartDrafts';
 
-/**
- * Who may open the desktop app over the network: the UI password and access
- * from the local network. Both apply on the next launch, so they are drafts
- * until "Save + restart", which also saves the restart drafts of
- * `DesktopAppSettings` (`desktopRestartDrafts.ts`).
- */
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
   const [savedValue, setSavedValue] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(false);
-  // The password is write-only: the server says whether one is set, and the
-  // page sends a value only when the user types a new one or removes it.
   const [hasSavedPassword, setHasSavedPassword] = React.useState(false);
   const [draftPassword, setDraftPassword] = React.useState('');
   const [removePassword, setRemovePassword] = React.useState(false);
@@ -127,20 +119,15 @@ export const DesktopNetworkSettings: React.FC = () => {
   const passwordWillBeSet = nextPassword.length > 0 || (hasSavedPassword && !removePassword);
   const lanRequiresPassword = draftValue && !passwordWillBeSet;
   const lanBlockedByMissingPassword = savedValue && !lanAccessActive && lanAccessBlockedReason === 'missing-password';
-  // Enterprise mode without the administrator's allowance: the desktop binds
-  // loopback and the server refuses a network address, so there is no choice here.
   const lanBlockedByEnterprise = useEnterprisePolicyStore((state) => state.networkAccessBlocked)
     || lanAccessBlockedReason === 'enterprise-mode';
   const setRestartDraft = useDesktopRestartDrafts((state) => state.setDraft);
   const hasPendingRestart = useDesktopRestartDrafts((state) => Boolean(state.patches.app || state.patches.network));
   const saveDisabled = isLoading || isSaving || !hasPendingRestart || lanRequiresPassword;
 
-  // Publishes this section's pending changes, so a restart from the desktop
-  // app section saves them too, or waits while they cannot be saved.
   React.useEffect(() => {
     setRestartDraft('network', isDirty && !lanRequiresPassword ? {
       ...(draftValue !== savedValue ? { desktopLanAccessEnabled: draftValue } : {}),
-      // Omitted when unchanged: the server keeps the password it has.
       ...(nextPassword ? { desktopUiPassword: nextPassword } : removePassword ? { desktopUiPassword: '' } : {}),
     } : null, lanRequiresPassword);
   }, [draftValue, isDirty, lanRequiresPassword, nextPassword, removePassword, savedValue, setRestartDraft]);
@@ -164,8 +151,6 @@ export const DesktopNetworkSettings: React.FC = () => {
     setError(null);
 
     try {
-      // Saves the desktop app section's pending changes as well: the restart
-      // would drop them otherwise.
       if (!await saveDesktopRestartDrafts()) {
         throw new Error(t('settings.openchamber.desktopNetwork.error.saveFailed'));
       }

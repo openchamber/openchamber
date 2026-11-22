@@ -60,6 +60,10 @@ Starts OpenChamber in headless mode when set to `true` or `1`. API routes stay a
 
 Origins allowed to show OpenChamber inside a frame on their own page, separated by spaces, for example `https://dash.example.com`. `*` allows any site. By default only OpenChamber itself and its desktop and mobile apps may frame it, which keeps other sites from overlaying its buttons.
 
+### `OPENCHAMBER_TRUSTED_PROXIES`
+
+Addresses of reverse proxies that run on another machine or in another container, separated by commas, such as `192.168.1.10` or `172.18.0.0/16`. OpenChamber limits failed sign-in attempts per client and reads the client's address from `X-Forwarded-For` only when the request comes from this machine or from an address listed here. A proxy that isn't listed counts as one client, so one person's failed attempts can keep everyone behind it from signing in for a while.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Overrides the OpenChamber data directory. The default is `~/.config/openchamber`.
@@ -113,6 +117,22 @@ Prevents OpenChamber from starting its own OpenCode server when set to `true`.
 ### `OPENCHAMBER_OPENCODE_HOSTNAME`
 
 Bind hostname for the OpenCode server managed by OpenChamber. The default is `127.0.0.1`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Time limit for an OpenCode health probe, in milliseconds. The default is `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Consecutive counted health-check failures before OpenChamber restarts a managed OpenCode process that is still running. The default is `20`. Busy sessions can delay the restart.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Overrides the managed OpenCode health-check interval, in milliseconds. It also sets the minimum time between counted failures. The default is `0`, which keeps the server's `15000` millisecond interval.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+How long OpenChamber reuses a managed OpenCode health-probe result, including a failure, in milliseconds. The default is `750`.
 
 ### `OPENCODE_BINARY`
 

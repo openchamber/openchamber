@@ -1,9 +1,13 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import fs, { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os, { tmpdir } from 'node:os';
+import path, { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { OpenCodeUpstreamAuthError, isOpenCodeUpstreamAuthRejection } from '../../../opencode/credential-auth-error.js';
+import { ANTIGRAVITY_ACCOUNTS_PATHS } from '../../utils/index.js';
+import { fetchQuota } from './index.js';
+import { configureOpenCodeCredentials } from '../../../opencode/auth.js';
+
 
 // The credential source is wired through configureOpenCodeCredentials, the
 // same seam server/index.js uses. Entries are credential rows as the
@@ -276,5 +280,85 @@ describe('Antigravity fetchQuota credential resolution', () => {
     expect(result.configured).toBe(false);
     expect(result.error).toBe('Not configured');
     expect(fetchStub).not.toHaveBeenCalled();
+  });
+});
+
+// ---- upstream tests ----
+
+const originalPaths = [...ANTIGRAVITY_ACCOUNTS_PATHS];
+let directory;
+let accountPath;
+
+beforeEach(() => {
+  directory = mkdtempSync(join(tmpdir(), 'antigravity-provider-'));
+  accountPath = join(directory, 'accounts.json');
+  ANTIGRAVITY_ACCOUNTS_PATHS.splice(0, ANTIGRAVITY_ACCOUNTS_PATHS.length, accountPath);
+  // The provider also reads the OpenCode credential store; these cases
+  // cover the accounts file alone, so the store is wired and empty.
+  configureOpenCodeCredentials({ list: async () => [] });
+});
+
+afterEach(() => {
+  configureOpenCodeCredentials(null);
+  vi.unstubAllGlobals();
+  ANTIGRAVITY_ACCOUNTS_PATHS.splice(0, ANTIGRAVITY_ACCOUNTS_PATHS.length, ...originalPaths);
+  rmSync(directory, { recursive: true, force: true });
+});
+
+const account = (refreshToken = 'test-refresh') => {
+  writeFileSync(accountPath, JSON.stringify({ accounts: [{ refreshToken }] }));
+};
+
+describe('Antigravity provider composition', () => {
+  it('reports an unconfigured account without making requests', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    expect(await fetchQuota()).toMatchObject({
+      providerId: 'antigravity', ok: false, configured: false,
+      error: 'Not configured', usage: null
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('reads a refresh token that is not a string as no login, without a request', async () => {
+    account(42);
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    expect(await fetchQuota()).toMatchObject({
+      ok: false, configured: false,
+      error: 'Not configured', usage: null
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('reports empty model results after a successful refresh', async () => {
+    account();
+    vi.stubGlobal('fetch', async (url) => Response.json(
+      url === 'https://oauth2.googleapis.com/token' ? { access_token: 'test-access' } : {}
+    ));
+    expect(await fetchQuota()).toMatchObject({
+      ok: false, configured: true,
+      error: 'Failed to fetch Antigravity quota', usage: null
+    });
+  });
+
+  it('returns model windows using the default project', async () => {
+    account();
+    vi.stubGlobal('fetch', async (url, options) => {
+      if (url === 'https://oauth2.googleapis.com/token') {
+        return Response.json({ access_token: 'test-access' });
+      }
+      expect(JSON.parse(options.body)).toEqual({ project: 'rising-fact-p41fc' });
+      expect(new Headers(options.headers).get('Authorization')).toBe('Bearer test-access');
+      return Response.json(url.endsWith(':retrieveUserQuotaSummary') ? {} : {
+        models: { 'gemini-test': { quotaInfo: { remainingFraction: 0.75 } } }
+      });
+    });
+    expect(await fetchQuota()).toMatchObject({
+      ok: true, configured: true,
+      usage: { windows: {}, models: { 'gemini-test': { windows: {
+        '5h': { usedPercent: 25, remainingPercent: 75 }
+      } } } }
+    });
   });
 });

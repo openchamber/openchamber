@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { SourceControlBindingRead } from '@/lib/api/types';
+import { clearWorktreeBootstrapState, setWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
 import { RepositoryBindingOwner } from './repository-binding';
 
 const endpoint = { displayUrl: 'https://github.com/team/repo', fingerprint: 'fetch' };
@@ -69,6 +70,18 @@ describe('repository binding authority', () => {
     checkoutReady();
     expect((await pending).status).toBe('ready');
     expect(requests).toBe(1);
+  });
+
+  test('a worktree whose checkout failed is still read, so its recovery controls get the binding (#5811)', async () => {
+    setWorktreeBootstrapState('/failed-worktree', { status: 'failed', error: 'checkout hydration timed out', updatedAt: 1 });
+    try {
+      const owner = new RepositoryBindingOwner(() => 'runtime');
+      const snapshot = await owner.read(owner.scope('/failed-worktree'), { repositoryBinding: async () => bound() });
+      expect(snapshot.status).toBe('ready');
+      expect(snapshot.read?.binding).toEqual(bound().binding);
+    } finally {
+      clearWorktreeBootstrapState('/failed-worktree');
+    }
   });
 
   test('failed refresh retains the complete snapshot as stale but grants no read authority', async () => {

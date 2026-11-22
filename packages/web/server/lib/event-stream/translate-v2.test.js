@@ -30,6 +30,15 @@ describe('translateWireEvent', () => {
     expect(update).toMatchObject({ type: 'installation.update-available', properties: { version: '2.1.0' } });
   });
 
+  test("session.created names a workflow agent's run session as its parent", () => {
+    const [event] = translateWireEvent(wire('session.created', {
+      sessionID: 'agent',
+      metadata: { openchamber: { kind: 'workflow-agent', parentID: 'run' } },
+      location: { directory: '/repo' },
+    }));
+    expect(event.properties.info.parentID).toBe('run');
+  });
+
   test('session.created carries the directory from its location', () => {
     const [event] = translateWireEvent(wire('session.created', {
       sessionID: 's1',
@@ -56,6 +65,16 @@ describe('translateWireEvent', () => {
     expect(translateWireEvent(wire('session.compaction.started', { sessionID: 's1', reason: 'auto' }))).toEqual([]);
   });
 
+  test('session.forked preserves the source and fork ids for server policy inheritance', () => {
+    expect(translateWireEvent(wire('session.forked', { sessionID: 'fork', parentID: 'source' })))
+      .toEqual([{
+        type: 'session.forked', id: 'evt_1', created: 1000,
+        properties: { sessionID: 'fork', parentID: 'source', directory: '/repo' },
+      }]);
+    expect(translateWireEvent(wire('session.forked', { sessionID: 'fork' }))).toEqual([]);
+    expect(translateWireEvent(wire('session.forked', { parentID: 'source' }))).toEqual([]);
+  });
+
   test('rename, move and usage all read as session.updated', () => {
     expect(translateWireEvent(wire('session.renamed', { sessionID: 's1', title: 'New' }))[0])
       .toMatchObject({ type: 'session.updated', properties: { info: { id: 's1', title: 'New' } } });
@@ -70,9 +89,21 @@ describe('translateWireEvent', () => {
     expect(event).toMatchObject({ type: 'session.deleted', properties: { sessionID: 's1', info: { id: 's1' } } });
   });
 
+  test('an archive and a restore are their own events, never a session update', () => {
+    expect(translateWireEvent(wire('session.archived', { sessionID: 's1' }))).toEqual([
+      { type: 'session.archived', id: 'evt_1', created: 1000, properties: { sessionID: 's1', directory: '/repo' } },
+    ]);
+    expect(translateWireEvent(wire('session.unarchived', { sessionID: 's1' }))).toEqual([
+      { type: 'session.unarchived', id: 'evt_1', created: 1000, properties: { sessionID: 's1', directory: '/repo' } },
+    ]);
+  });
+
   test('execution events synthesize the status vocabulary v2 no longer emits', () => {
-    expect(translateWireEvent(wire('session.execution.started', { sessionID: 's1' })))
-      .toMatchObject([{ type: 'session.status', properties: { sessionID: 's1', status: { type: 'busy' } } }]);
+    const started = translateWireEvent(wire('session.execution.started', { sessionID: 's1' }));
+    expect(started).toMatchObject([{ type: 'session.status', properties: { sessionID: 's1', status: { type: 'busy' } } }]);
+    expect(started[0].properties.turnStartedAt).toBe(started[0].created);
+    expect(translateWireEvent(wire('session.step.started', { sessionID: 's1', assistantMessageID: 'msg_1' }))[1].properties)
+      .not.toHaveProperty('turnStartedAt');
 
     const succeeded = translateWireEvent(wire('session.execution.succeeded', { sessionID: 's1' }));
     expect(succeeded.map((entry) => entry.type)).toEqual(['session.status', 'session.idle']);

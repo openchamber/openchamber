@@ -1,6 +1,3 @@
-// Commit-message prompt assembly and parse/format helpers for the VS Code
-// extension host. Keep these templates aligned with
-// `packages/ui/src/lib/magicPrompts.ts` (`git.commit.generate.*`).
 
 export const COMMIT_DIFF_FILE_LIMIT = 30;
 export const COMMIT_DIFF_TOTAL_CHAR_LIMIT = 120_000;
@@ -92,17 +89,21 @@ export const formatRecentCommitSubjects = (messages: string[]): string => {
   return subjects.map((subject) => `- ${subject}`).join('\n');
 };
 
+const VISIBLE_PROMPT_ID = 'git.commit.generate.visible';
+const INSTRUCTIONS_PROMPT_ID = 'git.commit.generate.instructions';
+
+const overrideOf = (overrides: Record<string, string>, id: string): string | undefined => (
+  Object.prototype.hasOwnProperty.call(overrides, id) ? overrides[id] : undefined
+);
+
 export const buildCommitGenerationPrompt = (
   files: string[],
   recentCommits: string,
   diffs: string,
-  visibleOverride: string,
-  instructionsOverride: string,
+  overrides: Record<string, string>,
 ): CommitGenerationPrompt => {
-  const system = visibleOverride.trim().length > 0 ? visibleOverride : DEFAULT_VISIBLE_PROMPT;
-  const instructionsTemplate = instructionsOverride.trim().length > 0
-    ? instructionsOverride
-    : DEFAULT_INSTRUCTIONS_PROMPT;
+  const system = overrideOf(overrides, VISIBLE_PROMPT_ID) ?? DEFAULT_VISIBLE_PROMPT;
+  const instructionsTemplate = overrideOf(overrides, INSTRUCTIONS_PROMPT_ID) ?? DEFAULT_INSTRUCTIONS_PROMPT;
   const hiddenPrompt = applyCommitPromptVariables(
     instructionsTemplate,
     files.map((file) => `- ${file}`).join('\n'),

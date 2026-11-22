@@ -1,6 +1,7 @@
 import { opencodeClient } from '@/lib/opencode/client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { captureRuntimeCleanup } from '@/lib/runtime-cleanup';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export const CHAT_DRAFT_PROJECT_ID = 'openchamber:chats';
@@ -17,23 +18,38 @@ function legacyRootForHome(home: string | null | undefined): string | null {
   return normalized ? joinPath(normalized, '.config', 'openchamber', 'chats') : null;
 }
 
+const DOT_SEGMENT = /(?:^|\/)\.\.?(?:\/|$)/;
+
 function isWithinRoot(directory: string, root: string): boolean {
-  return !directory.split('/').some((part) => part === '..' || part === '.')
-    && (directory === root || directory.startsWith(`${root}/`));
+  const inside = directory === root
+    || (directory.length > root.length && directory.charCodeAt(root.length) === 47 && directory.startsWith(root));
+  return inside && !DOT_SEGMENT.test(directory);
 }
 
 function cachedRoots(): ChatRoots | undefined {
   return chatsRootCacheByRuntime.get(getRuntimeKey());
 }
 
-export function getChatsRootFromDirectory(directory: string | null | undefined): string | null {
+const resolveChatsRoot = (directory: string, roots: ChatRoots): string | null => {
   const normalized = normalizePath(directory);
-  const roots = cachedRoots();
-  if (!normalized || !roots) return null;
-  // Canonical aliases come from the server's filesystem, not client-side case
-  // folding. Keep returning the original root identity for folders and scopes.
+  if (!normalized) return null;
   if (isWithinRoot(normalized, roots.configured) || isWithinRoot(normalized, roots.canonicalConfigured)) return roots.configured;
   return isWithinRoot(normalized, roots.legacy) || isWithinRoot(normalized, roots.canonicalLegacy) ? roots.legacy : null;
+};
+
+const CHATS_ROOT_CACHE_LIMIT = 5000;
+let chatsRootByDirectory: { roots: ChatRoots; byDirectory: Map<string, string | null> } | null = null;
+
+export function getChatsRootFromDirectory(directory: string | null | undefined): string | null {
+  const roots = cachedRoots();
+  if (!directory || !roots) return null;
+  if (chatsRootByDirectory?.roots !== roots) chatsRootByDirectory = { roots, byDirectory: new Map() };
+  const { byDirectory } = chatsRootByDirectory;
+  const cached = byDirectory.get(directory);
+  if (cached !== undefined) return cached;
+  const root = resolveChatsRoot(directory, roots);
+  if (byDirectory.size < CHATS_ROOT_CACHE_LIMIT) byDirectory.set(directory, root);
+  return root;
 }
 
 export function isChatDirectoryPath(directory: string | null | undefined): boolean {
@@ -47,16 +63,10 @@ export function isChatDirectoryForHome(directory: string | null | undefined, hom
   return Boolean(normalized && legacy && isWithinRoot(normalized, legacy));
 }
 
-/**
- * The chats root the server named, or null until it has. Never a guess: with
- * OPENCHAMBER_DATA_DIR the root is outside the home, and the home's legacy
- * folder does not exist, so a guessed root failed to open.
- */
 export function getChatsRoot(): string | null {
   return cachedRoots()?.configured ?? null;
 }
 
-/** Notifies once the server names a chats root for a runtime. */
 export function subscribeChatsRoot(listener: () => void): () => void {
   chatsRootListeners.add(listener);
   return () => chatsRootListeners.delete(listener);
@@ -87,16 +97,10 @@ async function getChatRoots(): Promise<ChatRoots> {
   return pending;
 }
 
-/** Required before a global snapshot can classify or persist managed chats. */
 export async function ensureChatsRootDirectory(): Promise<void> {
   await getChatRoots();
 }
 
-/**
- * The chats root from the server's answer itself. The cache behind
- * `getChatsRoot` is keyed by the runtime key at request time, which can still
- * change while the page starts up.
- */
 export async function resolveChatsRootDirectory(): Promise<string> {
   return (await getChatRoots()).configured;
 }
@@ -127,17 +131,13 @@ export async function createChatDirectory(now = new Date()): Promise<string> {
   return directory;
 }
 
-export async function deleteChatDirectory(directory: string): Promise<void> {
+async function deleteChatDirectoryWithTransport(directory: string, roots: ChatRoots, fetch: typeof globalThis.fetch): Promise<void> {
   const normalized = normalizePath(directory);
   if (!normalized) return;
-  const runtimeKey = getRuntimeKey();
-  const roots = await getChatRoots();
-  if (getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed while deleting chat directory');
-  // A session may own a descendant, never either shared chats root itself.
   const allowedRoots = [roots.configured, roots.legacy, roots.canonicalConfigured, roots.canonicalLegacy];
   if (allowedRoots.includes(normalized)) return;
   if (!allowedRoots.some(root => isWithinRoot(normalized, root))) return;
-  const response = await runtimeFetch('/api/fs/delete', {
+  const response = await fetch('/api/fs/delete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: directory }),
@@ -145,4 +145,23 @@ export async function deleteChatDirectory(directory: string): Promise<void> {
   if (!response.ok && response.status !== 404) {
     throw new Error(`Failed to delete chat directory (${response.status})`);
   }
+}
+
+export async function deleteChatDirectory(directory: string): Promise<void> {
+  if (!normalizePath(directory)) return;
+  const runtimeKey = getRuntimeKey();
+  const roots = await getChatRoots();
+  if (getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed while deleting chat directory');
+  await deleteChatDirectoryWithTransport(directory, roots, runtimeFetch);
+}
+
+export async function captureChatDirectoryCleanup(runtimeKey: string): Promise<(directory: string) => Promise<void>> {
+  const cleanup = await captureRuntimeCleanup(runtimeKey);
+  const roots = await getChatRoots();
+  if (getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed while preparing chat cleanup');
+  return async (directory) => {
+    await cleanup(async ({ fetch }) => {
+      await deleteChatDirectoryWithTransport(directory, roots, fetch);
+    });
+  };
 }

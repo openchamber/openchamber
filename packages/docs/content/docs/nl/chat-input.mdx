@@ -1,6 +1,6 @@
 ---
 title: Chatinvoer
-description: Wat u in het chatvak kunt typen: opdrachten, skills, snippets, vermeldingen en bijlagen.
+description: "Wat u in het chatvak kunt typen: opdrachten, skills, snippets, vermeldingen en bijlagen."
 ---
 
 # Chatinvoer
@@ -61,11 +61,13 @@ Typ `@` om een bestand bij te voegen of het bericht met een andere agent uit te 
 Het **+**-menu naast het chatvak voegt meer toe dan een bestand:
 
 - bestanden van uw computer
-- issues en pull requests uit uw repository (GitHub, of GitLab bij een GitLab-project)
+- issues en pull requests uit uw repository (GitHub, GitLab, Gitea, Forgejo of Gerrit, afhankelijk van waar het project staat)
 - Linear-issues, wanneer Linear is verbonden
 - taken van geïnstalleerde [extensies](/nl/extensions/) die aanbieden om bij te voegen
 
-Elk item reist als context mee met uw volgende bericht; uw bericht bepaalt wat ermee gebeurt. U kunt ook een afbeelding plakken of een bestand rechtstreeks op het chatvak slepen.
+U kunt ook een afbeelding plakken of een bestand rechtstreeks op het chatvak slepen. Hoe het ook binnenkomt, elk item wordt een chip in uw tekst, op de plek van de cursor, zodat uw bericht kan zeggen wat ermee moet gebeuren: "vergelijk dit met dat". Klik op een chip voor een voorbeeld. Verwijder de chip en de bijlage gaat niet meer mee met het bericht; ongedaan maken brengt beide terug. Een bericht verstuurt alleen wat de tekst nog bevat.
+
+Bij Word-, PowerPoint-, Excel- en OpenDocument-bestanden (docx, pptx, xlsx, odt, odp, ods) die je neerzet, plakt of kiest, vraagt OpenChamber wat ermee moet. **Ongewijzigd bijvoegen** zet het origineel waar OpenCode draait en linkt het via het pad, zodat de agent het met eigen tools opent. **Omzetten naar tekst** stuurt de uitgehaalde tekst. Een vaste keuze maak je in **Instellingen → Chat**, bij **Office-documenten**. Een bestand dat je uit het Files-paneel sleept of met `@` noemt, werkt zoals voorheen.
 
 ## Een shell-opdracht uitvoeren
 
@@ -85,4 +87,4 @@ Op een telefoon begint Enter altijd een nieuwe regel. Versturen doe je met de ve
 
 - [Skills](/nl/skills/): grotere instructiesets op verzoek laden
 - [Magic Prompts](/nl/magic-prompts/): de ingebouwde opdrachten en waar ze elk worden uitgevoerd
-- [GitHub-issues en PR's](/nl/github/): issues en pull requests toevoegen
+- [Git-hosts](/nl/github/): issues en pull requests toevoegen

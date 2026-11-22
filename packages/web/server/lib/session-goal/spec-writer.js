@@ -9,7 +9,7 @@ import path from 'path';
 
 import { z } from 'zod';
 
-import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { readMergedSettingsSync } from '../settings/settings-files.js';
 import { generateSmallModelText, parseModelRef } from '../small-model/index.js';
 import { GOAL_OBJECTIVE_HARD_CAP, goalObjectiveLimits } from './objectives.js';
 
@@ -192,6 +192,17 @@ export const readGoalWriterSettings = () => {
   };
 };
 
+/**
+ * @param {{
+ *   request?: string | undefined, conversation?: string | undefined, openItems?: string | undefined,
+ *   section?: string | undefined, currentSpec?: string | undefined,
+ *   directory?: string | undefined, providerID?: string | undefined, modelID?: string | undefined,
+ *   writerProviderID?: string | undefined, writerModelID?: string | undefined, writerVariant?: string | undefined,
+ *   ignoreLimit?: boolean | undefined, signal?: AbortSignal,
+ *   settings?: ReturnType<typeof readGoalWriterSettings>,
+ *   generate?: typeof generateSmallModelText,
+ * }} input
+ */
 export const writeGoalSpec = async ({
   request,
   conversation,

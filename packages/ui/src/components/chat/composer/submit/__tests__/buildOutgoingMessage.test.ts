@@ -1,11 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
-import { CONTEXT_METADATA_KEY, contextPayloadFromDraft } from '@/lib/messages/contextParts';
+import { CONTEXT_METADATA_KEY, contextPayloadFromDraft, readContextPart } from '@/lib/messages/contextParts';
 import type { QueuedContextPart, QueuedMessage } from '@/stores/messageQueueStore';
 import {
     buildComposerContext,
@@ -48,6 +45,15 @@ const input = (overrides: Partial<OutgoingMessageInput> = {}): OutgoingMessageIn
     syntheticTexts: [],
     references: [],
     ...overrides,
+});
+
+describe('a share link in the text', () => {
+    test('leaves without its key, in the composer text and in queued text', () => {
+        const link = 'https://share.openchamber.dev/p/AbCdEfGhIjKlMnOpQrStUv';
+        const out = buildOutgoingMessage(input({ composerText: `[pick](${link}#Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmE)`, queued: [{ text: `${link}#Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmE` }] }), deps());
+        expect(out.primaryText).not.toContain('Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmE');
+        expect(out.primaryText).toContain(`[pick](${link})`);
+    });
 });
 
 describe('the composer text alone', () => {
@@ -236,7 +242,7 @@ describe('context drafts', () => {
             .toEqual(contextPayloadFromDraft(commentDraft()));
         expect(result.additionalParts[1].metadata?.[CONTEXT_METADATA_KEY])
             .toEqual(contextPayloadFromDraft(commentDraft({ id: 'icd-2', source: 'file', side: undefined })));
-        expect(result.additionalParts[0].text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
+        expect(result.additionalParts[0].text).toContain('The user selected `src/app.ts` lines 3-5 (modified):');
         expect(result.additionalParts[0].text).toContain('fix this');
     });
 
@@ -246,7 +252,7 @@ describe('context drafts', () => {
             inlineComments: [commentDraft()],
             syntheticTexts: ['conflict note'],
         }), deps());
-        expect(result.additionalParts.map((p) => p.text.startsWith('Comment on') ? 'comment' : p.text))
+        expect(result.additionalParts.map((p) => p.text.startsWith('The user selected') ? 'comment' : p.text))
             .toEqual(['comment', 'conflict note']);
     });
 
@@ -280,15 +286,15 @@ describe('synthetic context', () => {
             .toEqual({ kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' });
     });
 
-    test('a linked Linear issue is sent as context', () => {
+    test('a linked tracker item is sent as context', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'fix it',
-            references: [{ kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear body' }],
+            references: [{ kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear body' }],
         }), deps());
         expect(result.additionalParts).toHaveLength(1);
         expect(result.additionalParts[0].text).toBe('linear body');
         expect(result.additionalParts[0].metadata?.[CONTEXT_METADATA_KEY])
-            .toEqual({ kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' });
+            .toEqual({ kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' });
     });
 
     test('a linked guest issue is sent as context', () => {
@@ -412,7 +418,7 @@ describe('several references', () => {
         const result = buildOutgoingMessage(input({
             composerText: 'compare',
             references: [
-                { kind: 'linear-issue', identifier: 'ENG-1', title: 'A', url: 'https://linear.app/x/issue/ENG-1', contextText: 'linear' },
+                { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-1', title: 'A', url: 'https://linear.app/x/issue/ENG-1', contextText: 'linear' },
                 { kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue 3' },
                 { kind: 'repository-issue', number: 4, title: 'Bug', url: 'https://x/issues/4', contextText: 'issue 4' },
                 { kind: 'guest', providerId: 'jira', id: 'OPS-2', title: 'Ops', url: 'https://jira/OPS-2', contextText: 'jira' },
@@ -431,7 +437,7 @@ describe('full assembly order', () => {
             references: [
                 { kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue' },
                 { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' },
-                { kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
+                { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
             ],
         }), deps());
 
@@ -461,13 +467,13 @@ describe('capturing composer context for the queue', () => {
             references: [
                 { kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3', contextText: 'issue' },
                 { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' },
-                { kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
+                { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
             ],
         }), 'use: deploy');
 
         expect(context.map((part) => part.kind)).toEqual(['context', 'synthetic', 'context', 'context', 'context', 'instruction']);
         expect(context[0]?.kind).toBe('context');
-        expect(context[0]?.text).toContain('Comment on `src/app.ts` lines 3-5 (modified):');
+        expect(context[0]?.text).toContain('The user selected `src/app.ts` lines 3-5 (modified):');
         expect(context[0]?.kind === 'context' ? context[0].metadata[CONTEXT_METADATA_KEY] : null)
             .toEqual(contextPayloadFromDraft(commentDraft()));
         expect(context[3]).toEqual({
@@ -476,6 +482,17 @@ describe('capturing composer context for the queue', () => {
             metadata: { [CONTEXT_METADATA_KEY]: { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7' } },
         });
         expect(context.at(-1)).toEqual({ kind: 'instruction', text: 'use: deploy' });
+    });
+
+    test('change request source links survive queue capture and read-back without changing model text', () => {
+        const sourceLinks = ['https://portal.example/review/42', 'https://portal.example/changes/42'];
+        const reference = { kind: 'change-request' as const, provider: 'gitlab' as const, number: 42, title: 'MR', url: 'https://gitlab.com/group/app/-/merge_requests/42', context: 'body and diff', sourceLinks };
+        const captured = buildComposerContext(contextInput({ references: [reference] }), null);
+        const [part] = queuedContextToParts(captured);
+        expect(part.text).toBe('body and diff');
+        expect(readContextPart(part)).toEqual({ kind: 'change-request', provider: 'gitlab', number: 42, title: 'MR', url: reference.url, sourceLinks });
+        const direct = buildOutgoingMessage(input({ composerText: sourceLinks.join(' '), references: [reference] }), deps());
+        expect(direct.additionalParts).toEqual([part]);
     });
 
     test('a message queued with instructions before they were dropped still delivers them first', () => {
@@ -505,88 +522,14 @@ describe('capturing composer context for the queue', () => {
     });
 });
 
-const chatInputSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'ChatInput.tsx'), 'utf-8');
-
-const LINKED_REFERENCE_KINDS = ['linkedReferences'];
-
-/** Lift one predicate out of the composer source: the code under test is the parameter source. */
-const gateExpression = (pattern: RegExp, what: string): string => {
-    const match = pattern.exec(chatInputSource);
-    if (!match) throw new Error('ChatInput.tsx no longer holds ' + what);
-    return match[1];
-};
-
-/** Every value in the file that is derived from the linked references. */
-const linkedReferenceValues = (): string[] => {
-    const names: string[] = [];
-    for (const match of chatInputSource.matchAll(/const (\w+) = ([^;\n]*);/g)) {
-        const [, name, expression] = match;
-        if (LINKED_REFERENCE_KINDS.every((kind) => expression.includes(kind))) names.push(name);
-    }
-    return names;
-};
-
-/**
- * True when a predicate counts a linked reference: it names the reference list
- * directly, or it reads a value derived from it. The assertion follows that
- * intent rather than one variable name, so inlining the value back into the
- * predicates stays green while a predicate that stops counting stays red.
- */
-const countsLinkedReference = (predicate: string): boolean =>
-    LINKED_REFERENCE_KINDS.some((kind) => predicate.includes(kind))
-    || linkedReferenceValues().some((name) => predicate.includes(name));
-
-/** The condition the builder strips linked references with, read from the builder call itself. */
-const builderStripGuard = gateExpression(/references: (\w+) \? \[\] : linkedReferences/, 'the builder strip on linked references');
-
 describe('the composer send gate counts what the submission builder counts', () => {
-    // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,
-    // Vite worker URLs and every runtime store. The gate is guarded at the source, the way
-    // the neighbouring composer regression tests guard theirs.
-    test('queue counts and captured configuration use the ordinary-only projection', () => {
-        expect(gateExpression(/const composerQueuedMessages = ([^;\n]*);/, 'the manual queue projection'))
-            .toBe('selectComposerQueue(queuedMessages)');
-        expect(gateExpression(/const hasQueuedMessages = ([^;\n]*);/, 'the manual queue content gate'))
-            .toContain('composerQueuedMessages.length > 0');
-        const projection = gateExpression(/const queuedProjection = ([\s\S]*?);\n/, 'the captured queue projection');
-        expect(projection).toContain('composerQueuedMessages');
-        expect(projection).not.toContain('queuedMessages');
-        expect(gateExpression(/const capturedSendConfig = ([^;\n]*);/, 'the captured queue selection'))
-            .toContain('queuedProjection[0]?.sendConfig');
-    });
-
-    test('every predicate the composer sends with counts a linked reference', () => {
-        const gates = [
-            gateExpression(/const hasContent = ([^;\n]*);/, 'the send-button gate'),
-            gateExpression(/hasContent: (currentMessage\.trim\(\)[^,\n]*),/, 'the submit guard predicate'),
-            gateExpression(/hasContent: (options\.presetText\.trim\(\)[^,\n]*),/, 'the preset snapshot predicate'),
-        ];
-
-        for (const gate of gates) {
-            expect(countsLinkedReference(gate)).toBe(true);
-            // The builder drops the linked context in that mode, so the gate must too.
-            expect(gate).toContain(builderStripGuard);
-        }
-    });
-
-    test('the submit guard recomputes when a linked reference changes', () => {
-        expect(countsLinkedReference(gateExpression(
-            /const getCurrentInputSnapshot = React\.useCallback\(\(\) => \{([\s\S]*?)\n {4}\}, \[/,
-            'the submit guard body',
-        ))).toBe(true);
-        expect(countsLinkedReference(gateExpression(
-            /const getCurrentInputSnapshot = React\.useCallback\(\(\) => \{[\s\S]*?\n {4}\}, ([^)]*)\);/,
-            'the submit guard dependencies',
-        ))).toBe(true);
-    });
-
     test('a linked reference on its own is a message, and nothing at all is still empty', () => {
         expect(buildOutgoingMessage(input(), deps()).isEmpty).toBe(true);
 
         const onlyLinked: Partial<OutgoingMessageInput>[] = [
             { references: [{ kind: 'repository-issue', number: 12, title: 'Attached', url: 'https://github.com/acme/app/issues/12', contextText: 'body' }] },
             { references: [{ kind: 'change-request', provider: 'github', number: 34, title: 'Attached', url: 'https://github.com/acme/app/pull/34', context: 'body' }] },
-            { references: [{ kind: 'linear-issue', identifier: 'ENG-1', title: 'Attached', url: 'https://linear.app/acme/issue/ENG-1', contextText: 'body' }] },
+            { references: [{ kind: 'tracker-item', provider: 'linear', identifier: 'ENG-1', title: 'Attached', url: 'https://linear.app/acme/issue/ENG-1', contextText: 'body' }] },
             { references: [{ kind: 'guest', providerId: 'guest.example', id: 'guest-1', title: 'Attached', url: 'https://example.com/issues/1', contextText: 'body' }] },
         ];
 

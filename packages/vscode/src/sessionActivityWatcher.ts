@@ -1,12 +1,13 @@
 import { OpenCode, type OpenCodeClient, type OpenCodeEvent } from '@opencode/client';
 import type { OpenCodeManager } from './opencode';
+import { openCodeTrust } from './opencodeTrust';
 
-// Session activity tracking (mirrors web server and desktop behavior)
 type ActivityPhase = 'idle' | 'busy' | 'cooldown';
 
 interface SessionActivity {
   sessionId: string;
   phase: ActivityPhase;
+  startedAt?: number;
 }
 
 // External observability contract v1: design #612, phase 1 on the web server
@@ -23,6 +24,8 @@ interface SessionActivityV1Entry {
   status: null;
   model: null;
   toolInFlight: null;
+  /** How long ago the running turn started, for a busy session whose start is known. */
+  startedAgoMs?: number;
 }
 
 interface SessionActivityV1Snapshot {
@@ -33,19 +36,23 @@ interface SessionActivityV1Snapshot {
 }
 
 export const buildSessionActivityV1Snapshot = (
-  phases: ReadonlyMap<string, { phase: ActivityPhase; updatedAt: number }>,
+  phases: ReadonlyMap<string, { phase: ActivityPhase; updatedAt: number; startedAt?: number }>,
   watcherReady: boolean,
   serverTime: number,
 ): SessionActivityV1Snapshot => {
   const sessions: Record<string, SessionActivityV1Entry> = {};
   for (const [sessionId, data] of phases) {
-    sessions[sessionId] = {
+    const entry: SessionActivityV1Entry = {
       type: data.phase,
       lastActivityAt: data.updatedAt,
       status: null,
       model: null,
       toolInFlight: null,
     };
+    if (data.phase === 'busy' && data.startedAt !== undefined) {
+      entry.startedAgoMs = Math.max(0, serverTime - data.startedAt);
+    }
+    sessions[sessionId] = entry;
   }
   return { version: 1, serverTime, watcherReady, sessions };
 };
@@ -100,7 +107,7 @@ export const pruneStaleSessionActivity = (
   return removed;
 };
 
-const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number }>();
+const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number; startedAt?: number }>();
 const sessionActivityCooldowns = new Map<string, NodeJS.Timeout>();
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 
@@ -142,14 +149,6 @@ const createActivityClient = (manager: OpenCodeManager, baseUrl: string): OpenCo
   headers: manager.getOpenCodeAuthHeaders(),
 });
 
-/**
- * `GET /api/session/active` is the authoritative set of sessions running an
- * agent loop. Anything in it is busy. Anything tracked but absent is either
- * idle or deleted while the stream was down; absent entries are marked idle
- * so a live session survives a reconnect, and the idle-TTL prune below
- * removes the ones that stay idle past SESSION_ACTIVITY_IDLE_TTL_MS, so
- * missed deletions age out instead of being kept as idle ghosts forever.
- */
 const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promise<void> => {
   const active = await client.session.active({ signal: AbortSignal.timeout(8_000) });
   const activeSessionIds = new Set(Object.keys(active || {}));
@@ -182,7 +181,7 @@ const removeSessionActivity = (sessionId: string): void => {
   deleteSessionActivityEntry(sessionActivityPhases, sessionId);
 };
 
-const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void => {
+const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase, startedAt?: number): void => {
   if (!sessionId) return;
 
   const existingTimer = sessionActivityCooldowns.get(sessionId);
@@ -192,9 +191,18 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void 
   }
 
   const current = sessionActivityPhases.get(sessionId);
-  if (current?.phase === phase) return;
+  if (current?.phase === phase) {
+    if (phase === 'busy' && startedAt !== undefined && startedAt !== current.startedAt) {
+      sessionActivityPhases.set(sessionId, { ...current, updatedAt: Date.now(), startedAt });
+    }
+    return;
+  }
 
-  sessionActivityPhases.set(sessionId, { phase, updatedAt: Date.now() });
+  sessionActivityPhases.set(sessionId, {
+    phase,
+    updatedAt: Date.now(),
+    startedAt: phase === 'busy' ? startedAt : undefined,
+  });
 
   chatViewProvider?.postMessage({
     type: 'openchamber:session-activity',
@@ -251,7 +259,7 @@ const deriveSessionActivity = (event: OpenCodeEvent): SessionActivityUpdate | nu
       };
     }
     case 'session.execution.started':
-      return { sessionId: event.data.sessionID, phase: 'busy' };
+      return { sessionId: event.data.sessionID, phase: 'busy', startedAt: Date.now() };
     case 'session.execution.succeeded':
       return { sessionId: event.data.sessionID, phase: 'cooldown' };
     case 'session.execution.failed':
@@ -338,17 +346,19 @@ export const startGlobalEventWatcher = async (
           );
         }
 
-        // The stream is lazy: it is only proven connected once a frame arrives.
         let connected = false;
 
         for await (const event of client.event.subscribe({ signal })) {
           if (!connected) {
             connected = true;
             sessionActivityWatcherReady = true;
-            // A healthy connection clears the backoff, so a long-lived watcher
-            // does not carry a 30s delay into its next reconnect.
             attempt = 0;
             console.log('[VSCode:Activity] connected');
+            openCodeTrust.followLocations(true);
+          }
+
+          if (event.type === 'location.shutdown' && event.location?.directory) {
+            void openCodeTrust.forget(event.location.directory);
           }
 
           const activity = deriveSessionActivity(event);
@@ -356,7 +366,7 @@ export const startGlobalEventWatcher = async (
             if ('deleted' in activity) {
               removeSessionActivity(activity.sessionId);
             } else {
-              setSessionActivityPhase(activity.sessionId, activity.phase);
+              setSessionActivityPhase(activity.sessionId, activity.phase, activity.startedAt);
             }
           }
 
@@ -370,6 +380,7 @@ export const startGlobalEventWatcher = async (
         }
         console.warn('[VSCode:Activity] disconnected', error instanceof Error ? error.message : error);
       }
+      openCodeTrust.followLocations(false);
 
       const backoffMs = Math.min(1000 * Math.pow(2, Math.min(attempt, 5)), 30000);
       await new Promise(r => setTimeout(r, backoffMs));
@@ -383,14 +394,15 @@ export const stopGlobalEventWatcher = (): void => {
   globalEventWatcherStartToken += 1;
   clearGlobalEventWatcherRetry();
   clearSessionActivityPruneTimer();
+  openCodeTrust.followLocations(false);
 
   if (globalEventWatcherAbortController) {
-    try {
-      globalEventWatcherAbortController.abort();
-    } catch {
-      // ignore
-    }
+  try {
+    globalEventWatcherAbortController.abort();
+  } catch {
+    // ignore
   }
+}
   globalEventWatcherAbortController = null;
   sessionActivityWatcherReady = false;
   chatViewProvider = null;

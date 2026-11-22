@@ -1,6 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildMessageLink, isSessionDeepLink, parseSessionLink } from './sessionLinks';
+import { bareSessionId, buildMessageLink, isSessionDeepLink, parseSessionLink } from './sessionLinks';
+
+describe('bareSessionId', () => {
+    test('reads an id alone, with whitespace around it', () => {
+        expect(bareSessionId('ses_a1-B')).toBe('ses_a1-B');
+        expect(bareSessionId('  ses_a\r\n')).toBe('ses_a');
+    });
+
+    test('refuses anything more than the id', () => {
+        for (const text of ['', 'ses_', '/ses_a', 'see ses_a', 'ses_a ses_b', '`ses_a`', `ses_${'a'.repeat(125)}`, 'openchamber://session/ses_a']) {
+            expect(bareSessionId(text)).toBeNull();
+        }
+    });
+});
 
 describe('buildMessageLink', () => {
     test('builds the native deep link', () => {

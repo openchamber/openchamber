@@ -34,6 +34,10 @@ const parseLimit = (value) => {
   return /^\d+$/.test(text) ? Number(text) : undefined;
 };
 
+/**
+ * @param {import('express').Application} app
+ * @param {{ modelChoiceService: ReturnType<typeof import('./service.js').createModelChoiceService> }} options
+ */
 export const registerModelChoiceRoutes = (app, { modelChoiceService }) => {
   app.post('/api/openchamber/model-choices', express.json({ limit: '16kb' }), async (req, res) => {
     try {

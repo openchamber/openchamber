@@ -16,8 +16,11 @@ Deze drie bestanden vormen een werkende extensie. Ze gebruikt een GitHub-token, 
   "private": true,
   "openchamber": {
     "apiVersion": 1,
+    "id": "my-repos",
+    "name": "Repos",
+    "icon": "github",
     "contributes": {
-      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "panel": { "entry": "panel/index.html" },
       "attach": "panel",
       "integration": {
         "name": "GitHub (token)",

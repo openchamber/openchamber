@@ -5,13 +5,8 @@ export const IPAD_LEFT_SIDEBAR_WIDTH = 320;
 export const IPAD_RIGHT_SIDEBAR_WIDTH = 380;
 const IPAD_SIDEBAR_MIN_WIDTH = 280;
 const IPAD_SIDEBAR_MAX_WIDTH = 560;
-/** The workspace panel holds diffs, a file editor and a terminal, so it earns
-    far more room than the sessions list ever needs. */
 export const IPAD_WORKSPACE_SIDEBAR_MAX_WIDTH = 900;
 
-/** Drag-resize for the iPad sidebars: same live-width mechanics as the desktop
-    Sidebar (imperative styles during the drag, committed to state at the end),
-    but with a finger-sized grab strip instead of a 3px hover handle. */
 export function useIpadSidebarResize(
   side: 'left' | 'right',
   storageKey: string,
@@ -60,8 +55,6 @@ export function useIpadSidebarResize(
 
   const handlePointerMove = React.useCallback((event: React.PointerEvent) => {
     if (pointerIdRef.current !== event.pointerId) return;
-    // `side` is the panel's place in the layout; in RTL the layout mirrors, so the
-    // start ("left") panel sits on the right and dragging left widens it.
     const sign = (side === 'left' ? 1 : -1) * (isRightToLeft(event.currentTarget) ? -1 : 1);
     const next = clampWidth(startWidthRef.current + (event.clientX - startXRef.current) * sign);
     if (liveWidthRef.current === next) return;
@@ -98,3 +91,24 @@ export function useIpadSidebarResize(
   return { asideRef, width, isResizing, handleProps };
 }
 
+
+const prefersReducedMotion = (): boolean => (
+  typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+);
+
+const IPAD_PANEL_SLIDE_MS = 200;
+
+export function useIpadPanelSlide(open: boolean) {
+  const [leaving, setLeaving] = React.useState(false);
+  const [wasOpen, setWasOpen] = React.useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    setLeaving(!open && !prefersReducedMotion());
+  }
+  React.useEffect(() => {
+    if (!leaving) return;
+    const timer = window.setTimeout(() => setLeaving(false), IPAD_PANEL_SLIDE_MS);
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
+  return { placed: open || leaving, inPlace: open };
+}

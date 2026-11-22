@@ -2,6 +2,7 @@ import * as React from 'react';
 import { toast } from '@/components/ui/toast';
 import { useI18n } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const TOAST_ID = 'project-config-invalid';
 
@@ -39,7 +40,7 @@ export const ProjectConfigErrorToast: React.FC = () => {
         <div className="flex min-w-0 flex-col gap-1">
           <span className="break-all font-mono typography-meta">{error.path ?? t('projectConfigError.toast.unknownFile')}</span>
           {error.message && (
-            <span className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono typography-meta">{error.message}</span>
+            <ScrollableOverlay as="span" outerClassName="max-h-40" className="whitespace-pre-wrap break-words font-mono typography-meta" disableHorizontal>{error.message}</ScrollableOverlay>
           )}
           <span className="typography-meta text-muted-foreground">{t('projectConfigError.toast.hint')}</span>
         </div>

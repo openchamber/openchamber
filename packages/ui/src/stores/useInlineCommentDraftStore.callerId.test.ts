@@ -15,7 +15,7 @@ const target = { directory: '/repo', sessionKey: 'session-1' };
 const store = () => useInlineCommentDraftStore.getState();
 
 describe('caller-provided draft ids', () => {
-  afterEach(() => { useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} }); });
+  afterEach(() => { useInlineCommentDraftStore.setState({ drafts: {} }); });
 
   test('a caller that owns its own view of the draft chooses the id', () => {
     // The VS Code editor thread mints the id so it can track its draft without

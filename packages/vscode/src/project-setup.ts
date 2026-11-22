@@ -1,11 +1,3 @@
-// The client-owned part of a project's config file
-// (`~/.config/openchamber/projects/<projectId>.json`): worktree setup
-// commands, project actions, and pinned draft starters. A mirror of the
-// server's `packages/web/server/lib/projects/project-setup.js`; keep the
-// sanitizing rules in sync so a value written from VS Code reads back the
-// same on every other surface.
-//
-// Kept free of `vscode` imports so it is unit-tested directly.
 
 import crypto from 'node:crypto';
 
@@ -35,40 +27,47 @@ export type DraftStarter = { type: 'command' | 'skill'; name: string };
 
 export type SetupWorktreeMode = 'append' | 'replace';
 
-/** The personal file's part of the setup; the wait flag is `null` when the file does not set it. */
 export type PersonalProjectSetup = {
   setupWorktree: string[];
   setupWorktreeWait: boolean | null;
   setupWorktreeMode: SetupWorktreeMode;
+  teardownWorktree: string[];
+  createWorktreeCommand: string;
   projectActions: ProjectAction[];
   projectActionsPrimaryId: string | null;
   draftStarters: DraftStarter[];
   hiddenSharedActionIds: string[];
-  /** The recorded answer to the trust prompt: which shared commands were trusted, and when. */
   sharedTrust: { hash: string; trustedAt: number } | null;
+  notesTodosInRepository: boolean;
 };
 
 export type SharedProjectConfig = {
   setupWorktree: string[];
   setupWorktreeWait: boolean | null;
+  teardownWorktree: string[];
   projectActions: ProjectAction[];
   draftStarters: DraftStarter[];
   plansDir: string | null;
 };
 
+export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
+export type JsonObject = { [key: string]: JsonValue };
+
+const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>
+  value instanceof Object && !Array.isArray(value);
+
 export type SharedProjectConfigRead =
   | { status: 'missing' }
-  | { status: 'ok'; config: SharedProjectConfig }
-  | { status: 'invalid'; reason: string };
+  | { status: 'ok'; config: SharedProjectConfig; document: JsonObject }
+  | { status: 'invalid'; reason: string; document?: JsonObject };
 
 export type ProjectSetupSource = 'shared' | 'personal';
 
-/** The merged view every client sees; see `mergeProjectSetup` for the rules. */
 export type ProjectSetupView = {
-  /** Nothing to trust when `hash` is null; otherwise trusted only for the recorded hash. */
   trust: { hash: string | null; trusted: boolean };
   setupWorktree: string[];
   setupWorktreeWait: boolean;
+  teardownWorktree: string[];
   projectActions: Array<ProjectAction & { source: ProjectSetupSource }>;
   projectActionsPrimaryId: string | null;
   draftStarters: Array<DraftStarter & { source: ProjectSetupSource }>;
@@ -85,19 +84,21 @@ export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
 export const SHARED_PROJECT_CONFIG_MAX_BYTES = 1024 * 1024;
 const SHARED_CONFIG_VERSION = 1;
 
-/**
- * The on-disk keys this module owns inside the personal config document, as
- * a patch: a key set to `undefined` is removed from the document.
- */
+export const SHARED_SETUP_KEYS: readonly string[] = Object.freeze(['version', 'setupWorktree', 'setupWorktreeWait', 'teardownWorktree', 'projectActions', 'draftStarters', 'plansDir']);
+const SHARED_SETUP_KEY_SET: ReadonlySet<string> = new Set(SHARED_SETUP_KEYS);
+
 type StoredProjectSetupPatch = {
   'setup-worktree'?: string[];
   'setup-worktree-wait'?: boolean;
   setupWorktreeMode?: SetupWorktreeMode;
+  teardownWorktree?: string[];
+  createWorktreeCommand?: string | undefined;
   projectActions?: ProjectAction[];
   projectActionsPrimaryId?: string | undefined;
   draftStarters?: DraftStarter[];
   hiddenSharedActionIds?: string[];
   sharedTrust?: { hash: string; trustedAt: number } | undefined;
+  notesTodosInRepository?: true | undefined;
   projectPath?: string;
 };
 
@@ -118,6 +119,8 @@ const clamp = (value: string, maxLength: number): string => {
 };
 
 const trimmedString = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+
+const sanitizeCreateWorktreeCommand = (value: string): string => clamp(value.trim(), SETUP_COMMAND_MAX_LENGTH);
 
 export const sanitizeSetupCommands = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
@@ -201,7 +204,6 @@ const sanitizeIdList = (value: unknown): string[] => {
 
 const setupWorktreeModeOf = (value: unknown): SetupWorktreeMode => (value === 'replace' ? 'replace' : 'append');
 
-/** The personal part of the view, straight from the personal file. */
 export const personalProjectSetupOf = (raw: unknown): PersonalProjectSetup => {
   const document = isObjectRecord(raw) ? raw : {};
   const projectActions = sanitizeProjectActions(document.projectActions);
@@ -211,11 +213,14 @@ export const personalProjectSetupOf = (raw: unknown): PersonalProjectSetup => {
     setupWorktree: sanitizeSetupCommands(document['setup-worktree']),
     setupWorktreeWait: typeof wait === 'boolean' ? wait : null,
     setupWorktreeMode: setupWorktreeModeOf(document.setupWorktreeMode),
+    teardownWorktree: sanitizeSetupCommands(document.teardownWorktree),
+    createWorktreeCommand: sanitizeCreateWorktreeCommand(trimmedString(document.createWorktreeCommand)),
     projectActions,
     projectActionsPrimaryId: primaryRaw && projectActions.some((action) => action.id === primaryRaw) ? primaryRaw : null,
     draftStarters: sanitizeDraftStarters(document.draftStarters),
     hiddenSharedActionIds: sanitizeIdList(document.hiddenSharedActionIds),
     sharedTrust: sharedTrustOf(document.sharedTrust),
+    notesTodosInRepository: document.notesTodosInRepository === true,
   };
 };
 
@@ -227,12 +232,9 @@ const sharedTrustOf = (value: unknown): PersonalProjectSetup['sharedTrust'] => {
   return { hash, trustedAt: typeof trustedAt === 'number' && Number.isFinite(trustedAt) ? trustedAt : 0 };
 };
 
-/**
- * What a trust answer covers: the shared setup commands and the shared
- * actions' commands, canonical order, hashed; `null` when nothing executes.
- */
 export const sharedTrustHashOf = (shared: SharedProjectConfig): string | null => {
   const commands = shared.setupWorktree;
+  const teardown = shared.teardownWorktree;
   const actions = shared.projectActions
     .map((action) => {
       const executable: { id: string; command: string; runIn?: 'parent' } = { id: action.id, command: action.command };
@@ -240,15 +242,14 @@ export const sharedTrustHashOf = (shared: SharedProjectConfig): string | null =>
       return executable;
     })
     .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
-  if (commands.length === 0 && actions.length === 0) return null;
-  const digest = crypto.createHash('sha256').update(JSON.stringify({ setupWorktree: commands, projectActions: actions })).digest('hex');
+  if (commands.length === 0 && teardown.length === 0 && actions.length === 0) return null;
+  const executable = teardown.length > 0
+    ? { setupWorktree: commands, projectActions: actions, teardownWorktree: teardown }
+    : { setupWorktree: commands, projectActions: actions };
+  const digest = crypto.createHash('sha256').update(JSON.stringify(executable)).digest('hex');
   return `sha256:${digest}`;
 };
 
-/**
- * A `plansDir` is a relative path inside the repo: no absolute paths, no
- * drive letters, no `..` segments, forward slashes.
- */
 export const normalizePlansDir = (value: unknown): string | null => {
   const raw = trimmedString(value).replace(/\\/g, '/');
   if (!raw) return null;
@@ -261,39 +262,41 @@ export const normalizePlansDir = (value: unknown): string | null => {
 const EMPTY_SHARED: SharedProjectConfig = {
   setupWorktree: [],
   setupWorktreeWait: null,
+  teardownWorktree: [],
   projectActions: [],
   draftStarters: [],
   plansDir: null,
 };
 
-/**
- * Parse the text of a shared file. Anything that is not a version-1 object
- * is `invalid` with a reason, never an empty config.
- */
 export const parseSharedProjectConfig = (raw: string): SharedProjectConfigRead => {
-  let parsed: unknown;
+  let parsed: JsonValue;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     return { status: 'invalid', reason: `invalid JSON: ${error instanceof Error ? error.message : String(error)}` };
   }
-  if (!isObjectRecord(parsed)) return { status: 'invalid', reason: 'not an object' };
+  if (!isJsonObject(parsed)) return { status: 'invalid', reason: 'not an object' };
+  const document = parsed;
   if (parsed.version !== SHARED_CONFIG_VERSION) return { status: 'invalid', reason: `unsupported version ${JSON.stringify(parsed.version)}` };
-  if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return { status: 'invalid', reason: 'setupWorktree must be an array' };
-  if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return { status: 'invalid', reason: 'setupWorktreeWait must be a boolean' };
-  if ('projectActions' in parsed && !Array.isArray(parsed.projectActions)) return { status: 'invalid', reason: 'projectActions must be an array' };
-  if ('draftStarters' in parsed && !Array.isArray(parsed.draftStarters)) return { status: 'invalid', reason: 'draftStarters must be an array' };
+  const invalid = (reason: string): SharedProjectConfigRead => ({ status: 'invalid', reason, document });
+  if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return invalid('setupWorktree must be an array');
+  if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return invalid('setupWorktreeWait must be a boolean');
+  if ('teardownWorktree' in parsed && !Array.isArray(parsed.teardownWorktree)) return invalid('teardownWorktree must be an array');
+  if ('projectActions' in parsed && !Array.isArray(parsed.projectActions)) return invalid('projectActions must be an array');
+  if ('draftStarters' in parsed && !Array.isArray(parsed.draftStarters)) return invalid('draftStarters must be an array');
   let plansDir: string | null = null;
   if ('plansDir' in parsed && parsed.plansDir !== null) {
     plansDir = normalizePlansDir(parsed.plansDir);
-    if (!plansDir) return { status: 'invalid', reason: 'plansDir must be a relative path inside the repository' };
+    if (!plansDir) return invalid('plansDir must be a relative path inside the repository');
   }
   const wait = parsed.setupWorktreeWait;
   return {
     status: 'ok',
+    document,
     config: {
       setupWorktree: sanitizeSetupCommands(parsed.setupWorktree),
       setupWorktreeWait: typeof wait === 'boolean' ? wait : null,
+      teardownWorktree: sanitizeSetupCommands(parsed.teardownWorktree),
       projectActions: sanitizeProjectActions(parsed.projectActions),
       draftStarters: sanitizeDraftStarters(parsed.draftStarters),
       plansDir,
@@ -304,12 +307,6 @@ export const parseSharedProjectConfig = (raw: string): SharedProjectConfigRead =
 const withSource = <T,>(entries: T[], source: ProjectSetupSource): Array<T & { source: ProjectSetupSource }> =>
   entries.map((entry) => ({ ...entry, source }));
 
-/**
- * One merged view from the personal part and the shared read. Same rules as
- * the server: shared setup commands first (unless personal replaces), the
- * personal wait flag wins when set, actions union by id with personal
- * replacing shared and hidden shared ids dropped, starters union by key.
- */
 export const mergeProjectSetup = (personal: PersonalProjectSetup, sharedRead: SharedProjectConfigRead): ProjectSetupView => {
   const shared = sharedRead.status === 'ok' ? sharedRead.config : EMPTY_SHARED;
   const hidden = new Set(personal.hiddenSharedActionIds);
@@ -326,6 +323,7 @@ export const mergeProjectSetup = (personal: PersonalProjectSetup, sharedRead: Sh
     setupWorktreeWait: personal.setupWorktreeWait !== null
       ? personal.setupWorktreeWait
       : shared.setupWorktreeWait === true,
+    teardownWorktree: [...shared.teardownWorktree, ...personal.teardownWorktree],
     projectActions: [...withSource(sharedActions, 'shared'), ...withSource(personal.projectActions, 'personal')],
     projectActionsPrimaryId: personal.projectActionsPrimaryId,
     draftStarters: [...withSource(shared.draftStarters, 'shared'), ...withSource(personalStarters, 'personal')],
@@ -340,35 +338,41 @@ const sharedBlockOf = (sharedRead: SharedProjectConfigRead, shared: SharedProjec
   return block;
 };
 
-/** An action without an icon is written without the key; readers fall back to the play icon. */
 const withoutEmptyIcon = (action: ProjectAction): Omit<ProjectAction, 'icon'> & { icon?: string } => {
   const { icon, ...rest } = action;
   return icon === null ? rest : { ...rest, icon };
 };
 
-/** True when the shared config carries nothing: the file should not exist. */
-export const isSharedProjectConfigEmpty = (config: SharedProjectConfig): boolean => (
+const foreignSharedEntriesOf = (document: JsonObject): Array<[string, JsonValue]> => (
+  Object.entries(document).filter(([key]) => !SHARED_SETUP_KEY_SET.has(key))
+);
+
+export const isSharedProjectConfigEmpty = (config: SharedProjectConfig, document: JsonObject = {}): boolean => (
   config.setupWorktree.length === 0
   && config.setupWorktreeWait === null
+  && config.teardownWorktree.length === 0
   && config.projectActions.length === 0
   && config.draftStarters.length === 0
   && config.plansDir === null
+  && foreignSharedEntriesOf(document).length === 0
 );
 
-/** The bytes of a shared file: version first, only the keys that carry something, pretty-printed. */
-export const serializeSharedProjectConfig = (config: SharedProjectConfig): string => {
-  const document: Record<string, unknown> = { version: SHARED_CONFIG_VERSION };
-  if (config.setupWorktree.length > 0) document.setupWorktree = config.setupWorktree;
-  if (config.setupWorktreeWait !== null) document.setupWorktreeWait = config.setupWorktreeWait;
-  if (config.projectActions.length > 0) document.projectActions = sanitizeProjectActions(config.projectActions).map(withoutEmptyIcon);
-  if (config.draftStarters.length > 0) document.draftStarters = config.draftStarters;
-  if (config.plansDir !== null) document.plansDir = config.plansDir;
-  return `${JSON.stringify(document, null, 2)}\n`;
+export const serializeSharedProjectConfig = (config: SharedProjectConfig, document: JsonObject = {}): string => {
+  const output: Record<string, unknown> = { version: SHARED_CONFIG_VERSION };
+  if (config.setupWorktree.length > 0) output.setupWorktree = config.setupWorktree;
+  if (config.setupWorktreeWait !== null) output.setupWorktreeWait = config.setupWorktreeWait;
+  if (config.teardownWorktree.length > 0) output.teardownWorktree = config.teardownWorktree;
+  if (config.projectActions.length > 0) output.projectActions = sanitizeProjectActions(config.projectActions).map(withoutEmptyIcon);
+  if (config.draftStarters.length > 0) output.draftStarters = config.draftStarters;
+  if (config.plansDir !== null) output.plansDir = config.plansDir;
+  for (const [key, value] of foreignSharedEntriesOf(document)) {
+    Object.defineProperty(output, key, { value, enumerable: true, writable: true, configurable: true });
+  }
+  return `${JSON.stringify(output, null, 2)}\n`;
 };
 
 export const EMPTY_SHARED_PROJECT_CONFIG: SharedProjectConfig = EMPTY_SHARED;
 
-/** The next shared config after a client patch over the current one; wrong shapes are validation errors. */
 export const applySharedProjectSetupPatch = (current: SharedProjectConfig, patch: unknown): SharedProjectConfig => {
   if (!isObjectRecord(patch)) throw new ProjectSetupValidationError('patch must be an object');
   const next: SharedProjectConfig = { ...current };
@@ -380,6 +384,10 @@ export const applySharedProjectSetupPatch = (current: SharedProjectConfig, patch
     const wait = patch.setupWorktreeWait;
     if (wait !== null && typeof wait !== 'boolean') throw new ProjectSetupValidationError('setupWorktreeWait must be a boolean or null');
     next.setupWorktreeWait = wait;
+  }
+  if ('teardownWorktree' in patch) {
+    if (!Array.isArray(patch.teardownWorktree)) throw new ProjectSetupValidationError('teardownWorktree must be an array of commands');
+    next.teardownWorktree = sanitizeSetupCommands(patch.teardownWorktree);
   }
   if ('projectActions' in patch) {
     if (!Array.isArray(patch.projectActions)) throw new ProjectSetupValidationError('projectActions must be an array');
@@ -402,10 +410,6 @@ export const applySharedProjectSetupPatch = (current: SharedProjectConfig, patch
   return next;
 };
 
-/**
- * The stored keys a client patch changes; `undefined` marks a key to remove.
- * A key with the wrong shape is a validation error, never silently dropped.
- */
 export const projectSetupPatchToStored = (patch: unknown): StoredProjectSetupPatch => {
   if (!isObjectRecord(patch)) {
     throw new ProjectSetupValidationError('patch must be an object');
@@ -418,6 +422,14 @@ export const projectSetupPatchToStored = (patch: unknown): StoredProjectSetupPat
   if ('setupWorktreeWait' in patch) {
     if (typeof patch.setupWorktreeWait !== 'boolean') throw new ProjectSetupValidationError('setupWorktreeWait must be a boolean');
     stored['setup-worktree-wait'] = patch.setupWorktreeWait;
+  }
+  if ('teardownWorktree' in patch) {
+    if (!Array.isArray(patch.teardownWorktree)) throw new ProjectSetupValidationError('teardownWorktree must be an array of commands');
+    stored.teardownWorktree = sanitizeSetupCommands(patch.teardownWorktree);
+  }
+  if ('createWorktreeCommand' in patch) {
+    if (typeof patch.createWorktreeCommand !== 'string') throw new ProjectSetupValidationError('createWorktreeCommand must be a string');
+    stored.createWorktreeCommand = sanitizeCreateWorktreeCommand(patch.createWorktreeCommand) || undefined;
   }
   if ('projectActions' in patch) {
     if (!Array.isArray(patch.projectActions)) throw new ProjectSetupValidationError('projectActions must be an array');
@@ -450,6 +462,12 @@ export const projectSetupPatchToStored = (patch: unknown): StoredProjectSetupPat
       throw new ProjectSetupValidationError('sharedTrustHash must be a non-empty string or null');
     }
     stored.sharedTrust = hash === null ? undefined : { hash: hash.trim(), trustedAt: Date.now() };
+  }
+  if ('notesTodosInRepository' in patch) {
+    if (patch.notesTodosInRepository !== true && patch.notesTodosInRepository !== false) {
+      throw new ProjectSetupValidationError('notesTodosInRepository must be a boolean');
+    }
+    stored.notesTodosInRepository = patch.notesTodosInRepository || undefined;
   }
   if ('projectPath' in patch) {
     if (typeof patch.projectPath !== 'string') throw new ProjectSetupValidationError('projectPath must be a string');

@@ -67,11 +67,12 @@ describe('applyGoalChoice', () => {
 
 // ChatInput cannot be mounted in bun test: its import graph pulls the composer
 // editor, Vite worker URLs and every runtime store. The call sites are guarded
-// at the source, the way the neighbouring composer regression tests guard
-// theirs: each exit that sends or queues must apply the choice first, or the
-// queued goal takes whatever stale arm the composer happened to hold.
+// at the source of ChatInput's submit handler, the way the neighbouring
+// composer regression tests guard theirs: each exit that sends or queues must
+// apply the choice first, or the queued goal takes whatever stale arm the
+// composer happened to hold.
 const chatInputLines = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'chat', 'ChatInput.tsx'),
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'chat', 'composer', 'input', 'useComposerSubmission.ts'),
   'utf-8',
 ).split('\n');
 
@@ -99,13 +100,13 @@ describe('ChatInput applies the goal choice at every exit', () => {
 
   test('the dismissed-permission and form queue exit applies the choice before queueing', () => {
     const site = choiceCallSites[1];
-    expect(precedingContext(site)).toContain('deniedPermissions || dismissedForms');
+    expect(precedingContext(site)).toContain('deniedPermissions || forms.dismissed');
     expect(nextStatement(site)).toBe('void handleQueueMessage(options?.presetText);');
   });
 
   test('the normal send applies the choice with no exit before sending', () => {
     const site = choiceCallSites[2];
-    const sendLine = chatInputLines.findIndex((line, index) => index > site && line.trim().startsWith('const sendPromise = sessionActions.sendMessage('));
+    const sendLine = chatInputLines.findIndex((line, index) => index > site && line.trim().startsWith('const sendPromise = sendMessage('));
     expect(sendLine).toBeGreaterThan(site);
     const between = chatInputLines.slice(site + 1, sendLine).filter((line) => !line.trim().startsWith('//'));
     // handleSubmit's own statements sit at eight spaces; deeper returns belong to helpers it defines.

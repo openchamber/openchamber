@@ -90,13 +90,13 @@ release_commands() {
     cat <<EOF
 .|bun install --frozen-lockfile
 $ELECTRON_DIR|bun run build:web-assets
-$ELECTRON_DIR|bun run prepare:opencode-cli
-$ELECTRON_DIR|bun run verify:opencode-cli
+$ELECTRON_DIR|bun run prepare:opencode-server
+$ELECTRON_DIR|bun run verify:opencode-server
 $ELECTRON_DIR|bun run prepare:ripgrep
 $ELECTRON_DIR|bun run bundle:main
 $ELECTRON_DIR|bun run rebuild:native
 $ELECTRON_DIR|bunx electron-builder --mac --$arch --publish=never
-$ELECTRON_DIR|bun run verify:opencode-cli:packaged
+$ELECTRON_DIR|bun run verify:opencode-server:packaged
 EOF
 }
 

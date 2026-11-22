@@ -27,6 +27,14 @@ describe('a namespace the tool name already implies', () => {
     expect(resolveAgentToolAction('knowledge.list', 'openchamber').error).toBeDefined();
   });
 
+  test('resolves read inside the usage tool', () => {
+    expect(resolveAgentToolAction('read', 'openchamber_usage')).toEqual({ action: 'usage.read' });
+    expect(resolveAgentToolAction('usage.read', 'openchamber_usage')).toEqual({ action: 'usage.read' });
+    expect(resolveAgentToolAction('get', 'openchamber_usage').error).toContain('usage.read');
+    // The memory tool's `read` stays its own.
+    expect(resolveAgentToolAction('read', 'openchamber_memory')).toEqual({ action: 'memory.read' });
+  });
+
   test('keeps a fully qualified action as it is', () => {
     expect(resolveAgentToolAction('memory.read', 'openchamber_memory')).toEqual({ action: 'memory.read' });
   });
@@ -76,7 +84,7 @@ describe('a prototype-named caller', () => {
   test('is treated exactly like any other unknown tool, never throws', () => {
     for (const toolName of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
       // A bare name that means one thing everywhere still resolves via the full list.
-      expect(resolveAgentToolAction('read', toolName)).toEqual({ action: 'memory.read' });
+      expect(resolveAgentToolAction('snapshot', toolName)).toEqual({ action: 'browser.snapshot' });
       const { error, action } = resolveAgentToolAction('nonsense', toolName);
       expect(action).toBeUndefined();
       expect(error).toContain('Unsupported OpenChamber action: nonsense. Use one of:');

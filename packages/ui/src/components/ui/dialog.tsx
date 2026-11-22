@@ -4,7 +4,9 @@ import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { cn } from "@/lib/utils"
 import { useI18n } from '@/lib/i18n'
 import { Icon } from "@/components/icon/Icon";
+import { PopupOverlayScrollbar } from "@/components/ui/AttachedOverlayScrollbar";
 import { DockedPanelSurfaceContext } from "@/hooks/usePageColors";
+import { useDeviceInfo, useTabletLayout } from "@/lib/device";
 
 let openDialogCount = 0;
 
@@ -77,6 +79,7 @@ type DialogContentProps = Omit<React.ComponentProps<typeof BaseDialog.Popup>, "c
   showCloseButton?: boolean
   backdropProps?: React.ComponentProps<typeof DialogOverlay>
   layerClassName?: string
+  fullWindow?: boolean
   children?: React.ReactNode
 }
 
@@ -92,21 +95,24 @@ function DialogContent({
   showCloseButton = true,
   backdropProps,
   layerClassName,
+  fullWindow = false,
   ref,
   initialFocus,
   ...props
 }: DialogContentProps) {
   const { t } = useI18n()
+  const { isMobile } = useDeviceInfo()
+  const { enabled: tabletLayout } = useTabletLayout()
+  const heldToTop = layerClassName?.includes('items-start') ?? false
+  const bottomSheet = isMobile && !tabletLayout && !heldToTop
   const popupRef = React.useRef<HTMLDivElement | null>(null)
+  const [popup, setPopup] = React.useState<HTMLDivElement | null>(null)
   const setPopupRef = React.useCallback((node: HTMLDivElement | null) => {
     popupRef.current = node
+    setPopup(node)
     if (typeof ref === "function") ref(node)
     else if (ref) ref.current = node
   }, [ref])
-  // Base UI focuses the first tabbable on open, usually a button or the close
-  // cross, and opening from the keyboard then draws its focus ring. Focus the
-  // first text field instead, else the window itself. A control that already
-  // took focus (an autoFocus Cancel) keeps it.
   const defaultInitialFocus = React.useCallback(() => {
     const popup = popupRef.current
     if (!popup || popup.contains(document.activeElement)) return true
@@ -116,43 +122,35 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay className="rounded-none" {...backdropProps} />
-      <div className={cn("fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4", layerClassName)}>
+      <div data-slot="dialog-layer" data-sheet={bottomSheet ? '' : undefined} data-keyboard-rider={heldToTop ? undefined : bottomSheet ? '1' : '0.5'} className={cn("oc-keyboard-inset-surface fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4", layerClassName)}>
         <BaseDialog.Popup
           ref={setPopupRef}
           initialFocus={initialFocus ?? defaultInitialFocus}
           data-slot="dialog-content"
           data-state-slot="dialog"
           className={cn(
-            // The canvas tone, like the Settings window: in themes whose
-            // elevated surface is lighter, a dialog would otherwise read as a
-            // grey slab over the dimmed app.
-            "oc-window-corners relative pointer-events-auto outline-none bg-background flex flex-col w-full max-w-lg max-h-full gap-4 border p-5 oc-modal-shadow overflow-y-auto pwa-dialog-content origin-center",
+            "relative pointer-events-auto outline-none bg-background flex flex-col w-full max-w-lg max-h-full gap-4 p-5 oc-modal-shadow overflow-y-auto overlay-scrollbar-target origin-center",
+            !fullWindow && "oc-window-corners pwa-dialog-content",
             "transition-all duration-150 ease-out",
             "data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]",
             "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",
-            // When a nested dialog opens on top of this one, dim this popup the
-            // same way the page behind a dialog is dimmed (Base UI marks the
-            // parent popup with data-nested-dialog-open). Brightness dims the
-            // whole popup uniformly — including scrolled content — and animates
-            // via the existing transition-all.
             "data-[nested-dialog-open]:brightness-[0.55] dark:data-[nested-dialog-open]:brightness-[0.4]",
             className
           )}
           {...props}
         >
-        {/* A dialog opened from a docked panel floats over the app, off the
-            panel's page colour. */}
         <DockedPanelSurfaceContext.Provider value={false}>{children}</DockedPanelSurfaceContext.Provider>
         {showCloseButton && (
           <BaseDialog.Close
             data-slot="dialog-close"
-            className="ring-offset-background focus-visible:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2.5 inset-e-2.5 z-10 inline-flex size-7 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+            className="ring-offset-background focus-visible:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2.5 inset-e-2.5 z-10 inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <Icon name="close"/>
             <span className="sr-only">{t('dialog.common.actions.close')}</span>
           </BaseDialog.Close>
         )}
         </BaseDialog.Popup>
+        <PopupOverlayScrollbar scroller={popup} />
       </div>
     </DialogPortal>
   )

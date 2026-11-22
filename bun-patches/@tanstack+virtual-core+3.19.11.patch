@@ -1,0 +1,52 @@
+diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
+index c69f792d6293ba97a38faf47aa3f9236127d2291..677c3b26dfc77303c8a42e557b49d3d620bed1e2 100644
+--- a/dist/cjs/index.cjs
++++ b/dist/cjs/index.cjs
+@@ -805,7 +805,10 @@ class Virtualizer {
+         if (lanes === 1) {
+           const need = count * 2;
+           let flat = (_a = this._singleLaneMeasurements) == null ? void 0 : _a.flat;
+-          if (!flat || flat.length < need) {
++          // A full rebuild gets a fresh array: a view handed out earlier reads
++          // the entries nobody touched yet from this one, so rewriting it in
++          // place made an older layout answer with the new layout's numbers.
++          if (!flat || flat.length < need || min === 0) {
+             const next = new Float64Array(need);
+             if (flat && min > 0) next.set(flat.subarray(0, min * 2));
+             flat = next;
+@@ -919,6 +922,9 @@ class Virtualizer {
+           this.range = null;
+           return null;
+         }
++        // Until the element reports a clamped position (the list shrank, a
++        // rubber-band bounce), the offset can sit past the last row, which
++        // would leave only that row in the range.
+         const maxScrollOffset = Math.max(listEnd - outerSize, 0);
+         this.range = calculateRangeImpl(
+           measurements,
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+index 514c03fd58092f6c6c1ce971c500f114803fc5c3..3b16966f03acf5833c701e01a54f7322d8549454 100644
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -804,7 +804,10 @@ class Virtualizer {
+         if (lanes === 1) {
+           const need = count * 2;
+           let flat = (_a = this._singleLaneMeasurements) == null ? void 0 : _a.flat;
+-          if (!flat || flat.length < need) {
++          // A full rebuild gets a fresh array: a view handed out earlier reads
++          // the entries nobody touched yet from this one, so rewriting it in
++          // place made an older layout answer with the new layout's numbers.
++          if (!flat || flat.length < need || min === 0) {
+             const next = new Float64Array(need);
+             if (flat && min > 0) next.set(flat.subarray(0, min * 2));
+             flat = next;
+@@ -918,6 +921,9 @@ class Virtualizer {
+           this.range = null;
+           return null;
+         }
++        // Until the element reports a clamped position (the list shrank, a
++        // rubber-band bounce), the offset can sit past the last row, which
++        // would leave only that row in the range.
+         const maxScrollOffset = Math.max(listEnd - outerSize, 0);
+         this.range = calculateRangeImpl(
+           measurements,

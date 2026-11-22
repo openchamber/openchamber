@@ -113,6 +113,7 @@ mock.module('@/lib/smallModel', () => ({
 
 mock.module('@/lib/goalWriter', () => ({
   requestGoalSpec: async () => ({ ok: false, message: 'writer unused in these tests' }),
+  buildGoalIntroReminder: () => '',
 }));
 
 mock.module('@/lib/i18n', () => ({

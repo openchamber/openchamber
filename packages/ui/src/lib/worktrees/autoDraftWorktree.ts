@@ -24,7 +24,8 @@ import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { getGitBranches } from '@/lib/gitApi';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { normalizePath } from '@/lib/pathNormalization';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
+import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import {
@@ -193,7 +194,7 @@ const pullRequestWorktreeArgs = async ({ source, target, sourceControl, generate
   });
   if (!changeRequest) {
     throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.chatInput.autoWorktree.source.notFound', {
-      reference: formatChangeRequestReference(source.context.provider, source.number),
+      reference: formatChangeRequestReference(readSourceControlProvider(source.context.provider), source.number),
     }));
   }
   const config = resolvePrWorktreeConfig(changeRequest, source.context, branches.branches ?? {});

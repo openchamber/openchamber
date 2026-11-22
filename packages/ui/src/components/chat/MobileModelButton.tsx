@@ -5,6 +5,9 @@ import { getModelDisplayName } from './mobileControlsUtils';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
+import { Icon } from '@/components/icon/Icon';
+import { useModelMissingFromCatalog } from './agentAvailability';
+import { useChatSessionSelection } from './chatColumnSession';
 
 interface MobileModelButtonProps {
     onOpenModel: () => void;
@@ -22,15 +25,16 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
     const modelLabel = isAuto
         ? t('chat.modelControls.autoModel')
         : getModelDisplayName(currentProvider, currentModelId, t('chat.modelControls.selectModel'));
+    const columnDirectory = useChatSessionSelection().directory ?? undefined;
+    const modelUnavailable = useModelMissingFromCatalog(model === undefined ? undefined : columnDirectory, currentProviderId, currentModelId);
+    const unavailableText = modelUnavailable
+        ? t('chat.modelControls.modelUnavailable', { model: modelLabel })
+        : undefined;
 
     return (
         <button
             type="button"
             onClick={onOpenModel}
-            // Same guard as PermissionAutoAcceptButton/MobileAgentButton: block
-            // the focus transfer so the tap doesn't dismiss the keyboard. With
-            // interactive-widget=resizes-content (Android), the keyboard-close
-            // relayout moves this button mid-tap and the click never lands.
             onMouseDown={(event) => event.preventDefault()}
             onPointerDownCapture={(event) => {
                 if (event.pointerType === 'touch') {
@@ -38,16 +42,19 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
                 }
             }}
             className={cn(
-                'inline-flex h-[26px] min-h-0 min-w-0 items-stretch',
+                'inline-flex h-9 -my-[5px] min-h-0 min-w-0 items-stretch',
                 'rounded-lg',
                 'typography-micro font-medium text-foreground/80',
                 'focus:outline-none hover:bg-[var(--interactive-hover)]',
                 className
             )}
-            title={modelLabel}
+            title={unavailableText ?? modelLabel}
+            aria-label={unavailableText}
         >
             <span className="flex h-full w-full min-w-0 items-center gap-1">
-                {currentProviderId && !isAuto ? (
+                {unavailableText ? (
+                    <Icon name="error-warning" className="size-4 flex-shrink-0 text-[var(--status-warning)]" />
+                ) : currentProviderId && !isAuto ? (
                     <ProviderLogo providerId={currentProviderId} className="size-4 flex-shrink-0" />
                 ) : null}
                 <span className="truncate">{modelLabel}</span>

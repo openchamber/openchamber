@@ -66,27 +66,27 @@ const isKeptByUser = (session) => {
 
 /**
  * @param {object} options
- * @param {{ archive: (ids: string[]) => Promise<{ archived: Array<{ id: string }>, failedIds: string[] }> }} options.archiveStore
- *   The archive store from `./archive-store.js`; the only write path.
+ * @param {{ archive: (ids: string[]) => Promise<{ archived: Array<{ id: string, archivedAt: number }>, failedIds: string[] }>, isArchived?: (id: string) => Promise<boolean> }} options.archiveStore
+ *   The archive write path (the session archive, which records it in OpenCode); the only write path.
  * @param {(options?: { revalidate?: boolean }) => Promise<Array<object>>} options.listSessions
  *   Resolves the current live session records (`{ id, time: { updated, created }, time.archived? }`).
  *   The pre-commit revalidation calls it with `{ revalidate: true }`: a provider whose
  *   reads are stateful (a rotating window over a large history) must then re-read the
  *   same batch the candidates came from, not the next one.
- * @param {(sessions: Array<object>) => Promise<Map<string, unknown> | Record<string, unknown> | null>} [options.getSessionStatuses]
+ * @param {((sessions: Array<object>) => Promise<Map<string, unknown> | Record<string, unknown> | null>) | null} [options.getSessionStatuses]
  *   Resolves the OpenCode status per session id (`{ type: 'idle' | 'busy' | 'retry', ... }`
  *   or the type string itself). When absent, a record's own `status` field is used;
  *   a session with no status from either source is never reaped. Resolving `null`
  *   means the statuses could not be read: only record-carried statuses are used.
- * @param {(session: object) => Promise<boolean | null>} [options.hasPendingWork]
+ * @param {((session: object) => Promise<boolean | null>) | null} [options.hasPendingWork]
  *   Extra pending-work guard for an otherwise reapable session (e.g. a working
  *   subagent descendant). Only an explicit `false` lets the reap proceed:
  *   `true` and `null` (unknown) both keep the session live.
- * @param {() => Promise<Set<string> | null>} [options.getProtectedSessionIds]
+ * @param {(() => Promise<Set<string> | null>) | null} [options.getProtectedSessionIds]
  *   Resolves the ids that must never be reaped (the targets of enabled
  *   scheduled tasks). Resolving `null` — or rejecting — means the set could
  *   not be read, and the sweep then reaps nothing at all.
- * @param {(archived: Array<{ id: string, archivedAt: number }>) => void} [options.onArchived]
+ * @param {((archived: Array<{ id: string, archivedAt: number }>) => void) | null} [options.onArchived]
  *   Called with the entries a sweep actually archived, so the caller can
  *   publish the same archive transition the interactive archive path emits.
  * @param {number} [options.maxIdleAgeMs] Idle threshold; defaults to IDLE_SESSION_MAX_AGE_MS.

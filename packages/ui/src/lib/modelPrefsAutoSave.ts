@@ -13,6 +13,7 @@ type ModelPrefsPayload = {
   favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
   modelDefaultVariants: Record<string, string>;
+  lastUsedEfforts: Record<string, string | null>;
   modelDefaultVariantLocks: string[];
   customProviderIcons: Record<string, CustomProviderIcon>;
 };
@@ -43,6 +44,13 @@ const recentEffortsEqual = (a: Record<string, string[]>, b: Record<string, strin
   return aKeys.every((key) => Array.isArray(b[key]) && stringsEqual(a[key], b[key]));
 };
 
+const lastUsedEffortsEqual = (a: Record<string, string | null>, b: Record<string, string | null>): boolean => {
+  if (a === b) return true;
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && a[key] === b[key]);
+};
+
 const customProviderIconsEqual = (a: Record<string, CustomProviderIcon>, b: Record<string, CustomProviderIcon>): boolean => {
   if (a === b) return true;
   const keys = Object.keys(a);
@@ -60,6 +68,7 @@ const snapshotModelPrefs = (): ModelPrefsPayload => {
     favoriteAgents: state.favoriteAgents,
     recentEfforts: state.recentEfforts,
     modelDefaultVariants: state.modelDefaultVariants,
+    lastUsedEfforts: state.lastUsedEfforts,
     modelDefaultVariantLocks: state.modelDefaultVariantLocks,
     customProviderIcons: state.customProviderIcons,
   };
@@ -77,6 +86,7 @@ const modelPrefsEqual = (a: ModelPrefsPayload, b: ModelPrefsPayload): boolean =>
     Object.keys(a.modelDefaultVariants).length === Object.keys(b.modelDefaultVariants).length
     && Object.entries(a.modelDefaultVariants).every(([key, value]) => b.modelDefaultVariants[key] === value)
   )) &&
+  lastUsedEffortsEqual(a.lastUsedEfforts, b.lastUsedEfforts) &&
   stringsEqual(a.modelDefaultVariantLocks, b.modelDefaultVariantLocks) &&
   customProviderIconsEqual(a.customProviderIcons, b.customProviderIcons)
 );
@@ -90,6 +100,7 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   favoriteAgents: prefs.favoriteAgents.slice(),
   recentEfforts: Object.fromEntries(Object.entries(prefs.recentEfforts).map(([key, variants]) => [key, variants.slice()])),
   modelDefaultVariants: { ...prefs.modelDefaultVariants },
+  lastUsedEfforts: { ...prefs.lastUsedEfforts },
   modelDefaultVariantLocks: prefs.modelDefaultVariantLocks.slice(),
   customProviderIcons: { ...prefs.customProviderIcons },
 });
@@ -127,6 +138,7 @@ export const startModelPrefsAutoSave = () => {
       favoriteAgents: state.favoriteAgents,
       recentEfforts: state.recentEfforts,
       modelDefaultVariants: state.modelDefaultVariants,
+      lastUsedEfforts: state.lastUsedEfforts,
       modelDefaultVariantLocks: state.modelDefaultVariantLocks,
       customProviderIcons: state.customProviderIcons,
     };
@@ -139,20 +151,17 @@ export const startModelPrefsAutoSave = () => {
       favoriteAgents: prevState.favoriteAgents,
       recentEfforts: prevState.recentEfforts,
       modelDefaultVariants: prevState.modelDefaultVariants,
+      lastUsedEfforts: prevState.lastUsedEfforts,
       modelDefaultVariantLocks: prevState.modelDefaultVariantLocks,
       customProviderIcons: prevState.customProviderIcons,
     };
     if (modelPrefsEqual(next, prev)) {
       return;
     }
-    // Adopted from the server by the settings sync: that is the new baseline,
-    // not a change of this window's to send back.
     if (isApplyingServerSettings()) {
       lastSent = cloneModelPrefs(next);
       return;
     }
-    // updateDesktopSettings owns the shared debounce and lifecycle flush, so
-    // the change is queued immediately and cannot be lost on a quick reload.
     flush();
   });
 

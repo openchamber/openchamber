@@ -34,6 +34,15 @@
     "opencodeBinary": {
       "scope": "instance"
     },
+    "useGlobalOpenCodeService": {
+      "scope": "instance"
+    },
+    "serverUpdateChannel": {
+      "scope": "instance",
+      "surfaces": [
+        "web"
+      ]
+    },
     "projects": {
       "scope": "instance"
     },
@@ -63,6 +72,12 @@
       ]
     },
     "desktopMinimizeToTrayEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopUpdateChannel": {
       "scope": "instance",
       "surfaces": [
         "desktop"
@@ -176,13 +191,43 @@
     "agentRenderToolEnabled": {
       "scope": "instance"
     },
-    "agentToolsCodeMode": {
+    "agentUsageToolEnabled": {
+      "scope": "instance"
+    },
+    "agentTerminalToolEnabled": {
+      "scope": "instance"
+    },
+    "agentImageToolEnabled": {
+      "scope": "instance"
+    },
+    "agentImageModel": {
+      "scope": "instance"
+    },
+    "agentSecretToolEnabled": {
       "scope": "instance"
     },
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
+    "agentMemoryDreamingEnabled": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingModel": {
+      "scope": "instance"
+    },
+    "agentMemoryDreamingVariant": {
+      "scope": "instance"
+    },
     "agentKnowledgeToolEnabled": {
+      "scope": "instance"
+    },
+    "agentWorkflowToolEnabled": {
+      "scope": "instance"
+    },
+    "agentWorkflowAutoApprove": {
+      "scope": "instance"
+    },
+    "agentWorkflowAutoApproveLeads": {
       "scope": "instance"
     },
     "isolatedSpacesEnabled": {
@@ -195,6 +240,14 @@
       "scope": "instance"
     },
     "agentMemoryFeatureAvailable": {
+      "scope": "instance",
+      "computed": true
+    },
+    "agentWorkflowFeatureAvailable": {
+      "scope": "instance",
+      "computed": true
+    },
+    "overviewFeatureAvailable": {
       "scope": "instance",
       "computed": true
     },
@@ -218,10 +271,16 @@
     "sessionRetentionOnlyArchived": {
       "scope": "instance"
     },
+    "sessionRetentionIncludeInWork": {
+      "scope": "instance"
+    },
     "sessionRetentionAction": {
       "scope": "instance"
     },
     "mergedWorktreeCleanupEnabled": {
+      "scope": "instance"
+    },
+    "worktreeArchiveOnDoneEnabled": {
       "scope": "instance"
     },
     "terminalShell": {
@@ -239,10 +298,16 @@
     "dictationEnabled": {
       "scope": "profile"
     },
+    "dictationAutoSend": {
+      "scope": "profile"
+    },
     "sttProvider": {
       "scope": "instance"
     },
     "sttServerUrl": {
+      "scope": "instance"
+    },
+    "sttEndpointPath": {
       "scope": "instance"
     },
     "sttModel": {
@@ -254,10 +319,19 @@
     "sttLanguage": {
       "scope": "profile"
     },
+    "sttPrompt": {
+      "scope": "profile"
+    },
+    "sttCorrectTranscript": {
+      "scope": "profile"
+    },
     "tunnelProvider": {
       "scope": "instance"
     },
     "tunnelMode": {
+      "scope": "instance"
+    },
+    "tunnelHttpsPort": {
       "scope": "instance"
     },
     "tunnelBootstrapTtlMs": {
@@ -334,6 +408,9 @@
     "workStatusSectionOrder": {
       "scope": "profile"
     },
+    "workStatusSectionOrderExplicit": {
+      "scope": "profile"
+    },
     "workStatusPanelEnabled": {
       "scope": "profile"
     },
@@ -382,6 +459,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "chatWidth": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "wideChatLayoutEnabled": {
       "scope": "profile",
       "perSurface": true
@@ -399,6 +480,9 @@
       "scope": "profile"
     },
     "copyMessagesAsPlainText": {
+      "scope": "profile"
+    },
+    "selectionApprovalText": {
       "scope": "profile"
     },
     "showTurnChangedFiles": {
@@ -449,6 +533,9 @@
     "autoSaveEnabled": {
       "scope": "profile"
     },
+    "fileEditorWrapLines": {
+      "scope": "profile"
+    },
     "confirmFileTreeMove": {
       "scope": "profile"
     },
@@ -478,12 +565,33 @@
         "desktop"
       ]
     },
+    "agentBrowserSharesLogins": {
+      "scope": "profile",
+      "surfaces": [
+        "desktop"
+      ]
+    },
     "openTrackerLinksOnBoard": {
       "scope": "profile",
       "surfaces": [
         "web",
         "desktop",
         "mobile"
+      ]
+    },
+    "terminalCloseOnExit": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "terminalOpenOnProjectAction": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
       ]
     },
     "questionTimeoutMinutes": {
@@ -518,6 +626,13 @@
         "vscode"
       ]
     },
+    "sessionTabsPerWorkspace": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
+      ]
+    },
     "allowPromptingSubagentSessions": {
       "scope": "profile"
     },
@@ -530,13 +645,16 @@
     "enterToSendConfigured": {
       "scope": "profile"
     },
-    "persistChatDraft": {
+    "mobileReturnKeySends": {
       "scope": "profile"
     },
     "largeTextPasteBehavior": {
       "scope": "profile"
     },
     "agentTerminalsPlacement": {
+      "scope": "profile"
+    },
+    "documentAttachBehavior": {
       "scope": "profile"
     },
     "savePastedImagesAsFiles": {
@@ -570,6 +688,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "chatFontSize": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "terminalFontSize": {
       "scope": "profile",
       "perSurface": true
@@ -588,6 +710,9 @@
       "scope": "profile"
     },
     "customMonoFont": {
+      "scope": "profile"
+    },
+    "uiFontWeight": {
       "scope": "profile"
     },
     "padding": {
@@ -610,13 +735,37 @@
     "defaultAgent": {
       "scope": "profile"
     },
+    "chatsDefaultModel": {
+      "scope": "profile"
+    },
+    "chatsDefaultVariant": {
+      "scope": "profile"
+    },
+    "chatsDefaultAgent": {
+      "scope": "profile"
+    },
     "smallModelUseDefault": {
       "scope": "profile"
     },
     "smallModelOverride": {
       "scope": "profile"
     },
+    "smallModelVariant": {
+      "scope": "profile"
+    },
     "walkthroughModelOverride": {
+      "scope": "profile"
+    },
+    "walkthroughModelVariant": {
+      "scope": "profile"
+    },
+    "fallbackModel": {
+      "scope": "profile"
+    },
+    "fallbackVariant": {
+      "scope": "profile"
+    },
+    "accountSwitchProviders": {
       "scope": "profile"
     },
     "zenModel": {
@@ -632,6 +781,9 @@
       "scope": "profile"
     },
     "customProviderIcons": {
+      "scope": "profile"
+    },
+    "customProviderLogos": {
       "scope": "profile"
     },
     "recentModels": {
@@ -650,6 +802,9 @@
       "scope": "profile"
     },
     "modelDefaultVariants": {
+      "scope": "profile"
+    },
+    "lastUsedEfforts": {
       "scope": "profile"
     },
     "modelDefaultVariantLocks": {
@@ -821,6 +976,9 @@
     "notifyOnCompletion": {
       "scope": "profile"
     },
+    "notifyOnPullRequests": {
+      "scope": "profile"
+    },
     "notifyOnError": {
       "scope": "profile"
     },
@@ -911,11 +1069,23 @@
       "scope": "device",
       "local": true
     },
+    "sidebarFoldedForExpandedZone": {
+      "scope": "device",
+      "local": true
+    },
     "sidebarWidth": {
       "scope": "device",
       "local": true
     },
     "contextPanelByDirectory": {
+      "scope": "device",
+      "local": true
+    },
+    "contextZoneSizes": {
+      "scope": "device",
+      "local": true
+    },
+    "contextZoneExpandedChatSizes": {
       "scope": "device",
       "local": true
     },
@@ -932,6 +1102,10 @@
       "local": true
     },
     "mobileWorkspaceHiddenTabs": {
+      "scope": "device",
+      "local": true
+    },
+    "mobileWorkStatusHiddenSections": {
       "scope": "device",
       "local": true
     },
@@ -1020,6 +1194,14 @@
       "local": true
     },
     "alwaysShowScrollbars": {
+      "scope": "device",
+      "local": true
+    },
+    "mobileKeepScreenAwake": {
+      "scope": "device",
+      "local": true
+    },
+    "questionsInChat": {
       "scope": "device",
       "local": true
     },

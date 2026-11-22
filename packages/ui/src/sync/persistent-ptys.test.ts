@@ -16,6 +16,7 @@ import {
 const terminal = (id: string, sessionID: string, overrides: Partial<PersistentPtyInfo> = {}): PersistentPtyInfo => ({
   id,
   title: `title ${id}`,
+  userTitle: null,
   command: "bash",
   args: [],
   cwd: "/repo",

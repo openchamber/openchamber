@@ -54,7 +54,6 @@ const parseGuestServiceProxyResponse = async (
 export const proxyGuestServiceRequest = async (
   guestId: string,
   request: GuestRequest,
-  /** The shared-surface viewer open in this window (`surface-viewers.ts`). */
   viewerId?: string,
 ): Promise<GuestRequestProxyResult> => {
   try {
@@ -84,6 +83,20 @@ export const loadGuestServiceStatus = async (
     return { ok: true, result: parsed.data };
   } catch {
     return { ok: false, code: 'HOST_REJECTED', message: 'Could not read service status.' };
+  }
+};
+
+const serviceFailureSchema = z.object({
+  failure: z.object({ at: z.number(), output: z.string() }).nullable(),
+});
+
+export const loadGuestServiceFailure = async (guestId: string): Promise<{ at: number; output: string } | null> => {
+  try {
+    const response = await runtimeFetch(`/api/guests/${guestId}/service/failure`);
+    if (!response.ok) return null;
+    return serviceFailureSchema.safeParse(await response.json().catch(() => null)).data?.failure ?? null;
+  } catch {
+    return null;
   }
 };
 

@@ -55,8 +55,7 @@ const MESSAGE_STREAM_TRANSPORT_OPTIONS: Array<{ id: 'auto' | 'ws' | 'sse'; label
   },
 ];
 
-/** Files and the editor: keymap, tree side, saving, hidden files, preview. */
-const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
+const FilesAndEditorSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const isVSCode = isVSCodeRuntime();
@@ -87,7 +86,7 @@ const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
   const showTreeControls = !isVSCode && !isMobile;
 
   return (
-    <SettingsSection title={t('settings.layout.general.files.title')} divider={divider} contentClassName="space-y-4">
+    <SettingsSection title={t('settings.layout.general.files.title')} contentClassName="space-y-4">
       <div>
         <SettingsFieldRow
           label={t('settings.openchamber.visual.field.fileEditorKeymap')}
@@ -115,6 +114,7 @@ const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
             className="pt-1 pb-2"
           >
             <Textarea
+              dir="ltr"
               value={fileEditorVimMappings}
               onChange={(event) => setFileEditorVimMappings(event.target.value)}
               placeholder="inoremap jk <Esc>"
@@ -182,7 +182,6 @@ const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
   );
 };
 
-/** The built-in terminal: which shell, login mode, quick keys. Not in VS Code. */
 const TerminalSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -195,6 +194,10 @@ const TerminalSection: React.FC = () => {
   const agentTerminalsPlacement = useUIStore((state) => state.agentTerminalsPlacement);
   const setAgentTerminalsPlacement = useUIStore((state) => state.setAgentTerminalsPlacement);
   const setShowTerminalQuickKeysOnDesktop = useUIStore((state) => state.setShowTerminalQuickKeysOnDesktop);
+  const terminalCloseOnExit = useUIStore((state) => state.terminalCloseOnExit);
+  const setTerminalCloseOnExit = useUIStore((state) => state.setTerminalCloseOnExit);
+  const terminalOpenOnProjectAction = useUIStore((state) => state.terminalOpenOnProjectAction);
+  const setTerminalOpenOnProjectAction = useUIStore((state) => state.setTerminalOpenOnProjectAction);
   const [availableTerminalShells, setAvailableTerminalShells] = React.useState<TerminalShellOption[]>([]);
   const [terminalShellRuntimeEpoch, setTerminalShellRuntimeEpoch] = React.useState(0);
 
@@ -242,7 +245,11 @@ const TerminalSection: React.FC = () => {
       >
         <Select value={terminalShell} onValueChange={(value) => { if (isTerminalShell(value)) setTerminalShell(value); }}>
           <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
-            <SelectValue />
+            <SelectValue>
+              {terminalShell === 'auto'
+                ? t('settings.openchamber.visual.option.terminalShell.auto')
+                : terminalShellOptions.find((shell) => shell.id === terminalShell)?.name ?? terminalShell}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="auto">{t('settings.openchamber.visual.option.terminalShell.auto')}</SelectItem>
@@ -267,7 +274,6 @@ const TerminalSection: React.FC = () => {
           ]}
         />
       </SettingsFieldRow>
-      {terminalShellSupportsLogin || !isMobile ? (
         <div className={SETTINGS_OPTION_STACK_CLASS}>
           {terminalShellSupportsLogin ? (
             <SettingsCheckboxRow
@@ -278,8 +284,26 @@ const TerminalSection: React.FC = () => {
               settingsItem="appearance.terminal-login-shell"
             />
           ) : null}
+        <SettingsCheckboxRow
+          checked={terminalCloseOnExit}
+          onChange={setTerminalCloseOnExit}
+          label={t('settings.openchamber.visual.field.terminalCloseOnExit')}
+          ariaLabel={t('settings.openchamber.visual.field.terminalCloseOnExit')}
+          info={t('settings.openchamber.visual.field.terminalCloseOnExitInfo')}
+          settingsItem="appearance.terminal-close-on-exit"
+        />
           {!isMobile ? (
             <SettingsCheckboxRow
+            checked={terminalOpenOnProjectAction}
+            onChange={setTerminalOpenOnProjectAction}
+            label={t('settings.openchamber.visual.field.terminalOpenOnProjectAction')}
+            ariaLabel={t('settings.openchamber.visual.field.terminalOpenOnProjectAction')}
+            info={t('settings.openchamber.visual.field.terminalOpenOnProjectActionInfo')}
+            settingsItem="appearance.terminal-open-on-project-action"
+          />
+        ) : null}
+        {!isMobile ? (
+          <SettingsCheckboxRow
               checked={showTerminalQuickKeysOnDesktop}
               onChange={setShowTerminalQuickKeysOnDesktop}
               label={t('settings.openchamber.visual.field.terminalQuickKeys')}
@@ -292,17 +316,17 @@ const TerminalSection: React.FC = () => {
             />
           ) : null}
         </div>
-      ) : null}
     </SettingsSection>
   );
 };
 
-/** How the window behaves: header tabs, panel motion, where links open. */
 const PanelsAndLinksSection: React.FC = () => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
   const setSessionTabsEnabled = useUIStore((state) => state.setSessionTabsEnabled);
+  const sessionTabsPerWorkspace = useUIStore((state) => state.sessionTabsPerWorkspace);
+  const setSessionTabsPerWorkspace = useUIStore((state) => state.setSessionTabsPerWorkspace);
   const layoutAnimations = useUIStore((state) => state.layoutAnimations);
   const setLayoutAnimations = useUIStore((state) => state.setLayoutAnimations);
   const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel);
@@ -311,6 +335,8 @@ const PanelsAndLinksSection: React.FC = () => {
   const setLiveBrowserTabLimit = useUIStore((state) => state.setLiveBrowserTabLimit);
   const openTrackerLinksOnBoard = useUIStore((state) => state.openTrackerLinksOnBoard);
   const setOpenTrackerLinksOnBoard = useUIStore((state) => state.setOpenTrackerLinksOnBoard);
+  const alwaysShowScrollbars = useUIStore((state) => state.alwaysShowScrollbars === true);
+  const setAlwaysShowScrollbars = useUIStore((state) => state.setAlwaysShowScrollbars);
 
   return (
     <SettingsSection title={t('settings.layout.general.panels.title')} contentClassName={SETTINGS_OPTION_STACK_CLASS}>
@@ -322,6 +348,16 @@ const PanelsAndLinksSection: React.FC = () => {
           ariaLabel={t('settings.openchamber.visual.field.sessionTabsAria')}
           info={t('settings.openchamber.visual.field.sessionTabsInfo')}
           settingsItem="appearance.session-tabs"
+        />
+      ) : null}
+      {!isMobile && sessionTabsEnabled ? (
+        <SettingsCheckboxRow
+          checked={sessionTabsPerWorkspace}
+          onChange={setSessionTabsPerWorkspace}
+          label={t('settings.openchamber.visual.field.sessionTabsPerWorkspace')}
+          ariaLabel={t('settings.openchamber.visual.field.sessionTabsPerWorkspaceAria')}
+          info={t('settings.openchamber.visual.field.sessionTabsPerWorkspaceInfo')}
+          className="ps-6"
         />
       ) : null}
       {!isMobile ? (
@@ -344,6 +380,13 @@ const PanelsAndLinksSection: React.FC = () => {
           settingsItem="appearance.open-links-in-browser-panel"
         />
       ) : null}
+      <SettingsCheckboxRow
+        checked={alwaysShowScrollbars}
+        onChange={setAlwaysShowScrollbars}
+        label={t('settings.openchamber.visual.field.alwaysShowScrollbars')}
+        info={t('settings.openchamber.visual.field.alwaysShowScrollbarsHint')}
+        settingsItem="appearance.scrollbars"
+      />
       <SettingsCheckboxRow
         checked={openTrackerLinksOnBoard}
         onChange={setOpenTrackerLinksOnBoard}
@@ -379,27 +422,24 @@ const PanelsAndLinksSection: React.FC = () => {
   );
 };
 
-/**
- * The workspace part of General: files and the editor, the terminal, and how
- * panels and links behave. VS Code keeps only the editor settings it applies.
- */
-export const GeneralWorkspaceSettings: React.FC<{
-  /** The page opens on these sections (no desktop app section above them). */
-  firstSection: boolean;
-}> = ({ firstSection }) => {
-  const isVSCode = isVSCodeRuntime();
+export const GeneralInterfaceSettings: React.FC = () => {
   const { isMobile } = useDeviceInfo();
+  if (isVSCodeRuntime()) return null;
   return (
     <>
-      <FilesAndEditorSection divider={!firstSection} />
-      {isVSCode ? null : <TerminalSection />}
-      {isVSCode ? null : <PanelsAndLinksSection />}
+      <PanelsAndLinksSection />
       {isMobile ? <MobileWorkspaceTabsSettings /> : null}
     </>
   );
 };
 
-/** The last sections of General: how messages stream in, and usage reports. */
+export const GeneralFilesAndTerminalSettings: React.FC = () => (
+  <>
+    <FilesAndEditorSection />
+    {isVSCodeRuntime() ? null : <TerminalSection />}
+  </>
+);
+
 export const GeneralConnectionAndPrivacySettings: React.FC = () => {
   const { t } = useI18n();
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
@@ -413,7 +453,6 @@ export const GeneralConnectionAndPrivacySettings: React.FC = () => {
     void updateDesktopSettings({ messageStreamTransport: mode });
   }, [setMessageStreamTransport]);
 
-  // Sync reportUsage changes to server settings
   const handleReportUsageChange = React.useCallback((enabled: boolean) => {
     setReportUsage(enabled);
     void updateDesktopSettings({ reportUsage: enabled });

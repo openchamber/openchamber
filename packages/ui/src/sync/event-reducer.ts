@@ -9,15 +9,15 @@ import {
   type ToolPart,
 } from "@/lib/opencode/model"
 import { Binary } from "./binary"
+import { withSessionMetadata } from "@/lib/opencode/projection"
 import { withoutUnshownResult } from "@/lib/opencode/toolContentShells"
 import type { State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { syncDebug } from "./debug"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 import {
-  compareMessagesChronologically,
   findMessageIndex,
-  insertMessageChronologically,
+  insertMessageInEventOrder,
 } from "./message-ordering"
 
 type DedupeMetadata = {
@@ -38,11 +38,6 @@ function appendNonOverlappingDelta(existingValue: string | undefined, delta: str
   return existingValue + delta
 }
 
-/**
- * A full text snapshot that extends or repeats the streamed text means the
- * next delta may overlap it; mark the field so the delta appends only what is
- * new.
- */
 function getUpdatedDeltaFields(previous: Part, next: Part): string[] {
   if (previous.type !== next.type) return []
   if (next.type !== "text" && next.type !== "reasoning") return []
@@ -56,10 +51,6 @@ function getUpdatedDeltaFields(previous: Part, next: Part): string[] {
   return []
 }
 
-/**
- * A text or reasoning `ended` snapshot carries only its own timestamp as
- * `start`; the start streamed earlier is the real one and stays.
- */
 function withStreamedStart(previous: Part, next: Part): Part {
   if (previous.displayTime && next.displayTime) {
     next = { ...next, displayTime: { ...previous.displayTime, ...next.displayTime } }
@@ -118,9 +109,6 @@ function areJsonEquivalent<T extends object>(left: T | undefined, right: T | und
   }
 }
 
-// ---------------------------------------------------------------------------
-// Global events
-// ---------------------------------------------------------------------------
 
 export type GlobalEventResult = {
   type: "refresh"
@@ -138,6 +126,7 @@ export type SessionMaterializationReason =
   | "child-session-discovered"
   | "ensure-session-messages"
   | "stream-reconnect"
+  | "stream-replayed"
   | "transport-switch"
   | "stale-status-resync"
   | "settled-running-tool"
@@ -160,7 +149,6 @@ function hasMessage(draft: State, sessionID: string | undefined, messageID: stri
   return messages.some((message) => message.id === messageID)
 }
 
-/** Index of the compaction still running in a session (the newest one), or -1. */
 const findRunningCompactionIndex = (messages: readonly Message[]): number => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
@@ -179,12 +167,9 @@ export function reduceGlobalEvent(event: SyncEvent): GlobalEventResult {
   return null
 }
 
-// ---------------------------------------------------------------------------
-// Patch application
-// ---------------------------------------------------------------------------
 
 function applySessionPatch(session: Session, patch: SessionPatch): Session {
-  const next: Session = { ...session }
+  const next: Session = patch.metadata === undefined ? { ...session } : withSessionMetadata(session, patch.metadata)
   if (patch.title !== undefined) next.title = patch.title
   if (patch.directory !== undefined) next.directory = patch.directory
   if (patch.projectID !== undefined) next.projectID = patch.projectID
@@ -198,7 +183,6 @@ function applySessionPatch(session: Session, patch: SessionPatch): Session {
   if (patch.revert === null) delete next.revert
   else if (patch.revert !== undefined) next.revert = patch.revert
   if (patch.outcome !== undefined) next.outcome = patch.outcome
-  if (patch.metadata !== undefined) next.metadata = patch.metadata
   if (patch.time) {
     const { archived, ...rest } = patch.time
     next.time = compact({ ...session.time, ...rest, archived: archived === null ? undefined : (archived ?? session.time.archived) })
@@ -212,9 +196,6 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
     if (patch.time) next.time = compact({ ...message.time, ...patch.time })
     if (patch.finish !== undefined) next.finish = patch.finish
     if (patch.error !== undefined) next.error = patch.error
-    // A completion the server reports supersedes the local interruption mark
-    // (`interruptedTurnToolParts`); a turn that really failed arrives with its
-    // own error in the same patch.
     else if (patch.time?.completed !== undefined && message.closedLocally) delete next.error
     if (patch.error !== undefined || patch.time?.completed !== undefined) delete next.closedLocally
     if (patch.cost !== undefined) next.cost = patch.cost
@@ -236,9 +217,15 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
     return next
   }
   if (patch.time?.created !== undefined) {
-    return { ...message, time: { ...message.time, created: patch.time.created } }
+    const next = { ...message, time: { ...message.time, created: patch.time.created } }
+    if (next.role === "synthetic") delete next.pending
+    return next
   }
   return message
+}
+
+function isLocallyMarkedToolState(state: ToolPart["state"]): boolean {
+  return state.status === "error" && state.errorSource === "local"
 }
 
 function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPart {
@@ -259,8 +246,8 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       if (state.status !== "running") return part
       return { ...part, state: { ...state, metadata: transition.metadata } }
     case "success": {
-      if (isFinalToolStatus(state.status)) return part
-      const start = state.status === "running" ? state.time.start : transition.end
+      if (isFinalToolStatus(state.status) && !isLocallyMarkedToolState(state)) return part
+      const start = state.status === "pending" ? transition.end : state.time.start
       const attachments = transition.attachments
       return withoutUnshownResult({
         ...part,
@@ -277,8 +264,8 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       })
     }
     case "failed": {
-      if (isFinalToolStatus(state.status)) return part
-      const start = state.status === "running" ? state.time.start : transition.end
+      if (isFinalToolStatus(state.status) && !isLocallyMarkedToolState(state)) return part
+      const start = state.status === "pending" ? transition.end : state.time.start
       return withoutUnshownResult({
         ...part,
         executed: transition.executed,
@@ -287,6 +274,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
           status: "error",
           input: state.input,
           error: transition.error,
+          errorType: transition.errorType,
           output: transition.output,
           metadata: transition.metadata ?? (state.status === "running" ? state.metadata : undefined),
           time: { start, end: transition.end },
@@ -300,10 +288,6 @@ function findShellMessageIndex(messages: readonly Message[], shellID: string): n
   return messages.findIndex((message) => message.role === "shell" && message.shellID === shellID)
 }
 
-// ---------------------------------------------------------------------------
-// Directory events — mutates draft in place for batching efficiency.
-// Caller MUST pass a mutable copy of State (e.g. structuredClone or spread).
-// ---------------------------------------------------------------------------
 
 export function applyDirectoryEvent(
   draft: State,
@@ -343,8 +327,6 @@ export function applyDirectoryEvent(
         return false
       }
       if (result.found) {
-        // A create echo for a session we already hold (optimistic create, or
-        // a replayed event) must not erase title/usage learned since.
         sessions[result.index] = { ...info, ...sessions[result.index] }
       } else {
         sessions.splice(result.index, 0, info)
@@ -363,7 +345,6 @@ export function applyDirectoryEvent(
       const next = applySessionPatch(sessions[result.index], patch)
       if (shouldSkipStaleSessionEvent(sessions[result.index], next)) return false
 
-      // Archiving removes the session from the live list; its caches go too.
       if (next.time.archived && !sessions[result.index].time.archived) {
         sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, sessionID)
@@ -380,10 +361,6 @@ export function applyDirectoryEvent(
     }
 
     case "session.revert.committed": {
-      // OpenCode deleted the boundary message and everything after it without
-      // per-message removals, so the same range goes here. The loaded window
-      // is always the transcript's tail: a boundary the window does not hold
-      // is older than everything loaded, so a matching marker trims it all.
       const { sessionID, to } = event.properties
       const sessions = draft.session
       const result = Binary.search(sessions, sessionID, (s) => s.id)
@@ -441,7 +418,6 @@ export function applyDirectoryEvent(
 
     case "session.idle":
     case "session.error": {
-      // An error ends the turn; it is not a lasting status.
       const { sessionID } = event.properties
       const status = { type: "idle" } as const
       const wasInvalidated = draft.sessionStatusInvalidated?.[sessionID] === true
@@ -463,9 +439,6 @@ export function applyDirectoryEvent(
         draft.message[info.sessionID] = [info]
         return true
       }
-      // A compaction settles the record that has been running, the way
-      // OpenCode's own message store does: `session.compaction.ended` carries
-      // no input id, so the settled record keeps the running one's identity.
       const runningCompaction = info.role === "compaction" && info.status !== "running"
         ? findRunningCompactionIndex(messages)
         : -1
@@ -478,23 +451,22 @@ export function applyDirectoryEvent(
       }
       const messageIndex = findMessageIndex(messages, info.id)
       if (messageIndex >= 0) {
-        // Skip message replacement if unchanged — preserves reference, avoids re-render
         const existing = messages[messageIndex]
         if (areJsonEquivalent(existing, info)) {
           syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, undefined, undefined)
           return false
         }
         const next = [...messages]
-        if (compareMessagesChronologically(existing, info) === 0) {
+        if (existing.time.created === info.time.created) {
           next[messageIndex] = info
         } else {
           next.splice(messageIndex, 1)
-          insertMessageChronologically(next, info)
+          insertMessageInEventOrder(next, info)
         }
         draft.message[info.sessionID] = next
       } else {
         const next = [...messages]
-        insertMessageChronologically(next, info)
+        insertMessageInEventOrder(next, info)
         draft.message[info.sessionID] = next
       }
       return true
@@ -522,11 +494,11 @@ export function applyDirectoryEvent(
       const updated = applyMessagePatch(existing, patch)
       if (updated === existing || areJsonEquivalent(existing, updated)) return false
       const next = [...messages]
-      if (compareMessagesChronologically(existing, updated) === 0) {
+      if (existing.time.created === updated.time.created) {
         next[messageIndex] = updated
       } else {
         next.splice(messageIndex, 1)
-        insertMessageChronologically(next, updated)
+        insertMessageInEventOrder(next, updated)
       }
       draft.message[sessionID] = next
       return true
@@ -646,7 +618,6 @@ export function applyDirectoryEvent(
       // SAFETY: the marker is only ever set by the snapshot branch above.
       const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
       const shouldDedupe = dedupeFields.includes(field)
-      // Create new Part object + new array so React detects the change
       // SAFETY: same private marker as above on an otherwise unchanged part.
       next[partIndex] = {
         ...existing,
@@ -760,9 +731,6 @@ export function applyDirectoryEvent(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function trimSessions(draft: State) {
   if (draft.session.length <= draft.limit) return
@@ -797,5 +765,10 @@ function blockingSessionsWithAncestors(draft: State): Set<string> {
 
 function cleanupSessionCaches(draft: State, sessionID: string) {
   if (!sessionID) return
+  draft.message = { ...draft.message }
+  draft.part = { ...draft.part }
+  draft.session_status = { ...draft.session_status }
+  draft.permission = { ...draft.permission }
+  draft.form = { ...draft.form }
   dropSessionCaches(draft, [sessionID])
 }

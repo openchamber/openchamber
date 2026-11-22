@@ -303,3 +303,34 @@ describe('theme values written into CSS', () => {
     }
   });
 });
+
+// Components draw these roles at full strength, so each one has to read on
+// its own: secondary text on every surface it sits on, chat markdown on the
+// canvas. A component that needs a quieter step mixes toward the muted text
+// (`oc-title-rest`) rather than fading it below this floor.
+describe('built-in text contrast', () => {
+  test('keeps every text role at 4.5:1 or more on its surfaces', () => {
+    const failures: string[] = [];
+    for (const theme of themes) {
+      const { surface, markdown } = theme.colors;
+      const canvas = surface.background;
+      const pairs: Array<[string, string | undefined, string]> = [
+        ['foreground on canvas', surface.foreground, canvas],
+        ['foreground on sidebar', surface.foreground, surface.muted],
+        ['elevated foreground on elevated', surface.elevatedForeground ?? surface.foreground, surface.elevated],
+        ['muted foreground on canvas', surface.mutedForeground, canvas],
+        ['muted foreground on sidebar', surface.mutedForeground, surface.muted],
+        ['muted foreground on elevated', surface.mutedForeground, surface.elevated],
+        ['link on canvas', markdown?.link, canvas],
+        ['link hover on canvas', markdown?.linkHover, canvas],
+        ['blockquote on canvas', markdown?.blockquote, canvas],
+      ];
+      for (const [role, color, background] of pairs) {
+        if (!color) continue;
+        const ratio = contrastRatio(color, background, canvas) ?? 0;
+        if (ratio < 4.5) failures.push(`${theme.metadata.id}: ${role} ${ratio.toFixed(2)}`);
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+});

@@ -1,4 +1,5 @@
 import { normalizePath } from '@/lib/pathNormalization';
+import { withoutShareLinkKeys } from '@/lib/received-pages/link';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { countSyncPersistenceSerialization } from '@/sync/performance-diagnostics';
 
@@ -40,6 +41,18 @@ export const createChatDraftIdentity = (
   if (!runtimeKey || !normalizedDirectory) return null;
   return { runtimeKey, directory: normalizedDirectory, sessionId };
 };
+
+const WORK_DRAFT_KEY_PREFIX = 'draft:';
+
+export const workDraftComposerKey = (workDraftId: string): string => `${WORK_DRAFT_KEY_PREFIX}${workDraftId}`;
+
+export const workDraftIdOfComposerKey = (sessionId: string | null | undefined): string | null => (
+  sessionId?.startsWith(WORK_DRAFT_KEY_PREFIX) ? sessionId.slice(WORK_DRAFT_KEY_PREFIX.length) : null
+);
+
+export const isNewSessionDraftIdentity = (identity: ChatDraftIdentity): boolean => (
+  identity.sessionId === null || workDraftIdOfComposerKey(identity.sessionId) !== null
+);
 
 export const getChatDraftIdentityKey = (identity: ChatDraftIdentity): string =>
   JSON.stringify([identity.runtimeKey, identity.directory, identity.sessionId]);
@@ -92,12 +105,35 @@ export const readChatDraft = (identity: ChatDraftIdentity | null): ChatDraftSnap
     : { text: '', confirmedMentions: new Set() };
 };
 
+const ownSlotWorkDrafts = new Set<string>();
+
+export const keepWorkDraftOwnSlot = (workDraftId: string): void => {
+  ownSlotWorkDrafts.add(workDraftId);
+};
+
+export const workDraftKeepsOwnSlot = (workDraftId: string | null | undefined): boolean => (
+  Boolean(workDraftId && ownSlotWorkDrafts.has(workDraftId))
+);
+
+export const readChatDraftClaimingFolderDraft = (identity: ChatDraftIdentity | null): ChatDraftSnapshot => {
+  const saved = readChatDraft(identity);
+  const workDraftId = workDraftIdOfComposerKey(identity?.sessionId);
+  if (!identity || workDraftId === null || saved.text || workDraftKeepsOwnSlot(workDraftId)) return saved;
+  const folderIdentity = { ...identity, sessionId: null };
+  const folderDraft = readChatDraft(folderIdentity);
+  if (!folderDraft.text) return saved;
+  writeChatDraft(identity, folderDraft.text, folderDraft.confirmedMentions);
+  clearChatDraft(folderIdentity);
+  return folderDraft;
+};
+
 export const writeChatDraft = (
   identity: ChatDraftIdentity | null,
   text: string,
   confirmedMentions: Iterable<string>,
 ): void => {
   if (!identity) return;
+  text = withoutShareLinkKeys(text);
   const envelope = readEnvelope();
   const key = getChatDraftIdentityKey(identity);
   const mentions = Array.from(new Set(confirmedMentions));

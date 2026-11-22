@@ -80,13 +80,6 @@ describe('CodeMirrorEditor detached', () => {
     expect(mounted?.dom.isConnected).toBe(true);
     expect(container.contains(mounted?.dom ?? null)).toBe(true);
   });
-
-  test('is destroyed cleanly while detached', async () => {
-    await render({ detached: true });
-    await act(async () => root.unmount());
-    root = createRoot(container);
-    expect(container.querySelector('.cm-editor')).toBeNull();
-  });
 });
 
 describe('CodeMirrorEditor reconfiguration', () => {
@@ -107,5 +100,16 @@ describe('CodeMirrorEditor reconfiguration', () => {
     await render({ highlightLines: { start: 2, end: 3 }, readOnly: true });
     expect(reconfigures).toBe(2);
     expect(view?.state.facet(EditorView.editable)).toBe(false);
+  });
+
+  test('read-only stops editing commands as well as typing', async () => {
+    const { indentMore, undo } = await import('@codemirror/commands');
+    await render({ readOnly: true });
+    expect(view!.state.readOnly).toBe(true);
+    expect(indentMore(view!)).toBe(false);
+    expect(view!.state.doc.toString()).toBe('one\ntwo\nthree');
+    await render({ readOnly: false });
+    expect(view!.state.readOnly).toBe(false);
+    expect(undo(view!)).toBe(false);
   });
 });

@@ -12,6 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  contents: read
   issues: write
   pull-requests: write
 
@@ -56,7 +57,32 @@ jobs:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
           private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
 
-      - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
+      - name: Checkout PR checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github
+          persist-credentials: false
+
+      # actions/stale has no exemption by author, so maintainers' pull requests
+      # carry a label it skips. pr-intake sets it when a pull request opens; this
+      # catches what it missed, and a failed read stops the job before it can
+      # close a pull request that lacks the label.
+      - name: Label team pull requests
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const { TEAM_LABEL, isMaintainer } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-checks.cjs`);
+            const { owner, repo } = context.repo;
+            const pulls = await github.paginate(github.rest.pulls.list, { owner, repo, state: "open", per_page: 100 });
+            for (const pull of pulls) {
+              if (pull.labels.some((label) => label.name === TEAM_LABEL.name)) continue;
+              if (await isMaintainer({ github, owner, repo, username: pull.user.login })) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: pull.number, labels: [TEAM_LABEL.name] });
+              }
+            }
+
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
         with:
           repo-token: ${{ steps.app-token.outputs.token || github.token }}
           days-before-stale: 28
@@ -72,8 +98,8 @@ jobs:
             This pull request has been automatically marked as stale because it has
             not had any activity in the last 28 days. Stale pull requests are not
             closed automatically; the label is removed when activity resumes.
-          exempt-issue-labels: pinned,security,help wanted,accepted
-          exempt-pr-labels: pinned,security,help wanted
+          exempt-issue-labels: pinned,security,help wanted,accepted,enhancement,waiting:opencode
+          exempt-pr-labels: pinned,security,help wanted,team
           remove-stale-when-updated: true
           labels-to-add-when-unstale: ""
           operations-per-run: 100

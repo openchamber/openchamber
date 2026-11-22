@@ -48,6 +48,15 @@ const countOrNull = (value) => (Number.isInteger(value) && value >= 0 ? value : 
  *   so a recorded pid is never presented as a live server on signal-0
  *   liveness alone. The own entry (pid === own.pid) does not go through
  *   this check — it is verified by this instance's live lifecycle state.
+ *
+ * @param {{
+ *   registryEntries?: readonly unknown[],
+ *   drainingRecords?: readonly unknown[],
+ *   own?: { pid: number, port: number | null, directory: string | null, version: string | null, ready: boolean, startedAt: string | null, sessionCount: number | null } | null,
+ *   isPidAlive?: (pid: number) => boolean,
+ *   isRecordedPidVerified?: (server: { pid: number, port: number | null }) => boolean,
+ *   now?: number,
+ * }} [options]
  */
 export const buildManagedServersResponse = ({ registryEntries = [], drainingRecords = [], own = null, isPidAlive = () => true, isRecordedPidVerified = () => false, now = Date.now() } = {}) => {
   const byPid = new Map();

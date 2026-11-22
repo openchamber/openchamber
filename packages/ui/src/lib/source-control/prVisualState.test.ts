@@ -4,13 +4,17 @@ import { prVisualStateOf } from './prVisualState';
 
 const open = { state: 'open', draft: false, checksState: 'success', mergeable: true, mergeableState: 'clean' };
 
-test('orange means not good yet: failed checks, a conflict, or checks still running', () => {
+test('orange means something to fix: failed checks or a conflict', () => {
   expect(prVisualStateOf(open)).toBe('open');
   expect(prVisualStateOf({ ...open, checksState: 'failure' })).toBe('blocked');
   expect(prVisualStateOf({ ...open, mergeable: false })).toBe('blocked');
   expect(prVisualStateOf({ ...open, mergeableState: 'dirty' })).toBe('blocked');
-  expect(prVisualStateOf({ ...open, checksState: 'pending' })).toBe('blocked');
-  expect(prVisualStateOf({ ...open, checksState: 'pending', mergeable: null, mergeableState: null })).toBe('blocked');
+  expect(prVisualStateOf({ ...open, checksState: 'pending', mergeable: false })).toBe('blocked');
+});
+
+test('checks still running keep the open colour', () => {
+  expect(prVisualStateOf({ ...open, checksState: 'pending' })).toBe('open');
+  expect(prVisualStateOf({ ...open, checksState: 'pending', mergeable: null, mergeableState: null })).toBe('open');
 });
 
 test('a merge blocked only by a missing review keeps the open colour', () => {

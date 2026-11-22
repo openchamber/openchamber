@@ -64,7 +64,7 @@ function fixture(code: boolean) {
       return { path, projectDirectory: '/repo', branch: input.branchName ?? '', label: input.preferredName ?? '' };
     },
     waitBootstrap: async () => {}, startDirectory: async (_project, tree) => tree.path,
-    renderPrompt: async () => 'Fuse results',
+    loadPrompts: async () => ({ render: () => 'Fuse results' }),
     createSession: async (input) => {
       const id = `fusion-${sessions.size}`;
       const session = makeSession(id, input.directory);

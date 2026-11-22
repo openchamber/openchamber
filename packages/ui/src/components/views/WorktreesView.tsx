@@ -1,14 +1,12 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { WorktreeSectionContent } from '@/components/sections/openchamber/WorktreeSectionContent';
 
-// Full-page worktree management surface for a single project, opened from the
-// project menu in the sidebar. Renders only the worktree list (setup commands
-// stay in project settings); the New-worktree action leads the content flow.
 export function WorktreesView(): React.ReactNode {
   const { t } = useI18n();
   const projectId = useUIStore((state) => state.worktreesPageProjectId);
@@ -20,7 +18,7 @@ export function WorktreesView(): React.ReactNode {
 
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-background">
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-6 py-4" disableHorizontal>
         <div className="mx-auto w-full max-w-4xl space-y-4">
           <div className="flex items-center">
             <Button
@@ -30,13 +28,13 @@ export function WorktreesView(): React.ReactNode {
                 setNewWorktreeDialogOpen(true);
               }}
             >
-              <Icon name="node-tree" className="me-1 h-3.5 w-3.5" />
+              <Icon name="worktree" className="me-1 h-3.5 w-3.5" />
               {t('sessions.sidebar.project.actions.newWorktree')}
             </Button>
           </div>
           <WorktreeSectionContent projectRef={{ id: project.id, path: project.path }} />
         </div>
-      </div>
+      </ScrollableOverlay>
     </div>
   );
 }

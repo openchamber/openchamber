@@ -155,6 +155,7 @@ printf '4321\\n'`);
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe('ssh');
     expect(calls[0].options.windowsHide).toBe(true);
+    expect(calls[0].options.stdio[0]).toBe('ignore');
     expect(calls[0].args).toContain('ControlMaster=no');
     expect(calls[0].args).toContain('ControlPath=none');
     expect(calls[0].args).toContain('StrictHostKeyChecking=accept-new');
@@ -291,6 +292,111 @@ printf '4321\\n'`);
     expect(result.cleanupPaths.map((filePath) => path.basename(filePath))).toEqual(['askpass.cmd', 'askpass.ps1']);
     expect(await fsp.readFile(path.join(tempDir, 'askpass.cmd'), 'utf8')).toContain('WindowsPowerShell');
     expect(await fsp.readFile(path.join(tempDir, 'askpass.ps1'), 'utf8')).toContain('OPENCHAMBER_SSH_ASKPASS_VALUE');
+  });
+
+  const runPosixAskpass = async (prompt, extraEnv = {}, extraBins = {}) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-askpass-test-'));
+    tempDirs.push(tempDir);
+    const binDir = path.join(tempDir, 'bin');
+    await fsp.mkdir(binDir);
+    // A fake zenity that answers with the arguments it was given.
+    await fsp.writeFile(
+      path.join(binDir, 'zenity'),
+      '#!/bin/sh\nprintf "zenity:%s\\n" "$*"\nif [ -n "$ZENITY_PRINT_DISPLAY" ]; then printf "display=%s\\n" "${DISPLAY-<unset>}"; fi\n',
+      { mode: 0o755 },
+    );
+    for (const [name, content] of Object.entries(extraBins)) {
+      await fsp.writeFile(path.join(binDir, name), content, { mode: 0o755 });
+    }
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(tempDir, 'settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      platform: 'linux',
+    });
+    const { askpassPath } = await manager.writeAskpassFiles(tempDir);
+    return execFileSync(askpassPath, [prompt], {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { PATH: `${binDir}:/usr/bin:/bin`, ...extraEnv },
+    });
+  };
+
+  test.skipIf(process.platform !== 'linux')('answers a password prompt with the stored SSH password', async () => {
+    const output = await runPosixAskpass("user@example.test's password: ", { OPENCHAMBER_SSH_ASKPASS_VALUE: 'secret-value' });
+    expect(output).toBe('secret-value\n');
+  });
+
+  test.skipIf(process.platform !== 'linux')('asks for a one-time code in a dialog on Linux instead of sending the stored password', async () => {
+    for (const prompt of ['Verification code: ', 'One-time password (OATH) for `user\': ', 'Passcode or option (1-3): ']) {
+      const output = await runPosixAskpass(prompt, { OPENCHAMBER_SSH_ASKPASS_VALUE: 'secret-value', DISPLAY: ':0' });
+      expect(output).not.toContain('secret-value');
+      expect(output).toStartWith('zenity:');
+      expect(output).toContain('--hide-text');
+      expect(output).toContain(prompt.trim());
+    }
+  });
+
+  test.skipIf(process.platform !== 'linux')('prefers the user SSH_ASKPASS program on Linux', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-askpass-user-'));
+    tempDirs.push(tempDir);
+    const userAskpass = path.join(tempDir, 'user-askpass');
+    await fsp.writeFile(userAskpass, '#!/bin/sh\nprintf "user:%s\\n" "$1"\n', { mode: 0o755 });
+    const output = await runPosixAskpass('Verification code: ', { OPENCHAMBER_SSH_ASKPASS_FALLBACK: userAskpass, DISPLAY: ':0' });
+    expect(output).toBe('user:Verification code: \n');
+  });
+
+  test.skipIf(process.platform !== 'linux')('finds a user SSH_ASKPASS given by name on PATH', async () => {
+    const output = await runPosixAskpass('Verification code: ', { OPENCHAMBER_SSH_ASKPASS_FALLBACK: 'user-askpass', DISPLAY: ':0' }, {
+      'user-askpass': '#!/bin/sh\nprintf "user:%s\\n" "$1"\n',
+    });
+    expect(output).toBe('user:Verification code: \n');
+  });
+
+  test.skipIf(process.platform !== 'linux')('hides the DISPLAY placeholder from the dialog on Wayland', async () => {
+    const output = await runPosixAskpass('Verification code: ', {
+      DISPLAY: '1',
+      WAYLAND_DISPLAY: 'wayland-0',
+      ZENITY_PRINT_DISPLAY: '1',
+    });
+    expect(output).toStartWith('zenity:');
+    expect(output).toContain('display=<unset>');
+  });
+
+  test.skipIf(process.platform !== 'linux')('opens no dialog on Linux without a graphical session', async () => {
+    const output = await runPosixAskpass('Verification code: ', { DISPLAY: '1' });
+    expect(output).toBe('\n');
+  });
+
+  test('keeps the real DISPLAY and passes the user SSH_ASKPASS on', () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      platform: 'linux',
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+    manager.sshAuth.set(parsed, { askpassPath: '/tmp/oc/askpass.sh', sshPassword: null, children: new Set() });
+    const previous = { DISPLAY: process.env.DISPLAY, SSH_ASKPASS: process.env.SSH_ASKPASS };
+    try {
+      process.env.DISPLAY = ':1';
+      process.env.SSH_ASKPASS = '/usr/bin/ksshaskpass';
+      const env = manager.authEnvironment(parsed);
+      expect(env.DISPLAY).toBe(':1');
+      expect(env.SSH_ASKPASS).toBe('/tmp/oc/askpass.sh');
+      expect(env.OPENCHAMBER_SSH_ASKPASS_FALLBACK).toBe('/usr/bin/ksshaskpass');
+
+      delete process.env.DISPLAY;
+      delete process.env.SSH_ASKPASS;
+      const bare = manager.authEnvironment(parsed);
+      expect(bare.DISPLAY).toBe('1');
+      expect(bare.OPENCHAMBER_SSH_ASKPASS_FALLBACK).toBeUndefined();
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   test('runs each Windows port forward as an independent hidden SSH process', async () => {
@@ -661,6 +767,7 @@ printf '4321\\n'`);
     manager.runRemoteCommand = async () => [
       '/home/pi/.openchamber/npm-global/bin/openchamber\t1.2.3',
       '/usr/bin/openchamber\t0.9.0',
+      '/opt/canary/bin/openchamber\t1.2.4-canary.20261030.7',
       '',
     ].join('\n');
 
@@ -669,6 +776,7 @@ printf '4321\\n'`);
     expect(candidates).toEqual([
       { binPath: '/home/pi/.openchamber/npm-global/bin/openchamber', version: '1.2.3' },
       { binPath: '/usr/bin/openchamber', version: '0.9.0' },
+      { binPath: '/opt/canary/bin/openchamber', version: '1.2.4-canary.20261030.7' },
     ]);
   });
 
@@ -1312,7 +1420,8 @@ printf '4321\\n'`);
           const server = host.servers.find((entry) => entry.port === Number(probedPort[1]));
           if (!server) return 'INFO_STATUS=000\nAUTH_STATUS=0\nHEALTH_STATUS=000\n';
           // /api/system/info is public, so only the auth status tells a fitting password apart.
-          const offered = script.match(/"password":"([^"]*)"/);
+          const offered = script.match(/"password":"([^"]*)"/)
+            || (script.includes('--data-urlencode password@-') && host.environmentPassword && [null, host.environmentPassword]);
           let authStatus = 0;
           if (offered) authStatus = !server.password ? 400 : offered[1] === server.password ? 200 : 401;
           if (offered && server.rateLimited) authStatus = 429;
@@ -1338,7 +1447,7 @@ printf '4321\\n'`);
         if (servedPort) {
           host.started.push(Number(servedPort[2]));
           const servedPassword = script.match(/OPENCHAMBER_UI_PASSWORD='([^']*)'/);
-          host.servers.push({ port: Number(servedPort[2]), version: '1.2.3', bindHost: servedPort[1], password: servedPassword?.[1] });
+          host.servers.push({ port: Number(servedPort[2]), version: '1.2.3', bindHost: servedPort[1], password: servedPassword?.[1] ?? host.environmentPassword });
           return `${servedPort[2]}\n`;
         }
         throw new Error(`Unexpected remote command: ${script}`);
@@ -1412,6 +1521,27 @@ printf '4321\\n'`);
 
     test('an instance without a password leaves password-protected servers alone', async () => {
       const { host, manager } = createRemoteHost([{ port: 30001, version: '1.1.0', password: 'secret' }]);
+
+      const result = await manager.ensureRemoteServer(managed(), parsed, '/unused.sock');
+
+      expect(host.stopped).toEqual([]);
+      expect(result.remotePort).not.toBe(30001);
+    });
+
+    test('reconnecting reuses a server protected by the password the remote login shell sets', async () => {
+      const { host, manager } = createRemoteHost();
+      host.environmentPassword = 'profile-secret';
+
+      const first = await manager.ensureRemoteServer(managed(), parsed, '/unused.sock');
+      const second = await manager.ensureRemoteServer(managed(), parsed, '/unused.sock');
+
+      expect(second).toMatchObject({ remotePort: first.remotePort, startedByUs: false });
+      expect(host.started).toEqual([first.remotePort]);
+    });
+
+    test('a server protected by another password than the remote login shell sets stays someone else\'s', async () => {
+      const { host, manager } = createRemoteHost([{ port: 30001, version: '1.1.0', password: 'someone-else' }]);
+      host.environmentPassword = 'profile-secret';
 
       const result = await manager.ensureRemoteServer(managed(), parsed, '/unused.sock');
 

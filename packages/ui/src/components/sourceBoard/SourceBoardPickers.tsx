@@ -1,7 +1,3 @@
-/**
- * The board's scope pickers, drawn like the draft composer's project picker:
- * a quiet trigger with the project's icon and name, and a searchable list.
- */
 
 import * as React from 'react';
 import { Popover } from '@base-ui/react/popover';
@@ -23,22 +19,23 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
-import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSearch } from '@/components/ui/MobileSheetList';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { LinearTeamMapping, ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry, TrackerContainer } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { useTrackerDescriptor } from '@/lib/trackers/registry';
+import { useTrackerAuthEntry, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 
 import { repositoryLabel } from './boardRepository';
 
 const projectName = (project: ProjectEntry): string => project.label?.trim() || formatDirectoryName(project.path) || project.path;
 
-/** `toolbar`: the board's scope, beside the search. `inline`: a smaller one inside a sentence. */
 type PickerSize = 'toolbar' | 'inline';
 
 const TRIGGER_CLASS = {
@@ -52,7 +49,6 @@ export const SourceBoardProjectPicker: React.FC<{
     onSelect: (projectId: string) => void;
     ariaLabel: string;
     size: PickerSize;
-    /** The phone shell picks from a bottom sheet: a popup there cannot scroll far enough for a long list. */
     sheet?: boolean;
 }> = ({ projects, selected, onSelect, ariaLabel, size, sheet = false }) => {
     const { t } = useI18n();
@@ -174,25 +170,14 @@ export const SourceBoardProjectPicker: React.FC<{
     );
 };
 
-/** One entry of the repository picker: a repository's folder, or null for all of them. */
 type RepositoryEntry = { value: string; repository: string | null; label: string };
 
-/**
- * Which repository under the project's folder the board lists, or all of them
- * together, shown beside the project picker while the folder is not a
- * repository itself.
- */
 export const SourceBoardRepositoryPicker: React.FC<{
     repositories: readonly string[];
-    /** The listed repository's folder; null while the board lists all of them. */
     selected: string | null;
-    /** The project's folder the repository paths are shown relative to. */
     root: string;
-    /** Offers "All repositories" first; not where the runtime cannot list across repositories. */
     allAvailable: boolean;
-    /** A repository's folder, or null for all of them. */
     onSelect: (repository: string | null) => void;
-    /** The phone shell picks from a bottom sheet, like the project picker. */
     sheet?: boolean;
 }> = ({ repositories, selected, root, allAvailable, onSelect, sheet = false }) => {
     const { t } = useI18n();
@@ -217,7 +202,6 @@ export const SourceBoardRepositoryPicker: React.FC<{
         setOpen(false);
         setQuery('');
     };
-    // Not shrink-0 like the project picker: beside it, this is the one that truncates.
     const triggerClass = cn('min-w-0 w-fit justify-start gap-1 normal-case data-[popup-open]:bg-interactive-hover', TRIGGER_CLASS.toolbar);
     const triggerContent = (
         <span className="flex min-w-0 items-center gap-1.5">
@@ -233,25 +217,19 @@ export const SourceBoardRepositoryPicker: React.FC<{
                 <Button variant="ghost" size="sm" aria-label={ariaLabel} aria-haspopup="dialog" onClick={() => setOpen(true)} className={triggerClass}>
                     {triggerContent}
                 </Button>
-                <MobileOverlayPanel open={open} title={ariaLabel} onClose={() => { setOpen(false); setQuery(''); }}>
-                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-                        <Input value={query} onChange={(event) => setQuery(event.target.value)} aria-label={searchLabel} placeholder={searchLabel} className="h-9" />
-                        <div className="flex flex-col">
-                            {entries.length === 0 ? (
-                                <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
-                            ) : entries.map((entry) => (
-                                <button
-                                    key={entry.value}
-                                    type="button"
-                                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                    onClick={() => choose(entry)}
-                                >
-                                    <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-                                    {entry.value === selectedValue ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                <MobileOverlayPanel
+                    open={open}
+                    title={ariaLabel}
+                    onClose={() => { setOpen(false); setQuery(''); }}
+                    subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={searchLabel} />}
+                >
+                    {entries.length === 0 ? (
+                        <div role="status" className="px-3 py-6 text-center typography-meta text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
+                    ) : entries.map((entry) => (
+                        <MobileSheetRow key={entry.value} selected={entry.value === selectedValue} onClick={() => choose(entry)}>
+                            {entry.label}
+                        </MobileSheetRow>
+                    ))}
                 </MobileOverlayPanel>
             </>
         );
@@ -308,36 +286,39 @@ export const SourceBoardRepositoryPicker: React.FC<{
     );
 };
 
-const ALL_TEAMS = '__all__';
+const ALL_CONTAINERS = '__all__';
+const NO_ACCOUNTS: readonly never[] = [];
 
-/**
- * Which Linear team the board lists, and which workspace when more than one
- * is connected: workspaces are few and switched rarely, so they share the menu.
- */
-export const SourceBoardTeamPicker: React.FC<{
-    teams: readonly LinearTeamMapping[];
-    selectedTeamId: string | null;
-    onSelectTeam: (teamId: string | null) => void;
-    onWorkspaceSwitched: () => void;
-}> = ({ teams, selectedTeamId, onSelectTeam, onWorkspaceSwitched }) => {
+export const SourceBoardContainerPicker: React.FC<{
+    provider: string;
+    containers: readonly TrackerContainer[];
+    selectedContainerId: string | null;
+    onSelectContainer: (containerId: string | null) => void;
+    onAccountSwitched: () => void;
+}> = ({ provider, containers, selectedContainerId, onSelectContainer, onAccountSwitched }) => {
     const { t } = useI18n();
-    const { linear } = useRuntimeAPIs();
-    const workspaces = useLinearAuthStore((state) => state.status?.workspaces) ?? [];
-    const current = workspaces.find((workspace) => workspace.current) ?? null;
+    const { trackers } = useRuntimeAPIs();
+    const descriptor = useTrackerDescriptor(provider);
+    const { icon, copy } = trackerPresentation(provider);
+    const status = useTrackerAuthEntry(provider).status;
+    const accounts = status?.connected ? status.accounts ?? NO_ACCOUNTS : NO_ACCOUNTS;
+    const current = accounts.find((account) => account.current) ?? null;
     const [switching, setSwitching] = React.useState(false);
-    const workspaceName = (workspace: (typeof workspaces)[number]) => workspace.name?.trim() || workspace.urlKey?.trim() || workspace.id;
-    const canSwitch = workspaces.length > 1 && Boolean(current) && Boolean(linear?.authActivate);
-    const teamName = teams.find((team) => team.id === selectedTeamId)?.name ?? t('sourceBoard.team.all');
+    const accountName = (account: (typeof accounts)[number]) => account.name?.trim() || account.id;
+    const canSwitch = descriptor.capabilities.multipleAccounts && accounts.length > 1 && Boolean(current) && Boolean(trackers);
+    const containerName = containers.find((container) => container.id === selectedContainerId)?.name ?? t(copy.containerAll);
 
-    const activate = async (organizationId: string) => {
-        if (!current || organizationId === current.id || switching || !linear?.authActivate) return;
+    if (!descriptor.capabilities.projectMapping && !canSwitch) return null;
+
+    const activate = async (accountId: string) => {
+        if (!current || accountId === current.id || switching || !trackers) return;
         setSwitching(true);
         try {
-            useLinearAuthStore.getState().setStatus(await linear.authActivate(organizationId));
-            onWorkspaceSwitched();
-            toast.success(t('settings.integrations.linear.toast.workspaceSwitched'));
+            useTrackerAuthStore.getState().setStatus(provider, await trackers.authActivate(provider, accountId));
+            onAccountSwitched();
+            toast.success(t(copy.accountSwitched));
         } catch (error) {
-            toast.error(t('settings.integrations.linear.toast.workspaceSwitchFailed'), { description: error instanceof Error ? error.message : String(error) });
+            toast.error(t(copy.accountSwitchFailed), { description: error instanceof Error ? error.message : String(error) });
         } finally {
             setSwitching(false);
         }
@@ -349,30 +330,30 @@ export const SourceBoardTeamPicker: React.FC<{
                 <Button
                     variant="ghost"
                     size="sm"
-                    aria-label={t('sourceBoard.team.label')}
+                    aria-label={t(copy.containerLabel)}
                     disabled={switching}
                     className={cn('min-w-0 w-fit shrink-0 justify-start gap-1 normal-case data-[popup-open]:bg-interactive-hover', TRIGGER_CLASS.toolbar)}
                 >
                     <span className="flex min-w-0 items-center gap-1.5">
-                        <Icon name="linear" className="size-3.5 shrink-0" />
-                        {canSwitch && current ? <span className="truncate text-muted-foreground">{workspaceName(current)} /</span> : null}
-                        <span className="truncate">{teamName}</span>
+                        <Icon name={icon} className="size-3.5 shrink-0" />
+                        {canSwitch && current ? <span className="truncate text-muted-foreground">{accountName(current)} /</span> : null}
+                        <span className="truncate">{containerName}</span>
                         <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
                     </span>
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel>{t('sourceBoard.team.label')}</DropdownMenuLabel>
-                <DropdownMenuRadioGroup value={selectedTeamId ?? ALL_TEAMS} onValueChange={(value) => onSelectTeam(value === ALL_TEAMS ? null : String(value))}>
-                    <DropdownMenuRadioItem value={ALL_TEAMS}>{t('sourceBoard.team.all')}</DropdownMenuRadioItem>
-                    {teams.map((team) => <DropdownMenuRadioItem key={team.id} value={team.id}>{team.name}</DropdownMenuRadioItem>)}
+                <DropdownMenuLabel>{t(copy.containerLabel)}</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={selectedContainerId ?? ALL_CONTAINERS} onValueChange={(value) => onSelectContainer(value === ALL_CONTAINERS ? null : String(value))}>
+                    <DropdownMenuRadioItem value={ALL_CONTAINERS}>{t(copy.containerAll)}</DropdownMenuRadioItem>
+                    {containers.map((container) => <DropdownMenuRadioItem key={container.id} value={container.id}>{container.name}</DropdownMenuRadioItem>)}
                 </DropdownMenuRadioGroup>
                 {canSwitch && current ? (
                     <>
                         <DropdownMenuSeparator />
-                        <DropdownMenuLabel>{t('sourceBoard.workspace.label')}</DropdownMenuLabel>
+                        <DropdownMenuLabel>{t(copy.accountLabel)}</DropdownMenuLabel>
                         <DropdownMenuRadioGroup value={current.id} onValueChange={(value) => void activate(String(value))}>
-                            {workspaces.map((workspace) => <DropdownMenuRadioItem key={workspace.id} value={workspace.id}>{workspaceName(workspace)}</DropdownMenuRadioItem>)}
+                            {accounts.map((account) => <DropdownMenuRadioItem key={account.id} value={account.id}>{accountName(account)}</DropdownMenuRadioItem>)}
                         </DropdownMenuRadioGroup>
                     </>
                 ) : null}

@@ -1,22 +1,17 @@
 import React from 'react';
-import type { FormField } from '@opencode/client';
+import type { FormField } from '@/lib/opencode/model';
+import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { dominantTextDirection } from '@/lib/i18n/textDirection';
 import { FORM_CUSTOM_TEXTAREA_MIN_HEIGHT, getFormCustomTextareaHeight } from './formTextareaSizing';
 import { FormMarkdown } from './FormMarkdown';
 import { isRecommendedOption, stripRecommendedMarker } from './formSerializers';
 import { type FormValues, isAnswerableField, toFiniteNumber, valueOf } from './formCardState';
 
-/**
- * One form field as the user answers it: label, description, and the control
- * for its type (options as radios or checkboxes with an "Other" free-text
- * entry, a text box, a number box, a yes/no checkbox, or an external link).
- * Shared by the inline card (the BTW sheet) and the composer dock, so both
- * answer a field the same way.
- */
 
 interface AutoGrowTextareaProps {
     value: string;
@@ -27,11 +22,6 @@ interface AutoGrowTextareaProps {
     onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
-/**
- * Free-text answer box. It keeps its own value while the user types so a
- * keystroke does not re-render the whole form, and grows with the content up
- * to the cap in `formTextareaSizing`.
- */
 const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     value,
     placeholder,
@@ -41,9 +31,8 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     onKeyDown,
 }: AutoGrowTextareaProps) {
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+    const emojiPicker = useEmojiPicker(textareaRef);
     const [localValue, setLocalValue] = React.useState(value);
-    const [height, setHeight] = React.useState(FORM_CUSTOM_TEXTAREA_MIN_HEIGHT);
-    const [isScrollable, setIsScrollable] = React.useState(false);
 
     React.useEffect(() => {
         setLocalValue(value);
@@ -51,49 +40,55 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
 
     React.useLayoutEffect(() => {
         const textarea = textareaRef.current;
-        if (!textarea) return;
-        const nextHeight = getFormCustomTextareaHeight({
-            scrollHeight: textarea.scrollHeight,
-            currentHeight: height,
-        });
-        const nextScrollable = textarea.scrollHeight > (nextHeight ?? height);
-        if (isScrollable !== nextScrollable) setIsScrollable(nextScrollable);
-        if (nextHeight !== null && nextHeight !== height) setHeight(nextHeight);
-    }, [height, isScrollable, localValue]);
+        const wrapper = textarea?.parentElement;
+        if (!textarea || !wrapper) return;
+        const minHeight = wrapper.style.minHeight;
+        wrapper.style.minHeight = `${wrapper.offsetHeight}px`;
+        try {
+            textarea.style.height = '0px';
+            textarea.style.overflowY = 'hidden';
+            const contentHeight = textarea.scrollHeight + textarea.offsetHeight - textarea.clientHeight;
+            const nextHeight = getFormCustomTextareaHeight(contentHeight);
+            textarea.style.height = `${nextHeight}px`;
+            textarea.style.overflowY = contentHeight > nextHeight ? 'auto' : 'hidden';
+        } finally {
+            wrapper.style.minHeight = minHeight;
+        }
+    }, [localValue]);
 
     return (
-        <textarea
-            ref={textareaRef}
-            value={localValue}
-            placeholder={placeholder}
-            disabled={disabled}
-            autoFocus={autoFocus}
-            style={{ height }}
-            onChange={(event) => {
-                setLocalValue(event.target.value);
-                onValueChange(event.target.value);
-            }}
-            onKeyDown={onKeyDown}
-            className={cn(
-                'w-full resize-none rounded border border-border/30 bg-background/50 px-2 py-1',
-                'typography-meta text-foreground placeholder:text-muted-foreground/60',
-                'focus:outline-none focus:border-border/60',
-                isScrollable ? 'overflow-y-auto' : 'overflow-y-hidden',
-                disabled ? 'opacity-60' : null,
-            )}
-        />
+        <>
+            <textarea
+                ref={textareaRef}
+                value={localValue}
+                placeholder={placeholder}
+                disabled={disabled}
+                autoFocus={autoFocus}
+                style={{ height: FORM_CUSTOM_TEXTAREA_MIN_HEIGHT }}
+                onChange={(event) => {
+                    setLocalValue(event.target.value);
+                    onValueChange(event.target.value);
+                }}
+                onKeyDown={onKeyDown}
+                className={cn(
+                    'w-full resize-none rounded border border-edge-muted bg-background/50 px-2 py-1',
+                    'typography-meta text-foreground placeholder:text-muted-foreground',
+                    'focus:outline-none focus:border-edge',
+                    disabled ? 'opacity-60' : null,
+                )}
+            />
+            {emojiPicker}
+        </>
     );
 });
 
 export interface FormFieldControlProps {
     field: FormField;
     values: FormValues;
-    /** Keys of required fields still unanswered, used to mark the label. */
     missing: string[];
     showErrors: boolean;
     isResponding: boolean;
     updateValue: (key: string, patch: Partial<FormValues[string]>) => void;
-    /** Enter in a text box submits or advances; the owner decides which. */
     onTextKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
@@ -102,9 +97,14 @@ const { t } = useI18n();
 const value = valueOf(values, field.key);
 const isMissing = showErrors && missing.includes(field.key);
 const label = field.title?.trim() || field.key;
+const dir = dominantTextDirection(
+    label,
+    field.description,
+    ...('options' in field ? field.options ?? [] : []).flatMap((option) => [option.label, option.description]),
+);
 
 return (
-        <div key={field.key} className="px-1.5 py-1">
+        <div key={field.key} dir={dir} className="px-1.5 py-1">
             <div className="flex items-baseline gap-1.5">
                 <span className={cn('typography-meta font-medium', isMissing ? 'text-[var(--status-error)]' : 'text-foreground')}>
                     {label}
@@ -159,8 +159,8 @@ return (
                         updateValue(field.key, { number: parsed !== null && Number.isFinite(parsed) ? parsed : null });
                     }}
                     className={cn(
-                        'w-full rounded border border-border/30 bg-background/50 px-2 py-1',
-                        'typography-meta text-foreground focus:outline-none focus:border-border/60',
+                        'w-full rounded border border-edge-muted bg-background/50 px-2 py-1',
+                        'typography-meta text-foreground focus:outline-none focus:border-edge',
                     )}
                 />
             ) : null}
@@ -192,9 +192,6 @@ return (
                                     isResponding ? 'opacity-60 cursor-not-allowed' : null,
                                 )}
                             >
-                                {/* The control and the label share one centred row; the
-                                    description hangs under the label, so the control never
-                                    depends on a line height to line up. */}
                                 <div className="flex items-center gap-2">
                                     {multiple ? (
                                         <Checkbox checked={selected} onChange={toggle} disabled={isResponding} />
@@ -238,7 +235,7 @@ return (
                                 <div className="flex items-center gap-2">
                                     <Icon
                                         name="edit"
-                                        className={cn('h-3.5 w-3.5', value.custom ? 'text-primary' : 'text-muted-foreground/50')}
+                                        className={cn('h-3.5 w-3.5', value.custom ? 'text-primary' : 'text-muted-foreground')}
                                     />
                                     <span
                                         className={cn(

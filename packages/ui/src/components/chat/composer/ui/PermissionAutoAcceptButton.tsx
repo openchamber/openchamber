@@ -1,12 +1,3 @@
-/**
- * Cycles how this session answers tool permissions: ask, safety net, accept
- * everything. The safety net is left out of the cycle while no classification
- * provider can run it.
- *
- * The pointer guards keep a tap from dismissing the mobile keyboard: on
- * Android's resizes-content viewport the keyboard-close relayout moves this
- * button mid-tap and the click never lands.
- */
 
 import React from 'react';
 
@@ -16,12 +7,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { PermissionMode } from '@/stores/utils/permissionAutoAccept';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { useUIStore } from '@/stores/useUIStore';
 
 type PermissionAutoAcceptButtonProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
     isInteractive: boolean;
-    /** Already passed through `displayedPermissionMode`. */
     permissionMode: PermissionMode;
     handlePermissionModeCycle: () => void;
     withTooltip?: boolean;
@@ -35,6 +28,7 @@ const MODE_ICON = {
 
 export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButton(props: PermissionAutoAcceptButtonProps) {
     const { t } = useI18n();
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const {
         footerIconButtonClass,
         iconSizeClass,
@@ -70,7 +64,7 @@ export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcce
                 }
             }}
             aria-label={label}
-            title={label}
+            {...(withTooltip ? {} : { title: label })}
         >
             <Icon name={icon} className={cn(iconSizeClass)} style={color ? { color } : undefined} />
         </button>
@@ -86,7 +80,7 @@ export const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcce
                 {button}
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
-                {label}
+                <TooltipLabelWithShortcut label={label} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_permission_auto_accept', shortcutOverrides), '')} />
             </TooltipContent>
         </Tooltip>
     );

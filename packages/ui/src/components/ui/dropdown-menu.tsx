@@ -2,12 +2,14 @@ import * as React from "react"
 import { Menu as BaseMenu } from "@base-ui/react/menu"
 
 import { cn } from "@/lib/utils"
+import { useHeightMorphRef } from "@/lib/motion/useSizeMorph"
 import { Icon } from "@/components/icon/Icon";
 import { shortcutRegistry } from "@/lib/shortcuts";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { useMenuWindowDismiss } from "./menu-window-dismiss";
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
 import { GlassRedrawGuard } from "./glass-redraw-guard"
+import { PopupOverlayScrollbar } from "./AttachedOverlayScrollbar"
 
 type AsChildProps = { asChild?: boolean };
 type AsChildRenderProps = {
@@ -38,7 +40,6 @@ function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNo
   return { children };
 }
 
-// The wrapper owns `actionsRef` to close the menu on window blur.
 type DropdownMenuProps = Omit<React.ComponentProps<typeof BaseMenu.Root>, "actionsRef"> & {
   disableGlobalShortcuts?: boolean;
 };
@@ -54,6 +55,7 @@ function DropdownMenu({
   const [collisionBoundary, setCollisionBoundary] = React.useState<Element | null>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const isOpen = open ?? uncontrolledOpen;
+  const openedOnHoverRef = React.useRef(false);
   const actionsRef = useMenuWindowDismiss(isOpen);
   const portalContextValue = React.useMemo<DropdownPortalContextValue>(() => ({
     portalContainer,
@@ -67,9 +69,20 @@ function DropdownMenu({
     return shortcutRegistry.suspend();
   }, [disableGlobalShortcuts, isOpen]);
 
+  React.useLayoutEffect(() => {
+    if (!isOpen) openedOnHoverRef.current = false;
+  }, [isOpen]);
+
   const handleOpenChange: NonNullable<React.ComponentProps<typeof BaseMenu.Root>['onOpenChange']> = (nextOpen, eventDetails) => {
-    if (open === undefined) setUncontrolledOpen(nextOpen);
+    // external: https://base-ui.com/react/components/menu Controlled openings lack an opening DOM event, so hover dismissal must follow the opening reason.
+    if (!nextOpen && eventDetails.reason === 'trigger-hover' && !openedOnHoverRef.current) {
+      eventDetails.cancel();
+      return;
+    }
     onOpenChange?.(nextOpen, eventDetails);
+    if (eventDetails.isCanceled) return;
+    if (nextOpen) openedOnHoverRef.current = eventDetails.reason === 'trigger-hover';
+    if (open === undefined) setUncontrolledOpen(nextOpen);
   };
 
   return (
@@ -149,10 +162,26 @@ function DropdownMenuContent({
   children,
   onCloseAutoFocus,
   onKeyDown,
+  ref,
   ...props
 }: ContentProps) {
   const portalContext = React.useContext(DropdownPortalContext);
   void onCloseAutoFocus
+  const morphHeight = useHeightMorphRef();
+  const [popup, setPopup] = React.useState<HTMLDivElement | null>(null);
+  const setPopupRef = React.useCallback((node: HTMLDivElement | null) => {
+    morphHeight(node);
+    setPopup(node);
+    const cleanup = typeof ref === 'function' ? ref(node) : undefined;
+    if (ref && typeof ref !== 'function') ref.current = node;
+    return () => {
+      morphHeight(null);
+      setPopup(null);
+      if (typeof cleanup === 'function') cleanup();
+      else if (typeof ref === 'function') ref(null);
+      else if (ref) ref.current = null;
+    };
+  }, [morphHeight, ref]);
 
   const handleKeyDown: NonNullable<React.ComponentProps<typeof BaseMenu.Popup>['onKeyDown']> = (event) => {
     onKeyDown?.(event);
@@ -177,6 +206,7 @@ function DropdownMenuContent({
         className={cn("app-region-no-drag z-50", positionerClassName)}
       >
         <BaseMenu.Popup
+          ref={setPopupRef}
           data-slot="dropdown-menu-content"
           style={{
             color: 'var(--surface-elevated-foreground)',
@@ -184,6 +214,7 @@ function DropdownMenuContent({
           }}
           className={cn(
             dropdownMenuPopupClass,
+            "overlay-scrollbar-target",
             className
           )}
           {...props}
@@ -192,6 +223,7 @@ function DropdownMenuContent({
           {children}
           <GlassRedrawGuard />
         </BaseMenu.Popup>
+        <PopupOverlayScrollbar scroller={popup} />
       </BaseMenu.Positioner>
     </BaseMenu.Portal>
   )
@@ -330,8 +362,9 @@ function DropdownMenuSubContent({
   children,
   onKeyDown,
   ...props
-}: React.ComponentProps<typeof BaseMenu.Popup>) {
+}: Omit<React.ComponentProps<typeof BaseMenu.Popup>, 'ref'>) {
   const portalContext = React.useContext(DropdownPortalContext);
+  const [popup, setPopup] = React.useState<HTMLDivElement | null>(null);
   const handleKeyDown: NonNullable<React.ComponentProps<typeof BaseMenu.Popup>['onKeyDown']> = (event) => {
     onKeyDown?.(event);
     handleDropdownNavigationKey(event, (navigationKey) => {
@@ -347,12 +380,14 @@ function DropdownMenuSubContent({
     <BaseMenu.Portal className="contents" container={portalContext?.portalContainer || undefined}>
       <BaseMenu.Positioner className="z-50">
         <BaseMenu.Popup
+          ref={setPopup}
           data-slot="dropdown-menu-sub-content"
           style={{
             color: 'var(--surface-elevated-foreground)',
           }}
           className={cn(
             dropdownMenuPopupClass,
+            "overlay-scrollbar-target",
             className
           )}
           {...props}
@@ -361,6 +396,7 @@ function DropdownMenuSubContent({
           {children}
           <GlassRedrawGuard />
         </BaseMenu.Popup>
+        <PopupOverlayScrollbar scroller={popup} />
       </BaseMenu.Positioner>
     </BaseMenu.Portal>
   )
