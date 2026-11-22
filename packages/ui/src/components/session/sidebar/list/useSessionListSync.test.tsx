@@ -44,8 +44,8 @@ const childStores = {
   },
   clearBootstrapDemand: (owner: string) => state.clearedOwners.push(owner),
 };
-type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; status: 'ready' };
-const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], status: 'ready' };
+type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; authoritativeSessions: never[]; status: 'ready' };
+const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], authoritativeSessions: [], status: 'ready' };
 
 const realSyncContext = { ...syncContextModule };
 const realSyncRefs = { ...syncRefsModule };

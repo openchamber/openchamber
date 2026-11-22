@@ -70,6 +70,8 @@ mock.module('@/sync/sync-context', () => ({
   useScopedBlockingForms: () => React.useSyncExternalStore(subscribePendingForms, () => pendingForms),
   useRecoveredQuestions: useDeferredQuestions,
   useSessions: () => [],
+  // The cards here come from the viewed session itself, never a subagent.
+  useSubagentRequest: () => false,
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 

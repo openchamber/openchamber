@@ -829,7 +829,7 @@ export const Header: React.FC = () => {
             <TooltipContent side="bottom">{t('header.mainSurface.backToChat')}</TooltipContent>
           </Tooltip>
           <div className="me-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-start">
-            <span className="truncate typography-ui-label text-[0.875rem] font-normal leading-tight text-foreground max-w-full">
+            <span className="truncate typography-ui-header font-normal leading-tight text-foreground max-w-full">
               {activeSurfaceHeader.title}
             </span>
             {activeSurfaceHeader.subtitle ? (
@@ -876,7 +876,7 @@ export const Header: React.FC = () => {
                     onChange={(event) => setHeaderSessionTitleDraft(event.target.value)}
                     onKeyDown={(event) => handleSessionRenameKeyDown(event, () => setIsRenamingHeaderSession(false))}
                     placeholder={t('sessions.sidebar.session.menu.rename')}
-                    className="min-w-0 flex-1 bg-transparent typography-ui-label text-[0.875rem] font-normal leading-tight outline-none placeholder:text-muted-foreground"
+                    className="min-w-0 flex-1 bg-transparent typography-ui-header font-normal leading-tight outline-none placeholder:text-muted-foreground"
                   />
                   <button
                     type="submit"
@@ -897,7 +897,7 @@ export const Header: React.FC = () => {
                   </button>
                 </form>
               ) : isNewSessionDraftOpen ? null : (
-                <span dir="auto" className="oc-ui-start-align truncate typography-ui-label text-[0.875rem] font-normal leading-tight text-foreground max-w-full">
+                <span dir="auto" className="oc-ui-start-align truncate typography-ui-header font-normal leading-tight text-foreground max-w-full">
                   {currentSessionTitle}
                 </span>
               )}
@@ -905,7 +905,7 @@ export const Header: React.FC = () => {
                 <span className={cn(
                   'flex min-w-0 max-w-full items-center gap-1.5 truncate font-normal leading-tight',
                   isNewSessionDraftOpen
-                    ? 'typography-ui-label text-[0.875rem] text-foreground'
+                    ? 'typography-ui-header text-foreground'
                     : 'typography-micro text-[0.65625rem] text-muted-foreground',
                 )}>
                   {activeProjectLabel ? <span dir="auto" className="truncate">{activeProjectLabel}</span> : null}

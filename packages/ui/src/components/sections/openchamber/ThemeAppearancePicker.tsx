@@ -60,7 +60,11 @@ export function ThemeAppearancePicker() {
     darkThemeId,
     setLightThemePreference,
     setDarkThemePreference,
+    customThemesLoading,
+    customThemesLoadError,
+    reloadCustomThemes,
   } = useThemeSystem();
+  const [themesReloading, setThemesReloading] = React.useState(false);
   const layout: ThemeSchematicLayout = isMobile ? 'phone' : 'desktop';
 
   const chosenVariant = useThemeVariantTabStore((state) => state.variant);
@@ -162,6 +166,25 @@ export function ThemeAppearancePicker() {
         headerAction={<ThemeImportButton />}
       >
         <div className="space-y-3">
+          {customThemesLoadError ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p role="alert" className="typography-settings-caption text-destructive">
+                {t('settings.openchamber.visual.state.customThemesLoadFailed')}
+              </p>
+              <button
+                type="button"
+                disabled={customThemesLoading || themesReloading}
+                onClick={() => {
+                  setThemesReloading(true);
+                  void reloadCustomThemes().finally(() => setThemesReloading(false));
+                }}
+                className="typography-settings-link inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+              >
+                <Icon name="restart" className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
+                {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
+              </button>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
           <SettingsChipGroup<ThemeVariant>
             value={variant}

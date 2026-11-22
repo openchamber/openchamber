@@ -1,5 +1,4 @@
 import React from 'react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
@@ -153,19 +152,6 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           transitionTimingFunction: PANEL_TRANSITION_EASING,
         } : undefined}
       >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={t('chat.workStatus.sections.open')}
-            onClick={() => setSectionsDialogOpen(true)}
-            className="absolute inset-e-2 top-2 z-10 inline-flex h-6 items-center rounded px-1 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Icon name="list-settings" className="size-[13px]" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" sideOffset={6}>{t('chat.workStatus.sections.open')}</TooltipContent>
-      </Tooltip>
 
       {contentMounted ? (
       <WorkStatusPresenceProvider onChange={setRenderedSections}>

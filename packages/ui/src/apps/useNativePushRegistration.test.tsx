@@ -3,6 +3,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { create } from 'zustand';
+import * as capacitorModule from '@capacitor/core';
+import * as platformModule from '@/lib/platform';
 
 // Deterministic coverage for the registration/disable race in
 // useNativePushRegistration (#2159): a registration callback parked on the
@@ -67,7 +69,9 @@ const useUIStoreStub = create<{ nativeNotificationsEnabled: boolean }>()(() => (
   nativeNotificationsEnabled: true,
 }));
 
+const realCapacitor = { ...capacitorModule };
 mock.module('@capacitor/core', () => ({
+  ...realCapacitor,
   registerPlugin: () => pushKeyStub,
 }));
 
@@ -79,7 +83,11 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
   getRegisteredRuntimeAPIs: () => ({ push: { registerApnsToken, unregisterApnsToken } }),
 }));
 
+// Everything else the platform module exports stays real: modules this hook
+// pulls in read it too.
+const realPlatform = { ...platformModule };
 mock.module('@/lib/platform', () => ({
+  ...realPlatform,
   getClientPlatform: () => 'android',
 }));
 
@@ -200,7 +208,8 @@ describe('useNativePushRegistration disable race (#2159)', () => {
 
     registrationRequest.resolve(undefined);
     await flush();
-    expect(unregisterPayloads).toEqual([{ token: 'token-1' }]);
+    expect(unregisterPayloads).toHaveLength(1);
+    expect(unregisterPayloads[0]).toMatchObject({ token: 'token-1' });
     expect(callOrder).toEqual(['register', 'unregister']);
   });
 

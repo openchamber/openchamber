@@ -127,7 +127,7 @@ export const useSubagentRows = (sessionId: string | null, directory: string | nu
     // same test covers the subagent and everything it launched.
     const isRunning = (id: string): boolean => {
       const type = statuses[id]?.type;
-      return type === 'busy' || type === 'retry' || (!type && observedById.get(id) === 'busy');
+      return type === 'busy' || type === 'retry' || observedById.get(id) === 'busy';
     };
     const describe = (node: SubagentNode) => {
       const child = node.session;

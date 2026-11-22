@@ -27,7 +27,8 @@ const ui = create(() => ({
 let sessions: Array<{ id: string; title: string }> = [];
 const errors: string[] = [];
 mock.module('@/stores/useProjectsStore', () => ({ useProjectsStore: create(() => ({ projects: [], activeProjectId: null })) }));
-mock.module('@/stores/useSessionDisplayStore', () => ({ useSessionDisplayStore: create(() => ({ showArchivedSessions: false, toggleArchivedSessions: noOp })) }));
+const sessionDisplayModule = await import('@/stores/useSessionDisplayStore');
+mock.module('@/stores/useSessionDisplayStore', () => ({ ...sessionDisplayModule, useSessionDisplayStore: create(() => ({ showArchivedSessions: false, toggleArchivedSessions: noOp })) }));
 mock.module('@/stores/useUIStore', () => ({ useUIStore: ui }));
 const syncContext = await import('@/sync/sync-context');
 mock.module('@/sync/sync-context', () => ({
