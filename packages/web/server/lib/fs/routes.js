@@ -1861,12 +1861,12 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      const canonicalBase = await canonicalDirectoryPath(resolved.base, fsPromises, path).catch(() => path.resolve(resolved.base));
       if (
         path.resolve(resolved.resolved) === path.resolve(resolved.base)
         || path.resolve(resolved.resolved) === canonicalBase
       ) {
-        return res.status(400).json({ error: 'Cannot delete the workspace root' });
+        return res.status(400).json({ error: 'Cannot delete a workspace or managed root' });
       }
 
       const canonicalParent = await fsPromises.realpath(path.dirname(resolved.resolved));
@@ -1875,6 +1875,15 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       const deletePath = path.join(canonicalParent, path.basename(resolved.resolved));
+      const canonicalTarget = await fsPromises.realpath(deletePath).catch(() => deletePath);
+      const protectedRoots = [...new Set([resolved.base, ...managedRoots, ...chatsRoots])];
+      const canonicalProtectedRoots = await Promise.all(protectedRoots.map((root) => (
+        canonicalDirectoryPath(root, fsPromises, path).catch(() => path.resolve(root))
+      )));
+      if (canonicalProtectedRoots.some((root) => canonicalTarget === root)) {
+        return res.status(400).json({ error: 'Cannot delete a workspace or managed root' });
+      }
+
       await fsPromises.rm(deletePath, { recursive: true, force: true });
       return res.json({ success: true, path: deletePath });
     } catch (error) {

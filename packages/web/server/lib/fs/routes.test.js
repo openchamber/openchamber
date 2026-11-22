@@ -2941,6 +2941,28 @@ describe('fs delete workspace containment', () => {
     expect(response.statusCode).toBe(400);
     expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('managed sentinel');
   });
+
+  it('rejects deleting the nested chats root while allowing a chat child', async context => {
+    const { getRoute, managedRoot } = await setup(context);
+    const chatsRoot = path.join(managedRoot, 'chats');
+    const sentinel = path.join(chatsRoot, 'keep.txt');
+    const deletable = path.join(chatsRoot, 'delete.txt');
+    await nativeFs.mkdir(chatsRoot);
+    await nativeFs.writeFile(sentinel, 'chat sentinel');
+    await nativeFs.writeFile(deletable, 'ordinary chat file');
+
+    const rootResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: chatsRoot } }, rootResponse);
+
+    expect(rootResponse.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('chat sentinel');
+
+    const childResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: deletable } }, childResponse);
+
+    expect(childResponse.statusCode).toBe(200);
+    await expect(nativeFs.stat(deletable)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
 });
 
 describe('fs html preview grants', () => {
