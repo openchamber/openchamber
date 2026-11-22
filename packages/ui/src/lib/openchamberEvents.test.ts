@@ -206,6 +206,25 @@ describe('openchamber events', () => {
     }
   });
 
+  // Oracle: the server's event shape (spec-jobs.js publish/publishRemoved).
+  // A job update and a removal each reach listeners; a malformed one does not.
+  test('goal writer job events reach listeners, and a malformed one is dropped', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const seen: unknown[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => { if (event.type === 'goal-spec-job') seen.push(event.update); });
+    try {
+      const source = MockEventSource.instances[0];
+      const job = { id: 'j1', sessionId: 's1', directory: '/repo', status: 'failed', error: 'down', cancelled: false, content: 'hi', attachmentCount: 0, createdAt: 1, updatedAt: 2 };
+      const removed = { id: 'j1', sessionId: 's1', directory: '/repo', outcome: 'queued' };
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:goal-spec-job.updated', properties: { job } }) });
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:goal-spec-job.updated', properties: { removed } }) });
+      source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:goal-spec-job.updated', properties: { job: { id: 'j2' } } }) });
+      expect(seen).toEqual([{ job }, { removed }]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test('an expired session stops the stream from reconnecting until the user logs in', async () => {
     const { useAuthSessionStore } = await import('./runtime-auth-expiry');
     const { subscribeOpenchamberEvents } = await import('./openchamberEvents');

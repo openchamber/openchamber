@@ -52,6 +52,7 @@ send never re-resolves mutable UI state:
   ],
   sendConfig: { providerID, modelID, agent?, variant? },  // required
   goal?: { objective?, tokenBudget, settled?, briefAgent?, ignoreLimit? }  // queued with "run as goal" armed
+  promptOnly?: true,  // send `text` as a prompt even when it names a command
 }
 ```
 
@@ -65,6 +66,13 @@ refused): a settled objective is not rewritten by "Rewrite every goal", a
 `<goal-spec>`, and `ignoreLimit` keeps the objective whole and marks the goal.
 Without `briefAgent` the intro carries the spec the writer produced, if any.
 A goal needs message text. Snapshots keep `goal`, so the queue row can show it.
+
+`promptOnly` is set by the goal writer's jobs (`session-goal/spec-jobs.js`)
+when the written spec is sent as the message: a spec that starts with `/` is
+text, not a command. Those jobs also enqueue with a caller-chosen item id
+(`enqueue(..., { itemId })`, in-process only, not on the route); an item with
+that id already queued makes the call a no-op, and `hasItem` tells a restarted
+job whether the queue still holds it.
 
 The server is a courier for `context`: it validates the shape (a kind it
 knows, a `metadata` object on `context` entries) and delivers each entry as a

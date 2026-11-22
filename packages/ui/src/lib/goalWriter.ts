@@ -2,7 +2,6 @@ import { z } from 'zod';
 import type { Message, Part } from '@/lib/opencode/model';
 import { excerptMarkdown, formatMessageText } from '@/lib/messages/messageMarkdown';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import type { QueuedMessageGoal } from '@/stores/messageQueueStore';
 import type { SessionGoalAutoCreate, SessionGoalWriterSendMode } from '@/stores/useUIStore';
 
 // The goal writer: a model turns a message into a goal spec within the goal
@@ -30,53 +29,6 @@ export type GoalSubmitChoice =
   | { kind: 'unchanged' }
   /** No goal: the message goes out as an ordinary one. */
   | { kind: 'none' };
-
-/**
- * A send handed off while its spec is still being written ("Send when ready"):
- * the writing run keeps going without the goal window, and the send goes out
- * with the spec it produces, accepted as written.
- */
-export interface BackgroundGoalSpec {
-  /** The writing run's outcome. It never rejects. */
-  result: Promise<GoalSpecResult>;
-  /** Aborting it stops the run, and the send with it. */
-  controller: AbortController;
-  sendMode: SessionGoalWriterSendMode;
-  ignoreLimit: boolean;
-}
-
-/** A background goal that ended without a spec; the send it held does not go out. */
-export class BackgroundGoalError extends Error {
-  readonly cancelled: boolean;
-  constructor(message: string, cancelled: boolean) {
-    super(message);
-    this.name = 'BackgroundGoalError';
-    this.cancelled = cancelled;
-  }
-}
-
-/** What a send waiting on a background goal carries once the spec is written. */
-export interface BackgroundGoalOutcome {
-  goal: QueuedMessageGoal;
-  /** The text to send in place of the typed message (the spec sent as the message); null keeps the message. */
-  content: string | null;
-}
-
-/**
- * The goal a handed-off send carries, accepted exactly as a "send" click on the
- * written spec would be (`applyGoalChoice`). Rejects with a
- * {@link BackgroundGoalError} when no spec came back, so the send is never made
- * without its goal.
- */
-export async function settleBackgroundGoal(pending: BackgroundGoalSpec, tokenBudget: number | null): Promise<BackgroundGoalOutcome> {
-  const result = await pending.result;
-  if (pending.controller.signal.aborted) throw new BackgroundGoalError('cancelled', true);
-  if (!result.ok) throw new BackgroundGoalError(result.message, false);
-  const goal: QueuedMessageGoal = { objective: result.spec, tokenBudget, settled: true };
-  if (pending.sendMode === 'with-message') goal.briefAgent = true;
-  if (pending.ignoreLimit) goal.ignoreLimit = true;
-  return { goal, content: pending.sendMode === 'goal-as-message' ? result.spec : null };
-}
 
 /**
  * Why the composer stops a send to write a goal: the user armed one, or the

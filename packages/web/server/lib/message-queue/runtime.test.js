@@ -460,6 +460,33 @@ describe('parseQueuedItemInput', () => {
   });
 });
 
+describe('items queued by the goal writer jobs', () => {
+  it('enqueueing a caller-chosen id twice queues it once', async () => {
+    const { runtime, openCode } = createRuntime();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const first = await runtime.enqueue(SESSION, DIRECTORY, item(), { itemId: 'goaljob-1' });
+    const second = await runtime.enqueue(SESSION, DIRECTORY, item(), { itemId: 'goaljob-1' });
+    expect(first.itemId).toBe('goaljob-1');
+    expect(second.itemId).toBe('goaljob-1');
+    expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.id)).toEqual(['goaljob-1']);
+    expect(runtime.hasItem(SESSION, 'goaljob-1')).toBe(true);
+    expect(runtime.hasItem(SESSION, 'other')).toBe(false);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('a prompt-only item is sent as literal text even when it names a command', async () => {
+    const { runtime, openCode } = createRuntime();
+    openCode.state.commands = [{ name: 'summarize' }];
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/summarize notes', text: '/summarize notes', promptOnly: true }));
+    await settle();
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([`/api/session/${SESSION}/prompt`]);
+    expect(openCode.state.sent[0].body.text).toBe('/summarize notes');
+    runtime.stop();
+    await runtime.flush();
+  });
+});
+
 describe('a message queued as a goal', () => {
   const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
   afterEach(() => {

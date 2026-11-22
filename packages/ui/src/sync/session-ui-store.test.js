@@ -7,7 +7,7 @@ import { useSessionWorktreeStore } from './session-worktree-store';
 import { expandSlashCommandGoalObjective, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
 import { ChildStoreManager } from './child-store';
 import { setSyncRefs } from './sync-refs';
-import { setActionRefs, setOptimisticRefs } from './session-actions';
+import { createDraftSessionForServerSend, setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -1303,73 +1303,51 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     useSessionDisplayStore.setState({ singleProjectId: null });
   });
 
-  // Oracle: a send handed off to a background goal (pendingGoal) leaves the
-  // user where they went: its session is created where the draft pointed,
-  // and neither the view nor a draft opened since changes. The send above
-  // without a goal still opens its session.
-  const waitFor = async (predicate) => {
-    for (let attempt = 0; attempt < 100 && !predicate(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(predicate()).toBe(true);
-  };
-  const handOffDraftSend = (draftSnapshot) => {
-    let rejectGoal;
-    const pendingGoal = new Promise((_resolve, reject) => { rejectGoal = reject; });
-    const sent = useSessionUIStore.getState().sendMessage(
-      'message for project A', 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal',
-      { draftSnapshot, pendingGoal },
-    ).catch((error) => error);
-    return { sent, rejectGoal };
-  };
+  // Oracle: a draft handed to the server ("Send when ready") leaves the user
+  // where they went: its session is created where the draft pointed, nothing
+  // is sent from here, and neither the view nor a draft opened since changes.
+  // The ordinary draft send below still opens its session.
+  const createForServerSend = (draftSnapshot) => createDraftSessionForServerSend(
+    { providerID: 'provider-a', modelID: 'model-a' },
+    draftSnapshot,
+    getRuntimeKey(),
+  );
 
-  test('a background goal send creates its session without pulling the user back from another chat', async () => {
+  test('a server-sent draft creates its session without pulling the user back from another chat', async () => {
     const draftSnapshot = { open: true, draftId: 41, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
     useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
 
-    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
+    const creating = createForServerSend(draftSnapshot);
     useSessionUIStore.getState().setCurrentSession('session-project-b', '/projects/beta');
+    const created = await creating;
 
-    await waitFor(() => createSessionCalls.length === 1);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(createSessionCalls[0]).toBe('/projects/alpha');
+    expect(created.sessionId).toBe('session-materialized');
+    expect(createSessionCalls).toEqual(['/projects/alpha']);
     expect(useSessionUIStore.getState().currentSessionId).toBe('session-project-b');
-    // The prompt waits for the goal; nothing was sent yet.
     expect(sendMessageCalls).toHaveLength(0);
-
-    rejectGoal(new Error('goal not written'));
-    expect((await sent).message).toBe('goal not written');
-    expect(sendMessageCalls).toHaveLength(0);
-    expect(useSessionUIStore.getState().currentSessionId).toBe('session-project-b');
   });
 
-  test('a background goal send leaves a new draft the user opened meanwhile open', async () => {
+  test('a server-sent draft leaves a new draft the user opened meanwhile open', async () => {
     const draftSnapshot = { open: true, draftId: 51, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
     useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
 
-    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
-    const nextDraft = { open: true, draftId: 52, directoryOverride: '/projects/alpha', parentID: null };
-    useSessionUIStore.setState({ newSessionDraft: nextDraft });
+    const creating = createForServerSend(draftSnapshot);
+    useSessionUIStore.setState({ newSessionDraft: { open: true, draftId: 52, directoryOverride: '/projects/alpha', parentID: null } });
+    await creating;
 
-    await waitFor(() => createSessionCalls.length === 1);
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(useSessionUIStore.getState().currentSessionId).toBeNull();
     expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
     expect(useSessionUIStore.getState().newSessionDraft.draftId).toBe(52);
-
-    rejectGoal(new Error('goal not written'));
-    await sent;
   });
 
-  test('a background goal send still opens its session when the user stayed on the draft', async () => {
+  test('a server-sent draft still opens its session when the user stayed on the draft', async () => {
     const draftSnapshot = { open: true, draftId: 61, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
     useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
 
-    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
-    await waitFor(() => createSessionCalls.length === 1);
-    await waitFor(() => useSessionUIStore.getState().currentSessionId === 'session-materialized');
+    await createForServerSend(draftSnapshot);
+    expect(useSessionUIStore.getState().currentSessionId).toBe('session-materialized');
     expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false);
-
-    rejectGoal(new Error('goal not written'));
-    await sent;
+    expect(sendMessageCalls).toHaveLength(0);
   });
 
   test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {
