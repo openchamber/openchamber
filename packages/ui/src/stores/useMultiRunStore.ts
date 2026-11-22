@@ -12,7 +12,7 @@ import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { resolveCreatedWorktreeStartDirectory } from '@/lib/worktrees/worktreeStartDirectory';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
-import { checkIsGitRepository } from '@/lib/gitApi';
+import { checkIsGitRepository, getGitBranches } from '@/lib/gitApi';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
@@ -23,6 +23,7 @@ import { clampMultiRunTitle } from '@/lib/multirun/title';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { RUN_LAUNCHER_ID } from '@/lib/multirun/launcher';
 import { multiRunVariantLabel } from '@/lib/multirun/runs';
+import { uniqueLaneBranchName } from '@/lib/multirun/laneBranches';
 import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
 import { generateUuid } from '@/lib/uuid';
 
@@ -45,6 +46,21 @@ const generateWorktreeNameSeed = (groupSlug: string, modelSlug: string): string 
 };
 
 const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
+
+/**
+ * Local branches, so lane branches can avoid them. A failed read leaves only
+ * this launch's own names to avoid: a lane whose branch then exists fails on
+ * its own, which never puts two lanes in one worktree.
+ */
+const readLocalBranchNames = async (directory: string): Promise<Set<string>> => {
+  try {
+    const branches = await getGitBranches(directory, { remote: 'local' });
+    return new Set(branches.all.filter((name) => !name.startsWith('remotes/')));
+  } catch (error) {
+    console.warn('[MultiRun] Could not list local branches:', error);
+    return new Set();
+  }
+};
 
 export const registerMultiRunSession = (session: Session, directory: string): Session => {
   const normalizedDirectory = normalizePath(directory);
@@ -194,6 +210,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
           }
 
           const directory = project.path;
+          const sharedDirectory = normalizePath(params.sharedDirectory) || directory;
 
           const isGit = await checkIsGitRepository(directory);
           assertCurrent();
@@ -205,6 +222,14 @@ export const useMultiRunStore = create<MultiRunStore>()(
           assertCurrent();
           const rootTrackingRemote = shouldIsolateRuns ? await resolveRootTrackingRemote(directory) : null;
           assertCurrent();
+          const takenBranches = shouldIsolateRuns ? await readLocalBranchNames(directory) : new Set<string>();
+          assertCurrent();
+          // A worktree the draft just made may still be running its setup commands.
+          if (!shouldIsolateRuns && sharedDirectory !== directory && await getWorktreeSetupWaitEnabled(project)) {
+            assertCurrent();
+            await waitForWorktreeBootstrap(sharedDirectory);
+            assertCurrent();
+          }
 
           const createdRuns: Array<{
             sessionId: string;
@@ -263,12 +288,12 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   selection: { model: { providerID: model.providerID, id: model.modelID, variant: model.variant }, agent },
                 }, assertCurrent);
                 if (!shouldIsolateRuns) {
-                  const session = await createRun(directory);
-                  registerMultiRunSession(session, directory);
+                  const session = await createRun(sharedDirectory);
+                  registerMultiRunSession(session, sharedDirectory);
 
                   createdRuns.push({
                     sessionId: session.id,
-                    directory,
+                    directory: sharedDirectory,
                     providerID: model.providerID,
                     modelID: model.modelID,
                     variant: model.variant,
@@ -279,11 +304,14 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 }
 
                 assertCurrent();
+                // Taken before the request, so a lane that fails keeps its name out of later lanes too.
+                const laneBranch = uniqueLaneBranchName(preferredName, takenBranches);
+                takenBranches.add(laneBranch);
                 const worktreeMetadata = await createWorktreeWithDefaults(project, {
-                  preferredName,
+                  preferredName: laneBranch,
                   mode: 'new',
-                  branchName: preferredName,
-                  worktreeName: preferredName,
+                  branchName: laneBranch,
+                  worktreeName: laneBranch,
                   startRef: params.worktreeBaseBranch || 'HEAD',
                   setupCommands: commandsToRun,
                   returnAfterDirectoryCreated: true,

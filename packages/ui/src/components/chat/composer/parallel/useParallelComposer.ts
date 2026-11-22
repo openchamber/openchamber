@@ -7,6 +7,8 @@ import { useInputStore } from '@/sync/input-store';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { waitForPendingDraftWorktreeRequest } from '@/lib/worktrees/pendingDraftWorktree';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { CreateMultiRunParams } from '@/types/multirun';
 
 export type ParallelModel = {
@@ -29,6 +31,8 @@ export type ParallelComposerState = {
   variants: ParallelVariant[];
   active: number;
   isolate: boolean;
+  /** Set once the user picks where the runs work; until then `isolate` follows Auto-create worktree. */
+  isolateChosen: boolean;
   baseBranch: string;
   /** Null until the project's commands are loaded. */
   setupCommands: string[] | null;
@@ -49,24 +53,47 @@ const countParallelRuns = (state: ParallelComposerState): number => (
 );
 
 /**
+ * Where the lanes of a run that shares a directory work: the directory the
+ * draft is aimed at, waiting for a worktree the draft is still making (Quick
+ * worktree). A failed worktree rejects, so the run does not quietly start in
+ * the project root instead.
+ */
+const resolveDraftDirectory = async (): Promise<string | undefined> => {
+  const draft = useSessionUIStore.getState().newSessionDraft;
+  if (!draft.open) return undefined;
+  if (draft.pendingWorktreeRequestId) return waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId);
+  return draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? undefined;
+};
+
+/**
  * "Run in parallel" state of the composer. The editor keeps showing one
  * prompt, the active variant's: switching tabs stores the editor text in the
  * variant it leaves and loads the one it opens, so autocomplete, drafts and
  * attachments stay the composer's own. Only offered on a new-session draft.
+ *
+ * Where the runs work starts on the draft's Auto-create worktree policy
+ * (`autoIsolate`): separate worktrees where a single send would get a new
+ * worktree, else the draft's directory shared by every run. It keeps following
+ * the policy until the user picks in the launch settings.
  */
 export function useParallelComposer(input: {
   enabled: boolean;
   draftOpen: boolean;
   draftProjectId: string | null;
+  /** Whether Auto-create worktree would give this draft's first send a new worktree. */
+  autoIsolate: boolean;
   message: string;
   setMessage: (text: string) => void;
 }) {
   const { t } = useI18n();
-  const { enabled, draftOpen, draftProjectId, message, setMessage } = input;
+  const { enabled, draftOpen, draftProjectId, autoIsolate, message, setMessage } = input;
   const [state, setState] = React.useState<ParallelComposerState | null>(null);
   const [isLaunching, setIsLaunching] = React.useState(false);
+  const launchingRef = React.useRef(false);
   const messageRef = React.useRef(message);
   messageRef.current = message;
+  const autoIsolateRef = React.useRef(autoIsolate);
+  autoIsolateRef.current = autoIsolate;
 
   const enter = React.useCallback((text = '') => {
     const config = useConfigStore.getState();
@@ -77,8 +104,12 @@ export function useParallelComposer(input: {
       ? [{ providerID, modelID, displayName: displayName || undefined, variant: config.currentVariant || undefined, count: 1 }]
       : [];
     if (text) setMessage(text);
-    setState({ variants: [{ id: 'A', text: '', models: seed }], active: 0, isolate: false, baseBranch: '', setupCommands: null, fuse: null });
+    setState({ variants: [{ id: 'A', text: '', models: seed }], active: 0, isolate: autoIsolateRef.current, isolateChosen: false, baseBranch: '', setupCommands: null, fuse: null });
   }, [setMessage]);
+
+  React.useEffect(() => {
+    setState((current) => (current && !current.isolateChosen && current.isolate !== autoIsolate ? { ...current, isolate: autoIsolate } : current));
+  }, [autoIsolate]);
 
   const exit = React.useCallback(() => setState(null), []);
 
@@ -165,14 +196,15 @@ export function useParallelComposer(input: {
     setMessage(variants[active].text);
   }, [setMessage, state]);
 
-  const setIsolate = React.useCallback((isolate: boolean) => update((current) => ({ ...current, isolate })), [update]);
+  const setIsolate = React.useCallback((isolate: boolean) => update((current) => ({ ...current, isolate, isolateChosen: true })), [update]);
   const setBaseBranch = React.useCallback((baseBranch: string) => update((current) => ({ ...current, baseBranch })), [update]);
   const setSetupCommands = React.useCallback((setupCommands: string[]) => update((current) => ({ ...current, setupCommands })), [update]);
   const setFuse = React.useCallback((fuse: ParallelFuseJudge | null) => update((current) => ({ ...current, fuse })), [update]);
 
   const launch = React.useCallback(async () => {
     const current = state;
-    if (!current || isLaunching) return;
+    // A ref, so a second Enter before the re-render cannot start a second run.
+    if (!current || launchingRef.current) return;
     const variants = current.variants.map((variant, index) => (index === current.active ? { ...variant, text: messageRef.current } : variant));
     const ready = variants.filter((variant) => variant.text.trim() && variant.models.length > 0);
     if (ready.length !== variants.length) {
@@ -215,8 +247,18 @@ export function useParallelComposer(input: {
     };
 
     setIsLaunching(true);
+    launchingRef.current = true;
     try {
-      const result = await useMultiRunStore.getState().createMultiRun(params);
+      let sharedDirectory: string | undefined;
+      if (!current.isolate) {
+        try {
+          sharedDirectory = await resolveDraftDirectory();
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : t('chat.parallel.toast.failed'));
+          return;
+        }
+      }
+      const result = await useMultiRunStore.getState().createMultiRun({ ...params, sharedDirectory });
       if (!result) {
         toast.error(useMultiRunStore.getState().error ?? t('chat.parallel.toast.failed'));
         return;
@@ -227,9 +269,10 @@ export function useParallelComposer(input: {
       setState(null);
       useUIStore.getState().setRunOverviewKey(result.groupKey);
     } finally {
+      launchingRef.current = false;
       setIsLaunching(false);
     }
-  }, [draftProjectId, isLaunching, setMessage, state, t]);
+  }, [draftProjectId, setMessage, state, t]);
 
   return {
     state,

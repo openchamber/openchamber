@@ -1262,13 +1262,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const focusComposer = React.useCallback(() => composerRef.current?.focus(), []);
     usePendingComposerText({ enabled: !isBtwActive, target: mailboxTarget, setMessage, focus: focusComposer });
 
-    const parallel = useParallelComposer({
-        enabled: !isMobile && !isBtwActive,
-        draftOpen: newSessionDraftOpen && newSessionDraft?.target !== 'chat',
-        draftProjectId: newSessionDraft?.selectedProjectId ?? null,
-        message,
-        setMessage,
-    });
     const parallelProjectId = newSessionDraft?.selectedProjectId ?? null;
     const parallelProject = useProjectsStore(React.useCallback((state) => {
         const project = state.projects.find((entry) => entry.id === (parallelProjectId ?? state.activeProjectId));
@@ -1279,6 +1272,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const [id, path] = parallelProject.split('\n');
         return { id, path };
     }, [parallelProject]);
+    // The policy a single send from this draft follows. Whether the project is
+    // a git repository is left to the strip and the launch, which both check.
+    const autoCreateWorktree = useConfigStore((state) => state.settingsAutoCreateWorktree);
+    const parallelAutoIsolate = newSessionDraft ? shouldAutoCreateDraftWorktree({
+        enabled: autoCreateWorktree,
+        draft: newSessionDraft,
+        projectPath: parallelProjectRef?.path ?? null,
+        isGitRepo: true,
+    }) : false;
+    const parallel = useParallelComposer({
+        enabled: !isMobile && !isBtwActive,
+        draftOpen: newSessionDraftOpen && newSessionDraft?.target !== 'chat',
+        draftProjectId: newSessionDraft?.selectedProjectId ?? null,
+        autoIsolate: parallelAutoIsolate,
+        message,
+        setMessage,
+    });
     const enterParallel = parallel.enter;
     const { isActive: parallelActive, runCount: parallelRunCount, isLaunching: parallelLaunching, launch: launchParallel } = parallel;
     const parallelRun = React.useMemo(() => (parallelActive ? {

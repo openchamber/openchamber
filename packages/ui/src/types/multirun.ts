@@ -33,7 +33,10 @@ export interface CreateMultiRunParams {
   groups: MultiRunGroup[];
   agent?: string;
   worktreeBaseBranch?: string;
+  /** Separate worktrees per lane; off, or a project that is not a git repository, shares `sharedDirectory`. */
   isolateRuns?: boolean;
+  /** Where lanes work when they share a directory: the draft's checkout. The project directory when absent. */
+  sharedDirectory?: string;
   /** Files sent with every variant. */
   files?: MultiRunFileAttachment[];
   setupCommands?: string[];

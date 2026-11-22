@@ -16,16 +16,26 @@ let rejectNextMembership = false;
 let onCreate = () => {};
 let isGitRepository = false;
 let waitForWorktreeSetup = false;
+let localBranches: string[] = [];
+let failBranchListing = false;
+const usedFolders = new Set<string>();
 const createWorktreeWithDefaultsMock = mock((project: { id?: string; path: string }, args: Record<string, unknown>, options: unknown) => {
   worktreeCreateCalls.push({ project, args, options });
+  // Like the client and server: the folder flattens the name, and a folder
+  // that exists gets a suffix. The branch is the one asked for.
+  const seed = String(args.worktreeName ?? 'fix-thing').replaceAll('/', '-');
+  let name = seed;
+  for (let n = 2; usedFolders.has(name); n += 1) name = `${seed}-x${n}`;
+  usedFolders.add(name);
+  const branch = String(args.branchName ?? name);
   return Promise.resolve({
     source: 'sdk',
-    name: 'fix-thing',
-    path: '/repo-worktrees/fix-thing',
+    name,
+    path: `/repo-worktrees/${name}`,
     projectDirectory: '/repo',
-    branch: 'fix-thing',
-    label: 'fix-thing',
-    worktreeRoot: '/repo-worktrees/fix-thing',
+    branch,
+    label: branch,
+    worktreeRoot: `/repo-worktrees/${name}`,
     worktreeStatus: 'pending',
     headState: 'branch',
     worktreeSource: 'created-for-session',
@@ -112,6 +122,9 @@ mock.module('@/sync/session-archive-batch', () => ({
 
 mock.module('@/lib/gitApi', () => ({
   checkIsGitRepository: mock(() => Promise.resolve(isGitRepository)),
+  getGitBranches: mock(() => (failBranchListing
+    ? Promise.reject(new Error('git unavailable'))
+    : Promise.resolve({ all: [...localBranches, 'remotes/origin/main'], current: 'main', branches: {} }))),
   resolveGitRepositoryPrefix: mock(() => Promise.resolve('')),
   validateWorktreeDirectory: mock(() => Promise.resolve({ valid: true, insideWorktreeRoot: true, resolvedWorktreeRoot: null, resolvedCwd: null })),
 }));
@@ -212,6 +225,9 @@ describe('useMultiRunStore', () => {
     onCreate = () => {};
     isGitRepository = false;
     waitForWorktreeSetup = false;
+    localBranches = [];
+    failBranchListing = false;
+    usedFolders.clear();
     childState.session = [];
     childState.sessionTotal = 0;
     childState.limit = 5;
@@ -287,9 +303,9 @@ describe('useMultiRunStore', () => {
     expect(worktreeCreateCalls[0]?.args.returnAfterDirectoryCreated).toBe(true);
     expect(worktreeCreateCalls[0]?.options).toEqual({ resolvedRootTrackingRemote: null });
     expect(worktreeBootstrapWaitCalls).toEqual([]);
-    expect(operationOrder).toEqual(['createSession:/repo-worktrees/fix-thing']);
-    expect(registeredDirectories).toEqual([{ sessionID: 'ses_multirun', directory: '/repo-worktrees/fix-thing' }]);
-    expect(worktreeMetadataCalls).toEqual([{ sessionId: 'ses_multirun', path: '/repo-worktrees/fix-thing' }]);
+    expect(operationOrder).toEqual(['createSession:/repo-worktrees/fix-thing-anthropic-claude-sonnet-4-5']);
+    expect(registeredDirectories).toEqual([{ sessionID: 'ses_multirun', directory: '/repo-worktrees/fix-thing-anthropic-claude-sonnet-4-5' }]);
+    expect(worktreeMetadataCalls).toEqual([{ sessionId: 'ses_multirun', path: '/repo-worktrees/fix-thing-anthropic-claude-sonnet-4-5' }]);
   });
 
   test('waits for isolated worktree bootstrap when setup wait is enabled', async () => {
@@ -306,10 +322,10 @@ describe('useMultiRunStore', () => {
     });
 
     expect(result?.sessionIds).toEqual(['ses_multirun']);
-    expect(worktreeBootstrapWaitCalls).toEqual(['/repo-worktrees/fix-thing']);
+    expect(worktreeBootstrapWaitCalls).toEqual(['/repo-worktrees/fix-thing-anthropic-claude-sonnet-4-5']);
     expect(operationOrder).toEqual([
-      'wait:/repo-worktrees/fix-thing',
-      'createSession:/repo-worktrees/fix-thing',
+      'wait:/repo-worktrees/fix-thing-anthropic-claude-sonnet-4-5',
+      'createSession:/repo-worktrees/fix-thing-anthropic-claude-sonnet-4-5',
     ]);
   });
 
@@ -346,5 +362,120 @@ describe('useMultiRunStore', () => {
     expect(useMultiRunStore.getState().error).toBeNull();
     expect(result?.sessionIds).toHaveLength(6);
     expect(worktreeCreateCalls.length).toBe(6);
+  });
+
+  const laneDirectories = () => registeredDirectories.map((entry) => entry.directory);
+  const requestedBranches = () => worktreeCreateCalls.map((call) => call.args.branchName);
+
+  test('isolated runs: every lane gets its own branch, worktree and session directory', async () => {
+    isGitRepository = true;
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'Fix thing',
+      isolateRuns: true,
+      groups: [{ prompt: 'Fix it', models: [
+        { providerID: 'openai', modelID: 'gpt-5' },
+        { providerID: 'openai', modelID: 'gpt-5' },
+        { providerID: 'anthropic', modelID: 'claude' },
+        // Slugs to the same name as the first model.
+        { providerID: 'openai', modelID: 'gpt.5' },
+      ] }],
+    });
+
+    expect(result?.sessionIds).toHaveLength(4);
+    expect(requestedBranches()).toEqual([
+      'fix-thing/openai-gpt-5/1',
+      'fix-thing/openai-gpt-5/2',
+      'fix-thing/anthropic-claude',
+      // `fix-thing/openai-gpt-5` would sit above the duplicates' branches.
+      'fix-thing/openai-gpt-5-2',
+    ]);
+    for (const call of worktreeCreateCalls) {
+      expect(call.args.worktreeName).toBe(call.args.branchName);
+      expect(call.args.preferredName).toBe(call.args.branchName);
+    }
+    expect(new Set(laneDirectories()).size).toBe(4);
+    expect(worktreeMetadataCalls.map((call) => call.path)).toEqual(laneDirectories());
+  });
+
+  test('isolated runs: a second run with the same title avoids the first run\'s branches', async () => {
+    isGitRepository = true;
+    localBranches = ['main', 'fix-thing/openai-gpt-5', 'fix-thing/anthropic-claude', 'fix-thing/anthropic-claude-2'];
+    await useMultiRunStore.getState().createMultiRun({
+      name: 'Fix thing',
+      isolateRuns: true,
+      groups: [{ prompt: 'Fix it', models: [
+        { providerID: 'openai', modelID: 'gpt-5' },
+        { providerID: 'anthropic', modelID: 'claude' },
+      ] }],
+    });
+    expect(requestedBranches()).toEqual(['fix-thing/openai-gpt-5-2', 'fix-thing/anthropic-claude-3']);
+  });
+
+  test('isolated runs: lanes stay distinct when the branch list cannot be read', async () => {
+    isGitRepository = true;
+    failBranchListing = true;
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'Fix thing',
+      isolateRuns: true,
+      groups: [
+        { prompt: 'A', models: [{ providerID: 'openai', modelID: 'gpt-5' }, { providerID: 'openai', modelID: 'gpt.5' }] },
+        { prompt: 'B', models: [{ providerID: 'openai', modelID: 'gpt-5' }] },
+      ],
+    });
+    expect(result?.sessionIds).toHaveLength(3);
+    expect(requestedBranches()).toEqual(['g1/fix-thing/openai-gpt-5', 'g1/fix-thing/openai-gpt-5-2', 'g2/fix-thing/openai-gpt-5']);
+  });
+
+  test('shared runs: no worktree is made and every lane works in the draft directory', async () => {
+    isGitRepository = true;
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'Question',
+      isolateRuns: false,
+      sharedDirectory: '/repo-worktrees/picked',
+      groups: [{ prompt: 'Why?', models: [{ providerID: 'openai', modelID: 'gpt-5' }, { providerID: 'anthropic', modelID: 'claude' }] }],
+    });
+    expect(result?.sessionIds).toHaveLength(2);
+    expect(worktreeCreateCalls).toEqual([]);
+    expect(worktreeMetadataCalls).toEqual([]);
+    expect(laneDirectories()).toEqual(['/repo-worktrees/picked', '/repo-worktrees/picked']);
+  });
+
+  test('shared runs in a worktree the draft just made wait for its setup when Settings say so', async () => {
+    isGitRepository = true;
+    waitForWorktreeSetup = true;
+    await useMultiRunStore.getState().createMultiRun({
+      name: 'Question',
+      isolateRuns: false,
+      sharedDirectory: '/repo-worktrees/picked',
+      groups: [{ prompt: 'Why?', models: [{ providerID: 'openai', modelID: 'gpt-5' }, { providerID: 'anthropic', modelID: 'claude' }] }],
+    });
+    expect(operationOrder).toEqual([
+      'wait:/repo-worktrees/picked',
+      'createSession:/repo-worktrees/picked',
+      'createSession:/repo-worktrees/picked',
+    ]);
+  });
+
+  test('shared runs without a draft directory use the project directory', async () => {
+    isGitRepository = true;
+    waitForWorktreeSetup = true;
+    await useMultiRunStore.getState().createMultiRun({
+      name: 'Question',
+      isolateRuns: false,
+      groups: [{ prompt: 'Why?', models: [{ providerID: 'openai', modelID: 'gpt-5' }] }],
+    });
+    expect(worktreeBootstrapWaitCalls).toEqual([]);
+    expect(laneDirectories()).toEqual(['/repo']);
+  });
+
+  test('a project that is not a git repository shares the directory even when isolation was asked for', async () => {
+    isGitRepository = false;
+    await useMultiRunStore.getState().createMultiRun({
+      name: 'Question',
+      isolateRuns: true,
+      groups: [{ prompt: 'Why?', models: [{ providerID: 'openai', modelID: 'gpt-5' }, { providerID: 'anthropic', modelID: 'claude' }] }],
+    });
+    expect(worktreeCreateCalls).toEqual([]);
+    expect(laneDirectories()).toEqual(['/repo', '/repo']);
   });
 });

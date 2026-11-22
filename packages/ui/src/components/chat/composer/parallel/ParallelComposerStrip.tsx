@@ -34,12 +34,15 @@ function LaunchSettingsDialog({
   parallel,
   project,
   isGitRepository,
+  isolate,
   open,
   onOpenChange,
 }: {
   parallel: ParallelComposer;
   project: { id: string; path: string } | null;
   isGitRepository: boolean | null;
+  /** Separate worktrees will be made: chosen, and the project is a git repository. */
+  isolate: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }): React.ReactNode {
@@ -58,7 +61,7 @@ function LaunchSettingsDialog({
     : null);
   const judgeSelection: ModelSelectionWithId[] = judge ? [{ ...judge, instanceId: `${judge.providerID}:${judge.modelID}` }] : [];
   const close = () => {
-    if (state.isolate) parallel.setSetupCommands(setupDraft.split('\n').map((line) => line.trim()).filter(Boolean));
+    if (isolate) parallel.setSetupCommands(setupDraft.split('\n').map((line) => line.trim()).filter(Boolean));
     onOpenChange(false);
   };
 
@@ -74,26 +77,29 @@ function LaunchSettingsDialog({
             <SettingsColumnBlock title={t('chat.parallel.settings.whereTitle')}>
               <SettingsRadioGroup aria-label={t('chat.parallel.settings.whereTitle')}>
                 <SettingsRadioOption
-                  selected={!state.isolate}
+                  selected={!isolate}
                   onSelect={() => parallel.setIsolate(false)}
                   label={t('chat.parallel.settings.whereShared')}
                   description={t('chat.parallel.settings.whereSharedHint')}
                 />
                 <SettingsRadioOption
-                  selected={state.isolate}
+                  selected={isolate}
                   onSelect={() => parallel.setIsolate(true)}
                   disabled={isGitRepository === false}
                   label={t('chat.parallel.settings.whereWorktrees')}
                   description={t('chat.parallel.settings.whereWorktreesHint')}
                 />
               </SettingsRadioGroup>
+              {state.isolateChosen ? null : (
+                <p className="typography-micro text-muted-foreground">{t('chat.parallel.settings.whereFollowsAutoWorktree')}</p>
+              )}
             </SettingsColumnBlock>
             <SettingsColumnBlock title={t('chat.parallel.settings.baseBranchTitle')}>
               <BranchSelector
                 directory={project?.path ?? null}
                 value={state.baseBranch}
                 onChange={parallel.setBaseBranch}
-                disabled={!state.isolate}
+                disabled={!isolate}
                 className="w-full"
               />
             </SettingsColumnBlock>
@@ -102,7 +108,7 @@ function LaunchSettingsDialog({
               <Textarea
                 value={setupDraft}
                 onChange={(event) => setSetupDraft(event.target.value)}
-                disabled={!state.isolate}
+                disabled={!isolate}
                 placeholder="bun install"
                 className="min-h-[72px] font-mono typography-micro"
               />
@@ -196,14 +202,12 @@ export function ParallelComposerStrip({
   const state = parallel.state;
   const { isGitRepository } = useBranchOptions(project?.path ?? null);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
-  const { setIsolate, setSetupCommands } = parallel;
+  const { setSetupCommands } = parallel;
+  // A project that is not a git repository cannot have worktrees: its runs
+  // share the directory whatever the state says, and launch does the same.
+  const isolate = Boolean(state?.isolate) && isGitRepository !== false;
 
-  // A project that is not a git repository cannot have worktrees.
-  React.useEffect(() => {
-    if (isGitRepository === false && state?.isolate) setIsolate(false);
-  }, [isGitRepository, setIsolate, state?.isolate]);
-
-  const needsSetupCommands = Boolean(state?.isolate) && state?.setupCommands === null;
+  const needsSetupCommands = isolate && state?.setupCommands === null;
   React.useEffect(() => {
     if (!project || !needsSetupCommands) return;
     let cancelled = false;
@@ -219,7 +223,7 @@ export function ParallelComposerStrip({
   if (!state) return null;
   const active = state.variants[state.active];
   const summary = [
-    state.isolate ? t('chat.parallel.isolation.worktrees') : t('chat.parallel.isolation.shared'),
+    isolate ? t('chat.parallel.isolation.worktrees') : t('chat.parallel.isolation.shared'),
     state.fuse ? t('chat.parallel.fuse.judge', { model: state.fuse.displayName || state.fuse.modelID }) : t('chat.parallel.fuse.off'),
   ].join(' · ');
 
@@ -340,6 +344,7 @@ export function ParallelComposerStrip({
         parallel={parallel}
         project={project}
         isGitRepository={isGitRepository}
+        isolate={isolate}
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
       />

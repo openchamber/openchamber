@@ -67,6 +67,12 @@ The composer's parallel mode (`components/chat/composer/parallel/`) and the
 overview's "Ask another model" launch lanes; `useMultiRunStore.createMultiRun`
 creates them and `dispatchRunPrompt` sends each lane its prompt with the
 project's session knowledge. The Auto routing model is never a lane.
+An isolated run gives each lane a branch of its own
+(`laneBranches.uniqueLaneBranchName`): the `<run>/<model>` seed, suffixed past
+the repository's local branches and the launch's earlier lanes. The server
+refuses an existing branch, so without this a second run with the same title,
+or two models whose slugs match (`gpt-5`, `gpt.5`), failed those lanes. A
+shared run puts every lane in `sharedDirectory`, the draft's directory.
 `runActions.askOtherModels` turns a chat into a run by writing membership onto
 it and adding lanes that re-send its first prompt; it refuses any turn but the
 first, because new lanes would start without the conversation that followed.
