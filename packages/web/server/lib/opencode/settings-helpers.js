@@ -440,6 +440,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sidebarShowWorkSection === 'boolean') {
       result.sidebarShowWorkSection = candidate.sidebarShowWorkSection;
     }
+    if (typeof candidate.sidebarHeaderless === 'boolean') {
+      result.sidebarHeaderless = candidate.sidebarHeaderless;
+    }
     if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
       result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
     }

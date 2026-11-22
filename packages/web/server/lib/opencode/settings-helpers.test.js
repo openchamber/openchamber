@@ -981,7 +981,7 @@ describe('settings registry gate', () => {
     usageExpandedFamilies: { anthropic: ['f'] }, usageModelGroups: { anthropic: { customGroups: [{ id: 'g', label: 'G', models: ['claude'], order: 0 }] } },
     globalBehaviorPrompt: 'Be brief.', responseStyleEnabled: true, responseStylePreset: 'concise', responseStyleCustomInstructions: 'x',
     pwaAppName: 'OpenChamber', pwaOrientation: 'portrait', mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic',
-    inputBarOffset: 10,
+    inputBarOffset: 10, sidebarHeaderless: true,
     customProviderIcons: { 'campus-llm': 'cloud' },
   };
 
