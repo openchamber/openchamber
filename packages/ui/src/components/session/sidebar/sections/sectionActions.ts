@@ -10,12 +10,14 @@ import {
   type SidebarSectionEntry,
 } from '@/lib/sidebarSections';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { nextSidebarPageOrder } from '../pages/sidebarPageOrder';
 
 type PinListRequest = { pin: (listId: string) => void };
 type PinToRequest = { current: string | null; pin: (list: string | null) => void; unpin: () => void };
 
 type SidebarSectionsUiState = {
   managerOpen: boolean;
+  pagesListOpen: boolean;
   draft: CustomSidebarSection | null;
   draftIsNew: boolean;
   draftMatchCount: number | null;
@@ -25,6 +27,7 @@ type SidebarSectionsUiState = {
 
 export const useSidebarSectionsUiStore = create<SidebarSectionsUiState>(() => ({
   managerOpen: false,
+  pagesListOpen: false,
   draft: null,
   draftIsNew: false,
   draftMatchCount: null,
@@ -33,8 +36,10 @@ export const useSidebarSectionsUiStore = create<SidebarSectionsUiState>(() => ({
 }));
 
 export const openSectionsManager = (): void => useSidebarSectionsUiStore.setState({ managerOpen: true });
-export const closeSectionsManager = (): void => useSidebarSectionsUiStore.setState({ managerOpen: false, draft: null, draftIsNew: false, draftMatchCount: null });
-export const editSection = (section: CustomSidebarSection, isNew: boolean): void => useSidebarSectionsUiStore.setState({ managerOpen: true, draft: section, draftIsNew: isNew });
+export const closeSectionsManager = (): void => useSidebarSectionsUiStore.setState({ managerOpen: false, pagesListOpen: false, draft: null, draftIsNew: false, draftMatchCount: null });
+export const openSidebarPagesList = (): void => useSidebarSectionsUiStore.setState({ pagesListOpen: true });
+export const closeSidebarPagesList = (): void => useSidebarSectionsUiStore.setState({ pagesListOpen: false });
+export const editSection = (section: CustomSidebarSection, isNew: boolean): void => useSidebarSectionsUiStore.setState({ managerOpen: true, pagesListOpen: false, draft: section, draftIsNew: isNew });
 export const updateSectionDraft = (draft: CustomSidebarSection): void => useSidebarSectionsUiStore.setState({ draft });
 export const discardSectionDraft = (): void => useSidebarSectionsUiStore.setState({ draft: null, draftIsNew: false, draftMatchCount: null });
 
@@ -60,6 +65,19 @@ export const setSidebarSectionHidden = (id: string, hidden: boolean): void => {
   const next = hidden ? [...store.hiddenSections, id] : store.hiddenSections.filter((entry) => entry !== id);
   store.setHiddenSections(next);
   void updateDesktopSettings({ sidebarHiddenSections: useSessionDisplayStore.getState().hiddenSections });
+};
+
+export const saveSidebarPageOrder = (arranged: readonly string[]): void => {
+  const store = useSessionDisplayStore.getState();
+  store.setPageOrder(nextSidebarPageOrder(arranged, store.pageOrder));
+  void updateDesktopSettings({ sidebarPageOrder: useSessionDisplayStore.getState().pageOrder });
+};
+
+export const setSidebarPageHidden = (id: string, hidden: boolean): void => {
+  const store = useSessionDisplayStore.getState();
+  const next = hidden ? [...store.hiddenPages, id] : store.hiddenPages.filter((entry) => entry !== id);
+  store.setHiddenPages(next);
+  void updateDesktopSettings({ sidebarHiddenPages: useSessionDisplayStore.getState().hiddenPages });
 };
 
 export const canAddSidebarSection = (sections: readonly SidebarSectionEntry[]): boolean => (

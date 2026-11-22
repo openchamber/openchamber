@@ -76,6 +76,29 @@ test('the pages come in their order, each row opens its page and closes it on th
   }
 });
 
+test('the rows follow the order and the hidden pages the user chose', async () => {
+  const restoreDom = installDom();
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { useSessionDisplayStore } = await import('@/stores/useSessionDisplayStore');
+  const initial = useUIStore.getState();
+  const initialDisplay = useSessionDisplayStore.getState();
+  useUIStore.getState().setOverviewFeatureAvailable(true);
+  useSessionDisplayStore.getState().setPageOrder(['stats', 'archive', 'overview']);
+  useSessionDisplayStore.getState().setHiddenPages(['archive', 'integrations']);
+  const { root, labels } = await renderPages();
+  try {
+    expect(labels()).toEqual(['Stats', 'Overview', 'Issues and PRs', 'Scheduled tasks']);
+    await act(async () => { useSessionDisplayStore.getState().setHiddenPages([]); });
+    // Integrations is not in the stored order, so it follows Stats as it does by default.
+    expect(labels()).toEqual(['Stats', 'Integrations catalog', 'Archive', 'Overview', 'Issues and PRs', 'Scheduled tasks']);
+  } finally {
+    useUIStore.setState(initial);
+    useSessionDisplayStore.setState(initialDisplay);
+    await act(async () => root.unmount());
+    await restoreDom();
+  }
+});
+
 test('without the overview feature there is no Overview row', async () => {
   const restoreDom = installDom();
   const { useUIStore } = await import('@/stores/useUIStore');

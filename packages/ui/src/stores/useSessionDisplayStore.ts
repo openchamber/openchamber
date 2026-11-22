@@ -7,6 +7,7 @@ import {
   clampSessionBatchSize,
   DEFAULT_SIDEBAR_SECTIONS,
   hiddenSidebarSectionsSchema,
+  sidebarPageIdsSchema,
   sidebarPinListsSchema,
   sidebarSectionsSchema,
   type SidebarPinList,
@@ -46,10 +47,14 @@ type SessionDisplayStore = {
   sections: SidebarSectionEntry[];
   pinLists: SidebarPinList[];
   hiddenSections: string[];
+  pageOrder: string[];
+  hiddenPages: string[];
   sectionsOwner: string | null;
   setSections: (sections: SidebarSectionEntry[]) => void;
   setPinLists: (lists: SidebarPinList[]) => void;
   setHiddenSections: (ids: string[]) => void;
+  setPageOrder: (ids: string[]) => void;
+  setHiddenPages: (ids: string[]) => void;
   showArchivedSessions: boolean;
   projectSortOrder: ProjectSortOrder;
   setShowChatsSection: (show: boolean) => void;
@@ -135,10 +140,14 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       sections: [...DEFAULT_SIDEBAR_SECTIONS],
       pinLists: [],
       hiddenSections: [],
+      pageOrder: [],
+      hiddenPages: [],
       sectionsOwner: null,
       setSections: (sections) => set({ sections: sidebarSectionsSchema.parse(sections), sectionsOwner: getRuntimeKey() }),
       setPinLists: (lists) => set({ pinLists: sidebarPinListsSchema.parse(lists), sectionsOwner: getRuntimeKey() }),
       setHiddenSections: (ids) => set({ hiddenSections: hiddenSidebarSectionsSchema.parse(ids), sectionsOwner: getRuntimeKey() }),
+      setPageOrder: (ids) => set({ pageOrder: sidebarPageIdsSchema.parse(ids), sectionsOwner: getRuntimeKey() }),
+      setHiddenPages: (ids) => set({ hiddenPages: sidebarPageIdsSchema.parse(ids), sectionsOwner: getRuntimeKey() }),
       showArchivedSessions: false,
       projectSortOrder: 'manual',
       setShowChatsSection: (show) => set({ showChatsSection: show }),
@@ -171,7 +180,7 @@ export type {
 export const dropSectionsOfOtherInstance = (runtimeKey: string): void => {
   const state = useSessionDisplayStore.getState();
   if (state.sectionsOwner === null || state.sectionsOwner === runtimeKey || isTransientRuntimeKey(runtimeKey)) return;
-  useSessionDisplayStore.setState({ sections: [...DEFAULT_SIDEBAR_SECTIONS], pinLists: [], hiddenSections: [], sectionsOwner: null });
+  useSessionDisplayStore.setState({ sections: [...DEFAULT_SIDEBAR_SECTIONS], pinLists: [], hiddenSections: [], pageOrder: [], hiddenPages: [], sectionsOwner: null });
 };
 subscribeRuntimeEndpointWillChange(({ runtimeKey }) => dropSectionsOfOtherInstance(runtimeKey));
 queueMicrotask(() => dropSectionsOfOtherInstance(getRuntimeKey()));

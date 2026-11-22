@@ -407,6 +407,12 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sidebarPageOrder": {
+      "scope": "profile"
+    },
+    "sidebarHiddenPages": {
+      "scope": "profile"
+    },
     "workStatusSectionOrder": {
       "scope": "profile"
     },

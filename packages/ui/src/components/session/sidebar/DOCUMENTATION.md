@@ -1259,7 +1259,8 @@ expanded; an order saved before it existed gets it first on read. Its caption
 (`page` rows, `pages/SidebarPageRow.tsx`, from `pages/useSidebarPages.ts`) are
 Overview (while the feature is on), Issues and PRs, Scheduled tasks, Archive,
 Stats, Integrations catalog (not in enterprise mode), then each active
-extension page. A row is a one-line session row: the icon in the tree's slot,
+extension page; that is the default order, and the sections manager hides and
+reorders single pages (`sections/DOCUMENTATION.md`). A row is a one-line session row: the icon in the tree's slot,
 so the label starts where session titles do, the label in the row-title
 colour. An open page fills its row (`oc-selected`) and the next press closes
 it. A page with a shortcut (Overview, Issues and PRs, Archive) shows it in a

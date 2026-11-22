@@ -139,6 +139,23 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: 'bad' }).workStatusSectionOrder).toBeUndefined();
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: [] }).workStatusSectionOrder).toEqual([]);
   });
+
+  it('keeps the sidebar page order and hidden pages, extension page ids included, through writes that leave them out', () => {
+    const helpers = createTestHelpers();
+    const longGuest = `guest:${'x'.repeat(64)}`;
+    const changes = helpers.sanitizeSettingsUpdate({
+      sidebarPageOrder: ['stats', longGuest, 'stats', '', null, 'archive'],
+      sidebarHiddenPages: ['guest:voice', 7],
+    });
+    expect(changes.sidebarPageOrder).toEqual(['stats', longGuest, 'archive']);
+    expect(changes.sidebarHiddenPages).toEqual(['guest:voice']);
+    let stored = JSON.parse(JSON.stringify(helpers.mergePersistedSettings({}, changes)));
+    // An older client knows neither field and writes the hidden sections only.
+    stored = helpers.mergePersistedSettings(stored, helpers.sanitizeSettingsUpdate({ sidebarHiddenSections: ['s1'] }));
+    const reloaded = helpers.formatSettingsResponse(stored);
+    expect(reloaded.sidebarPageOrder).toEqual(['stats', longGuest, 'archive']);
+    expect(reloaded.sidebarHiddenPages).toEqual(['guest:voice']);
+  });
   it('preserves loose settings values and rejects unreadable usage group entries', () => {
     const helpers = createTestHelpers();
     const notificationTemplates = [];
@@ -995,6 +1012,7 @@ describe('settings registry gate', () => {
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
     sidebarSections: [{ kind: 'builtin', id: 'pages' }, { kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`], folders: ['f1'] }, claims: true, hideWhenEmpty: false }],
     sidebarPinLists: [{ id: 'l1', name: 'Release' }], sidebarHiddenSections: ['s1'],
+    sidebarPageOrder: ['stats', `guest:${'x'.repeat(64)}`, 'overview'], sidebarHiddenPages: ['guest:voice'],
     sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarKeepPinnedInPlace: false, sidebarSessionBatchSize: 12, sidebarProjectSortOrder: 'manual',
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'], workStatusSectionOrderExplicit: true,
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
