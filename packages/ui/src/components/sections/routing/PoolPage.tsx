@@ -108,7 +108,13 @@ export const PoolPage: React.FC<{
   const offered = catalogEntry ? modelVariantNames(catalogEntry) : null;
 
   const levelsMode: LevelsMode = route.levels === undefined ? (listLevels ? 'listed' : 'auto') : route.levels.length === 0 ? 'hidden' : 'listed';
+  // A member set to one effort (a locked model, or a pool set to one level) keeps it, and makes an
+  // automatic pool offer none. Unlocking only exists for models: OpenCode takes no default or
+  // remaps on a pool member, so its level is changed on its own row. Listing levels only matters
+  // when some member follows the pool's level.
   const lockedCount = targets.filter((target) => memberEffort(target).mode === 'locked').length;
+  const lockedModelCount = targets.filter((target) => memberKind(target).kind !== 'pool' && memberEffort(target).mode === 'locked').length;
+  const followsPoolLevel = targets.some((target) => memberEffort(target).mode !== 'locked');
 
   const setTargets = (next: ModelRouteTarget[]) => onChange({ ...route, targets: next });
   const sensors = useSensors(
@@ -308,17 +314,21 @@ export const PoolPage: React.FC<{
             <div className="space-y-2 rounded-md bg-[var(--status-warning-background)] p-3">
               <p className="typography-meta text-[var(--status-warning-text)]">{t('settings.pools.effort.lockedWarning')}</p>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={memberLevels.length === 0}
-                  onClick={() => setTargets(targets.map((target) => (memberKind(target).kind === 'pool' ? target : unlockMemberWithRemaps(target, memberLevels))))}
-                >
-                  {t('settings.pools.effort.fixUnlock')}
-                </Button>
-                <Button size="sm" variant="outline" disabled={memberLevels.length === 0} onClick={() => onChange(setRouteField(route, 'levels', memberLevels))}>
-                  {t('settings.pools.effort.fixList')}
-                </Button>
+                {lockedModelCount > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={memberLevels.length === 0}
+                    onClick={() => setTargets(targets.map((target) => (memberKind(target).kind === 'pool' ? target : unlockMemberWithRemaps(target, memberLevels))))}
+                  >
+                    {t('settings.pools.effort.fixUnlock')}
+                  </Button>
+                ) : null}
+                {followsPoolLevel ? (
+                  <Button size="sm" variant="outline" disabled={memberLevels.length === 0} onClick={() => onChange(setRouteField(route, 'levels', memberLevels))}>
+                    {t('settings.pools.effort.fixList')}
+                  </Button>
+                ) : null}
                 <Button size="sm" variant="outline" onClick={() => onChange(setRouteField(route, 'levels', []))}>
                   {t('settings.pools.effort.fixHide')}
                 </Button>

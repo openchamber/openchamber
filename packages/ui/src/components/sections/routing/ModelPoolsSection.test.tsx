@@ -239,6 +239,8 @@ const clickLabelled = async (container: HTMLElement, label: string) => {
 // every recorded save is a Record<string, ModelRoute>.
 const lastSave = () => routeSaves.at(-1) as Record<string, ModelRoute>;
 
+const buttonTexts = (container: HTMLElement) => [...container.querySelectorAll('button')].map((button) => button.textContent?.trim() ?? '');
+
 const clickCheckbox = async (container: HTMLElement, label: string) => {
   await act(async () => findByAriaLabel(container, '[role="checkbox"]', label).click());
 };
@@ -606,7 +608,9 @@ describe('ModelPoolsSection', () => {
     const { dom, cleanup } = await renderSection();
     try {
       await expandPool(dom.container);
-      expect(dom.container.textContent).toContain('A locked model hides every effort level while this pool is automatic.');
+      expect(dom.container.textContent).toContain('A locked model, or a pool set to one level, keeps that effort, so while this pool is automatic it offers no effort levels.');
+      // p/cheap follows the pool's level, so listing levels is offered too.
+      expect(buttonTexts(dom.container)).toContain('List the levels the models run');
       await clickButton(dom.container, 'Unlock, same effort at every level');
       expect(lastSave().kept.targets).toEqual([
         { model: 'p/luna', defaultVariant: 'high', variants: { low: 'high', medium: 'high', high: 'high' } },
@@ -614,6 +618,34 @@ describe('ModelPoolsSection', () => {
       ]);
       await clickButton(dom.container, 'Hidden');
       expect(lastSave().kept.levels).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // Oracle: OpenCode's rules for a pool member that is another pool: `#level` sets it to one level and
+  // it takes no default or remaps (opencode normalize: "ignored on a nested pool, which takes only
+  // false in variants"). So the only fix that keeps such a pool running the same is hiding its effort.
+  test('a pool of pools set to one level each offers only hiding effort, and hiding keeps every level', async () => {
+    Object.assign(serverRoutes, {
+      sol: { targets: ['p/cheap'] },
+      opus: { targets: ['p/dear'] },
+      workhorse: { targets: ['opencode-route/opus#medium', 'opencode-route/sol#high'], health: { firstTokenTimeoutMs: 62_000 } },
+    });
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container, 'workhorse');
+      expect(dom.container.textContent).toContain('A locked model, or a pool set to one level, keeps that effort');
+      const offered = buttonTexts(dom.container);
+      // Unlocking a pool member, or listing levels no member follows, would change nothing.
+      expect(offered).not.toContain('Unlock, same effort at every level');
+      expect(offered).not.toContain('List the levels the models run');
+      await clickButton(dom.container, 'Hide effort for this pool');
+      expect(lastSave().workhorse).toEqual({
+        targets: ['opencode-route/opus#medium', 'opencode-route/sol#high'],
+        health: { firstTokenTimeoutMs: 62_000 },
+        levels: [],
+      });
     } finally {
       await cleanup();
     }
