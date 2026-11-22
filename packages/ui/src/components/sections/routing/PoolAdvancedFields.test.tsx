@@ -89,12 +89,6 @@ const inputNamed = (container: HTMLElement, label: string): HTMLInputElement => 
   return input;
 };
 
-const switchNamed = (container: HTMLElement, label: string): HTMLElement => {
-  const control = container.querySelector<HTMLElement>(`[role="switch"][aria-label="${label}"]`);
-  if (!control) throw new Error(`no switch labelled "${label}"`);
-  return control;
-};
-
 // Fields commit when the user leaves them; happy-dom does not route synthetic input events to React.
 const typeInto = async (input: HTMLInputElement, value: string) => {
   await act(async () => {
@@ -150,14 +144,6 @@ describe('PoolAdvancedFields', () => {
     current.restore();
   });
 
-  test('asks for two requests in total by default, and saves the attempts as typed', async () => {
-    const container = await renderFields({ targets: ['p/cheap'] }, onChange);
-    const attempts = inputNamed(container, 'Total requests before failover');
-    expect(attempts.placeholder).toBe('2');
-    await typeInto(attempts, '3');
-    expect(changes.at(-1)).toMatchObject({ attempts: 3 });
-  });
-
   test('saves the health window and the slow-request threshold separately', async () => {
     const container = await renderFields({ targets: ['p/cheap'], health: { sampleWindow: 5 } }, onChange);
     await typeInto(inputNamed(container, 'Requests counted for health'), '4');
@@ -166,14 +152,11 @@ describe('PoolAdvancedFields', () => {
     expect(changes.at(-1)).toMatchObject({ health: { sampleWindow: 5, slowThreshold: 2 } });
   });
 
-  test('saves the time limits in milliseconds, and the switch that turns the first-token timeout off', async () => {
+  // The first-output wait, attempts and hedge moved to the pool page's failover section (ModelPoolsSection.test.tsx).
+  test('saves the slow-response limit in milliseconds', async () => {
     const container = await renderFields({ targets: ['p/cheap'] }, onChange);
-    await typeInto(inputNamed(container, 'First response timeout (seconds)'), '30');
-    expect(changes.at(-1)).toMatchObject({ health: { firstTokenTimeoutMs: 30000 } });
     await typeInto(inputNamed(container, 'Slow above (seconds)'), '45');
     expect(changes.at(-1)).toMatchObject({ health: { maxResponseTimeMs: 45000 } });
-    await act(async () => switchNamed(container, 'Never time out the first token').click());
-    expect(changes.at(-1)).toMatchObject({ health: { firstTokenTimeoutMs: false } });
   });
 
   test('saves the failure and quota cooldowns in seconds, and the slow-rate floor as typed', async () => {

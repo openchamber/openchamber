@@ -1125,6 +1125,8 @@ interface UIStore {
   /** Agents starred in the agent menu. While any of them is available, agent cycling (Tab) goes through those only. */
   favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
+  /** Per-model baseline effort. An absent key sends no effort unless another explicit default applies. */
+  modelDefaultVariants: Record<string, string>;
 
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
@@ -1442,6 +1444,7 @@ interface UIStore {
   addRecentAgent: (agentName: string) => void;
   toggleFavoriteAgent: (agentName: string) => void;
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
+  setModelDefaultVariant: (providerID: string, modelID: string, variant: string | undefined) => void;
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   /** The layout setting for every diff, dropping the per-file choices (the Changes header toggle). */
   setDiffLayoutForAllFiles: (mode: 'inline' | 'side-by-side') => void;
@@ -1687,6 +1690,7 @@ export const useUIStore = create<UIStore>()(
         recentAgents: [],
         favoriteAgents: [],
         recentEfforts: {},
+        modelDefaultVariants: {},
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
@@ -3263,6 +3267,16 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setModelDefaultVariant: (providerID, modelID, variant) => {
+          const key = `${providerID}/${modelID}`;
+          set((state) => {
+            const next = { ...state.modelDefaultVariants };
+            if (variant) next[key] = variant;
+            else delete next[key];
+            return { modelDefaultVariants: next };
+          });
+        },
+
         addRecentEffort: (providerID, modelID, variant) => {
           const provider = typeof providerID === 'string' ? providerID.trim() : '';
           const model = typeof modelID === 'string' ? modelID.trim() : '';
@@ -3945,6 +3959,7 @@ export const useUIStore = create<UIStore>()(
           recentAgents: state.recentAgents,
           favoriteAgents: state.favoriteAgents,
           recentEfforts: state.recentEfforts,
+          modelDefaultVariants: state.modelDefaultVariants,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
           diffHideWhitespace: state.diffHideWhitespace,

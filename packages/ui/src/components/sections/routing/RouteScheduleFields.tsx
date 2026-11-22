@@ -2,7 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CommitInput } from '@/components/sections/routing/PoolTargetOptions';
+import { CommitInput } from '@/components/sections/routing/CommitInput';
 import { RangedNumberField } from '@/components/sections/routing/RangedNumberField';
 import {
   SETTINGS_HELPER_CLASS,

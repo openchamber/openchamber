@@ -573,7 +573,7 @@ export const RoutingPage: React.FC = () => {
             ) : null}
 
             {shows('rules') ? <div id="routing-rules"><RouteRulesSection /></div> : null}
-            {shows('pools') ? <div id="routing-pools"><ModelPoolsSection /></div> : null}
+            {shows('pools') ? <div id="routing-pools"><ModelPoolsSection routing={{ config: draft, update }} /></div> : null}
             {shows('plans') ? <div id="routing-plans"><PlansSection /></div> : null}
 
             {shows('categories') ? (

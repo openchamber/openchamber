@@ -1,4 +1,6 @@
 import express from 'express';
+import { matchExpressionProblem, patternProblem } from './route-match.js';
+import { normalizePoolTimeouts, poolTimeoutSummaries } from './pool-timeouts.js';
 
 /**
  * Model pools for OpenCode's `experimental.model_routes`: ordered provider/model
@@ -24,23 +26,52 @@ const isWhole = (value, min, max) => Number.isInteger(value) && value >= min && 
 const MAX_MS = 3_600_000;
 const MAX_COUNT = 50;
 
-// The keys each object may carry, as OpenCode's schema defines them. OpenCode
-// reads only these, so any other key would be saved and silently ignored.
-// `description` and `details` are the exception: OpenChamber owns them and
-// gives them to Jev (`jev.js`). OpenCode decodes its config with
-// `onExcessProperty: "ignore"` (core config.ts, config/normalize.ts), so it
-// loads a route that carries them and drops the two keys.
-const ROUTE_KEYS = ["name", "targets", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules", "description", "details"];
+// The keys each object may carry, as OpenCode's schema defines them
+// (packages/schema/src/config/model-routes.ts in the fork OpenChamber pins).
+// OpenCode reads only these, so any other key would be saved and silently
+// ignored. Three keys are OpenChamber's own: `description` and `details` go to
+// Jev (`jev.js`), and `nestedTimeout` says how Settings derives a pool's
+// first-output timeout from the pools inside it (`normalizePoolTimeouts`).
+// OpenCode decodes its config with `onExcessProperty: "ignore"` (core
+// config.ts, config/normalize.ts), so it loads a route that carries them and
+// drops the three keys.
+const ROUTE_KEYS = [
+  "name", "targets", "system", "include", "exclude", "contains", "notContains", "match", "levels", "variantRules",
+  "cache_format", "health", "budgets", "hedgeAfterMs", "attempts", "autonomy", "selection", "weights", "schedules", "limit",
+  "description", "details", "nestedTimeout",
+];
 // The UI reads a value over these as absent (`modelRoutesApi.ts`), so the two
 // must match; `model-routes.test.js` checks that.
 export const MAX_DESCRIPTION_LENGTH = 200;
 export const MAX_DETAILS_LENGTH = 2000;
-const TARGET_KEYS = ["model", "defaultVariant", "variants", "until"];
+const TARGET_KEYS = ["model", "exclude", "defaultVariant", "variants", "until", "limit", "cache_format", "window"];
 const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
 const TUNING_KEYS = ["enabled", "intervalMinutes", "windowHours", "notes"];
 const SCHEDULE_KEYS = ["id", "targets", "when", "factor", "weight", "note"];
-const WINDOW_KEYS = ["daysOfWeek", "daysOfMonth", "start", "end", "timezone", "from", "until"];
+const WINDOW_KEYS = ["daysOfWeek", "daysOfMonth", "dates", "excludeDates", "excludeWindows", "start", "end", "timezone", "from", "until"];
+const VARIANT_RULE_KEYS = ["match", "map"];
+// OpenCode's `CacheFormat` (packages/schema/src/model-compatibility.ts).
+const CACHE_FORMATS = ["anthropic", "alibaba"];
+// A window name in `experimental.routes.windows`, as OpenCode's schema reads it.
+const WINDOW_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const DATE_ENTRY_PATTERN = /^(\d{4}-\d{2}-\d{2})(?:\/(\d{4}-\d{2}-\d{2}))?$/;
+
+/**
+ * How a pool that contains other pools gets its first-output timeout. OpenCode
+ * reads `health.firstTokenTimeoutMs` only from the pool a session selected;
+ * the pools nested inside it never apply their own (core `routeModel` builds
+ * one policy from the addressed route). So Settings writes the outer pool's
+ * value from its inner pools: the longest by default, or the shortest.
+ */
+const NESTED_TIMEOUT_POLICIES = ["longest", "shortest"];
+/**
+ * The first-output timeout Settings writes for a pool that names none.
+ * OpenCode's own default is 10 seconds (core model-route.ts DEFAULT_POLICY),
+ * which drops slow high-effort models before their first token; the user asked
+ * for 30 seconds. OpenCode cannot be changed from here, so the value is written
+ * into each pool explicitly.
+ */
 const GLOBAL_SCHEDULE_KEYS = ["id", "providers", "models", "targets", "routes", "when", "factor", "weight", "note"];
 // The weekday spellings OpenCode's schema accepts, beside a whole number from 0 (Sunday) to 6.
 const DAY_OF_WEEK_NAMES = [
@@ -203,7 +234,7 @@ const validateHealth = (id, health) => {
 
 const BUDGET_LIMITS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay"];
 
-const validateBudgets = (id, budgets, targets) => {
+const validateBudgets = (id, budgets, targets, dynamicTargets = false) => {
   if (!isRecord(budgets)) return `route "${id}" budgets must map target references to allowances`;
   for (const [target, budget] of Object.entries(budgets)) {
     // OpenCode reads a budget by the concrete model a target expands to, so a
@@ -217,7 +248,7 @@ const validateBudgets = (id, budgets, targets) => {
     // weights key naming the reference is live configuration.)
     if (routeReferenceOf(target) !== null)
       return `route "${id}" budget for "${target}" is keyed by a route reference: OpenCode reads budgets by concrete model reference, so key the budget by a concrete model the route expands to instead`;
-    if (!targets.some((candidate) => keyNamesTarget(target, candidate)))
+    if (!dynamicTargets && !targets.some((candidate) => keyNamesTarget(target, candidate)))
       return `route "${id}" budget for "${target}" matches no target in the route`;
     if (!isRecord(budget)) return `route "${id}" budget for "${target}" must be an object`;
     const unknown = unknownKeysProblem(budget, BUDGET_KEYS);
@@ -265,6 +296,42 @@ const isKnownTimezone = (value) => {
   }
 };
 
+/** A weekday as OpenCode's schedule parser reads it: a day name in any case or
+ * padding, a whole number from 0 (Sunday) to 6, or that number as text. */
+const isWeekday = (day) => {
+  if (isWhole(day, 0, 6)) return true;
+  if (!isString(day)) return false;
+  const text = day.trim().toLowerCase();
+  return /^0?[0-6]$/.test(text) || DAY_OF_WEEK_NAMES.includes(text);
+};
+
+/** A day of the month as OpenCode's parser reads it: 1 to 31, or -1 for the
+ * last day, as a number or as text. */
+const isDayOfMonth = (day) => {
+  if (day === -1 || isWhole(day, 1, 31)) return true;
+  if (!isString(day)) return false;
+  const text = day.trim();
+  const parsed = /^-?\d+$/.test(text) ? Number(text) : Number.NaN;
+  return parsed === -1 || (parsed >= 1 && parsed <= 31);
+};
+
+/** A real calendar date: 2026-02-30 has the shape and is no date. */
+const isRealDate = (text) => {
+  const [year, month, day] = text.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+};
+
+/** One `dates` or `excludeDates` entry, or the reason OpenCode refuses it. */
+const dateEntryProblem = (value) => {
+  if (!isString(value)) return "must be a date such as \"2026-12-25\" or a range \"2026-12-24/2026-12-26\"";
+  const match = DATE_ENTRY_PATTERN.exec(value.trim());
+  if (!match) return "must be a date such as \"2026-12-25\" or a range \"2026-12-24/2026-12-26\"";
+  if (!isRealDate(match[1]) || (match[2] !== undefined && !isRealDate(match[2]))) return "is not a real calendar date";
+  if (match[2] !== undefined && match[2] < match[1]) return "ends before it starts";
+  return null;
+};
+
 /** A schedule's `when` window, judged the way OpenCode judges it: its schema first, then the
  * schedule parser, which drops a window it cannot read and takes the whole schedule with it. */
 const validateScheduleWindow = (subject, window) => {
@@ -276,7 +343,7 @@ const validateScheduleWindow = (subject, window) => {
     if (window.daysOfWeek.length === 0)
       return `${subject} window.daysOfWeek must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
     for (const day of window.daysOfWeek)
-      if (!DAY_OF_WEEK_NAMES.includes(day) && !isWhole(day, 0, 6))
+      if (!isWeekday(day))
         return `${subject} window.daysOfWeek entry "${String(day)}" is not a weekday name or a whole number from 0 to 6`;
   }
   if (window.daysOfMonth !== undefined) {
@@ -285,8 +352,25 @@ const validateScheduleWindow = (subject, window) => {
     if (window.daysOfMonth.length === 0)
       return `${subject} window.daysOfMonth must not be empty: OpenCode drops a schedule whose day list reads as empty, so leave the key out for every day`;
     for (const day of window.daysOfMonth)
-      if (day !== -1 && !isWhole(day, 1, 31))
+      if (!isDayOfMonth(day))
         return `${subject} window.daysOfMonth entry "${String(day)}" is not a whole number from 1 to 31 or -1`;
+  }
+  for (const key of ["dates", "excludeDates"]) {
+    const list = window[key];
+    if (list === undefined) continue;
+    if (!Array.isArray(list) || list.length === 0)
+      return `${subject} window.${key} must be a list with at least one date: OpenCode drops a window whose ${key} list is empty`;
+    for (const entry of list) {
+      const problem = dateEntryProblem(entry);
+      if (problem) return `${subject} window.${key} entry "${String(entry)}" ${problem}`;
+    }
+  }
+  if (window.excludeWindows !== undefined) {
+    if (!Array.isArray(window.excludeWindows) || window.excludeWindows.length === 0)
+      return `${subject} window.excludeWindows must be a list with at least one window name`;
+    for (const name of window.excludeWindows)
+      if (!isString(name) || !WINDOW_NAME_PATTERN.test(name.trim()))
+        return `${subject} window.excludeWindows entry "${String(name)}" is not a window name`;
   }
   for (const key of ["start", "end"])
     if (window[key] !== undefined && !isWindowTime(window[key]))
@@ -309,6 +393,18 @@ const validateScheduleWindow = (subject, window) => {
   if (window.until !== undefined && window.until <= Date.now())
     return `${subject} window.until is in the past: the window has already ended, so the schedule can never apply`;
   return null;
+};
+
+/** A schedule's `when`: an inline window, or the name of a window from
+ * `experimental.routes.windows` (OpenCode's `ScheduleWindow`). */
+const validateScheduleWhen = (subject, when) => {
+  if (isString(when)) {
+    return WINDOW_NAME_PATTERN.test(when.trim())
+      ? null
+      : `${subject} when names a window, and "${when}" is not a window name: use 1 to 128 letters, digits, ".", "_" or "-"`;
+  }
+  if (!isRecord(when)) return `${subject} needs a when window object or the name of a window`;
+  return validateScheduleWindow(subject, when);
 };
 
 /**
@@ -402,7 +498,7 @@ const patternsOverlap = (first, second) => {
 /** A route's `schedules`: time-bound weight changes, as OpenCode's Schedule schema defines them.
  * A schedule with nothing to change, or with both changes, is refused: OpenCode drops the first
  * kind without a word and applies only the weight of the second, ignoring its factor. */
-const validateSchedules = (id, schedules, targets) => {
+const validateSchedules = (id, schedules, targets, dynamicTargets = false) => {
   if (!Array.isArray(schedules)) return `route "${id}" schedules must be a list of schedule objects`;
   for (const [index, schedule] of schedules.entries()) {
     const label = `schedule ${index + 1}`;
@@ -447,11 +543,10 @@ const validateSchedules = (id, schedules, targets) => {
           // the other, so a partly overlapping pair counts as a match too.
           return entryReference.includes("*") && targetReference.includes("*") && patternsOverlap(entryReference, targetReference);
         });
-        if (!matches) return `route "${id}" ${label} target "${entry}" matches no target in the route`;
+        if (!matches && !dynamicTargets) return `route "${id}" ${label} target "${entry}" matches no target in the route`;
       }
     }
-    if (!isRecord(schedule.when)) return `route "${id}" ${label} needs a when window object`;
-    const windowProblem = validateScheduleWindow(`route "${id}" ${label}`, schedule.when);
+    const windowProblem = validateScheduleWhen(`route "${id}" ${label}`, schedule.when);
     if (windowProblem) return windowProblem;
     if (schedule.factor !== undefined && schedule.weight !== undefined)
       return `route "${id}" ${label} gives both factor and weight: OpenCode uses the weight and ignores the factor, so give one of them`;
@@ -519,8 +614,9 @@ const validateTarget = (target) => {
     return "its until is already past: OpenCode drops a target whose until has passed, so the target would leave the route as soon as the config is saved";
   if (target.defaultVariant !== undefined && routeReferenceOf(target.model) !== null)
     return "its defaultVariant is on a route reference: OpenCode expands the referenced route from its own targets and never reads defaultVariant on a reference, so the default variant would never apply";
-  if (target.variants !== undefined && routeReferenceOf(target.model) !== null)
-    return "its variants are on a route reference: OpenCode expands the referenced route from its own targets and never reads variants on a reference, so the variant remaps would never apply";
+  if (target.variants !== undefined && routeReferenceOf(target.model) !== null
+    && isRecord(target.variants) && Object.values(target.variants).some((choice) => choice !== false))
+    return "its variants are on a route reference: only false applies there, to make the nested pool sit a level out; string remaps would never apply";
   if (target.defaultVariant !== undefined && (typeof target.defaultVariant !== "string" || target.defaultVariant === ""))
     return "its defaultVariant must be a string and not empty: OpenCode drops an empty default variant, so the target would run at its own default";
   if (target.defaultVariant !== undefined && target.defaultVariant !== target.defaultVariant.trim())
@@ -533,9 +629,79 @@ const validateTarget = (target) => {
       if (from === "") return "its variants must not use an empty route variant as a key: no selected variant is ever empty, so the remap would never apply";
       if (from !== from.trim()) return "its variants must not use a padded route variant as a key: OpenCode does not trim variant names, so the remap would never apply";
       if (/\s/.test(from)) return "its variants must not use a route variant containing whitespace as a key: variant names contain no whitespace, so the remap would never apply";
-      if (typeof to !== "string" || to === "") return `its variant remap "${from}" must be a string and not empty`;
+      if (to === false) continue;
+      if (typeof to !== "string" || to === "") return `its variant remap "${from}" must be a string and not empty, or false to sit this level out`;
       if (to !== to.trim()) return `its variant remap "${from}" is padded with whitespace: OpenCode does not trim variant names, so the remap would never apply`;
       if (/\s/.test(to)) return `its variant remap "${from}" contains whitespace: variant names contain no whitespace, so the remap would never apply`;
+    }
+  }
+  if (target.exclude !== undefined) {
+    if (!Array.isArray(target.exclude) || target.exclude.some((entry) => !isString(entry) || !entry.trim()))
+      return 'its exclude must be a list of provider ids';
+    if (!target.model.startsWith('*/')) return 'its exclude only applies to a target whose provider is *';
+  }
+  if (target.cache_format !== undefined && !CACHE_FORMATS.includes(target.cache_format))
+    return `its cache_format must be ${CACHE_FORMATS.join(' or ')}`;
+  if (target.limit !== undefined) {
+    const problem = validateContextLimit('its limit', target.limit);
+    if (problem) return problem;
+  }
+  if (target.window !== undefined) {
+    const window = target.window;
+    if (isString(window)) {
+      if (!WINDOW_NAME_PATTERN.test(window.trim())) return 'its window must name a configured window';
+    } else {
+      if (!isRecord(window)) return 'its window must be a window name or { name, invert }';
+      const problem = unknownKeysProblem(window, ['name', 'invert']);
+      if (problem) return `its window has ${problem}`;
+      if (!isString(window.name) || !WINDOW_NAME_PATTERN.test(window.name.trim())) return 'its window.name must name a configured window';
+      if (window.invert !== undefined && window.invert !== true && window.invert !== false) return 'its window.invert must be true or false';
+    }
+  }
+  return null;
+};
+
+const validateContextLimit = (subject, limit) => {
+  if (!isRecord(limit)) return `${subject} must be an object with a context ceiling`;
+  const problem = unknownKeysProblem(limit, ['context']);
+  if (problem) return `${subject} has ${problem}`;
+  return isWhole(limit.context, 1, Number.MAX_SAFE_INTEGER) ? null : `${subject}.context must be a positive whole number`;
+};
+
+const hasMatchingTargets = (route) => (route.include?.length ?? 0) > 0 || (route.contains?.length ?? 0) > 0 || isString(route.match);
+
+const validateMatching = (id, route) => {
+  for (const key of ['include', 'exclude', 'contains', 'notContains', 'levels']) {
+    if (route[key] === undefined) continue;
+    if (!Array.isArray(route[key]) || route[key].some((entry) => !isString(entry) || !entry.trim()))
+      return `route "${id}" ${key} must be a list of non-blank strings`;
+    if (key === 'include' || key === 'exclude') {
+      for (const entry of route[key]) {
+        const problem = patternProblem(entry);
+        if (problem) return `route "${id}" ${key} pattern "${entry}" ${problem}`;
+      }
+    }
+  }
+  if (route.match !== undefined) {
+    if (!isString(route.match)) return `route "${id}" match must be an expression`;
+    const problem = matchExpressionProblem(route.match);
+    if (problem) return `route "${id}" match: ${problem}`;
+  }
+  if (route.variantRules !== undefined) {
+    if (!Array.isArray(route.variantRules)) return `route "${id}" variantRules must be a list`;
+    for (const [index, rule] of route.variantRules.entries()) {
+      const subject = `route "${id}" variantRules entry ${index + 1}`;
+      if (!isRecord(rule)) return `${subject} must be an object`;
+      const unknown = unknownKeysProblem(rule, VARIANT_RULE_KEYS);
+      if (unknown) return `${subject} has ${unknown}`;
+      if (!isString(rule.match)) return `${subject}.match must be an expression`;
+      const problem = matchExpressionProblem(rule.match);
+      if (problem) return `${subject}.match: ${problem}`;
+      if (!isRecord(rule.map)) return `${subject}.map must map levels to variants or false`;
+      for (const [level, choice] of Object.entries(rule.map)) {
+        if (!level || /\s/.test(level) || (choice !== false && (!isString(choice) || !choice || /\s/.test(choice))))
+          return `${subject}.map must use non-blank levels and variants, or false to sit a level out`;
+      }
     }
   }
   return null;
@@ -563,7 +729,7 @@ export const keyNamesTarget = (key, target) => {
   if (!reference.includes("*")) return false;
   const [provider, ...pattern] = reference.split("/");
   const [keyProvider, ...model] = key.split("/");
-  if (provider !== keyProvider || model.length === 0) return false;
+  if ((provider !== '*' && provider !== keyProvider) || model.length === 0) return false;
   const matcher = new RegExp(`^${pattern.join("/").split("*").map(escapeRegExp).join(".*")}$`);
   return matcher.test(model.join("/"));
 };
@@ -601,12 +767,37 @@ const expandedTargetsOf = (routes, id, trail = []) => {
   return expanded;
 };
 
-export const validateModelRoute = (id, route, expandedTargets) => {
+/** Matching keys depend on the live catalog, so membership checks cannot reject
+ * a concrete weight or budget just because it is absent from explicit targets. */
+const hasDynamicTargets = (routes, id, trail = []) => {
+  if (trail.includes(id)) return false;
+  const route = routes[id];
+  if (!isRecord(route)) return false;
+  if (hasMatchingTargets(route)) return true;
+  return (Array.isArray(route.targets) ? route.targets : []).some((target) => {
+    if (!isString(target) && !(isRecord(target) && isString(target.model))) return false;
+    const nested = routeReferenceOf(target);
+    return nested !== null && hasDynamicTargets(routes, nested, [...trail, id]);
+  });
+};
+
+export const validateModelRoute = (id, route, expandedTargets, dynamicTargets = hasMatchingTargets(route ?? {})) => {
   if (!ROUTE_ID_PATTERN.test(id)) return `invalid route id "${id}"`;
   if (!isRecord(route)) return `route "${id}" must be an object`;
   const unknown = unknownKeysProblem(route, ROUTE_KEYS);
   if (unknown) return `route "${id}" has ${unknown}`;
   if (route.name !== undefined && typeof route.name !== "string") return `route "${id}" name must be a string`;
+  if (route.system !== undefined && !isString(route.system)) return `route "${id}" system must be text`;
+  const matchingProblem = validateMatching(id, route);
+  if (matchingProblem) return matchingProblem;
+  if (route.nestedTimeout !== undefined && !NESTED_TIMEOUT_POLICIES.includes(route.nestedTimeout))
+    return `route "${id}" nestedTimeout must be longest or shortest`;
+  if (route.cache_format !== undefined && !CACHE_FORMATS.includes(route.cache_format))
+    return `route "${id}" cache_format must be ${CACHE_FORMATS.join(' or ')}`;
+  if (route.limit !== undefined) {
+    const problem = validateContextLimit(`route "${id}" limit`, route.limit);
+    if (problem) return problem;
+  }
   // Only a string is equal to its own String(), so these are plain value checks.
   if (route.description !== undefined) {
     if (String(route.description) !== route.description || /[\r\n]/.test(route.description))
@@ -619,11 +810,13 @@ export const validateModelRoute = (id, route, expandedTargets) => {
     if (route.details.length > MAX_DETAILS_LENGTH)
       return `route "${id}" details must be at most ${MAX_DETAILS_LENGTH} characters`;
   }
-  if (!Array.isArray(route.targets) || route.targets.length === 0)
-    return `route "${id}" needs at least one target`;
+  if (route.targets !== undefined && !Array.isArray(route.targets)) return `route "${id}" targets must be a list`;
+  const targets = route.targets ?? [];
+  if (targets.length === 0 && !hasMatchingTargets(route))
+    return `route "${id}" needs at least one target, include, contains or match`;
   const seenTargets = new Set();
   const earlierTargets = [];
-  for (const target of route.targets) {
+  for (const target of targets) {
     const problem = validateTarget(target);
     if (problem) return `route "${id}" has a bad target: ${problem}`;
     // OpenCode attaches each target once, keyed by its full model reference
@@ -683,7 +876,7 @@ export const validateModelRoute = (id, route, expandedTargets) => {
       // matches no attach key and the weight would never apply.
       if (key.includes("*"))
         return `route "${id}" weight for "${key}" is keyed by a pattern: OpenCode reads weights by concrete target reference, so key the weight by a concrete target instead`;
-      if (!route.targets.some((target) => keyNamesTarget(key, target)))
+      if (!dynamicTargets && !targets.some((target) => keyNamesTarget(key, target)))
         return `route "${id}" weight for "${key}" matches no target in the route`;
     }
   }
@@ -699,14 +892,14 @@ export const validateModelRoute = (id, route, expandedTargets) => {
     // The set-level caller passes the targets the route expands to through
     // its route references; a single route judged alone can only be judged
     // against its direct targets.
-    const problem = validateBudgets(id, route.budgets, expandedTargets ?? route.targets);
+    const problem = validateBudgets(id, route.budgets, expandedTargets ?? targets, dynamicTargets);
     if (problem) return problem;
   }
   if (route.schedules !== undefined) {
     // Schedules judge against the same expanded targets: OpenCode inherits
     // a route's schedule rules into nested groups and matches them against
     // each concrete leaf, so a leaf reached through a reference counts.
-    const problem = validateSchedules(id, route.schedules, expandedTargets ?? route.targets);
+    const problem = validateSchedules(id, route.schedules, expandedTargets ?? targets, dynamicTargets);
     if (problem) return problem;
   }
   return null;
@@ -715,7 +908,7 @@ export const validateModelRoute = (id, route, expandedTargets) => {
 export const validateModelRoutes = (routes) => {
   if (!isRecord(routes)) return "routes must be an object of route definitions";
   for (const [id, route] of Object.entries(routes)) {
-    const problem = validateModelRoute(id, route, expandedTargetsOf(routes, id));
+    const problem = validateModelRoute(id, route, expandedTargetsOf(routes, id), hasDynamicTargets(routes, id));
     if (problem) return problem;
   }
   // A target can reference another route in the set (`opencode-route/<id>`).
@@ -723,7 +916,7 @@ export const validateModelRoutes = (routes) => {
   // the set, or it is already on the trail (a cycle) — without a word, so a
   // dead reference is refused here, the only place it can be named.
   for (const [id, route] of Object.entries(routes)) {
-    for (const target of route.targets) {
+    for (const target of route.targets ?? []) {
       const referenced = routeReferenceOf(target);
       // A route is always on its own trail during expansion, so a target
       // referencing the route itself is dropped from every entry point,
@@ -741,14 +934,14 @@ export const validateModelRoutes = (routes) => {
   // through references until no route is added; what is left reaches none.
   const expanding = new Set(
     Object.entries(routes)
-      .filter(([, route]) => route.targets.some((target) => routeReferenceOf(target) === null))
+      .filter(([, route]) => hasMatchingTargets(route) || (route.targets ?? []).some((target) => routeReferenceOf(target) === null))
       .map(([id]) => id),
   );
   for (let grew = true; grew; ) {
     grew = false;
     for (const [id, route] of Object.entries(routes)) {
       if (expanding.has(id)) continue;
-      if (route.targets.some((target) => expanding.has(routeReferenceOf(target)))) {
+      if ((route.targets ?? []).some((target) => expanding.has(routeReferenceOf(target)))) {
         expanding.add(id);
         grew = true;
       }
@@ -763,10 +956,10 @@ export const validateModelRoutes = (routes) => {
   // reference that reaches no concrete target that way contributes no
   // model to the referencing route and is refused per entry.
   for (const [id, route] of Object.entries(routes)) {
-    for (const target of route.targets) {
+    for (const target of route.targets ?? []) {
       const referenced = routeReferenceOf(target);
       if (referenced === null || referenced === id) continue;
-      if (expandedTargetsOf(routes, referenced, [id]).length === 0)
+      if (expandedTargetsOf(routes, referenced, [id]).length === 0 && !hasDynamicTargets(routes, referenced, [id]))
         return `route "${id}" target "${target.model ?? target}" can never serve a model in this route: route "${referenced}" reaches models only through route "${id}" itself, which OpenCode will not revisit during expansion`;
     }
   }
@@ -797,8 +990,7 @@ export const validateModelRouteSchedules = (schedules) => {
       if (list.length === 0)
         return `${label} ${key} must not be empty: OpenCode reads an empty list as every ${key.slice(0, -1)}, so leave the key out instead`;
     }
-    if (!isRecord(schedule.when)) return `${label} needs a when window object`;
-    const windowProblem = validateScheduleWindow(label, schedule.when);
+    const windowProblem = validateScheduleWhen(label, schedule.when);
     if (windowProblem) return windowProblem;
     if (schedule.factor !== undefined && schedule.weight !== undefined)
       return `${label} sets both factor and weight: OpenCode applies the weight and ignores the factor, so keep one`;
@@ -871,6 +1063,7 @@ export const registerModelRouteRoutes = (app, dependencies) => {
         // The user file's own pools, which are the ones Settings edits; the
         // merged view would copy other files' pools into it on save.
         routes: readModelRoutes(targetConfig),
+        timeouts: poolTimeoutSummaries(readModelRoutes(targetConfig)),
         tuning: readLayeredModelRouteTuning(sourcesFromLayers(layers)),
         // The user file's own list, which is the one Settings edits; the
         // merged view would copy other files' entries into it on save.
@@ -909,11 +1102,12 @@ export const registerModelRouteRoutes = (app, dependencies) => {
       // readers fold flat under nested and a stale flat key would come back
       // as a second copy. A flat file keeps the flat keys as before.
       const nestedRoutes = readNestedRoutes(targetConfig);
-      if (routes !== undefined) {
+      const normalizedRoutes = routes === undefined ? undefined : normalizePoolTimeouts(routes);
+      if (normalizedRoutes !== undefined) {
         if (nestedRoutes) {
-          nestedRoutes.models = routes;
+          nestedRoutes.models = normalizedRoutes;
           delete targetConfig.experimental.model_routes;
-        } else targetConfig.experimental.model_routes = routes;
+        } else targetConfig.experimental.model_routes = normalizedRoutes;
       }
       if (tuning === null) {
         delete targetConfig.experimental.model_route_tuning;
@@ -933,7 +1127,11 @@ export const registerModelRouteRoutes = (app, dependencies) => {
           delete targetConfig.experimental.model_route_schedules;
         } else targetConfig.experimental.model_route_schedules = schedules;
       }
-      writeConfig(targetConfig, targetPath);
+      // Pool key order is the order shown by Settings and OpenCode. The shared
+      // writer normally compares maps per key, so reorder these maps explicitly.
+      writeConfig(targetConfig, targetPath, { orderedPaths: routes === undefined ? [] : [
+        nestedRoutes ? ['experimental', 'routes', 'models'] : ['experimental', 'model_routes'],
+      ] });
       if (refreshOpenCodeAfterConfigChange) {
         try {
           await refreshOpenCodeAfterConfigChange("model-routes");
@@ -942,7 +1140,8 @@ export const registerModelRouteRoutes = (app, dependencies) => {
         }
       }
       res.json({
-        routes: routes ?? readModelRoutes(targetConfig),
+        routes: readModelRoutes(targetConfig),
+        timeouts: poolTimeoutSummaries(readModelRoutes(targetConfig)),
         tuning: tuning === undefined ? readLayeredModelRouteTuning(sourcesFromLayers(layers)) : tuning,
         schedules: readModelRouteSchedules(targetConfig),
         ...(await otherFilesFor(req, targetPath)),

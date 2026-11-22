@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Message, ModelSelection } from '@/lib/opencode/model';
-import { getModelPoolTargets, modelForRecoveryAnchor, nextModelPoolTarget, recoveryUserMessage } from './sessionErrorRecovery';
+import { failedModelsForPrompt, getModelPoolTargets, modelForRecoveryAnchor, nextModelPoolTarget, recoveryUserMessage } from './sessionErrorRecovery';
 
 const target = (providerID: string, id: string, variant?: string): ModelSelection => {
   const selection: ModelSelection = { providerID, id };
@@ -40,12 +40,36 @@ describe('session error recovery helpers', () => {
     expect(getModelPoolTargets(providers, 'provider-a', 'model-a')).toEqual([]);
   });
 
-  test('advances after the failed pool target and starts at the first fallback when unknown', () => {
+  // Oracle: the pool's configured order; a used-up pool has no next target.
+  test('advances after failed targets and reports a used-up pool instead of wrapping', () => {
     const targets = [target('a', 'one'), target('b', 'two'), target('c', 'three')];
-    expect(nextModelPoolTarget(targets, { providerID: 'b', id: 'two' })).toEqual(targets[2]);
-    expect(nextModelPoolTarget(targets, { providerID: 'c', id: 'three' })).toEqual(targets[0]);
+    expect(nextModelPoolTarget(targets, [{ providerID: 'b', id: 'two' }])).toEqual(targets[2]);
+    expect(nextModelPoolTarget(targets, [{ providerID: 'c', id: 'three' }])).toBeNull();
+    expect(nextModelPoolTarget(targets, [{ providerID: 'a', id: 'one' }, { providerID: 'b', id: 'two' }])).toEqual(targets[2]);
     expect(nextModelPoolTarget(targets)).toEqual(targets[1]);
     expect(nextModelPoolTarget([targets[0]])).toBeNull();
+  });
+
+  test('never offers a target that already failed, for every failure set', () => {
+    const targets = [target('a', '1'), target('b', '2'), target('c', '3'), target('d', '4')];
+    for (let mask = 1; mask < 16; mask++) {
+      const failed = targets.filter((_, index) => mask & (1 << index));
+      const next = nextModelPoolTarget(targets, failed);
+      const last = Math.max(...failed.map((entry) => targets.indexOf(entry)));
+      expect(next === null ? null : targets.indexOf(next)).toBe(last === targets.length - 1 ? null : last + 1);
+    }
+  });
+
+  test('collects the models that failed the prompt, stopping at the next prompt', () => {
+    const history: Message[] = [
+      { id: 'u', sessionID: 's', role: 'user', time: { created: 1 } },
+      { id: 'a1', sessionID: 's', role: 'assistant', time: { created: 2 }, agent: 'build', providerID: 'p', modelID: 'one', finish: 'error' },
+      { id: 'a2', sessionID: 's', role: 'assistant', time: { created: 3 }, agent: 'build', providerID: 'p', modelID: 'two', finish: 'error' },
+      { id: 'u2', sessionID: 's', role: 'user', time: { created: 4 } },
+      { id: 'a3', sessionID: 's', role: 'assistant', time: { created: 5 }, agent: 'build', providerID: 'p', modelID: 'three', finish: 'error' },
+    ];
+    expect(failedModelsForPrompt(history, 'u')).toEqual([{ providerID: 'p', id: 'one' }, { providerID: 'p', id: 'two' }]);
+    expect(failedModelsForPrompt(history, 'missing')).toEqual([]);
   });
 
   test('finds the prompt associated with an assistant error or the latest prompt', () => {

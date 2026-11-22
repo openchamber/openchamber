@@ -1139,17 +1139,17 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'routing.pools-advanced',
     page: 'routing',
-    titleKey: 'settings.pools.advanced.selection',
-    descriptionKey: 'settings.pools.advanced.selectionInfo',
-    keywords: ['pool', 'selection', 'round robin', 'weighted', 'attempts', 'hedge', 'health', 'cooldown', 'budget', 'quota', 'soft limit', 'routing'],
+    titleKey: 'settings.pools.timeout.label',
+    descriptionKey: 'settings.pools.timeout.info',
+    keywords: ['pool', 'timeout', 'first token', 'first output', 'wait', 'slow', 'failover', 'fallback', 'attempts', 'retry', 'hedge', 'selection', 'round robin', 'weighted', 'health', 'cooldown', 'budget', 'quota', 'soft limit', 'routing'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {
     id: 'routing.pools-targets',
     page: 'routing',
-    titleKey: 'settings.pools.target.options',
-    descriptionKey: 'settings.pools.target.remapsInfo',
-    keywords: ['pool', 'target', 'variant', 'remap', 'default variant', 'until', 'expiry', 'expire', 'nested pool', 'display name', 'first token'],
+    titleKey: 'settings.pools.member.byLevel',
+    descriptionKey: 'settings.pools.member.lockInfo',
+    keywords: ['pool', 'model', 'effort', 'variant', 'lock', 'default effort', 'remap', 'skip level', 'until', 'expiry', 'nested pool', 'hide', 'picker', 'reorder', 'order', 'display name', 'category'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {

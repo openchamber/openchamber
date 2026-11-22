@@ -1,10 +1,15 @@
 import { AUTONOMY_LEVELS, type AutonomyLevel, type ModelRoute, type ModelRouteTarget, type ModelRouteTuning } from '@/lib/routing/modelRoutesApi';
 
+/** A target in its object form: a plain `provider/model` string reads as `{ model }`. */
+export const targetEntry = (target: ModelRouteTarget): Exclude<ModelRouteTarget, string> =>
+  (typeof target === 'string' ? { model: target } : target);
+
+export const targetLabel = (target: ModelRouteTarget): string => targetEntry(target).model;
+
+export const targetUntil = (target: ModelRouteTarget): number | undefined => targetEntry(target).until;
+
 /** The model a budget or weight is keyed by: the target without its `#variant` suffix. */
-export const targetReference = (target: ModelRouteTarget): string => {
-  const label = typeof target === 'string' ? target : target.model;
-  return label.split('#')[0];
-};
+export const targetReference = (target: ModelRouteTarget): string => targetLabel(target).split('#')[0];
 
 /** A pattern such as `openai/*` names several models, so it cannot carry its own budget or weight. */
 export const isConcreteTarget = (target: ModelRouteTarget): boolean => !targetReference(target).includes('*');
@@ -52,30 +57,6 @@ export const setTargetEntry = <T extends object>(
   return pruneEmpty(next);
 };
 
-export type TargetOptions = {
-  defaultVariant?: string;
-  variants?: Record<string, string>;
-  until?: number;
-};
-
-export const targetLabel = (target: ModelRouteTarget): string => (typeof target === 'string' ? target : target.model);
-
-export const targetUntil = (target: ModelRouteTarget): number | undefined =>
-  typeof target === 'string' ? undefined : target.until;
-
-export const targetOptions = (target: ModelRouteTarget): TargetOptions =>
-  typeof target === 'string' ? {} : { defaultVariant: target.defaultVariant, variants: target.variants, until: target.until };
-
-/** A target with no options stays a plain string so the saved config keeps its short form. */
-export const withTargetOptions = (target: ModelRouteTarget, options: TargetOptions): ModelRouteTarget => {
-  const model = targetLabel(target);
-  const kept: TargetOptions = {};
-  if (options.defaultVariant) kept.defaultVariant = options.defaultVariant;
-  if (options.variants && Object.keys(options.variants).length > 0) kept.variants = options.variants;
-  if (options.until !== undefined) kept.until = options.until;
-  return Object.keys(kept).length === 0 ? model : { model, ...kept };
-};
-
 const ROUTE_REFERENCE_PREFIX = 'opencode-route/';
 
 /** The route id a target points at when it is another pool, or null for a model. */
@@ -117,8 +98,22 @@ export const weightNamesTarget = (key: string, target: ModelRouteTarget): boolea
 /** Drops the weights of targets the route no longer has, so a removed or edited target cannot block the save. */
 export const withoutAbsentWeights = (route: ModelRoute): ModelRoute => {
   if (!route.weights) return route;
+  // Matching keys add models only OpenCode can list, so a weight for one of
+  // them names no configured target and must stay.
+  if (route.include || route.contains || route.match) return route;
   const kept = Object.fromEntries(
-    Object.entries(route.weights).filter(([key]) => route.targets.some((target) => weightNamesTarget(key, target))),
+    Object.entries(route.weights).filter(([key]) => (route.targets ?? []).some((target) => weightNamesTarget(key, target))),
   );
   return setRouteField(route, 'weights', pruneEmpty(kept));
+};
+
+/**
+ * The pools in a new order. Pool order is the key order of the map OpenCode
+ * reads; its catalog and the model picker follow it, except that OpenCode lists
+ * pools with a `levels` list or a `#effort` member after the others.
+ */
+export const withPoolOrder = (routes: Record<string, ModelRoute>, orderedIds: readonly string[]): Record<string, ModelRoute> => {
+  const ordered = orderedIds.filter((id) => Object.hasOwn(routes, id));
+  const rest = Object.keys(routes).filter((id) => !ordered.includes(id));
+  return Object.fromEntries([...ordered, ...rest].map((id) => [id, routes[id]]));
 };

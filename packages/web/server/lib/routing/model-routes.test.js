@@ -12,6 +12,12 @@ import {
   validateModelRoutes,
 } from './model-routes.js';
 
+// Oracle for successful saves: the approved 30-second default is written into
+// every pool that had no wait. None of these fixtures uses inherited waits.
+const withDefaultTimeouts = (routes) => Object.fromEntries(Object.entries(routes).map(([id, route]) => [
+  id, { ...route, health: { firstTokenTimeoutMs: 30_000, ...route.health } },
+]));
+
 describe('validateModelRoute', () => {
   it('accepts a minimal ordered route', () => {
     expect(validateModelRoute('cheap-fast', { targets: ['openai/gpt-6-luna'] })).toBeNull();
@@ -693,7 +699,8 @@ describe('validateModelRoute schedules', () => {
 
   it('refuses a schedule with no window, no change, or both changes', () => {
     expect(validateModelRoute('x', { ...base, schedules: [{ factor: 0.5 }] })).toMatch(/needs a when window/);
-    expect(validateModelRoute('x', { ...base, schedules: [{ when: 'weekdays' }] })).toMatch(/needs a when window/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: 'weekdays' }] })).toMatch(/needs a factor or a weight/);
+    expect(validateModelRoute('x', { ...base, schedules: [{ when: 'weekdays', factor: 0.5 }] })).toBeNull();
     expect(validateModelRoute('x', { ...base, schedules: [{ when: {} }] })).toMatch(/needs a factor or a weight/);
     expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 0.5, weight: 2 }] })).toMatch(/both factor and weight/);
     expect(validateModelRoute('x', { ...base, schedules: [{ when: {}, factor: 0 }] })).toMatch(/factor must be a positive number/);
@@ -704,7 +711,8 @@ describe('validateModelRoute schedules', () => {
   it('refuses window values OpenCode cannot read, because its parser drops the whole schedule', () => {
     const withWindow = (when) => validateModelRoute('x', { ...base, schedules: [{ when, factor: 0.5 }] });
     expect(withWindow({ daysOfWeek: ['funday'] })).toMatch(/daysOfWeek entry "funday"/);
-    expect(withWindow({ daysOfWeek: ['Mon'] })).toMatch(/daysOfWeek entry "Mon"/);
+    expect(withWindow({ daysOfWeek: ['Mon'] })).toBeNull();
+    expect(withWindow({ daysOfWeek: [' MON ', '01'], daysOfMonth: ['-1', '15'] })).toBeNull();
     expect(withWindow({ daysOfWeek: [7] })).toMatch(/daysOfWeek entry "7"/);
     expect(withWindow({ daysOfWeek: 'mon' })).toMatch(/daysOfWeek must be a list/);
     expect(withWindow({ daysOfWeek: [] })).toMatch(/daysOfWeek must not be empty/);
@@ -877,7 +885,8 @@ describe('registerModelRouteRoutes', () => {
     registerModelRouteRoutes(app, deps);
     const response = res();
     await routes.get[0][1]({}, response);
-    expect(response.out.body).toEqual({ routes: { old: { targets: ['a/b'] } }, tuning: null, schedules: null, otherRoutes: [], otherSchedules: [], path: '/u/opencode.json' });
+    expect(response.out.body).toMatchObject({ routes: { old: { targets: ['a/b'] } }, tuning: null, schedules: null, otherRoutes: [], otherSchedules: [], path: '/u/opencode.json' });
+    expect(response.out.body.timeouts).toEqual({ old: { applied: 10_000, longest: 30_000, shortest: 30_000, nested: [] } });
   });
 
   it('GET returns nested routes, tuning, and schedules for a nested-only config', async () => {
@@ -969,11 +978,11 @@ describe('registerModelRouteRoutes', () => {
     const schedules = [{ routes: ['fresh'], when: {}, weight: 3 }];
     const saved = res();
     await handler({ body: { routes: pools, schedules } }, saved);
-    expect(targetConfig.experimental.routes.models).toEqual(pools);
+    expect(targetConfig.experimental.routes.models).toEqual(withDefaultTimeouts(pools));
     expect(targetConfig.experimental.routes.schedules).toEqual(schedules);
     expect(targetConfig.experimental.model_routes).toBeUndefined();
     expect(targetConfig.experimental.model_route_schedules).toBeUndefined();
-    expect(saved.out.body.routes).toEqual(pools);
+    expect(saved.out.body.routes).toEqual(withDefaultTimeouts(pools));
     expect(saved.out.body.schedules).toEqual(schedules);
     const removed = res();
     await handler({ body: { schedules: null } }, removed);
@@ -1023,7 +1032,7 @@ describe('registerModelRouteRoutes', () => {
     const response = res();
     await handler({ body: { routes: pools } }, response);
     expect(response.out.status).toBeUndefined();
-    expect(targetConfig.experimental.model_routes).toEqual(pools);
+    expect(targetConfig.experimental.model_routes).toEqual(withDefaultTimeouts(pools));
     expect(deps.writeConfig).toHaveBeenCalledTimes(1);
   });
 
@@ -1202,9 +1211,9 @@ describe('registerModelRouteRoutes', () => {
       const edited = { own: { targets: ['a/c'] } };
       const saved = res();
       await handler({ body: { routes: edited }, query: { directory: '/p' } }, saved);
-      expect(userConfig.experimental.model_routes).toEqual(edited);
+      expect(userConfig.experimental.model_routes).toEqual(withDefaultTimeouts(edited));
       expect(projectConfig.experimental.model_routes).toEqual(projectRoutes);
-      expect(saved.out.body.routes).toEqual(edited);
+      expect(saved.out.body.routes).toEqual(withDefaultTimeouts(edited));
       expect(saved.out.body.otherRoutes).toEqual([{ path: '/p/opencode.json', routes: projectRoutes }]);
     });
 
@@ -1277,9 +1286,9 @@ describe('registerModelRouteRoutes', () => {
     const [, , , handler] = routes.put[0];
     const response = res();
     await handler({ body: { routes: { luna: { targets: ['openai/x'], autonomy: 'agent' } } } }, response);
-    expect(response.out.body.routes).toEqual({ luna: { targets: ['openai/x'], autonomy: 'agent' } });
-    expect(targetConfig.experimental.model_routes).toEqual({ luna: { targets: ['openai/x'], autonomy: 'agent' } });
-    expect(deps.writeConfig).toHaveBeenCalledWith(targetConfig, '/u/opencode.json');
+    expect(response.out.body.routes).toEqual({ luna: { targets: ['openai/x'], autonomy: 'agent', health: { firstTokenTimeoutMs: 30_000 } } });
+    expect(targetConfig.experimental.model_routes).toEqual(response.out.body.routes);
+    expect(deps.writeConfig).toHaveBeenCalledWith(targetConfig, '/u/opencode.json', { orderedPaths: [['experimental', 'model_routes']] });
     expect(deps.refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('model-routes');
   });
 
@@ -1341,8 +1350,8 @@ describe('registerModelRouteRoutes', () => {
     const response = res();
     await handler({ body: { routes: sent } }, response);
     expect(response.out.status).toBeUndefined();
-    expect(targetConfig.experimental.model_routes).toEqual(sent);
-    expect(response.out.body.routes).toEqual(sent);
+    expect(targetConfig.experimental.model_routes).toEqual(withDefaultTimeouts(sent));
+    expect(response.out.body.routes).toEqual(withDefaultTimeouts(sent));
   });
 
   it('saves tuning notes as sent', async () => {
