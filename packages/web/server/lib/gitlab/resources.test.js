@@ -843,6 +843,20 @@ describe('GitLab resource service', () => {
     expect(client.MergeRequests.merge).not.toHaveBeenCalled();
   });
 
+  it('rejects merge requests whose source project is outside the allowed network', async () => {
+    const outside = { ...openMR, source_project_id: 99 };
+    const { service, client } = setup({
+      MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => outside) },
+    }, { canonicalReads: true });
+    const context = { directory: '/repo', repositoryId: 'repo_one', bindingRevision: 3, primaryRemote: 'origin' };
+
+    await expect(service.resolveChangeRequestMutation(context, {
+      project: { owner: 'team', name: 'repo' }, number: 5,
+    })).rejects.toThrow('outside the bound repository network');
+    expect(client.MergeRequests.edit).not.toHaveBeenCalled();
+    expect(client.MergeRequests.merge).not.toHaveBeenCalled();
+  });
+
   it('reconciles create only from one exact provider match', async () => {
     const exact = { ...openMR, target_branch: 'main' };
     const mergeRequests = { ...setup().client.MergeRequests, all: list([exact]) };
@@ -1430,35 +1444,32 @@ describe("GitLab fork merge requests through the maintainer's upstream clone", (
     return result;
   };
 
-  it("reads the patch, both sides of a file at the fork's head and the context from the upstream", async () => {
+  // The fork keeps refusing a merge request whose source project is outside
+  // the network (repository-network.ts changeRequestSourceInNetwork); these two
+  // are upstream's cases, inverted while that rule stands. Adopting upstream's
+  // rule restores them as they were upstream.
+  it("refuses the patch and file reads of a fork merge request whose source is outside the network, and still reads its context", async () => {
     const showRaw = vi.fn(async (_project, path, ref) => `${path}@${ref.slice(0, 1)}`);
     const { service, client } = setupUpstream({ RepositoryFiles: { showRaw } });
 
     await expect(service.changeRequestPatch('/repo', 5, { project: upstream, remote: 'origin' }))
-      .resolves.toMatchObject({ meta: { owner: 'team', repo: 'repo', number: 5 } });
+      .rejects.toMatchObject({ status: 404 });
     await expect(service.changeRequestFileContents('/repo', 5, { project: upstream, remote: 'origin', path: 'a.ts', status: 'M' }))
-      .resolves.toEqual({ original: 'a.ts@a', modified: 'a.ts@b' });
+      .rejects.toMatchObject({ status: 404 });
     const result = await service.changeRequestContext('/repo', 5, { project: upstream, remote: 'origin', constrainToPrimary: true });
 
     expect(result.changeRequest).toMatchObject({ project: { id: '2' }, headProject: { id: '1', owner: 'me', name: 'repo' } });
-    expect(client.MergeRequests.allDiffs).toHaveBeenCalledWith('2', 5, expect.anything());
-    expect(showRaw).toHaveBeenCalledWith('2', 'a.ts', diffRefs.head_sha);
+    expect(client.MergeRequests.allDiffs).not.toHaveBeenCalled();
+    expect(showRaw).not.toHaveBeenCalled();
   });
 
-  it('comments on and merges the fork merge request', async () => {
-    const create = vi.fn(async () => ({ id: 8 }));
+  it('refuses to comment on or merge a fork merge request whose source is outside the network', async () => {
     const merge = vi.fn(async () => ({ ...forkMR, state: 'merged' }));
-    const { service } = setupUpstream({ MergeRequestNotes: { ...setup().client.MergeRequestNotes, create }, MergeRequests: { merge } });
+    const { service } = setupUpstream({ MergeRequests: { merge } });
 
-    const resolved = await service.resolveChangeRequestMutation(context, { project: upstream, number: 5, headSha: diffRefs.head_sha });
-    expect(resolved.target).toMatchObject({ project: { id: '2', owner: 'team', name: 'repo' }, number: 5, headSha: diffRefs.head_sha });
-    await service.commentChangeRequest({ providerTarget: resolved.providerTarget, body: 'Thanks' });
-    await expect(service.mergeChangeRequest({
-      providerTarget: resolved.providerTarget, targetProject: resolved.target.project, expectedTarget: resolved.target, method: 'merge',
-    })).resolves.toMatchObject({ merged: true });
-
-    expect(create).toHaveBeenCalledWith('2', 5, 'Thanks');
-    expect(merge).toHaveBeenCalledWith('2', 5, expect.objectContaining({ sha: diffRefs.head_sha }));
+    await expect(service.resolveChangeRequestMutation(context, { project: upstream, number: 5, headSha: diffRefs.head_sha }))
+      .rejects.toThrow('outside the bound repository network');
+    expect(merge).not.toHaveBeenCalled();
   });
 
   it('still refuses a merge request whose target is outside the network', async () => {
