@@ -39,7 +39,7 @@ const querySchema = z.object({
 // parameters (#554 class): the value's whole text must be digits, else the
 // default page size of 20. z.coerce reinterpreted '1e3' as 1000 (the runtime
 // then clamped it to 200) and '' / '-5' as a page size of 1 instead of 20.
-const parseLimit = (value: unknown) => {
+const parseLimit = <Value>(value: Value) => {
   const text = String(value ?? '');
   return /^\d+$/.test(text) ? Number(text) : 20;
 };

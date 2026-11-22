@@ -13,6 +13,7 @@ import {
 } from './tunnels/executable-search.js';
 import { createBoundedOutputAccumulator } from './shared/bounded-output-accumulator.js';
 import { readBoundedFileSync } from './shared/bounded-file-read.js';
+import { isString } from './shared/object-guards.js';
 
 const TRY_CF_URL_REGEX = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 
@@ -218,7 +219,7 @@ function assertReadableFile(filePath: string, contextLabel: string) {
 // assertReadableFile's stat — or is swapped for a FIFO — is refused here
 // instead of being read whole or blocking the server on the read.
 export function extractHostnameFromCloudflaredConfigDetailed(configPath: string, contextLabel = 'Managed local tunnel config') {
-  if (typeof configPath !== 'string' || configPath.trim().length === 0) {
+  if (!isString(configPath) || configPath.trim().length === 0) {
     return { hostname: null, parseError: null };
   }
 

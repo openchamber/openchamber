@@ -114,22 +114,24 @@ const includes = <T extends SourceControlJson>(items: readonly T[], value: Sourc
 const validNames = (value: SourceControlJson | undefined, limit: number): value is string[] =>
   !(!Array.isArray(value) || value.length > limit || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256));
 
-const accountView = (origin: string, account: AuthCredential, current: boolean, accounts: AuthCredential[]) => ({
-  id: account.id,
-  credentialId: account.id,
-  credentialRevision: account.credentialRevision,
-  providerUserId: account.providerUserId,
-  providerUserStatus: accounts.some((candidate) => (
-    candidate.providerUserId === account.providerUserId && candidate.status === 'valid'
-  )) ? 'available' : 'unavailable',
-  user: { ...account.user, provider: 'gitlab', instance: origin },
-  scope: account.scope,
-  current,
-  source: account.source,
-  status: account.status === 'invalid' ? 'invalid' : 'valid',
+const accountView = (origin: string, account: AuthCredential, current: boolean, accounts: AuthCredential[]) => {
+  const view = {
+    id: account.id,
+    credentialId: account.id,
+    credentialRevision: account.credentialRevision,
+    providerUserId: account.providerUserId,
+    providerUserStatus: accounts.some((candidate) => (
+      candidate.providerUserId === account.providerUserId && candidate.status === 'valid'
+    )) ? 'available' : 'unavailable',
+    user: { ...account.user, provider: 'gitlab', instance: origin },
+    scope: account.scope,
+    current,
+    source: account.source,
+    status: account.status === 'invalid' ? 'invalid' : 'valid',
+  };
   // Where a vault account's token is kept (op://…); never the token.
-  ...(account.tokenReference ? { tokenReference: account.tokenReference } : {}),
-});
+  return account.tokenReference ? { ...view, tokenReference: account.tokenReference } : view;
+};
 
 const cliAccountView = (origin: string, user: GitLabUser, current: boolean) => ({
   id: `${origin}#cli:${user.id}`,

@@ -9,6 +9,7 @@ import { getTunnelDependencyInstallInfo } from './tunnels/install-help.js';
 import { TUNNEL_PROVIDER_NGROK } from './tunnels/types.js';
 import { readBoundedResponseJson } from './shared/response-body.js';
 import { createBoundedOutputAccumulator } from './shared/bounded-output-accumulator.js';
+import { isFunction } from './shared/object-guards.js';
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
 // spawnSync blocks the whole server event loop while it waits, so a hung
@@ -326,7 +327,7 @@ export function pollNgrokPublicUrl({ fetchImpl, timeoutMs = NGROK_POLL_TIMEOUT_M
     // supply the URL while a poll fetch is stalled, and it must resolve
     // startup promptly instead of waiting out that attempt (or the 30 s
     // startup timeout firing first).
-    const existing = typeof getPublicUrl === 'function' ? getPublicUrl() : null;
+    const existing = isFunction(getPublicUrl) ? getPublicUrl() : null;
     if (existing) {
       onPublicUrl?.(existing);
       return;
@@ -339,7 +340,7 @@ export function pollNgrokPublicUrl({ fetchImpl, timeoutMs = NGROK_POLL_TIMEOUT_M
     currentController = controller;
     try {
       const fetched = await fetchNgrokPublicUrl({ fetchImpl, timeoutMs, signal: controller.signal });
-      const resolved = (typeof getPublicUrl === 'function' ? getPublicUrl() : null) || fetched;
+      const resolved = (isFunction(getPublicUrl) ? getPublicUrl() : null) || fetched;
       if (resolved && !stopped) {
         onPublicUrl?.(resolved);
       }

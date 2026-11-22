@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { WebSocket as RelayWebSocket } from '../shared/websocket-contracts.js';
 import type { RelayChannel } from './e2ee.js';
 import type { RelayIdentity } from './identity.js';
+import { isNumber } from '../shared/object-guards.js';
 
 export interface RelayHostStatus {
   state: string;
@@ -82,8 +83,8 @@ const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
 // the 150 ms default. Only applies on directions where batching was negotiated.
-export const resolveBatchWindowMs = (option: unknown, rawEnvValue = process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS) => {
-  if (typeof option === 'number' && Number.isFinite(option) && option >= 0) return option;
+export const resolveBatchWindowMs = <Option>(option: Option, rawEnvValue = process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS) => {
+  if (isNumber(option) && Number.isFinite(option) && option >= 0) return option;
   // The strict plain-decimal judgement for the env spelling lives in
   // shared/parse-int.js (design #802 phase 2, #804): a bare parseInt would
   // silently honour '150junk' as 150, truncate '2.9' to 2, read '1e3' as a

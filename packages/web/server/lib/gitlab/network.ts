@@ -41,6 +41,11 @@ export function classifyGitLabFailure(cause: unknown): GitLabFailureKind {
   return 'provider-error';
 }
 
+interface FetchDeadline {
+  timeoutMs: number;
+  signal?: AbortSignal;
+}
+
 export async function fetchWithTimeout(fetchImpl: typeof fetch, url: string, init: RequestInit = {}, timeoutMs = 10_000) {
   // Delegates to the shared deadline (design #802 phase 2, #804), keeping
   // this name and signature for its importers. Two behaviour changes are
@@ -48,5 +53,7 @@ export async function fetchWithTimeout(fetchImpl: typeof fetch, url: string, ini
   // composes with the deadline instead of being overwritten by it, and the
   // deadline stays armed until the response body has been read instead of
   // clearing when the headers arrive.
-  return fetchWithDeadline(fetchImpl, url, { ...init, redirect: 'error' }, { timeoutMs, ...(init?.signal ? { signal: init.signal } : {}) });
+  const deadline: FetchDeadline = { timeoutMs };
+  if (init?.signal) deadline.signal = init.signal;
+  return fetchWithDeadline(fetchImpl, url, { ...init, redirect: 'error' }, deadline);
 }

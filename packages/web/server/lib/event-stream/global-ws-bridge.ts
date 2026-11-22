@@ -41,7 +41,9 @@ export function createGlobalMessageStreamWsBridge({
   // holds no cursor adopts it, so its next reconnect resumes from there instead of refetching.
   const readyFrame = (fields: Partial<GlobalReadyFrame> = {}): GlobalReadyFrame => {
     const headCursor = globalHub.headEventId() ? globalHub.headCursor() : undefined;
-    return { type: 'ready', scope: 'global', ...fields, ...(headCursor ? { headEventId: headCursor } : {}) };
+    const frame: GlobalReadyFrame = { type: 'ready', scope: 'global', ...fields };
+    if (headCursor) frame.headEventId = headCursor;
+    return frame;
   };
 
   const removeClient = (socket: StreamSocket) => {

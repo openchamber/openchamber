@@ -52,7 +52,7 @@ const toPort = (value: string) => {
   return port > 0 && port <= 65535 ? port : null;
 };
 
-const toPid = (value: unknown) => {
+const toPid = (value: string) => {
   const raw = String(value || '').trim();
   if (!/^\d+$/.test(raw)) return null;
   const pid = Number(raw);

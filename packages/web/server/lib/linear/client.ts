@@ -10,6 +10,7 @@ import { refreshAccessToken } from './oauth.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
 import { readBoundedResponseText } from '../shared/response-body.js';
 import type { LinearAuth, LinearOrganization, LinearUser } from './auth.js';
+import type { JsonValue } from '../shared/json-values.js';
 
 interface LinearGraphqlPayload {
   data?: unknown;
@@ -69,7 +70,7 @@ class LinearApiError extends Error {
 
 // AbortSignal.timeout aborts with a TimeoutError DOMException; a body read cut
 // off by the same deadline may surface as an AbortError instead.
-function isTimeoutAbort(error: unknown) {
+function isTimeoutAbort(error: unknown): error is Error {
   return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
 }
 
@@ -192,7 +193,7 @@ export async function fetchLinearGraphql(authorization: LinearAuthorization | st
     if (isTimeoutAbort(error)) throw graphqlTimeoutError();
     throw error;
   }
-  let payload: unknown;
+  let payload: JsonValue | null = null;
   let bodyTooLarge = false;
   try {
     const bounded = await readBoundedResponseText(response, LINEAR_GRAPHQL_RESPONSE_MAX_BYTES);

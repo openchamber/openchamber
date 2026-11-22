@@ -13,7 +13,7 @@ const DEFAULT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 // judgement lives in shared/parse-int.js (design #802 phase 2, #804): a bare
 // Number(...) would silently honour '' and ' ' as 0, '1e3' as 1000, '0x10' as
 // 16, and '5.9' as a fractional value.
-const parsePlainDecimalInt = (raw: unknown) => parseBoundedIntWithDefault(raw, null, 0, Number.MAX_SAFE_INTEGER);
+const parsePlainDecimalInt = (raw: string | undefined) => parseBoundedIntWithDefault(raw, null, 0, Number.MAX_SAFE_INTEGER);
 
 export const guestUploadMaxBytes = () => {
   const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES);

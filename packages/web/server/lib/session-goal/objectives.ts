@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { z } from 'zod';
 import { writeDurableJsonFile } from '../shared/durable-json-store.js';
+import { isNumber } from '../shared/object-guards.js';
 
 export type ObjectiveContent = string | number | boolean | null | ObjectiveContent[] | { [key: string]: ObjectiveContent };
 
@@ -29,8 +30,8 @@ export const GOAL_OBJECTIVE_VERSION_CAP = 20;
 const GOAL_VERSIONS_MAX_READ_BYTES =
   GOAL_OBJECTIVE_VERSION_CAP * (GOAL_OBJECTIVE_MAX_READ_BYTES + 256);
 
-const asCharLimit = (value: unknown, fallback: number) => (
-  typeof value === 'number' && Number.isInteger(value) && value >= MIN_CHAR_LIMIT && value <= GOAL_OBJECTIVE_HARD_CAP ? value : fallback
+const asCharLimit = <Value>(value: Value, fallback: number) => (
+  isNumber(value) && Number.isInteger(value) && value >= MIN_CHAR_LIMIT && value <= GOAL_OBJECTIVE_HARD_CAP ? value : fallback
 );
 
 /**
@@ -148,7 +149,7 @@ const VERSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 const VersionIdSchema = z.string().regex(VERSION_ID_PATTERN);
 
-const isValidVersionId = (versionId: unknown) => VersionIdSchema.safeParse(versionId).success;
+const isValidVersionId = (versionId: unknown): versionId is string => VersionIdSchema.safeParse(versionId).success;
 
 const createVersionId = () => `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -250,7 +251,7 @@ export const listObjectiveVersions = async (sessionId: string) => {
 };
 
 /** One retained version by id, or null when missing. */
-export const readObjectiveVersion = async (sessionId: string, versionId: unknown) => {
+export const readObjectiveVersion = async <Id>(sessionId: string, versionId: Id) => {
   if (!isValidObjectiveKey(sessionId) || !isValidVersionId(versionId)) return null;
   const versions = await readVersionList(sessionId);
   return versions.find((version) => version.id === versionId) ?? null;
@@ -261,7 +262,7 @@ export const readObjectiveVersion = async (sessionId: string, versionId: unknown
  * recorded for a write that was then rolled back — the goal never held it, so
  * it must not appear as a prior version.
  */
-export const deleteObjectiveVersion = async (sessionId: string, versionId: unknown) => {
+export const deleteObjectiveVersion = async <Id>(sessionId: string, versionId: Id) => {
   if (!isValidObjectiveKey(sessionId) || !isValidVersionId(versionId)) return;
   const versions = await readVersionList(sessionId);
   const next = versions.filter((version) => version.id !== versionId);

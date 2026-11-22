@@ -1,3 +1,4 @@
+import type { JsonObject } from '../shared/json-values.js';
 import type { ModelInfo, OpenCodeClient } from '@opencode/client';
 import { isAutoModel } from '../routing/defaults.js';
 import { readChatsDefaults } from './chats-scope.js';
@@ -6,7 +7,7 @@ export interface SessionDefaultSettings {
   defaultModel?: unknown;
   defaultVariant?: unknown;
   defaultAgent?: unknown;
-  modelDefaultVariants?: Record<string, unknown> | null;
+  modelDefaultVariants?: JsonObject | null;
   modelDefaultVariantLocks?: unknown;
 }
 

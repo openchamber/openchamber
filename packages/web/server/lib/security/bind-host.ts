@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { isString } from '../shared/object-guards.js';
 
 const stripIpv6Brackets = (value: string) => {
   const trimmed = value.trim().toLowerCase();
@@ -42,8 +43,8 @@ export const isLoopbackBindHost = (host: string) => {
 // http://localhost.evil.example and http://localhost@evil.example as
 // loopback, and an exact-match list misses the rest of 127/8 and
 // ::ffff:-mapped forms. Unparseable values are not loopback.
-export const isLoopbackUrl = (raw: unknown) => {
-  if (typeof raw !== 'string') return false;
+export const isLoopbackUrl = (raw: string | null | undefined) => {
+  if (!isString(raw)) return false;
   let url;
   try {
     url = new URL(raw);

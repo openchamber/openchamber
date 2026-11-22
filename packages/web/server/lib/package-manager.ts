@@ -12,6 +12,7 @@ import { getSpawnSyncBaseOptions, spawnPackageManagerProbe } from './package-man
 
 import { resolveNpmRegistryRequest } from './npm/npm-registry-config.js';
 import type { JsonObject, JsonValue } from './shared/json-values.js';
+import { isFunction, isString } from './shared/object-guards.js';
 
 type VersionValue = JsonValue | undefined;
 type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
@@ -110,7 +111,7 @@ async function readUpdateJson<T>(response: Response, fallback: T): Promise<JsonV
   // Test doubles pass a plain { ok, json } without a body; real responses go
   // through the bounded reader.
   if (!response.body) {
-    return typeof response.json === 'function' ? response.json() : fallback;
+    return isFunction(response.json) ? response.json() : fallback;
   }
   const bounded = await readBoundedResponseText(response, UPDATE_RESPONSE_MAX_BYTES);
   if (bounded.tooLarge) return fallback;
@@ -183,7 +184,7 @@ function normalizeArch(value: string | undefined) {
 }
 
 async function resolveAndroidApkUrl(version: string, candidateUrl: string | undefined) {
-  if (typeof candidateUrl === 'string') {
+  if (isString(candidateUrl)) {
     try {
       if (new URL(candidateUrl).pathname.toLowerCase().endsWith('.apk')) return candidateUrl;
     } catch {
@@ -216,7 +217,14 @@ async function resolveAndroidApkUrl(version: string, candidateUrl: string | unde
   }
 }
 
-async function postUpdateCheck(payload: Record<string, unknown>) {
+type ForkReleaseUpdate = {
+  latestVersion: string;
+  updateAvailable: true;
+  releaseNotes?: string;
+  releaseNotesUrl?: string;
+};
+
+async function postUpdateCheck<Payload extends object>(payload: Payload) {
   const response = await fetch(UPDATE_CHECK_URL, {
     method: 'POST',
     headers: {
@@ -257,12 +265,13 @@ async function fetchLatestForkRelease(): Promise<JsonObject | null> {
   const latest = published[0];
   if (!latest) return null;
 
-  return {
+  const found: ForkReleaseUpdate = {
     latestVersion: latest.version,
     updateAvailable: true,
-    ...(isText(latest.release.body) ? { releaseNotes: latest.release.body } : {}),
-    ...(isText(latest.release.html_url) ? { releaseNotesUrl: latest.release.html_url } : {}),
   };
+  if (isText(latest.release.body)) found.releaseNotes = latest.release.body;
+  if (isText(latest.release.html_url)) found.releaseNotesUrl = latest.release.html_url;
+  return found;
 }
 
 async function checkForUpdatesFromApi(currentVersion: VersionValue, options: UpdateCheckOptions = {}) {

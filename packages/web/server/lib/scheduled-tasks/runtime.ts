@@ -366,7 +366,7 @@ const clipPairSafe = (text: string, limit: number) => {
 };
 
 export const formatScheduledSessionTitle = (task: Pick<ScheduledTask, 'name' | 'schedule'> | null | undefined, nowMs: number) => {
-  const timezone = typeof task?.schedule?.timezone === 'string' && task.schedule.timezone.trim().length > 0
+  const timezone = isString(task?.schedule?.timezone) && task.schedule.timezone.trim().length > 0
     ? task.schedule.timezone.trim()
     : DateTime.local().zoneName;
   const stamp = DateTime.fromMillis(nowMs, { zone: timezone }).toFormat('yyyy-LL-dd HH:mm');
@@ -1470,10 +1470,10 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksDependencies) =>
         const event: ScheduledTaskRunEvent = {
           projectID,
           taskID,
-          ...(stateResult.task?.name ? { taskName: stateResult.task.name } : {}),
           ranAt: finishedAt,
           status,
         };
+        if (stateResult.task?.name) event.taskName = stateResult.task.name;
         if (sessionID) event.sessionID = sessionID;
         if (runIsolation) {
           event.isolated = true;

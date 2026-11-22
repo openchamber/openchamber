@@ -1,6 +1,7 @@
 import { EnvironmentPatchError, isProjectId, parseProjectPatch, parseUserPatch } from './store.js';
 import type { EnvironmentStore } from './store.js';
 import type { EnvironmentRuntime } from './runtime.js';
+import type { EnvironmentVariables } from './variables.js';
 import type { Response } from '../shared/http-contracts.js';
 import { isVaultReference } from './vault.js';
 
@@ -28,7 +29,7 @@ export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, run
     return res.status(500).json({ error: cause instanceof Error ? cause.message : fallback });
   };
 
-  const withReferences = <Described extends object>(described: Described, variables: Record<string, unknown>) => {
+  const withReferences = <Described extends object>(described: Described, variables: EnvironmentVariables) => {
     const references = Object.fromEntries(Object.entries(variables).filter(([, value]) => isVaultReference(value)));
     const statuses = runtime.vaultStatus(variables);
     return {

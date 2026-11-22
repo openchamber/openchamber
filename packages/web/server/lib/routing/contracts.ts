@@ -1,5 +1,5 @@
 import type { OpenCode } from '@opencode/client';
-import type { JsonValue } from '../shared/json-values.js';
+import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { CustomEndpoint, RoutingCategory, RoutingConfig, createRoutingStore } from './store.js';
 import type { readPinnedCustomEndpoint } from './classifier.js';
 import type { RoutingHistory } from './history.js';
@@ -101,7 +101,7 @@ export interface RoutingRuntimeOptions {
   readSessionAgent?: ((scope: SessionScope) => Promise<string | null>) | null;
   // The `experimental.model_routes` map for a directory, so a category on a
   // pool carries the pool's description to Jev. Unset: no pool text.
-  readModelPools?: (directory: SessionScope['directory']) => Record<string, unknown>;
+  readModelPools?: (directory: SessionScope['directory']) => JsonObject;
   isSessionWarm?: (sessionId: string, cacheLifetimeMs: number) => boolean;
   now?: () => number;
 }

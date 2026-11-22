@@ -8,6 +8,7 @@ import {
 } from './auth.js';
 import { isPlainObject, isString, readFiniteNumber, readTrimmedString } from './parse.js';
 import { readBoundedResponseText } from '../shared/response-body.js';
+import type { JsonValue } from '../shared/json-values.js';
 
 interface BrokerTransaction {
   url: string;
@@ -118,7 +119,7 @@ class LinearOAuthError extends Error {
 
 // AbortSignal.timeout aborts with a TimeoutError DOMException; a body read cut
 // off by the same deadline may surface as an AbortError instead.
-function isTimeoutAbort(error: unknown) {
+function isTimeoutAbort(error: unknown): error is Error {
   return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
 }
 
@@ -136,7 +137,7 @@ async function fetchWithDeadline(url: string | URL, options: RequestInit, timeou
   }
 }
 
-async function readJsonWithDeadline(response: Response, signal: AbortSignal, onTimeout: () => Error, onTooLarge: () => Error): Promise<unknown> {
+async function readJsonWithDeadline(response: Response, signal: AbortSignal, onTimeout: () => Error, onTooLarge: () => Error): Promise<JsonValue | null> {
   let bounded;
   try {
     bounded = await readBoundedResponseText(response, LINEAR_JSON_RESPONSE_MAX_BYTES);

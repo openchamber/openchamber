@@ -3,6 +3,7 @@ import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeader, Server }
 import type { Duplex } from 'node:stream';
 import type { Application, Query, Request } from './shared/http-contracts.js';
 import type { RawData } from './shared/websocket-contracts.js';
+import { isString } from './shared/object-guards.js';
 
 export interface DesktopRuntimeConfig {
   apiBaseUrl?: unknown;
@@ -108,13 +109,13 @@ const sanitizeHeaders = (config: DesktopRuntimeConfig | null) => {
 
 const hasHeaders = (headers: Record<string, string>) => Object.keys(headers).length > 0;
 
-const getTargetParam = (req: { query?: Record<string, unknown>; url?: string | undefined }) => {
+const getTargetParam = (req: { query?: Query; url?: string | undefined }) => {
   // A repeated url parameter is ambiguous: never silently select its
   // first value (#2324; the resolveDirectoryQuery precedent in the git
   // routes). Express surfaces a repeat as an array; the raw-URL fallback
   // below counts the values instead of taking the first.
   if (Array.isArray(req.query?.url)) return null;
-  let raw = typeof req.query?.url === 'string' ? req.query.url : '';
+  let raw = isString(req.query?.url) ? req.query.url : '';
   if (!raw) {
     try {
       const values = new URL(req.url || '/', 'http://127.0.0.1').searchParams.getAll('url');

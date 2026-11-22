@@ -596,7 +596,7 @@ export async function listLinearIssueStates(teamId: string | null | undefined) {
       ? connection.nodes
       : [];
     const states = nodes
-      .map(readWorkflowState)
+      .map((node) => readWorkflowState(isPlainObject(node) ? node : null))
       .filter((state): state is LinearWorkflowState => state !== null)
       .sort(compareWorkflowStates);
     return { connected: true, states, statesMore: readPageInfo(isPlainObject(connection) ? connection : null).hasMore };

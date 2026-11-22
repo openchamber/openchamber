@@ -5,6 +5,7 @@ import { createTraversalBudget } from '../shared/traversal-budget.js';
 import type nodeFsPromises from 'node:fs/promises';
 import type nodePath from 'node:path';
 import type { spawn as nodeSpawn } from 'node:child_process';
+import { isString } from '../shared/object-guards.js';
 
 interface FsSearchOptions {
   fsPromises: Pick<typeof nodeFsPromises, 'readdir'>;
@@ -187,7 +188,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
         // One decoder across chunks: a name whose UTF-8 bytes are split
         // between chunks must not decode to U+FFFD (#1540).
         const decoder = new StringDecoder('utf8');
-        child.stdout.on('data', (data: Buffer | string) => { stdout += typeof data === 'string' ? data : decoder.write(data); });
+        child.stdout.on('data', (data: Buffer | string) => { stdout += isString(data) ? data : decoder.write(data); });
         child.on('close', () => finish(stdout + decoder.end()));
         child.on('error', () => finish(''));
         if (!workspaceSearch) {

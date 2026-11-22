@@ -3,6 +3,7 @@ import { storeLinearAuthorization } from './auth-status.js';
 import { readTrimmedString } from './parse.js';
 import type { Application, Request } from '../shared/http-contracts.js';
 import type { linearLibraries } from './index.js';
+import { errorStatusOf, isBoolean } from '../shared/object-guards.js';
 
 type CallbackPage = { title: string; message: string; desktopReturn?: boolean };
 type RouteBody = {
@@ -28,7 +29,6 @@ function queryValue(req: Request, key: string) {
   return readTrimmedString(value);
 }
 
-const errorStatus = (error: unknown) => (error !== null && typeof error === 'object' && 'status' in error ? error.status : undefined);
 
 function canReadRouteError(value: unknown): value is { code?: unknown; userError?: unknown; origin?: unknown; message?: unknown } {
   return value != null;
@@ -233,7 +233,7 @@ export function registerLinearRoutes(app: Application) {
         }, { activate: false });
       return toLinearPublicStatus(next, getLinearAuthWorkspaces());
     } catch (error) {
-      if (errorStatus(error) === 401) {
+      if (errorStatusOf(error) === 401) {
         if (auth?.tokenReference) {
           // A rejected vault key may be a stale cached read of a rotated
           // key: keep the reference so a later read can recover. When
@@ -316,7 +316,7 @@ export function registerLinearRoutes(app: Application) {
       try {
         identity = await fetchLinearIdentity({ token: read.value, source: 'vault' });
       } catch (error) {
-        if (errorStatus(error) === 401) {
+        if (errorStatusOf(error) === 401) {
           return res.status(400).json({
             error: 'Linear refused the API key from 1Password',
             code: 'INVALID_TOKEN',
@@ -540,8 +540,8 @@ export function registerLinearRoutes(app: Application) {
     }
   });
 
-  const writePreferences = async (sessionComments: unknown) => {
-    if (sessionComments !== true && sessionComments !== false) {
+  const writePreferences = async <Value>(sessionComments: Value) => {
+    if (!isBoolean(sessionComments)) {
       return { status: 400, body: { error: 'sessionComments must be a boolean' } };
     }
     const { setLinearSessionCommentsEnabled } = await getLinearLibraries();
@@ -558,7 +558,7 @@ export function registerLinearRoutes(app: Application) {
     }
   });
 
-  const activateWorkspace = async (requested: unknown) => {
+  const activateWorkspace = async <Value>(requested: Value) => {
     const {
       activateLinearAuth,
       getLinearAuth,

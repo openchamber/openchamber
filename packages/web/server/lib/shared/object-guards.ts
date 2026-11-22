@@ -29,3 +29,14 @@ export const hasProperties = <Value>(value: Value): value is Value & Readonly<Re
 
 /** The `code` of a thrown value (a Node system error's `ENOENT`, an app error's code), or undefined. */
 export const errorCodeOf = (error: unknown): unknown => (error != null && typeof error === 'object' && 'code' in error ? error.code : undefined);
+
+export const isNumber = (value: unknown): value is number => typeof value === 'number';
+
+export const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+export const isFunction = (value: unknown): value is (...args: never[]) => unknown => typeof value === 'function';
+
+export const isObjectLike = (value: unknown): value is object => value !== null && typeof value === 'object';
+
+/** The `status` of a thrown value (an HTTP error's status), or undefined. */
+export const errorStatusOf = (error: unknown): unknown => (error != null && typeof error === 'object' && 'status' in error ? error.status : undefined);

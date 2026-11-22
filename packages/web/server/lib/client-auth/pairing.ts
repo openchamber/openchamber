@@ -121,7 +121,7 @@ export const createClientPairingRuntime = ({
     }
   };
 
-  const normalizeStore = (raw: unknown): PairingStore => normalizeStoreInput(isStoreInput(raw) ? raw : null);
+  const normalizeStore = <Raw>(raw: Raw): PairingStore => normalizeStoreInput(isStoreInput(raw) ? raw : null);
   const normalizeStoreInput = (payload: StoreInput | null): PairingStore => ({
     version: STORE_VERSION,
     sessions: isInputArray(payload?.sessions)

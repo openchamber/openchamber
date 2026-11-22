@@ -44,6 +44,12 @@ const isObjectiveBody = (value: ObjectiveContent): value is { [key: string]: Obj
 const isRouteError = (value: unknown): value is { statusCode?: unknown; message?: unknown } =>
   value !== null && (typeof value === 'object' || typeof value === 'function');
 
+
+interface GoalSpecErrorBody {
+  error: string;
+  code?: string;
+}
+
 export function registerSessionGoalRoutes(app: GoalApp, { writeSpec = writeGoalSpec }: { writeSpec?: typeof writeGoalSpec } = {}) {
   app.put('/api/goals/objective/:sessionId', async (req: GoalRequest, res) => {
     try {
@@ -59,7 +65,7 @@ export function registerSessionGoalRoutes(app: GoalApp, { writeSpec = writeGoalS
       // that did land as failed.
       let versionId = null;
       if (record !== false) {
-        const recorded = await appendObjectiveVersion(req.params.sessionId, saved.content).catch((error: unknown) => {
+        const recorded = await appendObjectiveVersion(req.params.sessionId, saved.content).catch((error) => {
           console.error('Failed to record goal objective version:', error);
           return null;
         });
@@ -136,7 +142,7 @@ export function registerSessionGoalRoutes(app: GoalApp, { writeSpec = writeGoalS
       if (statusCode >= 500) {
         console.error('Failed to write goal spec:', error);
       }
-      const payload: { error: unknown; code?: string } = { error: (isRouteError(error) ? error.message : undefined) || 'Failed to write goal spec' };
+      const payload: GoalSpecErrorBody = { error: String((isRouteError(error) ? error.message : undefined) || 'Failed to write goal spec') };
       const coded = ErrorCodeSchema.safeParse(error);
       if (coded.success) payload.code = coded.data.code;
       res.status(statusCode).json(payload);

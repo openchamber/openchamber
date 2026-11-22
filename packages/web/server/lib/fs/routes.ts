@@ -38,6 +38,7 @@ import type { FileHandle } from 'node:fs/promises';
 import type { Application, Request, Response } from '../shared/http-contracts.js';
 import type { EnvironmentRuntime } from '../environment/runtime.js';
 import type { createNetworkOperations } from '../git/network-operations.js';
+import { isFunction, isNumber } from '../shared/object-guards.js';
 
 interface FsBody {
   path?: unknown;
@@ -1437,12 +1438,12 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         throw Object.assign(new Error('ENOENT: no such file or directory, open ' + canonicalPath), { code: 'ENOENT' });
       };
       let content = await readBounded();
-      if (typeof content !== 'string') return content;
+      if (!isString(content)) return content;
       if (content.length === 0 && stats.size > 0) {
         for (let attempt = 0; attempt < 3; attempt++) {
           await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
           content = await readBounded();
-          if (typeof content !== 'string') return content;
+          if (!isString(content)) return content;
           if (content.length > 0) break;
         }
         if (content.length === 0) {
@@ -1529,18 +1530,18 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       // swapped for a FIFO after the stat above (#2298); regularity is then
       // judged from the opened handle, which names the file actually opened.
       const handle = await fsPromises.open(canonicalPath, nonBlockingOpenFlags(platform));
-      if (typeof handle.stat === 'function') {
+      if (isFunction(handle.stat)) {
         let handleStats;
         try {
           handleStats = await handle.stat();
         } catch (error) {
-          if (typeof handle.close === 'function') {
+          if (isFunction(handle.close)) {
             await handle.close().catch(() => {});
           }
           throw error;
         }
         if (!handleStats.isFile()) {
-          if (typeof handle.close === 'function') {
+          if (isFunction(handle.close)) {
             await handle.close();
           }
           return res.status(400).json({ error: 'Specified path is not a file' });
@@ -1726,7 +1727,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       // through to the write the same way, without being read at all.
       const contentByteLength = Buffer.byteLength(content, 'utf8');
       let existing = null;
-      if (contentByteLength <= MAX_READ_BYTES && typeof fsPromises.open === 'function') {
+      if (contentByteLength <= MAX_READ_BYTES && isFunction(fsPromises.open)) {
         let handle;
         try {
           handle = await fsPromises.open(writePath, nonBlockingOpenFlags(platform));
@@ -1740,7 +1741,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         if (handle) {
           try {
             const stat = await handle.stat();
-            const isFile = stat && typeof stat.isFile === 'function' ? stat.isFile() : true;
+            const isFile = stat && isFunction(stat.isFile) ? stat.isFile() : true;
             if (isFile && stat.size === contentByteLength) {
               // One byte past the equal length: a file that grew after the
               // fstat reads long and falls through to the write.
@@ -1858,7 +1859,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
           req.resume?.();
           return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
         }
-        if (typeof stats.mode === 'number') existingMode = stats.mode & 0o7777;
+        if (isNumber(stats.mode)) existingMode = stats.mode & 0o7777;
       }
 
       const tmp = `${writePath}.upload-${crypto.randomUUID()}`;

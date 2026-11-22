@@ -13,6 +13,7 @@ import {
   NOTES_TODOS_STORE_REPOSITORY, MALFORMED_NOTES_TODOS_FILE, PROJECT_ID_PATTERN, PLAN_FILE_PATTERN,
 } from './contracts.js';
 import type { PlanProgress } from './plan-progress.js';
+import { isString, errorStatusOf } from '../shared/object-guards.js';
 
 const optionalTextInput = z.string().optional();
 const completedInput = z.boolean();
@@ -49,8 +50,8 @@ export const CONTEXT_FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
 // The clamp must not split a surrogate pair: a value cut right after a high
 // surrogate drops that half, because the clamped value is persisted and
 // rendered, where a lone surrogate becomes U+FFFD permanently (#2010).
-const clampLength = (value: unknown, maxLength: number) => {
-  if (typeof value !== 'string') {
+const clampLength = <Value>(value: Value, maxLength: number) => {
+  if (!isString(value)) {
     return '';
   }
   if (value.length <= maxLength) {
@@ -322,7 +323,7 @@ const assertTodoGraph = (previous: ProjectTodo[], next: ProjectTodo[]) => {
   for (const todo of next) visit(todo);
 };
 
-export const createProjectContextRuntime = (deps: ProjectContextDependencies & { readPlanMetrics?: ((sessionId: string) => unknown) | null }) => {
+export const createProjectContextRuntime = (deps: ProjectContextDependencies & { readPlanMetrics?: ((sessionId: string) => Promise<object | null>) | null }) => {
   const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, resolveNotesTodosFile, onChanged, readPlanMetrics } = deps;
   const sharedPlansDirFor = resolveSharedPlansDir ?? (async () => null);
   const resolveNotesTodosFileFor = resolveNotesTodosFile ?? (async () => null);
@@ -457,7 +458,7 @@ export const createProjectContextRuntime = (deps: ProjectContextDependencies & {
         try {
           raw = await readPlanFile(absolutePath);
         } catch (recoverError) {
-          if (!recoverError || !(typeof recoverError === 'object' && 'status' in recoverError && recoverError.status === 413)) throw recoverError;
+          if (errorStatusOf(recoverError) !== 413) throw recoverError;
           continue;
         }
         if (raw === null) continue;

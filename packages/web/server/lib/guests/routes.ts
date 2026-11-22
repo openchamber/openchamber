@@ -698,7 +698,7 @@ export const registerGuestRoutes = (app: Application, {
   });
 
   /** Saves the declared keys of `values`; anything else in it is ignored, as on the card. */
-  const saveSettings = async (id: string, values: unknown) => {
+  const saveSettings = async <Values>(id: string, values: Values) => {
     const guest = await loadGuest(id);
     if (!guest?.integration) {
       return { status: 404, body: { error: 'not-found' } };

@@ -332,11 +332,7 @@ function publicCredential(credential: AuthCredentialFields & { tokenReference?: 
   const userHasValidCredential = instance.credentials.some((candidate) => (
     candidate.providerUserId === credential.providerUserId && candidate.status === 'valid'
   ));
-  const view: {
-    id: string; credentialId: string; credentialRevision: number; providerUserId: string; providerUserStatus: string;
-    user: AuthCredentialFields['user']; scope: string; current: boolean; source: AuthCredentialFields['source'];
-    status: AuthCredentialFields['status']; tokenReference?: string;
-  } = {
+  const view = {
     id: credential.credentialId,
     credentialId: credential.credentialId,
     credentialRevision: credential.revision,
@@ -349,8 +345,7 @@ function publicCredential(credential: AuthCredentialFields & { tokenReference?: 
     status: credential.status,
   };
   // Where the token is kept, not the token.
-  if (credential.tokenReference) view.tokenReference = credential.tokenReference;
-  return view;
+  return credential.tokenReference ? { ...view, tokenReference: credential.tokenReference } : view;
 }
 
 export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }: StoreOptions = {}) {

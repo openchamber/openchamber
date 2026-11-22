@@ -184,7 +184,7 @@ function collectTurns(messages: AssistMessage[], limit = TURN_LIMIT) {
 }
 
 /** The cursor to the older page, or null on the oldest page. */
-const nextCursor = (page: Awaited<ReturnType<PageReader['readPage']>>) => (typeof page.cursor?.next === 'string' ? page.cursor.next : null);
+const nextCursor = (page: Awaited<ReturnType<PageReader['readPage']>>) => (isString(page.cursor?.next) ? page.cursor.next : null);
 
 const settledTurns = (messages: AssistMessage[]) => collectTurns(messages, Infinity)
   .filter((turn) => turn.complete)

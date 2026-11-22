@@ -62,7 +62,7 @@ export const registerGuestAvailabilityRoutes = (app: Application, { persistPath,
    * Pause (false) or resume; a pause stops the service and hands back any role the guest held.
    * Shared with the `openchamber` agent tool (../openchamber-control/integration-service-actions.js).
    */
-  const setEnabled = async (id: string, request: unknown) => {
+  const setEnabled = async <Body>(id: string, request: Body) => {
     const guest = await loadGuest(id);
     if (!guest) {
       return { status: 404, body: { error: 'not-found' } };

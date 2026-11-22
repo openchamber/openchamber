@@ -506,7 +506,7 @@ export const createSessionGoalRuntime = ({
     return shells && shells.filter((shell) => shell.sessionID === sessionId);
   };
 
-  const isWorkingStatus = (status: unknown) => Boolean(status);
+  const isWorkingStatus = <Status>(status: Status) => Boolean(status);
 
   const readGoal = async (sessionId: string) => parseGoalMetadata({ metadata: await readSessionMetadata?.(sessionId) });
 

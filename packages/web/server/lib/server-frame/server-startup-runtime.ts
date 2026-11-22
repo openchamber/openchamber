@@ -15,9 +15,9 @@ export interface ServerStartupDependencies extends Pick<TunnelRoutesDependencies
   startTunnelWithNormalizedRequest: TunnelStart;
   gracefulShutdown: (options?: { keepOpenCode?: boolean }) => void | Promise<void>;
   // SIGHUP rereads the OpenCode configuration without restarting the server.
-  reloadOpenCodeConfiguration: () => Promise<unknown>;
+  reloadOpenCodeConfiguration: () => Promise<boolean>;
   // Self-handoff (opencode/self-handoff.js); null where it is not wired.
-  requestHandoff?: ((options: { exitProcess: boolean }) => Promise<unknown>) | null;
+  requestHandoff?: ((options: { exitProcess: boolean }) => Promise<{ ok: boolean }>) | null;
   getSignalsAttached: () => boolean;
   setSignalsAttached: (attached: boolean) => void;
   syncToHmrState: () => void;

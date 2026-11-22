@@ -8,6 +8,7 @@ import { resolveRepoNetwork } from './repo/fork-detection.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import type { SourceControlIdentity } from './octokit.js';
 import type { GitHubEnvelope } from './contracts.js';
+import { isString } from '../shared/object-guards.js';
 
 interface Repository { owner: string; repo: string }
 export interface ChangeRequestPatchInput {
@@ -109,7 +110,7 @@ const patchTooLarge = () => Object.assign(new Error('This pull request diff is t
 
 async function readPatchBody(response: { data: unknown; headers?: Record<string, string | number | undefined> }): Promise<string> {
   // A buffered body (a client that ignores parseSuccessResponseBody) is judged by its size.
-  if (typeof response.data === 'string') {
+  if (isString(response.data)) {
     if (Buffer.byteLength(response.data) > MAX_PATCH_BYTES) throw patchTooLarge();
     return response.data;
   }

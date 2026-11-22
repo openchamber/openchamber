@@ -1,3 +1,4 @@
+import { isString } from '../shared/object-guards.js';
 export interface CheckRun {
   id?: number | undefined;
   name?: string;
@@ -55,8 +56,8 @@ export function dedupeCheckRuns<Run extends CheckRun | null | undefined>(checkRu
   return Array.from(byName.values());
 }
 
-function parseStartedAt(value: unknown) {
-  if (typeof value !== 'string' || value === '') return null;
+function parseStartedAt(value: string | null | undefined) {
+  if (!isString(value) || value === '') return null;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? null : parsed;
 }

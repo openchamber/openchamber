@@ -137,7 +137,7 @@ const createResumedGreetingGate = () => {
       deciding = false;
       const held = greeting;
       greeting = null;
-      // The held greeting came through this same gate, so it is the caller's event type too.
+      // SAFETY: the held greeting came through this same gate, so it is the caller's event type too.
       return held && payloadType(event.payload) === SSE_RESYNC_PAYLOAD_TYPE ? [held as Event, event] : [event];
     },
   };

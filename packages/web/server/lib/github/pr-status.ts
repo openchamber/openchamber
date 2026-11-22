@@ -5,6 +5,7 @@ import { noteIfGitHubRateLimit } from './rate-limit.js';
 import { getOctokitCacheIdentity } from './octokit.js';
 import { hasProperty, isDiscoveryText, isCacheIdentity } from './contracts.js';
 import type { Octokit, RestEndpointMethodTypes, DiscoveryPull as Pull, DiscoveryMetadata as RepoMetadata, DiscoveryRepository as Repository, RemoteCandidate, RankedCandidate, HistoricalEntry, PullList, PendingPullList, StatusInput, FoundPull, FindBranchPrInput } from './contracts.js';
+import { isObjectLike } from '../shared/object-guards.js';
 
 const directoryExists = async (dir: string) => {
   if (!dir) return false;
@@ -572,7 +573,7 @@ export function pruneExpiredPrStatusCaches(now = Date.now()) {
   return getPrStatusCacheSizes();
 }
 
-const isInFlightPullsEntry = (entry: unknown) => Boolean(entry && typeof entry === 'object' && 'promise' in entry && entry.promise && 'token' in entry && entry.token);
+const isInFlightPullsEntry = (entry: unknown): entry is { promise: unknown; token: unknown } => isObjectLike(entry) && 'promise' in entry && Boolean(entry.promise) && 'token' in entry && Boolean(entry.token);
 
 const capCacheEntries = <Key, Value>(cache: Map<Key, Value>) => {
   while (cache.size > PR_STATUS_CACHE_MAX_ENTRIES) {

@@ -88,7 +88,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     }
   };
 
-  const normalizeStore = (raw: unknown): ClientStore => normalizeStoreInput(isStoreInput(raw) ? raw : null);
+  const normalizeStore = <Raw>(raw: Raw): ClientStore => normalizeStoreInput(isStoreInput(raw) ? raw : null);
   const normalizeStoreInput = (payload: StoreInput | null): ClientStore => ({
     version: STORE_VERSION,
     clients: isInputArray(payload?.clients)

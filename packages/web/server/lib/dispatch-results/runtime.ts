@@ -307,7 +307,7 @@ export function createDispatchResultsRuntime({
   // deliveries, not "nothing pending": the primitive preserves them aside
   // under its collision-proof name before any write can replace them.
   // Parse errors are never logged: they can quote the file.
-  const isDispatchResultsValue = (value: unknown) => isJsonObject(value) && 'entries' in value && Array.isArray(value.entries);
+  const isDispatchResultsValue = (value: unknown): value is { entries: unknown[] } => isJsonObject(value) && 'entries' in value && Array.isArray(value.entries);
   const durableOptions = () => ({ fs: fsPromises, validateValue: isDispatchResultsValue });
 
   const readFile = async () => {

@@ -26,9 +26,10 @@ import {
   DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
 } from './upstream-reader.js';
+import { isString } from '../shared/object-guards.js';
 
 function messageStreamPayloadByteLength(data: string | Buffer | ArrayBuffer | Buffer[] | null | undefined) {
-  if (typeof data === 'string') {
+  if (isString(data)) {
     return Buffer.byteLength(data);
   }
   if (Array.isArray(data)) {
@@ -269,12 +270,13 @@ export function createMessageStreamWsRuntime({
         // Read the SSE `id:` line, so the followed OpenCode's ids reach the buffer and its reconnects.
         parseBlock: parseGlobalBlock,
         onEvent(event) {
-          globalHub.injectEvent({
+          const injected: Parameters<typeof globalHub.injectEvent>[0] = {
             payload: event.payload,
             directory: event.envelope?.directory ?? '',
             spaceId: event.envelope?.spaceId ?? null,
-            ...(event.eventId ? { eventId: event.eventId } : {}),
-          });
+          };
+          if (event.eventId) injected.eventId = event.eventId;
+          globalHub.injectEvent(injected);
         },
       });
       void reader.start();

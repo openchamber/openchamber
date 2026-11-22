@@ -218,7 +218,7 @@ const MEMORY_PARAMETER_OVERRIDES = {
   scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global: about the user, every project. project: this codebase. Required for save and delete; read and list search both when omitted' },
 };
 
-const ALL_PARAMETER_PROPERTIES: Record<string, ParameterSchema> = {
+const ALL_PARAMETER_PROPERTIES = {
   projectId: { type: 'string', description: 'Not with directory' },
   directory: { type: 'string', description: "Absolute path; default: this session's directory. For projects.add, the directory to add" },
   create: { type: 'boolean', description: 'projects.add: create the directory first if it does not exist' },
@@ -309,7 +309,7 @@ const ALL_PARAMETER_PROPERTIES: Record<string, ParameterSchema> = {
   body: { type: 'string', description: 'At most 2000 characters; longer is rejected. Written to make sense without this conversation' },
   memoryId: { type: 'string', description: 'From memory.list or memory.read; on save it rewrites that entry' },
   type: { type: 'string', enum: ['fact', 'preference', 'reference'], description: 'fact: something true. preference: how the user wants work done. reference: a resource hard to find again' },
-};
+} satisfies Record<string, ParameterSchema>;
 
 const pickParameters = (names: string[]) => Object.fromEntries(
   Object.entries(ALL_PARAMETER_PROPERTIES).filter(([name]) => names.includes(name)),

@@ -59,7 +59,7 @@ interface ShutdownDependencies {
   setOpenCodeProcess: (value: null) => void;
   waitForPortRelease: (port: number | null, timeoutMs: number) => Promise<boolean>;
   // Closes OpenCode processes left draining by a handoff (draining-opencode.js).
-  closeDrainingOpenCode?: () => void | Promise<unknown>;
+  closeDrainingOpenCode?: () => void | Promise<void>;
   getServer: () => Server | null;
   getUiAuthController: () => { dispose: Cleanup } | null;
   setUiAuthController: (value: null) => void;

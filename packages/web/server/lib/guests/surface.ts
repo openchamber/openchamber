@@ -41,6 +41,7 @@ import type { GuestRecord } from './contracts.js';
 import type { SurfaceHostMessage, SurfaceViewerMessage } from '@openchamber/sdk/schemas';
 import type { RawData, WebSocket } from '../shared/websocket-contracts.js';
 import type { SurfaceController, SurfaceEndReason, SurfaceFrame, SurfaceGuest, SurfaceRuntimeOptions, SurfaceSession, SurfaceViewer } from './surface-contracts.js';
+import { isString } from '../shared/object-guards.js';
 
 const SURFACE_WS_PATH = /^\/api\/guests\/([a-z][a-z0-9-]*)\/surface\/ws$/;
 const VIEWER_MESSAGE_MAX_BYTES = 256 * 1024;
@@ -456,7 +457,7 @@ export const createGuestSurfaceRuntime = ({
       // under every runtime (Bun delivers the oversized message whole), so
       // refuse it here — before it is parsed — with the same 1009 the ws
       // layer would have used.
-      const frameBytes = typeof raw === 'string'
+      const frameBytes = isString(raw)
         ? Buffer.byteLength(raw)
         : Array.isArray(raw) ? raw.reduce((total, part) => total + part.byteLength, 0) : raw.byteLength;
       if (frameBytes > VIEWER_MESSAGE_MAX_BYTES) {

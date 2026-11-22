@@ -767,21 +767,23 @@ const updateSessionMetadataWith = async (sessionID: string, decide: MetadataDeci
 // The notifications runtime is created after the session runtime, so the
 // session-activity snapshot reads its remembered model/provider through
 // this ref, filled in once the notifications runtime exists.
-const sessionModelProviderRef: { current: ((sessionId: string) => { modelID?: string | null; providerID?: string | null } | null) | null } = { current: null };
+type SessionModelProviderLookup = (sessionId: string) => { modelID?: string | null; providerID?: string | null } | null;
+// SAFETY: the ref starts empty and holds only the notifications runtime's lookup once that exists.
+const sessionModelProviderRef = { current: null as SessionModelProviderLookup | null };
 
 // The queue binding for a session lives in the repo-queue task ledger
 // (bound at launch by the claimant, code#1656 step 3); the launch-side
 // owner registers its lookup here once it exists in this process, and
 // until then the session-activity snapshot reports queue: null (no known
-// binding) rather than inferring one (#1473).
-const sessionQueueBindingRef: { current: ((sessionId: string) => unknown) | null } = { current: null };
+// binding) rather than inferring one (#1473). No lookup registers in this
+// process yet, so every session reports no binding.
 
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
   getSessionModelProvider: (sessionId) => sessionModelProviderRef.current?.(sessionId) ?? null,
-  getSessionQueueBinding: (sessionId) => sessionQueueBindingRef.current?.(sessionId) ?? null,
+  getSessionQueueBinding: () => null,
   readTurnStart: (sessionId) => createTurnStartReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).readTurnStart(sessionId),
   buildOpenCodeUrl: (...args) => buildOpenCodeUrl(...args),
   getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(),
@@ -2092,7 +2094,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   resolveServerMaxRunDurationMs: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     const value = settings?.scheduledTasksMaxRunDurationMs;
-    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+    return isNumber(value) && Number.isFinite(value) && value > 0 ? value : null;
   },
   chatsScope: scheduledChatsScope,
   readSessionMetadata: readStoredSessionMetadata,

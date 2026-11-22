@@ -133,7 +133,7 @@ const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
 // back to 3: the UI's full-context callers ask for 1,000,000 lines
 // (FULL_CONTEXT_DIFF_LINES) and must still get a whole-file patch.
 const MAX_DIFF_CONTEXT_LINES = 100_000;
-const parseDiffContextLines = (value: unknown) => {
+const parseDiffContextLines = <Value>(value: Value) => {
   const text = String(value ?? '');
   if (!/^\d+$/.test(text)) return 3;
   const contextLines = Number(text);
@@ -144,7 +144,7 @@ const parseDiffContextLines = (value: unknown) => {
 // can exceed JavaScript's safe integer range or ask git to return the entire
 // history. Unsafe or invalid values use the service default; safe values clamp
 // to the shared ceiling so the route and direct service callers stay bounded.
-const parseLogMaxCount = (value: unknown) => {
+const parseLogMaxCount = <Value>(value: Value) => {
   const text = String(value ?? '');
   if (!/^\d+$/.test(text)) return undefined;
   const maxCount = Number(text);
@@ -823,7 +823,7 @@ export function registerGitRoutes(app: Application, {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
       const remoteParam = req.query.remote;
-      if (remoteParam !== undefined && (typeof remoteParam !== 'string' || !remoteParam.trim())) {
+      if (remoteParam !== undefined && (!isString(remoteParam) || !remoteParam.trim())) {
         return res.status(400).json({ error: 'remote parameter must be a single non-empty string' });
       }
       const remote = remoteParam?.trim() || 'origin';
@@ -1458,7 +1458,7 @@ export function registerGitRoutes(app: Application, {
       }
 
       const remoteField = fieldsOf(req.body)?.remote;
-      const remote = typeof remoteField === 'string' ? remoteField.trim() : '';
+      const remote = isString(remoteField) ? remoteField.trim() : '';
       if (!remote) {
         return res.status(400).json({ error: 'remote is required' });
       }
@@ -2177,7 +2177,7 @@ export function registerGitRoutes(app: Application, {
       }
 
       const { maxCount: rawMaxCount, from, to, file } = req.query;
-      if ([rawMaxCount, from, to, file].some((value) => value !== undefined && typeof value !== 'string')) {
+      if ([rawMaxCount, from, to, file].some((value) => value !== undefined && !isString(value))) {
         return res.status(400).json({ error: 'log parameters must be single string values' });
       }
       const all = req.query.all === 'true';

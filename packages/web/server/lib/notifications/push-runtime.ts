@@ -8,6 +8,7 @@ import { isLoopbackUrl } from '../security/bind-host.js';
 import { hasStatusCode, isJsonObject, isNumber, isString } from './inputs.js';
 import type { JsonValue, PushSettings, SessionRecords } from './contracts.js';
 import type { UpdateSettingsFromDisk } from '../settings/settings-write-queue.js';
+import { isObjectLike } from '../shared/object-guards.js';
 
 interface PushStore {
   version: number;
@@ -50,7 +51,7 @@ const hasVapidKeys = (settings: PushSettings): settings is PushSettings & {
   return isJsonObject(keys) && isString(keys.publicKey) && isString(keys.privateKey);
 };
 
-const isLoopbackHttpOrigin = (value: unknown) => isLoopbackUrl(value);
+const isLoopbackHttpOrigin = (value: string) => isLoopbackUrl(value);
 
 export const createPushRuntime = (deps: PushDependencies) => {
   const {
@@ -86,7 +87,7 @@ export const createPushRuntime = (deps: PushDependencies) => {
   // primitive preserves them aside under its collision-proof name
   // before any write can replace them. Parse errors are never logged:
   // they can quote the file, and the file holds subscription keys.
-  const isPushSubscriptionsValue = (value: unknown) => isJsonObject(value) && value.version === PUSH_SUBSCRIPTIONS_VERSION;
+  const isPushSubscriptionsValue = (value: unknown): value is { version: typeof PUSH_SUBSCRIPTIONS_VERSION } => isJsonObject(value) && value.version === PUSH_SUBSCRIPTIONS_VERSION;
   const durableOptions = () => ({ fs: fsPromises, validateValue: isPushSubscriptionsValue });
 
   // Answers the preserve outcome ('preserved' | 'replaced' | 'missing' |
@@ -147,7 +148,7 @@ export const createPushRuntime = (deps: PushDependencies) => {
       }
       try {
         const stored =
-          result.value.subscriptionsBySession && typeof result.value.subscriptionsBySession === 'object'
+          isObjectLike(result.value.subscriptionsBySession)
             ? result.value.subscriptionsBySession
             : {};
         const { bySession: subscriptionsBySession, changed } = withHashedSessionKeys(stored);

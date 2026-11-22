@@ -2,7 +2,7 @@ import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import { z } from 'zod';
 import { readProcessInstance } from '../scheduled-tasks/process-instance.js';
-import { asNonEmptyString, isBoolean, isRecord, isString } from '../shared/object-guards.js';
+import { asNonEmptyString, isBoolean, isRecord, isString, isNumber } from '../shared/object-guards.js';
 import type { promises as fsPromises } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import type { PlatformPath } from 'node:path';
@@ -439,7 +439,7 @@ const normalizeTaskForStorage = (value: JsonValue | ScheduledTaskInput, options:
   const existingMaxRun = existingTask?.maxRunDurationMs;
   const maxRunDurationMs = requestedMaxRun === null
     ? undefined
-    : (typeof requestedMaxRun === 'number' && Number.isFinite(requestedMaxRun) && requestedMaxRun > 0
+    : (isNumber(requestedMaxRun) && Number.isFinite(requestedMaxRun) && requestedMaxRun > 0
       ? Math.floor(requestedMaxRun)
       : (existingMaxRun !== undefined && Number.isFinite(existingMaxRun) && existingMaxRun > 0
         ? Math.floor(existingMaxRun)
@@ -1274,7 +1274,7 @@ export const createProjectConfigRuntime = (deps: ProjectConfigDependencies) => {
       // behaviour of falling back to the empty config.
       if (
         currentRead.status === 'invalid'
-        && typeof currentRead.reason === 'string'
+        && isString(currentRead.reason)
         && currentRead.reason.startsWith('shared project config is too large:')
       ) {
         throw new Error(currentRead.reason);

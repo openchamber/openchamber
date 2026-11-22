@@ -2,12 +2,13 @@ import { asNonEmptyString } from '../shared/guards.js';
 import { randomUUID } from 'node:crypto';
 import { controlErrorFields } from '../openchamber-control/error.js';
 import type { ControlErrorFields } from '../openchamber-control/error.js';
-import type { Application, Request, Response } from '../shared/http-contracts.js';
+import type { Application, QueryValue, Request, Response } from '../shared/http-contracts.js';
 import type { createScheduledTasksRuntime } from './runtime.js';
 import type { createProjectConfigRuntime } from '../projects/project-config.js';
 import type { ScheduledTaskServiceDependencies } from './service.js';
 import type { createNotificationEmitterRuntime } from '../notifications/emitter-runtime.js';
 import type { createScheduledTaskRunHistory } from './run-history.js';
+import { isString } from '../shared/object-guards.js';
 
 export interface ScheduledTaskEventClient extends Response {
   openchamberBrowserCapable?: boolean;
@@ -81,19 +82,19 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
     if (!scheduledTaskRunHistory) {
       return res.status(503).json({ error: 'scheduled task run history is unavailable' });
     }
-    const parseTime = (value: unknown) => {
-      if (typeof value !== 'string' || value.length === 0) return undefined;
+    const parseTime = (value: QueryValue | undefined) => {
+      if (!isString(value) || value.length === 0) return undefined;
       const asNumber = Number(value);
       if (Number.isFinite(asNumber)) return asNumber;
       const parsed = Date.parse(value);
       return Number.isFinite(parsed) ? parsed : undefined;
     };
-    const parseTimeFilter = (name: string, value: unknown) => {
-      if (value !== undefined && typeof value !== 'string') {
+    const parseTimeFilter = (name: string, value: QueryValue | undefined) => {
+      if (value !== undefined && !isString(value)) {
         return { error: `${name} must be a single value` };
       }
       const parsed = parseTime(value);
-      if (typeof value === 'string' && value.length > 0 && parsed === undefined) {
+      if (isString(value) && value.length > 0 && parsed === undefined) {
         return { error: `${name} must be epoch milliseconds or a parseable date string` };
       }
       return { value: parsed };
@@ -116,7 +117,7 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
     const limitParam = req.query?.limit;
     let limit;
     if (limitParam !== undefined) {
-      const text = typeof limitParam === 'string' ? limitParam.trim() : '';
+      const text = isString(limitParam) ? limitParam.trim() : '';
       if (!/^\d+$/.test(text) || !Number.isSafeInteger(Number(text))) {
         return res.status(400).json({ error: 'limit must be a single integer' });
       }

@@ -109,7 +109,7 @@ const hasErrorFields = (value: unknown): value is { code?: unknown; remoteName?:
 
 // Host and path of a remote URL without user, scheme or `.git`, so the https
 // and ssh forms of one repository compare equal.
-const repositoryLocation = (value: unknown) => {
+const repositoryLocation = <Value>(value: Value) => {
   const raw = String(value || '').trim();
   const scp = raw.includes('://') ? null : raw.match(/^(?:[^@\s]+@)?([^:/\s]+):(?!\/)(.+)$/);
   let host = '';

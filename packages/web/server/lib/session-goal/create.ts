@@ -1,6 +1,7 @@
 import { GOAL_MISSION_INSTRUCTIONS, GOAL_REPORT_INSTRUCTIONS } from './audit.js';
 import { appendObjectiveVersion, GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
 import { readGoalWriterSettings, writeGoalSpec } from './spec-writer.js';
+import { isString } from '../shared/object-guards.js';
 
 export interface CreatedSessionGoal {
   id: string;
@@ -49,7 +50,7 @@ const hasMessage = (value: unknown): value is { message?: unknown } => value != 
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
 
-const escapeXmlText = (value: unknown) => String(value ?? '')
+const escapeXmlText = <Value>(value: Value) => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;');
@@ -163,8 +164,8 @@ export const createSessionGoal = async ({
       ({ spec } = await writeSpec({
       request: requested,
       directory,
-      providerID: typeof providerID === 'string' ? providerID : undefined,
-      modelID: typeof modelID === 'string' ? modelID : undefined,
+      providerID: isString(providerID) ? providerID : undefined,
+      modelID: isString(modelID) ? modelID : undefined,
       ignoreLimit,
       settings: goalWriterSettings,
     }));
@@ -192,7 +193,7 @@ export const createSessionGoal = async ({
     await writeObjectiveFile(sessionID, objectiveText);
     // The initial objective is the goal's first version (#1830). Best-effort:
     // a history failure must not cost the user the goal.
-    await appendObjectiveVersionFile(sessionID, objectiveText).catch((error: unknown) => {
+    await appendObjectiveVersionFile(sessionID, objectiveText).catch((error) => {
       warn('goal objective version record failed', error);
     });
     objectiveFile = true;

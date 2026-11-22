@@ -1,3 +1,4 @@
+import type { JsonObject } from '../shared/json-values.js';
 import { z } from 'zod';
 import {
   JEV_LINGER_MS,
@@ -61,7 +62,7 @@ const poolTextSchema = z.object({
  * Jev's request keeps one string per category (`ROUTING_INSTRUCTIONS` note in
  * DOCUMENTATION.md).
  */
-const categoryCriteria = (category: Pick<RoutingCategory, 'id' | 'description'> & { model?: { providerID?: string; modelID?: string } | null }, pools: Record<string, unknown>) => {
+const categoryCriteria = (category: Pick<RoutingCategory, 'id' | 'description'> & { model?: { providerID?: string; modelID?: string } | null }, pools: JsonObject) => {
   if (category.model?.providerID !== ROUTE_PROVIDER_ID) return category.description;
   const poolID = category.model.modelID;
   const pool = poolTextSchema.safeParse(poolID !== undefined && Object.hasOwn(pools, poolID) ? pools[poolID] : null);
@@ -74,7 +75,7 @@ const categoryCriteria = (category: Pick<RoutingCategory, 'id' | 'description'> 
 };
 
 /** `pools` is the `experimental.model_routes` map (`model-routes.js` `readModelRoutes`). */
-export const buildRoutingRequest = ({ categories, history, request, pools = {} }: { categories: (Pick<RoutingCategory, 'id' | 'description'> & { model?: { providerID?: string; modelID?: string } | null })[]; history: HistoryEntry[]; request: string; pools?: Record<string, unknown> }): JevRequest => {
+export const buildRoutingRequest = ({ categories, history, request, pools = {} }: { categories: (Pick<RoutingCategory, 'id' | 'description'> & { model?: { providerID?: string; modelID?: string } | null })[]; history: HistoryEntry[]; request: string; pools?: JsonObject }): JevRequest => {
   const criteria: Record<string, string> = {};
   for (const category of categories) criteria[category.id] = categoryCriteria(category, pools);
   return {

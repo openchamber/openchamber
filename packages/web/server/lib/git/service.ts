@@ -22,7 +22,7 @@ import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from '
 import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { randomUUID } from 'crypto';
 import { worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
-import { errorCodeOf, isString } from '../shared/object-guards.js';
+import { errorCodeOf, isString, isNumber } from '../shared/object-guards.js';
 import type { SimpleGit, BranchSummary, FileStatusResult, RemoteWithRefs } from 'simple-git';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
@@ -79,8 +79,8 @@ const DIFF_PREFIX_ARGS = ['--src-prefix=a/', '--dst-prefix=b/'];
 // else takes the default of 3: a fractional value reaching git as -U2.9
 // (or NaN as -UNaN) is rejected with exit 129 (#578). Normalizing here, in
 // the service, mirrors the getLog maxCount guard below (#463).
-const normalizeContextLines = (contextLines: unknown) =>
-  typeof contextLines === 'number' && Number.isInteger(contextLines) && contextLines >= 0 ? contextLines : 3;
+const normalizeContextLines = <Value>(contextLines: Value) =>
+  isNumber(contextLines) && Number.isInteger(contextLines) && contextLines >= 0 ? contextLines : 3;
 const gitIndexMutationQueues = new Map<string, Promise<unknown>>();
 const remoteProvisioningQueues = new Map<string, Promise<unknown>>();
 

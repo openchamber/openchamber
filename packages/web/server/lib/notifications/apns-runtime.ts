@@ -21,6 +21,7 @@ import type { JsonValue, SessionRecords } from './contracts.js';
 import type { PushContent } from './push-seal.js';
 import { hasErrorProperties, isIncludesMessage, isJsonObject, isNumber, isString } from './inputs.js';
 import type { NotificationFailure } from './inputs.js';
+import { isFunction, isObjectLike } from '../shared/object-guards.js';
 
 type ApnsEnvironment = 'sandbox' | 'production';
 
@@ -178,7 +179,7 @@ const truncateToUtf8Bytes = (value: string, maxBytes: number) => {
   return value.slice(0, end);
 };
 
-const collapseIdForTag = (tag: unknown) => (typeof tag === 'string' ? truncateToUtf8Bytes(tag, APNS_COLLAPSE_ID_MAX_BYTES) : undefined);
+const collapseIdForTag = <Tag>(tag: Tag) => (isString(tag) ? truncateToUtf8Bytes(tag, APNS_COLLAPSE_ID_MAX_BYTES) : undefined);
 
 const trimmedEnv = (name: string) => {
   const value = process.env[name];
@@ -280,7 +281,7 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
   // preserves them aside under its collision-proof name before any write
   // can replace them. Parse errors are never logged: they can quote the
   // file, and the file holds device tokens.
-  const isApnsTokensValue = (value: unknown) => isJsonObject(value) && value.version === APNS_TOKENS_VERSION;
+  const isApnsTokensValue = (value: unknown): value is { version: typeof APNS_TOKENS_VERSION } => isJsonObject(value) && value.version === APNS_TOKENS_VERSION;
   const durableOptions = () => ({ fs: fsPromises, validateValue: isApnsTokensValue });
 
   // Answers the preserve outcome ('preserved' | 'replaced' | 'missing' |
@@ -341,7 +342,7 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
       }
       try {
         const stored =
-          result.value.tokensBySession && typeof result.value.tokensBySession === 'object'
+          isObjectLike(result.value.tokensBySession)
             ? result.value.tokensBySession
             : {};
         const { bySession: tokensBySession, changed } = withHashedSessionKeys(stored);
@@ -643,7 +644,7 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
       req.setEncoding('utf8');
       req.on('data', (chunk) => {
         if (responseOverflow) return;
-        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        const text = isString(chunk) ? chunk : chunk.toString('utf8');
         responseBodyBytes += Buffer.byteLength(text, 'utf8');
         if (responseBodyBytes > APNS_DIRECT_RESPONSE_MAX_BYTES) {
           // Overflow: drop the buffered body (a partial body is never
@@ -652,7 +653,7 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
           // handler by destroying the request.
           responseOverflow = true;
           responseBody = '';
-          if (typeof req.destroy === 'function') {
+          if (isFunction(req.destroy)) {
             req.destroy(new Error(`APNs response body exceeded ${APNS_DIRECT_RESPONSE_MAX_BYTES} bytes`));
           }
           return;
