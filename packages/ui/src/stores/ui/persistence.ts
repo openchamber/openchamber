@@ -4,12 +4,12 @@ import { zonePlacementSchema } from '@/lib/workspace/zones';
 import { sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
 import type { PersistOptions } from 'zustand/middleware';
 import {
-  normalizeLargeTextPasteBehavior,
-  normalizeAgentTerminalsPlacement,
-  normalizeActiveRunModelChangeBehavior,
+  largeTextPasteBehaviorSchema,
+  agentTerminalsPlacementSchema,
+  activeRunModelChangeBehaviorSchema,
   continueWithModelModeSchema,
   documentAttachBehaviorSchema,
-  normalizeFileEditorKeymap,
+  fileEditorKeymapSchema,
   DEFAULT_EDITOR_FONT_SIZE,
   DEFAULT_CONTEXT_EDITOR_TREE_WIDTH,
 } from './preferences';
@@ -236,11 +236,11 @@ export const uiStorePersistOptions = {
     delete state.linearIssueListTeamIdByRuntime;
     delete state.linearIssueListPriority;
 
-    state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
-    state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
-    state.agentTerminalsPlacement = normalizeAgentTerminalsPlacement(state.agentTerminalsPlacement);
+    state.fileEditorKeymap = fileEditorKeymapSchema.parse(state.fileEditorKeymap);
+    state.largeTextPasteBehavior = largeTextPasteBehaviorSchema.parse(state.largeTextPasteBehavior);
+    state.agentTerminalsPlacement = agentTerminalsPlacementSchema.parse(state.agentTerminalsPlacement);
     state.continueWithModelMode = continueWithModelModeSchema.parse(state.continueWithModelMode);
-    state.activeRunModelChangeBehavior = normalizeActiveRunModelChangeBehavior(state.activeRunModelChangeBehavior);
+    state.activeRunModelChangeBehavior = activeRunModelChangeBehaviorSchema.parse(state.activeRunModelChangeBehavior);
     state.documentAttachBehavior = documentAttachBehaviorSchema.parse(state.documentAttachBehavior);
 
     if (state.toolJsonViewMode !== 'summary'

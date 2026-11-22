@@ -7,27 +7,21 @@ export const clampContextEditorTreeWidth = (width: number): number =>
 
 export const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 
-export const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
-  if (value === 'attach' || value === 'inline' || value === 'ask' || value === 'inline-double-paste') {
-    return value;
-  }
-  return DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR;
-};
+export const largeTextPasteBehaviorSchema = z.enum(['ask', 'attach', 'inline', 'inline-double-paste'])
+  .catch(DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR) satisfies z.ZodType<LargeTextPasteBehavior>;
 
 export const DEFAULT_AGENT_TERMINALS_PLACEMENT: AgentTerminalsPlacement = 'terminal-panel';
 
-export const normalizeAgentTerminalsPlacement = (value: unknown): AgentTerminalsPlacement => (
-  value === 'sidebar' ? 'sidebar' : DEFAULT_AGENT_TERMINALS_PLACEMENT
-);
+export const agentTerminalsPlacementSchema = z.enum(['terminal-panel', 'sidebar'])
+  .catch(DEFAULT_AGENT_TERMINALS_PLACEMENT) satisfies z.ZodType<AgentTerminalsPlacement>;
 
 /** Stopping everything is the default; keeping work running is the choice a user makes. */
 export const continueWithModelModeSchema = z.enum(CONTINUE_WORK_MODES).catch('stop');
 
 export const DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR: ActiveRunModelChangeBehavior = 'next-message';
 
-export const normalizeActiveRunModelChangeBehavior = (value: unknown): ActiveRunModelChangeBehavior => (
-  value === 'restart' ? 'restart' : DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR
-);
+export const activeRunModelChangeBehaviorSchema = z.enum(['next-message', 'restart'])
+  .catch(DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR) satisfies z.ZodType<ActiveRunModelChangeBehavior>;
 
 // A plain slice at a cap can land between the halves of a surrogate pair
 // and persist a value whose last code unit is a lone high surrogate
@@ -44,9 +38,7 @@ export const DEFAULT_DOCUMENT_ATTACH_BEHAVIOR: DocumentAttachBehavior = 'ask';
 
 export const documentAttachBehaviorSchema = z.enum(['ask', 'save', 'convert']).catch(DEFAULT_DOCUMENT_ATTACH_BEHAVIOR);
 
-export function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
-  return value === 'vim' ? 'vim' : 'default';
-}
+export const fileEditorKeymapSchema = z.enum(['default', 'vim']).catch('default') satisfies z.ZodType<FileEditorKeymap>;
 
 export const DEFAULT_SELECTION_APPROVAL_TEXT = 'Sounds good';
 

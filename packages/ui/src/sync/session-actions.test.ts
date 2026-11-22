@@ -464,7 +464,11 @@ mock.module("@/lib/sessionTabs", () => ({
 mock.module("@/stores/useGlobalSessionsStore", () => ({
   resolveGlobalSessionDirectory: (session: SessionWithDirectory) => session.directory ?? session.project?.worktree ?? null,
   mergeSessionDirectoryMetadata: (incoming: Session, existing?: SessionWithDirectory | null): SessionWithDirectory => {
-    if (!existing) return incoming as SessionWithDirectory
+    if (!existing) {
+      // SAFETY: SessionWithDirectory only adds optional directory and project fields to Session.
+      return incoming as SessionWithDirectory
+    }
+    // SAFETY: as above, the optional fields are read with fallbacks below.
     const next = { ...(incoming as SessionWithDirectory) }
     if (!next.directory && existing.directory) next.directory = existing.directory
     if (!next.project && existing.project) next.project = existing.project

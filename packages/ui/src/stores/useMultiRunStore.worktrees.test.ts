@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { z } from 'zod';
 import type { Metadata, Session } from '@/lib/opencode/model';
+import type { CreateWorktreeArgs } from '@/lib/worktrees/worktreeManager';
+
+type WorktreeCreateOptions = { resolvedRootTrackingRemote?: string | null } | undefined;
 
 const upsertedSessions: Session[] = [];
 const registeredDirectories: Array<{ sessionID: string; directory: string }> = [];
 const ensureChildCalls: Array<{ directory: string; bootstrap?: boolean }> = [];
 const worktreeMetadataCalls: Array<{ sessionId: string; path: string }> = [];
-const worktreeCreateCalls: Array<{ project: { id?: string; path: string }; args: Record<string, unknown>; options: unknown }> = [];
+const worktreeCreateCalls: Array<{ project: { id?: string; path: string }; args: CreateWorktreeArgs; options: WorktreeCreateOptions }> = [];
 const worktreeBootstrapWaitCalls: string[] = [];
 const operationOrder: string[] = [];
 const dispatchedSessionIds: string[] = [];
@@ -20,15 +23,15 @@ let localBranches: string[] = [];
 const startRefReads: Array<{ directory: string; startFrom: string }> = [];
 let failBranchListing = false;
 const usedFolders = new Set<string>();
-const createWorktreeWithDefaultsMock = mock((project: { id?: string; path: string }, args: Record<string, unknown>, options: unknown) => {
+const createWorktreeWithDefaultsMock = mock((project: { id?: string; path: string }, args: CreateWorktreeArgs, options: WorktreeCreateOptions) => {
   worktreeCreateCalls.push({ project, args, options });
   // Like the client and server: the folder flattens the name, and a folder
   // that exists gets a suffix. The branch is the one asked for.
-  const seed = String(args.worktreeName ?? 'fix-thing').replaceAll('/', '-');
+  const seed = (args.worktreeName ?? 'fix-thing').replaceAll('/', '-');
   let name = seed;
   for (let n = 2; usedFolders.has(name); n += 1) name = `${seed}-x${n}`;
   usedFolders.add(name);
-  const branch = String(args.branchName ?? name);
+  const branch = args.branchName ?? name;
   return Promise.resolve({
     source: 'sdk',
     name,
@@ -42,8 +45,9 @@ const createWorktreeWithDefaultsMock = mock((project: { id?: string; path: strin
     worktreeSource: 'created-for-session',
   });
 });
-const childState = {
-  session: [] as Session[],
+type ChildState = { session: Session[]; sessionTotal: number; limit: number };
+const childState: ChildState = {
+  session: [],
   sessionTotal: 0,
   limit: 5,
 };
@@ -203,8 +207,8 @@ mock.module('@/sync/sync-refs', () => ({
     ensureChild: (directory: string, options?: { bootstrap?: boolean }) => {
       ensureChildCalls.push({ directory, bootstrap: options?.bootstrap });
       return {
-        setState: (updater: typeof childState | ((state: typeof childState) => Partial<typeof childState> | typeof childState)) => {
-          const patch = typeof updater === 'function' ? updater(childState) : updater;
+        setState: (updater: (state: ChildState) => Partial<ChildState>) => {
+          const patch = updater(childState);
           if (patch !== childState) {
             Object.assign(childState, patch);
           }
