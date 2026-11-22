@@ -31,6 +31,7 @@ const targetSchema = z.union([
 const healthSchema = z
   .object({
     firstTokenTimeoutMs: z.union([z.number(), z.literal(false)]).optional(),
+    lastTargetTimeoutMs: z.union([z.number(), z.literal(false)]).optional(),
     maxResponseTimeMs: z.number().optional(),
     minOutputTokensPerSecond: z.number().optional(),
     sampleWindow: z.number().optional(),

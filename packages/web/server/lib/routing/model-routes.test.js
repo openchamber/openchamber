@@ -284,6 +284,7 @@ describe('validateModelRoute advanced fields', () => {
         selection: 'round-robin',
         health: {
           firstTokenTimeoutMs: false,
+          lastTargetTimeoutMs: 900000,
           maxResponseTimeMs: 60000,
           minOutputTokensPerSecond: 12.5,
           sampleWindow: 5,
@@ -303,6 +304,11 @@ describe('validateModelRoute advanced fields', () => {
     expect(validateModelRoute('x', { ...base, hedgeAfterMs: 0 })).toMatch(/hedgeAfterMs/);
     expect(validateModelRoute('x', { ...base, health: { cooldownMs: 1.5 } })).toMatch(/health\.cooldownMs/);
     expect(validateModelRoute('x', { ...base, health: { firstTokenTimeoutMs: 0 } })).toMatch(/firstTokenTimeoutMs/);
+    // OpenCode's last-target limit (developing-today-forks/opencode#2676): milliseconds up to an hour, or false.
+    expect(validateModelRoute('x', { ...base, health: { lastTargetTimeoutMs: false } })).toBeNull();
+    expect(validateModelRoute('x', { ...base, health: { lastTargetTimeoutMs: 0 } })).toMatch(/health\.lastTargetTimeoutMs/);
+    expect(validateModelRoute('x', { ...base, health: { lastTargetTimeoutMs: 3_600_001 } })).toMatch(/health\.lastTargetTimeoutMs/);
+    expect(validateModelRoute('x', { ...base, health: { lastTargetTimeoutMs: true } })).toMatch(/health\.lastTargetTimeoutMs/);
     expect(validateModelRoute('x', { ...base, health: { minOutputTokensPerSecond: 0 } })).toMatch(/minOutputTokensPerSecond/);
   });
 
