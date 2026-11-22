@@ -100,6 +100,16 @@ The VS Code queue gate and its live inputs are documented in
 | `session-ordering.ts` | Ephemeral lifecycle rank used by every user-visible session list | All known sessions in the active runtime |
 | `session-activity-timing.ts` | Elapsed time of the running turn and of the turn that just finished, plus the persisted starts that survive a reload | All known sessions in the active runtime |
 | `session-ui-store.ts` | Session selection, draft lifecycle, one-shot draft-materialization transition identity, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
+
+Background goal sends carry their own `pendingGoal`, captured target and draft
+snapshot into `session-actions.ts`. Replies wait before sending; draft sessions
+may be created first, but their first prompt waits for the generated objective
+to be saved. `materializeOpenDraftSession` uses `keepUserPlace` for these sends:
+it opens the result only if the originating draft is still selected when create
+finishes. It preserves any later chat or draft. Failure restores the message to
+the created session's composer, or to its original composer for replies, without
+replacing text entered since. See the goal writer contract in
+`packages/web/server/lib/session-goal/DOCUMENTATION.md`.
 | `useGlobalSessionsStore.ts` | Global active/archived entities plus root, parent/child, and directory indexes | All opened project/worktree session lists |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `attachment-files.ts` | Attachment picker allowlists, MIME/content validation, structured-text sanitization, and HEIC conversion | Local chat attachments across shared UI runtimes |

@@ -970,25 +970,48 @@ const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Pr
   void activateConfigForDirectory(recovered)
 }
 
+/**
+ * Whether the user is still on `draft`. A send can create its session long
+ * after it was made (it waits on a worktree, or on a goal being written), and
+ * by then the user may have opened another draft or chat.
+ */
+const isStillOnDraft = (draft: NewSessionDraftState): boolean => {
+  const live = useSessionUIStore.getState().newSessionDraft
+  return live.open && live.draftId === draft.draftId
+}
+
 const createSessionWithDraftLifecycle = async (
   title?: string,
   directoryOverride?: string | null,
   metadata?: Metadata,
   selectionTransition?: "submitted-draft",
   selection?: SessionCreateSelection,
+  submittedDraft?: NewSessionDraftState,
 ): Promise<Session | null> => {
   const store = useSessionUIStore.getState()
-  const draft = store.newSessionDraft
+  const draft = submittedDraft ?? store.newSessionDraft
   const targetFolderId = draft.targetFolderId
+  // A user who moved on keeps where they are: the session is created where
+  // the draft pointed, without opening it or closing the draft now on screen.
+  const movedOn = submittedDraft !== undefined && !isStillOnDraft(submittedDraft)
 
   try {
-    const resolved = await resolveCreatableDraftDirectory(draft, directoryOverride)
+    const resolved = movedOn
+      ? { status: "ok" as const, directory: directoryOverride ?? submittedDraft.directoryOverride ?? null }
+      : await resolveCreatableDraftDirectory(draft, directoryOverride)
     if (resolved.status === "aborted") return null
     const directory = resolved.directory
-    const session = await createSessionAction(title, directory, metadata, selectionTransition, selection)
+    // A submitted draft decides whether to open its session only once it
+    // exists: the user may leave the draft while it is being created.
+    const session = await createSessionAction(title, directory, metadata, selectionTransition, selection, submittedDraft ? "preserve" : "open")
     if (!session) return null
 
-    useSessionUIStore.getState().closeNewSessionDraft()
+    if (!submittedDraft) {
+      useSessionUIStore.getState().closeNewSessionDraft()
+    } else if (isStillOnDraft(submittedDraft)) {
+      useSessionUIStore.getState().setCurrentSession(session.id, session.directory || directory || null, selectionTransition)
+      useSessionUIStore.getState().closeNewSessionDraft()
+    }
 
     if (targetFolderId) {
       const currentStore = useSessionUIStore.getState()
@@ -1035,7 +1058,15 @@ export async function materializeOpenDraftSession(selection: {
   agent?: string
   /** `null` is an explicit `Default` thinking level. */
   variant?: string | null
-}, draftOverride?: NewSessionDraftState): Promise<MaterializedDraftSession | null> {
+}, draftOverride?: NewSessionDraftState, options?: {
+  /**
+   * The send was handed off and the user may have moved on (a background
+   * goal): if they left the draft, its session is created without opening it
+   * or closing the draft now on screen. Other sends open their session.
+   */
+  keepUserPlace?: boolean
+}): Promise<MaterializedDraftSession | null> {
+  const submittedRuntimeKey = getRuntimeKey()
   const store = useSessionUIStore.getState()
   const draft = draftOverride ?? store.newSessionDraft
   if (!draft?.open) return null
@@ -1059,7 +1090,11 @@ export async function materializeOpenDraftSession(selection: {
   }
 
   const isChatDraft = draft.target === "chat"
-  if (isChatDraft) {
+  const keepUserPlace = options?.keepUserPlace === true
+  if (isChatDraft && keepUserPlace && !isStillOnDraft(draft)) {
+    // The user left this chat draft; the live draft's directory is not its own.
+    draftDirectoryOverride = draft.preparedChatDirectory ?? await createChatDirectory()
+  } else if (isChatDraft) {
     draftDirectoryOverride = await store.prepareChatDraftDirectory()
     if (!draftDirectoryOverride) throw new Error("Failed to prepare chat directory")
     const currentDraft = useSessionUIStore.getState().newSessionDraft
@@ -1072,6 +1107,7 @@ export async function materializeOpenDraftSession(selection: {
 
   await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
   draftDirectoryOverride = await resolveDraftStartDirectory(draftDirectoryOverride, draftProjectId)
+  if (getRuntimeKey() !== submittedRuntimeKey) throw new Error("Message was not sent because the runtime changed.")
 
   const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
   // The subsession models the draft's picker holds go on the create call;
@@ -1093,6 +1129,7 @@ export async function materializeOpenDraftSession(selection: {
       agent: trimmedAgent,
       subagentPolicy: draftSubagentPolicy,
     },
+    keepUserPlace ? draft : undefined,
   )
   if (created?.id && draftSubagentPolicy) useSubsessionDraftStore.getState().consume()
   if (!created?.id) {
@@ -1127,9 +1164,12 @@ export async function materializeOpenDraftSession(selection: {
 
   const draftSyntheticParts = draft.syntheticParts
   const configState = useConfigStore.getState()
-  void activateConfigForDirectory(createdDirectory).catch((error) => {
-    console.warn("Failed to activate directory after creating session:", error)
-  })
+  // Only the session on screen activates its directory's configuration.
+  if (useSessionUIStore.getState().currentSessionId === created.id) {
+    void activateConfigForDirectory(createdDirectory).catch((error) => {
+      console.warn("Failed to activate directory after creating session:", error)
+    })
+  }
 
   const effectiveDraftAgent = trimmedAgent ?? configState.currentAgentName
   const variantOverride = resolveVariantToRecord(

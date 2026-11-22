@@ -53,7 +53,7 @@ import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import { useUIStore } from "@/stores/useUIStore"
 import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useCommandsStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
-import { buildGoalIntroReminder } from "@/lib/goalWriter"
+import { buildGoalIntroReminder, type BackgroundGoalOutcome } from "@/lib/goalWriter"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { createInputHistoryIdentity, useInputHistoryStore, type InputHistorySubmission } from "@/stores/useInputHistoryStore"
 import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
@@ -2072,6 +2072,8 @@ export type CapturedSendTarget = {
 }
 
 export type SendMessageOptions = {
+  /** Runtime captured before a background wait or draft materialization. */
+  runtimeKey?: string
   /** Explicit composer intent; automated continuations must not restore archives. */
   userInitiated?: boolean
   target?: CapturedSendTarget
@@ -2088,6 +2090,14 @@ export type SendMessageOptions = {
    * replaces the composer's armed goal, which belongs to the composer text.
    */
   queuedGoal?: QueuedMessageGoal | null
+  /**
+   * A goal still being written ("Send when ready"). The message waits for it
+   * and goes out with it; a draft creates its session first. When it rejects,
+   * nothing is sent.
+   */
+  pendingGoal?: Promise<BackgroundGoalOutcome>
+  /** Called once a draft send has created its session. */
+  onSessionCreated?: (sessionId: string, directory: string | null) => void
 }
 
 function notifyMessageSent(sessionId: string): void {
@@ -2115,14 +2125,51 @@ export async function sendMessage(
   options?: SendMessageOptions,
 ): Promise<void> {
   const capturedTarget = options?.target
-  const capturedRuntimeKey = capturedTarget?.runtimeKey ?? getRuntimeKey()
-  if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
-    throw new Error("Message was not sent because the runtime changed.")
+  const capturedRuntimeKey = capturedTarget?.runtimeKey ?? options?.runtimeKey ?? getRuntimeKey()
+  const assertRuntimeUnchanged = () => {
+    if (capturedRuntimeKey !== getRuntimeKey()) throw new Error("Message was not sent because the runtime changed.")
+  }
+  assertRuntimeUnchanged()
+  const capturedDraft = options?.draftSnapshot ?? useSessionUIStore.getState().newSessionDraft
+  const pendingGoal = options?.pendingGoal
+  if (pendingGoal) {
+    // Attach rejection handling before worktree creation can yield. Otherwise
+    // a writer failure during setup is temporarily an unhandled rejection.
+    const goalResult = pendingGoal.then(
+      (value) => ({ ok: true as const, value }),
+      (error: Error) => ({ ok: false as const, error }),
+    )
+    const isDraftSend = !capturedTarget && !options?.sessionId && capturedDraft?.open
+    const created = isDraftSend
+      ? await runAfterOpenCodeStartup(async () => {
+          assertRuntimeUnchanged()
+          return materializeOpenDraftSession({ providerID, modelID, agent, variant }, capturedDraft, { keepUserPlace: true })
+        })
+      : null
+    if (isDraftSend && !created) throw new Error("Failed to create session")
+    if (created) options?.onSessionCreated?.(created.sessionId, created.directory ?? null)
+    // Goal generation stays outside the startup send queue, so it never
+    // prevents a later task from being handed to OpenCode.
+    const settled = await goalResult
+    if (!settled.ok) throw settled.error
+    assertRuntimeUnchanged()
+    const ready = settled.value
+    return sendMessage(ready.content ?? content, providerID, modelID, created?.agent ?? agent, attachments, agentMentionName,
+      created ? [...(additionalParts ?? []), ...(created.syntheticParts ?? [])] : additionalParts,
+      variant, inputMode, {
+        ...options,
+        runtimeKey: capturedRuntimeKey,
+        sessionId: created?.sessionId ?? options?.sessionId,
+        directory: created?.directory ?? options?.directory,
+        pendingGoal: undefined,
+        queuedGoal: ready.goal,
+      })
   }
   // A message sent while OpenCode is still starting waits for it here, ahead
   // of session creation, commands and shell, all of which need OpenCode.
   // Held sends go out one after another, in the order they were made.
   return runAfterOpenCodeStartup(async () => {
+    assertRuntimeUnchanged()
     const draft = options?.draftSnapshot ?? useSessionUIStore.getState().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
@@ -2138,21 +2185,18 @@ export async function sendMessage(
           ignoreLimit: queuedGoal?.ignoreLimit === true,
         }
         : useSessionGoalArmStore.getState().consume()
-    const goalArmed = goalArm.armed
-    // A queued goal keeps the budget it was queued with.
-    const goalUiState = useUIStore.getState()
-    const goalTokenBudget = queuedGoal
-      ? queuedGoal.tokenBudget
-      : (goalUiState.sessionGoalDefaultBudgetEnabled ? goalUiState.sessionGoalDefaultBudget : null)
     // Creates the armed goal and returns its goal-mode reminder, which
     // teaches the agent the goal protocol from turn one (without it the agent
     // only learns about goal mode from the first server continuation). It is
     // built after the goal is saved so it names the objective that was
     // saved: a spec the writer produced carries that spec to the agent.
     const applyArmedGoal = async (goalSessionId: string, goalDirectory: string | null | undefined) => {
-      if (!goalArmed) return null
+      if (!goalArm.armed) return null
       const uiState = useUIStore.getState()
-      const tokenBudget = goalTokenBudget
+      // A queued goal keeps the budget it was queued with.
+      const tokenBudget = queuedGoal
+        ? queuedGoal.tokenBudget
+        : (uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null)
       let objective = goalArm.objectiveOverride?.trim() || content
       if (!goalArm.objectiveOverride && content.startsWith("/")) {
         // Same directory-scoped resolution as routeMessage: the objective must
@@ -2196,6 +2240,7 @@ export async function sendMessage(
         variant,
       }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
+      options?.onSessionCreated?.(createdDraftSession.sessionId, createdDraftSession.directory ?? null)
 
       // The server writes the project knowledge into the new session while
       // the message is already on screen: only the prompt request waits.
@@ -2232,6 +2277,7 @@ export async function sendMessage(
         ...(createdDraftSession.syntheticParts ?? []),
       ]
       await routeMessage({
+        runtimeKey: capturedRuntimeKey,
         sessionId: createdDraftSession.sessionId,
         directory: createdDraftSession.directory,
         content,
@@ -2346,7 +2392,7 @@ export async function sendMessage(
       : undefined
 
     await routeMessage({
-      runtimeKey: capturedTarget?.runtimeKey,
+      runtimeKey: capturedRuntimeKey,
       sessionId: targetSessionId || "",
       directory: currentSessionDirectory,
       content,
