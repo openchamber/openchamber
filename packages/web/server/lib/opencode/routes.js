@@ -451,7 +451,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  app.put('/api/config/opencode-model-settings', refuseInEnterpriseMode, async (req, res) => {
+  // The server-wide body parser covers only listed path prefixes, so this route parses its own.
+  app.put('/api/config/opencode-model-settings', express.json({ limit: '16kb' }), refuseInEnterpriseMode, async (req, res) => {
     const request = parseModelSettingsRequest(req.body);
     if (!request.success) return res.status(400).json({ error: request.error });
     const { providerID, modelID, settings } = request.data;

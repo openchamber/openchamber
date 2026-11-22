@@ -57,6 +57,13 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
 
   const heading = 'typography-ui-label font-medium text-foreground';
 
+  const selectionLabel = (selection: ModelRoute['selection']) => {
+    if (selection === 'ordered') return t('settings.pools.advanced.selection.ordered');
+    if (selection === 'round-robin') return t('settings.pools.advanced.selection.roundRobin');
+    if (selection === 'weighted') return t('settings.pools.advanced.selection.weighted');
+    return t('settings.pools.advanced.selectionDefault');
+  };
+
   return (
     <div className="space-y-4">
       <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.advanced.help')}</p>
@@ -67,7 +74,8 @@ export const PoolAdvancedFields: React.FC<{ route: ModelRoute; onChange: (route:
           onValueChange={(next) => onChange(setRouteField(route, 'selection', pickedValue(next)))}
         >
           <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-56')} aria-label={t('settings.pools.advanced.selection')}>
-            <SelectValue />
+            {/* The select shows its raw value unless given the label; `__unset__` is internal. */}
+            <SelectValue>{selectionLabel(route.selection)}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__unset__">{t('settings.pools.advanced.selectionDefault')}</SelectItem>

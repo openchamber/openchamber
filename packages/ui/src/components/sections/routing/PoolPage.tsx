@@ -368,7 +368,8 @@ export const PoolPage: React.FC<{
           <SettingsStackedField label={t('settings.pools.autonomy')} info={t('settings.pools.autonomyInfo')}>
             <Select value={route.autonomy ?? '__unset__'} onValueChange={(next) => onChange(setRouteField(route, 'autonomy', pickedAutonomy(next)))}>
               <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('settings.pools.autonomy')}>
-                <SelectValue placeholder={t('settings.pools.autonomyDefault')} />
+                {/* The select shows its raw value unless given the label; `__unset__` is internal. */}
+                <SelectValue>{route.autonomy ? t(`settings.pools.autonomy.${route.autonomy}`) : t('settings.pools.autonomyDefault')}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__unset__">{t('settings.pools.autonomyDefault')}</SelectItem>

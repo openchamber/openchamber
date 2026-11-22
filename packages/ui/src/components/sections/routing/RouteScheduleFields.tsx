@@ -237,7 +237,7 @@ const ScheduleEditor: React.FC<{
             }
           >
             <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, 'w-full')} aria-label={t('settings.pools.schedules.effect')}>
-              <SelectValue />
+              <SelectValue>{effect === 'weight' ? t('settings.pools.schedules.effect.weight') : t('settings.pools.schedules.effect.factor')}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="factor">{t('settings.pools.schedules.effect.factor')}</SelectItem>
