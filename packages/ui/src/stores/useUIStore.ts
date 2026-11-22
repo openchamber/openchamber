@@ -19,6 +19,7 @@ import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
+import { clampQuestionTimeoutMinutes, QUESTION_TIMEOUT_MINUTES_DEFAULT } from '@/lib/questionTimeout';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import { CONTEXT_SURFACE_WIDTHS } from '@/lib/surfaces/registry';
 import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
@@ -1079,6 +1080,10 @@ interface UIStore {
   liveBrowserTabLimit: number;
   /** Plain clicks on issue, PR and Linear links in chat open them on the issues and PRs board. */
   openTrackerLinksOnBoard: boolean;
+  /** Minutes an agent's question waits before it closes unanswered; 0 never closes it. */
+  questionTimeoutMinutes: number;
+  /** An agent's question closes as soon as it is asked, so the agent goes on; the user answers it later from the chat. */
+  questionsInBackground: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   sessionRetentionOnlyArchived: boolean;
@@ -1386,6 +1391,8 @@ interface UIStore {
   setOpenLinksInBrowserPanel: (value: boolean) => void;
   setLiveBrowserTabLimit: (value: number) => void;
   setOpenTrackerLinksOnBoard: (value: boolean) => void;
+  setQuestionTimeoutMinutes: (value: number) => void;
+  setQuestionsInBackground: (value: boolean) => void;
   setFileTreeSide: (side: 'left' | 'right') => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
@@ -1642,6 +1649,8 @@ export const useUIStore = create<UIStore>()(
         openLinksInBrowserPanel: false,
         liveBrowserTabLimit: LIVE_BROWSER_TABS_DEFAULT,
         openTrackerLinksOnBoard: true,
+        questionTimeoutMinutes: QUESTION_TIMEOUT_MINUTES_DEFAULT,
+        questionsInBackground: false,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         sessionRetentionOnlyArchived: false,
@@ -2830,6 +2839,14 @@ export const useUIStore = create<UIStore>()(
           set({ openTrackerLinksOnBoard: value });
         },
 
+        setQuestionTimeoutMinutes: (value) => {
+          set({ questionTimeoutMinutes: clampQuestionTimeoutMinutes(value) });
+        },
+
+        setQuestionsInBackground: (value) => {
+          set({ questionsInBackground: value });
+        },
+
         setFileTreeSide: (side) => {
           set({ fileTreeSide: side === 'left' ? 'left' : 'right' });
         },
@@ -3887,6 +3904,8 @@ export const useUIStore = create<UIStore>()(
           openLinksInBrowserPanel: state.openLinksInBrowserPanel,
           liveBrowserTabLimit: state.liveBrowserTabLimit,
           openTrackerLinksOnBoard: state.openTrackerLinksOnBoard,
+          questionTimeoutMinutes: state.questionTimeoutMinutes,
+          questionsInBackground: state.questionsInBackground,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           sessionRetentionOnlyArchived: state.sessionRetentionOnlyArchived,

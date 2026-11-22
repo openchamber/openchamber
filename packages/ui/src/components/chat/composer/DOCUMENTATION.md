@@ -46,7 +46,13 @@ as answers change, an `external` field is an information step, Enter in a
 text box moves to the next step and Cmd/Ctrl+Enter submits. Submit is
 enabled only once every question is answered; a submit with a required
 question still open jumps to it. It shows the
-oldest pending form and counts the rest in its header. The BTW sheet keeps
+oldest pending form and counts the rest in its header. The header's close
+button and Dismiss both cancel the form without a message, which ends the
+agent's turn. Answer later (agent questions only) cancels it with a message
+saying the user will answer later, so the agent goes on, and the question
+stays answerable from its transcript row. With a question timeout set (`questionTimeoutMinutes`), the header counts
+the minutes left before `sync/question-timeouts.ts` closes the form the same
+way. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
@@ -670,10 +676,19 @@ and the send path reading the same grammar.
   when the selected value is unchanged.
   Beside the branch select (and in the mobile branch sheet) sits the
   **Auto-create worktree** switch (`settingsAutoCreateWorktree`, the profile
-  setting `autoCreateWorktree`, also on Settings → Sessions) with an optional
+  setting `autoCreateWorktree`, also on Settings → Sessions, on unless the
+  profile turns it off: `DEFAULT_AUTO_CREATE_WORKTREE`) with an optional
   name kept on the draft (`autoWorktreeName`). It shows, and applies, only
   while a git project draft is aimed at its project root
   (`shouldAutoCreateDraftWorktree` in `lib/worktrees/autoDraftWorktree.ts`).
+  While the switch is on, a new chat does not reuse the worktree of the
+  session it was opened from: `openNewSessionDraft` aims a draft whose
+  directory was only inherited (the live or last directory, or a caller's
+  `inheritedDirectory: true`, which New chat from a session passes) at the
+  project root when that directory is one of the project's worktrees, so the
+  first send makes a fresh worktree. A worktree the caller picked
+  (`directoryOverride` without `inheritedDirectory`, or a pinned
+  `preserveDirectoryOverride`) stays.
   `ChatInput` starts it right before the first send, when nothing can cancel
   the send any more: it puts a pending worktree request on the draft snapshot
   and the live draft, and draft materialization waits on it as it does for

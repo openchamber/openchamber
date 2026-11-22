@@ -22,6 +22,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
 import { useInputStore } from './input-store';
+import { shouldAutoCreateDraftWorktree } from '@/lib/worktrees/autoDraftWorktree';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -973,6 +974,81 @@ describe('openNewSessionDraft project binding', () => {
     useSessionUIStore.getState().openNewSessionDraft();
 
     expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+  });
+
+  describe('a worktree inherited from the last session', () => {
+    const worktree = '/worktrees/alpha-earlier-task';
+    let originalAutoCreate;
+
+    beforeEach(() => {
+      originalAutoCreate = useConfigStore.getState().settingsAutoCreateWorktree;
+      useSessionUIStore.setState({
+        availableWorktreesByProject: new Map([[projectA.path, [{ path: worktree, projectDirectory: projectA.path, branch: 'earlier-task' }]]]),
+      });
+      getDeferredSafeStorage().setItem(
+        DRAFT_TARGET_KEY,
+        JSON.stringify({ projectId: projectA.id, directory: worktree, target: 'project' }),
+      );
+      useDirectoryStore.getState().setDirectory(worktree, { showOverlay: false });
+    });
+
+    afterEach(() => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: originalAutoCreate });
+    });
+
+    // Oracle: the rule from openNewSessionDraft. Only a directory the draft
+    // inherited goes back to the project root, and only while Auto-create
+    // worktree is on; a picked or pinned worktree always stays.
+    const opens = [
+      { name: 'implicit open', options: undefined, inherited: true },
+      { name: 'New chat forwarding the session directory', options: { directoryOverride: worktree, inheritedDirectory: true }, inherited: true },
+      { name: 'a picked worktree', options: { directoryOverride: worktree }, inherited: false },
+      { name: 'a pinned worktree', options: { directoryOverride: worktree, inheritedDirectory: true, preserveDirectoryOverride: true }, inherited: false },
+    ];
+    for (const autoCreate of [true, false]) {
+      for (const open of opens) {
+        const expected = autoCreate && open.inherited ? projectA.path : worktree;
+        test(`${open.name} with Auto-create worktree ${autoCreate ? 'on' : 'off'} aims at ${expected}`, () => {
+          useConfigStore.setState({ settingsAutoCreateWorktree: autoCreate });
+
+          useSessionUIStore.getState().openNewSessionDraft(open.options);
+          const draft = useSessionUIStore.getState().newSessionDraft;
+
+          expect(draft.target).toBe('project');
+          expect(draft.selectedProjectId).toBe(projectA.id);
+          expect(draft.directoryOverride).toBe(expected);
+        });
+      }
+    }
+
+    // Oracle: the default and the switch's own rule. A fresh config store
+    // has Auto-create worktree on, and every new chat opened from a session
+    // in an earlier worktree is a draft the switch acts on, so each first
+    // send makes its own worktree.
+    test('with the default setting, every new chat from a worktree session gets a worktree of its own', () => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: useConfigStore.getInitialState().settingsAutoCreateWorktree });
+      expect(useConfigStore.getState().settingsAutoCreateWorktree).toBe(true);
+
+      for (const open of [() => useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: worktree, inheritedDirectory: true }), () => useSessionUIStore.getState().openNewSessionDraft()]) {
+        open();
+        const draft = useSessionUIStore.getState().newSessionDraft;
+        expect(shouldAutoCreateDraftWorktree({
+          enabled: useConfigStore.getState().settingsAutoCreateWorktree,
+          draft,
+          projectPath: projectA.path,
+          isGitRepo: true,
+        })).toBe(true);
+      }
+    });
+
+    test('successive new chats keep aiming at the project root', () => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: true });
+
+      useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: worktree, inheritedDirectory: true });
+      expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe(projectA.path);
+      useSessionUIStore.getState().openNewSessionDraft();
+      expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe(projectA.path);
+    });
   });
 });
 
