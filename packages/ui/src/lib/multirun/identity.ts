@@ -4,6 +4,11 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { parseMultiRunSessionTitle } from './title';
 
 const identifier = z.string().min(1).refine((value) => value === value.trim());
+const generationSessionSchema = z.object({
+  sessionID: identifier, directory: identifier, providerID: identifier, modelID: identifier,
+  variant: identifier.optional(),
+});
+export type PromptGenerationSession = z.infer<typeof generationSessionSchema>;
 // Source guidance travels on session metadata; cap it so one note cannot turn
 // every session-list event into an unbounded text transfer.
 export const RUN_GUIDANCE_LIMIT = 20_000;
@@ -44,7 +49,9 @@ const membershipSchema = z.object({
   autoFusion: autoFusionSchema.optional(),
   guidance: z.string().max(RUN_GUIDANCE_LIMIT).optional(),
   fusion: fusionReceiptSchema.optional(),
-}).refine((value) => value.group.kind !== 'legacy' || value.role !== 'run');
+  // These are archived sources, never execution lanes or fusion inputs.
+  generationSessions: z.array(generationSessionSchema).optional(),
+});
 const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema)]),
 );
@@ -67,12 +74,13 @@ export function getMultiRunIdentity(session: Session, legacyDirectory = session.
   const parsedOpenchamber = openchamberSchema.safeParse(session.metadata?.openchamber);
   const openchamber = parsedOpenchamber.success ? parsedOpenchamber.data : null;
   if (openchamber?.multirunDetached === true) return null;
+  if (openchamber?.kind === 'prompt-generation') return null;
   if (openchamber && Object.hasOwn(openchamber, 'multirun')) {
     const membership = getMultiRunMembership(session);
     if (!membership) return null;
-    const { group, groupSlug, runGroup, providerID, modelID, index, role, title, autoFusion, guidance, fusion } = membership;
+    const { group, groupSlug, runGroup, providerID, modelID, index, role, title, autoFusion, guidance, fusion, generationSessions } = membership;
     return {
-      group, groupSlug, runGroup, providerID, modelID, index, role, title, autoFusion, guidance, fusion,
+      group, groupSlug, runGroup, providerID, modelID, index, role, title, autoFusion, guidance, fusion, generationSessions,
       key: multiRunGroupKey(group, groupSlug),
     };
   }
@@ -111,6 +119,11 @@ const membershipMetadata = (membership: MultiRunMembership): Metadata => {
   if (value.index !== undefined) marker.index = value.index;
   if (value.title !== undefined) marker.title = value.title;
   if (value.guidance !== undefined) marker.guidance = value.guidance;
+  if (value.generationSessions) marker.generationSessions = value.generationSessions.map((source) => {
+    const entry: Metadata = { sessionID: source.sessionID, directory: source.directory, providerID: source.providerID, modelID: source.modelID };
+    if (source.variant) entry.variant = source.variant;
+    return entry;
+  });
   if (value.fusion !== undefined) {
     const receipt: Metadata = { passID: value.fusion.passID, sources: value.fusion.sources.map((source) => {
       const entry: Metadata = { sessionID: source.sessionID, directory: source.directory };

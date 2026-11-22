@@ -348,7 +348,7 @@ export function ParallelComposerStrip({
       />
       <PromptCandidatesDialog open={promptsOpen} onOpenChange={setPromptsOpen} original={parallel.getActivePrompt()} directory={project?.path ?? ''}
         initialModels={active.models.map((model) => ({ providerID: model.providerID, modelID: model.modelID, variant: model.variant, displayName: model.displayName, instanceId: generateInstanceId() }))}
-        onUse={parallel.addGeneratedVariants} />
+        onUse={parallel.addGeneratedVariants} onGenerationSessions={parallel.retainGenerationSessions} />
     </div>
   );
 }

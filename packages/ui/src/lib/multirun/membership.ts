@@ -48,9 +48,10 @@ export async function attachSessionToRun(
     io.read(input.anchor.id, input.anchor.directory),
   ]);
   assertCurrent();
-  const target = getMultiRunIdentity(anchor);
+  const anchorMember = [...input.run.lanes, ...input.run.fusions, ...input.run.parents].find((member) => member.sessionId === anchor.id);
+  const legacyDirectory = anchorMember?.identity.group.kind === 'legacy' ? anchorMember.identity.group.scope : undefined;
+  const target = getMultiRunIdentity(anchor, legacyDirectory);
   if (!target || target.key !== input.run.key || anchor.time.archived || anchor.parentID) throw new Error('Run membership changed');
-  if (target.group.kind !== 'id') throw new Error('Existing sessions can only join ID-bound runs');
   if (session.time.archived || session.parentID) throw new Error('Session must be an active root');
   const existing = getMultiRunIdentity(session);
   if (existing?.key === target.key) return session;
@@ -72,6 +73,7 @@ export async function attachSessionToRun(
     version: 1, sessionID: session.id,
     group: target.group, groupSlug: target.groupSlug, title: input.run.title,
     runGroup: `g${rank + 1}`, providerID: session.model.providerID, modelID: session.model.id, role: 'run',
+    generationSessions: [...input.run.generationSessions],
   }), session.directory);
   assertCurrent();
   if (result.outcome !== 'updated') throw new Error(`Membership was not saved: ${result.reason}`);
@@ -121,8 +123,9 @@ export async function saveFusionGuidance(
   current();
   const identity = getMultiRunIdentity(session, input.legacyDirectory);
   if (!identity || identity.key !== input.runKey || session.time.archived) throw new Error('Run membership changed');
-  if (identity.group.kind === 'legacy' && identity.role === 'run') throw new Error('Saved guidance requires ID-bound membership');
-  const result = await io.write(session.id, { openchamber: { multirun: { guidance } } }, session.directory);
+  // Bind title-only legacy membership when storing a note. Its group key and
+  // title remain unchanged; the new marker belongs only to this session ID.
+  const result = await io.write(session.id, multiRunMembershipPatch({ ...identity, version: 1, sessionID: session.id, guidance }), session.directory);
   current();
   if (result.outcome !== 'updated') throw new Error(`Guidance was not saved: ${result.reason}`);
   const updated = { ...session, metadata: result.metadata };

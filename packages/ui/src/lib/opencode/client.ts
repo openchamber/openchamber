@@ -1062,6 +1062,7 @@ class OpencodeService {
       agent?: string
       model?: ModelSelection
       metadata?: Metadata
+      permissions?: Session['permissions']
       subagentPolicy?: SubagentPolicy
     },
     directory?: string | null,
@@ -1077,6 +1078,7 @@ class OpencodeService {
       model: !params?.model || isAutoModel(params.model.providerID, params.model.id) ? undefined : toModelRef(params.model),
       location: requestDirectory ? { directory: requestDirectory } : undefined,
       metadata: params?.metadata,
+      permissions: params?.permissions,
     }
     if (params?.subagentPolicy === undefined) {
       const info = await call("session.create", () => this.clientFor(directory).session.create(createInput))
@@ -1763,6 +1765,13 @@ class OpencodeService {
     } catch {
       return null
     }
+  }
+
+  /** Retained input/output for a prompt-generation session; never starts execution. */
+  async recordPromptGeneration(sessionId: string, kind: 'request' | 'result', text: string, directory: string): Promise<void> {
+    await call('session.synthetic', () => this.clientFor(directory).session.synthetic({
+      sessionID: sessionId, text, metadata: { openchamberPromptGeneration: { kind } }, resume: false,
+    }))
   }
 
   /** Transient text generated from the session's context; never enters history. */

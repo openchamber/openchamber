@@ -27,6 +27,7 @@ export type MultiRunSummary = {
   createdAt: number;
   lastActivity: number;
   autoFusion?: MultiRunIdentity['autoFusion'];
+  generationSessions: readonly import('./identity').PromptGenerationSession[];
 };
 
 export type MultiRunIndex = {
@@ -110,6 +111,7 @@ export function buildMultiRunIndex(
       createdAt: Math.min(...list.map((entry) => entry.session.time.created)),
       lastActivity: Math.max(...list.map((entry) => entry.session.time.updated ?? entry.session.time.created)),
       autoFusion: withAutoFusion?.identity.autoFusion,
+      generationSessions: Object.freeze([...new Map(ordered.flatMap((entry) => entry.identity.generationSessions ?? []).map((source) => [source.sessionID, source])).values()]),
     }));
     for (const entry of list) runKeyBySessionId.set(entry.session.id, key);
   }

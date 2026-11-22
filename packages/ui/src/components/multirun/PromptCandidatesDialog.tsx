@@ -10,18 +10,20 @@ import { generatePromptCandidates, selectPromptCandidates, type PromptCandidate 
 import { ModelMultiSelect, type ModelSelectionWithId } from './ModelMultiSelect';
 import { BusyDots } from '@/components/ui/busy-dots';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import type { PromptGenerationSession } from '@/lib/multirun/identity';
 
 const draftScope = () => {
   const draft = useSessionUIStore.getState().newSessionDraft;
   return JSON.stringify([getRuntimeKey(), draft.draftId, draft.open, draft.selectedProjectId, draft.directoryOverride]);
 };
 
-function CandidateReview({ original, directory, initialModels, onUse, onClose }: {
+function CandidateReview({ original, directory, initialModels, onUse, onClose, onGenerationSessions }: {
   original: string;
   directory: string;
   initialModels: ModelSelectionWithId[];
   onUse: (texts: string[]) => void;
   onClose: () => void;
+  onGenerationSessions: (sessions: readonly PromptGenerationSession[]) => void;
 }): React.ReactNode {
   const { t } = useI18n();
   const scope = React.useRef(draftScope()).current;
@@ -30,7 +32,7 @@ function CandidateReview({ original, directory, initialModels, onUse, onClose }:
   const [candidates, setCandidates] = React.useState<PromptCandidate[]>([]);
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = React.useState(false);
-  const [failure, setFailure] = React.useState<{ kind: 'models'; models: string[] } | { kind: 'generation' } | null>(null);
+  const [failure, setFailure] = React.useState<{ kind: 'models'; models: string[] } | { kind: 'generation' | 'retention' } | null>(null);
   const generation = React.useRef(0);
   React.useEffect(() => () => { generation.current += 1; }, []);
   const generate = async () => {
@@ -39,11 +41,14 @@ function CandidateReview({ original, directory, initialModels, onUse, onClose }:
     setBusy(true);
     setFailure(null);
     try {
-      const result = await generatePromptCandidates({ original, description, directory, models: models.map((model) => ({ providerID: model.providerID, id: model.modelID, variant: model.variant })) });
+      const result = await generatePromptCandidates({ original, description, directory, title: t('multirun.prompts.title'), models: models.map((model) => ({ providerID: model.providerID, id: model.modelID, variant: model.variant })) });
+      // Keep archived provenance for this draft even if its review popup closed.
+      if (draftScope() === scope) onGenerationSessions(result.generationSessions);
       if (generation.current !== epoch || draftScope() !== scope) return;
       setCandidates((current) => [...current, ...result.candidates]);
       const unavailable = result.failures.filter((item) => item.reason === 'model-unavailable');
-      setFailure(unavailable.length > 0 ? { kind: 'models', models: unavailable.map(({ model }) => `${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ''}`) }
+      setFailure(result.failures.some((item) => item.reason === 'retention') ? { kind: 'retention' }
+        : unavailable.length > 0 ? { kind: 'models', models: unavailable.map(({ model }) => `${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ''}`) }
         : result.failures.length > 0 ? { kind: 'generation' } : null);
     } catch {
       if (generation.current === epoch) setFailure({ kind: 'generation' });
@@ -53,7 +58,7 @@ function CandidateReview({ original, directory, initialModels, onUse, onClose }:
   };
   const chosen = selectPromptCandidates(candidates, selected);
   const statusText = failure?.kind === 'models' ? t('multirun.prompts.modelsUnavailable', { models: failure.models.join(', ') })
-    : failure ? t('multirun.prompts.failed') : busy ? t('multirun.prompts.generating') : '';
+    : failure?.kind === 'retention' ? t('multirun.prompts.retentionFailed') : failure ? t('multirun.prompts.failed') : busy ? t('multirun.prompts.generating') : t('multirun.prompts.historyHint');
   return <>
     <DialogHeader>
       <DialogTitle>{t('multirun.prompts.title')}</DialogTitle>
@@ -93,17 +98,18 @@ function CandidateReview({ original, directory, initialModels, onUse, onClose }:
   </>;
 }
 
-export function PromptCandidatesDialog({ open, onOpenChange, original, directory, initialModels, onUse }: {
+export function PromptCandidatesDialog({ open, onOpenChange, original, directory, initialModels, onUse, onGenerationSessions }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   original: string;
   directory: string;
   initialModels: ModelSelectionWithId[];
   onUse: (texts: string[]) => void;
+  onGenerationSessions: (sessions: readonly PromptGenerationSession[]) => void;
 }): React.ReactNode {
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-w-3xl">
-      <CandidateReview original={original} directory={directory} initialModels={initialModels} onUse={onUse} onClose={() => onOpenChange(false)} />
+      <CandidateReview original={original} directory={directory} initialModels={initialModels} onUse={onUse} onGenerationSessions={onGenerationSessions} onClose={() => onOpenChange(false)} />
     </DialogContent>
   </Dialog>;
 }

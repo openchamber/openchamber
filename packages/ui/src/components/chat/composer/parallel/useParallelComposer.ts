@@ -11,6 +11,7 @@ import { waitForPendingDraftWorktreeRequest } from '@/lib/worktrees/pendingDraft
 import { selectWorktreeStartFrom } from '@/lib/worktrees/worktreeStartSource';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { CreateMultiRunParams } from '@/types/multirun';
+import type { PromptGenerationSession } from '@/lib/multirun/identity';
 
 export type ParallelModel = {
   providerID: string;
@@ -36,6 +37,7 @@ export type ParallelComposerState = {
   /** Null until the project's commands are loaded. */
   setupCommands: string[] | null;
   fuse: ParallelFuseJudge | null;
+  generationSessions?: PromptGenerationSession[];
 };
 
 export type ParallelComposerModelInput = Omit<ParallelModel, 'count'>;
@@ -184,6 +186,10 @@ export function useParallelComposer(input: {
     setMessage(ready[0]);
   }, [setMessage, update]);
   const getActivePrompt = React.useCallback(() => messageRef.current, []);
+  const retainGenerationSessions = React.useCallback((sessions: readonly PromptGenerationSession[]) => {
+    if (sessions.length === 0) return;
+    update((current) => ({ ...current, generationSessions: [...new Map([...(current.generationSessions ?? []), ...sessions].map((session) => [session.sessionID, session])).values()] }));
+  }, [update]);
 
   const switchVariant = React.useCallback((target: number) => {
     const current = state;
@@ -252,6 +258,7 @@ export function useParallelComposer(input: {
       autoFusion: current.fuse
         ? { providerID: current.fuse.providerID, modelID: current.fuse.modelID, variant: current.fuse.variant, agent: config.currentAgentName || undefined }
         : undefined,
+      generationSessions: current.generationSessions,
     };
 
     setIsLaunching(true);
@@ -297,6 +304,7 @@ export function useParallelComposer(input: {
     addVariant,
     addGeneratedVariants,
     getActivePrompt,
+    retainGenerationSessions,
     switchVariant,
     removeVariant,
     setIsolate,
