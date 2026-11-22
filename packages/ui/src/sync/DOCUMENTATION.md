@@ -110,14 +110,13 @@ The VS Code queue gate and its live inputs are documented in
 | `session-activity-timestamps.ts` | Each session's last input, last completed output and last activity, plus exact start and end times of chat entries, persisted per runtime | All sessions this client saw events or history for |
 | `session-ui-store.ts` | Session selection, draft lifecycle, one-shot draft-materialization transition identity, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
 
-Background goal sends carry their own `pendingGoal`, captured target and draft
-snapshot into `session-actions.ts`. Replies wait before sending; draft sessions
-may be created first, but their first prompt waits for the generated objective
-to be saved. `materializeOpenDraftSession` uses `keepUserPlace` for these sends:
-it opens the result only if the originating draft is still selected when create
-finishes. It preserves any later chat or draft. Failure restores the message to
-the created session's composer, or to its original composer for replies, without
-replacing text entered since. See the goal writer contract in
+The goal writer's Send when ready hands the message to the server (a goal
+spec job). A draft's session is made first by `createDraftSessionForServerSend`,
+which calls `materializeOpenDraftSession` with `keepUserPlace`: it opens the
+result only if the originating draft is still selected when create finishes,
+and preserves any later chat or draft. `stores/useGoalSpecJobStore.ts` mirrors
+the server's jobs (read on start, runtime switch and stream reconnect; then
+`openchamber:goal-spec-job.updated`); a failed read keeps the jobs held. See
 `packages/web/server/lib/session-goal/DOCUMENTATION.md`.
 | `useGlobalSessionsStore.ts` | Global active/archived entities plus root, parent/child, and directory indexes | All opened project/worktree session lists |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |

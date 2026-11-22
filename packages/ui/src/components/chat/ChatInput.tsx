@@ -7,18 +7,20 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { applyChatRoute } from '@/lib/routing/chatRoute';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
+import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal, type QueuedMessageInput, queuedMessageFromTakenItem } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { applyGoalChoice, rearmQueuedGoal, useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
-import { backgroundSendJournal } from '@/lib/backgroundGoalSends';
-import { BackgroundGoalError, planGoalWriter, requestGoalSpec, settleBackgroundGoal, type BackgroundGoalOutcome, type BackgroundGoalSpec, type GoalSubmitChoice } from '@/lib/goalWriter';
+import { planGoalWriter, requestGoalSpec, type GoalSubmitChoice } from '@/lib/goalWriter';
+import { createGoalSpecJob, takeGoalSpecJob, type GoalSpecJobWriterInput } from '@/lib/goalSpecJobs';
+import { useGoalSpecJobStore } from '@/stores/useGoalSpecJobStore';
+import { useGoalSpecJobSync } from '@/hooks/useGoalSpecJobSync';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { isGoalCheckAvailableNow } from '@/hooks/useSessionGoal';
 import { collectGoalWriterContext } from '@/components/chat/goalWriterContext';
-import { GoalSpecDialog, type GoalSpecDialogRequest } from '@/components/chat/GoalSpecDialog';
+import { GoalSpecDialog, type GoalSpecDialogRequest, type GoalWriterHandoff, type GoalWriterRunOptions } from '@/components/chat/GoalSpecDialog';
 import { GoalEditStrip } from '@/components/chat/GoalEditStrip';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
@@ -37,7 +39,6 @@ import {
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
-import { openSessionFromToast } from '@/sync/session-navigation';
 // Guest surfaces load on demand: VS Code and mobile never mount them, and the
 // composer must not pay for the guest bridge before an extension is installed.
 const GuestAttachDialog = React.lazy(() => import('@/components/layout/GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
@@ -178,6 +179,7 @@ import {
     type ComposerSelection,
 } from './composer/editor/ComposerEditor';
 import { useComposerHeightLimit } from './composer/editor/useComposerHeightLimit';
+import { takeComposerApplicationShortcut } from './composer/editor/applicationShortcuts';
 import { usePendingComposerText } from './composer/state/usePendingComposerText';
 import { createComposerEditorViewStore } from './composer/editor/viewStore';
 import { composerAutoCorrect } from './composer/editor/autocorrect';
@@ -337,8 +339,6 @@ const sameDraftIdentity = (a: ChatDraftIdentity | null, b: ChatDraftIdentity | n
     a === null || b === null ? a === b : getChatDraftIdentityKey(a) === getChatDraftIdentityKey(b)
 );
 
-/** Background goals a send took over; any other is stopped when its handoff ends. */
-const takenBackgroundGoals = new WeakSet<BackgroundGoalSpec>();
 
 const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
     if (!projectLabel) return title;
@@ -1183,22 +1183,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         },
     });
 
-    // Messages that waited on a background goal when an earlier page went
-    // away (reload) go back to the composer they came from. The
-    // pinned column composers leave it to the main one, so one composer
-    // restores each message. Session storage isolates recovery to this tab.
-    const recoverRef = React.useRef({ restoreDraft, t });
-    recoverRef.current = { restoreDraft, t };
-    React.useEffect(() => {
-        if (columnPinned) return;
-        const recover = () => {
-            const orphans = backgroundSendJournal.takeOrphans();
-            for (const entry of orphans) recoverRef.current.restoreDraft(entry.identity, entry.text, new Set(entry.mentions));
-            if (orphans.length > 0) toast.info(recoverRef.current.t('chat.goal.writer.toast.recoveredUnsent'));
-        };
-        recover();
-    }, [columnPinned]);
-
     const handleExitBtw = React.useCallback(() => {
         if (!currentSessionId) return;
         immediateBtwSubmitRef.current = null;
@@ -1362,8 +1346,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         presetText?: string;
         /** The goal writer's outcome for this send; set when the writer dialog sends again. */
         goal?: GoalSubmitChoice;
-        /** A goal still being written: the send goes out with it once it is ready. */
-        backgroundGoal?: BackgroundGoalSpec;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1377,6 +1359,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         message: string;
         delivery?: 'steer';
         identity: ChatDraftIdentity | null;
+        writerInputFor: (options: GoalWriterRunOptions) => Promise<GoalSpecJobWriterInput>;
     } | null>(null);
     const cancelGoalWriter = React.useCallback(() => {
         goalWriterPendingRef.current = null;
@@ -1396,55 +1379,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             goal: choice,
         });
     }, []);
-    // "Send when ready": the message leaves the composer now and waits for its
-    // spec on its own, so the user can go to another chat. The send keeps the
-    // session or draft it was made from (captured by this submit).
-    const handleGoalWriterBackground = React.useCallback((pendingGoal: BackgroundGoalSpec) => {
+    // "Send when ready": the server writes the spec and sends the message
+    // with it, so the user can go to another chat, close the tab, or restart
+    // OpenChamber meanwhile. The message leaves the composer now; it is sent
+    // to the session or draft it was written in (captured by this submit).
+    const startGoalJobRef = React.useRef<(pending: NonNullable<typeof goalWriterPendingRef.current>, handoff: GoalWriterHandoff) => Promise<void>>(async () => {});
+    const handleGoalWriterBackground = React.useCallback((handoff: GoalWriterHandoff) => {
         const pending = goalWriterPendingRef.current;
         goalWriterPendingRef.current = null;
         setGoalWriterRequest(null);
-        if (!pending || !sameDraftIdentity(pending.identity, currentChatDraftIdentityRef.current)) {
-            pendingGoal.controller.abort();
-            return;
-        }
-        void handleSubmitRef.current({
-            presetText: pending.message,
-            delivery: pending.delivery,
-            backgroundGoal: pendingGoal,
-        }).finally(() => {
-            // The submit stopped before sending (a refusal it reported): the
-            // run has nothing left to send with.
-            if (!takenBackgroundGoals.has(pendingGoal)) pendingGoal.controller.abort();
-        });
+        if (!pending || !sameDraftIdentity(pending.identity, currentChatDraftIdentityRef.current)) return;
+        void startGoalJobRef.current(pending, handoff);
     }, []);
 
-    // Add message to queue instead of sending
-    // `presetText` queues that text instead of the composer's: the goal
-    // writer's resubmit sends the generated spec as the message.
-    const handleQueueMessage = React.useCallback(async (presetText?: string) => {
-        // The comment's exit paths are attach/cancel; queueing a real prompt
-        // underneath comment mode must never fire.
-        if (isMobileCommentOpen()) return;
-        const composerSnapshot = getCurrentInputSnapshot();
-        const inputSnapshot = presetText != null
-            ? { message: presetText, hasContent: presetText.trim().length > 0 || composerSnapshot.hasContent }
-            : composerSnapshot;
-        if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
-
-        // A local or extension command is run, not queued: the queue delivers
-        // text to the model, and `/compact`, `/btw`, or `/task` mean nothing there.
-        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)
-            || routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)) {
-            void handleSubmitRef.current();
-            return;
-        }
-        const queueRuntimeKey = getRuntimeKey();
-        const queueTarget = messageQueueTarget;
-        const queueSessionId = currentSessionId;
-        // Queueing is the same user intent as sending, so an archived session
-        // comes back once the queue accepts the message, not at delivery.
-        const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
-        const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+    /**
+     * Resolves the composer's message for a send the server makes later (the
+     * queue, or a goal writer job): mentions, snippets and the attached
+     * context are fixed now, because the server has no agent list, no
+     * confirmed mentions, and no way to read a file the user named. Takes the
+     * attached context off the composer; null when the message cannot be
+     * resolved (the reason was shown).
+     */
+    const captureComposerMessage = React.useCallback(async (message: string, runtimeKey: string) => {
+        const messageToQueue = message.replace(/^\n+|\n+$/g, '');
         const composerAttachments = sanitizeAttachmentsForSend(attachedFiles);
 
         // A queued message is resolved now, not at delivery: the server that
@@ -1454,12 +1411,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const readOnSendMentions = await prepareReadOnSendMentions(
             [messageToQueue],
             new Set(composerAttachments.map((attachment) => attachment.filename)),
-            queueRuntimeKey,
+            runtimeKey,
         );
-        if (readOnSendMentions.status === 'runtime-changed') return;
+        if (readOnSendMentions.status === 'runtime-changed') return null;
         if (readOnSendMentions.status === 'failed') {
             toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
-            return;
+            return null;
         }
         const { sanitizedText, mention } = parseAgentMentions(messageToQueue, agents);
         const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared);
@@ -1495,6 +1452,50 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             references: linked.map(toContextReference),
         }, skillInstruction);
         const attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
+        return {
+            messageToQueue,
+            textToQueue,
+            agentMention: mention?.name,
+            composerAttachments,
+            attachmentsToQueue,
+            context,
+            syntheticParts,
+            drafts,
+            draftTarget,
+            linked,
+        };
+    }, [attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, t]);
+
+    // Add message to queue instead of sending
+    // `presetText` queues that text instead of the composer's: the goal
+    // writer's resubmit sends the generated spec as the message.
+    const handleQueueMessage = React.useCallback(async (presetText?: string) => {
+        // The comment's exit paths are attach/cancel; queueing a real prompt
+        // underneath comment mode must never fire.
+        if (isMobileCommentOpen()) return;
+        const composerSnapshot = getCurrentInputSnapshot();
+        const inputSnapshot = presetText != null
+            ? { message: presetText, hasContent: presetText.trim().length > 0 || composerSnapshot.hasContent }
+            : composerSnapshot;
+        if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
+
+        // A local or extension command is run, not queued: the queue delivers
+        // text to the model, and `/compact`, `/btw`, or `/task` mean nothing there.
+        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)
+            || routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)) {
+            void handleSubmitRef.current();
+            return;
+        }
+        const queueRuntimeKey = getRuntimeKey();
+        const queueTarget = messageQueueTarget;
+        const queueSessionId = currentSessionId;
+        // Queueing is the same user intent as sending, so an archived session
+        // comes back once the queue accepts the message, not at delivery.
+        const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
+        const captured = await captureComposerMessage(inputSnapshot.message, queueRuntimeKey);
+        if (!captured) return;
+        const { messageToQueue, textToQueue, composerAttachments, attachmentsToQueue, context, syntheticParts, drafts, draftTarget, linked } = captured;
+        const mention = captured.agentMention ? { name: captured.agentMention } : null;
         // An armed goal belongs to this message: it leaves with it and starts
         // when this message is delivered, whatever is sent in between.
         const goalArm = textToQueue.trim()
@@ -1569,7 +1570,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, captureComposerMessage, mailboxTarget, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1682,16 +1683,155 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : message || fallback;
     };
 
-    // A send waiting on a background goal shows a progress toast until the
-    // goal is written, with a way to stop it; the toast follows the user
-    // across chats. Marking the goal taken tells the handoff the send owns it.
-    const watchBackgroundGoal = (outcome: Promise<BackgroundGoalOutcome>, pendingGoal: BackgroundGoalSpec): Promise<BackgroundGoalOutcome> => {
-        takenBackgroundGoals.add(pendingGoal);
-        const toastId = toast.loading(t('chat.goal.writer.toast.writingInBackground'), {
-            action: { label: t('chat.goal.action.cancel'), onClick: () => pendingGoal.controller.abort() },
+    /**
+     * Puts a message the server handed back (a goal job that failed or was
+     * cancelled, or one that could not be started) into the composer of
+     * `identity`, below anything typed there since. Its attached context comes
+     * back as chips when that composer is this one; otherwise its text is
+     * appended, so nothing is lost.
+     */
+    const restoreHandedBackMessage = (identity: ChatDraftIdentity, message: Pick<QueuedMessage, 'content' | 'attachments' | 'context'>) => {
+        const isCurrent = sameDraftIdentity(identity, currentChatDraftIdentityRef.current);
+        const context = message.context ?? [];
+        const foldedContext = isCurrent
+            ? []
+            : context.filter((part) => part.kind !== 'instruction').map((part) => part.text.trim()).filter(Boolean);
+        const text = [message.content, ...foldedContext].filter((part) => part.trim()).join('\n\n');
+        if (text) restoreDraft(identity, text, new Set());
+        if (message.attachments?.length) useInputStore.getState().restoreAttachedFiles(message.attachments, identity);
+        if (isCurrent && context.length > 0) restoreQueuedContext(context);
+    };
+
+    startGoalJobRef.current = async (pending, handoff) => {
+        const runtimeKey = getRuntimeKey();
+        const providerID = currentProviderId;
+        const modelID = currentModelId;
+        const sourceIdentity = pending.identity;
+        if (!providerID || !modelID || !sourceIdentity) {
+            toast.error(t('chat.chatInput.toast.noModelSelected'));
+            return;
+        }
+        const sendConfig = { providerID, modelID, agent: currentAgentName ?? undefined, variant: currentVariant ?? undefined };
+        const draftSnapshot = newSessionDraftOpen ? { ...newSessionDraft } : null;
+        const replySessionId = currentSessionId;
+        const replyDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+        const isNewSession = !replySessionId && Boolean(draftSnapshot);
+        const captured = await captureComposerMessage(pending.message, runtimeKey);
+        if (!captured) return;
+        const message: QueuedMessageInput & Pick<QueuedMessage, 'content'> = {
+            content: captured.messageToQueue,
+            text: captured.textToQueue,
+            agentMention: captured.agentMention,
+            attachments: captured.attachmentsToQueue,
+            context: [...captured.context],
+        };
+        // The composer is free for the next message at once. Its goal arm went
+        // with this message: the server sets the written spec as the goal.
+        useSessionGoalArmStore.getState().setArmed(false);
+        setMessage('');
+        messageRef.current = '';
+        confirmedMentionsRef.current.clear();
+        persistDraftImmediately(chatDraftIdentity, '');
+        messageHistory.reset();
+        if (captured.composerAttachments.length > 0) clearAttachedFiles(chatDraftIdentity);
+        setLinkedReferences([]);
+
+        let target: { sessionId: string; directory: string } | null = replySessionId && replyDirectory
+            ? { sessionId: replySessionId, directory: replyDirectory }
+            : null;
+        try {
+            if (!target && draftSnapshot) {
+                startDraftWorktreeIfConfigured(draftSnapshot, captured.textToQueue, `${providerID}/${modelID}`);
+                const created = await sessionActions.createDraftSessionForServerSend(
+                    { providerID, modelID, agent: currentAgentName ?? undefined, variant: currentVariant },
+                    draftSnapshot,
+                    runtimeKey,
+                );
+                if (!created.directory) throw new Error('Failed to create session');
+                target = { sessionId: created.sessionId, directory: created.directory };
+                for (const part of created.syntheticParts ?? []) message.context?.push({ kind: 'synthetic', text: part.text });
+            }
+            if (!target) throw new Error(t('chat.chatInput.toast.messageSendFailed'));
+            if (isNewSession) {
+                const responseStyle = await fetchResponseStyleInstruction().catch(() => null);
+                if (responseStyle) message.context?.push({ kind: 'synthetic', text: wrapSystemReminder(responseStyle) });
+            }
+            const goalSettings = useUIStore.getState();
+            const job = await createGoalSpecJob({
+                sessionId: target.sessionId,
+                directory: target.directory,
+                sendMode: handoff.sendMode,
+                tokenBudget: goalSettings.sessionGoalDefaultBudgetEnabled ? goalSettings.sessionGoalDefaultBudget : null,
+                writer: await pending.writerInputFor(handoff.run),
+                message,
+                sendConfig,
+            });
+            useGoalSpecJobStore.getState().upsert(job);
+            recordLinkedReferences(target.sessionId, target.directory, captured.linked);
+        } catch (error) {
+            // Nothing reached the server: the message goes back where it was
+            // written, or to the session it already made.
+            const restoreTo = target ? createChatDraftIdentity(runtimeKey, target.directory, target.sessionId) ?? sourceIdentity : sourceIdentity;
+            restoreHandedBackMessage(restoreTo, message);
+            toast.error(getSubmitErrorMessage(error, t('chat.chatInput.toast.messageSendFailed')));
+        }
+    };
+
+    // A goal job that failed or was cancelled holds its message on the server
+    // until the composer it was written for takes it back: this one, once it
+    // shows that session. Take is atomic, so one window gets it.
+    useGoalSpecJobSync(!columnPinned);
+    const goalJobs = useGoalSpecJobStore((state) => state.jobs);
+    const takingGoalJobsRef = React.useRef(new Set<string>());
+    const restoreHandedBackRef = React.useRef(restoreHandedBackMessage);
+    restoreHandedBackRef.current = restoreHandedBackMessage;
+    React.useEffect(() => {
+        const identity = chatDraftIdentity;
+        if (!identity?.sessionId) return;
+        for (const job of Object.values(goalJobs)) {
+            if (job.status !== 'failed' || job.sessionId !== identity.sessionId || takingGoalJobsRef.current.has(job.id)) continue;
+            takingGoalJobsRef.current.add(job.id);
+            void takeGoalSpecJob(job)
+                .then((taken) => {
+                    useGoalSpecJobStore.getState().remove(taken);
+                    restoreHandedBackRef.current(identity, queuedMessageFromTakenItem(taken.item, taken.id));
+                })
+                .catch((error: Error) => console.warn('[goal-spec-jobs] failed to take a goal job back:', error))
+                .finally(() => takingGoalJobsRef.current.delete(job.id));
+        }
+    }, [goalJobs, chatDraftIdentity]);
+
+    /**
+     * Starts the draft's own worktree when Settings ask for one; the draft's
+     * session creation waits for it. Writes the request id onto `draft`.
+     */
+    const startDraftWorktreeIfConfigured = (draft: NewSessionDraftState, prompt: string, model: string) => {
+        if (
+            !showDraftTargetSelectors
+            || !selectedDraftProject
+            || !shouldAutoCreateDraftWorktree({
+                enabled: useConfigStore.getState().settingsAutoCreateWorktree,
+                draft,
+                projectPath: selectedDraftProject.path,
+                isGitRepo: selectedDraftProjectIsGitRepo,
+            })
+        ) return;
+        const autoWorktreeSource = draft.autoWorktreeSource;
+        draft.pendingWorktreeRequestId = startAutoDraftWorktree({
+            project: { id: selectedDraftProject.id, path: selectedDraftProject.path },
+            prompt,
+            model,
+            typedName: draft.autoWorktreeName,
+            // A source picked in another project names branches this one does not have.
+            source: autoWorktreeSource?.projectId === selectedDraftProject.id ? autoWorktreeSource.source : undefined,
+            startFrom: selectWorktreeStartFrom(useConfigStore.getState(), 'autoCreate'),
+            branchTemplates: {
+                worktree: useConfigStore.getState().settingsWorktreeBranchTemplate,
+                pullRequest: useConfigStore.getState().settingsPullRequestBranchTemplate,
+            },
+            sourceControl: runtimeSourceControl,
+            fallbackDirectory: draft.directoryOverride ?? selectedDraftProject.path,
         });
-        void outcome.finally(() => toast.dismiss(toastId)).catch(() => undefined);
-        return outcome;
     };
 
     const handleSubmit = async (options?: SubmitOptions) => {
@@ -1881,7 +2021,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // is taken from the composer. The dialog's choice submits again with
         // `goal`, so cancelling leaves the composer, the queue and any pending
         // prompts exactly as they were.
-        if (!options?.goal && !options?.backgroundGoal) {
+        if (!options?.goal) {
             const uiState = useUIStore.getState();
             const goalTargetDirectory = currentSessionId
                 ? currentSessionDirectoryForSync ?? currentDirectory ?? null
@@ -1915,7 +2055,33 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         goalTargetDirectory,
                     )
                     : selectedDraftProject && selectedDraftProject.kind !== 'chat' ? selectedDraftProject : null;
-                goalWriterPendingRef.current = { message: request, delivery: options?.delivery, identity: chatDraftIdentity };
+                // The writer's input, the same whether this window writes the
+                // spec or the server does ("Send when ready").
+                const writerInputFor = async ({ writer, ignoreLimit, section, currentSpec }: GoalWriterRunOptions): Promise<GoalSpecJobWriterInput> => {
+                    const context = goalWriterPlan.trigger === 'auto-create'
+                        ? await collectGoalWriterContext({
+                            sessionId: sessionIdForContext,
+                            directory: goalTargetDirectory,
+                            project: projectForContext ? { id: projectForContext.id, path: projectForContext.path } : null,
+                            queuedMessages: queuedTexts,
+                        })
+                        : null;
+                    const input: GoalSpecJobWriterInput = { request };
+                    if (context?.conversation) input.conversation = context.conversation;
+                    if (context?.openItems) input.openItems = context.openItems;
+                    if (providerIdToSend) input.providerID = providerIdToSend;
+                    if (modelIdToSend) input.modelID = modelIdToSend;
+                    if (writer) {
+                        input.writerProviderID = writer.providerID;
+                        input.writerModelID = writer.modelID;
+                        if (writer.variant) input.writerVariant = writer.variant;
+                    }
+                    if (ignoreLimit) input.ignoreLimit = true;
+                    if (section) input.section = section;
+                    if (currentSpec) input.currentSpec = currentSpec;
+                    return input;
+                };
+                goalWriterPendingRef.current = { message: request, delivery: options?.delivery, identity: chatDraftIdentity, writerInputFor };
                 goalWriterRequestIdRef.current += 1;
                 setGoalWriterRequest({
                     id: goalWriterRequestIdRef.current,
@@ -1925,26 +2091,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     sessionModel: providerIdToSend && modelIdToSend ? { providerID: providerIdToSend, modelID: modelIdToSend } : null,
                     directory: goalTargetDirectory,
                     inputLength: request.length,
-                    write: async (signal, { writer, ignoreLimit, section, currentSpec }) => {
-                        const context = goalWriterPlan.trigger === 'auto-create'
-                            ? await collectGoalWriterContext({
-                                sessionId: sessionIdForContext,
-                                directory: goalTargetDirectory,
-                                project: projectForContext ? { id: projectForContext.id, path: projectForContext.path } : null,
-                                queuedMessages: queuedTexts,
-                            })
-                            : null;
+                    write: async (signal, runOptions) => {
+                        const input = await writerInputFor(runOptions);
                         return requestGoalSpec({
-                            request,
-                            conversation: context?.conversation,
-                            openItems: context?.openItems,
+                            ...input,
+                            writer: runOptions.writer,
                             directory: goalTargetDirectory,
-                            providerID: providerIdToSend,
-                            modelID: modelIdToSend,
-                            writer,
-                            ignoreLimit,
-                            section,
-                            currentSpec,
                             signal,
                         });
                     },
@@ -1954,11 +2106,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         // Auto-review owns the active workflow; follow-ups wait in its queue.
-        // A send waiting on a background goal is not queued: the queue would
-        // take it without the goal, and it is sent only once the goal is
-        // written, by when the dismissed prompts below are long settled.
-        const backgroundGoal = options?.backgroundGoal;
-        if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan && !backgroundGoal) {
+        if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan) {
             applyGoalChoice(options?.goal);
             void handleQueueMessage(options?.presetText);
             return;
@@ -1980,7 +2128,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // takes it while the turn is still active. Any other send would
             // race with that run, so it is queued; the queued-message auto-send
             // hook delivers it once the session returns to idle (#1740, #3369).
-            if ((deniedPermissions || dismissedForms) && delivery !== 'steer' && !backgroundGoal) {
+            if ((deniedPermissions || dismissedForms) && delivery !== 'steer') {
                 applyGoalChoice(options?.goal);
                 void handleQueueMessage(options?.presetText);
                 return;
@@ -2095,8 +2243,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             skills?: SkillMentions;
             queuedGoal?: QueuedMessageGoal | null;
             runtimeKey?: string;
-            pendingGoal?: Promise<BackgroundGoalOutcome>;
-            onSessionCreated?: (sessionId: string, directory: string | null) => void;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -2412,80 +2558,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Auto-create worktree: the draft's first prompt runs in a worktree of
         // its own. Started only now, when nothing above can still cancel the
         // send; the draft materialization waits for it.
-        if (
-            capturedDraftSnapshot
-            && !capturedTarget
-            && !isBtwActive
-            && showDraftTargetSelectors
-            && selectedDraftProject
-            && shouldAutoCreateDraftWorktree({
-                enabled: useConfigStore.getState().settingsAutoCreateWorktree,
-                draft: capturedDraftSnapshot,
-                projectPath: selectedDraftProject.path,
-                isGitRepo: selectedDraftProjectIsGitRepo,
-            })
-        ) {
-            const autoWorktreeSource = capturedDraftSnapshot.autoWorktreeSource;
-            capturedDraftSnapshot.pendingWorktreeRequestId = startAutoDraftWorktree({
-                project: { id: selectedDraftProject.id, path: selectedDraftProject.path },
-                prompt: primaryText,
-                model: `${providerIdToSend}/${modelIdToSend}`,
-                typedName: capturedDraftSnapshot.autoWorktreeName,
-                // A source picked in another project names branches this one does not have.
-                source: autoWorktreeSource?.projectId === selectedDraftProject.id ? autoWorktreeSource.source : undefined,
-                startFrom: selectWorktreeStartFrom(useConfigStore.getState(), 'autoCreate'),
-                branchTemplates: {
-                    worktree: useConfigStore.getState().settingsWorktreeBranchTemplate,
-                    pullRequest: useConfigStore.getState().settingsPullRequestBranchTemplate,
-                },
-                sourceControl: runtimeSourceControl,
-                fallbackDirectory: capturedDraftSnapshot.directoryOverride ?? selectedDraftProject.path,
-            });
+        if (capturedDraftSnapshot && !capturedTarget && !isBtwActive) {
+            startDraftWorktreeIfConfigured(capturedDraftSnapshot, primaryText, `${providerIdToSend}/${modelIdToSend}`);
         }
 
         // The goal writer's choice decides this send's goal; set last, so no
-        // early return above can leave a stale arm behind. A background goal
-        // travels with the send instead: the composer's arm is for whatever
-        // the composer holds next.
-        if (backgroundGoal) useSessionGoalArmStore.getState().setArmed(false);
-        else applyGoalChoice(options?.goal);
-        // The session a draft send creates. The send may finish after the user
-        // moved on, so the view's current session is not this one.
-        let createdSession: { sessionId: string; directory: string | null } | null = null;
-        sendMessageOptions = {
-            ...sendMessageOptions,
-            runtimeKey: submitRuntimeKey,
-            onSessionCreated: (sessionId, directory) => { createdSession = { sessionId, directory }; },
-        };
-        if (backgroundGoal) {
-            const goalSettings = useUIStore.getState();
-            sendMessageOptions = {
-                ...sendMessageOptions,
-                pendingGoal: watchBackgroundGoal(settleBackgroundGoal(
-                    backgroundGoal,
-                    goalSettings.sessionGoalDefaultBudgetEnabled ? goalSettings.sessionGoalDefaultBudget : null,
-                ), backgroundGoal),
-            };
-        }
-        // Until a background send settles its text lives only in this page, so
-        // a journal keeps it for the next page should this one go away.
-        const journalId = backgroundGoal && chatDraftIdentity && inputSnapshot.message
-            ? backgroundSendJournal.record({ identity: chatDraftIdentity, text: inputSnapshot.message, mentions: confirmedMentionsSnapshot })
-            : null;
-        const createdSessionIdentity = () => {
-            const created = createdSession;
-            return created ? createChatDraftIdentity(submitRuntimeKey, created.directory ?? capturedDraftSnapshot?.directoryOverride ?? currentDirectory, created.sessionId) : null;
-        };
-        if (journalId) {
-            sendMessageOptions = {
-                ...sendMessageOptions,
-                onSessionCreated: (sessionId, directory) => {
-                    createdSession = { sessionId, directory };
-                    const identity = createdSessionIdentity();
-                    if (identity) backgroundSendJournal.retarget(journalId, identity);
-                },
-            };
-        }
+        // early return above can leave a stale arm behind.
+        applyGoalChoice(options?.goal);
+        // Deferred send paths (startup hold, worktree setup) re-check it.
+        sendMessageOptions = { ...sendMessageOptions, runtimeKey: submitRuntimeKey };
 
         const sendPromise = sessionActions.sendMessage(
             primaryText,
@@ -2500,23 +2581,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             sendMessageOptions,
         );
         void sendPromise.then(() => {
-            if (journalId) backgroundSendJournal.remove(journalId);
             if (isBtwActive) return;
             // On a draft there is no session yet in this closure: the send path
-            // reports the one it created. The store's current session is the
-            // last fallback, used only when the closure had no session at all,
-            // so a mid-send session switch cannot redirect the write to an
-            // unrelated session.
+            // creates one and makes it current before resolving, so the id is
+            // read from the store. The fallback is used only when the closure
+            // had no session at all, so a mid-send session switch cannot
+            // redirect the write to an unrelated session.
             const sessionState = useSessionUIStore.getState();
-            const created = createdSession;
-            const linkTargetSessionId = currentSessionId ?? created?.sessionId ?? sessionState.currentSessionId;
+            const linkTargetSessionId = currentSessionId ?? sessionState.currentSessionId;
             const linkTargetDirectory = currentSessionId
                 ? currentSessionDirectoryForSync ?? currentDirectory
-                : created
-                    ? created.directory ?? sessionState.getDirectoryForSession(created.sessionId) ?? currentDirectory
-                    : sessionState.currentSessionDirectory
-                        ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
-                        ?? currentDirectory;
+                : sessionState.currentSessionDirectory
+                    ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
+                    ?? currentDirectory;
             if (linkTargetSessionId) {
                 recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferences);
             }
@@ -2535,38 +2612,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const sentKeys = new Set(linkedReferences.map(composerReferenceKey));
             setLinkedReferences((current) => current.filter((reference) => !sentKeys.has(composerReferenceKey(reference))));
         }).catch((error: unknown) => {
-            // The goal was not written (or the user cancelled it), so nothing
-            // was sent: everything the send took goes back. A draft already
-            // created its session, so the message waits in that session's
-            // composer, apart from any new draft the user started meanwhile.
-            // restoreDraft appends to text already there, so a message typed
-            // since is kept too.
-            if (error instanceof BackgroundGoalError) {
-                if (journalId) backgroundSendJournal.remove(journalId);
-                restoreConsumedDrafts();
-                const createdIdentity = createdSessionIdentity();
-                const restoreIdentity = createdIdentity ?? chatDraftIdentity;
-                if (createdIdentity) {
-                    if (inputSnapshot.message) restoreDraft(createdIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
-                } else {
-                    restoreComposerText();
-                }
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreIdentity);
-                }
-                const created = createdSession;
-                const openCreated = createdIdentity
-                    ? { label: t('chat.goal.writer.toast.openSession'), onClick: () => {
-                        if (getRuntimeKey() === submitRuntimeKey && createdIdentity.sessionId) openSessionFromToast(createdIdentity.sessionId, createdIdentity.directory);
-                    } }
-                    : undefined;
-                if (error.cancelled) toast.info(t(created ? 'chat.goal.writer.toast.backgroundCancelledInSession' : 'chat.goal.writer.toast.backgroundCancelled'), openCreated ? { action: openCreated } : undefined);
-                else toast.error(t(created ? 'chat.goal.writer.toast.backgroundFailedInSession' : 'chat.goal.writer.toast.backgroundFailed', { reason: error.message }), openCreated ? { action: openCreated } : undefined);
-                return;
-            }
-            if (journalId) backgroundSendJournal.remove(journalId);
-            // A send that failed for another reason no longer needs its goal.
-            backgroundGoal?.controller.abort();
             const rawMessage =
                 error instanceof Error
                     ? error.message
@@ -2577,15 +2622,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             console.error('Message send failed:', rawMessage || error);
             restoreConsumedDrafts();
-            // A background draft send that created its session gives the text
-            // back to that session, apart from any draft started since.
-            const backgroundSessionIdentity = backgroundGoal ? createdSessionIdentity() : null;
-            const attachmentIdentity = backgroundSessionIdentity ?? chatDraftIdentity;
-            if (backgroundSessionIdentity) {
-                if (inputSnapshot.message) restoreDraft(backgroundSessionIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
-            } else {
-                restoreComposerText();
-            }
+            restoreComposerText();
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -2601,14 +2638,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, attachmentIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, attachmentIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
@@ -2616,14 +2653,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             if (normalized.includes('runtime changed')) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, attachmentIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
                 }
                 toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useInputStore.getState().restoreAttachedFiles(allAttachments, attachmentIdentity);
+                useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
             }
 
             if (normalized.includes('returned a web page instead of an api response') || normalized.includes('runtime_unavailable')) {
@@ -2818,6 +2855,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         if (largeTextPasteBehavior === 'inline-double-paste') largeTextPasteGesture.keyDown(e);
+
+        if (takeComposerApplicationShortcut(e, useUIStore.getState().shortcutOverrides)) return;
 
         // Enter shell mode before CodeMirror inserts the trigger. Keeping the
         // document unchanged also keeps the caret at the start for the first

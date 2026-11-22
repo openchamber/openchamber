@@ -25,7 +25,12 @@ const { OpencodeApiError, opencodeClient } = await import('@/lib/opencode/client
 spyOn(opencodeClient, 'getSystemInfo').mockResolvedValue({ homeDirectory: '/home/test' });
 spyOn(opencodeClient, 'getFilesystemHome').mockResolvedValue('/home/test');
 const { PromptCandidatesDialog } = await import('./PromptCandidatesDialog');
-const generateSpy = spyOn(opencodeClient, 'generateText');
+const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const generateSpy = spyOn(opencodeClient, 'generateSessionText');
+const createSpy = spyOn(opencodeClient, 'createSession');
+const recordSpy = spyOn(opencodeClient, 'recordPromptGeneration');
+const archiveSpy = spyOn(useSessionUIStore.getState(), 'archiveSessions');
+const models = new Map<string, string>();
 let root: Root | null = null;
 
 afterEach(async () => {
@@ -33,15 +38,24 @@ afterEach(async () => {
   root = null;
   document.body.innerHTML = '';
   generateSpy.mockReset();
+  createSpy.mockReset(); recordSpy.mockReset(); archiveSpy.mockReset(); models.clear();
 });
 
 async function mount(onUse: (texts: string[]) => void) {
+  createSpy.mockImplementation(async (params, directory) => {
+    if (!params?.model || !directory) throw new Error('Missing generation model');
+    const id = `generation-${params.model.id}`; models.set(id, params.model.id);
+    return { id, directory, title: params.title ?? id, projectID: 'p', model: { providerID: params.model.providerID, id: params.model.id },
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 }, metadata: params.metadata };
+  });
+  recordSpy.mockResolvedValue(undefined);
+  archiveSpy.mockImplementation(async (ids) => ({ archivedIds: ids, failedIds: [] }));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
   const host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
   await act(async () => { root?.render(<I18nProvider><PromptCandidatesDialog open onOpenChange={() => {}} original="Original task" directory="/repo"
-    initialModels={[{ providerID: 'p', modelID: 'm1', instanceId: '1' }, { providerID: 'p', modelID: 'm2', instanceId: '2' }]} onUse={onUse} /></I18nProvider>); });
+    initialModels={[{ providerID: 'p', modelID: 'm1', instanceId: '1' }, { providerID: 'p', modelID: 'm2', instanceId: '2' }]} onUse={onUse} onGenerationSessions={() => {}} /></I18nProvider>); });
 }
 async function click(name: string) {
   const element = [...document.querySelectorAll<HTMLElement>('button,[role="checkbox"]')].find((item) => (item.getAttribute('aria-label') ?? item.textContent?.trim()) === name);
@@ -59,7 +73,7 @@ async function describePrompts() {
 // are added to the existing composer after the user clicks Add selected prompts.
 test('reviews candidates from multiple models and admits only the multiselected prompts', async () => {
   const submitted: string[][] = [];
-  generateSpy.mockImplementation(async (_prompt, options) => JSON.stringify({ candidates: [{ title: `Candidate ${options?.model?.id}`, text: `Prompt ${options?.model?.id}`, kind: 'variation' }] }));
+  generateSpy.mockImplementation(async (id) => JSON.stringify({ candidates: [{ title: `Candidate ${models.get(id)}`, text: `Prompt ${models.get(id)}`, kind: 'variation' }] }));
   await mount((texts) => { submitted.push(texts); });
   await describePrompts();
   await click('Generate candidates');
@@ -76,8 +90,8 @@ test('reviews candidates from multiple models and admits only the multiselected 
 
 test('partial generation failure keeps successful candidates selectable', async () => {
   const submitted: string[][] = [];
-  generateSpy.mockImplementation(async (_prompt, options) => {
-    if (options?.model?.id === 'm2') throw new Error('generation failed');
+  generateSpy.mockImplementation(async (id) => {
+    if (models.get(id) === 'm2') throw new Error('generation failed');
     return JSON.stringify({ candidates: [{ title: 'Successful', text: 'Keep this prompt', kind: 'new' }] });
   });
   await mount((texts) => { submitted.push(texts); });
@@ -91,17 +105,17 @@ test('partial generation failure keeps successful candidates selectable', async 
 
 test('project-only model errors explain the cause and leave successful candidates selectable', async () => {
   const submitted: string[][] = [];
-  generateSpy.mockImplementation(async (_prompt, options) => {
-    if (options?.model?.id === 'm2') throw new OpencodeApiError('generate.text', 'Model unavailable: p/m2', { status: 400 });
+  generateSpy.mockImplementation(async (id) => {
+    if (models.get(id) === 'm2') throw new OpencodeApiError('session.generate', 'Model unavailable: p/m2', { status: 503 });
     return JSON.stringify({ candidates: [{ title: 'Successful', text: 'Keep this prompt', kind: 'new' }] });
   });
   await mount((texts) => { submitted.push(texts); });
   await describePrompts();
   await click('Generate candidates');
   const error = document.querySelector('[role="alert"]')?.textContent ?? '';
-  expect(error).toContain('server-wide settings');
+  expect(error).toContain('in this project');
   expect(error).toContain('p/m2');
-  expect(error).toContain('Configure them globally');
+  expect(error).toContain('Check their configuration');
   await click('Successful');
   await click('Add selected prompts (1)');
   expect(submitted).toEqual([['Keep this prompt']]);

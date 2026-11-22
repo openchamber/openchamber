@@ -97,6 +97,7 @@ export async function askOtherModels(input: {
     lanes: [{ sessionId: session.id, identity }],
     fusions: [],
     parents: [],
+    generationSessions: [],
     memberIds: [session.id],
     providerIDs: [providerID],
     variants: [undefined],
@@ -200,6 +201,7 @@ export async function addLaneToRun(input: {
       index,
       role: 'run',
       title: run.title,
+      generationSessions: [...run.generationSessions],
     },
     selection: { model: { providerID: model.providerID, id: model.modelID, variant: model.variant }, agent: templateSession.agent },
   }, assertCurrent);

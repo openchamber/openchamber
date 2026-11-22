@@ -108,6 +108,7 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
+import { createGoalSpecJobRuntime } from './lib/session-goal/spec-jobs.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
@@ -1218,6 +1219,29 @@ const messageQueueRuntime = createMessageQueueRuntime({
 });
 messageQueueRuntime.start();
 
+// "Send when ready" in the goal writer: the server writes the spec and hands
+// the held message to the queue with the spec as its goal, so a closed tab or
+// a restart never drops it.
+const goalSpecJobRuntime = createGoalSpecJobRuntime({
+  messageQueue: messageQueueRuntime,
+  globalEventHub: globalMessageStreamHub,
+  broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
+  dataDir: OPENCHAMBER_DATA_DIR,
+  // Defined further down; called only after start, once jobs were read.
+  waitForOpenCode: async () => {
+    for (;;) {
+      try {
+        await waitForOpenCodeReady();
+        return;
+      } catch {
+        // OpenCode has no port yet, or is still starting: try again.
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+  },
+});
+void goalSpecJobRuntime.start();
+
 // Sessions an agent dispatched with `returnResult` report back to it: their
 // final answer lands in the dispatching session and wakes it.
 const dispatchResultsRuntime = createDispatchResultsRuntime({
@@ -2128,6 +2152,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   contextObligatoryRuntime,
   sessionWarmingRuntime,
   messageQueueRuntime,
+  goalSpecJobRuntime,
   dispatchResultsRuntime,
   messageSearchRuntime,
   sessionRuntime,
@@ -2822,6 +2847,7 @@ async function main(options = {}) {
     permissionAutoAcceptRuntime,
     worktreeBootstrapStore,
     messageQueueRuntime,
+    goalSpecJobRuntime,
     routingRuntime,
   });
 

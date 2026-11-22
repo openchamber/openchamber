@@ -68,6 +68,7 @@ export async function createRunParent(input: {
   const session = await io.createSession({
     title: input.title, directory,
     identity: { group: identity.group, groupSlug: identity.groupSlug, title: input.run.title,
+      generationSessions: [...input.run.generationSessions],
       role: 'parent', providerID: input.model.providerID, modelID: input.model.modelID },
     selection: { model: { providerID: input.model.providerID, id: input.model.modelID, variant: input.model.variant }, agent: input.model.agent },
   }, current);

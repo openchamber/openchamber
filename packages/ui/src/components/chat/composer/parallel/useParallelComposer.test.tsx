@@ -150,6 +150,19 @@ describe('useParallelComposer worktree policy', () => {
 });
 
 describe('generated prompt variants', () => {
+  test('archived generation references follow the selected prompts into the launched run', async () => {
+    useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'm', providers: [] });
+    const source = { sessionID: 'generator', directory: '/repo', providerID: 'project', modelID: 'generator-model' };
+    await withComposer(async ({ capture, render, launches }) => {
+      await render();
+      await act(async () => capture.composer?.enter());
+      await act(async () => capture.composer?.retainGenerationSessions([source, source]));
+      await act(async () => capture.composer?.addGeneratedVariants(['Chosen prompt']));
+      await act(async () => { await capture.composer?.launch(); });
+      expect(launches[0].generationSessions).toEqual([source]);
+      expect(launches[0].groups.map((group) => group.prompt)).toEqual(['Fix the login', 'Chosen prompt']);
+    });
+  });
   // Oracle: selected candidates become ordinary variants and preserve the
   // original text. Each added variant owns its run-model array independently.
   test('retains the original and admits exactly the chosen prompts with independent run models', async () => {

@@ -75,7 +75,7 @@ afterEach(() => {
  * `content[]`, `model`, `finish`, `tokens`), `{ location, data }` envelopes,
  * `/api/session/active` for busy state, and the three continuation calls.
  */
-const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200 }) => {
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], models = [], defaultModel = null }) => {
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
     status,
@@ -95,6 +95,9 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
       const next = index + 1 < childPages.length ? { next: `page-${index + 1}` } : {};
       return json({ data, cursor: next }, childrenStatus);
     }
+    if (url.pathname === '/api/shell') return json(shells);
+    if (url.pathname === '/api/model') return json(models);
+    if (url.pathname === '/api/model/default') return json(defaultModel);
     if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
     if (url.pathname === `/api/session/${SESSION_ID}`) return json({ id: SESSION_ID, location: { directory: '/repo' } });
     return json({});
@@ -695,5 +698,272 @@ describe('session goal runtime', () => {
     expect(prompts).toHaveLength(2);
     expect(state.goal.turnsUsed).toBe(2);
     runtime.stop();
+  });
+});
+
+describe('session goal tick and background work', () => {
+  const DONE = 'All requested work is done.';
+  const doneTurn = () => assistantRecord({ content: [{ type: 'text', text: DONE }] });
+  const doneChecker = () => vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+  const shell = (extra = {}) => ({
+    id: 'sh_1',
+    status: 'running',
+    command: 'bun run build',
+    metadata: { sessionID: SESSION_ID },
+    time: { started: Date.now() },
+    ...extra,
+  });
+
+  it('settles a "done" report as complete when nothing runs in the background', async () => {
+    quiet();
+    const { calls } = v2OpenCode({ messages: [doneTurn()] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = doneChecker();
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runTick(runtime);
+
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'complete' });
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('waits instead of judging the same report while a background shell still runs', async () => {
+    quiet();
+    const { calls } = v2OpenCode({ messages: [doneTurn()], shells: [shell()] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = doneChecker();
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      idleQuietMs: 1_000,
+    });
+
+    await runTick(runtime);
+
+    expect(calls.some((call) => call.path === '/api/shell')).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('ignores shells of other sessions and shells that already exited', async () => {
+    quiet();
+    v2OpenCode({
+      messages: [doneTurn()],
+      shells: [shell({ metadata: { sessionID: 'ses_other' } }), shell({ id: 'sh_2', status: 'exited' })],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = doneChecker();
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runTick(runtime);
+
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'complete' });
+  });
+
+  it('does not treat an unreadable shell list as "nothing running"', async () => {
+    quiet();
+    const { calls } = v2OpenCode({ messages: [doneTurn()], shells: null });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = doneChecker();
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      idleQuietMs: 1_000,
+    });
+
+    await runTick(runtime);
+
+    expect(calls.some((call) => call.path === '/api/shell')).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+  });
+
+  it('asks the top-level session about untimed work past the default window, then waits a full window again', async () => {
+    quiet();
+    const startedAt = Date.now() - 10 * 60_000;
+    const { calls } = v2OpenCode({
+      messages: [doneTurn()],
+      active: { ses_child_1: { type: 'running' } },
+      childPages: [[{ id: 'ses_child_1', parentID: SESSION_ID, title: 'Run the e2e suite', time: { created: startedAt, updated: startedAt } }]],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = doneChecker();
+    let clock = Date.now();
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      backgroundCheckMs: 5 * 60_000,
+      now: () => clock,
+      idleQuietMs: 5,
+    });
+
+    await runTick(runtime);
+
+    const prompts = () => calls.filter((call) => call.method === 'POST' && call.path.endsWith('/prompt'));
+    expect(prompts()).toHaveLength(1);
+    const text = prompts()[0].body.text;
+    expect(text).toContain('Background status check');
+    expect(text).toContain('ses_child_1');
+    expect(text).toContain('Run the e2e suite');
+    expect(generate).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'active', turnsUsed: 1 });
+
+    // Later ticks inside the next window wait again without asking.
+    clock += 60_000;
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(prompts()).toHaveLength(1);
+
+    // Past the next window it asks once more.
+    clock += 5 * 60_000;
+    await vi.waitFor(() => expect(prompts()).toHaveLength(2));
+  });
+
+  it('leaves a background shell with its own timeout to that timeout', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [doneTurn()],
+      shells: [shell({ time: { started: Date.now() - 60 * 60_000 }, metadata: { sessionID: SESSION_ID, timeout: 2 * 60 * 60_000 } })],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: doneChecker() }),
+      backgroundCheckMs: 5 * 60_000,
+      idleQuietMs: 1_000,
+    });
+
+    await runTick(runtime);
+
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+  });
+});
+
+describe('session goal recovery from turn errors', () => {
+  const failedTurn = (type, message, model = { providerID: 'anthropic', id: 'claude-opus-5', variant: 'high' }) => assistantRecord({
+    content: [],
+    finish: 'error',
+    model,
+    error: { type, message },
+  });
+  const opus = (providerID, extra = {}) => ({ providerID, id: 'claude-opus-5', modelID: 'claude-opus-5', enabled: true, variants: [], ...extra });
+  const noCheck = () => ({ getSmallModelService: async () => { throw new Error('an errored turn is not audited'); } });
+  const posts = (calls) => calls.filter((call) => call.method === 'POST').map((call) => [call.path.replace(`/api/session/${SESSION_ID}`, ''), call.body]);
+
+  it('continues on its own after an ordinary error, naming the error', async () => {
+    quiet();
+    const { calls } = v2OpenCode({ messages: [failedTurn('provider.transport', 'socket hang up')] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime({ ...seam, ...noCheck() });
+
+    await runTick(runtime);
+
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0][0]).toBe('/prompt');
+    expect(sent[0][1].text).toContain('provider.transport: socket hang up');
+    expect(sent[0][1].text).toContain('Continue working toward the active session goal.');
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'active', turnsUsed: 1, errorStreak: 1 });
+  });
+
+  it('blocks once ordinary errors keep repeating', async () => {
+    quiet();
+    const { calls } = v2OpenCode({ messages: [failedTurn('provider.transport', 'socket hang up')] });
+    const seam = wired({ openchamber: { goal: activeGoal({ errorStreak: 3 }) } });
+    const { runtime } = makeRuntime({ ...seam, ...noCheck() });
+
+    await runTick(runtime);
+
+    expect(posts(calls)).toEqual([]);
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'blocked', statusReason: expect.stringContaining('provider.transport') });
+  });
+
+  it('moves a refused turn to another effort of the same model first', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [failedTurn('provider.content-filter', 'Provider blocked the response (reasoning_extraction)')],
+      models: [opus('anthropic', { variants: [{ id: 'high' }, { id: 'low' }] }), opus('github-copilot')],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime({ ...seam, ...noCheck() });
+
+    await runTick(runtime);
+
+    const sent = posts(calls);
+    expect(sent[0]).toEqual(['/model', { model: { providerID: 'anthropic', id: 'claude-opus-5', variant: 'low' } }]);
+    expect(sent[1][0]).toBe('/prompt');
+    expect(sent[1][1].text).toContain('refused by the provider');
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({
+      status: 'active',
+      recoveryTried: ['anthropic/claude-opus-5#high', 'anthropic/claude-opus-5#low'],
+    });
+  });
+
+  it('moves a refusal to the same model from another provider once the efforts are used up', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [failedTurn('provider.content-filter', 'blocked', { providerID: 'anthropic', id: 'claude-opus-5', variant: 'low' })],
+      models: [opus('anthropic', { variants: [{ id: 'high' }, { id: 'low' }] }), opus('github-copilot')],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal({ recoveryTried: ['anthropic/claude-opus-5#high', 'anthropic/claude-opus-5#low'], errorStreak: 1 }) } });
+    const { runtime } = makeRuntime({ ...seam, ...noCheck() });
+
+    await runTick(runtime);
+
+    expect(posts(calls)[0]).toEqual(['/model', { model: { providerID: 'github-copilot', id: 'claude-opus-5' } }]);
+  });
+
+  it('moves an auth failure straight to another provider, skipping other efforts of the same one', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [failedTurn('provider.auth', 'invalid api key')],
+      models: [opus('anthropic', { variants: [{ id: 'high' }, { id: 'low' }] }), opus('github-copilot')],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const { runtime } = makeRuntime({ ...seam, ...noCheck() });
+
+    await runTick(runtime);
+
+    expect(posts(calls)[0]).toEqual(['/model', { model: { providerID: 'github-copilot', id: 'claude-opus-5' } }]);
+  });
+
+  it('blocks a refusal once every available model has been tried', async () => {
+    quiet();
+    const { calls } = v2OpenCode({
+      messages: [failedTurn('provider.content-filter', 'blocked', { providerID: 'github-copilot', id: 'claude-opus-5' })],
+      models: [opus('anthropic', { variants: [{ id: 'high' }, { id: 'low' }] }), opus('github-copilot')],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal({
+      errorStreak: 3,
+      recoveryTried: ['anthropic/claude-opus-5#high', 'anthropic/claude-opus-5#low', 'anthropic/claude-opus-5#', 'github-copilot/claude-opus-5#'],
+    }) } });
+    const { runtime, emitGoalNotification } = makeRuntime({ ...seam, ...noCheck() });
+
+    await runTick(runtime);
+
+    expect(posts(calls)).toEqual([]);
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({
+      status: 'blocked',
+      statusReason: 'provider.content-filter: refused by every available model',
+      errorStreak: 0,
+      recoveryTried: [],
+    });
+    expect(emitGoalNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the recovery once a turn ends cleanly', async () => {
+    quiet();
+    const { calls } = v2OpenCode({ messages: [assistantRecord()] });
+    const seam = wired({ openchamber: { goal: activeGoal({ errorStreak: 2, recoveryTried: ['anthropic/claude-opus-5#high'] }) } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runTick(runtime);
+
+    expect(posts(calls)).toHaveLength(1);
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ errorStreak: 0, recoveryTried: [] });
   });
 });

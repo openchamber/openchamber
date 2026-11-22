@@ -102,13 +102,15 @@ describe('multi-run identity', () => {
       { sessionID: 'source-a', directory: '/repo/a', snapshotRef: 'refs/openchamber/runs/pass-a', snapshotCommit: 'commit-a' },
       { sessionID: 'source-b', directory: '/repo/b' },
     ] };
+    const generationSessions = [{ sessionID: 'generator', directory: '/repo', providerID: 'p', modelID: 'm', variant: 'high' }];
     for (const role of ['run', 'fusion', 'parent'] as const) {
-      const fields: MultiRunMembership = { ...membership('s1'), role, guidance: 'Keep api_v2\n日本語', fusion: role === 'fusion' ? receipt : undefined };
+      const fields: MultiRunMembership = { ...membership('s1'), role, guidance: 'Keep api_v2\n日本語', fusion: role === 'fusion' ? receipt : undefined, generationSessions };
       const bound = session('s1', fields);
       const reread = getMultiRunIdentity(JSON.parse(JSON.stringify(bound)));
       expect(reread?.role).toBe(role);
       expect(reread?.guidance).toBe(fields.guidance);
       expect(reread?.fusion).toEqual(fields.fusion);
+      expect(reread?.generationSessions).toEqual(generationSessions);
       expect(sameMultiRunIdentity(bound, session('s1', { ...fields, guidance: 'Changed source preference' }))).toBe(false);
     }
   });

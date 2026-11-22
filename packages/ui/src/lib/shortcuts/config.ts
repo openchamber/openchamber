@@ -164,9 +164,11 @@ const SHORTCUT_GROUPS = {
     },
     { id: 'abort_run', defaultBinding: 'escape', customizable: false },
     {
-      // Not ctrl+b (the OpenCode TUI's key): the composer editor's macOS
-      // emacs keymap moves the caret on it, and elsewhere it is mod+b
-      // (toggle_sidebar).
+      // Not ctrl+b (the OpenCode TUI's key) by default: the composer
+      // editor's macOS emacs keymap moves the caret on it, and elsewhere it
+      // is mod+b (toggle_sidebar). A user may rebind it to ctrl+b; the
+      // composer then hands the press to this action first
+      // (composer/editor/applicationShortcuts.ts).
       id: 'background_session_work',
       defaultBinding: 'mod+shift+b',
       customizable: true,

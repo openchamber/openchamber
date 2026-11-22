@@ -21,6 +21,10 @@ the web server and survives UI disconnects.
   tokensCommitted,         // closed segments' total (one segment per compaction)
   turnsUsed,               // auto-continuations sent (capped at the Settings turn limit)
   auditFailStreak,         // consecutive progress checks that could not run
+  errorStreak,             // consecutive errored turns the loop recovered from
+  recoveryTried,           // 'provider/model#variant' keys a recovery already used
+  errorStreak,             // consecutive errored turns the loop recovered from
+  recoveryTried,           // 'provider/model#variant' keys a recovery already used
   statusReason,            // why settled; 'resumed' is a kickoff signal from UI
   evaluationProviderID,    // provider of the latest check; '' when Jev answered
   evaluationModelID,       // model of the latest check (Jev's model id for Jev)
@@ -168,15 +172,29 @@ progress check judges against. `spec-writer.js` owns it.
 3. On fire (`tick`), gated by the `sessionGoalEnabled` setting:
    - fetch session (skip sub-agent sessions), require an `active` goal;
    - authoritative live-activity check after the quiet window: re-read
-     `/api/session/active`, bail if the parent resumed; then list the
-      parent's subagent sessions through `GET /api/session?parentID=` (cursor
-      paged) and bail while any of them is active. The loop rechecks after
+     `/api/session/active`, bail if the parent resumed; then read the
+      background work (`background-work.js`): the parent's subagent sessions
+      that are active (`GET /api/session?parentID=`, cursor paged) and the
+      running shells of `GET /api/shell` whose `metadata.sessionID` is the
+      parent or one of its children. While any of it runs, the stop is a
+      pause: the report is not audited, so "it says it's done" never settles
+      a goal whose background work is still going. The loop rechecks after
       another quiet window so a missed parent idle event cannot strand the
-      goal when the child finishes. A status or children fetch failure is
+      goal when the work finishes. A status, children or shell fetch failure is
       unknown, not empty, so it skips the audit and retries after another quiet
       window;
-     both reads live in `../opencode/session-activity.js`, shared with the
-     notification runtime;
+     the status and children reads live in `../opencode/session-activity.js`,
+     shared with the notification runtime;
+   - background work with no timeout of its own (every subagent, and every
+     shell without `metadata.timeout`, which OpenCode sets only for a
+     background command started with an explicit timeout) gets a default one,
+     `DEFAULT_BACKGROUND_CHECK_MS` (30 minutes). Once some of it has run that
+     long since it started, or since the last check, the loop sends the parent
+     a status-check prompt naming each overdue task, asking it to confirm
+     progress or stop and redo stalled work, then waits a full window again.
+     The check is an auto-continuation: it counts toward the turn cap. When
+     the loop last asked lives in memory, so after a restart the first check
+     comes as soon as some work is past its window;
    - messages come from `/api/session/:id/message` as v2's flat records
      (`type`, `content[]`, `model`, `finish`, `tokens`); `toLoopMessage`
      projects them into the `{ info, parts }` view the rest of the tick reads,
@@ -205,15 +223,32 @@ progress check judges against. `spec-writer.js` owns it.
      stop), with a tick-side safety net. Messages sent while paused leave
      the goal alone; Resume re-arms the loop, and resuming over an aborted
      tail skips the audit and goes straight to a continuation nudge;
-    - terminal checks, cheapest first: assistant turn error → `blocked`;
-      `tokensUsed >= tokenBudget` → `budgetLimited`;
+    - a turn that ended in an error is recovered (`recovery.js`), not settled:
+      a refusal (`provider.content-filter`) moves the session to another
+      model through `POST /api/session/:id/model`, trying other efforts of the
+      same model, then the same model from another provider (same `modelID`
+      in `/api/model`), then `/api/model/default`; an error of the serving
+      provider (auth, quota, no route, unsupported operation, an
+      empty-completion streak) walks the same ladder without the same
+      provider's efforts; any other error gets a continuation whose prompt
+      names the error and asks the agent to fix what it can and keep going.
+      Each recovery is an auto-continuation. The goal blocks when no model
+      is left (`refused by every available model` / `no other model
+      available`), after `ORDINARY_ERROR_LIMIT` (3) consecutive ordinary
+      errors, or after `RECOVERY_STREAK_LIMIT` (8) recoveries of any kind. A
+      turn that ends cleanly resets `errorStreak` and `recoveryTried`, and so
+      does settling, so Resume starts afresh. Pools fail over inside OpenCode
+      first (a refusal before any output moves to the next member there), so
+      an error that reaches the loop from a pool has exhausted it or came
+      after output started;
+    - terminal checks, cheapest first: `tokensUsed >= tokenBudget` → `budgetLimited`;
       `turnsUsed >= ` the turn limit (Settings → Goal, `sessionGoalMaxAutoTurns`, 1–200, default 20; read on every tick) → `blocked`;
     - error classification is independent of `finish`: `MessageAbortedError`
       keeps the pause/resume behavior; only a `finish: "length"` with no
       error, or `MessageOutputLengthError`, is an in-progress truncation that
       skips the audit and continues. Any other non-null error wins over a
-      length finish and blocks with its non-empty `error.name`, or
-      `assistant turn failed` when unnamed;
+      length finish and goes to the recovery above, named by its non-empty
+      `error.name`, or `assistant turn failed` when unnamed;
     - length recovery is bounded separately from the token budget and
       auto-continuation cap: the first truncation permits one continuation, but
       a second consecutive completed, non-summary assistant turn that is also
@@ -381,23 +416,37 @@ sees only that final turn, so the report is its evidence.
   option, and only then is the arm set, right before `sendMessage`. Picking
   another writer model or effort starts a new run for it at once; the run it
   replaces is aborted and its result is never shown or sent.
-- Send when ready: while the spec is being written, the dialog can hand the
-  run in progress to the composer (`BackgroundGoalSpec` in `lib/goalWriter.ts`).
-  Closing a dialog that already sends when written (no review) does the same;
-  closing a review dialog cancels. The composer submits at once with
-  `backgroundGoal`: the message leaves the composer, a draft creates its
-  session, and `sendMessage` gets `pendingGoal` (`settleBackgroundGoal`), so
-  the prompt waits for the spec and carries it as a settled `queuedGoal`
-  exactly as a click on the written spec would. The target session is captured
-  at submit, so switching chats does not move the send. A failed or cancelled
-  write sends nothing, and the text is never dropped: a reply's text goes
-  back to its session's composer, below anything typed there since; a new
-  task's text goes to the composer of the session it already created (with
-  an Open session action on the toast), so a draft the user started meanwhile
-  keeps its own text. Attachments follow the text; inline comments go back to
-  where they were taken from. A loading toast with Cancel follows the user until the spec is written. Such a
-  send is never diverted to the queue (auto-review, dismissed prompts): the
-  queue would take it without its goal.
+- Send when ready: while the spec is being written, the dialog hands the
+  latest run's options (writer model and effort, section) to the composer
+  (`GoalWriterHandoff`). Closing a dialog that already sends when written (no
+  review) does the same; closing a review dialog cancels. The run in the
+  window stops, and the server takes over (`spec-jobs.js`, below): the
+  composer resolves the message as it would for the queue (mentions,
+  snippets, attachments, attached context), creates a draft's session
+  (`createDraftSessionForServerSend`, which leaves the user where they went
+  meanwhile), and starts a job for that session. The message leaves the
+  composer at once. A job that cannot be started (session creation or the
+  save failed) puts the message back at once, in the created session's
+  composer or the one it came from.
+- `server/lib/session-goal/spec-jobs.js` — the server owns a Send when ready
+  message from then on, whether or not a window is open. It writes the spec
+  and puts the message into the session's message queue with the spec as a
+  settled goal (`with-message` adds `briefAgent`; `goal-as-message` sends the
+  spec as literal text, `promptOnly`, so a spec starting with `/` never runs a
+  command). The queue delivers it like any queued goal message. Jobs are kept
+  in `goal-spec-jobs.json` (mode 0600; at most 50, a full table refuses rather
+  than evicts) and broadcast as `openchamber:goal-spec-job.updated`. A failed
+  or cancelled job keeps its message, attachments and context included, until
+  the composer of its session takes it back (`POST .../take`); every window
+  shows a toast with Open session. Routes: `GET/POST /api/goals/spec-jobs`,
+  `POST /api/goals/spec-jobs/:id/cancel`, `POST /api/goals/spec-jobs/:id/take`.
+  Deleting the session drops its job; moving it follows the new directory.
+  Exactly once across a restart: a job goes `writing` -> `enqueuing` (saved
+  with the spec before the queue sees it) -> removed. The queue item carries
+  the job's id and enqueueing that id again is a no-op. On start, a `writing`
+  job is written again; an `enqueuing` job still in the queue is left to the
+  queue; one missing from it may already have been sent, so it fails with its
+  message kept and a note to check the session, never sent a second time.
 - `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
   produced or the user kept over it, so rewrite-all leaves it alone;
   `briefAgent` puts the spec into the reminder when the message itself is not
@@ -410,8 +459,8 @@ sees only that final turn, so the report is its evidence.
   saved, so a rewritten spec reaches the agent in the same message.
 - A writer request belongs to the composer it came from: switching the
   composer to another session or draft closes the dialog, and a late choice is
-  dropped. A send handed off with Send when ready already left the composer,
-  so switching afterwards does not affect it.
+  dropped. A send handed off with Send when ready belongs to the server, so
+  switching afterwards does not affect it.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by
   the server only, so it lives in the settings file like the walkthrough
@@ -457,31 +506,50 @@ ordering used by create and scheduled goals.
 - `tokensUsed` only counts completed assistant messages seen within the
   40-message fetch window per tick; extremely long busy stretches between
   idles undercount (acceptable: budget is a guardrail, not billing).
-- A background goal lives in the browser tab that started it: the writing
-  request and the held send are client-side, so closing or reloading the tab
-  before the spec is written drops the send. Reloading the same tab recovers
-  its text from `lib/backgroundGoalSends.ts`, which journals it in session
-  storage until the send settles. The main composer of the next page puts
-  it back in its owning composer. Other tabs cannot claim a live send, even
-  when its page is suspended. Attachments are not journaled; closing the tab
-  permanently is outside this recovery guarantee.
+- A Send when ready job for a session inside an isolated space runs on that
+  space's server, which does not forward its job events: the host window
+  shows no toast for it, and a failed job's message is taken back only by a
+  window reading that space's jobs.
+- Steer delivery does not apply to Send when ready: the message joins the
+  session's queue and goes out when the session is idle.
 
 ## Decisions
 
-### Why a draft creates its session before its background goal is written, and not after
+### Why stalled background work gets a status check and is not killed
+
+A job without a timeout can be a long build or a hung one, and only the agent
+can read its output and tell which. Killing it at a default limit would throw
+away real work; waiting forever lets a hung job hold the goal with nothing
+running. Asking the top-level session every window keeps the job and still
+bounds how long a stall goes unnoticed. A job with its own timeout is left to
+it: OpenCode ends it there.
+
+### Why the loop moves a refused session to another model rather than retrying
+
+A refusal is the provider's answer to this request, so the same model at the
+same effort refuses again. The ladder tries what is closest first (another
+effort, then the same model elsewhere) and ends at the user's default model.
+The models it switched through are kept on the goal, so a restart cannot make
+it loop over them.
+
+### Why a draft creates its session before its goal is written, and not after
 
 Creating a session from a draft reads the live draft: its directory checks,
 the prepared chat directory and closing the draft all assume the user is still
 on it. Deferring creation until the spec arrives would race whatever draft or
-chat the user opened meanwhile. The session is created while the draft is
-still open, and only its first prompt waits for the goal, so the agent never
-starts without it. Creation that waits on worktree setup uses the submitted
+chat the user opened meanwhile, and the server cannot create it from a draft
+that only exists in a browser. The session is created at once, and the job
+the server owns holds its first message until the goal is written, so the
+agent never starts without it. Creation that waits on worktree setup uses the submitted
 draft snapshot and preserves a different chat or draft the user opened while
 waiting. The new session never changes that later selection or clears its text.
 
-### Why reload recovery uses session storage
+### Why the server owns Send when ready, through the message queue
 
-Each tab owns its pending sends. A new page in that tab can recover its
-predecessor's unsent text without guessing whether another page is alive.
-Local storage with a heartbeat timeout would allow a suspended tab's send
-to be reclaimed while its goal was still being generated.
+A send held in the browser is lost with the tab, a reload or an OpenChamber
+restart; journaling it in the browser only covered a reload. The server
+already owns a durable, exactly-once path for a message with a goal: the
+message queue. A job adds only what the queue lacks, the time spent writing
+the spec, and hands the message over by id. The cost is that a restart
+between saving `enqueuing` and the queue's own save cannot tell whether the
+message went out; such a job is kept for the user instead of being sent twice.

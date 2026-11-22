@@ -1,4 +1,5 @@
 import type { WorktreeStartFrom } from '@/lib/worktrees/worktreeStartSource';
+import type { PromptGenerationSession } from '@/lib/multirun/identity';
 
 interface MultiRunModelSelection {
   providerID: string;
@@ -47,6 +48,8 @@ export interface CreateMultiRunParams {
   setupCommands?: string[];
   /** Fuse the lanes automatically once all of them finish. */
   autoFusion?: MultiRunAutoFusion;
+  /** Archived generation sessions whose prompts informed this run. */
+  generationSessions?: readonly PromptGenerationSession[];
 }
 
 export interface CreateMultiRunResult {

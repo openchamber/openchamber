@@ -53,8 +53,8 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
    * carry the filter inside the cursor, so only the cursor and the limit
    * travel. A parent with more subagents than this walks is unknown (`null`).
    */
-  const fetchChildSessionIds = async (sessionId) => {
-    const ids = [];
+  const fetchChildSessions = async (sessionId) => {
+    const children = [];
     const seenCursors = new Set();
     let cursor;
     for (let pageNumber = 0; pageNumber < CHILDREN_MAX_PAGES; pageNumber += 1) {
@@ -64,14 +64,19 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
       }).catch(() => null);
       if (!Array.isArray(page?.data)) return null;
       for (const child of page.data) {
-        if (typeof child?.id === 'string' && child.id) ids.push(child.id);
+        if (typeof child?.id === 'string' && child.id) children.push(child);
       }
       const next = page.cursor?.next;
-      if (!next || page.data.length === 0 || seenCursors.has(next)) return ids;
+      if (!next || page.data.length === 0 || seenCursors.has(next)) return children;
       seenCursors.add(next);
       cursor = next;
     }
     return null;
+  };
+
+  const fetchChildSessionIds = async (sessionId) => {
+    const children = await fetchChildSessions(sessionId);
+    return children ? children.map((child) => child.id) : null;
   };
 
   /** True when a subagent of the session is still running; null when unknown. */
@@ -131,5 +136,5 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     return unknown ? null : false;
   };
 
-  return { fetchActiveSessionStatuses, fetchChildSessionIds, hasWorkingChildren, hasWorkingDescendants };
+  return { fetchActiveSessionStatuses, fetchChildSessions, fetchChildSessionIds, hasWorkingChildren, hasWorkingDescendants };
 };

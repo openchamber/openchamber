@@ -295,7 +295,8 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 const createRun = (runDirectory: string) => createMultiRunSession({
                   title: sessionTitle, directory: runDirectory,
                   identity: { group: membershipGroup, groupSlug, runGroup, providerID: model.providerID,
-                    modelID: model.modelID, index: count > 1 ? index : undefined, role: 'run', title: runTitle, autoFusion },
+                    modelID: model.modelID, index: count > 1 ? index : undefined, role: 'run', title: runTitle, autoFusion,
+                    generationSessions: params.generationSessions ? [...params.generationSessions] : undefined },
                   selection: { model: { providerID: model.providerID, id: model.modelID, variant: model.variant }, agent },
                 }, assertCurrent);
                 if (!shouldIsolateRuns) {
