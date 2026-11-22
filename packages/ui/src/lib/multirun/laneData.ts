@@ -57,6 +57,22 @@ export async function loadLaneLastReply(sessionId: string, directory: string): P
   return (await loadLaneLastTurn(sessionId, directory)).text;
 }
 
+/** Recent conversation for parent guidance, excluding synthetic status snapshots. */
+export async function loadLaneConversation(sessionId: string, directory: string): Promise<Array<{ role: 'user' | 'assistant'; text: string }>> {
+  const page = await opencodeClient.getSessionMessages(sessionId, { limit: 50 }, directory);
+  return [...page.items].reverse().flatMap((record): Array<{ role: 'user' | 'assistant'; text: string }> => {
+    if (record.info.role === 'user') {
+      const text = flattenUserTextParts(record.parts).trim();
+      return text ? [{ role: 'user', text }] : [];
+    }
+    if (record.info.role === 'assistant') {
+      const text = flattenAssistantTextParts(record.parts).trim();
+      return text ? [{ role: 'assistant', text }] : [];
+    }
+    return [];
+  });
+}
+
 /**
  * Uncommitted changes of a lane worktree against its HEAD: every changed path
  * counts as a file, tracked edits contribute line counts. Throws on failure,

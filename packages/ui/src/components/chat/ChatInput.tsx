@@ -25,6 +25,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 import { useParallelComposer } from './composer/parallel/useParallelComposer';
 import { ParallelComposerStrip } from './composer/parallel/ParallelComposerStrip';
+import { useRunParentHint } from '@/components/multirun/RunParentHint';
 import {
     ACCEPTED_ATTACHMENT_EXTENSIONS,
     ATTACHMENT_ACCEPT,
@@ -4452,6 +4453,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const spaceWaitRow = showDraftTargetSelectors && messageWaitsForSpace
         ? <ComposerStatusStrip icon="time" text={t('spaces.draft.queued')} />
         : null;
+    const parentHint = useRunParentHint(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory);
+    const parentHintRow = !isBtwActive && !newSessionDraftOpen ? parentHint : null;
     const autoReviewRow = !isBtwActive && !newSessionDraftOpen ? <AutoReviewStrip /> : null;
     // The session's goal, then what is still running, then what waits for it.
     const goalRow = !isBtwActive ? (
@@ -4482,10 +4485,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ) : null;
     // Null exactly when the suggestion row alone would have been: the mobile
     // pill picks its shape from whether a top row exists.
-    const composerTopRows = worktreeSetupRow || spaceWaitRow || goalRow || goalEditRow || autoReviewRow || backgroundShellsRow || persistentTerminalsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    const composerTopRows = worktreeSetupRow || spaceWaitRow || parentHintRow || goalRow || goalEditRow || autoReviewRow || backgroundShellsRow || persistentTerminalsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
             {worktreeSetupRow}
             {spaceWaitRow}
+            {parentHintRow}
             {goalRow}
             {goalEditRow}
             {autoReviewRow}

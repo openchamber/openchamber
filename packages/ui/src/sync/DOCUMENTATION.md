@@ -83,6 +83,14 @@ of button visibility.
 
 ## Ownership map
 
+Multi-run parent conversations are ordinary root sessions carrying the `parent`
+membership role. `routeMessage` attaches current known member status and available
+results only to those sends, through `lib/multirun/parentContext.ts`; normal sessions
+perform no run-wide reads. This is on the user-send path, never on streaming
+events. Parent guidance is included in subsequent fusion inputs and is not
+broadcast to individual model sessions. The multi-run module documentation owns
+membership, retention and result-combination rules.
+
 Queue delivery uses `hasActiveSubagent` with an explicit parent resolver over
 the cached sync session index. This keeps the ancestor walk shared
 with display activity while leaving the global display resolver unchanged.

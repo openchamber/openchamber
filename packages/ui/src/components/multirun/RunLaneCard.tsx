@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { Session } from '@/lib/opencode/model';
@@ -10,6 +11,7 @@ import type { LaneSummary } from '@/lib/multirun/useLaneSummaries';
 import type { LaneStatus } from '@/lib/multirun/laneStatus';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { LaneStatusIcon } from './LaneStatusIcon';
+import { FusionGuidance } from './FusionGuidance';
 
 const costFormatter = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -60,6 +62,7 @@ export type RunLaneCardProps = {
   actionsDisabled: boolean;
   onOpenChat: () => void;
   onOpenDiff: () => void;
+  guidance?: { saved: string; disabled: boolean; onSave: (text: string) => Promise<void> };
 };
 
 export function RunLaneCard({
@@ -81,8 +84,10 @@ export function RunLaneCard({
   actionsDisabled,
   onOpenChat,
   onOpenDiff,
+  guidance,
 }: RunLaneCardProps): React.ReactNode {
   const { t } = useI18n();
+  const [confirmation, setConfirmation] = React.useState<'detach' | 'archive' | null>(null);
   const reply = summary?.reply;
   const diff = summary?.diff;
   const excluded = fuseSource !== null && !fuseSource.checked;
@@ -123,26 +128,11 @@ export function RunLaneCard({
 
   return (
     <div
-      role={fuseSource ? 'checkbox' : undefined}
-      tabIndex={fuseSource ? 0 : undefined}
-      aria-checked={fuseSource ? fuseSource.checked : undefined}
-      aria-label={fuseSource ? t('multirun.overview.card.selectAria', { name: modelLabel }) : undefined}
-      onClick={fuseSource ? onToggleFuseSource : undefined}
-      onKeyDown={fuseSource ? (event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onToggleFuseSource();
-        }
-      } : undefined}
       className={cn(
-        'relative flex min-h-[184px] flex-col gap-2 rounded-xl border p-3 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        'bg-[var(--surface-elevated)] border-border hover:border-[var(--interactive-border-hover)]',
-        isFusion && 'col-span-full min-h-0 border-[color-mix(in_srgb,var(--primary-base)_35%,transparent)]',
-        fuseSource && 'cursor-pointer',
-        fuseSource?.checked && 'border-[var(--primary-base)]',
+        'oc-tile relative flex min-h-[184px] flex-col gap-2 rounded-xl p-3 text-start',
+        isFusion && 'col-span-full min-h-0',
+        fuseSource?.checked && 'bg-interactive-selection',
         excluded && 'opacity-50',
-        fuseSource && !fuseSource.selectable && 'cursor-not-allowed',
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
@@ -153,15 +143,17 @@ export function RunLaneCard({
         ) : null}
         <span className="ms-auto inline-flex shrink-0 items-center">
           {fuseSource ? (
-            <span
-              aria-hidden="true"
-              className={cn(
-                'inline-flex size-4 items-center justify-center rounded border',
-                fuseSource.checked ? 'border-[var(--primary-base)] bg-[var(--primary-base)] text-[var(--primary-foreground)]' : 'border-[var(--interactive-border-hover)]',
-              )}
+            <Button
+              variant="chip"
+              size="icon"
+              role="checkbox"
+              aria-checked={fuseSource.checked}
+              aria-label={t('multirun.overview.card.selectAria', { name: modelLabel })}
+              disabled={!fuseSource.selectable}
+              onClick={onToggleFuseSource}
             >
-              {fuseSource.checked ? <Icon name="check" className="size-3" /> : null}
-            </span>
+              <Icon name={fuseSource.checked ? 'checkbox' : 'checkbox-blank'} className="size-4" />
+            </Button>
           ) : (
             <span className="inline-flex items-center gap-1.5">
               {unread && status !== 'working' ? (
@@ -180,7 +172,7 @@ export function RunLaneCard({
         <LaneDuration session={session} busy={busy} />
         {session.cost > 0 ? <span>{costFormatter.format(session.cost)}</span> : null}
       </div>
-      {fuseSource ? null : (
+      {guidance ? <FusionGuidance saved={guidance.saved} disabled={guidance.disabled} onSave={guidance.onSave} /> : null}
         <div className="flex items-center gap-1.5">
           <Button
             variant="outline"
@@ -195,8 +187,8 @@ export function RunLaneCard({
           </Button>
           {onKeep ? (
             <Button variant="outline" size="xs" onClick={onKeep}>
-              <Icon name="check" className="size-3.5" />
-              {t('multirun.overview.card.keep')}
+              <Icon name="inbox-archive" className="size-3.5" />
+            {t('multirun.membership.cleanup')}
             </Button>
           ) : null}
           {hasWorktree && diff?.state === 'ready' && diff.stat.files > 0 ? (
@@ -220,13 +212,13 @@ export function RunLaneCard({
                   size="icon"
                   className="size-6 text-muted-foreground hover:text-foreground"
                   disabled={actionsDisabled}
-                  aria-label={t('multirun.overview.card.detach')}
-                  onClick={onDetach}
+                  aria-label={t('multirun.membership.remove')}
+                  onClick={() => setConfirmation('detach')}
                 >
-                  <Icon name="external-link" className="size-3.5" />
+                  <Icon name="close" className="size-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="top">{t('multirun.overview.card.detachHint')}</TooltipContent>
+              <TooltipContent side="top">{t('multirun.membership.remove')}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -236,7 +228,7 @@ export function RunLaneCard({
                   className="size-6 text-muted-foreground hover:text-foreground"
                   disabled={actionsDisabled}
                   aria-label={t('multirun.overview.card.archive')}
-                  onClick={onArchive}
+                  onClick={() => setConfirmation('archive')}
                 >
                   <Icon name="inbox-archive" className="size-3.5" />
                 </Button>
@@ -245,7 +237,29 @@ export function RunLaneCard({
             </Tooltip>
           </span>
         </div>
-      )}
+      <Dialog open={confirmation !== null} onOpenChange={(open) => { if (!open) setConfirmation(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirmation === 'archive'
+              ? t('multirun.overview.card.archive')
+              : t('multirun.membership.confirmTitle', { name: modelLabel })}</DialogTitle>
+            <DialogDescription>{confirmation === 'archive'
+              ? t('multirun.membership.archiveDescription')
+              : t('multirun.membership.confirmDescription')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmation(null)}>{t('multirun.overview.cancel')}</Button>
+            <Button disabled={actionsDisabled} onClick={() => {
+              const action = confirmation;
+              setConfirmation(null);
+              if (action === 'detach') onDetach();
+              if (action === 'archive') onArchive();
+            }}>
+              {confirmation === 'archive' ? t('multirun.overview.card.archive') : t('multirun.membership.remove')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

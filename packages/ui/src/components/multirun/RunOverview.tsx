@@ -22,7 +22,12 @@ import { keepRunMember } from '@/lib/multirun/keep';
 import { fusionModeFor, NoFusionOutputsError, startRunFusion } from '@/lib/multirun/fusion';
 import { resolveFusionJudge } from '@/lib/multirun/autoFusion';
 import { RUN_LAUNCHER_ID } from '@/lib/multirun/launcher';
-import { addLaneToRun, archiveRun, detachFromRun, renameRun } from '@/lib/multirun/runActions';
+import { addLaneToRun, archiveRun, renameRun } from '@/lib/multirun/runActions';
+import { attachSessionToRun, canAttachSession, detachSessionFromRun, saveFusionGuidance } from '@/lib/multirun/membership';
+import { Textarea } from '@/components/ui/textarea';
+import { createRunParent } from '@/lib/multirun/parent';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { AttachSessionDialog } from './AttachSessionDialog';
 import { AgentSelector } from './AgentSelector';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
 import { RunLaneCard } from './RunLaneCard';
@@ -128,12 +133,15 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   // Phones get the overview, fusion and Keep, but never launch lanes (no header back arrow either).
   const isMobile = useUIStore((state) => state.isMobile);
   const [bar, setBar] = React.useState<BarMode>({ kind: 'idle' });
-  const [busyAction, setBusyAction] = React.useState<'keep' | 'fuse' | 'ask' | 'archive' | 'member' | null>(null);
+  const [busyAction, setBusyAction] = React.useState<'keep' | 'fuse' | 'ask' | 'archive' | 'member' | 'parent' | null>(null);
   const [judge, setJudge] = React.useState<ModelSelectionWithId[]>([]);
   const [judgeAgent, setJudgeAgent] = React.useState(currentAgentName ?? '');
   const [renaming, setRenaming] = React.useState<string | null>(null);
   const [expandedPrompts, setExpandedPrompts] = React.useState<ReadonlySet<string>>(() => new Set());
   const [pendingModel, setPendingModel] = React.useState<{ runGroup: string | undefined; model: ModelSelectionWithId } | null>(null);
+  const [attachOpen, setAttachOpen] = React.useState(false);
+  const [fusionGuidance, setFusionGuidance] = React.useState('');
+  const availableWorktrees = useSessionUIStore((state) => state.availableWorktreesByProject);
 
   const projectRoots = React.useMemo(
     () => new Set(projects.map((project) => normalizePath(project.path)).filter((path): path is string => Boolean(path))),
@@ -168,10 +176,11 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   }
 
   const laneIds = run.lanes.map((lane) => lane.sessionId);
-  const finishedLaneIds = laneIds.filter((id) => !activeSessionIds.has(id) && sessionById.get(id)?.time.idle);
+  const finishedLaneIds = [...run.lanes, ...run.fusions].map((member) => member.sessionId)
+    .filter((id) => !activeSessionIds.has(id) && sessionById.get(id)?.time.idle);
   const busyLaneCount = laneIds.filter((id) => activeSessionIds.has(id)).length;
   const isolated = run.lanes.some((lane) => worktreeById.get(lane.sessionId));
-  const memberById = new Map([...run.lanes, ...run.fusions].map((member) => [member.sessionId, member]));
+  const memberById = new Map([...run.lanes, ...run.fusions, ...run.parents].map((member) => [member.sessionId, member]));
   const nameOf = (sessionId: string): string => {
     const member = memberById.get(sessionId);
     return member ? modelLabelFor(member, providers) : '';
@@ -252,6 +261,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
         sourceIds: fuseSources,
         judge: resolveFusionJudge({ providerID: selection.providerID, modelID: selection.modelID, variant: selection.variant, agent: judgeAgent || undefined }),
         sessionById,
+        guidance: fusionGuidance,
       });
       setBar({ kind: 'idle' });
     } catch (error) {
@@ -260,6 +270,26 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const handleParent = async () => {
+    const existing = run.parents[0];
+    if (existing) { openChat(existing.sessionId); return; }
+    const selection = judge[0];
+    if (!selection || busyAction) return;
+    setBusyAction('parent');
+    try {
+      const parent = await createRunParent({
+        run, sessionById,
+        model: resolveFusionJudge({ providerID: selection.providerID, modelID: selection.modelID, variant: selection.variant, agent: judgeAgent || undefined }),
+        title: `${run.title} · ${t('multirun.parent.title')}`,
+      });
+      useUIStore.getState().closeMainSurfaces();
+      useSessionUIStore.getState().setCurrentSession(parent.id, parent.directory);
+    } catch (error) {
+      console.error('[MultiRun] Could not open the parent conversation', error);
+      toast.error(t('multirun.parent.failed'));
+    } finally { setBusyAction(null); }
   };
 
   const handleAddModel = async (model: ModelSelectionWithId, runGroup: string | undefined) => {
@@ -291,7 +321,8 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     if (!session) return;
     setBusyAction('member');
     try {
-      await detachFromRun(session, run.title);
+      const group = memberById.get(sessionId)?.identity.group;
+      await detachSessionFromRun({ session, runKey: run.key, confirmed: true, legacyDirectory: group?.kind === 'legacy' ? group.scope : undefined });
       toast.success(t('multirun.overview.card.detachDone', { name: nameOf(sessionId) }));
     } catch (error) {
       console.error('[MultiRun] Could not detach a session', error);
@@ -299,6 +330,32 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     } finally {
       setBusyAction(null);
     }
+  };
+
+  const anchorMember = run.lanes[0] ?? run.fusions[0] ?? run.parents[0];
+  const anchor = sessionById.get(anchorMember?.sessionId ?? '');
+  const projectOf = (session: Session) => resolveProjectForSessionDirectory(projects, availableWorktrees,
+    useSessionUIStore.getState().getWorktreeMetadata(session.id)?.projectDirectory ?? session.directory)
+    ?? resolveProjectForSessionDirectory(projects, availableWorktrees, session.directory);
+  const anchorProject = anchor ? projectOf(anchor) : null;
+  const eligibleSessions = attachOpen && anchorProject ? [...sessionById.values()].filter((session) => canAttachSession(session) && projectOf(session)?.id === anchorProject.id) : [];
+  const handleAttach = async (session: Session) => {
+    if (!anchor || busyAction) return;
+    setBusyAction('member');
+    try {
+      await attachSessionToRun({ run, session, anchor });
+      setAttachOpen(false);
+    } catch (error) {
+      console.error('[MultiRun] Could not add an existing session', error);
+      toast.error(t('multirun.membership.addFailed'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+  const handleSaveGuidance = async (session: Session, guidance: string) => {
+    setBusyAction('member');
+    try { await saveFusionGuidance({ session, runKey: run.key, guidance }); }
+    finally { setBusyAction(null); }
   };
 
   const handleArchiveMember = async (sessionId: string) => {
@@ -333,13 +390,13 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
         session={session}
         providerID={member.identity.providerID}
         modelLabel={modelLabelFor(member, providers)}
-        variantLabel={!isFusion && run.variants.length > 1 ? multiRunVariantLabel(member.identity.runGroup) : null}
+        variantLabel={member.identity.role === 'run' && run.variants.length > 1 ? multiRunVariantLabel(member.identity.runGroup) : null}
         isFusion={isFusion}
         busy={activeSessionIds.has(member.sessionId)}
         status={statusOf(member.sessionId) ?? 'notStarted'}
         unread={(unseenCountBySession[member.sessionId] ?? 0) > 0}
         summary={summaries.get(member.sessionId)}
-        fuseSource={bar.kind === 'fuse' && !isFusion
+        fuseSource={bar.kind === 'fuse' && member.identity.role !== 'parent'
           ? { checked: finished && !bar.excluded.has(member.sessionId), selectable: finished }
           : null}
         hasWorktree={Boolean(worktreeById.get(member.sessionId))}
@@ -352,6 +409,11 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
         actionsDisabled={busyAction !== null || bar.kind !== 'idle'}
         onOpenChat={() => openChat(member.sessionId)}
         onOpenDiff={() => openDiff(member.sessionId)}
+        guidance={finished && !(member.identity.group.kind === 'legacy' && member.identity.role === 'run') ? {
+          saved: member.identity.guidance ?? '',
+          disabled: busyAction !== null,
+          onSave: (guidance) => handleSaveGuidance(session, guidance),
+        } : undefined}
       />
     );
   };
@@ -484,6 +546,10 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
               </div>
             </div>
             {!isMobile && run.variants.length === 1 ? renderAddModel(run.variants[0]) : null}
+            <Button variant="outline" size="sm" disabled={busyAction !== null || anchor === undefined || anchorMember?.identity.group.kind !== 'id'} onClick={() => setAttachOpen(true)}>
+              <Icon name="add" className="size-4" />
+              {t('multirun.membership.add')}
+            </Button>
             <Button
               variant="ghost"
               size={isMobile ? 'icon' : 'sm'}
@@ -497,6 +563,11 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
             </Button>
           </div>
 
+          {run.parents.length > 0 ? <section className="mt-6">
+            <h2 className="mb-2 typography-ui-label font-semibold text-foreground">{t('multirun.parent.title')}</h2>
+            <p className="mb-2 typography-meta text-muted-foreground">{t('multirun.parent.hint')}</p>
+            <div className={cardGridClassName}>{run.parents.map(renderCard)}</div>
+          </section> : null}
           {run.fusions.length > 0 ? (
             <section className="mt-6">
               <h2 className="mb-2 inline-flex items-center gap-1.5 typography-ui-label font-semibold text-foreground">
@@ -508,6 +579,9 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
               </div>
             </section>
           ) : null}
+          <p className="mt-3 typography-meta text-muted-foreground">{t('multirun.fusion.retention')}</p>
+          {!isolated ? <p className="mt-1 typography-meta text-[var(--status-warning-text)]">{t('multirun.fusion.sharedWarning')}</p> : null}
+          {bar.kind === 'fuse' ? <Textarea value={fusionGuidance} onChange={(event) => setFusionGuidance(event.target.value)} aria-label={t('multirun.fusion.passGuidance')} placeholder={t('multirun.fusion.passGuidance')} className="mt-3 min-h-20" /> : null}
 
           {run.variants.map((variant) => {
             const label = multiRunVariantLabel(variant);
@@ -540,17 +614,19 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
           })}
         </div>
       </ScrollableOverlay>
+      <AttachSessionDialog open={attachOpen} onOpenChange={setAttachOpen} sessions={eligibleSessions} busy={busyAction !== null} onAttach={handleAttach} />
 
       <div className={cn('pointer-events-none absolute inset-x-0 bottom-4 flex justify-center', isMobile ? 'px-3' : 'px-6')}>
         <div className="pointer-events-auto flex w-full max-w-4xl flex-wrap items-center gap-2 rounded-xl border border-[var(--interactive-border-hover)] bg-[var(--surface-elevated)] px-3 py-2 shadow-lg">
           {keepTarget ? (
             <>
               <Icon name="git-branch" className="size-4 text-muted-foreground" />
-              <span className="min-w-0 flex-1 typography-meta text-foreground">
+              <div className="min-w-0 flex-1 typography-meta text-foreground">
                 {othersCount === 1
                   ? t('multirun.overview.keep.confirmSingle', { name: nameOf(keepTarget), count: othersCount })
                   : t('multirun.overview.keep.confirmPlural', { name: nameOf(keepTarget), count: othersCount })}
-              </span>
+                <p className="mt-1 text-[var(--status-warning-text)]">{t('multirun.cleanup.warning')}</p>
+              </div>
               <Button variant="ghost" size="sm" disabled={busyAction !== null} onClick={() => setBar({ kind: 'idle' })}>
                 {t('multirun.overview.cancel')}
               </Button>
@@ -606,13 +682,17 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
                     ? t('multirun.overview.meta.progress', { done: laneIds.length - busyLaneCount, total: laneIds.length })
                     : t('multirun.overview.bar.hint')}
               </span>
+              <Button variant="outline" size="sm" disabled={busyAction !== null || (run.parents.length === 0 && judge.length === 0)} onClick={() => void handleParent()} title={t('multirun.parent.hint')}>
+                <Icon name="chat-3" className="size-4" />
+                {t('multirun.parent.open')}
+              </Button>
               <Button
                 size="sm"
                 disabled={finishedLaneIds.length < 2 || busyAction !== null}
                 onClick={() => setBar({ kind: 'fuse', excluded: new Set() })}
               >
                 <FusionIcon className="size-4" />
-                {t('multirun.overview.bar.fuse')}
+                {run.fusions.length ? t('multirun.fusion.combine') : t('multirun.overview.bar.fuse')}
               </Button>
             </>
           )}

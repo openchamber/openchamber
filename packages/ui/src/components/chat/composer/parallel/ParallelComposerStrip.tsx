@@ -7,13 +7,14 @@ import { FusionIcon } from '@/components/icons/FusionIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Textarea } from '@/components/ui/textarea';
 import { BranchSelector, useBranchOptions } from '@/components/multirun/BranchSelector';
-import { ModelMultiSelect, type ModelSelectionWithId } from '@/components/multirun/ModelMultiSelect';
+import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from '@/components/multirun/ModelMultiSelect';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { ModelEffortMenu } from '@/components/multirun/ModelEffortMenu';
 import { SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
 import type { ParallelComposer } from './useParallelComposer';
+import { PromptCandidatesDialog } from '@/components/multirun/PromptCandidatesDialog';
 
 function SettingsColumnBlock({ title, children }: { title: string; children: React.ReactNode }): React.ReactNode {
   return (
@@ -34,17 +35,16 @@ function LaunchSettingsDialog({
   parallel,
   project,
   isGitRepository,
-  isolate,
   open,
   onOpenChange,
+  onGeneratePrompts,
 }: {
   parallel: ParallelComposer;
   project: { id: string; path: string } | null;
   isGitRepository: boolean | null;
-  /** Separate worktrees will be made: chosen, and the project is a git repository. */
-  isolate: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onGeneratePrompts: () => void;
 }): React.ReactNode {
   const { t } = useI18n();
   const state = parallel.state;
@@ -54,6 +54,7 @@ function LaunchSettingsDialog({
     if (open) setSetupDraft((setupCommands ?? []).join('\n'));
   }, [open, setupCommands]);
   if (!state) return null;
+  const isolate = state.isolate;
   const firstModel = state.variants[state.active]?.models[0];
   // The judge shown while fusion is off is the one "Automatic" would pick.
   const judge = state.fuse ?? (firstModel
@@ -80,14 +81,14 @@ function LaunchSettingsDialog({
                   selected={!isolate}
                   onSelect={() => parallel.setIsolate(false)}
                   label={t('chat.parallel.settings.whereShared')}
-                  description={t('chat.parallel.settings.whereSharedHint')}
+                  description={t('multirun.fusion.sharedWarning')}
                 />
                 <SettingsRadioOption
                   selected={isolate}
                   onSelect={() => parallel.setIsolate(true)}
                   disabled={isGitRepository === false}
                   label={t('chat.parallel.settings.whereWorktrees')}
-                  description={t('chat.parallel.settings.whereWorktreesHint')}
+                  description={t('multirun.fusion.isolatedHint')}
                 />
               </SettingsRadioGroup>
             </SettingsColumnBlock>
@@ -114,12 +115,13 @@ function LaunchSettingsDialog({
 
           <div className="flex flex-col gap-5">
             <SettingsColumnBlock title={t('chat.parallel.settings.fusionTitle')}>
+              <p className="typography-meta text-muted-foreground">{t('multirun.fusion.explanation')}</p>
               <SettingsRadioGroup aria-label={t('chat.parallel.settings.fusionTitle')}>
                 <SettingsRadioOption
                   selected={!state.fuse}
                   onSelect={() => parallel.setFuse(null)}
-                  label={t('chat.parallel.settings.fusionOff')}
-                  description={t('chat.parallel.settings.fusionOffHint')}
+                  label={t('multirun.fusion.manual')}
+                  description={t('multirun.fusion.manualHint')}
                 />
                 <SettingsRadioOption
                   selected={Boolean(state.fuse)}
@@ -170,6 +172,7 @@ function LaunchSettingsDialog({
                 <Icon name="add" className="size-3.5" />
                 {t('chat.parallel.settings.addVariant')}
               </Button>
+              <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => { close(); onGeneratePrompts(); }}>{t('multirun.prompts.title')}</Button>
             </SettingsColumnBlock>
           </div>
         </div>
@@ -199,12 +202,10 @@ export function ParallelComposerStrip({
   const state = parallel.state;
   const { isGitRepository } = useBranchOptions(project?.path ?? null);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [promptsOpen, setPromptsOpen] = React.useState(false);
   const { setSetupCommands } = parallel;
-  // A project that is not a git repository cannot have worktrees: its runs
-  // share the directory whatever the state says, and launch does the same.
-  const isolate = Boolean(state?.isolate) && isGitRepository !== false;
 
-  const needsSetupCommands = isolate && state?.setupCommands === null;
+  const needsSetupCommands = Boolean(state?.isolate) && state?.setupCommands === null;
   React.useEffect(() => {
     if (!project || !needsSetupCommands) return;
     let cancelled = false;
@@ -220,8 +221,8 @@ export function ParallelComposerStrip({
   if (!state) return null;
   const active = state.variants[state.active];
   const summary = [
-    isolate ? t('chat.parallel.isolation.worktrees') : t('chat.parallel.isolation.shared'),
-    state.fuse ? t('chat.parallel.fuse.judge', { model: state.fuse.displayName || state.fuse.modelID }) : t('chat.parallel.fuse.off'),
+    state.isolate ? t('chat.parallel.isolation.worktrees') : t('chat.parallel.isolation.shared'),
+    state.fuse ? t('chat.parallel.fuse.judge', { model: state.fuse.displayName || state.fuse.modelID }) : t('multirun.fusion.manual'),
   ].join(' · ');
 
   return (
@@ -341,10 +342,13 @@ export function ParallelComposerStrip({
         parallel={parallel}
         project={project}
         isGitRepository={isGitRepository}
-        isolate={isolate}
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
+        onGeneratePrompts={() => setPromptsOpen(true)}
       />
+      <PromptCandidatesDialog open={promptsOpen} onOpenChange={setPromptsOpen} original={parallel.getActivePrompt()} directory={project?.path ?? ''}
+        initialModels={active.models.map((model) => ({ providerID: model.providerID, modelID: model.modelID, variant: model.variant, displayName: model.displayName, instanceId: generateInstanceId() }))}
+        onUse={parallel.addGeneratedVariants} />
     </div>
   );
 }

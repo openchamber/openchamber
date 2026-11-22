@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './ko.settings';
+import { multirunWorkflowI18n } from './multirun-workflow.i18n';
 import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -82,6 +83,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '하위 에이전트 {count}개 사용',
   'sessions.sidebar.projectAction.active': '프로젝트 작업 실행 중',
   ...settingsDict,
+  ...multirunWorkflowI18n.ko,
   ...messagingI18n.ko,
   'gitView.operation.title': 'Git 작업',
   'gitView.operation.recovery.storage': 'OpenChamber가 여기에 Git 전송 상태를 저장할 수 없습니다. 사이트 저장소를 허용하고 새로 고치세요. 그때까지 push와 pull은 일시 중지됩니다.',

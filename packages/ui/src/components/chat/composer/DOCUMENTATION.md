@@ -1023,7 +1023,8 @@ the default remote's default branch such as `origin/main` unless changed),
 resolved at launch so it holds even when the launch settings were never
 opened. **Shared directory** puts every lane in the draft's directory (the
 worktree it points at, waiting for one Quick worktree is still making, else the
-project root). A project that is not a git repository always shares. A tab row shows only
+project root). Shared files require an explicit choice, including for a project
+without Git. A tab row shows only
 once there are two or more variants. Model pickers there render through a
 portal because the box clips its content; the footer drops the model button
 and keeps the ordinary send button (`ComposerActionButtons` with a
@@ -1042,6 +1043,30 @@ the maintainer chose separate worktrees from the Settings start as the default,
 even for a draft aimed at a worktree or with Auto-create worktree off. That
 switch names one worktree for one session and does not fit several lanes.
 Shared directory stays one click away for questions and research.
+
+The fusion settings explain that fusion creates a new result while retaining
+the individual sessions. Manual fusion waits for review and source guidance
+in the overview; automatic fusion remains an optional first pass.
+
+The parent's normal composer shows a role hint with a tappable explanation of
+guidance: it applies to the parent and future fusion, while individual steering
+uses the member's own chat. `useRunParentHint` selects the role as a primitive value,
+so streamed timestamps do not redraw it.
+
+"Generate prompts" in the prompt-variants settings opens the candidate review
+dialog. The description may ask for variations on the original, brand-new prompts,
+or both. Selected models call OpenCode's stateless `generate.text`; generation
+never runs candidate tasks. `lib/multirun/promptCandidates.ts` parses the bounded
+JSON response before it can enter composer state. One model's failure preserves
+the others' candidates. Generation models and execution models are separate choices.
+
+Candidates start unselected. Only an explicit multiselection followed by "Add
+selected prompts" creates ordinary variants through `addGeneratedVariants`.
+Existing nonempty prompts survive; empty placeholder variants are omitted. Each
+added prompt receives an independent copy of the active variant's run models,
+which can then be changed in its tab. A runtime, draft, or target change prevents
+stale generation from being applied to another draft. Mobile does not offer this
+launch workflow, consistent with existing parallel-mode availability.
 
 ## Chat quote highlights
 

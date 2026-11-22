@@ -1,4 +1,5 @@
 import { settingsDict } from './de.settings';
+import { multirunWorkflowI18n } from './multirun-workflow.i18n';
 import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -81,6 +82,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} Unteragenten eingesetzt',
   'sessions.sidebar.projectAction.active': 'Projektaktion aktiv',
   ...settingsDict,
+  ...multirunWorkflowI18n.de,
   ...messagingI18n.de,
   'gitView.operation.title': 'Git-Vorgang',
   'gitView.operation.recovery.storage': 'OpenChamber kann den Stand von Git-Übertragungen hier nicht speichern. Erlaube den Websitespeicher und lade neu; bis dahin sind Push und Pull pausiert.',

@@ -42,21 +42,6 @@ export async function renameRun(run: MultiRunSummary, title: string, sessionById
   return failed;
 }
 
-/**
- * Turns a member into an ordinary session, as if it never took part in the
- * run: its membership marker is deleted (a merge patch with `null`) and its
- * lane title ("Model · Run") becomes the run's title. It keeps its directory
- * or worktree. A run left with one member stops being a run by itself.
- */
-export async function detachFromRun(session: Session, runTitle: string): Promise<void> {
-  const result = await requestSessionMetadataUpdate(session.id, { openchamber: { multirun: null } }, session.directory);
-  if (result.outcome !== 'updated') throw new Error(`Multi-run membership was not removed: ${result.reason}`);
-  registerMultiRunSession({ ...session, metadata: result.metadata }, session.directory);
-  // Renaming also keeps an old slash-style lane title from reading as a legacy run.
-  const title = runTitle.trim();
-  if (title && title !== session.title) await useSessionUIStore.getState().updateSessionTitle(session.id, title);
-}
-
 /** Archives every member of the run. Worktrees stay; the chats move to the archive. */
 export async function archiveRun(run: MultiRunSummary): Promise<{ archivedIds: string[]; failedIds: string[] }> {
   return useSessionUIStore.getState().archiveSessions([...run.memberIds]);
@@ -111,6 +96,7 @@ export async function askOtherModels(input: {
     groupSlug: membership.groupSlug,
     lanes: [{ sessionId: session.id, identity }],
     fusions: [],
+    parents: [],
     memberIds: [session.id],
     providerIDs: [providerID],
     variants: [undefined],

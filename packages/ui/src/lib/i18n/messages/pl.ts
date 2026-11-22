@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './pl.settings';
+import { multirunWorkflowI18n } from './multirun-workflow.i18n';
 import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -82,6 +83,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': 'Użyci subagenci: {count}',
   'sessions.sidebar.projectAction.active': 'Trwa wykonywanie akcji projektu',
   ...settingsDict,
+  ...multirunWorkflowI18n.pl,
   ...messagingI18n.pl,
   'gitView.operation.title': 'Operacja Git',
   'gitView.operation.recovery.storage': 'OpenChamber nie może tu zapisać stanu przesyłów Git. Zezwól na pamięć witryny i odśwież; do tego czasu push i pull są wstrzymane.',

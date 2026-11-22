@@ -4,7 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useInputStore } from '@/sync/input-store';
-import { useMultiRunStore } from '@/stores/useMultiRunStore';
+import { MULTIRUN_ISOLATION_UNAVAILABLE, useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { waitForPendingDraftWorktreeRequest } from '@/lib/worktrees/pendingDraftWorktree';
@@ -168,6 +168,23 @@ export function useParallelComposer(input: {
     });
   }, [update]);
 
+  const addGeneratedVariants = React.useCallback((texts: string[]) => {
+    const ready = texts.filter((text) => text.trim());
+    if (ready.length === 0) return;
+    const originalText = messageRef.current;
+    update((current) => {
+      const existing = current.variants.map((variant, index) => index === current.active ? { ...variant, text: originalText } : variant);
+      const source = existing[current.active];
+      const variants = existing.filter((variant) => variant.text.trim());
+      const added = ready.map((text, index): ParallelVariant => ({
+        id: variantId(variants.length + index), text, models: source.models.map((model) => ({ ...model })),
+      }));
+      return { ...current, variants: [...variants, ...added].map((variant, index) => ({ ...variant, id: variantId(index) })), active: variants.length };
+    });
+    setMessage(ready[0]);
+  }, [setMessage, update]);
+  const getActivePrompt = React.useCallback(() => messageRef.current, []);
+
   const switchVariant = React.useCallback((target: number) => {
     const current = state;
     if (!current || target === current.active || !current.variants[target]) return;
@@ -251,7 +268,8 @@ export function useParallelComposer(input: {
       }
       const result = await useMultiRunStore.getState().createMultiRun({ ...params, sharedDirectory });
       if (!result) {
-        toast.error(useMultiRunStore.getState().error ?? t('chat.parallel.toast.failed'));
+        const error = useMultiRunStore.getState().error;
+        toast.error(error === MULTIRUN_ISOLATION_UNAVAILABLE ? t('multirun.fusion.noGit') : error ?? t('chat.parallel.toast.failed'));
         return;
       }
       if (result.failedCount > 0) toast.error(t('multirun.launcher.toast.partialFailure', { failed: result.failedCount }));
@@ -277,6 +295,8 @@ export function useParallelComposer(input: {
     incrementModel,
     decrementModel,
     addVariant,
+    addGeneratedVariants,
+    getActivePrompt,
     switchVariant,
     removeVariant,
     setIsolate,

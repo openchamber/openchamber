@@ -211,7 +211,7 @@ mock.module('@/sync/sync-refs', () => ({
   }),
 }));
 
-const { useMultiRunStore } = await import('./useMultiRunStore');
+const { MULTIRUN_ISOLATION_UNAVAILABLE, useMultiRunStore } = await import('./useMultiRunStore');
 
 describe('useMultiRunStore', () => {
   beforeEach(() => {
@@ -256,6 +256,22 @@ describe('useMultiRunStore', () => {
     expect(registeredDirectories).toEqual([{ sessionID: 'ses_multirun', directory: '/repo' }]);
     expect(ensureChildCalls).toEqual([{ directory: '/repo', bootstrap: false }]);
     expect(childState.session.map((session) => session.id)).toEqual(['ses_multirun']);
+  });
+
+  // Oracle: requesting separate files cannot silently launch shared-directory
+  // jobs. The explicit shared-directory test above is the positive control.
+  test('a non-Git project requires explicit shared-directory selection', async () => {
+    const result = await useMultiRunStore.getState().createMultiRun({
+      name: 'Independent work', isolateRuns: true,
+      groups: [{ prompt: 'Keep each result', models: [
+        { providerID: 'p', modelID: 'a' }, { providerID: 'p', modelID: 'b' },
+      ] }],
+    });
+    expect(result).toBeNull();
+    expect(useMultiRunStore.getState().error).toBe(MULTIRUN_ISOLATION_UNAVAILABLE);
+    expect(upsertedSessions).toEqual([]);
+    expect(worktreeCreateCalls).toEqual([]);
+    expect(dispatchedSessionIds).toEqual([]);
   });
 
   test('membership failure does not dispatch that session or discard a successful sibling', async () => {
@@ -506,11 +522,11 @@ describe('useMultiRunStore', () => {
     expect(laneDirectories()).toEqual(['/repo']);
   });
 
-  test('a project that is not a git repository shares the directory even when isolation was asked for', async () => {
+  test('a project without Git can explicitly choose a shared directory', async () => {
     isGitRepository = false;
     await useMultiRunStore.getState().createMultiRun({
       name: 'Question',
-      isolateRuns: true,
+      isolateRuns: false,
       groups: [{ prompt: 'Why?', models: [{ providerID: 'openai', modelID: 'gpt-5' }, { providerID: 'anthropic', modelID: 'claude' }] }],
     });
     expect(worktreeCreateCalls).toEqual([]);
