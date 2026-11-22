@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it, mock } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -276,6 +277,34 @@ describe('ui-passkeys store durability', () => {
     expect(controller.listPasskeys(requestFor())).toEqual([]);
     expect(fs.readFileSync(storeFile, 'utf8')).toBe(grown);
     expect(delivered).toBeLessThanOrEqual(33_554_433);
+    expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
+  });
+
+  // A FIFO swapped in before the recheck must be refused without a read: a
+  // plain readFileSync on a FIFO with no writer blocks this test forever.
+  it.skipIf(process.platform === 'win32')('refuses a non-regular file swapped in before the empty-file recheck (#2127)', () => {
+    const dir = fs.mkdtempSync(path.join(dataDir, 'fifo-'));
+    const storeFile = path.join(dir, 'ui-passkeys.json');
+    fs.writeFileSync(storeFile, '');
+    const racingFs = {
+      ...fs,
+      existsSync: (target) => {
+        if (target === storeFile && fs.statSync(storeFile).isFile()) {
+          fs.rmSync(storeFile);
+          execFileSync('mkfifo', [storeFile]);
+        }
+        return fs.existsSync(target);
+      },
+    };
+    const controller = createUiPasskeys({
+      passwordBinding: PASSWORD_BINDING,
+      readSettingsFromDiskMigrated: async () => ({}),
+      storeFile,
+      fs: racingFs,
+    });
+
+    expect(controller.listPasskeys(requestFor())).toEqual([]);
+    expect(fs.lstatSync(storeFile).isFIFO()).toBe(true);
     expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
   });
 
