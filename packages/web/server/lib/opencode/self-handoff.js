@@ -39,7 +39,7 @@ export const HANDOFF_FROM_ENV = 'OPENCHAMBER_HANDOFF_FROM';
 // Protocol 2 is the hello/go probe phase. The accepted range sits next to the
 // message names so a future protocol 3 widens it in exactly one place.
 export const HANDOFF_PROTOCOL_VERSION = 2;
-export const HANDOFF_PROTOCOL_RANGE = { min: 2, max: 2 };
+const HANDOFF_PROTOCOL_RANGE = { min: 2, max: 2 };
 
 const DEFAULT_HANDOFF_TIMEOUT_MS = 30_000;
 const TERMINATE_GRACE_MS = 3_000;
