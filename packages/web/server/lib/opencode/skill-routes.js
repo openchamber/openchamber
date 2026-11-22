@@ -488,6 +488,9 @@ export const registerSkillRoutes = (app, dependencies) => {
       );
 
       if (!scanResult.ok) {
+        if (scanResult.error?.kind === 'busy') {
+          return res.status(503).json({ ok: false, error: scanResult.error });
+        }
         if (scanResult.error?.kind === 'authRequired') {
           return res.status(401).json({
             ok: false,
