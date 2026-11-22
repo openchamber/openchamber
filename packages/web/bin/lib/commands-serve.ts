@@ -42,7 +42,7 @@ interface GeneratedPasswordResult {
 
 export interface ServeDependencies {
   serverPath: string;
-  checkOpenCodeCLI: (onNotice: (notice: CliNotice) => void) => Promise<string>;
+  checkOpenCodeCLI: (onNotice: (notice: CliNotice) => void) => Promise<string | undefined>;
   getServerRuntimeBinary: () => string;
   setForegroundServerActive: (active: boolean) => void;
   setForegroundShutdown: (handler: ((signal?: string) => Promise<void>) | null) => void;
@@ -299,11 +299,16 @@ async function serveCommand(options: ServeOptions) {
 
     const serveSpin = showOutput ? createSpinner(options) : null;
 
+    const childBaseEnv = withoutInjectedEnv(process.env);
+    if (opencodeBinary) {
+      childBaseEnv.OPENCODE_BINARY = opencodeBinary;
+    }
+
     const child = spawn(runtimeBin, serverArgs, {
       detached: true,
       windowsHide: true,
       stdio: ['ignore', logFd, logFd, 'ipc'],
-      env: assignInjectedEnv({ ...withoutInjectedEnv(process.env), OPENCODE_BINARY: opencodeBinary }, {
+      env: assignInjectedEnv(childBaseEnv, {
         OPENCHAMBER_PORT: String(targetPort),
         OPENCHAMBER_RUNTIME: 'web',
         OPENCHAMBER_HOST: effectiveHost,

@@ -219,8 +219,8 @@ gap.
   `packages/web/server/lib/opencode/compatibility.js`; raise it when OpenChamber
   starts depending on a route a newer tag added.
 - Pinned version: the `@opencode/*` devDependencies in
-  `packages/electron/package.json` (`@opencode/server` and the packages the
-  desktop's bundled server imports, `packages/electron/opencode-server`) and
+  `packages/web/package.json` and `packages/electron/package.json` (`@opencode/server` and the packages the
+  bundled server imports, `packages/web/opencode-server`), the four native wrapper packages in `packages/web/package.json` `dependencies` (`@lydell/node-pty`, `@parcel/watcher`, `@ff-labs/fff-node`, `@opencode/pty`), and
   `@opencode/client` / `@opencode/schema` in the root, ui, web and vscode
   manifests, plus `@opencode/cli@` in the Dockerfile. They move together,
   including `opencode.url` in `flake.nix` (see the bump steps).

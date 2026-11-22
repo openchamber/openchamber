@@ -12,6 +12,7 @@ import { searchPathFor } from './cli-executables.js';
 import { requestServerShutdown } from './cli-http.js';
 import { isProcessRunning, stopInstanceProcess, SERVER_SHUTDOWN_GRACE_MS } from './cli-process.js';
 import { injectedEnvKeys } from '../../server/lib/injected-env.js';
+import { createOpenCodeEnvRuntime } from '../../server/lib/opencode/env-runtime.js';
 import { fileURLToPath } from 'node:url';
 
 const STARTUP_SERVICE_ID = 'dev.openchamber.web';
@@ -138,7 +139,17 @@ function collectStartupEnv(options: StartupOptions = {}) {
   );
 
   if (options.envSnapshot !== false) {
-    const opencodeBinary = process.env.OPENCODE_BINARY || searchPathFor('opencode');
+    let opencodeBinary = process.env.OPENCODE_BINARY;
+    if (!opencodeBinary) {
+      const envRuntime = createOpenCodeEnvRuntime({
+        state: {},
+        normalizeDirectoryPath: () => { throw new TypeError('normalizeDirectoryPath is not a function'); },
+        readSettingsFromDiskMigrated: () => { throw new TypeError('readSettingsFromDiskMigrated is not a function'); },
+      });
+      if (!envRuntime.isBundledOpenCodePath(envRuntime.resolveOpencodeCliPath())) {
+        opencodeBinary = searchPathFor('opencode') ?? undefined;
+      }
+    }
     if (isStartupText(opencodeBinary) && opencodeBinary.trim().length > 0) {
       env.OPENCODE_BINARY = opencodeBinary.trim();
     }

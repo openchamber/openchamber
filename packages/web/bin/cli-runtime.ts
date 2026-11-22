@@ -162,14 +162,14 @@ function missingEnvDependency(name: string) {
   };
 }
 
-async function checkOpenCodeCLI(onNotice?: (notice: CliNotice) => void) {
+async function checkOpenCodeCLI(onNotice?: (notice: CliNotice) => void): Promise<string | undefined> {
   if (process.env.OPENCODE_BINARY) {
     const override = resolveExplicitBinary(process.env.OPENCODE_BINARY);
     if (override) {
       process.env.OPENCODE_BINARY = override;
       return override;
     }
-    const message = `OPENCODE_BINARY="${process.env.OPENCODE_BINARY}" is not an executable file. Falling back to PATH lookup.`;
+    const message = `OPENCODE_BINARY="${process.env.OPENCODE_BINARY}" is not an executable file. Falling back to default OpenCode lookup.`;
     if (onNotice !== undefined) {
       onNotice({ level: 'warning', code: 'OPENCODE_BINARY_INVALID', message });
     } else {
@@ -177,13 +177,22 @@ async function checkOpenCodeCLI(onNotice?: (notice: CliNotice) => void) {
     }
   }
 
+  const envRuntime = createOpenCodeEnvRuntime({
+    state: {},
+    normalizeDirectoryPath: missingEnvDependency('normalizeDirectoryPath'),
+    readSettingsFromDiskMigrated: missingEnvDependency('readSettingsFromDiskMigrated'),
+  });
+  const canUseBundled = () => envRuntime.isBundledOpenCodePath(envRuntime.resolveOpencodeCliPath());
+  if (canUseBundled()) {
+    return undefined;
+  }
+
   let resolvedFromPath = searchPathFor('opencode');
   if (!resolvedFromPath) {
-    createOpenCodeEnvRuntime({
-      state: {},
-      normalizeDirectoryPath: missingEnvDependency('normalizeDirectoryPath'),
-      readSettingsFromDiskMigrated: missingEnvDependency('readSettingsFromDiskMigrated'),
-    }).applyLoginShellEnvSnapshot();
+    envRuntime.applyLoginShellEnvSnapshot();
+    if (canUseBundled()) {
+      return undefined;
+    }
     resolvedFromPath = searchPathFor('opencode');
   }
   if (resolvedFromPath) {
