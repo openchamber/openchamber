@@ -400,3 +400,35 @@ test('sending from an existing session calls the session-actions sendMessage', a
   const [content, providerID, modelID] = calls[0] ?? [];
   expect([content, providerID, modelID]).toEqual(['hello', 'openai', 'gpt-test']);
 });
+
+/**
+ * Shares this file's mounted composer. Move to background rebound to Ctrl+B
+ * in Settings: the press in the real composer reaches the registered handler
+ * and is stopped there, so the editor keymap and the window route never see
+ * it. The only coverage of ChatInput handing the press over
+ * (composer/editor/applicationShortcuts.ts covers the hand-off itself).
+ */
+test('a Move to background shortcut rebound to Ctrl+B runs from the composer', async () => {
+  const { useUIStore } = await import('@/stores/useUIStore');
+  const { shortcutRegistry } = await import('@/lib/shortcuts');
+  const originalOverrides = useUIStore.getState().shortcutOverrides;
+  let backgrounded = 0;
+  let windowSaw = 0;
+  const onWindowKeyDown = (event: KeyboardEvent) => { if (event.key === 'b') windowSaw += 1; };
+  const unregister = shortcutRegistry.register('background_session_work', () => { backgrounded += 1; });
+  window.addEventListener('keydown', onWindowKeyDown);
+  try {
+    useUIStore.setState({ shortcutOverrides: { ...originalOverrides, background_session_work: 'ctrl+b' } });
+    await countComposerRenders('session', async (view) => {
+      const press = new KeyboardEvent('keydown', { key: 'b', code: 'KeyB', ctrlKey: true, bubbles: true, cancelable: true });
+      await act(async () => { view.contentDOM.dispatchEvent(press); });
+      expect(press.defaultPrevented).toBe(true);
+    });
+  } finally {
+    unregister();
+    window.removeEventListener('keydown', onWindowKeyDown);
+    useUIStore.setState({ shortcutOverrides: originalOverrides });
+  }
+  expect(backgrounded).toBe(1);
+  expect(windowSaw).toBe(0);
+});
