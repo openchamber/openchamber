@@ -4,6 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { CONTEXT_ZONES } from '@/lib/workspace/zones';
 import { useZoneDragStore } from './zoneDrag';
+import { isContextWindow } from '@/lib/contextWindow/role';
 
 const TARGET_LABEL_KEYS = {
   left: 'contextPanel.zone.dropLeft',
@@ -11,8 +12,12 @@ const TARGET_LABEL_KEYS = {
   right: 'contextPanel.zone.dropRight',
 } as const;
 
+const MIRRORED_TARGET_LABEL_KEYS = { ...TARGET_LABEL_KEYS, left: TARGET_LABEL_KEYS.right, right: TARGET_LABEL_KEYS.left };
+
 export const ZoneDropOverlay: React.FC = () => {
-  const { t } = useI18n();
+  const { t, direction } = useI18n();
+  const sideLabelKeys = direction === 'rtl' ? MIRRORED_TARGET_LABEL_KEYS : TARGET_LABEL_KEYS;
+  const labelKeys = isContextWindow() ? { ...sideLabelKeys, bottom: 'contextPanel.zone.dropCenter' as const } : sideLabelKeys;
   const drag = useZoneDragStore((state) => state.drag);
   const hovered = useZoneDragStore((state) => state.hovered);
   const chipRef = React.useRef<HTMLDivElement | null>(null);
@@ -62,7 +67,7 @@ export const ZoneDropOverlay: React.FC = () => {
             style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
           >
             <span className="typography-ui-label">
-              {t(TARGET_LABEL_KEYS[zone])}
+              {t(labelKeys[zone])}
             </span>
           </div>
         );

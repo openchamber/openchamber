@@ -19,6 +19,23 @@ client). VS Code does not mount `ContextPanel`, so it has no such menu.
 
 `ContextPanel` owns the open-file strip in each workspace zone. Its editor mounts `FilesView`, which has no tab row of its own. The file strip enables `SortableTabsStrip`'s `scrollWithWheel` option, so a regular vertical mouse wheel reaches tabs past either edge without changing the open file or showing a scrollbar. Other context panel tab modes keep their existing wheel behavior.
 
+## Context panel window
+
+`ContextWindowLayout.tsx` is the context panel in a window of its own: the
+rail and three zones, with the bottom zone as the center column where a main
+window has the chat. `ContextPanel` `variant="center"` fills that column with
+no resize handle; `variant="side"` marks the side zones there. No zone in
+that window expands, since the center already takes the room. The mode
+itself, routing and following the main window live in `lib/contextWindow`
+(`DOCUMENTATION.md` there). While a main window is detached, `MainLayout`
+mounts no zones, panes, rail, drop overlay or fit arbiter, and keeps only
+the closed right zone, whose slot holds the work-status card. The rail and
+the zone header (on hover, `ContextZoneWindowButtons`) carry the control
+that detaches the panel; in the panel window the rail's control sends it
+back. Drop targets follow the layout direction: in a right-to-left layout
+the measured physical sides map to the mirrored zones, and their labels
+swap with them.
+
 ## Header session tabs
 
 `SessionTabsStrip.tsx` is the header's horizontal working set of sessions, in

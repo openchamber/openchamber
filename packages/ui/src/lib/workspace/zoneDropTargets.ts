@@ -27,6 +27,19 @@ export const computeZoneDropTargets = (row: ZoneRect, chatColumn: ZoneRect, bott
   };
 };
 
+export const computeCenterDropTargets = (row: ZoneRect, center: ZoneRect): ZoneDropTargets => {
+  const rowRight = row.left + row.width;
+  const centerRight = center.left + center.width;
+  const strip = Math.min(SIDE_TARGET_MAX, row.width * SIDE_TARGET_SHARE, center.width / 4);
+  const leftRight = center.left - row.left >= 1 ? center.left : row.left + strip;
+  const rightLeft = rowRight - centerRight >= 1 ? centerRight : rowRight - strip;
+  return {
+    left: { left: row.left, top: row.top, width: leftRight - row.left, height: row.height },
+    right: { left: rightLeft, top: row.top, width: rowRight - rightLeft, height: row.height },
+    bottom: { left: leftRight, top: center.top, width: Math.max(0, rightLeft - leftRight), height: center.height },
+  };
+};
+
 const contains = (rect: ZoneRect, point: ZonePoint): boolean => (
   point.x >= rect.left && point.x < rect.left + rect.width
   && point.y >= rect.top && point.y < rect.top + rect.height

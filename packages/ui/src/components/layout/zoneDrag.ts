@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import type { ContextPanelMode } from '@/lib/surfaces/modes';
-import { computeZoneDropTargets, hitTestZoneDropTargets, type ZoneDropTargets, type ZonePoint, type ZoneRect } from '@/lib/workspace/zoneDropTargets';
+import { computeCenterDropTargets, computeZoneDropTargets, hitTestZoneDropTargets, type ZoneDropTargets, type ZonePoint, type ZoneRect } from '@/lib/workspace/zoneDropTargets';
 import { shownContextModes, type ContextZone } from '@/lib/workspace/zones';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { isRightToLeft } from '@/lib/i18n';
 
 type ActiveZoneDrag = {
   mode: ContextPanelMode;
@@ -37,11 +38,15 @@ const openZoneCard = (zone: ContextZone): ZoneRect | null => (
 );
 
 export const beginZoneDrag = (drag: Omit<ActiveZoneDrag, 'targets' | 'frames'>): boolean => {
-  const row = rectOf(document.querySelector('[data-workspace-row]'));
+  const rowElement = document.querySelector('[data-workspace-row]');
+  const row = rectOf(rowElement);
   const chatColumn = rectOf(document.querySelector('[data-workspace-chat]'));
-  if (!row || !chatColumn) return false;
+  if (!rowElement || !row || !chatColumn) return false;
   const bottomZone = document.querySelector('[data-context-zone="bottom"][data-context-panel-open="true"]');
-  const targets = computeZoneDropTargets(row, chatColumn, rectOf(bottomZone));
+  const measured = document.querySelector('[data-workspace-center]')
+    ? computeCenterDropTargets(row, chatColumn)
+    : computeZoneDropTargets(row, chatColumn, rectOf(bottomZone));
+  const targets = isRightToLeft(rowElement) ? { ...measured, left: measured.right, right: measured.left } : measured;
   const frames = {
     left: openZoneCard('left') ?? insetLikeCard(targets.left),
     right: openZoneCard('right') ?? insetLikeCard(targets.right),

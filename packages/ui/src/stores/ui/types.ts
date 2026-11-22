@@ -378,6 +378,7 @@ export interface UIStore {
   closeContextFile: (directory: string, filePath: string) => void;
   closeContextPanelTabs: (directory: string, tabIds: readonly string[]) => void;
   closeContextPanel: (directory: string) => void;
+  toggleContextPanel: (directory: string) => void;
   closeContextZone: (
     directory: string,
     zone: ContextZone,

@@ -10,6 +10,8 @@ import { ContextSurfacePanes } from './ContextSurfacePanes';
 import { ZoneDropOverlay } from './ZoneDropOverlay';
 import { ZoneFitArbiter } from './ZoneFitArbiter';
 import { followZonePlacementOfOtherWindows } from './zoneSync';
+import { useContextWindowOwner } from '@/hooks/useContextWindowOwner';
+import { useContextWindowStore } from '@/lib/contextWindow/store';
 import { ContextPanelRail } from './ContextPanelRail';
 import { GuestHosts } from './GuestHosts';
 import { PluginPane } from './PluginPane';
@@ -123,6 +125,8 @@ export const MainLayout: React.FC = () => {
     }, [openGuestPageId, guestPage]);
     React.useEffect(() => subscribeRuntimeEndpointChanged(() => useUIStore.getState().setOpenGuestPage(null)), []);
     React.useEffect(() => followZonePlacementOfOtherWindows(), []);
+    useContextWindowOwner();
+    const contextPanelDetached = useContextWindowStore((state) => state.detached);
     const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || isIntegrationsCatalogOpen || isUsageStatsPageOpen || isSourceBoardOpen || isOverviewOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
     const mainRef = React.useRef<HTMLElement | null>(null);
     React.useEffect(() => {
@@ -189,7 +193,7 @@ export const MainLayout: React.FC = () => {
                         <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
                             <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                                 <div className="relative flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true" data-workspace-row="true">
-                                    <ContextPanel zone="left" />
+                                    {contextPanelDetached ? null : <ContextPanel zone="left" />}
                                     <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
                                         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-workspace-chat="true">
                                         <main ref={mainRef} className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
@@ -214,18 +218,24 @@ export const MainLayout: React.FC = () => {
                                                     onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
                                             </div>}
                                         </main>
-                                        <ContextPanel zone="bottom" />
+                                        {contextPanelDetached ? null : <ContextPanel zone="bottom" />}
                                         </div>
                                         <ContextPanel zone="right" />
-                                        <ContextSurfacePanes />
-                                        <ZoneDropOverlay />
-                                        <ZoneFitArbiter />
+                                        {contextPanelDetached ? null : (
+                                            <>
+                                                <ContextSurfacePanes />
+                                                <ZoneDropOverlay />
+                                                <ZoneFitArbiter />
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             </div>
-                            <div data-page-scroll-lock="true">
-                                <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
-                            </div>
+                            {contextPanelDetached ? null : (
+                                <div data-page-scroll-lock="true">
+                                    <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+                                </div>
+                            )}
                             <ErrorBoundary><GuestHosts /></ErrorBoundary>
                         </div>
                     </div>
