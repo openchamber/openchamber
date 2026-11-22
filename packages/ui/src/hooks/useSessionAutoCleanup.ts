@@ -1,5 +1,7 @@
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { scheduleTimeout } from '@/lib/timing/scheduleTimeout';
 import { ensureGlobalSessionsLoaded, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
@@ -16,6 +18,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 
 const EMPTY_SESSIONS: Session[] = [];
+const RETENTION_SETTINGS_RETRY_MS = 60_000;
 type CleanupOptions = { autoRun?: boolean; enabled?: boolean };
 
 export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: CleanupOptions = {}) => {
@@ -36,10 +39,51 @@ export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: Cleanu
   const workKeeps = useUIStore(inWorkKeepsSessions);
 
   React.useEffect(() => {
-    if (!needsGlobalSessions) return;
-    if (autoRun && autoDeleteLastRunAt && Date.now() - autoDeleteLastRunAt < RETENTION_INTERVAL_MS) return;
-    void ensureGlobalSessionsLoaded();
-  }, [needsGlobalSessions, autoRun, autoDeleteLastRunAt]);
+    if (!enabled || !autoRun || !autoDeleteEnabled || autoDeleteAfterDays < 1 || isLoading) return;
+
+    let cancelTimeout: (() => void) | undefined;
+    let generation = 0;
+    let retriedSettings = false;
+    const schedule = (delay: number) => {
+      cancelTimeout?.();
+      cancelTimeout = scheduleTimeout(wake, delay);
+    };
+    const wake = () => {
+      const lastRunAt = useUIStore.getState().autoDeleteLastRunAt;
+      const remaining = lastRunAt ? lastRunAt + RETENTION_INTERVAL_MS - Date.now() : 0;
+      if (remaining > 0) {
+        schedule(Math.min(remaining, RETENTION_INTERVAL_MS));
+        return;
+      }
+      const attemptGeneration = generation;
+      void runSessionRetentionCleanup().then(({ skippedReason }) => {
+        if (attemptGeneration !== generation) return;
+        if ((skippedReason === 'settings-unconfirmed' || skippedReason === 'running') && !retriedSettings) {
+          retriedSettings = true;
+          schedule(RETENTION_SETTINGS_RETRY_MS);
+        } else {
+          schedule(RETENTION_INTERVAL_MS);
+        }
+      }).catch((error) => {
+        console.error('[SessionRetention] Cleanup failed', error);
+      });
+    };
+    const unsubscribe = subscribeRuntimeEndpointChanged(() => {
+      generation += 1;
+      retriedSettings = false;
+      schedule(0);
+    });
+    wake();
+    return () => {
+      generation += 1;
+      unsubscribe();
+      cancelTimeout?.();
+    };
+  }, [enabled, autoRun, autoDeleteEnabled, autoDeleteAfterDays, autoDeleteLastRunAt, isLoading, onlyArchived, action, workKeeps]);
+
+  React.useEffect(() => {
+    if (enabled && !autoRun) void ensureGlobalSessionsLoaded();
+  }, [enabled, autoRun]);
 
   const candidates = React.useMemo(() => buildSessionRetentionCandidates({
     sessions: [...activeSessions, ...archivedSessions],
@@ -50,15 +94,6 @@ export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: Cleanu
     activeSessionIds,
     isKept: (session) => isSessionKeptByUser(session, pinnedIds, workKeeps),
   }), [activeSessions, archivedSessions, currentSessionId, autoDeleteAfterDays, action, onlyArchived, activeSessionIds, pinnedIds, workKeeps]);
-
-  React.useEffect(() => {
-    if (!enabled || !autoRun || !autoDeleteEnabled || autoDeleteAfterDays <= 0
-      || isLoading || status !== 'ready' || isRunning) return;
-    if (autoDeleteLastRunAt && Date.now() - autoDeleteLastRunAt < RETENTION_INTERVAL_MS) return;
-    void runSessionRetentionCleanup().catch((error) => {
-      console.error('[SessionRetention] Cleanup failed', error);
-    });
-  }, [enabled, autoRun, autoDeleteEnabled, autoDeleteAfterDays, isLoading, status, isRunning, autoDeleteLastRunAt]);
 
   return {
     candidates,

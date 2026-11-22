@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Session } from "@/lib/opencode/model"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { loadDesktopSettings } from '@/lib/persistence';
 import { getBtwSessionID } from '@/lib/sessionBtwMetadata';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
@@ -95,7 +96,7 @@ type SessionRetentionResult = {
   completedIds: string[];
   failedIds: string[];
   action: SessionRetentionAction;
-  skippedReason?: 'disabled' | 'loading' | 'cooldown' | 'no-candidates' | 'running' | 'runtime-changed';
+  skippedReason?: 'disabled' | 'loading' | 'cooldown' | 'no-candidates' | 'running' | 'runtime-changed' | 'settings-unconfirmed';
 };
 
 export const useSessionRetentionRunStore = create(() => ({ isRunning: false }));
@@ -118,10 +119,39 @@ export async function runSessionRetentionCleanup({ force = false } = {}): Promis
   let runtimeChanged = false;
   const unsubscribe = subscribeRuntimeEndpointWillChange(() => { runtimeChanged = true; });
   const isCurrentRuntime = () => !runtimeChanged && getRuntimeKey() === runtimeKey;
+  let attempted = false;
+  const policyIsCurrent = () => {
+    const current = useUIStore.getState();
+    return current.autoDeleteEnabled && current.autoDeleteAfterDays === settings.autoDeleteAfterDays
+      && current.sessionRetentionOnlyArchived === onlyArchived
+      && (onlyArchived || current.sessionRetentionAction === action)
+      && inWorkKeepsSessions(current) === inWorkKeepsSessions(settings);
+  };
   useSessionRetentionRunStore.setState({ isRunning: true });
   try {
+    if (!force) {
+      const confirmed = await loadDesktopSettings();
+      if (!isCurrentRuntime()) return { ...result, skippedReason: 'runtime-changed' };
+      if (confirmed?.autoDeleteEnabled === false) return { ...result, skippedReason: 'disabled' };
+      const defaults = useUIStore.getInitialState();
+      if (confirmed?.autoDeleteEnabled !== true || !policyIsCurrent()
+        || (confirmed.autoDeleteAfterDays ?? defaults.autoDeleteAfterDays) !== settings.autoDeleteAfterDays
+        || (confirmed.sessionRetentionOnlyArchived ?? defaults.sessionRetentionOnlyArchived) !== onlyArchived
+        || (!onlyArchived && (confirmed.sessionRetentionAction ?? defaults.sessionRetentionAction) !== action)
+        || inWorkKeepsSessions({
+          sessionWorkEnabled: confirmed.sessionWorkEnabled ?? defaults.sessionWorkEnabled,
+          sessionRetentionIncludeInWork: confirmed.sessionRetentionIncludeInWork ?? defaults.sessionRetentionIncludeInWork,
+        }) !== inWorkKeepsSessions(settings)) {
+        return { ...result, skippedReason: 'settings-unconfirmed' };
+      }
+    }
+    attempted = true;
     await useGlobalSessionsStore.getState().loadSessions();
     if (!isCurrentRuntime()) return { ...result, skippedReason: 'runtime-changed' };
+    if (!force && !policyIsCurrent()) {
+      attempted = false;
+      return { ...result, skippedReason: 'settings-unconfirmed' };
+    }
     if (useGlobalSessionsStore.getState().status !== 'ready') {
       throw new Error('Session retention requires a complete session list');
     }
@@ -145,6 +175,7 @@ export async function runSessionRetentionCleanup({ force = false } = {}): Promis
         result.failedIds.push(...candidateIds.slice(index));
         break;
       }
+      if (!force && !policyIsCurrent()) break;
       const state = useGlobalSessionsStore.getState();
       const session = state.entityById.get(id);
       if (!session) continue;
@@ -190,7 +221,7 @@ export async function runSessionRetentionCleanup({ force = false } = {}): Promis
     }
     return result;
   } finally {
-    if (isCurrentRuntime()) settings.setAutoDeleteLastRunAt(Date.now());
+    if (attempted && isCurrentRuntime()) settings.setAutoDeleteLastRunAt(Date.now());
     unsubscribe();
     useSessionRetentionRunStore.setState({ isRunning: false });
   }

@@ -1008,8 +1008,12 @@ is a later stage.
 automatic runs share a lock acquired before loading. Each run requests a fresh
 complete global snapshot and refuses the loader's error/fallback state. A
 runtime switch stops the batch and prevents writing its cooldown into the new
-runtime. Automatic attempts are limited to once per day while the app is open;
-manual runs bypass the cooldown and enabled checkbox.
+runtime. Automatic attempts are limited to once per day while the app is open.
+The background hook sets a timeout for the cooldown deadline so it can resume
+even when the app state has not changed. Automatic attempts confirm the
+active runtime's settings before using its session list, since after a runtime
+switch the UI can still hold the previous host's settings. Manual runs bypass
+the cooldown and enabled checkbox.
 
 Retention targets unarchived sessions by last activity by default. The opt-in
 `sessionRetentionOnlyArchived` setting switches both the preview and execution

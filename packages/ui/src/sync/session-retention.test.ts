@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:
 import type { Session } from '@/lib/opencode/model';
 import * as sessionRoutes from './session-archive-batch';
 import { opencodeClient } from '@/lib/opencode/client';
+import { invalidateSettingsCache } from '@/lib/persistence';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -32,6 +33,7 @@ const seed = (sessions: Session[]) => useGlobalSessionsStore.getState().applySna
 
 beforeEach(() => {
   switchRuntimeEndpoint({ apiBaseUrl: 'https://retention.test', runtimeKey: 'retention-test' });
+  invalidateSettingsCache();
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
   useSessionUIStore.setState({ currentSessionId: null, isLoading: false });
   replaceGlobalSessionStatusById(new Map());
@@ -51,6 +53,28 @@ beforeEach(() => {
   spyOn(console, 'error').mockImplementation(() => {});
 });
 afterEach(() => { mock.restore(); });
+
+const unconfirmedPolicies = [
+  ['cleanup is disabled', () => Response.json({ autoDeleteEnabled: false })],
+  ['the archive scope is missing', () => Response.json({ autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'delete' })],
+  ['settings are unavailable', () => new Response(null, { status: 503 })],
+] as const;
+for (const [scenario, response] of unconfirmedPolicies) {
+  test(`automatic cleanup does not spend its cooldown or delete after switching when ${scenario}`, async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://retention-target.test', runtimeKey: 'retention-target' });
+    useUIStore.setState({ sessionRetentionOnlyArchived: true });
+    seed([session('old')]);
+    const remove = spyOn(opencodeClient, 'deleteSession').mockResolvedValue(true);
+    spyOn(globalThis, 'fetch').mockImplementation(async () => response());
+
+    const result = await runSessionRetentionCleanup();
+
+    expect(result.completedIds).toEqual([]);
+    expect(remove).not.toHaveBeenCalled();
+    expect(useGlobalSessionsStore.getState().entityById.has('old')).toBe(true);
+    expect(useUIStore.getState().autoDeleteLastRunAt).toBe(0);
+  });
+}
 
 describe('retention eligibility', () => {
   test('retains recent, current, archived and running sessions', () => {
@@ -159,6 +183,23 @@ describe('retention execution', () => {
     });
     expect((await runSessionRetentionCleanup({ force: true })).skippedReason).toBe('no-candidates');
     expect(remove.mock.calls).toHaveLength(0);
+  });
+
+  test('keeps cleanup due when the cutoff changes while the session list loads', async () => {
+    seed([session('old')]);
+    const remove = spyOn(opencodeClient, 'deleteSession').mockResolvedValue(true);
+    spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
+      autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'delete',
+    }));
+    spyOn(useGlobalSessionsStore.getState(), 'loadSessions').mockImplementation(async () => {
+      useUIStore.setState({ autoDeleteAfterDays: 35 });
+      const state = useGlobalSessionsStore.getState();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    });
+
+    expect((await runSessionRetentionCleanup()).skippedReason).toBe('settings-unconfirmed');
+    expect(remove).not.toHaveBeenCalled();
+    expect(useUIStore.getState().autoDeleteLastRunAt).toBe(0);
   });
 
   test('treats an authoritative 404 as completed and removes stale cached state', async () => {
