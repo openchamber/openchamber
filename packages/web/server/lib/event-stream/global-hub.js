@@ -37,6 +37,37 @@ export const parseGlobalBlock = (block) => {
   return { ...envelope, eventId: id || undefined, bufferId: envelope.eventId };
 };
 
+// OpenCode opens every connection with a `server.connected` greeting, which carries no `id:` line,
+// and the UI answers a greeting by re-reading what it shows, since it means the stream started over.
+// A connection that resumed from an OpenCode cursor started over only when OpenCode could not honour
+// the cursor, which it says with a `server.resync` as the first event after the greeting
+// (packages/server/src/event-feed.ts queues the resync before the connection goes live). So the
+// greeting of such a connection is held until the connection's next event: a resync passes it on,
+// ahead of the resync; a replayed or live event drops it, because nothing was missed. A connection
+// without a cursor passes its greeting on at once.
+const createResumedGreetingGate = () => {
+  let deciding = false;
+  let greeting = null;
+  return {
+    connected(lastEventId) {
+      deciding = isOpenCodeEventId(lastEventId);
+      greeting = null;
+    },
+    /** The events to pass on, in order, for one the connection delivered. */
+    admit(event) {
+      if (!deciding) return [event];
+      if (event.payload?.type === SERVER_CONNECTED_PAYLOAD_TYPE && !isOpenCodeEventId(event.eventId)) {
+        greeting = event;
+        return [];
+      }
+      deciding = false;
+      const held = greeting;
+      greeting = null;
+      return held && event.payload?.type === SSE_RESYNC_PAYLOAD_TYPE ? [held, event] : [event];
+    },
+  };
+};
+
 // A hub built outside production keeps its replay state in memory unless it is handed a store. Tests
 // pass one store to two hubs to model a restart; the server gets a file under the data directory.
 const resolveReplayStore = (replayStore) => {
@@ -387,6 +418,7 @@ export function createGlobalMessageStreamHub({
     }
 
     controller = new AbortController();
+    const greetings = createResumedGreetingGate();
     reader = createUpstreamSseReader({
       signal: controller.signal,
       stallTimeoutMs: upstreamStallTimeoutMs,
@@ -404,7 +436,8 @@ export function createGlobalMessageStreamHub({
         }
       },
       getHeaders: getOpenCodeAuthHeaders,
-      onConnect() {
+      onConnect({ lastEventId }) {
+        greetings.connected(lastEventId);
         connected = true;
         const wasReady = everConnected;
         everConnected = true;
@@ -415,7 +448,7 @@ export function createGlobalMessageStreamHub({
         notifyStatus({ type: 'disconnect', reason });
       },
       onEvent(event) {
-        coalescer.push(event);
+        for (const admitted of greetings.admit(event)) coalescer.push(admitted);
       },
       onError(error) {
         if (controller?.signal.aborted) {
@@ -502,6 +535,32 @@ export function createGlobalMessageStreamHub({
       }, resumeIdleMs());
       idleTimer.unref?.();
     };
+    const readEvent = (event) => {
+      const normalized = normalizeEvent(event);
+      if (normalized.resync) {
+        finish();
+        onResync();
+        return;
+      }
+      // Pending text is committed first, so a buffer that holds this event is complete up to it.
+      coalescer.flush();
+      if (lostLocal()) {
+        finish();
+        onFailed();
+        return;
+      }
+      if (replayAfter(normalized.eventId) !== null) {
+        assignResumeCursorFromBuffer(normalized);
+        finish();
+        onCaughtUp(normalized);
+        return;
+      }
+      assignResumeCursor(normalized);
+      onEvent(normalized);
+    };
+    // Every connection of this read carries a cursor, so its greeting reaches the client only when
+    // OpenCode could not honour that cursor.
+    const greetings = createResumedGreetingGate();
     const resumeReader = createUpstreamSseReader({
       signal: readController.signal,
       stallTimeoutMs: upstreamStallTimeoutMs,
@@ -511,7 +570,8 @@ export function createGlobalMessageStreamHub({
       initialLastEventId: cursor,
       buildUrl: () => new URL(buildOpenCodeUrl('/api/event', '')),
       getHeaders: getOpenCodeAuthHeaders,
-      onConnect() {
+      onConnect({ lastEventId }) {
+        greetings.connected(lastEventId);
         connectedOnce = true;
         attached = true;
         armIdle();
@@ -522,27 +582,10 @@ export function createGlobalMessageStreamHub({
       onEvent(event) {
         if (done) return;
         armIdle();
-        const normalized = normalizeEvent(event);
-        if (normalized.resync) {
-          finish();
-          onResync();
-          return;
+        for (const admitted of greetings.admit(event)) {
+          if (done) return;
+          readEvent(admitted);
         }
-        // Pending text is committed first, so a buffer that holds this event is complete up to it.
-        coalescer.flush();
-        if (lostLocal()) {
-          finish();
-          onFailed();
-          return;
-        }
-        if (replayAfter(normalized.eventId) !== null) {
-          assignResumeCursorFromBuffer(normalized);
-          finish();
-          onCaughtUp(normalized);
-          return;
-        }
-        assignResumeCursor(normalized);
-        onEvent(normalized);
       },
       onError() {
         // A read that never connected cannot be retried into a resume: the client refetches. Once
