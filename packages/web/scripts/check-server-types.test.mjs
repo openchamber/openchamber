@@ -100,6 +100,26 @@ test('server lint checks a root other than this package', () => {
   }
 });
 
+test('server lint reports the findings of every batch, not only the first failing one', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-server-lint-batches-'));
+  try {
+    fs.mkdirSync(path.join(root, 'server'));
+    fs.mkdirSync(path.join(root, 'bin'));
+    fs.writeFileSync(path.join(root, 'server/first.ts'), 'export const firstKind = (value: unknown) => typeof value;\n');
+    fs.writeFileSync(path.join(root, 'bin/second.ts'), 'export const secondKind = (value: unknown) => typeof value;\n');
+    const linted = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { checkServerTypes } from ${JSON.stringify(new URL('./check-server-types.mjs', import.meta.url).href)};
+      process.exitCode = checkServerTypes(${JSON.stringify(root)}, true, 1);
+    `], { encoding: 'utf8' });
+    const output = linted.stdout + linted.stderr;
+    expect(linted.status, output).not.toBe(0);
+    expect(output).toContain('first.ts');
+    expect(output).toContain('second.ts');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}, 60_000);
+
 test('a new JavaScript module under server or bin is refused; entries, tests and assets are not', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-server-js-'));
   try {
