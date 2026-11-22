@@ -101,6 +101,10 @@ Squirrel.Mac asks for an administrator when the app bundle or its parent folder 
 - The packaged app sets it to `true` at startup only while the key is unset, the bundle and its `Contents` are writable with plain permissions (no ACL entry, file flag or sticky bit that could still refuse the `Contents` rename), and the parent folder is not: the one case where the mode removes a prompt. A fresh install, an install in a writable folder and a root-owned copy keep Squirrel's usual path; a root-owned copy still prompts until its permissions are repaired.
 - A stored boolean is never overwritten. `false` is the user's opt-out (`defaults write <bundle id> SquirrelMacEnableDirectContentsWrite -bool false`). Electron reads a missing key and a stored empty string alike, so a non-boolean empty string counts as unset; Squirrel documents only booleans for this key. An enabled value is kept when the install or its permissions change later, because ShipIt reads the same key when it resumes or rolls back an interrupted install; with an unwritable bundle Squirrel still takes the privileged path, and with a writable parent the Contents rename works as well as the whole-bundle move.
 
+### Why annotation messages use CDP arguments
+
+CDP passes annotation payloads as values in the overlay's isolated context. The receiver function stays the same for every payload, and addressing the context directly avoids keeping a remote object handle.
+
 ### Why manual proxy rules and not a PAC script
 
 Space isolation uses manual rules with `<-loopback>` and explicit per-tunnel bypasses. Chromium retains its implicit loopback and localhost bypass under a PAC script, allowing a space page to reach local services; a scheme-free dead proxy covers HTTP, HTTPS, WS, and WSS.
