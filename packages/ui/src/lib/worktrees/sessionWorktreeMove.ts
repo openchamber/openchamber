@@ -3,6 +3,7 @@ import type { I18nKey } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { checkIsGitRepository, getGitStatus } from '@/lib/gitApi';
 import { normalizePath } from '@/lib/pathNormalization';
+import { opencodeClient } from '@/lib/opencode/client';
 import { createQuickWorktree, resolveFolderProjectRef, resolveProjectRef } from '@/lib/worktreeSessionCreator';
 import { getLatestWorktreeMetadata, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { checkoutHoldsDirectory, findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
@@ -64,6 +65,17 @@ export type SessionTreeMoveIntent =
       sourceDirectory: string;
       projectDirectory: string;
       messages: SessionTreeMoveMessages;
+    }
+  | {
+      // "Change location": any folder the user names. This is the way out for
+      // a session whose folder was deleted, which no project or worktree
+      // list resolves any more.
+      kind: 'directory';
+      root: Session;
+      descendants: Session[];
+      sourceDirectory: string;
+      directory: string;
+      messages: SessionTreeMoveMessages;
     };
 
 // OpenCode 2.x `session.move` relocates the session only; uncommitted changes
@@ -117,12 +129,33 @@ const resolveSourceBranch = async (directory: string, projectDirectory: string):
 // status can be reported by a directory other than the one that wins the
 // directory dedup, and a directory-scoped read would then see no status at all
 // and move a running session.
-const assertSessionsIdle = (sessions: Session[]): void => {
+//
+// A session whose folder was deleted has no directory store to report its
+// status, so it would read "unknown" forever and could never be moved out.
+// When the server confirms the source folder is gone, "unknown" is accepted:
+// nothing can be running in a folder that does not exist, and OpenCode checks
+// its own executions again before it applies the move.
+const assertSessionsIdle = (sessions: Session[], isSourceMissing: () => Promise<boolean>): Promise<void> | void => {
+  let unknown = false;
   for (const session of sessions) {
     const activity = getSessionLiveActivity(session.id);
-    if (activity === 'unknown') throw new Error('Session status is unavailable');
     if (activity === 'active') throw new Error('Session is not idle');
+    if (activity === 'unknown') unknown = true;
   }
+  // Only an unknown status costs a round trip; a known-idle tree is checked synchronously.
+  if (!unknown) return;
+  return isSourceMissing().then((missing) => {
+    if (!missing) throw new Error('Session status is unavailable');
+  });
+};
+
+const createSourceMissingProbe = (sourceDirectory: string): (() => Promise<boolean>) => {
+  let probe: Promise<boolean> | null = null;
+  return () => {
+    probe ??= opencodeClient.getDirectoryAvailability(sourceDirectory)
+      .then((availability) => availability === 'missing', () => false);
+    return probe;
+  };
 };
 
 type RollbackFailure = {
@@ -223,7 +256,9 @@ const moveSessionTreeTransaction = async (
         useSessionUIStore.getState().getWorktreeMetadata(session.id),
       ]),
     );
-    assertSessionsIdle(sessions);
+    const isSourceMissing = createSourceMissingProbe(input.sourceDirectory);
+    const idleCheck = assertSessionsIdle(sessions, isSourceMissing);
+    if (idleCheck) await idleCheck;
 
     let destination: Awaited<ReturnType<typeof prepareDestination>> | null = null;
     const moved: Session[] = [];
@@ -234,7 +269,8 @@ const moveSessionTreeTransaction = async (
         // Setup and earlier moves can take long enough for a not-yet-moved
         // session to start running, so re-check the remaining source tree
         // immediately before each move. The root moves last.
-        assertSessionsIdle(sessions.slice(index));
+        const remainingIdleCheck = assertSessionsIdle(sessions.slice(index), isSourceMissing);
+        if (remainingIdleCheck) await remainingIdleCheck;
         try {
           await moveSessionToDirectory(session, input.sourceDirectory, destination.directory);
         } catch (error) {
@@ -317,11 +353,25 @@ const moveSessionTreeToProject = async (input: {
   descendants: Session[];
   sourceDirectory: string;
   projectDirectory: string;
+}): Promise<string> => moveSessionTreeToDirectory({ ...input, directory: input.projectDirectory });
+
+/**
+ * Moves a session tree to any folder. Nothing about the source is resolved
+ * (project, git branch, worktree), so it works when the source folder is gone.
+ * OpenCode checks that the destination exists and answers otherwise.
+ */
+export const moveSessionTreeToDirectory = async (input: {
+  root: Session;
+  descendants: Session[];
+  sourceDirectory: string;
+  directory: string;
 }): Promise<string> => {
-  if ((normalizePath(input.sourceDirectory) ?? input.sourceDirectory) === (normalizePath(input.projectDirectory) ?? input.projectDirectory)) {
+  const directory = normalizePath(input.directory.trim()) ?? input.directory.trim();
+  if (!directory) throw new Error('Choose a folder');
+  if ((normalizePath(input.sourceDirectory) ?? input.sourceDirectory) === directory) {
     throw new Error('Source and destination are the same');
   }
-  return moveSessionTreeTransaction(input, async () => ({ directory: input.projectDirectory, metadata: null }));
+  return moveSessionTreeTransaction(input, async () => ({ directory, metadata: null }));
 };
 
 const moveSessionTreeToQuickWorktree = async (input: {
@@ -372,6 +422,13 @@ const executeSessionTreeMove = (intent: SessionTreeMoveIntent): void => {
         descendants: intent.descendants,
         sourceDirectory: intent.sourceDirectory,
         projectDirectory: intent.projectDirectory,
+      })
+    : intent.kind === 'directory'
+    ? moveSessionTreeToDirectory({
+        root: intent.root,
+        descendants: intent.descendants,
+        sourceDirectory: intent.sourceDirectory,
+        directory: intent.directory,
       })
     : moveSessionTreeToQuickWorktree({
         root: intent.root,

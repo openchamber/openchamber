@@ -172,39 +172,71 @@ export const createNotificationTemplateRuntime = (deps) => {
     return '';
   };
 
+  // Page-walk bounds for the exact-message lookup below (#2154): at
+  // most OPEN_CODE_MESSAGE_MAX_PAGES pages of
+  // OPEN_CODE_MESSAGE_PAGE_SIZE, every page still under the
+  // per-request timeout and response-byte caps, and the whole walk
+  // under one overall deadline — a notification lookup must never
+  // hang or fetch unbounded history.
+  const OPEN_CODE_MESSAGE_PAGE_SIZE = 5;
+  const OPEN_CODE_MESSAGE_MAX_PAGES = 10;
+  const OPEN_CODE_MESSAGE_PAGE_WALK_DEADLINE_MS = 10000;
+
   const fetchLastAssistantMessageText = async (sessionId, messageId, maxLength = NOTIFICATION_BODY_MAX_CHARS, source = hostSource) => {
     if (!sessionId) return '';
 
     try {
       const url = source.buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/message`, '');
-      const response = await source.fetchImpl(`${url}?limit=5`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...source.getOpenCodeAuthHeaders(),
-        },
-        signal: AbortSignal.timeout(OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS),
-      });
+      const deadline = Date.now() + OPEN_CODE_MESSAGE_PAGE_WALK_DEADLINE_MS;
+      let cursor = null;
 
-      if (!response.ok) return '';
+      for (let pageIndex = 0; pageIndex < OPEN_CODE_MESSAGE_MAX_PAGES; pageIndex += 1) {
+        if (pageIndex > 0 && Date.now() > deadline) return '';
+        const query = cursor
+          ? `?limit=${OPEN_CODE_MESSAGE_PAGE_SIZE}&cursor=${encodeURIComponent(cursor)}`
+          : `?limit=${OPEN_CODE_MESSAGE_PAGE_SIZE}`;
+        const response = await source.fetchImpl(`${url}${query}`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            ...source.getOpenCodeAuthHeaders(),
+          },
+          signal: AbortSignal.timeout(OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS),
+        });
 
-      // v2 pages messages as `{ data, cursor }`, newest first, and a message is
-      // a flat record: an assistant one carries `content[]`, not `parts`.
-      const page = await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES);
-      const messages = Array.isArray(page?.data) ? page.data : null;
-      if (!messages) return '';
+        if (!response.ok) return '';
 
-      let target = null;
-      if (messageId) {
-        target = messages.find((message) => message?.id === messageId && message?.type === 'assistant');
+        // v2 pages messages as `{ data, cursor }`, newest first, and a message is
+        // a flat record: an assistant one carries `content[]`, not `parts`.
+        const page = await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES);
+        const messages = Array.isArray(page?.data) ? page.data : null;
+        if (!messages) return '';
+
+        let target = null;
+        if (messageId) {
+          target = messages.find((message) => message?.id === messageId && message?.type === 'assistant') ?? null;
+        } else {
+          target = messages.find((message) => message?.type === 'assistant' && message?.finish === 'stop') ?? null;
+        }
+
+        if (target) {
+          if (!Array.isArray(target.content)) return '';
+          return extractTextFromParts(target.content, maxLength);
+        }
+
+        // Only an exact-ID lookup follows pages (#2154): the no-ID
+        // fallback is newest-first by definition, and an exact ID
+        // must never fall back to a different message (#2140).
+        if (!messageId) return '';
+
+        const next = typeof page?.cursor?.next === 'string' && page.cursor.next.length > 0
+          ? page.cursor.next
+          : null;
+        if (!next || next === cursor) return '';
+        cursor = next;
       }
-      if (!target && !messageId) {
-        target = messages.find((message) => message?.type === 'assistant' && message?.finish === 'stop') ?? null;
-      }
 
-      if (!target || !Array.isArray(target.content)) return '';
-
-      return extractTextFromParts(target.content, maxLength);
+      return '';
     } catch {
       return '';
     }

@@ -81,6 +81,7 @@ import { runOpenCodeCliUpgrade } from './lib/opencode/cli-upgrade.js';
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
+import { createSessionActivityProbe } from './lib/opencode/session-activity.js';
 import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/client.js';
 import { configureOpenCodeCredentials, openCodeCredentialSource } from './lib/opencode/auth.js';
 import { configureProjectStartCommandSource, openCodeProjectStartCommandSource } from './lib/opencode/project-start-command.js';
@@ -1243,13 +1244,37 @@ const messageSearchRuntime = createMessageSearchRuntime({
   },
 });
 
+// The host status map only hears what the stream says; a session whose end
+// never arrived (see `reconcileBusySessionsWithActive`) is checked against
+// OpenCode's running list when the stream connects and every 30 s while the
+// map holds a busy session. Not while a replaced OpenCode drains: it still
+// runs the turns that were busy at the handoff, which the current OpenCode's
+// list does not name, and settling them here would let the drain end early
+// and stop those turns.
+const hostSessionActivityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: 5_000 });
+const readHostActiveSessionIds = async () => {
+  if (isShuttingDown || openCodeLifecycleRuntime.hasDrainingOpenCode()) return null;
+  const port = openCodePort;
+  const statuses = await hostSessionActivityProbe.fetchActiveSessionStatuses();
+  // A handoff can start during the HTTP read. The predecessor's sessions
+  // remain running, and a snapshot from the replaced port cannot settle them.
+  if (isShuttingDown || openCodePort !== port || openCodeLifecycleRuntime.hasDrainingOpenCode()) return null;
+  return statuses ? new Set(Object.keys(statuses)) : null;
+};
+sessionRuntime.startStatusReconciliation(readHostActiveSessionIds);
+
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
-  onConnectionState: (connected) => sessionRuntime.setWatcherConnected(connected),
+  onConnectionState: (connected) => {
+    sessionRuntime.setWatcherConnected(connected);
+    if (connected && sessionRuntime.hasBusySessions()) {
+      void sessionRuntime.reconcileBusySessionsWithActive(readHostActiveSessionIds).catch(() => {});
+    }
+  },
   onPayload: (payload, { spaceId }) => {
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
@@ -1995,10 +2020,15 @@ const openChamberControlService = createOpenChamberControlService({
       void maybeSendPushForTrigger(payload);
       return;
     }
-    broadcastOpenChamberUiEvent({
+    const payload = {
       type: 'openchamber:page-settled',
       properties: { sessionID: change.sessionId, pageID: change.callId },
-    });
+    };
+    broadcastOpenChamberUiEvent(payload);
+    // Forwarded like the waiting branch above, so the trigger
+    // runtime can cancel the session's pending question push
+    // (#2313); until now the settled event never reached it.
+    void maybeSendPushForTrigger(payload);
   },
   // The tool is off by default; a plugin generated before it was switched off
   // must not keep paging the user.
@@ -2574,6 +2604,7 @@ async function main(options = {}) {
     pluginNotificationEmitter,
     sessionRuntime,
     getManagedServersSnapshot: () => openCodeLifecycleRuntime.getManagedServersSnapshot(),
+    isOpenCodeDraining: () => openCodeLifecycleRuntime.hasDrainingOpenCode(),
     setPushInitialized,
     fs,
     os,
@@ -2813,6 +2844,8 @@ async function main(options = {}) {
     gracefulShutdown,
     isShuttingDown: () => isShuttingDown,
     entry: path.join(__dirname, '..', 'bin', 'cli.js'),
+    dataDir: OPENCHAMBER_DATA_DIR,
+    runningVersion: OPENCHAMBER_VERSION,
     apiOnly,
     log: console,
   });

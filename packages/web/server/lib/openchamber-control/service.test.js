@@ -135,6 +135,25 @@ describe('OpenChamber control service', () => {
     expect(generateWorktreeName).not.toHaveBeenCalled();
   });
 
+  it('honors an explicit directory as the session location when newWorktree is false', async () => {
+    const isGitRepository = vi.fn(async () => true);
+    const { service, sessionService } = createService({
+      isGitRepository,
+      generateWorktreeName: vi.fn(),
+      randomWorktreeName: vi.fn(),
+    });
+
+    await service.execute('session.create', {
+      directory: '/prepared-worktree',
+      newWorktree: false,
+    });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({ directory: '/prepared-worktree' }));
+    expect(sessionService.create.mock.calls[0][0]).not.toHaveProperty('worktree');
+    expect(sessionService.create.mock.calls[0][0].directory).toBe('/prepared-worktree');
+    expect(isGitRepository).not.toHaveBeenCalled();
+  });
+
   it('session.create names a new branch from a pull request from the prompt, and leaves a checkout to its branch', async () => {
     const generateWorktreeName = vi.fn(async () => 'csv-export');
     const { service, sessionService } = createService({ generateWorktreeName });
@@ -860,6 +879,21 @@ describe('OpenChamber control service', () => {
 
     await expect(service.execute('session.status', { sessionId: 'ses_unknown' }, '/current-session'))
       .resolves.toEqual({ sessionId: 'ses_unknown', directory: '/current-session', sessionStatus: { type: 'idle' } });
+  });
+
+  it('does not report a prototype-named session as busy (#2311)', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({ data: [{ id: 'constructor', location: { directory: '/repo' }, time: {} }] });
+    client.session.active.mockResolvedValue({ ses_active: { type: 'running' } });
+
+    await expect(service.execute('session.status', { sessionId: 'constructor' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'constructor', directory: '/repo', sessionStatus: { type: 'idle' } });
+    await expect(service.execute('session.status', { sessionId: 'ses_active' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_active', directory: '/current-session', sessionStatus: { type: 'busy' } });
+    await expect(service.execute('session.list', { limit: 10, withStatus: true }))
+      .resolves.toEqual(expect.objectContaining({
+        sessions: [expect.objectContaining({ id: 'constructor', status: { type: 'idle' } })],
+      }));
   });
 
   it('rejects an unknown project instead of reading another directory', async () => {

@@ -378,7 +378,7 @@ export function createDispatchResultsRuntime({
   const readWatchedSession = async (sessionId) => {
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
-    if (statuses[sessionId]) return { kind: 'running' };
+    if (Object.hasOwn(statuses, sessionId) && statuses[sessionId]) return { kind: 'running' };
     // A turn is over only when its subagents are done too: the session idles
     // while a background subagent works and runs again on its result.
     const subagentsWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);

@@ -633,7 +633,7 @@ const getPrimaryUserConfigPath = (userPaths: string[]): string => {
 
 const INVALID_JSONC = 'INVALID_JSONC';
 const CONFIG_FILE_TOO_LARGE = 'CONFIG_FILE_TOO_LARGE';
-const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
+export const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
 
 const formatJsoncParseError = (filePath: string, errors: ParseError[]): string => {
   const first = errors.length > 0 ? errors[0] : null;

@@ -6,29 +6,26 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 const TEMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'walkthrough-jobs-'));
 process.env.OPENCHAMBER_DATA_DIR = TEMP_DATA_DIR;
 
-// Mocking git rather than this module's own source loading: fewer of our own
-// seams faked means the test exercises the real digest and prompt path.
-vi.mock('../git/service.js', () => ({
-  getRepositoryRoot: vi.fn(async () => '/repo'),
-  getDiff: vi.fn(),
-  getRangeDiff: vi.fn(),
-  getUntrackedDiffs: vi.fn(async () => []),
-  listUntrackedPaths: vi.fn(async () => []),
-}));
-vi.mock('../small-model/index.js', () => ({
-  describeSmallModel: vi.fn(),
-  generateSmallModelText: vi.fn(),
-}));
 const {
-  generateWalkthrough,
-  getWalkthrough,
-  cancelWalkthroughGeneration,
+  generateWalkthrough: generateWalkthroughImpl,
+  getWalkthrough: getWalkthroughImpl,
+  cancelWalkthroughGeneration: cancelWalkthroughGenerationImpl,
   isGenerating,
   getGenerationStage,
   __testing: walkthroughTesting,
 } = await import('./index.js');
-const { describeSmallModel, generateSmallModelText } = await import('../small-model/index.js');
-const { getDiff } = await import('../git/service.js');
+const getDiff = vi.fn();
+const describeSmallModel = vi.fn();
+const generateSmallModelText = vi.fn();
+const walkthroughDeps = {
+  getRepositoryRoot: async () => '/repo', getDiff, getRangeDiff: vi.fn(),
+  getCommitDiff: vi.fn(async () => PATCH), getPullRequestDiff: vi.fn(async () => PATCH),
+  getUntrackedDiffs: async () => [], listUntrackedPaths: async () => [],
+  describeSmallModel, generateSmallModelText,
+};
+const generateWalkthrough = (options, deps = {}) => generateWalkthroughImpl(options, { ...walkthroughDeps, ...deps });
+const getWalkthrough = (options, deps = {}) => getWalkthroughImpl(options, { ...walkthroughDeps, ...deps });
+const cancelWalkthroughGeneration = (options) => cancelWalkthroughGenerationImpl(options, walkthroughDeps);
 
 // bun's vitest shim has no `vi.waitFor`.
 const waitFor = async (predicate, { timeout = 2_000, interval = 5 } = {}) => {

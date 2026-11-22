@@ -62,7 +62,7 @@ export const useMiniChatKeyboardShortcuts = () => {
     new_chat: () => {
       const sessionState = useSessionUIStore.getState();
       openNewSessionDraft(sessionState.currentSessionId && sessionState.currentSessionDirectory
-        ? { directoryOverride: sessionState.currentSessionDirectory }
+        ? { directoryOverride: sessionState.currentSessionDirectory, inheritedDirectory: true }
         : undefined);
       focusChatInput();
     },

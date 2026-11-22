@@ -6,7 +6,7 @@ import os from 'node:os';
 import { fetchOpenCodeGoUsage, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
 import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
-import { readConfig } from './opencodeConfig';
+import { MAX_CONFIG_FILE_BYTES, readCappedFileSync, readConfig } from './opencodeConfig';
 import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
 import { QUOTA_RESPONSE_MAX_BYTES, readBoundedResponseBody, ResponseBodyTooLargeError } from './bounded-response-body';
@@ -349,12 +349,17 @@ const ZAI_TOKEN_WINDOW_SECONDS: Record<number, number> = {
   6: 7 * 24 * 60 * 60,
 };
 
-const readJsonFile = (filePath: string): Record<string, unknown> | null => {
+const QUOTA_AUTH_FILE_MAX_BYTES = 1 * 1024 * 1024;
+
+export const readJsonFile = (filePath: string): Record<string, unknown> | null => {
   if (!fs.existsSync(filePath)) {
     return null;
   }
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
+    const raw = readCappedFileSync(filePath, QUOTA_AUTH_FILE_MAX_BYTES, {
+      tooLarge: (file) => new Error(`Quota auth file at ${file} exceeds the ${QUOTA_AUTH_FILE_MAX_BYTES}-byte limit`),
+      notRegular: (file) => Object.assign(new Error(`EISDIR: illegal operation on a directory, read '${file}'`), { code: 'EISDIR' }),
+    });
     const trimmed = raw.trim();
     if (!trimmed) return null;
     const parsed = JSON.parse(trimmed);
@@ -4545,11 +4550,14 @@ const getKiloApiKey = (auth: AuthFile) => {
     ?? asNonEmptyString(entry?.access);
 };
 
-const readKiloOrganizationIdFromUserConfig = (): string | null => {
+export const readKiloOrganizationIdFromUserConfig = (configPath = path.join(OPENCODE_CONFIG_DIR, 'opencode.json')): string | null => {
   try {
-    const configPath = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
     if (!fs.existsSync(configPath)) return null;
-    const parsed = asObject(JSON.parse(fs.readFileSync(configPath, 'utf8')));
+    const raw = readCappedFileSync(configPath, MAX_CONFIG_FILE_BYTES, {
+      tooLarge: (file) => new Error(`Kilo configuration at ${file} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit`),
+      notRegular: (file) => Object.assign(new Error(`EISDIR: illegal operation on a directory, read '${file}'`), { code: 'EISDIR' }),
+    });
+    const parsed = asObject(JSON.parse(raw));
     const provider = asObject(parsed?.provider);
     const kilo = asObject(provider?.kilo) ?? asObject(provider?.kilocode);
     const options = asObject(kilo?.options);

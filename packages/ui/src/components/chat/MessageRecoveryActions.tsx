@@ -29,7 +29,15 @@ export const MessageRecoveryActions: React.FC<MessageRecoveryActionsProps> = ({ 
   const providers = useConfigStore((state) => directory === undefined
     ? state.providers
     : selectProvidersForDirectory(state, directory));
-  const configSelection = useConfigStore((state) => ({ providerID: state.currentProviderId, id: state.currentModelId }));
+  // Selected one field at a time: a selector that builds an object returns a
+  // new snapshot on every read, which useSyncExternalStore treats as a change
+  // and re-renders until React aborts with "Maximum update depth exceeded".
+  const configProviderID = useConfigStore((state) => state.currentProviderId);
+  const configModelID = useConfigStore((state) => state.currentModelId);
+  const configSelection = React.useMemo(
+    () => ({ providerID: configProviderID, id: configModelID }),
+    [configProviderID, configModelID],
+  );
   const [pending, setPending] = React.useState(false);
 
   const userMessage = React.useMemo(

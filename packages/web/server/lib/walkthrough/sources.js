@@ -93,11 +93,11 @@ export function sourceKey(source) {
 // `git diff` never reports untracked files, so a brand-new file would be
 // invisible in a walkthrough of local work. The batch helper resolves the
 // repository once and bounds how many diff processes run at a time.
-const untrackedSections = async (directory) => {
-  const untracked = await listUntrackedPaths(directory);
+const untrackedSections = async (directory, listPaths = listUntrackedPaths, getDiffs = getUntrackedDiffs) => {
+  const untracked = await listPaths(directory);
   if (untracked.length === 0) return [];
 
-  const patches = await getUntrackedDiffs(directory, untracked);
+  const patches = await getDiffs(directory, untracked);
   return patches.filter((patch) => typeof patch === 'string' && patch.trim());
 };
 
@@ -106,18 +106,26 @@ const untrackedSections = async (directory) => {
  *
  * @returns {Promise<{sections: Array<{scope: string, patch: string}>, meta: object}>}
  */
-export async function loadSourceSections(directory, source, { getPullRequestDiff, readContext } = {}) {
+export async function loadSourceSections(directory, source, {
+  getPullRequestDiff,
+  readContext,
+  getDiff: getDiffImpl = getDiff,
+  getRangeDiff: getRangeDiffImpl = getRangeDiff,
+  getCommitDiff: getCommitDiffImpl = getCommitDiff,
+  getUntrackedDiffs: getUntrackedDiffsImpl = getUntrackedDiffs,
+  listUntrackedPaths: listUntrackedPathsImpl = listUntrackedPaths,
+} = {}) {
   if (source.kind === 'working-tree') {
     const sections = [];
 
     if (source.scope === 'all' || source.scope === 'staged') {
-      const patch = await getDiff(directory, { staged: true });
+      const patch = await getDiffImpl(directory, { staged: true });
       if (patch && patch.trim()) sections.push({ scope: 'staged', patch });
     }
 
     if (source.scope === 'all' || source.scope === 'working') {
-      const patch = await getDiff(directory, { staged: false });
-      const untracked = await untrackedSections(directory);
+      const patch = await getDiffImpl(directory, { staged: false });
+      const untracked = await untrackedSections(directory, listUntrackedPathsImpl, getUntrackedDiffsImpl);
       const combined = [patch, ...untracked].filter((value) => value && value.trim()).join('\n');
       if (combined.trim()) sections.push({ scope: 'working', patch: combined });
     }
@@ -126,7 +134,7 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
   }
 
   if (source.kind === 'branch') {
-    const patch = await getRangeDiff(directory, { base: source.baseRef, head: source.headRef, includeWorkingTree: true });
+    const patch = await getRangeDiffImpl(directory, { base: source.baseRef, head: source.headRef, includeWorkingTree: true });
     return {
       sections: patch && patch.trim() ? [{ scope: 'branch', patch }] : [],
       meta: { baseRef: source.baseRef, headRef: source.headRef },
@@ -134,7 +142,7 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
   }
 
   if (source.kind === 'commit') {
-    const patch = await getCommitDiff(directory, { hash: source.hash });
+    const patch = await getCommitDiffImpl(directory, { hash: source.hash });
     return {
       sections: patch.trim() ? [{ scope: 'commit', patch }] : [],
       meta: { hash: source.hash },

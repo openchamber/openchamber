@@ -9,10 +9,16 @@ let healthState: PoolHealthState = { available: true, statsAvailable: true, pool
 let planState: PlanState = { plans: [], models: {}, pools: {}, notes: [] };
 let linkFailure: Error | null = null;
 let linkGate: Promise<void> | null = null;
+let rotationReads = 0;
 const planLinkSaves: Array<{ target: string; planID: string | null }> = [];
 
 mock.module('@/lib/routing/poolHealthApi', () => ({
   fetchPoolHealth: async () => healthState,
+  fetchRotation: async () => {
+    rotationReads += 1;
+    return { settings: { enabled: false, intervalMinutes: 5 }, moves: [] };
+  },
+  saveRotation: async () => ({ settings: { enabled: false, intervalMinutes: 5 }, moves: [] }),
   savePoolPlanLink: async (target: string, planID: string | null) => {
     planLinkSaves.push({ target, planID });
     if (linkGate) await linkGate;
@@ -388,6 +394,23 @@ describe('PoolHealthSection', () => {
       });
       const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')].map((el) => el.textContent?.trim());
       expect(options).toEqual(['No plan linked', 'OpenAI Plus', 'Anthropic Max']);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('Refresh also reads the rotation history again', async () => {
+    healthState = {
+      available: true,
+      statsAvailable: true,
+      pools: { pool1: { selection: 'ordered', targets: [{ ref: 'openai/a', activeSessions: 0, plan: null, blastRadius: false, suggestion: null }] } },
+    };
+    const { dom, cleanup } = await renderSection();
+    try {
+      const before = rotationReads;
+      const button = clickButton(dom.container, 'Refresh');
+      await act(async () => { button.click(); await Promise.resolve(); await Promise.resolve(); });
+      expect(rotationReads).toBe(before + 1);
     } finally {
       await cleanup();
     }

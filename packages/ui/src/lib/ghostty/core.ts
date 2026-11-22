@@ -449,24 +449,6 @@ export class GhosttyTerminalCore {
     this.runtime.free(scroll, layout.size);
   }
 
-  scrollToBottom(): void {
-    this.ensureActive();
-    const layout = this.runtime.layout('GhosttyTerminalScrollViewport');
-    const scroll = this.runtime.alloc(layout.size);
-    this.runtime.setField(scroll, 'GhosttyTerminalScrollViewport', 'tag', 1);
-    this.runtime.call('ghostty_terminal_scroll_viewport', this.terminal, scroll);
-    this.runtime.free(scroll, layout.size);
-  }
-
-  isViewportActive(): boolean {
-    this.ensureActive();
-    this.runtime.bytes(this.scratch, 1)[0] = 0;
-    return (
-      this.runtime.call('ghostty_terminal_get', this.terminal, 32, this.scratch) ===
-        GHOSTTY_SUCCESS && this.runtime.bytes(this.scratch, 1)[0] !== 0
-    );
-  }
-
   scrollbarState(): GhosttyScrollbar | null {
     this.ensureActive();
     const layout = this.runtime.layout('GhosttyTerminalScrollbar');
@@ -725,19 +707,6 @@ export class GhosttyTerminalCore {
     }
   }
 
-  selectAll(): void {
-    this.ensureActive();
-    const layout = this.runtime.layout('GhosttySelection');
-    const selection = this.runtime.alloc(layout.size);
-    this.runtime.setField(selection, 'GhosttySelection', 'size', layout.size);
-    if (
-      this.runtime.call('ghostty_terminal_select_all', this.terminal, selection) === GHOSTTY_SUCCESS
-    ) {
-      this.runtime.call('ghostty_terminal_set', this.terminal, 21, selection);
-    }
-    this.runtime.free(selection, layout.size);
-  }
-
   selectWord(col: number, row: number): GhosttySelectionRange | null {
     return this.selectAt(
       'GhosttyTerminalSelectWordOptions',
@@ -904,10 +873,6 @@ export class GhosttyTerminalCore {
 
   viewportPointToScreen(col: number, row: number): { x: number; y: number } | null {
     return this.convertPoint(col, row, 1, 2);
-  }
-
-  screenPointToViewport(col: number, row: number): { x: number; y: number } | null {
-    return this.convertPoint(col, row, 2, 1);
   }
 
   private convertPoint(

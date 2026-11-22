@@ -40,6 +40,15 @@ describe('environment actions', () => {
     expect(JSON.stringify(result)).not.toContain('plain-secret');
   });
 
+  it('does not invent a vault status for a prototype-named variable (#2311)', async () => {
+    await store.updateUser({ variables: { constructor: REFERENCE } });
+    const result = await actions.execute('environment.get', {});
+    expect(result.references).toEqual({ constructor: REFERENCE });
+    // vaultStatus returned no entry for it: the inherited Object.prototype
+    // member must not be reported as its vault status.
+    expect(result.vault).toEqual({});
+  });
+
   it('sets a vault reference or removes a variable, and refuses a plain value without saving anything', async () => {
     await store.updateUser({ variables: { OLD: 'x' } });
     await expect(actions.execute('environment.set', { environmentVariables: { GITHUB_TOKEN: REFERENCE, OLD: null } }))

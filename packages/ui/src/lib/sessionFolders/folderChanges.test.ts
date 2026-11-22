@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, test } from 'bun:test';
 import { applyFolderChange } from './folderChanges';
 
 describe('applyFolderChange', () => {
-  it('does not create an id already owned by another scope', () => {
+  test('does not create an id already owned by another scope', () => {
     const folder = { id: 'shared', name: 'Keep', sessionIds: ['s1'], createdAt: 1, parentId: null };
     const map = { '/repo': [folder] };
 

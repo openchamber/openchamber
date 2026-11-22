@@ -110,6 +110,76 @@ loss window is accepted in exchange for atomic log replacement without
 cross-process locks. If compaction fails, the store logs the failure and leaves
 the log intact; a later append can retry it.
 
+## Sentences about models
+
+`route-interpreter.js` turns one sentence (`/route <sentence>` in the composer,
+or the "Prefer previous" button on a model-changed divider, which sends
+`prefer <provider/model>`) into overrides in OpenCode's `route-overrides.json`.
+OpenCode applies them to every pool, whatever its autonomy level: `avoid`
+takes a target out, `prefer` multiplies its weight (3 by default, `2x` and
+"less" change it), which ranks it first in an ordered pool, puts it alone in
+the top tier of a round-robin pool and makes a weighted draw pick it more
+often. The keyword stage reads what the sentence names, most specific first:
+
+- a `provider/model` reference the available catalog does not list: refused
+  as unknown, before any smart stage runs, so a model that is gone is never
+  widened into a whole provider or family;
+- one exact model, as `provider/model` or a bare id (a `#variant` is dropped,
+  because an override scopes a model, not its thinking variant); a bare id
+  covers every configured provider that serves it;
+- a model family the code knows (`opus`, `sonnet`, `haiku`: the newest one per
+  provider for `prefer`) or "claude", which asks which Claude is meant;
+- a kind of model: a word the sentence shares with the names of the models
+  available now, such as `gemini`, `gpt` or `flash`, scoped to the named
+  provider when there is one. The rule lists those models exactly, so a model
+  added later is not covered until the user says it again;
+- a configured provider, by id or alias (`gemini` for `google`). An alias of a
+  provider that is not configured names nothing, so "gemini" falls through to
+  the gemini models other providers serve.
+
+Kinds that are not words in model names, such as "cheap" or "fast", are not
+understood (`unknown`); cost tiers in `plans.json` are not read here. A rule
+lasts a day unless the sentence says otherwise ("for 2 hours", "today", "this
+week") and applies to every session. A session a round-robin or weighted pool
+has already drawn stays on its target (OpenCode's sticky choice), and an
+ordered pool keeps a session on the target answering it while that target is
+ready, so a preference shows on the next draw: a new session, or after the
+current target fails or is benched.
+
+## Picking a pool member directly
+
+While a pool is selected, the current-model line above the composer
+(`packages/ui/src/components/chat/CurrentModelIndicator.tsx`) opens a menu of
+the pool's members, read from the catalog OpenCode compiles for the pool
+(`settings.opencodeRoute.targets`; a pool whose members come only from
+patterns lists none and offers no menu). The user picks a member and when it
+applies (`packages/ui/src/lib/routing/poolMemberPick.ts`):
+
+- with the next message: only the composer's selection changes;
+- at the next step: the session's model switches now. OpenCode reloads the
+  session context before each model request (`session/runner/llm.ts`), so a
+  running turn makes its next request on the pick;
+- now: a running turn is replayed on the pick, as the "Stop and restart this
+  reply" choice for model changes during a reply does; an idle session
+  switches now.
+
+The OpenCode call runs first; the composer follows only when it succeeded.
+After a pick the composer holds that member, and the menu offers "Return to
+pool" for each pool listing it, with the same timings. Everything goes
+through OpenCode's own `session.switchModel` and the existing retry. VS Code
+shows the full model-changed text and the pool-member menu, but not "Prefer
+previous", which needs the OpenChamber server's `/api/model-routes/interpret`
+route that VS Code does not run.
+
+### Why a pick leaves the pool instead of pinning a member inside it
+
+OpenCode keeps a session's pool target in memory and has no route to set it,
+and route overrides apply to every session. So a pick makes the member the
+session's model: the session no longer fails over inside the pool until the
+user returns to it. Pool rotation (`pool-rotation.js`) moves sessions the same
+way for the same reason. A per-session target inside the pool needs an
+OpenCode route first.
+
 ## Invariants
 
 - The sentinel never reaches OpenCode. OpenCode 2.x holds the model and agent
@@ -411,14 +481,8 @@ and how close a target's plan looks to its quota window. Several sessions on
 one target lose their prompt cache together when its plan runs out; the panel
 makes that visible so the user can spread them.
 
-Staggered rotation (#295) automates that spreading: `pool-rotation.js` is the
-planner — given the pool-health shape and the sessions on each target, it
-answers at most one move per pool per pace window (target projecting to ≥70%
-of its plan's quota window with ≥2 sessions on it; subagents first, then the
-primary idle longest; destination a sibling target on a different plan and
-not near its own limit; sessions on Auto never move). It only plans: the
-session-row source, the applier that switches a session's model, the pace and
-history state, and the Settings switch are the following stages.
+Staggered rotation (#295) automates that spreading, off by default; the
+`pool-rotation.js` entry below describes how it picks and moves sessions.
 
 - `model-routes.js` validates a pool before Settings saves it, key by key
   against OpenCode's `Config.ModelRoute` schema, `schedules` included: a
@@ -561,6 +625,43 @@ history state, and the Settings switch are the following stages.
   is reported as `planError` / `linksError` and costs only the plan columns;
   a link to a plan that no longer exists is reported as `missingPlanID` so the
   panel can clear it. The panel reads again whenever the pools change.
+- `pool-rotation.js` moves sessions off a target one at a time before its plan
+  runs out, so they do not all restart on a cold cache together. Off by
+  default; `GET`/`PUT /api/model-routes/rotation` read and write
+  `{ enabled, intervalMinutes }` in `pool-rotation.json` in the OpenChamber
+  data directory (missing reads as off, malformed answers 409). OpenCode keeps
+  a session's pool target in memory and has no route to move one session,
+  and route overrides apply to every session, so a move sets the session's
+  model to a sibling target through `session.switchModel`. The session leaves
+  the pool and no longer fails over inside it; that is why the switch is off
+  by default and its description says so. Once a minute, per pool: a source
+  is a target whose linked plan projects to `warn` or `over`; a destination
+  is another concrete target of the pool not linked to the same plan, not
+  near its own limit, not past its `until`, and whose latest request in the
+  last 15 minutes did not fail (`queryTargetReliability`), a target with a
+  recent success before one with no recent traffic, then the most headroom.
+  A pattern source (`openai/*`) counts the sessions whose latest attempt went
+  to any model it covers. The target needs two or more live sessions still
+  on the pool (the per-route list, not the health count, which includes
+  other routes and sessions already moved): the last one stays. One session
+  moves: running subagents (a `parentID` and listed by OpenCode's
+  `session.active`, so a subagent busy in one long tool call still counts
+  and one that just finished does not; when that list cannot be read no
+  subagent moves) first, then the one idle longest; finished
+  subagents are not moved, Auto sessions never are, and only sessions whose
+  model is still the pool count. The destination must also be in the pool as
+  the session's own project defines it (a project can override a pool with
+  the same id), and the session is read again right before the switch, so a
+  model or Auto picked while the others were being read stands. A switch that fails puts that session in a
+  30-minute back-off and the next session is tried; a pool where every
+  switch failed is not throttled. OpenCode calls time out after 15 seconds.
+  `session.switchModel` goes through OpenCode's session location middleware,
+  so a move starts the session's location when it is not running. At most
+  one move per pool per `intervalMinutes`, measured from the start of the
+  tick that moved; a tick that ran long (slow OpenCode calls) also holds the
+  next move until `intervalMinutes` less one tick has passed since its switch
+  finished, and the move's `at` is that finish time. The pace, the back-off and the last 20 moves are kept in
+  memory, so a restart forgets them.
 
 ## Tests
 

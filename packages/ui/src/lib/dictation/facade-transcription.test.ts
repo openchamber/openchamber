@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+    FACADE_TRANSCRIPTION_DEADLINE_MS,
     FacadeTranscriptionError,
     MAX_AUDIO_BYTES,
     audioLeavesMachine,
@@ -276,6 +277,83 @@ describe('transcribeViaFacade', () => {
             'network_error',
             { retryable: true },
         );
+    });
+
+    test('the client deadline comfortably exceeds the façade 120s provider deadline (#2305)', () => {
+        expect(FACADE_TRANSCRIPTION_DEADLINE_MS).toBeGreaterThan(120_000);
+    });
+
+    test('threads an AbortSignal into the fetch init (#2305)', async () => {
+        let seenSignal: AbortSignal | undefined;
+        const fetchFn: TranscriptionFetch = async (_url, init) => {
+            seenSignal = init.signal;
+            return { ok: true, status: 200, json: async () => ({ text: 'hi' }) };
+        };
+        await transcribeViaFacade({
+            fetchFn,
+            url: 'http://x/v1/audio/transcriptions',
+            file: new Blob(['audio'], { type: 'audio/webm' }),
+            filename: 'clip.webm',
+        });
+        expect(seenSignal).toBeInstanceOf(AbortSignal);
+        expect(seenSignal?.aborted).toBe(false);
+    });
+
+    test('a fetch that never resolves settles as a retryable timeout within the deadline (#2305)', async () => {
+        const fetchFn: TranscriptionFetch = () => new Promise(() => {});
+        await expectFacadeRejection(
+            transcribeViaFacade({
+                fetchFn,
+                url: 'http://x/v1/audio/transcriptions',
+                file: new Blob(['audio'], { type: 'audio/webm' }),
+                filename: 'clip.webm',
+                deadlineMs: 25,
+            }),
+            'timeout',
+            { retryable: true },
+        );
+    });
+
+    test('a response body that never completes is covered by the same deadline (#2305)', async () => {
+        const fetchFn: TranscriptionFetch = async () => ({
+            ok: true,
+            status: 200,
+            json: () => new Promise(() => {}),
+        });
+        await expectFacadeRejection(
+            transcribeViaFacade({
+                fetchFn,
+                url: 'http://x/v1/audio/transcriptions',
+                file: new Blob(['audio'], { type: 'audio/webm' }),
+                filename: 'clip.webm',
+                deadlineMs: 25,
+            }),
+            'timeout',
+            { retryable: true },
+        );
+    });
+
+    test('caller abandonment aborts the in-flight fetch and settles as timeout (#2305)', async () => {
+        let fetchSawAbort = false;
+        const fetchFn: TranscriptionFetch = (_url, init) =>
+            new Promise((_resolve, reject) => {
+                init.signal?.addEventListener('abort', () => {
+                    fetchSawAbort = true;
+                    reject(new Error('The operation was aborted'));
+                });
+            });
+        const caller = new AbortController();
+        const promise = transcribeViaFacade({
+            fetchFn,
+            url: 'http://x/v1/audio/transcriptions',
+            file: new Blob(['audio'], { type: 'audio/webm' }),
+            filename: 'clip.webm',
+            signal: caller.signal,
+            deadlineMs: 60_000,
+        });
+        caller.abort();
+        await expectFacadeRejection(promise, 'timeout', { retryable: true });
+        expect(fetchSawAbort).toBe(true);
     });
 });
 

@@ -304,9 +304,9 @@ function getUniquePaths(paths) {
   return result;
 }
 
-function getCommandOutput(command, args) {
+function getCommandOutput(command, args, spawnSyncImpl = spawnSync) {
   try {
-    const result = spawnSync(command, args, {
+    const result = spawnSyncImpl(command, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10000,
@@ -324,33 +324,33 @@ function getCommandOutput(command, args) {
   }
 }
 
-function getGlobalBinDirs(pm) {
-  const pmCommand = resolvePackageManagerCommand(pm);
-  if (!isCommandAvailable(pmCommand)) {
+function getGlobalBinDirs(pm, spawnSyncImpl = spawnSync) {
+  const pmCommand = resolvePackageManagerCommand(pm, spawnSyncImpl);
+  if (!isCommandAvailable(pmCommand, spawnSyncImpl)) {
     return [];
   }
 
   const dirs = [];
   switch (pm) {
     case 'pnpm': {
-      const pnpmBin = getCommandOutput(pmCommand, ['bin', '-g']);
+      const pnpmBin = getCommandOutput(pmCommand, ['bin', '-g'], spawnSyncImpl);
       if (pnpmBin) dirs.push(pnpmBin);
-      const pnpmPrefix = getCommandOutput(pmCommand, ['prefix', '-g']);
+      const pnpmPrefix = getCommandOutput(pmCommand, ['prefix', '-g'], spawnSyncImpl);
       if (pnpmPrefix) dirs.push(process.platform === 'win32' ? pnpmPrefix : path.join(pnpmPrefix, 'bin'));
       break;
     }
     case 'yarn': {
-      const yarnBin = getCommandOutput(pmCommand, ['global', 'bin']);
+      const yarnBin = getCommandOutput(pmCommand, ['global', 'bin'], spawnSyncImpl);
       if (yarnBin) dirs.push(yarnBin);
       break;
     }
     case 'bun': {
-      const bunBin = getCommandOutput(pmCommand, ['pm', 'bin', '-g']);
+      const bunBin = getCommandOutput(pmCommand, ['pm', 'bin', '-g'], spawnSyncImpl);
       if (bunBin) dirs.push(bunBin);
       break;
     }
     default: {
-      const npmPrefix = getCommandOutput(pmCommand, ['prefix', '-g']);
+      const npmPrefix = getCommandOutput(pmCommand, ['prefix', '-g'], spawnSyncImpl);
       if (npmPrefix) dirs.push(process.platform === 'win32' ? npmPrefix : path.join(npmPrefix, 'bin'));
       break;
     }
@@ -359,10 +359,10 @@ function getGlobalBinDirs(pm) {
   return getUniquePaths(dirs);
 }
 
-function getGlobalNodeModulesRoots(pm) {
+function getGlobalNodeModulesRoots(pm, spawnSyncImpl = spawnSync) {
   try {
-    const pmCommand = resolvePackageManagerCommand(pm);
-    if (!isCommandAvailable(pmCommand)) {
+    const pmCommand = resolvePackageManagerCommand(pm, spawnSyncImpl);
+    if (!isCommandAvailable(pmCommand, spawnSyncImpl)) {
       return [];
     }
 
@@ -370,19 +370,19 @@ function getGlobalNodeModulesRoots(pm) {
 
     switch (pm) {
       case 'pnpm': {
-        const pnpmRoot = getCommandOutput(pmCommand, ['root', '-g']);
+        const pnpmRoot = getCommandOutput(pmCommand, ['root', '-g'], spawnSyncImpl);
         if (pnpmRoot) roots.push(pnpmRoot);
-        const pnpmPrefix = getCommandOutput(pmCommand, ['prefix', '-g']);
+        const pnpmPrefix = getCommandOutput(pmCommand, ['prefix', '-g'], spawnSyncImpl);
         if (pnpmPrefix) roots.push(process.platform === 'win32' ? path.join(pnpmPrefix, 'node_modules') : path.join(pnpmPrefix, 'lib', 'node_modules'));
         break;
       }
       case 'yarn': {
-        const yarnDir = getCommandOutput(pmCommand, ['global', 'dir']);
+        const yarnDir = getCommandOutput(pmCommand, ['global', 'dir'], spawnSyncImpl);
         if (yarnDir) roots.push(path.join(yarnDir, 'node_modules'));
         break;
       }
       case 'bun': {
-        const bunBinDir = getCommandOutput(pmCommand, ['pm', 'bin', '-g']);
+        const bunBinDir = getCommandOutput(pmCommand, ['pm', 'bin', '-g'], spawnSyncImpl);
         if (bunBinDir) {
           roots.push(path.resolve(bunBinDir, '..', 'install', 'global', 'node_modules'));
           roots.push(path.resolve(bunBinDir, '..', '..', 'node_modules'));
@@ -391,9 +391,9 @@ function getGlobalNodeModulesRoots(pm) {
       }
       default:
       {
-        const npmRoot = getCommandOutput(pmCommand, ['root', '-g']);
+        const npmRoot = getCommandOutput(pmCommand, ['root', '-g'], spawnSyncImpl);
         if (npmRoot) roots.push(npmRoot);
-        const npmPrefix = getCommandOutput(pmCommand, ['prefix', '-g']);
+        const npmPrefix = getCommandOutput(pmCommand, ['prefix', '-g'], spawnSyncImpl);
         if (npmPrefix) roots.push(process.platform === 'win32' ? path.join(npmPrefix, 'node_modules') : path.join(npmPrefix, 'lib', 'node_modules'));
         break;
       }
@@ -426,10 +426,10 @@ function detectPackageManagerFromCurrentInstallPath() {
   return detectPackageManagerFromInstallPath(getCurrentPackagePath());
 }
 
-function packageManagerOwnsCurrentInstall(pm) {
+function packageManagerOwnsCurrentInstall(pm, spawnSyncImpl = spawnSync) {
   const currentPackagePaths = getComparablePaths(getCurrentPackagePath());
   const candidatePackagePaths = [
-    ...getGlobalNodeModulesRoots(pm).map(getPackagePathForGlobalRoot),
+    ...getGlobalNodeModulesRoots(pm, spawnSyncImpl).map(getPackagePathForGlobalRoot),
     ...getOwnedPackagePathsFromGlobalBins(pm),
   ];
 
@@ -443,22 +443,22 @@ function packageManagerOwnsCurrentInstall(pm) {
   return false;
 }
 
-function describeDetection(packageManager, reason) {
+function describeDetection(packageManager, reason, spawnSyncImpl = spawnSync) {
   return {
     packageManager,
     reason,
     packagePath: getCurrentPackagePath(),
     packageManagerCommand: resolvePackageManagerCommand(packageManager),
-    globalNodeModulesRoot: getGlobalNodeModulesRoots(packageManager)[0] || null,
+    globalNodeModulesRoot: getGlobalNodeModulesRoots(packageManager, spawnSyncImpl)[0] || null,
   };
 }
 
-function rememberDetection(packageManager, reason) {
-  cachedDetection = { packageManager, reason };
-  return describeDetection(packageManager, reason);
+function rememberDetection(packageManager, reason, spawnSyncImpl = spawnSync) {
+  cachedDetection = { packageManager, reason, spawnSync: spawnSyncImpl };
+  return describeDetection(packageManager, reason, spawnSyncImpl);
 }
 
-export function detectPackageManagerDetails() {
+export function detectPackageManagerDetails({ spawnSync: spawnSyncImpl = spawnSync } = {}) {
   // In desktop (Electron) runtime, package-manager detection is worthless —
   // the app ships as a .app bundle, not installed via npm/pnpm/yarn/bun, and
   // updates are handled by electron-updater. The detection path does up to a
@@ -476,26 +476,26 @@ export function detectPackageManagerDetails() {
   }
 
   if (cachedDetection) {
-    return describeDetection(cachedDetection.packageManager, cachedDetection.reason);
+    return describeDetection(cachedDetection.packageManager, cachedDetection.reason, cachedDetection.spawnSync);
   }
 
   const forcedPm = process.env.OPENCHAMBER_PACKAGE_MANAGER?.trim();
   if (forcedPm && ['npm', 'pnpm', 'yarn', 'bun'].includes(forcedPm)) {
-    if (isCommandAvailable(resolvePackageManagerCommand(forcedPm))) {
-      return rememberDetection(forcedPm, 'forced-env');
+    if (isCommandAvailable(resolvePackageManagerCommand(forcedPm, spawnSyncImpl), spawnSyncImpl)) {
+      return rememberDetection(forcedPm, 'forced-env', spawnSyncImpl);
     }
   }
 
   // First prefer the package manager that demonstrably owns the current install.
   const installPathPm = detectPackageManagerFromCurrentInstallPath();
-  if (installPathPm && packageManagerOwnsCurrentInstall(installPathPm)) {
-    return rememberDetection(installPathPm, 'install-path-owner');
+  if (installPathPm && packageManagerOwnsCurrentInstall(installPathPm, spawnSyncImpl)) {
+    return rememberDetection(installPathPm, 'install-path-owner', spawnSyncImpl);
   }
 
   const ownershipCandidates = ['pnpm', 'yarn', 'bun', 'npm'];
   for (const candidate of ownershipCandidates) {
-    if (packageManagerOwnsCurrentInstall(candidate)) {
-      return rememberDetection(candidate, 'global-root-owner');
+    if (packageManagerOwnsCurrentInstall(candidate, spawnSyncImpl)) {
+      return rememberDetection(candidate, 'global-root-owner', spawnSyncImpl);
     }
   }
 
@@ -527,28 +527,28 @@ export function detectPackageManagerDetails() {
   }
 
   // Validate the hint against package visibility, but only after ownership checks failed.
-  if (hintedPm && isCommandAvailable(resolvePackageManagerCommand(hintedPm)) && isPackageInstalledWith(hintedPm)) {
-    return rememberDetection(hintedPm, 'hinted-visible-install');
+  if (hintedPm && isCommandAvailable(resolvePackageManagerCommand(hintedPm, spawnSyncImpl), spawnSyncImpl) && isPackageInstalledWith(hintedPm, spawnSyncImpl)) {
+    return rememberDetection(hintedPm, 'hinted-visible-install', spawnSyncImpl);
   }
 
   const runtimePm = detectPackageManagerFromRuntimePath(process.execPath);
-  if (runtimePm && isCommandAvailable(resolvePackageManagerCommand(runtimePm)) && isPackageInstalledWith(runtimePm)) {
-    return rememberDetection(runtimePm, 'runtime-visible-install');
+  if (runtimePm && isCommandAvailable(resolvePackageManagerCommand(runtimePm, spawnSyncImpl), spawnSyncImpl) && isPackageInstalledWith(runtimePm, spawnSyncImpl)) {
+    return rememberDetection(runtimePm, 'runtime-visible-install', spawnSyncImpl);
   }
 
   // Last resort: pick a PM that can at least see the package.
   const pmChecks = [
-    { name: 'pnpm', check: () => isCommandAvailable(resolvePackageManagerCommand('pnpm')) },
-    { name: 'yarn', check: () => isCommandAvailable(resolvePackageManagerCommand('yarn')) },
-    { name: 'bun', check: () => isCommandAvailable(resolvePackageManagerCommand('bun')) },
-    { name: 'npm', check: () => isCommandAvailable(resolvePackageManagerCommand('npm')) },
+    { name: 'pnpm', check: () => isCommandAvailable(resolvePackageManagerCommand('pnpm', spawnSyncImpl), spawnSyncImpl) },
+    { name: 'yarn', check: () => isCommandAvailable(resolvePackageManagerCommand('yarn', spawnSyncImpl), spawnSyncImpl) },
+    { name: 'bun', check: () => isCommandAvailable(resolvePackageManagerCommand('bun', spawnSyncImpl), spawnSyncImpl) },
+    { name: 'npm', check: () => isCommandAvailable(resolvePackageManagerCommand('npm', spawnSyncImpl), spawnSyncImpl) },
   ];
 
   for (const { name, check } of pmChecks) {
     if (check()) {
       // Verify this PM actually has the package installed globally
-      if (isPackageInstalledWith(name)) {
-        return rememberDetection(name, 'last-resort-visible-install');
+      if (isPackageInstalledWith(name, spawnSyncImpl)) {
+        return rememberDetection(name, 'last-resort-visible-install', spawnSyncImpl);
       }
     }
   }
@@ -556,7 +556,7 @@ export function detectPackageManagerDetails() {
   // npm is only a guess from here on. A copy outside any node_modules folder
   // (an unpacked tarball, the Docker image, a source checkout) was installed
   // by no package manager at all, so no install command updates it.
-  return rememberDetection('npm', installPathPm ? 'default-fallback' : 'unmanaged-install');
+  return rememberDetection('npm', installPathPm ? 'default-fallback' : 'unmanaged-install', spawnSyncImpl);
 }
 
 /** The running copy was installed by no package manager, so it cannot update itself. */
@@ -617,10 +617,10 @@ function getPackageManagerCommandCandidates(pm) {
   return [...new Set(candidates.filter(Boolean))];
 }
 
-function resolvePackageManagerCommand(pm) {
+function resolvePackageManagerCommand(pm, spawnSyncImpl = spawnSync) {
   const candidates = getPackageManagerCommandCandidates(pm);
   for (const candidate of candidates) {
-    if (isCommandAvailable(candidate)) {
+    if (isCommandAvailable(candidate, spawnSyncImpl)) {
       return candidate;
     }
   }
@@ -636,9 +636,9 @@ function quoteCommand(command) {
   return `'${command.replace(/'/g, "'\\''")}'`;
 }
 
-function isCommandAvailable(command) {
+function isCommandAvailable(command, spawnSyncImpl = spawnSync) {
   try {
-    const result = spawnSync(command, ['--version'], {
+    const result = spawnSyncImpl(command, ['--version'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
@@ -663,12 +663,12 @@ function getGlobalListArgs(pm) {
   }
 }
 
-function isPackageInstalledWith(pm) {
+function isPackageInstalledWith(pm, spawnSyncImpl = spawnSync) {
   try {
-    const pmCommand = resolvePackageManagerCommand(pm);
+    const pmCommand = resolvePackageManagerCommand(pm, spawnSyncImpl);
     const args = getGlobalListArgs(pm);
 
-    const result = spawnSync(pmCommand, args, {
+    const result = spawnSyncImpl(pmCommand, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10000,
@@ -692,10 +692,10 @@ const GLOBAL_VERSION_PATTERN = /@openchamber\/web[@\s]+v?(\d[\w.+-]*)/;
  * parsed. The listing command may exit non-zero when the package is missing,
  * so stdout is parsed regardless of the status.
  */
-function getInstalledGlobalVersion(pm) {
+function getInstalledGlobalVersion(pm, spawnSyncImpl = spawnSync) {
   try {
-    const pmCommand = resolvePackageManagerCommand(pm);
-    const result = spawnSync(pmCommand, getGlobalListArgs(pm), {
+    const pmCommand = resolvePackageManagerCommand(pm, spawnSyncImpl);
+    const result = spawnSyncImpl(pmCommand, getGlobalListArgs(pm), {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10000,
@@ -725,8 +725,8 @@ const PNPM_BUILD_DEPENDENCIES = ['msgpackr-extract', 'node-pty'];
 // unknown option, and pnpm 9 and older run build scripts without approval.
 const PNPM_ALLOW_BUILD_MIN_VERSION = '10.4.0';
 
-function getPnpmAllowBuildFlags(pmCommand) {
-  const version = normalizeTargetVersion(getCommandOutput(pmCommand, ['--version']));
+function getPnpmAllowBuildFlags(pmCommand, spawnSyncImpl = spawnSync) {
+  const version = normalizeTargetVersion(getCommandOutput(pmCommand, ['--version'], spawnSyncImpl));
   if (!version || compareVersions(version, PNPM_ALLOW_BUILD_MIN_VERSION) < 0) return '';
   return PNPM_BUILD_DEPENDENCIES.map((name) => ` --allow-build=${name}`).join('');
 }
@@ -744,11 +744,11 @@ export function getUpdateCommand(pm = detectPackageManager(), options = {}) {
     throw new Error(`Invalid target version for update: ${String(options.targetVersion)}`);
   }
   const versionSpec = targetVersion ? `@${targetVersion}` : '@latest';
-  const resolvedCommand = resolvePackageManagerCommand(pm);
+  const resolvedCommand = resolvePackageManagerCommand(pm, options.spawnSync);
   const pmCommand = quoteCommand(resolvedCommand);
   switch (pm) {
     case 'pnpm':
-      return `${pmCommand} add -g${getPnpmAllowBuildFlags(resolvedCommand)} ${PACKAGE_NAME}${versionSpec}`;
+      return `${pmCommand} add -g${getPnpmAllowBuildFlags(resolvedCommand, options.spawnSync)} ${PACKAGE_NAME}${versionSpec}`;
     case 'yarn':
       return `${pmCommand} global add ${PACKAGE_NAME}${versionSpec}`;
     case 'bun':

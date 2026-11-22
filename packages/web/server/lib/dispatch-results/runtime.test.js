@@ -210,6 +210,19 @@ describe('dispatch results runtime', () => {
     expect(openCode.state.synthetic).toHaveLength(1);
   });
 
+  it('does not let a prototype-named session read as running (#2311)', async () => {
+    const { runtime, openCode } = await createRuntime();
+    openCode.state.sessions['constructor'] = { id: 'constructor', title: 'Proto-named session' };
+    openCode.state.records['constructor'] = [user(11), assistant('Already done', 20), idle('succeeded', 30)];
+    openCode.state.children['constructor'] = [];
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'constructor', dispatchedAt: 10 });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([
+      expect.objectContaining({ sessionID: 'ses_parent', text: expect.stringContaining('Already done') }),
+    ]);
+    expect(runtime.pending()).toEqual([]);
+  });
+
   it('waits for the dispatched session\'s subagents before calling the turn over', async () => {
     const { runtime, openCode } = await createRuntime();
     openCode.state.records.ses_child.push(user(11), assistant('Waiting on a subagent', 12), idle('succeeded', 13));

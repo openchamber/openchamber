@@ -7,6 +7,10 @@ import { fileURLToPath } from 'url';
 
 const providersModule = fileURLToPath(new URL('./providers.js', import.meta.url));
 
+// Set by beforeEach: an isolated HOME for the child processes, so no
+// homedir-derived config source can leak the machine's real state (#2309).
+let isolatedHome;
+
 // The user config path is fixed when shared.js loads, so the calls run in a
 // child process pointed at a temporary OPENCODE_CONFIG_DIR; the real user
 // config is never touched.
@@ -15,8 +19,17 @@ const run = (configDir, body) => {
     import { readDisabledProviders, readProviderOffState, setProviderDisabled } from ${JSON.stringify(providersModule)};
     ${body}
   `;
+  // The child inherits this process's env, which on a developer machine
+  // exports OPENCODE_CONFIG pointing at the machine's runtime config
+  // (e.g. ~/.local/state/opencode/opencode-runtime.jsonc) — that file's
+  // providers would leak into the off-state universe (#2309). Scrub the
+  // custom-config vars and pin HOME; OPENCODE_CONFIG_DIR is the suite's
+  // one config source.
+  const env = { ...process.env, OPENCODE_CONFIG_DIR: configDir, HOME: isolatedHome };
+  delete env.OPENCODE_CONFIG;
+  delete env.OPENCODE_CONFIG_PATH;
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { ...process.env, OPENCODE_CONFIG_DIR: configDir },
+    env,
     encoding: 'utf8',
   });
   if (result.status !== 0) throw new Error(result.stderr);
@@ -27,9 +40,11 @@ describe('disabled providers', () => {
   let configDir;
   beforeEach(() => {
     configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-disabled-providers-'));
+    isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-disabled-providers-home-'));
   });
   afterEach(() => {
     fs.rmSync(configDir, { recursive: true, force: true });
+    fs.rmSync(isolatedHome, { recursive: true, force: true });
   });
 
   test('disables and re-enables a provider in the user config, keeping other keys', () => {

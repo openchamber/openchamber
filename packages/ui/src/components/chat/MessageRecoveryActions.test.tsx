@@ -2,16 +2,30 @@ import React, { act } from 'react';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
+import { create } from 'zustand';
 import type { Message } from '@/lib/opencode/model';
 
-const targets: Array<{ providerID: string; id: string }> = [];
-const providers = () => [{
+type Target = { providerID: string; id: string };
+const providersWith = (targets: Target[]) => [{
   id: 'opencode-route',
   models: [{
     id: 'pool',
     settings: { opencodeRoute: { targets } },
   }],
 }];
+
+// Real zustand stores rather than plain selector calls: the app reads them
+// through useSyncExternalStore, where a selector that builds a new object on
+// every read re-renders until React throws "Maximum update depth exceeded"
+// (React error #185 in production). A plain function never subscribes, so it
+// cannot catch that.
+const useConfigStore = create(() => ({
+  providers: providersWith([]),
+  currentProviderId: '',
+  currentModelId: '',
+}));
+const useSelectionStore = create(() => ({ sessionModelSelections: new Map<string, unknown>() }));
+const useSessionUIStore = create(() => ({ currentSessionId: 'session-1' }));
 // SAFETY: test fixture provides the subset of message properties used by recovery.
 const messages = [{
   id: 'user-1',
@@ -40,19 +54,11 @@ mock.module('@/lib/i18n', () => ({
   }[key] ?? key) }),
 }));
 mock.module('@/stores/useConfigStore', () => ({
-  useConfigStore: <T,>(select: (state: { providers: ReturnType<typeof providers>; currentProviderId: string; currentModelId: string }) => T): T => (
-    select({ providers: providers(), currentProviderId: '', currentModelId: '' })
-  ),
-  selectProvidersForDirectory: (state: { providers: ReturnType<typeof providers> }) => state.providers,
+  useConfigStore,
+  selectProvidersForDirectory: (state: { providers: ReturnType<typeof providersWith> }) => state.providers,
 }));
-mock.module('@/sync/selection-store', () => ({
-  useSelectionStore: <T,>(select: (state: { sessionModelSelections: Map<string, unknown> }) => T): T => (
-    select({ sessionModelSelections: new Map() })
-  ),
-}));
-mock.module('@/sync/session-ui-store', () => ({
-  useSessionUIStore: <T,>(select: (state: { currentSessionId: string }) => T): T => select({ currentSessionId: 'session-1' }),
-}));
+mock.module('@/sync/selection-store', () => ({ useSelectionStore }));
+mock.module('@/sync/session-ui-store', () => ({ useSessionUIStore }));
 mock.module('@/sync/sync-context', () => ({
   useSessionMessages: () => messages,
   useSession: () => ({ id: 'session-1', model: { providerID: 'opencode-route', id: 'pool' } }),
@@ -97,7 +103,11 @@ const installDom = () => {
 };
 
 beforeEach(() => {
-  targets.splice(0, targets.length, { providerID: 'provider-a', id: 'model-a' });
+  useConfigStore.setState({
+    providers: providersWith([{ providerID: 'provider-a', id: 'model-a' }]),
+    currentProviderId: '',
+    currentModelId: '',
+  });
 });
 
 describe('MessageRecoveryActions pool recovery', () => {
@@ -117,7 +127,12 @@ describe('MessageRecoveryActions pool recovery', () => {
   });
 
   test('enables the pool action when another configured target is available', async () => {
-    targets.push({ providerID: 'provider-b', id: 'model-b' });
+    useConfigStore.setState({
+      providers: providersWith([
+        { providerID: 'provider-a', id: 'model-a' },
+        { providerID: 'provider-b', id: 'model-b' },
+      ]),
+    });
     const dom = installDom();
     try {
       await dom.render();
@@ -127,6 +142,25 @@ describe('MessageRecoveryActions pool recovery', () => {
       expect(button).toBeDefined();
       expect(button?.disabled).toBe(false);
       expect(button?.title).toBe('provider-b/model-b');
+    } finally {
+      await dom.cleanup();
+    }
+  });
+});
+
+describe('MessageRecoveryActions store subscriptions', () => {
+  // Oracle: React's own loop guard. An unstable store snapshot makes React
+  // throw "Maximum update depth exceeded" out of act(); stable selectors render
+  // once and leave the recovery controls in the DOM.
+  test('renders without a render loop and stays stable when the configured model changes', async () => {
+    useConfigStore.setState({ currentProviderId: 'provider-a', currentModelId: 'model-a' });
+    const dom = installDom();
+    try {
+      await dom.render();
+      await act(async () => useConfigStore.setState({ currentProviderId: 'provider-b', currentModelId: 'model-b' }));
+
+      // Positive control: the controls rendered, so every selector ran.
+      expect(dom.container.textContent).toContain('Choose a model');
     } finally {
       await dom.cleanup();
     }

@@ -45,6 +45,19 @@ const initialState: GlobalSessionStatusState = {
 export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => initialState);
 useGlobalSessionStatusStore.subscribe(() => countSyncPerformance('globalStatusPublications'));
 
+// Only pending reads retain candidates. Any live write invalidates that
+// session's candidate, even a repeated busy event that changes no store field.
+const pendingStatusReads = new Set<Set<string>>();
+// A runtime switch replaces the index; a read started before it must not commit.
+let statusGeneration = 0;
+// Sessions the previous running-list read missed (see `reconcileGlobalSessionStatusWithActive`).
+let missingBefore = new Set<string>();
+
+const touchStatus = (sessionId: string): void => {
+  missingBefore.delete(sessionId);
+  for (const candidates of pendingStatusReads) candidates.delete(sessionId);
+};
+
 /**
  * Replaces the status map wholesale and derives active membership from it.
  * This is the ONE sanctioned way to swap statusById from outside the event
@@ -62,6 +75,9 @@ export const replaceGlobalSessionStatusById = (statusById: Map<string, GlobalSes
   }
   const sameMembership = nextActiveSessionIds.size === current.activeSessionIds.size
     && [...nextActiveSessionIds].every((sessionId) => current.activeSessionIds.has(sessionId));
+  statusGeneration += 1;
+  pendingStatusReads.clear();
+  missingBefore = new Set();
   useGlobalSessionStatusStore.setState({
     observedById: new Map(),
     statusById,
@@ -235,6 +251,7 @@ export const applyGlobalSessionStatusEvents = (directory: string, payloads: read
     if (payload.type === 'session.status') {
       const { sessionID, status } = payload.properties;
       if (!sessionID) continue;
+      touchStatus(sessionID);
       const type = normalizeStatusType(status.type);
       // A status event only records that the session is running again; the
       // outcome of the turn stays whatever the terminal event reported.
@@ -256,6 +273,7 @@ export const applyGlobalSessionStatusEvents = (directory: string, payloads: read
     if (payload.type === 'session.idle' || payload.type === 'session.error') {
       const { sessionID } = payload.properties;
       if (sessionID) {
+        touchStatus(sessionID);
         observe(sessionID, payload.type === 'session.error' ? 'failed' : 'completed');
         settle(sessionID);
       }
@@ -265,6 +283,7 @@ export const applyGlobalSessionStatusEvents = (directory: string, payloads: read
     if (payload.type === 'session.deleted') {
       const { sessionID } = payload.properties;
       if (!sessionID) continue;
+      touchStatus(sessionID);
       if ((observedById ?? state.observedById).has(sessionID)) {
         observedById ??= new Map(state.observedById);
         observedById.delete(sessionID);
@@ -319,7 +338,9 @@ export const applyGlobalSessionStatusSnapshot = (
   // sessions land here, so it stays small however long the directory's list is.
   const activeSessionIds = new Set<string>();
   for (const [sessionId, status] of Object.entries(raw)) {
-    if (normalizeStatusType(status.type) !== 'idle') activeSessionIds.add(sessionId);
+    if (normalizeStatusType(status.type) === 'idle') continue;
+    activeSessionIds.add(sessionId);
+    touchStatus(sessionId);
   }
   reconcileSessionActivitySnapshot(activeSessionIds, known);
   // Timing asks the coverage question instead of being handed a list: a snapshot
@@ -386,4 +407,57 @@ export const applyGlobalSessionStatusSnapshot = (
       activeSessionIds: nextActiveSessionIds ?? state.activeSessionIds,
     } : state;
   });
+};
+
+/**
+ * Settles every session the index holds as running that OpenCode no longer
+ * runs. `readActiveSessionIds` answers with OpenCode's own list of running
+ * sessions (`session.active`), or null when it could not be read.
+ *
+ * Directory recovery cannot cover an entry held only in this global index
+ * after its completion event was lost. `covers` limits the
+ * settling to sessions the list speaks for: a session inside an isolated space
+ * is not on the host's list, and one whose prompt is still being sent is not
+ * on it yet. A session written to after the read started keeps that write.
+ * A session is settled only when two reads in a row miss it: right after
+ * OpenCode restarts, a turn it resumes is not on the list until its drain
+ * starts again, and one miss must not end it. A settled session counts as
+ * observed, so the host seed cannot add it back.
+ */
+export const reconcileGlobalSessionStatusWithActive = async (
+  readActiveSessionIds: () => Promise<ReadonlySet<string> | null>,
+  covers: (sessionId: string, directory: string) => boolean,
+): Promise<void> => {
+  if (pendingStatusReads.size > 0) return;
+  const generation = statusGeneration;
+  const candidates = new Set(useGlobalSessionStatusStore.getState().statusById.keys());
+  pendingStatusReads.add(candidates);
+  let active: ReadonlySet<string> | null;
+  try {
+    active = await readActiveSessionIds();
+  } catch (error) {
+    if (generation === statusGeneration) missingBefore.clear();
+    throw error;
+  } finally {
+    pendingStatusReads.delete(candidates);
+  }
+  if (generation !== statusGeneration) return;
+  if (!active) {
+    missingBefore.clear();
+    return;
+  }
+  const missing = new Set<string>();
+  const settledByDirectory = new Map<string, SyncEvent[]>();
+  for (const [sessionId, entry] of useGlobalSessionStatusStore.getState().statusById) {
+    if (active.has(sessionId) || !candidates.has(sessionId) || !covers(sessionId, entry.directory)) continue;
+    if (!missingBefore.has(sessionId)) {
+      missing.add(sessionId);
+      continue;
+    }
+    const events = settledByDirectory.get(entry.directory) ?? [];
+    events.push({ type: 'session.status', properties: { sessionID: sessionId, status: { type: 'idle' } } });
+    settledByDirectory.set(entry.directory, events);
+  }
+  missingBefore = missing;
+  for (const [directory, events] of settledByDirectory) applyGlobalSessionStatusEvents(directory, events);
 };

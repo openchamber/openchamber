@@ -20,6 +20,7 @@ const CHILDREN_MAX_PAGES = 8;
 // 16 MiB matches the session-list proxy cap and leaves room for a 50-record page.
 const SESSION_ACTIVITY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const sessionLineageSchema = z.object({ id: z.string().min(1), parentID: z.string().min(1).nullish() });
+const activeSessionsSchema = z.record(z.string().min(1), z.object({ type: z.literal('running') }));
 
 export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs = 10_000, fetchImpl = fetch }) => {
   const openCodeGet = async (fetchPath, query, signal = AbortSignal.timeout(timeoutMs)) => {
@@ -42,7 +43,8 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
    */
   const fetchActiveSessionStatuses = async () => {
     const statuses = await openCodeGet('/api/session/active').catch(() => null);
-    return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
+    const parsed = activeSessionsSchema.safeParse(statuses);
+    return parsed.success ? parsed.data : null;
   };
 
   /**
@@ -76,7 +78,7 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
   const hasWorkingChildren = async (sessionId, statuses) => {
     const children = await fetchChildSessionIds(sessionId);
     if (!children) return null;
-    return children.some((id) => Boolean(statuses[id]));
+    return children.some((id) => Boolean(Object.hasOwn(statuses, id) && statuses[id]));
   };
 
   /**

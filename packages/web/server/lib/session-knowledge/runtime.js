@@ -23,8 +23,8 @@ const PINS_METADATA_KEY = 'project_context_pins';
  * number of ids, would grow the persisted session metadata on every call,
  * and every later read pays for the bloat.
  */
-export const PIN_ID_MAX_LENGTH = 1000;
-export const PINS_MAX_PER_KIND = 500;
+const PIN_ID_MAX_LENGTH = 1000;
+const PINS_MAX_PER_KIND = 500;
 
 const pinLimitError = (message) => {
   const error = new Error(message);
