@@ -115,7 +115,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
               />
             )}
             label={name}
-            muted={!connected}
+            inactive={!connected}
             // A server asking for sign-in or reporting a failure is asking to be
             // acted on; the state is the affordance, so it is the button.
             value={needsAuth ? (
@@ -138,7 +138,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
           />
         );
       })}
-      <p className="mx-1 mb-1 text-[11px] leading-4 text-muted-foreground">{t('mcpDropdown.cacheNote')}</p>
+      <p className="mx-1 mb-1 typography-micro text-muted-foreground">{t('mcpDropdown.cacheNote')}</p>
     </WorkStatusCollapsibleSection>
   );
 };

@@ -146,7 +146,7 @@ export const WorkStatusUsageSection: React.FC = () => {
                       {row.subtitle ? `${row.subtitle} · ${row.label}` : row.label}
                     </span>
                     {resetLabel ? (
-                      <span className="shrink-0 text-[11px] text-muted-foreground">{resetLabel}</span>
+                      <span className="shrink-0 typography-micro text-muted-foreground">{resetLabel}</span>
                     ) : null}
                   </span>
                 )}

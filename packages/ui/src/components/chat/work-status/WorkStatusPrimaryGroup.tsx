@@ -15,12 +15,14 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
+import { PR_PILL_TINT } from '@/lib/theme/readableColors';
 import { computeContextUsage } from './contextUsage';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
 import { getWorkStatusChecksPresentation } from '../../checksSummaryPresentation';
 import {
   WorkStatusCallout,
+  WorkStatusFullTextTooltip,
   WorkStatusMeter,
   WorkStatusPill,
   WorkStatusRow,
@@ -258,7 +260,12 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // than the session I am looking at". Only worth a line once subagents exist —
   // without them the total *is* the session's own cost and the row would
   // restate the number directly above it.
-  const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
+  const costBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0
+    ? t('chat.workStatus.cost.breakdown', {
+      session: formatCost(ownCost),
+      subagents: formatCost(subagentCost),
+    })
+    : null;
   const hasSession = showSession && (contextUsage !== null || cost !== null || Boolean(goalRow));
   const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel || projectActionsContext);
 
@@ -287,20 +294,19 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               />
               <WorkStatusMeter percent={usagePercent ?? 0} color={meterColor} />
               {contextUsage.state === 'compacted' ? (
-                <p className="mx-1 mb-1 text-[11px] leading-4 text-muted-foreground">
+                <p className="mx-1 mb-1 typography-micro leading-4 text-muted-foreground">
                   {t('contextUsage.compacted.description')}
                 </p>
               ) : null}
               {/* Caption, not a row: it explains the figure above it rather
                   than reporting a reading of its own, so it carries no icon
                   and no label column. */}
-              {showCostBreakdown ? (
-                <p className="mx-1 mb-1 truncate text-[11px] leading-4 text-muted-foreground tabular-nums">
-                  {t('chat.workStatus.cost.breakdown', {
-                    session: formatCost(ownCost),
-                    subagents: formatCost(subagentCost),
-                  })}
-                </p>
+              {costBreakdown ? (
+                <WorkStatusFullTextTooltip content={costBreakdown}>
+                  <p className="mx-1 mb-1 truncate typography-micro leading-4 text-muted-foreground tabular-nums">
+                    {costBreakdown}
+                  </p>
+                </WorkStatusFullTextTooltip>
               ) : null}
             </>
           ) : null}
@@ -345,7 +351,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               onClick={directory ? () => openSurface('git') : undefined}
               ariaLabel={t('chat.workStatus.action.openGit')}
               label={nestedRepoLabel}
-              muted
             />
           ) : null}
 
@@ -381,8 +386,10 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 label={prSummary.title ?? t(changeRequestCopy('chat.workStatus.pr.untitled', prSummary.provider))}
                 value={(
                   <WorkStatusPill
-                    color={`var(--pr-${prSummary.visualState})`}
-                    background={`color-mix(in srgb, var(--pr-${prSummary.visualState}) 18%, transparent)`}
+                    // The state colour itself is too faint as text on its own tint
+                    // in most themes; the theme computes a readable one (readableColors.ts).
+                    color={`var(--pr-${prSummary.visualState}-text)`}
+                    background={`color-mix(in srgb, var(--pr-${prSummary.visualState}) ${PR_PILL_TINT * 100}%, transparent)`}
                   >
                     {prSummary.draft ? t('chat.workStatus.pr.draft') : formatChangeRequestReference(prSummary.provider, prSummary.number)}
                   </WorkStatusPill>
@@ -394,7 +401,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   onClick={directory ? () => openSurface('pr') : undefined}
                   ariaLabel={t(changeRequestCopy('chat.workStatus.action.openPr', prSummary.provider))}
                   label={t('chat.workStatus.pr.checks')}
-                  muted
                   value={(
                     <>
                       {checksPresentation.failure !== null ? (

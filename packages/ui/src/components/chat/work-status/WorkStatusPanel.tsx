@@ -5,7 +5,7 @@ import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
-import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
+import { useWorkStatusWidths } from './useWorkStatusVisibility';
 import { setWorkStatusReserved } from '@/components/layout/rightSlot';
 import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
@@ -78,6 +78,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const { t, direction } = useI18n();
   // The card's fade and lift follow the side columns' animation setting.
   const panelTransitionMs = useLayoutAnimationMs();
+  const { panel: panelWidth } = useWorkStatusWidths();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
@@ -216,7 +217,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       aria-label={t('chat.workStatus.ariaLabel')}
       aria-hidden={!interactive}
       // The card stays mounted while hidden so it can animate its own collapse,
-      // and the sections button sits outside the content gate. Without `inert`
+      // and its content stays until that fade ends. Without `inert`
       // Tab could land on an invisible control — and `aria-hidden` around a
       // focusable descendant is an accessibility fault in its own right.
       inert={!interactive}
@@ -259,7 +260,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // glass layer off from what is behind it, so the card showed clear,
         // unblurred, for the whole fade and frosted only at the end. The glass
         // layer fades itself; the edge fades with it.
-        width: WORK_STATUS_PANEL_WIDTH,
+        width: panelWidth,
         opacity: overlay || interactive ? 1 : 0,
         transform: overlay ? (visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)') : undefined,
         // The overlay sits at the chat's end corner: top right, or top left in RTL.
@@ -285,17 +286,6 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           transitionTimingFunction: PANEL_TRANSITION_EASING,
         } : undefined}
       >
-      {/* Overlaid rather than placed in flow: the panel has no header of its
-          own, and giving it one would cost a row of height on every session. */}
-      <button
-        type="button"
-        aria-label={t('chat.workStatus.sections.open')}
-        onClick={() => setSectionsDialogOpen(true)}
-        className="absolute inset-e-2 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <Icon name="equalizer-2" className="size-4" />
-      </button>
-
       {contentMounted ? (
       <WorkStatusPresenceProvider onChange={setRenderedSections}>
       <ScrollShadow
@@ -304,7 +294,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         size={24}
         // Sections returning null leave no DOM node, so this reserves room for
         // settings in the first rendered heading, regardless of saved order.
-        className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7"
+        // `relative`: the settings button below is placed in this scroller.
+        className="oc-hide-scrollbar relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7"
       >
         <WorkStatusPrimaryGroup
           sessionId={sessionId}
@@ -322,22 +313,39 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
             return <React.Fragment key={id}>{id === 'session' || id === 'repository' ? primary[id] : secondarySections[id]}</React.Fragment>;
           })}
         </WorkStatusPrimaryGroup>
+
+        {/* In the scroller too: an empty scroller is shorter than the
+            settings button, which would overflow it and make it scroll. */}
+        {showEmptyState ? (
+          <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
+            <span className="text-sm text-muted-foreground">{t('chat.workStatus.sections.allHidden')}</span>
+            <Button
+              variant="link"
+              size="xs"
+              onClick={() => setSectionsDialogOpen(true)}
+              className="mt-2 normal-case text-muted-foreground hover:text-foreground"
+            >
+              {t('chat.workStatus.sections.open')}
+            </Button>
+          </div>
+        ) : null}
+
+        {/* Overlaid rather than placed in flow: the panel has no header of its
+            own, and giving it one would cost a row of height on every session.
+            It sits in the scrolled content over the room the first heading
+            leaves for it, so it scrolls away with that heading; pinned to the
+            card, it covered whatever scrolled under it. Last, so the first
+            section stays the scroller's first child for the rules above. */}
+        <button
+          type="button"
+          aria-label={t('chat.workStatus.sections.open')}
+          onClick={() => setSectionsDialogOpen(true)}
+          className="absolute inset-e-2 top-1.5 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Icon name="equalizer-2" className="size-4" />
+        </button>
       </ScrollShadow>
       </WorkStatusPresenceProvider>
-      ) : null}
-
-      {showEmptyState ? (
-        <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
-          <span className="text-sm text-muted-foreground">{t('chat.workStatus.sections.allHidden')}</span>
-          <Button
-            variant="link"
-            size="xs"
-            onClick={() => setSectionsDialogOpen(true)}
-            className="mt-2 normal-case text-muted-foreground hover:text-foreground"
-          >
-            {t('chat.workStatus.sections.open')}
-          </Button>
-        </div>
       ) : null}
       </div>
       </DockedPanelSurfaceContext.Provider>

@@ -10,6 +10,18 @@ Every readout is a **labelled row**: icon, name, trailing value. A number
 without a name is unreadable at a glance, which is what an unlabelled stream of
 values degenerates into.
 
+Row text is muted, under headings in the body colour. Only a disconnected MCP
+server steps further back, as an `inactive` row at 75% opacity (maintainer
+decision): that step is under 4.5:1 in all but one built-in theme, so every
+other row keeps full contrast. Opacity keeps the inherited colour, so a
+clickable inactive row still brightens on hover.
+
+A pull request's state pill paints its text in `--pr-<state>-text` on an 18%
+tint of `--pr-<state>`. The state colour itself fell below 4.5:1 on that tint
+in most built-in themes; the theme computes a readable one
+(`lib/theme/readableColors.ts`), and `readableColors.test.ts` measures it in
+every built-in theme.
+
 Rows are grouped into **named sections**, one component each, composed in
 order by `WorkStatusPanel`. They are parted by space alone, no rule. The gap
 is a `:not(:first-child)` CSS rule rather than a prop, because every section renders
@@ -19,6 +31,45 @@ sections above it decided to render.
 Sections render nothing when they have no rows, so the panel collapses upward
 instead of reserving empty space. Turn stats keeps its header for a
 selected session even without metrics, so a saved collapsed state can reopen.
+
+### Text sizes follow the interface size
+
+Every text size in the panel comes from the typography scale: headings,
+heading summaries, pills and captions are `typography-micro`, row labels and
+values `typography-ui-label`. The scale is in rem, and the interface size
+setting scales the root font, so text grows with the icons, row heights and
+spacing around it. A size in px stays put: row text fixed at 13px sat under
+24px headings in 56px rows at 200%. `WorkStatusPrimitives.test.tsx` refuses a
+px text size in any file the panel draws.
+
+The card grows with the text too: 300px at 100% and below, 300px times the
+interface size above it, up to 450px (150%). A 300px card cut the Context
+row's label at 150%; up to the cap the card cuts no more than at 100%, and at
+200% the Context row still fits (it needs 432px). `getWorkStatusWidths` in
+`useWorkStatusVisibility.ts` gives the card, its column and the width the
+panel needs to show; the card, the right slot and the visibility check all
+read it, so they agree at every size.
+
+Above 150% the card cuts more text off. Section titles keep their width: the
+project's name and then a section's summary are cut first. Cut text shows in full
+in a tooltip above it (`WorkStatusFullTextTooltip`): row labels, the project
+action's name, section titles with their subject or summary, the cost
+breakdown and the callout. Whether text is cut is read from the layout when
+the tooltip is about to open, and text that fits shows no tooltip. A row that
+passes its own `tooltip` replaces the cut-label one, so such a row names itself
+in it, as subagent and Turn stats rows do. The project action row does the same
+for auto-discovery: its name, then what it does, whether or not the name fits.
+
+### Why every row is a tooltip trigger
+
+Every row renders its tooltip, even while nothing is cut. Mounting it only
+once a row is cut was the cheaper option, but the tooltip wraps the row, so
+the row's element would be replaced whenever its cut state changed, taking
+keyboard focus and the pointer's hover with it. The cost is measured: in a
+production build, one row render took 2 to 4 µs without a tooltip and 20 to
+35 µs with one (200 rows re-rendered 50 times, three interleaved runs). The
+Session and Project rows re-render on every streamed flush; with about five
+of them that is roughly 0.1 ms more per flush.
 
 ## What it is not
 
@@ -38,7 +89,7 @@ the inline card keeps its lighter, non-blurred fill instead.
 portal into the right slot (`components/layout/rightSlot.ts`): the context
 panel's `aside` in `MainLayout`, which holds a right-anchored host for the card
 under the panel's content. The slot animates one width for both, from the
-card's column (`WORK_STATUS_COLUMN_WIDTH`, the card and its margins) to the
+card's column (`getWorkStatusWidths(...).column`, the card and its margins) to the
 panel's width and back, while the card fades out and the panel fades in over
 it. The chat column therefore narrows or widens once, in one direction.
 
@@ -60,8 +111,10 @@ The overlay form stays inside the chat column in `ChatContainer`.
   the same key the rail and the panel use. It is deliberately **not** the
   directory this panel reports about: a managed Chat reports about none, and
   that empty key answered "closed" for a context panel that was plainly open;
-- the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
-  `WORK_STATUS_PANEL_WIDTH` of panel. Only that threshold decision is state
+- the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` (560px) of transcript
+  alongside the card's column. The card widens with the interface size, so
+  the chat area it needs does too: 884px at 100%, 965px at 125%, 1046px at
+  150% and 1058px at 200%. Only that threshold decision is state
   (`roomy`); the width itself is not, because it changes on every frame of a
   sidebar animation and storing it re-rendered the whole chat each frame.
 
@@ -157,9 +210,10 @@ removing cached sessions. Only the completed list establishes authoritative
 coverage and removes absent records; newer live updates and deletions win over
 both partial pages and the final snapshot.
 
-Hovering or focusing a row shows its session model's catalog display name,
-falling back to the formatted model ID. Missing model metadata produces no
-tooltip. Model-only session updates invalidate the live-session comparison.
+Hovering or focusing a row shows its title and its session model's catalog
+display name, falling back to the formatted model ID. Without model metadata
+the row shows its title in a tooltip only when the panel cuts it off.
+Model-only session updates invalidate the live-session comparison.
 
 ### Turn stats
 
@@ -340,6 +394,19 @@ hidden and empty sections do not claim that space. Both heading variants expose
 `data-work-status-heading`; only the heading is inset, leaving body rows at full
 width. Heading summaries truncate within a bounded share of the available width
 so project names and usage summaries cannot push actions under settings.
+
+### Why the settings button scrolls with the sections
+
+The button is positioned inside the scroller, over the space the first heading
+reserves, so it scrolls away with that heading and never sits on a row. Pinned
+to the card's corner, as it was, it stayed put while rows scrolled under it:
+values at a row's end, the project action and, at 200%, the merge or rebase
+callout's text. A header row of its own would keep it in view, at the cost of a
+row of height on every session. It is the scroller's last child, so the first
+section stays its first child for the rules above. With every section hidden,
+the empty state sits in the scroller too: an empty scroller is shorter than the
+button, which would overflow it and make it scroll. `WorkStatusPanel.test.tsx`
+pins both.
 
 ## Extension sections
 
