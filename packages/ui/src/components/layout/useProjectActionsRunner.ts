@@ -23,6 +23,7 @@ import {
 import { ensureSharedSetupTrusted } from '@/lib/sharedTrustConfirmation';
 import {
   AUTO_DISCOVER_ACTION_ID,
+  isProjectActionForPlatform,
   normalizeProjectActionDirectory,
   PROJECT_ACTIONS_UPDATED_EVENT,
   resolveProjectActionDesktopForwardUrl,
@@ -197,8 +198,7 @@ export const useProjectActionsRunner = ({
         return;
       }
       setupRef.current = setup;
-      const filtered = setup.projectActions;
-      setActions(filtered);
+      setActions(setup.projectActions.filter((action) => isProjectActionForPlatform(action, setup.platform)));
     } catch {
       if (loadRequestIdRef.current !== requestId) {
         return;
@@ -721,7 +721,7 @@ export const useProjectActionsRunner = ({
             getProjectSetup(setupTarget),
             readPackageJsonScripts(normalizedDirectory),
           ]);
-          const devServer = await detectDevServerCommand(normalizedDirectory, setup.projectActions, scripts);
+          const devServer = await detectDevServerCommand(normalizedDirectory, setup.projectActions.filter((entry) => isProjectActionForPlatform(entry, setup.platform)), scripts);
           if (!devServer) {
             throw new Error(t('contextPanel.preview.noDevServer'));
           }

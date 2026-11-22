@@ -2,7 +2,7 @@ import { isRecord as isObjectRecord } from '../shared/guards.js';
 import path from 'node:path';
 import { z } from 'zod';
 import { createProjectIdFromPath } from './project-id.js';
-import { isProjectSetupValidationError } from './project-setup.js';
+import { actionPlatformOf, isProjectSetupValidationError } from './project-setup.js';
 import type { Application, Response } from '../shared/http-contracts.js';
 import type { DirectoryValidation, SessionProject } from './contracts.js';
 import type { SettingsDocument } from '../settings/settings-helpers.js';
@@ -98,7 +98,7 @@ export const registerProjectSetupRoutes = (app: Application, dependencies: Proje
 
   app.get('/api/projects/:projectId/config', async (req, res) => {
     try {
-      return res.json(await projectConfigRuntime.readProjectSetup(req.params.projectId));
+      return res.json({ ...await projectConfigRuntime.readProjectSetup(req.params.projectId), platform: actionPlatformOf(process.platform) ?? null });
     } catch (error) {
       return respondWithError(res, error, 'Failed to read project config');
     }

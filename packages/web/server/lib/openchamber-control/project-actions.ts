@@ -2,8 +2,9 @@ import crypto from 'node:crypto';
 import { asNonEmptyString } from '../shared/guards.js';
 import { getCheckedOutBranch, isLinkedWorktree } from '../git/service.js';
 import { OpenChamberControlError } from './error.js';
+import { actionPlatformOf, isActionForPlatform } from '../projects/project-setup.js';
 import type { createTerminalRuntime, TerminalListing } from '../terminal/runtime.js';
-import type { ActionPlatform, ProjectAction } from '../projects/contracts.js';
+import type { ProjectAction } from '../projects/contracts.js';
 import type { ControlInput } from './contracts.js';
 
 type TerminalRuntime = Pick<ReturnType<typeof createTerminalRuntime>, 'listTerminals' | 'readTerminal' | 'createSession' | 'closeTerminal'>;
@@ -48,12 +49,6 @@ const readGitCheckout = async (directory: string): Promise<OpenUrlCheckout> => (
   branch: await getCheckedOutBranch(directory),
   linkedWorktree: await isLinkedWorktree(directory),
 });
-
-const actionPlatformOf = (platform: NodeJS.Platform): ActionPlatform | undefined => {
-  if (platform === 'darwin') return 'macos';
-  if (platform === 'win32') return 'windows';
-  return platform === 'linux' ? 'linux' : undefined;
-};
 
 const isControlCharacter = (character: string) => {
   const code = character.charCodeAt(0);
@@ -109,8 +104,6 @@ export const createProjectActionsTool = ({
   platform = process.platform,
 }: ProjectActionsDependencies) => {
   const currentPlatform = actionPlatformOf(platform);
-  const forThisPlatform = (action: ProjectAction) => !action.platforms?.length
-    || (currentPlatform !== undefined && action.platforms.includes(currentPlatform));
 
   const readActions = async (directory: string, settings: ProjectActionsSettings) => {
     const projectPath = await projectPathFor(directory);
@@ -118,7 +111,7 @@ export const createProjectActionsTool = ({
     const projectId = asNonEmptyString(project?.id);
     if (!projectId) return null;
     const setup = await readProjectSetup(projectId);
-    return setup.projectActions.filter(forThisPlatform).map((action) => ({
+    return setup.projectActions.filter((action) => isActionForPlatform(action, currentPlatform)).map((action) => ({
       action,
       directory: action.runIn === 'parent' ? projectPath : directory,
       needsTrust: action.source === 'shared' && !setup.trust.trusted,
