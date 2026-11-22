@@ -41,6 +41,8 @@ export interface InlineCommentDraft {
 
 export const EMPTY_INLINE_COMMENT_DRAFTS: InlineCommentDraft[] = [];
 
+export const createInlineCommentDraftId = (): string => `icd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
 interface InlineCommentDraftState {
   drafts: Record<string, InlineCommentDraft[]>;
 }
@@ -258,9 +260,7 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
           if (!key || (draft.source === 'terminal' && !draft.code.trim())) return null;
           const requestedId = draft.id?.trim();
           const idIsTaken = Boolean(requestedId) && (get().drafts[key] ?? []).some((item) => item.id === requestedId);
-          const id = requestedId && !idIsTaken
-            ? requestedId
-            : `icd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          const id = requestedId && !idIsTaken ? requestedId : createInlineCommentDraftId();
           const nextDraft: InlineCommentDraft = { ...draft, sessionKey: target.sessionKey, id, createdAt: Date.now() };
           let storedId: string | null = null;
           set((state) => {

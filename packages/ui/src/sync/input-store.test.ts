@@ -117,6 +117,18 @@ describe("input-store attachments", () => {
     useInputStore.getState().setAttachedFiles([])
   })
 
+  testWithMockFileReader("a file restored while another is being read keeps both", async () => {
+    const pasting = useInputStore.getState().addAttachedFile(new File([pngBytes], "pasted.png", { type: "image/png" }))
+    await waitForReaderCount(1)
+
+    const restored = { id: "restored-1", file: new File([pngBytes], "shot.jpg", { type: "image/jpeg" }), dataUrl: "data:image/jpeg;base64,AA==", mimeType: "image/jpeg", filename: "shot.jpg", size: pngBytes.length, source: "local" as const }
+    useInputStore.getState().restoreAttachedFiles([restored], null)
+    resolveReader(pendingReaders[0]!, "data:image/png;base64,iVBORw0KGgo=")
+
+    expect(await pasting).toBe(true)
+    expect(useInputStore.getState().attachedFiles.map((file) => file.filename).sort()).toEqual(["pasted.png", "shot.jpg"])
+  })
+
   testWithMockFileReader("refuses a file over 10 MB without reading it when it has no path on disk", async () => {
     const big = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "place.rbxl")
 

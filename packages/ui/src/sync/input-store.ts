@@ -413,7 +413,8 @@ export const useInputStore = create<InputState>()((set, get) => ({
     const existing = key === state.attachmentDraftKey ? state.attachedFiles : (key && state.attachmentDrafts.get(key)) || []
     const present = new Set(existing.map((file) => file.id))
     const missing = files.filter((file) => !present.has(file.id))
-    if (missing.length) state.setAttachedFiles([...existing, ...missing], target)
+    if (!missing.length || (!key && state.attachmentDraftKey)) return
+    set((current) => appendAttachedFiles(current, missing, target))
   },
   moveAttachedFiles: (from, to) => {
     if (!from || !to) return
