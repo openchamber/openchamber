@@ -138,12 +138,16 @@ test('quota local JSON readers preserve their null fallback for over-cap files',
   }
 });
 
-const stubFetchReturning = (resolver: (url: string, init?: RequestInit) => Promise<unknown>): void => {
+// A fake answer is a Response or a response-shaped object; each case reads only what it set.
+type StubResolver = (url: string, init?: RequestInit) => Promise<unknown>;
+type StubJson = () => Promise<unknown>;
+
+const stubFetchReturning = (resolver: StubResolver): void => {
   globalThis.fetch = (async (input: unknown, init?: RequestInit) =>
     resolver(String(input), init)) as typeof fetch;
 };
 
-const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit): void => {
+const stubFetchFailing = (json: StubJson, init: MockResponseInit): void => {
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
 
@@ -4692,11 +4696,11 @@ describe('Mistral quota provider (VS Code parity)', () => {
   // The billing read comes first; a plan without a billing allowance answers it with 404,
   // and the key-validity read below decides. These cases cover that fallback.
   const BILLING = 'https://api.mistral.ai/v1/billing/';
-  const billingAnswers404 = (resolver: (url: string, init?: RequestInit) => Promise<unknown>) => (url: string, init?: RequestInit) => (
+  const billingAnswers404 = (resolver: StubResolver): StubResolver => (url, init) => (
     url.startsWith(BILLING) ? Promise.resolve(new Response('', { status: 404 })) : resolver(url, init)
   );
-  const stubModels = (resolver: (url: string, init?: RequestInit) => Promise<unknown>): void => stubFetchReturning(billingAnswers404(resolver));
-  const stubModelsFailing = (json: () => Promise<unknown>, init: MockResponseInit) => stubModels(async () => ({ json, ...init }));
+  const stubModels = (resolver: StubResolver): void => stubFetchReturning(billingAnswers404(resolver));
+  const stubModelsFailing = (json: StubJson, init: MockResponseInit) => stubModels(async () => ({ json, ...init }));
 
   test('reports the billing allowance when Mistral has one', async () => {
     stubFetchReturning(async (url: string) => {

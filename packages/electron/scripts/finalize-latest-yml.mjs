@@ -99,6 +99,7 @@ const manifestFromReleaseAsset = async (assets, name, token) => {
 
 const output = {};
 
+const macOnly = process.env.MAC_ONLY === '1';
 const windowsFromRelease = process.env.WINDOWS_FROM_RELEASE === '1';
 
 if (windowsFromRelease) {

@@ -13,7 +13,7 @@ const { getGitLog, normalizeMaxCount, MAX_LOG_COUNT } = await import('./gitServi
 
 const tempDirs = [];
 
-const runGit = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+const runGit = (cwd, args, input) => execFileSync('git', args, { cwd, encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'] });
 
 const canRunGit = () => {
   try {
@@ -25,18 +25,22 @@ const canRunGit = () => {
 };
 
 // 55 commits: more than the default page of 50, so an unbounded read and a
-// defaulted read are distinguishable.
+// defaulted read are distinguishable. One fast-import writes them all; 110
+// add/commit processes per repository outran the 5 s test timeout on a loaded
+// machine.
 const makeRepo = () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-max-count-'));
   tempDirs.push(dir);
   runGit(dir, ['init', '-b', 'main']);
-  runGit(dir, ['config', 'user.email', 'test@example.com']);
-  runGit(dir, ['config', 'user.name', 'Test']);
+  let stream = '';
   for (let i = 1; i <= 55; i++) {
-    fs.writeFileSync(path.join(dir, 'file.txt'), `v${i}\n`);
-    runGit(dir, ['add', 'file.txt']);
-    runGit(dir, ['commit', '-m', `c${i}`]);
+    const content = `v${i}\n`;
+    const message = `c${i}`;
+    stream += `commit refs/heads/main\ncommitter Test <test@example.com> ${1_700_000_000 + i} +0000\n`;
+    stream += `data ${message.length}\n${message}\n`;
+    stream += `M 100644 inline file.txt\ndata ${content.length}\n${content}\n`;
   }
+  runGit(dir, ['fast-import', '--quiet'], stream);
   return dir;
 };
 

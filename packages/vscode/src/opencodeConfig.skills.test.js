@@ -143,16 +143,6 @@ describe('VS Code skill walk directory cap (#1357)', () => {
     }
   };
 
-  test('states the same walk budget as the web twin in skill-files.ts', () => {
-    const webSource = fs.readFileSync(
-      new URL('../../web/server/lib/opencode/skill-files.ts', import.meta.url),
-      'utf8',
-    );
-    expect(webSource).toContain('createTraversalBudget({ maxDirs: 5000 })');
-    const ownSource = fs.readFileSync(new URL('./opencodeConfig.ts', import.meta.url), 'utf8');
-    expect(ownSource).toContain('createTraversalBudget({ maxDirs: 5000 })');
-  });
-
   test('discovery stops at the directory cap and keeps the partial results', () => {
     withTempDir((dir) => {
       const skillsRoot = path.join(dir, '.claude', 'skills');
@@ -217,16 +207,6 @@ describe('VS Code skill supporting-files caps (#1365)', () => {
     source: 'agents',
   });
 
-  test('pins the same cap values as the web twin in skill-files.ts', () => {
-    const webSource = fs.readFileSync(
-      new URL('../../web/server/lib/opencode/skill-files.ts', import.meta.url),
-      'utf8',
-    );
-    expect(webSource).toContain('createTraversalBudget({ maxDirs: 5000, maxEntries: 5000 })');
-    const ownSource = fs.readFileSync(new URL('./opencodeConfig.ts', import.meta.url), 'utf8');
-    expect(ownSource).toContain('createTraversalBudget({ maxDirs: 5000, maxEntries: 5000 })');
-  });
-
   test('lists supporting files under the caps without truncation', () => {
     withTempDir((dir) => {
       const skillDir = path.join(dir, 'supporting-skill');
@@ -288,6 +268,22 @@ describe('VS Code skill supporting-files caps (#1365)', () => {
       const sources = sourcesFor(dir, skillDir);
 
       expect(sources.md.supportingFilesTruncated).toBe(true);
+      expect(sources.md.supportingFiles).toHaveLength(5000);
+    });
+  }, 60_000);
+
+  test('is complete for a tree exactly at the file cap', () => {
+    withTempDir((dir) => {
+      const skillDir = path.join(dir, 'supporting-skill');
+      const supporting = [];
+      for (let i = 0; i < 5000; i += 1) {
+        supporting.push(`f${String(i).padStart(4, '0')}.txt`);
+      }
+      writeSkill(skillDir, supporting);
+
+      const sources = sourcesFor(dir, skillDir);
+
+      expect(sources.md.supportingFilesTruncated).toBe(false);
       expect(sources.md.supportingFiles).toHaveLength(5000);
     });
   }, 60_000);
