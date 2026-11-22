@@ -34,7 +34,6 @@ import { referencesLinkedIn, withoutSharedPageLinks, withReferencesFromText } fr
 import { type SessionReference } from '../../composer/sessionReferences';
 import { routeGuestSlashCommand } from '../../composer/submit/guestCommands';
 import { opencodeClient } from '@/lib/opencode/client';
-import { buildSkillMentionInstruction } from '@/lib/skillMentionInstruction';
 import { withMissingCitations } from '@/lib/attachmentIdentity';
 import { filterMissingInlineAttachments } from '../../composer/attachments/inlineMentionAttachments';
 import { buildComposerContext, expandCommentSnippets } from '../../composer/submit/buildOutgoingMessage';
@@ -167,7 +166,7 @@ export function useComposerQueueActions({
         const availableSkillNames = new Set(
             availableSkills.map((skill) => skill.name),
         );
-        const skillInstruction = buildSkillMentionInstruction(collectInlineSkillMentions(sanitizedText, availableSkillNames));
+        const skillNames = collectInlineSkillMentions(sanitizedText, availableSkillNames);
         const textToQueue = await useSnippetsStore.getState().expandText(sanitizedText).catch((error) => {
             console.warn('[queue] Failed to expand snippets, queueing original text:', error);
             return sanitizedText;
@@ -191,7 +190,7 @@ export function useComposerQueueActions({
             inlineComments: expandedDrafts,
             syntheticTexts: [...syntheticParts.map((part) => part.text), ...(actionsNote?.text ? [actionsNote.text] : [])],
             references: [...linkedToQueue.map(toContextReference), ...sessionMentionsIn(messageToQueue)],
-        }, skillInstruction);
+        });
         const goalArm = textToQueue.trim()
             ? useSessionGoalArmStore.getState().consume()
             : { armed: false, objectiveOverride: null };
@@ -218,6 +217,7 @@ export function useComposerQueueActions({
                 content: messageToQueue,
                 text: textToQueue,
                 agentMention: mention?.name,
+                skills: skillNames.length > 0 ? skillNames : undefined,
                 attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
                 context: context.length > 0 ? context : undefined,
                 sendConfig: currentProviderId && currentModelId ? {

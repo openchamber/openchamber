@@ -31,6 +31,53 @@ Scheduled items may omit their provider and model to retain the session's
 selection. Goal creation accepts numeric budgets and omitted unused fields
 through the declaration on `../session-goal/create.js`.
 
+### Why queued skills travel as names and resolve at send
+
+An item carries the skill names the user mentioned with `$name`. At send the
+runtime lists OpenCode's skills for the directory and attaches the matches (by
+name, then id) to the prompt as `skills`, the way a direct send from the
+composer does. OpenCode then puts the skill's text into the message itself; an
+instruction alone fails for a skill whose frontmatter sets
+`disable-model-invocation`, because OpenCode keeps it out of the model's skill
+list and the model answers that no such skill exists. Names it does not list, a
+failed list, and every skill of a slash command (the command route takes no
+attachments) go into the same instruction text the shared UI's
+`buildSkillMentionInstruction` writes.
+
+Resolving at send rather than at queue time keeps the item valid when skills
+change while it waits. The catalog reads (`/api/skill`, and `/api/command`
+for slash commands) pass `location[directory]`: OpenCode ignores a plain
+`directory` query there and would answer for its own working directory,
+missing project skills and commands. `/api/skill` does not wait for the
+location's plugins to finish activating and answers `[]` on a location that
+is still booting, as a queue drained right after a restart finds it, so the
+lookup first calls `/api/model`, which waits for activation. Plugins fill the
+command catalog too, so text with a leading slash waits on `/api/model` before
+`/api/command` decides whether it is a command, with or without skills; on a
+cold location the command would otherwise go out as plain text. A prompt rejected with `Skill not found` (a skill removed
+between the list and the prompt) is sent again without attachments and with the
+instruction, so the item cannot retry forever.
+
+Skill instructions are persisted apart from `syntheticIds` as
+`skillInstructions: [{ id, names }]`, one entry per set of names first admitted
+together. OpenCode keeps the first payload for an id, so one id reused for a
+different set of names would silently drop the new ones. Which skills resolve
+can differ between attempts: names an entry already covers are admitted again
+under that entry's id with its original names (OpenCode answers the repeat
+with the first record), and newly unresolved names, including skills the
+prompt rejected, get a new entry persisted before the post. A retry therefore
+neither admits an instruction twice nor loses a name.
+
+A staged revert is committed only right before something is admitted ahead of
+the message: captured context, the goal briefing, or a skill instruction
+(including the one for a rejected skill, which is why the fallback commits it
+then). For an instruction the commit comes after its id is saved, so a failed
+queue write leaves the undo staged. An item with only attached skills leaves the revert to OpenCode, which
+commits it once prompt preparation succeeds; committing it earlier would make
+the undo permanent even when the send then fails. Committing late would make
+the prompt commit the revert after an instruction and drop it with the
+reverted messages.
+
 ### Why active-map lookups retain their object check
 
 A session id can name an inherited property such as `constructor`. Only a
@@ -47,6 +94,11 @@ reads enforce these invariants without casts or non-null assertions.
 
 - `runtime.ts` — `createMessageQueueRuntime(...)` (state, persistence,
   dispatch loop, event handling) and `registerMessageQueueRoutes(app, runtime)`.
+- `skills.ts` — queued `$skill` mentions: parses them off an item, resolves
+  them against OpenCode's catalog per send, admits the instruction for the
+  unresolved ones, and sends the prompt with the attachments (including the
+  `Skill not found` fallback). Owns `catalogScope`, the `location[directory]`
+  query every catalog read uses.
 - `runtime.test.js` — delivery, idleness gates, retries, held delivery, persistence,
   concurrency with in-flight sends, slash commands, and project knowledge.
 
@@ -78,6 +130,7 @@ send never re-resolves mutable UI state:
   contextPreview?, // bounded display-only summary captured by the UI
   text,           // text to deliver (agent mention stripped, file mentions resolved); defaults to content
   agentMention?,  // delivered as an `agent` part
+  skills?,        // `$name` skill mentions, resolved at send (see "Why queued skills travel as names")
   attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, dataUrl, original? }],
   context: [      // what the composer had attached, in send order
     { kind: 'context', text, metadata, instructions? },  // a draft chip or linked issue/PR; metadata is the UI's structured payload
@@ -87,6 +140,7 @@ send never re-resolves mutable UI state:
   sendConfig: { providerID, modelID, agent?, variant? },  // required
   goal?: { objective?, tokenBudget },  // queued with "run as goal" armed
   syntheticIds?   // minted by the first delivery attempt, one per record admitted ahead of the message
+  skillInstructions? // [{ id, names }], one per set of skill names admitted together; queue file only
 }
 ```
 

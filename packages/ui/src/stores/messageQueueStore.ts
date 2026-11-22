@@ -6,6 +6,7 @@ import { createInputHistoryIdentity, createInputHistorySubmission, useInputHisto
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { serverAttachmentSchema, toAttachedFile, toServerAttachment, type ServerQueueAttachmentInput } from './messageQueueAttachments';
+import { copyQueuedMentions, serverMentionFields, type QueuedMentions } from './messageQueueMentions';
 import { contextPartMetadataSchema, type ContextPartMetadata } from '@/lib/messages/contextParts';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -76,11 +77,10 @@ export type QueuedContextPart =
         text: string;
     };
 
-export interface QueuedMessage {
+export interface QueuedMessage extends QueuedMentions {
     id: string;
     content: string;
     text: string;
-    agentMention?: string;
     attachments?: AttachedFile[];
     context?: QueuedContextPart[];
     contextPreview?: string;
@@ -90,10 +90,9 @@ export interface QueuedMessage {
     scheduledTask?: z.infer<typeof scheduledTaskSchema>;
 }
 
-interface QueuedMessageInput {
+interface QueuedMessageInput extends QueuedMentions {
     content: string;
     text?: string;
-    agentMention?: string;
     attachments?: AttachedFile[];
     context?: QueuedContextPart[];
     sendConfig?: QueuedMessageSendConfig;
@@ -155,7 +154,7 @@ const serverItemBaseSchema = z.object({
     createdAt: z.number(),
     content: z.string(),
     text: z.string(),
-    agentMention: z.string().optional(),
+    ...serverMentionFields,
     attachments: z.array(serverAttachmentSchema),
     context: z.array(serverContextPartSchema).optional(),
     contextPreview: z.string().optional(),
@@ -205,17 +204,16 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     if (selection.success) message.sendConfig = selection.data;
     if (item.goal) message.goal = item.goal;
     if ('scheduledTask' in item) message.scheduledTask = item.scheduledTask;
-    if (item.agentMention) message.agentMention = item.agentMention;
+    copyQueuedMentions(item, message);
     if (item.attachments.length > 0) message.attachments = item.attachments.map(toAttachedFile);
     if (item.context) message.context = item.context;
     if (item.contextPreview) message.contextPreview = item.contextPreview;
     return message;
 };
 
-type ServerQueueItemInput = {
+type ServerQueueItemInput = QueuedMentions & {
     content: string;
     text: string;
-    agentMention?: string;
     attachments: ServerQueueAttachmentInput[];
     context: QueuedContextPart[];
     contextPreview?: string;
@@ -254,7 +252,7 @@ const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessag
         context: message.context ?? [],
         sendConfig,
     };
-    if (message.agentMention) item.agentMention = message.agentMention;
+    copyQueuedMentions(message, item);
     if (message.goal) item.goal = message.goal;
     const contextPreview = getQueuedMessagePreview({ content: '', context: message.context });
     if (contextPreview) item.contextPreview = contextPreview;
@@ -520,7 +518,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             createdAt: Date.now(),
                             sendConfig: message.sendConfig,
                         };
-                        if (message.agentMention) queuedMessage.agentMention = message.agentMention;
+                        copyQueuedMentions(message, queuedMessage);
                         if (message.attachments && message.attachments.length > 0) queuedMessage.attachments = message.attachments;
                         if (message.context && message.context.length > 0) queuedMessage.context = message.context;
                         if (message.goal) queuedMessage.goal = message.goal;
