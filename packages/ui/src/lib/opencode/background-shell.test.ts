@@ -9,6 +9,7 @@ import {
   readShellCompletion,
   runningShellFromWire,
   shellCompletionFailed,
+  shellEndFromWire,
 } from "./background-shell"
 import type { Message, SyntheticMessage, ToolPart } from "./model"
 
@@ -119,6 +120,24 @@ describe("runningShellFromWire", () => {
   test("drops exited commands and commands without a session", () => {
     expect(runningShellFromWire({ ...info, status: "exited" })).toBeUndefined()
     expect(runningShellFromWire({ ...info, metadata: {} })).toBeUndefined()
+  })
+})
+
+describe("shellEndFromWire", () => {
+  test("reads the status, the exit code when OpenCode has one, and the end time", () => {
+    expect(shellEndFromWire({ status: "exited", exit: 2, time: { completed: 9000 } })).toEqual({
+      end: { kind: "exited", status: "exited", exit: 2 },
+      endedAt: 9000,
+    })
+    expect(shellEndFromWire({ status: "timeout", time: { completed: 9000 } })).toEqual({
+      end: { kind: "exited", status: "timeout" },
+      endedAt: 9000,
+    })
+    expect(shellEndFromWire({ status: "exited", time: {} })).toEqual({ end: { kind: "exited", status: "exited" } })
+  })
+
+  test("a command that still runs has no end", () => {
+    expect(shellEndFromWire({ status: "running", time: {} })).toBeUndefined()
   })
 })
 

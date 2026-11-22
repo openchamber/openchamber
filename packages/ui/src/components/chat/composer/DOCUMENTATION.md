@@ -97,12 +97,20 @@ time; the reducer trims by creation time).
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: worktree setup and a message
 waiting for its space (`ComposerStatusStrip`), the goal (`SessionGoalRow`), a
-running review loop (`AutoReviewStrip`), background commands, a staged revert
+running review loop (`AutoReviewStrip`), background commands, the agent's
+terminals, a staged revert
 (`RevertedMessagesStrip`), the queue (`QueuedMessagesStrip`),
 the "looks done" hint or the review offer, the suggestion
 (`SessionSuggestionChip`). BTW hides all of them. A pending form, a nonempty
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
+
+The rows are siblings of one fragment, so no two of them may share a React
+key. The background commands strip and the agent terminals strip are keyed by
+strip and session, so an expanded list collapses on a session switch. Keyed by
+the session alone, the two collided, and every render of the composer left a
+frozen copy of the background commands strip on screen
+(`__tests__/ChatInput.topRows.test.tsx`).
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,
@@ -152,6 +160,44 @@ reports its command ended, and a failed call makes its commands stoppable again.
 new-session drafts. The elapsed text is a leaf on the shared one-second
 ticker, and the tree is compared as a string, so neither the tick nor
 session-list updates re-render the composer.
+
+A command that ends keeps its row, in the place its start gave it, until the
+user dismisses it (the row's close button, or Dismiss all on the count row once
+nothing runs). The timer and Stop give way to how it ended, as the shell index
+recorded it from OpenCode: `exit code N` (0 in the success colour, any other
+code in the error colour), `exited` when OpenCode reported the end without a
+code, `timed out`, `stopped` for a command removed while running (a Stop or
+an aborted turn), and `no longer running` when the end fell into an event gap
+and OpenCode keeps no record of it. OpenCode reports no code for a stop, so a
+stopped row has none. The command's tooltip stays available in every state.
+Dismissing hides a command from the strip only (`dismissEndedShells`); the
+index's ended list, which extensions read, keeps it. The expanded list shows
+four rows and then scrolls on its own (`overscroll-contain`), and a long
+command scrolls inside its tooltip the same way.
+
+`PersistentTerminalsStrip` lists the terminals the agent started with the pty
+tool for the composer's session, after the background commands; the terminal
+panel or the sidebar shows the same rows (`AgentTerminalRow`), as the
+`agentTerminalsPlacement` setting says. A row keeps two lines in every state:
+the command with rename, Show and its action, then the session that started
+it (a link to it) and how the terminal is doing. Stop is offered only while
+the terminal runs. OpenCode announces no exit for these terminals, so
+`useSessionTerminalsLoaded` reads the session's list when the session shows
+and every 5 seconds while one of its terminals runs; an ended terminal reads
+`exit code N` (0 in the success colour, any other in the error colour), or
+`exited` when OpenCode reports no code. OpenCode maps a terminal that could not
+start to `exited` without a code too, so there is no separate "failed to
+start". Stop reads the terminal's record first: one that already exited keeps
+its exit; a running one is removed and its row stays as `stopped` (a stop
+leaves no code). An ended row offers to dismiss it: a stopped terminal is gone
+from OpenCode already, an exited one is removed there as well. Show reads the
+screen every 2 seconds while the terminal runs, once after it exited, and not
+after a stop, which removed it with its screen: what was shown stays, and a
+screen never read says the output is gone. The output follows its newest line
+while the reader is at its bottom and stays where a reader who scrolled up left
+it; the blank rows under the last line are dropped. The expanded list of
+several terminals scrolls past half the window, and each output scrolls inside
+it (`overscroll-contain`).
 
 The "looks done" hint (`SessionDoneHintRow`) and the review offer
 (`SessionReviewHintRow`, "Changes are ready to look over") take the same

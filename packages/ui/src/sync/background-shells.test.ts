@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { RunningShell, ShellEnd } from '@/lib/opencode/background-shell';
+import type { RunningShell, ShellEnd, ShellEndRecord } from '@/lib/opencode/background-shell';
 import type { SyncEvent } from '@/lib/opencode/events';
 import {
   ENDED_SHELLS_MAX,
   applyBackgroundShellEvents,
   backgroundShellRevision,
   directoriesWithRunningShells,
+  dismissEndedShells,
+  endedBackgroundShellsOfSessions,
   refreshBackgroundShells,
   replaceDirectoryShells,
   resetBackgroundShells,
@@ -41,6 +43,8 @@ const isBackground = (shellID: string) => useBackgroundShellsStore.getState().by
 
 const ids = () => [...useBackgroundShellsStore.getState().byId.keys()].sort();
 const sessions = () => [...useBackgroundShellsStore.getState().sessionIds].sort();
+/** OpenCode keeps no record of any ended command. */
+const noRecord = async (): Promise<ShellEndRecord | undefined> => undefined;
 
 beforeEach(() => resetBackgroundShells());
 
@@ -83,13 +87,13 @@ describe('background shell index', () => {
     applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
     await expect(refreshBackgroundShells('/repo', async () => {
       throw new Error('offline');
-    })).rejects.toThrow('offline');
+    }, noRecord)).rejects.toThrow('offline');
     expect(ids()).toEqual(['sh_1']);
   });
 
   test('a read that started before a runtime switch does not commit', async () => {
     let resolve: (listed: { directory: string; shells: RunningShell[] }) => void = () => undefined;
-    const pending = refreshBackgroundShells('/repo', () => new Promise((done) => { resolve = done; }));
+    const pending = refreshBackgroundShells('/repo', () => new Promise((done) => { resolve = done; }), noRecord);
     resetBackgroundShells();
     resolve({ directory: '/repo', shells: [shell('sh_stale')] });
     await pending;
@@ -98,7 +102,7 @@ describe('background shell index', () => {
 
   test('a list replaces the directory OpenCode answered for, which its events carry', async () => {
     applyBackgroundShellEvents('/private/tmp/repo', [started(shell('sh_exited'))]);
-    await refreshBackgroundShells('/tmp/repo', async () => ({ directory: '/private/tmp/repo', shells: [] }));
+    await refreshBackgroundShells('/tmp/repo', async () => ({ directory: '/private/tmp/repo', shells: [] }), noRecord);
     expect(ids()).toEqual([]);
   });
 });
@@ -156,6 +160,28 @@ describe('ended commands', () => {
     expect(useBackgroundShellsStore.getState().ended.get('sh_gap')?.status).toBe('unknown');
   });
 
+  test('a command a list no longer has takes the end OpenCode recorded for it', async () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_failed')), started(shell('sh_stopped'))]);
+    const asked: string[] = [];
+    await refreshBackgroundShells('/repo', async () => ({ directory: '/repo', shells: [] }), async (shellID, directory) => {
+      asked.push(`${shellID}@${directory}`);
+      // OpenCode keeps the failed command's record; the stopped one lost its record when it was removed.
+      return shellID === 'sh_failed' ? { end: { kind: 'exited', status: 'exited', exit: 3 }, endedAt: 4000 } : undefined;
+    });
+    expect(asked.sort()).toEqual(['sh_failed@/repo', 'sh_stopped@/repo']);
+    const { ended: byId } = useBackgroundShellsStore.getState();
+    expect(byId.get('sh_failed')).toMatchObject({ status: 'exited', exit: 3, endedAt: 4000 });
+    expect(byId.get('sh_stopped')?.status).toBe('unknown');
+  });
+
+  test('a failed record read leaves the end unknown', async () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
+    await refreshBackgroundShells('/repo', async () => ({ directory: '/repo', shells: [] }), async () => {
+      throw new Error('offline');
+    });
+    expect(useBackgroundShellsStore.getState().ended.get('sh_1')?.status).toBe('unknown');
+  });
+
   test('an end the index never saw running records nothing', () => {
     applyBackgroundShellEvents('/repo', [ended('sh_unknown')]);
     expect(endedIds()).toEqual([]);
@@ -169,6 +195,64 @@ describe('ended commands', () => {
     expect(endedIds()).toEqual(ids.slice(5));
     resetBackgroundShells();
     expect(endedIds()).toEqual([]);
+  });
+});
+
+describe('ended commands in the strip', () => {
+  const stripRows = (sessionIds: string[]) => {
+    const { ended: byId, dismissed } = useBackgroundShellsStore.getState();
+    return endedBackgroundShellsOfSessions(byId, dismissed, new Set(sessionIds)).map((item) => item.id);
+  };
+
+  test('the background commands of the chosen sessions that ended, oldest start first', () => {
+    applyBackgroundShellEvents('/repo', [
+      started({ ...shell('sh_late'), startedAt: 3000 }),
+      started({ ...shell('sh_early'), startedAt: 1000 }),
+      started({ ...shell('sh_waited'), startedAt: 2000 }),
+      started({ ...shell('sh_foreign', 'ses_other'), startedAt: 500 }),
+      settledInBackground('sh_late'),
+      settledInBackground('sh_early'),
+      settledInBackground('sh_foreign'),
+    ]);
+    // Ended in the opposite order of their start.
+    applyBackgroundShellEvents('/repo', [ended('sh_late'), ended('sh_waited'), ended('sh_early'), ended('sh_foreign')]);
+
+    expect(stripRows(['ses_1'])).toEqual(['sh_early', 'sh_late']);
+    expect([...useBackgroundShellsStore.getState().endedSessionIds].sort()).toEqual(['ses_1', 'ses_other']);
+  });
+
+  test('a dismissed command leaves the strip, and the ended list keeps it for extensions', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1')), started(shell('sh_2')), settledInBackground('sh_1'), settledInBackground('sh_2')]);
+    applyBackgroundShellEvents('/repo', [ended('sh_1'), ended('sh_2')]);
+
+    dismissEndedShells(['sh_1']);
+    expect(stripRows(['ses_1'])).toEqual(['sh_2']);
+    expect(endedIds()).toEqual(['sh_1', 'sh_2']);
+    expect([...useBackgroundShellsStore.getState().endedSessionIds]).toEqual(['ses_1']);
+
+    dismissEndedShells(['sh_2']);
+    expect(stripRows(['ses_1'])).toEqual([]);
+    expect(useBackgroundShellsStore.getState().endedSessionIds.size).toBe(0);
+  });
+
+  test('dismissing a running or unknown command, or one already dismissed, changes nothing', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1')), settledInBackground('sh_1')]);
+    const before = useBackgroundShellsStore.getState();
+    dismissEndedShells(['sh_1', 'sh_missing']);
+    expect(useBackgroundShellsStore.getState()).toBe(before);
+  });
+
+  test('a dismissal is forgotten once its command leaves the ended list', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_first')), settledInBackground('sh_first')]);
+    applyBackgroundShellEvents('/repo', [ended('sh_first')]);
+    dismissEndedShells(['sh_first']);
+
+    const later = Array.from({ length: ENDED_SHELLS_MAX }, (_, index) => `sh_later_${index}`);
+    applyBackgroundShellEvents('/repo', later.map((id) => started(shell(id))));
+    applyBackgroundShellEvents('/repo', later.map((id) => ended(id)));
+
+    expect(useBackgroundShellsStore.getState().ended.has('sh_first')).toBe(false);
+    expect(useBackgroundShellsStore.getState().dismissed.has('sh_first')).toBe(false);
   });
 });
 

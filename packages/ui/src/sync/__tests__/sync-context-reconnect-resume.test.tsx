@@ -13,10 +13,13 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
+import type { RunningShell } from '@/lib/opencode/background-shell';
 import { opencodeClient } from '@/lib/opencode/client';
 import { adoptRelayTunnel, deactivateRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import type { RelayTunnelClient, RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { applyBackgroundShellEvents, resetBackgroundShells, useBackgroundShellsStore } from '@/sync/background-shells';
+import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import { createFakeSocket } from './relay-socket-fixture';
 
 const DIRECTORY = '/repo/resume';
@@ -129,6 +132,16 @@ const deliverReady = async (frame: { resumed: boolean; replayReset: boolean }): 
   });
 };
 
+/** Delivers OpenCode's greeting on the stream socket, framed as the global bridge frames an event. */
+const deliverGreeting = async (): Promise<void> => {
+  const socket = sockets.at(-1);
+  if (!socket) throw new Error('the stream socket is not open');
+  await act(async () => {
+    socket.onmessage?.({ data: JSON.stringify({ type: 'event', directory: 'global', payload: { id: 'evt_greeting', type: 'server.connected', data: {} } }) });
+    await sleep(100);
+  });
+};
+
 // The provider treats the first ready as its first connect, and a ready within
 // the boot window as part of startup. Both skip the refetch for reasons that
 // have nothing to do with the replay, so the frame under test comes after both.
@@ -159,4 +172,88 @@ describe('SyncProvider stream reconnect', () => {
 
     expect(readsOf(DIRECTORY)).toBeGreaterThan(before);
   });
+});
+
+/**
+ * A command whose end fell into the gap. The OpenCode stream never restarted,
+ * so no `server.connected` arrives: only the client's own reconnect can
+ * notice, and only by reading the command lists again.
+ */
+describe('SyncProvider stream reconnect and background commands', () => {
+  const OTHER_DIRECTORY = '/repo/no-store';
+  const listReads: string[] = [];
+  let listSpy: ReturnType<typeof spyOn<typeof opencodeClient, 'listRunningShells'>> | null = null;
+  let endSpy: ReturnType<typeof spyOn<typeof opencodeClient, 'readShellEnd'>> | null = null;
+
+  const runningShell = (id: string): RunningShell => ({ id, sessionID: VIEWED_SESSION, command: `bun run ${id}`, file: `/tmp/${id}.out`, startedAt: 1 });
+
+  beforeEach(() => {
+    resetBackgroundShells();
+    listReads.length = 0;
+    // OpenCode no longer runs anything: both commands ended during the gap,
+    // and it kept no record of how.
+    listSpy = spyOn(opencodeClient, 'listRunningShells').mockImplementation(async (directory: string) => {
+      listReads.push(directory);
+      return { directory, shells: [] };
+    });
+    endSpy = spyOn(opencodeClient, 'readShellEnd').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    listSpy?.mockRestore();
+    endSpy?.mockRestore();
+    resetBackgroundShells();
+  });
+
+  /** Two commands seen running before the gap: one in the shown directory, one in a directory without a store. */
+  const startCommands = async (): Promise<void> => {
+    await act(async () => {
+      applyBackgroundShellEvents(DIRECTORY, [{ type: 'shell.started', properties: { shell: runningShell('sh_here') } }]);
+      applyBackgroundShellEvents(OTHER_DIRECTORY, [{ type: 'shell.started', properties: { shell: runningShell('sh_there') } }]);
+    });
+    expect([...useBackgroundShellsStore.getState().byId.keys()].sort()).toEqual(['sh_here', 'sh_there']);
+    listReads.length = 0;
+  };
+
+  test('a reconnect that resumed the cursor reads no command list', async () => {
+    await mountProvider();
+    await startCommands();
+
+    await reconnectAfterBootWindow({ resumed: true, replayReset: false });
+
+    expect(listReads).toEqual([]);
+    expect(useBackgroundShellsStore.getState().byId.size).toBe(2);
+  });
+
+  test('a reconnect that lost events reads the command list of every directory running one, and the ended commands leave', async () => {
+    await mountProvider();
+    await startCommands();
+
+    await reconnectAfterBootWindow({ resumed: false, replayReset: true });
+
+    expect([...new Set(listReads)].sort()).toEqual([DIRECTORY, OTHER_DIRECTORY].sort());
+    expect(useBackgroundShellsStore.getState().byId.size).toBe(0);
+    expect(useBackgroundShellsStore.getState().ended.get('sh_here')?.status).toBe('unknown');
+  });
+
+  // Every window answers OpenCode's greeting this way, which is why the server withholds the
+  // greeting of a connection that resumed from its cursor (event-stream/global-hub.js).
+  test('OpenCode greeting the stream after the boot window reads the command lists again', async () => {
+    // The boot window closes 1.5 s after the global bootstrap settles, and here that bootstrap
+    // first waits out its retries against the fixture's 503s.
+    useGlobalSyncStore.setState({ ready: false });
+    await mountProvider();
+    await startCommands();
+    await deliverReady({ resumed: false, replayReset: false });
+    for (let attempt = 0; attempt < 200 && !useGlobalSyncStore.getState().ready; attempt += 1) {
+      await act(async () => { await sleep(50); });
+    }
+    expect(useGlobalSyncStore.getState().ready).toBe(true);
+    await act(async () => { await sleep(BOOT_WINDOW_MS + 100); });
+    expect(listReads).toEqual([]);
+
+    await deliverGreeting();
+
+    expect(listReads).toContain(OTHER_DIRECTORY);
+  }, 20_000);
 });

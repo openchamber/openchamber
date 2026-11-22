@@ -179,7 +179,11 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
     read(() => opencodeClient.getVcs(directory).then((vcs) => commit({ vcs }))),
     // Commands the agent left running in the background, including ones whose
     // start or exit this client missed.
-    read(() => refreshBackgroundShells(directory, (target) => opencodeClient.listRunningShells(target))),
+    read(() => refreshBackgroundShells(
+      directory,
+      (target) => opencodeClient.listRunningShells(target),
+      (shellID, target) => opencodeClient.readShellEnd(shellID, target),
+    )),
   ])
   const [results, enrichmentResults] = await Promise.all([critical, enrichment])
   if (input.isStale?.()) return "stale"

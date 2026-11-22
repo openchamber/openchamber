@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
-import { readBackgroundShellIDFromMetadata, readShellCancellation, type RunningShell, type ShellEnd } from '@/lib/opencode/background-shell';
+import { readBackgroundShellIDFromMetadata, readShellCancellation, type RunningShell, type ShellEnd, type ShellEndRecord } from '@/lib/opencode/background-shell';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 
@@ -26,9 +26,12 @@ import { normalizeProjectPath } from '@/lib/projectResolution';
 // command the turn waits for is short-lived next to one left running.
 //
 // A command that leaves the index moves to `ended` with how it ended, for
-// extensions that show recent jobs (`lib/guests/shells.ts`). Only the app's
-// own observation fills it: it starts empty, holds the latest
-// `ENDED_SHELLS_MAX` commands, and resets on a runtime switch.
+// extensions that show recent jobs (`lib/guests/shells.ts`) and for the
+// composer's strip, which keeps a background command's row after it ends
+// until the user dismisses it. Only the app's own observation fills it: it
+// starts empty, holds the latest `ENDED_SHELLS_MAX` commands, and resets on a
+// runtime switch. Dismissing hides a command from the strip only; `ended`
+// keeps it for extensions.
 
 export type TrackedShell = RunningShell & {
   directory: string;
@@ -54,15 +57,22 @@ type BackgroundShellsState = {
   sessionIds: ReadonlySet<string>;
   /** Commands seen running that have since ended, oldest end first. */
   ended: ReadonlyMap<string, EndedShell>;
+  /** Ended commands the user dismissed from the strip. */
+  dismissed: ReadonlySet<string>;
+  /** Sessions with an ended background command the strip still shows. */
+  endedSessionIds: ReadonlySet<string>;
 };
 
 const EMPTY_SESSION_IDS: ReadonlySet<string> = new Set();
+const EMPTY_DISMISSED: ReadonlySet<string> = new Set();
 export const ENDED_SHELLS_MAX = 200;
 
 export const useBackgroundShellsStore = create<BackgroundShellsState>(() => ({
   byId: new Map(),
   sessionIds: EMPTY_SESSION_IDS,
   ended: new Map(),
+  dismissed: EMPTY_DISMISSED,
+  endedSessionIds: EMPTY_SESSION_IDS,
 }));
 
 const normalizeDirectory = (directory: string): string => normalizeProjectPath(directory) ?? directory;
@@ -109,16 +119,57 @@ const backgroundedShellID = (payload: SyncEvent): string | undefined => {
   return readBackgroundShellIDFromMetadata(transition.metadata);
 };
 
+const sameIds = (next: ReadonlySet<string>, previous: ReadonlySet<string>): boolean => (
+  next.size === previous.size && [...next].every((id) => previous.has(id))
+);
+
 const sessionIdsOf = (byId: ReadonlyMap<string, TrackedShell>, previous: ReadonlySet<string>): ReadonlySet<string> => {
   const next = new Set<string>();
   for (const shell of byId.values()) next.add(shell.sessionID);
-  const same = next.size === previous.size && [...next].every((id) => previous.has(id));
-  return same ? previous : next;
+  return sameIds(next, previous) ? previous : next;
 };
 
-const publish = (byId: Map<string, TrackedShell>, ended: ReadonlyMap<string, EndedShell> | null): void => {
+const endedSessionIdsOf = (
+  ended: ReadonlyMap<string, EndedShell>,
+  dismissed: ReadonlySet<string>,
+  previous: ReadonlySet<string>,
+): ReadonlySet<string> => {
+  const next = new Set<string>();
+  for (const shell of ended.values()) {
+    if (shell.background && !dismissed.has(shell.id)) next.add(shell.sessionID);
+  }
+  return sameIds(next, previous) ? previous : next;
+};
+
+const publish = (byId: ReadonlyMap<string, TrackedShell>, ended: ReadonlyMap<string, EndedShell> | null): void => {
   const state = useBackgroundShellsStore.getState();
-  useBackgroundShellsStore.setState({ byId, sessionIds: sessionIdsOf(byId, state.sessionIds), ended: ended ?? state.ended });
+  if (ended === null) {
+    useBackgroundShellsStore.setState({ byId, sessionIds: sessionIdsOf(byId, state.sessionIds) });
+    return;
+  }
+  // Dismissals of commands the ended list dropped are forgotten with them.
+  const dismissed = [...state.dismissed].every((id) => ended.has(id))
+    ? state.dismissed
+    : new Set([...state.dismissed].filter((id) => ended.has(id)));
+  useBackgroundShellsStore.setState({
+    byId,
+    sessionIds: sessionIdsOf(byId, state.sessionIds),
+    ended,
+    dismissed,
+    endedSessionIds: endedSessionIdsOf(ended, dismissed, state.endedSessionIds),
+  });
+};
+
+/** Removes ended commands from the strip. `ended` keeps them for extensions. */
+export const dismissEndedShells = (shellIDs: readonly string[]): void => {
+  const state = useBackgroundShellsStore.getState();
+  const added = shellIDs.filter((id) => state.ended.has(id) && !state.dismissed.has(id));
+  if (added.length === 0) return;
+  const dismissed = new Set([...state.dismissed, ...added]);
+  useBackgroundShellsStore.setState({
+    dismissed,
+    endedSessionIds: endedSessionIdsOf(state.ended, dismissed, state.endedSessionIds),
+  });
 };
 
 // A stop posts its note to the agent before it removes the command, and the
@@ -219,8 +270,9 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
 /**
  * Replaces one directory's commands with a complete list read from it.
  * `since` is the revision the read started at (`backgroundShellRevision()`).
+ * Returns the commands the list no longer has, ended as `unknown`.
  */
-export const replaceDirectoryShells = (rawDirectory: string, shells: readonly RunningShell[], since: number): void => {
+export const replaceDirectoryShells = (rawDirectory: string, shells: readonly RunningShell[], since: number): EndedShell[] => {
   const directory = normalizeDirectory(rawDirectory);
   const state = useBackgroundShellsStore.getState();
   let draft: Map<string, TrackedShell> | null = null;
@@ -240,24 +292,42 @@ export const replaceDirectoryShells = (rawDirectory: string, shells: readonly Ru
     draft.set(shell.id, shell);
   }
   if (draft) publish(draft, ended.length > 0 ? withEnded(state.ended, ended) : null);
+  return ended;
 };
 
 export const backgroundShellRevision = (): number => revision;
 
+/** Puts what OpenCode's record says in place of an `unknown` end. */
+const resolveUnknownEnd = (shellID: string, record: ShellEndRecord): void => {
+  const state = useBackgroundShellsStore.getState();
+  const recorded = state.ended.get(shellID);
+  if (recorded?.status !== 'unknown') return;
+  publish(state.byId, withEnded(state.ended, [endedFrom(recorded, record.end, record.endedAt ?? recorded.endedAt)]));
+};
+
 /**
  * Reads a directory's running commands and applies them. A failed read
- * rejects and changes nothing: it proves nothing about the commands.
+ * rejects and changes nothing: it proves nothing about the commands. A
+ * command the list no longer has ended inside an event gap; its end is read
+ * from OpenCode's record of it, and stays `unknown` when OpenCode no longer
+ * keeps one or the read fails.
  */
 export const refreshBackgroundShells = async (
   directory: string,
   listRunningShells: (directory: string) => Promise<{ directory: string; shells: RunningShell[] }>,
+  readShellEnd: (shellID: string, directory: string) => Promise<ShellEndRecord | undefined>,
 ): Promise<void> => {
   const startedGeneration = generation;
   const since = revision;
   const listed = await listRunningShells(directory);
   if (startedGeneration !== generation) return;
   // Keyed by the directory OpenCode answered for, which its events carry too.
-  replaceDirectoryShells(listed.directory, listed.shells, since);
+  const unknown = replaceDirectoryShells(listed.directory, listed.shells, since);
+  await Promise.all(unknown.map(async (shell) => {
+    const record = await readShellEnd(shell.id, shell.directory).catch(() => undefined);
+    if (record === undefined || startedGeneration !== generation) return;
+    resolveUnknownEnd(shell.id, record);
+  }));
 };
 
 /** Directories the index holds running commands for. */
@@ -277,7 +347,13 @@ export const resetBackgroundShells = (): void => {
   touchedAt.clear();
   settledInBackground.clear();
   stopNoted.clear();
-  useBackgroundShellsStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS, ended: new Map() });
+  useBackgroundShellsStore.setState({
+    byId: new Map(),
+    sessionIds: EMPTY_SESSION_IDS,
+    ended: new Map(),
+    dismissed: EMPTY_DISMISSED,
+    endedSessionIds: EMPTY_SESSION_IDS,
+  });
 };
 
 /**
@@ -306,6 +382,8 @@ export const sessionsInTree = (
   return inTree.sort();
 };
 
+const byStart = (left: TrackedShell, right: TrackedShell): number => left.startedAt - right.startedAt || left.id.localeCompare(right.id);
+
 /** Commands of the given sessions that went to the background, oldest first. */
 export const backgroundShellsOfSessions = (
   byId: ReadonlyMap<string, TrackedShell>,
@@ -315,7 +393,24 @@ export const backgroundShellsOfSessions = (
   for (const shell of byId.values()) {
     if (shell.background && sessionIds.has(shell.sessionID)) shells.push(shell);
   }
-  return shells.sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id));
+  return shells.sort(byStart);
+};
+
+/**
+ * Ended background commands of the given sessions that the user has not
+ * dismissed, oldest start first, so a command keeps its place in the strip
+ * when it ends.
+ */
+export const endedBackgroundShellsOfSessions = (
+  ended: ReadonlyMap<string, EndedShell>,
+  dismissed: ReadonlySet<string>,
+  sessionIds: ReadonlySet<string>,
+): EndedShell[] => {
+  const shells: EndedShell[] = [];
+  for (const shell of ended.values()) {
+    if (shell.background && sessionIds.has(shell.sessionID) && !dismissed.has(shell.id)) shells.push(shell);
+  }
+  return shells.sort(byStart);
 };
 
 export const useRunningShell = (shellID: string | undefined): TrackedShell | undefined => (

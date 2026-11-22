@@ -208,3 +208,25 @@ export function runningShellFromWire(info: ShellInfoWire): RunningShell | undefi
   if (!owner.success) return undefined
   return { id: info.id, sessionID: owner.data.sessionID, command: info.command, file: info.file, startedAt: info.time.started }
 }
+
+/** How OpenCode recorded a command's end, as its own record reports it. */
+export type ShellEndRecord = { end: ShellEnd; endedAt?: number }
+
+type ShellRecordWire = {
+  status: "running" | "exited" | "timeout" | "killed"
+  exit?: number
+  time: { completed?: number }
+}
+
+/**
+ * The end a command's record (`GET /api/shell/:id`) reports, or undefined
+ * while it still runs. OpenCode keeps an ended command's record until it
+ * evicts it; a stopped command loses its record at once.
+ */
+export function shellEndFromWire(info: ShellRecordWire): ShellEndRecord | undefined {
+  if (info.status === "running") return undefined
+  const end: ShellEnd = info.exit === undefined
+    ? { kind: "exited", status: info.status }
+    : { kind: "exited", status: info.status, exit: info.exit }
+  return info.time.completed === undefined ? { end } : { end, endedAt: info.time.completed }
+}

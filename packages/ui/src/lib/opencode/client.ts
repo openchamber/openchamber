@@ -70,7 +70,7 @@ import {
 } from "./model"
 import { ascendingId } from "./ids"
 import { RuntimeRoutingResponseError, validateRuntimeResponse } from "./runtime-response"
-import { runningShellFromWire, shellCancellationNote, type RunningShell, type ShellToStop } from "./background-shell"
+import { runningShellFromWire, shellCancellationNote, shellEndFromWire, type RunningShell, type ShellEndRecord, type ShellToStop } from "./background-shell"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
 import {
@@ -1847,6 +1847,21 @@ class OpencodeService {
   }
 
   /**
+   * How a command ended, from OpenCode's own record of it. Undefined while it
+   * still runs or once OpenCode no longer keeps it (a stopped command, or an
+   * ended one it evicted). Throws on any other failure.
+   */
+  async readShellEnd(shellID: string, directory: string): Promise<ShellEndRecord | undefined> {
+    try {
+      const response = await call("shell.get", () => this.clientFor(directory).shell.get({ id: shellID }))
+      return shellEndFromWire(response.data)
+    } catch (error) {
+      if (isOpencodeNotFound(error)) return undefined
+      throw error
+    }
+  }
+
+  /**
    * The newest part of a command's captured output, and the cursor to read
    * on from. Without a cursor the read starts `tailBytes` before the end.
    */
@@ -1874,6 +1889,20 @@ class OpencodeService {
   /** A terminal's screen as text, for a read-only view. */
   async readTerminalSnapshot(ptyID: string, directory: string): Promise<PersistentPtySnapshot> {
     return call("persistentPty.snapshot", () => this.clientFor(directory).experimental.persistentPty.snapshot({ ptyID }))
+  }
+
+  /**
+   * A terminal's record: whether it still runs, and its exit code once it
+   * exited and the process left one. Undefined once OpenCode no longer has
+   * the terminal. Throws on any other failure.
+   */
+  async getTerminal(ptyID: string, directory: string): Promise<PersistentPtyInfo | undefined> {
+    try {
+      return await call("persistentPty.get", () => this.clientFor(directory).experimental.persistentPty.get({ ptyID }))
+    } catch (error) {
+      if (isOpencodeNotFound(error)) return undefined
+      throw error
+    }
   }
 
   /** Ends a terminal's process and removes it. */
