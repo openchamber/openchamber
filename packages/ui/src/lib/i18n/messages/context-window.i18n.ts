@@ -2,6 +2,7 @@
 export const contextWindowI18n = {
   en: {
     'contextPanel.zone.dropCenter': 'Center',
+    'contextPanel.zone.moveCenter': 'Move panel to the center',
     'contextPanel.window.open': 'Open the panel in its own window',
     'contextPanel.window.return': 'Return the panel to the chat window',
     'contextPanel.window.title': 'Panel',
@@ -11,6 +12,7 @@ export const contextWindowI18n = {
   },
   ar: {
     'contextPanel.zone.dropCenter': 'الوسط',
+    'contextPanel.zone.moveCenter': 'نقل اللوحة إلى الوسط',
     'contextPanel.window.open': 'افتح اللوحة في نافذة مستقلة',
     'contextPanel.window.return': 'أعِد اللوحة إلى نافذة المحادثة',
     'contextPanel.window.title': 'اللوحة',
@@ -20,6 +22,7 @@ export const contextWindowI18n = {
   },
   de: {
     'contextPanel.zone.dropCenter': 'Mitte',
+    'contextPanel.zone.moveCenter': 'Panel in die Mitte verschieben',
     'contextPanel.window.open': 'Panel in eigenem Fenster öffnen',
     'contextPanel.window.return': 'Panel zurück ins Chatfenster holen',
     'contextPanel.window.title': 'Panel',
@@ -29,6 +32,7 @@ export const contextWindowI18n = {
   },
   es: {
     'contextPanel.zone.dropCenter': 'Centro',
+    'contextPanel.zone.moveCenter': 'Mover el panel al centro',
     'contextPanel.window.open': 'Abrir el panel en su propia ventana',
     'contextPanel.window.return': 'Devolver el panel a la ventana del chat',
     'contextPanel.window.title': 'Panel',
@@ -38,6 +42,7 @@ export const contextWindowI18n = {
   },
   fr: {
     'contextPanel.zone.dropCenter': 'Centre',
+    'contextPanel.zone.moveCenter': 'Déplacer le panneau au centre',
     'contextPanel.window.open': 'Ouvrir le panneau dans sa propre fenêtre',
     'contextPanel.window.return': 'Ramener le panneau dans la fenêtre du chat',
     'contextPanel.window.title': 'Panneau',
@@ -47,6 +52,7 @@ export const contextWindowI18n = {
   },
   he: {
     'contextPanel.zone.dropCenter': 'מרכז',
+    'contextPanel.zone.moveCenter': 'העברת החלונית למרכז',
     'contextPanel.window.open': 'פתח את החלונית בחלון נפרד',
     'contextPanel.window.return': 'החזר את החלונית לחלון הצ׳אט',
     'contextPanel.window.title': 'חלונית',
@@ -56,6 +62,7 @@ export const contextWindowI18n = {
   },
   ja: {
     'contextPanel.zone.dropCenter': '中央',
+    'contextPanel.zone.moveCenter': 'パネルを中央に移動',
     'contextPanel.window.open': 'パネルを別ウインドウで開く',
     'contextPanel.window.return': 'パネルをチャットウインドウに戻す',
     'contextPanel.window.title': 'パネル',
@@ -65,6 +72,7 @@ export const contextWindowI18n = {
   },
   ko: {
     'contextPanel.zone.dropCenter': '가운데',
+    'contextPanel.zone.moveCenter': '패널을 가운데로 이동',
     'contextPanel.window.open': '패널을 별도 창에서 열기',
     'contextPanel.window.return': '패널을 채팅 창으로 되돌리기',
     'contextPanel.window.title': '패널',
@@ -74,6 +82,7 @@ export const contextWindowI18n = {
   },
   nl: {
     'contextPanel.zone.dropCenter': 'Midden',
+    'contextPanel.zone.moveCenter': 'Paneel naar het midden verplaatsen',
     'contextPanel.window.open': 'Paneel in een eigen venster openen',
     'contextPanel.window.return': 'Paneel terugzetten in het chatvenster',
     'contextPanel.window.title': 'Paneel',
@@ -83,6 +92,7 @@ export const contextWindowI18n = {
   },
   pl: {
     'contextPanel.zone.dropCenter': 'Środek',
+    'contextPanel.zone.moveCenter': 'Przenieś panel na środek',
     'contextPanel.window.open': 'Otwórz panel w osobnym oknie',
     'contextPanel.window.return': 'Przywróć panel do okna czatu',
     'contextPanel.window.title': 'Panel',
@@ -92,6 +102,7 @@ export const contextWindowI18n = {
   },
   'pt-BR': {
     'contextPanel.zone.dropCenter': 'Centro',
+    'contextPanel.zone.moveCenter': 'Mover o painel para o centro',
     'contextPanel.window.open': 'Abrir o painel em uma janela própria',
     'contextPanel.window.return': 'Devolver o painel à janela do chat',
     'contextPanel.window.title': 'Painel',
@@ -101,6 +112,7 @@ export const contextWindowI18n = {
   },
   tr: {
     'contextPanel.zone.dropCenter': 'Orta',
+    'contextPanel.zone.moveCenter': 'Paneli ortaya taşı',
     'contextPanel.window.open': 'Paneli ayrı bir pencerede aç',
     'contextPanel.window.return': 'Paneli sohbet penceresine geri getir',
     'contextPanel.window.title': 'Panel',
@@ -110,6 +122,7 @@ export const contextWindowI18n = {
   },
   uk: {
     'contextPanel.zone.dropCenter': 'По центру',
+    'contextPanel.zone.moveCenter': 'Перемістити панель у центр',
     'contextPanel.window.open': 'Відкрити панель в окремому вікні',
     'contextPanel.window.return': 'Повернути панель у вікно чату',
     'contextPanel.window.title': 'Панель',
@@ -119,6 +132,7 @@ export const contextWindowI18n = {
   },
   'zh-CN': {
     'contextPanel.zone.dropCenter': '中间',
+    'contextPanel.zone.moveCenter': '将面板移到中间',
     'contextPanel.window.open': '在单独窗口中打开面板',
     'contextPanel.window.return': '将面板放回聊天窗口',
     'contextPanel.window.title': '面板',
@@ -128,6 +142,7 @@ export const contextWindowI18n = {
   },
   'zh-TW': {
     'contextPanel.zone.dropCenter': '中間',
+    'contextPanel.zone.moveCenter': '將面板移到中間',
     'contextPanel.window.open': '在獨立視窗中開啟面板',
     'contextPanel.window.return': '將面板放回聊天視窗',
     'contextPanel.window.title': '面板',

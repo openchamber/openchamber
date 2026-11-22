@@ -30,11 +30,27 @@ itself, routing and following the main window live in `lib/contextWindow`
 (`DOCUMENTATION.md` there). While a main window is detached, `MainLayout`
 mounts no zones, panes, rail, drop overlay or fit arbiter, and keeps only
 the closed right zone, whose slot holds the work-status card. The rail and
-the zone header (on hover, `ContextZoneWindowButtons`) carry the control
-that detaches the panel; in the panel window the rail's control sends it
-back. Drop targets follow the layout direction: in a right-to-left layout
-the measured physical sides map to the mirrored zones, and their labels
-swap with them.
+the zone header (`ContextZoneWindowButtons`) carry the control that detaches
+the panel; in the panel window the rail's control sends it back.
+
+- The three zone cards in the panel window start at one top edge and share
+  one header height: the center card takes no top gutter (the side cards
+  have none), and without the desktop header the row is padded by the
+  cards' bottom gutter so no card touches the window's edge.
+- The center is a destination everywhere a zone is chosen: the zone menu
+  (`ZoneMoveMenuItems`) names the bottom zone "center" there with its own
+  icon, and the drop overlay labels its target the same way.
+- Drop targets follow the layout direction: in a right-to-left layout the
+  measured physical sides map to the mirrored zones. Their labels are not
+  swapped again, because right-to-left dictionaries already name the start
+  zone by the side it shows on.
+- Drop target frames are opaque, so the zone's content does not read through
+  behind the label. An open zone's frame is its card cut to its target
+  (`computeZoneDropFrames`): in the panel window a closed side's strip is
+  carved out of the center column, and the center card would otherwise run
+  under that strip's frame.
+- A file surface with no editor beside its tree fills a bottom or center
+  zone with the tree; side zones shrink to the tree's width instead.
 
 ## Header session tabs
 

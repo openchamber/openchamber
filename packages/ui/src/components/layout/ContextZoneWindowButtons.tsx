@@ -27,7 +27,7 @@ export const ContextZoneWindowButtons: React.FC<{
               variant="ghost"
               size="sm"
               onClick={detachPanel.detach}
-              className="h-7 w-7 p-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/panel-header:opacity-100"
+              className="h-7 w-7 p-0"
               aria-label={t('contextPanel.window.open')}
             >
               <Icon name="external-link" className="h-3.5 w-3.5" />

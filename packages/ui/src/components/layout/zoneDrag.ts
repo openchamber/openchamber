@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ContextPanelMode } from '@/lib/surfaces/modes';
-import { computeCenterDropTargets, computeZoneDropTargets, hitTestZoneDropTargets, type ZoneDropTargets, type ZonePoint, type ZoneRect } from '@/lib/workspace/zoneDropTargets';
+import { computeCenterDropTargets, computeZoneDropFrames, computeZoneDropTargets, hitTestZoneDropTargets, type ZoneDropTargets, type ZonePoint, type ZoneRect } from '@/lib/workspace/zoneDropTargets';
 import { shownContextModes, type ContextZone } from '@/lib/workspace/zones';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { isRightToLeft } from '@/lib/i18n';
@@ -26,13 +26,6 @@ const rectOf = (element: Element | null): ZoneRect | null => {
   return width > 0 && height > 0 ? { left, top, width, height } : null;
 };
 
-const insetLikeCard = (rect: ZoneRect): ZoneRect => ({
-  left: rect.left + 6,
-  top: rect.top,
-  width: Math.max(0, rect.width - 12),
-  height: Math.max(0, rect.height - 8),
-});
-
 const openZoneCard = (zone: ContextZone): ZoneRect | null => (
   rectOf(document.querySelector(`[data-context-zone="${zone}"][data-context-panel-open="true"] [data-zone-card]`))
 );
@@ -47,11 +40,11 @@ export const beginZoneDrag = (drag: Omit<ActiveZoneDrag, 'targets' | 'frames'>):
     ? computeCenterDropTargets(row, chatColumn)
     : computeZoneDropTargets(row, chatColumn, rectOf(bottomZone));
   const targets = isRightToLeft(rowElement) ? { ...measured, left: measured.right, right: measured.left } : measured;
-  const frames = {
-    left: openZoneCard('left') ?? insetLikeCard(targets.left),
-    right: openZoneCard('right') ?? insetLikeCard(targets.right),
-    bottom: openZoneCard('bottom') ?? insetLikeCard(targets.bottom),
-  };
+  const frames = computeZoneDropFrames(targets, {
+    left: openZoneCard('left'),
+    right: openZoneCard('right'),
+    bottom: openZoneCard('bottom'),
+  });
   useZoneDragStore.setState({ drag: { ...drag, targets, frames }, hovered: null });
   return true;
 };

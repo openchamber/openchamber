@@ -40,6 +40,32 @@ export const computeCenterDropTargets = (row: ZoneRect, center: ZoneRect): ZoneD
   };
 };
 
+const intersect = (a: ZoneRect, b: ZoneRect): ZoneRect | null => {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.left + a.width, b.left + b.width);
+  const bottom = Math.min(a.top + a.height, b.top + b.height);
+  return right > left && bottom > top ? { left, top, width: right - left, height: bottom - top } : null;
+};
+
+const insetLikeCard = (rect: ZoneRect): ZoneRect => ({
+  left: rect.left + 6,
+  top: rect.top,
+  width: Math.max(0, rect.width - 12),
+  height: Math.max(0, rect.height - 8),
+});
+
+export const computeZoneDropFrames = (
+  targets: ZoneDropTargets,
+  cards: { [Zone in keyof ZoneDropTargets]: ZoneRect | null },
+): ZoneDropTargets => {
+  const frame = (zone: keyof ZoneDropTargets): ZoneRect => {
+    const card = cards[zone];
+    return (card && intersect(card, targets[zone])) ?? insetLikeCard(targets[zone]);
+  };
+  return { left: frame('left'), right: frame('right'), bottom: frame('bottom') };
+};
+
 const contains = (rect: ZoneRect, point: ZonePoint): boolean => (
   point.x >= rect.left && point.x < rect.left + rect.width
   && point.y >= rect.top && point.y < rect.top + rect.height

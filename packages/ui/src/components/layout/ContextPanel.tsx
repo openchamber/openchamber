@@ -1105,7 +1105,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
         data-zone-card=""
         className={cn(
           'relative z-10 flex min-h-0 shrink-0 flex-col motion-reduce:transition-none',
-          geometry.gutter,
+          variant === 'center' ? 'mb-2' : geometry.gutter,
           zone === 'bottom' && (leftZoneShown ? 'ms-0' : 'ms-2'),
           zone === 'bottom' && (rightSlotFilled ? 'me-0' : 'me-1.5'),
           isVertical ? null : 'h-[calc(100%-0.5rem)]',
@@ -1116,7 +1116,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone; variant?: 'center' | '
         )}
         style={{
           ...(isVertical
-            ? { height: variant === 'center' ? `calc(100% - ${geometry.gutterSize})` : cardSize, width: `calc(100% - ${(leftZoneShown ? 0 : 0.5) + (rightSlotFilled ? 0 : 0.375)}rem)` }
+            ? { height: variant === 'center' ? 'calc(100% - 0.5rem)' : cardSize, width: `calc(100% - ${(leftZoneShown ? 0 : 0.5) + (rightSlotFilled ? 0 : 0.375)}rem)` }
             : { width: cardSize }),
           ...(zone === 'right' ? { marginInlineStart: `calc(0.5rem + ${panelOffset})` } : null),
           transitionDuration: isResizing ? '0ms' : `${layoutAnimationMs}ms`,

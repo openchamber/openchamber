@@ -82,13 +82,14 @@ export const ContextWindowLayout: React.FC = () => {
   useSessionListSync({ isVSCode: false });
   useTerminalSessionKeepalive();
   useContextWindowPanel();
+  const hasHeader = isDesktopShell();
 
   return (
     <DiagnosticDialogAvailableContext.Provider value><DiffWorkerProvider>
       <ProjectActionsProvider>
         <div data-page-scroll-lock="true" className="main-content-safe-area relative flex h-[100dvh] flex-col bg-background">
-          {isDesktopShell() ? <ContextWindowHeader /> : null}
-          <div className="relative flex min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
+          {hasHeader ? <ContextWindowHeader /> : null}
+          <div className={cn('relative flex min-h-0 flex-1 overflow-hidden', !hasHeader && 'pt-2')} data-page-scroll-lock="true">
             <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true" data-workspace-row="true">
               <ContextPanel zone="left" variant="side" />
               <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true" data-chat-area="true">
