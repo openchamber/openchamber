@@ -222,7 +222,7 @@ gap.
   `packages/web/package.json` and `packages/electron/package.json` (`@opencode/server` and the packages the
   bundled server imports, `packages/web/opencode-server`), the four native wrapper packages in `packages/web/package.json` `dependencies` (`@lydell/node-pty`, `@parcel/watcher`, `@ff-labs/fff-node`, `@opencode/pty`), and
   `@opencode/client` / `@opencode/schema` in the root, ui, web and vscode
-  manifests, plus `@opencode/cli@` in the Dockerfile. They move together,
+  manifests. They move together,
   including `opencode.url` in `flake.nix` (see the bump steps).
 
 ## "What's new in OpenCode 2.x?"
