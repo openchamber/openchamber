@@ -416,23 +416,37 @@ sees only that final turn, so the report is its evidence.
   option, and only then is the arm set, right before `sendMessage`. Picking
   another writer model or effort starts a new run for it at once; the run it
   replaces is aborted and its result is never shown or sent.
-- Send when ready: while the spec is being written, the dialog can hand the
-  run in progress to the composer (`BackgroundGoalSpec` in `lib/goalWriter.ts`).
-  Closing a dialog that already sends when written (no review) does the same;
-  closing a review dialog cancels. The composer submits at once with
-  `backgroundGoal`: the message leaves the composer, a draft creates its
-  session, and `sendMessage` gets `pendingGoal` (`settleBackgroundGoal`), so
-  the prompt waits for the spec and carries it as a settled `queuedGoal`
-  exactly as a click on the written spec would. The target session is captured
-  at submit, so switching chats does not move the send. A failed or cancelled
-  write sends nothing, and the text is never dropped: a reply's text goes
-  back to its session's composer, below anything typed there since; a new
-  task's text goes to the composer of the session it already created (with
-  an Open session action on the toast), so a draft the user started meanwhile
-  keeps its own text. Attachments follow the text; inline comments go back to
-  where they were taken from. A loading toast with Cancel follows the user until the spec is written. Such a
-  send is never diverted to the queue (auto-review, dismissed prompts): the
-  queue would take it without its goal.
+- Send when ready: while the spec is being written, the dialog hands the
+  latest run's options (writer model and effort, section) to the composer
+  (`GoalWriterHandoff`). Closing a dialog that already sends when written (no
+  review) does the same; closing a review dialog cancels. The run in the
+  window stops, and the server takes over (`spec-jobs.js`, below): the
+  composer resolves the message as it would for the queue (mentions,
+  snippets, attachments, attached context), creates a draft's session
+  (`createDraftSessionForServerSend`, which leaves the user where they went
+  meanwhile), and starts a job for that session. The message leaves the
+  composer at once. A job that cannot be started (session creation or the
+  save failed) puts the message back at once, in the created session's
+  composer or the one it came from.
+- `server/lib/session-goal/spec-jobs.js` — the server owns a Send when ready
+  message from then on, whether or not a window is open. It writes the spec
+  and puts the message into the session's message queue with the spec as a
+  settled goal (`with-message` adds `briefAgent`; `goal-as-message` sends the
+  spec as literal text, `promptOnly`, so a spec starting with `/` never runs a
+  command). The queue delivers it like any queued goal message. Jobs are kept
+  in `goal-spec-jobs.json` (mode 0600; at most 50, a full table refuses rather
+  than evicts) and broadcast as `openchamber:goal-spec-job.updated`. A failed
+  or cancelled job keeps its message, attachments and context included, until
+  the composer of its session takes it back (`POST .../take`); every window
+  shows a toast with Open session. Routes: `GET/POST /api/goals/spec-jobs`,
+  `POST /api/goals/spec-jobs/:id/cancel`, `POST /api/goals/spec-jobs/:id/take`.
+  Deleting the session drops its job; moving it follows the new directory.
+  Exactly once across a restart: a job goes `writing` -> `enqueuing` (saved
+  with the spec before the queue sees it) -> removed. The queue item carries
+  the job's id and enqueueing that id again is a no-op. On start, a `writing`
+  job is written again; an `enqueuing` job still in the queue is left to the
+  queue; one missing from it may already have been sent, so it fails with its
+  message kept and a note to check the session, never sent a second time.
 - `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
   produced or the user kept over it, so rewrite-all leaves it alone;
   `briefAgent` puts the spec into the reminder when the message itself is not
@@ -445,8 +459,8 @@ sees only that final turn, so the report is its evidence.
   saved, so a rewritten spec reaches the agent in the same message.
 - A writer request belongs to the composer it came from: switching the
   composer to another session or draft closes the dialog, and a late choice is
-  dropped. A send handed off with Send when ready already left the composer,
-  so switching afterwards does not affect it.
+  dropped. A send handed off with Send when ready belongs to the server, so
+  switching afterwards does not affect it.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by
   the server only, so it lives in the settings file like the walkthrough
@@ -492,14 +506,12 @@ ordering used by create and scheduled goals.
 - `tokensUsed` only counts completed assistant messages seen within the
   40-message fetch window per tick; extremely long busy stretches between
   idles undercount (acceptable: budget is a guardrail, not billing).
-- A background goal lives in the browser tab that started it: the writing
-  request and the held send are client-side, so closing or reloading the tab
-  before the spec is written drops the send. Reloading the same tab recovers
-  its text from `lib/backgroundGoalSends.ts`, which journals it in session
-  storage until the send settles. The main composer of the next page puts
-  it back in its owning composer. Other tabs cannot claim a live send, even
-  when its page is suspended. Attachments are not journaled; closing the tab
-  permanently is outside this recovery guarantee.
+- A Send when ready job for a session inside an isolated space runs on that
+  space's server, which does not forward its job events: the host window
+  shows no toast for it, and a failed job's message is taken back only by a
+  window reading that space's jobs.
+- Steer delivery does not apply to Send when ready: the message joins the
+  session's queue and goes out when the session is idle.
 
 ## Decisions
 
@@ -520,20 +532,24 @@ effort, then the same model elsewhere) and ends at the user's default model.
 The models it switched through are kept on the goal, so a restart cannot make
 it loop over them.
 
-### Why a draft creates its session before its background goal is written, and not after
+### Why a draft creates its session before its goal is written, and not after
 
 Creating a session from a draft reads the live draft: its directory checks,
 the prepared chat directory and closing the draft all assume the user is still
 on it. Deferring creation until the spec arrives would race whatever draft or
-chat the user opened meanwhile. The session is created while the draft is
-still open, and only its first prompt waits for the goal, so the agent never
-starts without it. Creation that waits on worktree setup uses the submitted
+chat the user opened meanwhile, and the server cannot create it from a draft
+that only exists in a browser. The session is created at once, and the job
+the server owns holds its first message until the goal is written, so the
+agent never starts without it. Creation that waits on worktree setup uses the submitted
 draft snapshot and preserves a different chat or draft the user opened while
 waiting. The new session never changes that later selection or clears its text.
 
-### Why reload recovery uses session storage
+### Why the server owns Send when ready, through the message queue
 
-Each tab owns its pending sends. A new page in that tab can recover its
-predecessor's unsent text without guessing whether another page is alive.
-Local storage with a heartbeat timeout would allow a suspended tab's send
-to be reclaimed while its goal was still being generated.
+A send held in the browser is lost with the tab, a reload or an OpenChamber
+restart; journaling it in the browser only covered a reload. The server
+already owns a durable, exactly-once path for a message with a goal: the
+message queue. A job adds only what the queue lacks, the time spent writing
+the spec, and hands the message over by id. The cost is that a restart
+between saving `enqueuing` and the queue's own save cannot tell whether the
+message went out; such a job is kept for the user instead of being sent twice.
