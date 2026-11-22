@@ -37,6 +37,10 @@ import {
   searchGitHubReferencesAcross,
 } from './reference-search.js';
 import { createContextCache } from './context-cache.js';
+import {
+  branchLimitError, GITHUB_COLLECTION_PAGE_SIZE, readAnnotationPages, readCappedCollection, readCheckRunPages,
+  readIssueCommentPages, readPullFilePages, readReviewCommentPages, readWorkflowJobPages,
+} from './collections.js';
 import { fetchPullStack } from './pull-stack.js';
 import { referencesField } from './references.js';
 import { parseReferenceLink } from './reference-links.js';
@@ -215,8 +219,7 @@ export function createGitHubResources({
     let summary: ReturnType<GitHubResourceModules['checks']['summarizeCheckRuns']> | ReturnType<GitHubResourceModules['checks']['summarizeCombinedStatuses']> | null = null;
     let checkRuns: CheckRun[] = [];
     try {
-      const response = await octokit.rest.checks.listForRef({ owner: repo.owner, repo: repo.repo, ref: sha, per_page: 100 });
-      checkRuns = dedupeCheckRuns(requireGitHubCheckRuns(response?.data?.check_runs));
+      checkRuns = dedupeCheckRuns(await readCheckRunPages(octokit, repo, sha));
       if (checkRuns.length > 0) summary = summarizeCheckRuns(checkRuns);
     } catch {
       checkRuns = [];
@@ -235,6 +238,7 @@ export function createGitHubResources({
   const readCheckDetails = async (octokit: Octokit, repo: DiscoveryRepository, checkRuns: CheckRun[]) => {
     const jobsByRun = new Map<number, Job[]>();
     const annotationsByRun = new Map<number, ReturnType<typeof mapAnnotations>>();
+    const truncatedRuns = new Set<number>();
     const runIdOf = (run: CheckRun) => {
       const match = (isProviderString(run.details_url) ? run.details_url : '').match(/\/actions\/runs\/(\d+)(?:\/job\/(\d+))?/);
       const runId = match ? Number(match[1]) : null;
@@ -242,8 +246,7 @@ export function createGitHubResources({
     };
     for (const runId of new Set(checkRuns.map(runIdOf).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)).map((entry) => entry.runId))) {
       try {
-        const response = await octokit.rest.actions.listJobsForWorkflowRun({ owner: repo.owner, repo: repo.repo, run_id: runId, per_page: 100 });
-        jobsByRun.set(runId, requireGitHubWorkflowJobs(response?.data?.jobs));
+        jobsByRun.set(runId, await readWorkflowJobPages(octokit, repo, runId));
       } catch {
         jobsByRun.set(runId, []);
       }
@@ -251,20 +254,9 @@ export function createGitHubResources({
     for (const run of checkRuns) {
       const conclusion = isProviderString(run?.conclusion) ? run.conclusion.toLowerCase() : '';
       if (!run?.id || !conclusion || ['success', 'neutral', 'skipped'].includes(conclusion)) continue;
-      const annotations: Annotation[] = [];
-      for (let page = 1; page <= 3; page += 1) {
-        try {
-          const response = await octokit.rest.checks.listAnnotations({
-            owner: repo.owner, repo: repo.repo, check_run_id: run.id, per_page: 50, page,
-          });
-          const chunk = Array.isArray(response?.data) ? response.data : [];
-          annotations.push(...chunk);
-          if (chunk.length < 50) break;
-        } catch {
-          break;
-        }
-      }
-      if (annotations.length > 0) annotationsByRun.set(run.id, mapAnnotations(annotations));
+      const annotations = await readAnnotationPages(octokit, repo, run.id).catch(() => null);
+      if (annotations === null) truncatedRuns.add(run.id);
+      else if (annotations.length > 0) annotationsByRun.set(run.id, mapAnnotations(annotations));
     }
     return (run: CheckRun) => {
       const ids = runIdOf(run);
@@ -275,7 +267,7 @@ export function createGitHubResources({
           ?? jobs.find((entry) => entry.name === run.name) ?? null;
         job = mapWorkflowJob({ runId: ids.runId, jobId: ids.jobId, job: matched, detailsUrl: run.details_url });
       }
-      return { job, annotations: annotationsByRun.get(run.id) };
+      return { job, annotations: annotationsByRun.get(run.id), annotationsTruncated: truncatedRuns.has(run.id) };
     };
   };
 
@@ -485,18 +477,9 @@ export function createGitHubResources({
       const route = { owner: repo.owner, repo: repo.repo };
       const projectDTO = mapProject(repo, identity);
       const prData = requireGitHubPullRequest((await octokit.rest.pulls.get({ ...route, pull_number: number }))?.data, 'GitHub returned an invalid pull request');
-      const issueComments = requireProviderArray<Rest['issues']['listComments']['response']['data'][number]>(
-        (await octokit.rest.issues.listComments({ ...route, issue_number: number, per_page: 100 }))?.data,
-        'GitHub returned an invalid issue comment list',
-      ).map((comment) => mapComment(requireGitHubComment(comment, 'GitHub returned an invalid issue comment'), identity));
-      const reviewComments = requireProviderArray(
-        (await octokit.rest.pulls.listReviewComments({ ...route, pull_number: number, per_page: 100 }))?.data,
-        'GitHub returned an invalid review comment list',
-      ).map((comment) => mapReviewComment(requireGitHubReviewComment(comment), identity));
-      const files = requireProviderArray<Rest['pulls']['listFiles']['response']['data'][number]>(
-        (await octokit.rest.pulls.listFiles({ ...route, pull_number: number, per_page: 100 }))?.data,
-        'GitHub returned an invalid pull request file list',
-      ).map((file) => mapFile(requireGitHubPullFile(file)));
+      const issueComments = (await readIssueCommentPages(octokit, route, number)).map((comment) => mapComment(requireGitHubComment(comment, 'GitHub returned an invalid issue comment'), identity));
+      const reviewComments = (await readReviewCommentPages(octokit, route, number)).map((comment) => mapReviewComment(requireGitHubReviewComment(comment), identity));
+      const files = (await readPullFilePages(octokit, route, number)).map((file) => mapFile(requireGitHubPullFile(file)));
 
       let ci: CI | null = null;
       const sha = prData.head?.sha;
@@ -616,8 +599,7 @@ export function createGitHubResources({
       const identity = identityOf(session);
       const repo = await resolveRepoForRequest(octokit, directory, project ? { owner: project.owner, repo: project.name } : null, remote, { linked: context?.linked });
       if (!repo) return [];
-      const response = await octokit.rest.issues.listComments({ owner: repo.owner, repo: repo.repo, issue_number: number, per_page: 100 });
-      return requireProviderArray<Rest['issues']['listComments']['response']['data'][number]>(response?.data, 'GitHub returned an invalid issue comment list')
+      return (await readIssueCommentPages(octokit, { owner: repo.owner, repo: repo.repo }, number))
         .map((comment) => mapComment(requireGitHubComment(comment, 'GitHub returned an invalid issue comment'), identity));
     },
 
@@ -659,16 +641,13 @@ export function createGitHubResources({
       const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
       if (!repo) return [];
       const branches = [];
-      for (let page = 1; ; page += 1) {
-        const response = await octokit.rest.repos.listBranches({ owner: repo.owner, repo: repo.repo, per_page: 100, page });
-        const payload = requireProviderArray<Rest['repos']['listBranches']['response']['data'][number]>(response?.data, 'GitHub returned an invalid branch list');
-        for (const branch of payload) {
-          if (!isPlainObject(branch) || !isProviderString(branch.name) || !branch.name.trim()) {
-            throw invalidProviderPayload('GitHub returned an invalid branch');
-          }
-          branches.push(branch.name);
+      const payload = await readCappedCollection(branchLimitError, async (page) => requireProviderArray<Rest['repos']['listBranches']['response']['data'][number]>(
+        (await octokit.rest.repos.listBranches({ owner: repo.owner, repo: repo.repo, per_page: GITHUB_COLLECTION_PAGE_SIZE, page }))?.data, 'GitHub returned an invalid branch list'));
+      for (const branch of payload) {
+        if (!isPlainObject(branch) || !isProviderString(branch.name) || !branch.name.trim()) {
+          throw invalidProviderPayload('GitHub returned an invalid branch');
         }
-        if (payload.length < 100) break;
+        branches.push(branch.name);
       }
       return branches;
     },

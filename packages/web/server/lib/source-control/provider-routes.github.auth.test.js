@@ -628,8 +628,8 @@ describe('GitHub account routes', () => {
       .query(boundQuery(account.accountId, { number: 5 })).expect(200);
 
     expect(response.body.files).toHaveLength(250);
-    expect(response.body.files[0].filename).toBe('src/file-0.js');
-    expect(response.body.files[249].filename).toBe('src/file-249.js');
+    expect(response.body.files[0].path).toBe('src/file-0.js');
+    expect(response.body.files[249].path).toBe('src/file-249.js');
     expect(response.body.issueComments).toHaveLength(130);
     expect(response.body.reviewComments).toHaveLength(120);
     // Pages are followed until a short page, then stop: no page 4/3/3 probes.
@@ -715,7 +715,7 @@ describe('GitHub account routes', () => {
     const response = await request(app).get('/api/source-control/github/pulls/context')
       .query(boundQuery(account.accountId, { number: 5 })).expect(200);
 
-    expect(response.body.checks).toMatchObject({ state: 'failure', total: 250, success: 249, failure: 1 });
+    expect(response.body.ci.summary).toMatchObject({ state: 'failure', total: 250, success: 249, failure: 1 });
     expect(requestedPages).toEqual([1, 2, 3]);
   });
 
@@ -754,7 +754,7 @@ describe('GitHub account routes', () => {
     const response = await request(app).get('/api/source-control/github/pulls/context')
       .query(boundQuery(account.accountId, { number: 5 })).expect(200);
 
-    expect(response.body.checks).toMatchObject({ state: 'pending', total: 150, success: 149, pending: 1 });
+    expect(response.body.ci.summary).toMatchObject({ state: 'pending', total: 150, success: 149, pending: 1 });
   });
 
   it('never summarises a partial check run list past the safety cap as success (#1405)', async () => {
@@ -796,7 +796,7 @@ describe('GitHub account routes', () => {
     // The over-cap read errors and the route falls back to the combined
     // status (empty here): the answer is the fallback's unknown, never a
     // success summary built from the 2,000 runs that fit under the cap.
-    expect(response.body.checks).toMatchObject({ state: 'unknown', total: 0 });
+    expect(response.body.ci.summary).toMatchObject({ state: 'unknown', total: 0 });
     expect(requestedPages).toHaveLength(21);
     expect(requestedPages.at(-1)).toBe(21);
   });
@@ -840,10 +840,10 @@ describe('GitHub account routes', () => {
     const response = await request(app).get('/api/source-control/github/pulls/context')
       .query(boundQuery(account.accountId, { number: 5, checkDetails: '1' })).expect(200);
 
-    expect(response.body.checkRuns).toHaveLength(1);
-    expect(response.body.checkRuns[0].annotations).toHaveLength(350);
-    expect(response.body.checkRuns[0].annotations[349].message).toBe('annotation 349');
-    expect(response.body.checkRuns[0].annotationsTruncated).toBeUndefined();
+    expect(response.body.ci.runs).toHaveLength(1);
+    expect(response.body.ci.runs[0].annotations).toHaveLength(350);
+    expect(response.body.ci.runs[0].annotations[349].message).toBe('annotation 349');
+    expect(response.body.ci.runs[0].annotationsTruncated).toBeUndefined();
     expect(requestedPages).toEqual([1, 2, 3, 4]);
   });
 
@@ -883,9 +883,9 @@ describe('GitHub account routes', () => {
 
     // The summary survives, but the incomplete list is never presented as
     // complete: no annotations array, and the run is explicitly flagged.
-    expect(response.body.checks).toMatchObject({ state: 'failure', total: 1 });
-    expect(response.body.checkRuns[0].annotations).toBeUndefined();
-    expect(response.body.checkRuns[0].annotationsTruncated).toBe(true);
+    expect(response.body.ci.summary).toMatchObject({ state: 'failure', total: 1 });
+    expect(response.body.ci.runs[0].annotations).toBeUndefined();
+    expect(response.body.ci.runs[0].annotationsTruncated).toBe(true);
   });
 
   it('flags a check run whose annotations cross the safety cap instead of returning a partial list (#1420)', async () => {
@@ -924,8 +924,8 @@ describe('GitHub account routes', () => {
     const response = await request(app).get('/api/source-control/github/pulls/context')
       .query(boundQuery(account.accountId, { number: 5, checkDetails: '1' })).expect(200);
 
-    expect(response.body.checkRuns[0].annotations).toBeUndefined();
-    expect(response.body.checkRuns[0].annotationsTruncated).toBe(true);
+    expect(response.body.ci.runs[0].annotations).toBeUndefined();
+    expect(response.body.ci.runs[0].annotationsTruncated).toBe(true);
     expect(requestedPages).toHaveLength(21);
     expect(requestedPages.at(-1)).toBe(21);
   });
@@ -957,9 +957,9 @@ describe('GitHub account routes', () => {
     const response = await request(app).get('/api/source-control/github/issues/comments')
       .query(boundQuery(account.accountId, { number: 5 })).expect(200);
 
-    expect(response.body.comments).toHaveLength(130);
-    expect(response.body.comments[0].id).toBe(1000);
-    expect(response.body.comments[129].id).toBe(1129);
+    expect(response.body).toHaveLength(130);
+    expect(response.body[0].id).toBe('1000');
+    expect(response.body[129].id).toBe('1129');
     expect(requestedPages).toEqual([1, 2]);
   });
 
@@ -2096,6 +2096,49 @@ describe('gh CLI account consent', () => {
 
     expect(response.body).toMatchObject({ connected: true, user: { username: 'cli-user' }, cli: { active: true } });
   });
+
+  it('removes the gh CLI account and reconciles its bindings on success', async () => {
+    stubGitHubUsers();
+    auth.setGhCliActive(true);
+    const onAccountRemoved = vi.fn();
+
+    await request(makeApp({ onAccountRemoved })).delete('/api/source-control/github/auth')
+      .query({ accountId: 'github.com#cli:9' }).expect(200, { removed: true });
+
+    expect(onAccountRemoved).toHaveBeenCalledWith({ provider: 'github', instance: 'github.com', accountId: 'github.com#cli:9' });
+    expect(await auth.isGhCliActiveForHost('github.com')).toBe(false);
+  });
+
+  // #1274: setGhCliActive reads settings.json strictly (#990) and throws on a
+  // malformed file. The settings write must run before binding reconciliation,
+  // or a failed removal strands the bindings while the account stays active.
+  it('leaves gh CLI bindings untouched when the settings write throws on removal', async () => {
+    stubGitHubUsers();
+    auth.setGhCliActive(true);
+    await fs.writeFile(path.join(directory, 'settings.json'), '{broken', 'utf8');
+    const onAccountRemoved = vi.fn();
+
+    const response = await request(makeApp({ onAccountRemoved })).delete('/api/source-control/github/auth')
+      .query({ accountId: 'github.com#cli:9' }).expect(500);
+
+    expect(response.body.error).toContain('not valid JSON');
+    expect(onAccountRemoved).not.toHaveBeenCalled();
+    expect(await fs.readFile(path.join(directory, 'settings.json'), 'utf8')).toBe('{broken');
+  });
+
+  it('restores gh CLI activation when binding reconciliation fails after the settings write', async () => {
+    stubGitHubUsers();
+    auth.setGhCliActive(true);
+    const fail = async () => { throw Object.assign(new Error('binding store busy'), { code: 'SOURCE_CONTROL_LOCK_BUSY', status: 503 }); };
+    const onAccountRemoved = vi.fn(fail);
+
+    const response = await request(makeApp({ onAccountRemoved })).delete('/api/source-control/github/auth')
+      .query({ accountId: 'github.com#cli:9' }).expect(503);
+
+    expect(response.body).toEqual({ error: 'binding store busy', code: 'SOURCE_CONTROL_LOCK_BUSY' });
+    expect(onAccountRemoved).toHaveBeenCalledWith({ provider: 'github', instance: 'github.com', accountId: 'github.com#cli:9' });
+    expect(await auth.isGhCliActiveForHost('github.com')).toBe(true);
+  });
 });
 
 describe('gh logins on github.com', () => {
@@ -2213,48 +2256,5 @@ describe('gh logins on github.com', () => {
     await expect(getOctokitForAccountId('github.com#cli:10')).resolves.toBeNull();
     // Nothing asked gh by name, and gh's own active account was left alone.
     expect((await ghArgs()).every((args) => args === 'auth token')).toBe(true);
-  });
-
-  it('removes the gh CLI account and reconciles its bindings on success', async () => {
-    stubGitHubUsers();
-    auth.setGhCliActive(true);
-    const onAccountRemoved = vi.fn();
-
-    await request(makeApp({ onAccountRemoved })).delete('/api/source-control/github/auth')
-      .query({ accountId: 'github.com#cli:9' }).expect(200, { success: true, removed: true });
-
-    expect(onAccountRemoved).toHaveBeenCalledWith({ provider: 'github', instance: 'github.com', accountId: 'github.com#cli:9' });
-    expect(auth.isGhCliActive()).toBe(false);
-  });
-
-  // #1274: setGhCliActive reads settings.json strictly (#990) and throws on a
-  // malformed file. The settings write must run before binding reconciliation,
-  // or a failed removal strands the bindings while the account stays active.
-  it('leaves gh CLI bindings untouched when the settings write throws on removal', async () => {
-    stubGitHubUsers();
-    auth.setGhCliActive(true);
-    await fs.writeFile(path.join(directory, 'settings.json'), '{broken', 'utf8');
-    const onAccountRemoved = vi.fn();
-
-    const response = await request(makeApp({ onAccountRemoved })).delete('/api/source-control/github/auth')
-      .query({ accountId: 'github.com#cli:9' }).expect(500);
-
-    expect(response.body.error).toContain('not valid JSON');
-    expect(onAccountRemoved).not.toHaveBeenCalled();
-    expect(await fs.readFile(path.join(directory, 'settings.json'), 'utf8')).toBe('{broken');
-  });
-
-  it('restores gh CLI activation when binding reconciliation fails after the settings write', async () => {
-    stubGitHubUsers();
-    auth.setGhCliActive(true);
-    const fail = async () => { throw Object.assign(new Error('binding store busy'), { code: 'SOURCE_CONTROL_LOCK_BUSY', status: 503 }); };
-    const onAccountRemoved = vi.fn(fail);
-
-    const response = await request(makeApp({ onAccountRemoved })).delete('/api/source-control/github/auth')
-      .query({ accountId: 'github.com#cli:9' }).expect(503);
-
-    expect(response.body).toEqual({ error: 'binding store busy', code: 'SOURCE_CONTROL_LOCK_BUSY' });
-    expect(onAccountRemoved).toHaveBeenCalledWith({ provider: 'github', instance: 'github.com', accountId: 'github.com#cli:9' });
-    expect(auth.isGhCliActive()).toBe(true);
   });
 });

@@ -8,6 +8,7 @@ import {
   getGitHubClientId,
   getGitHubScopes,
   isGhCliActiveForHost,
+  isGhCliActiveForRemoval,
   isGhCliDisabledForHost,
   markGitHubAuthAccountInvalidForHost,
   removeGitHubAuthAccountForHost,
@@ -119,7 +120,7 @@ const guardStorage = <Args extends readonly unknown[], Result>(operation: (...ar
   try {
     return await operation(...args);
   } catch (error) {
-    if (hasFailureFields(error) && error.code === 'INVALID_GITHUB_AUTH') throw responseError(500, { error: error.message, code: error.code });
+    if (hasFailureFields(error) && (error.code === 'INVALID_GITHUB_AUTH' || error.code === 'MALFORMED_SETTINGS')) throw responseError(500, { error: error.message, code: error.code });
     throw error;
   }
 };
@@ -433,7 +434,7 @@ export function createGitHubAccounts({ createOctokit, events, fetch: fetchImpl, 
         if (host !== GITHUB_COM && !(await isTrustedGitHubHostOrStored(host))) throw responseError(400, { error: 'Unsupported GitHub instance' });
         const login = Number(cli[2]) === 0 ? null : await findGhCliLogin(host, accountId, { createOctokit: clientFor });
         if (Number(cli[2]) !== 0 && !login) return { removed: false };
-        if (!(await isGhCliActiveForHost(host))) return { removed: false };
+        if (!(await isGhCliActiveForRemoval(host))) return { removed: false };
         const pinned = await getGhCliLoginForHost(host);
         if (login && pinned && pinned.toLowerCase() !== (login.selector ?? login.login).toLowerCase()) return { removed: false };
         await requiredEvents(events).removed({ provider: 'github', instance: host, accountId });
