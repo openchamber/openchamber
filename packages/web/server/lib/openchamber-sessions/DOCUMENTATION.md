@@ -9,7 +9,7 @@ This module owns server-side session creation, dispatch, forking, archive and me
 - The OpenCode session record is authoritative for metadata and archive state after migration. A pending legacy entry overrides that record in reads and proxy responses until migration succeeds. Archive entries distinguish a timestamp, an explicit unarchive represented by `null`, and an absent entry represented by `undefined`.
 - Archive-file mutations, persistence, and rollback form one serialized transaction. Serializing only disk writes lets an older rollback erase a later committed batch from memory and from the next snapshot. Temporary files share the destination directory so rename exposes a complete snapshot atomically.
 - Archive writes remain disabled until the file is known. A missing file permits writes; a failed read preserves memory and permits a later retry. Loading merges into memory so changes made during loading survive. Malformed archive and metadata files are moved aside for recovery.
-- Archive migration and user archive operations share a per-session queue. Migration reads the entry inside its turn so an older archive cannot overwrite a newer restore. Unknown sessions lose their legacy entries; failed pushes retain them for a later migration.
+- Archive migration and user archive operations share a per-session queue. Migration reads the entry inside its turn so an older archive cannot overwrite a newer restore. An entry is forgotten only after OpenCode reads the session back in the entry's state (archived, or restored for an explicit `null`), or answers that the session does not exist; a failed or unapplied push keeps the entry, is retried once in the same run, and otherwise waits for the next start. Until then the proxy keeps laying the entry over OpenCode's record, so the session stays archived in every list. Confirmed entries are forgotten in batches of 250 (`archive-migration.ts`).
 - Archive batches bound request work and return per-session partial results. Callers split larger sets into batches. `archiveState` preserves an unknown read result for callers that might wake a session; the display-oriented `archivedAt` falls back to active on read failure.
 - Restoring an archived top-level session discovers archived descendants across every directory and uses OpenChamber lineage as well as OpenCode parentage. Moved parents can leave children in another worktree. Parents precede children, and repeated pagination cursors terminate the walk.
 - A send reads the archived tree before restoring its root and yields to a newer archive or restore. Restore failure after prompt acceptance is logged without failing the accepted send.
@@ -62,6 +62,9 @@ Linear entries retain `kind: 'linear'` with the provider alongside it while the 
 ### Why measure turn durations on the server and not in the page
 
 The unread duration remains visible after a page closes. The server's continuous event stream observes turns that no open page can measure, and stores their duration in session metadata.
+
+### Why the archive migration confirms each session and not only the update call
+OpenCode 2.0.x accepted `archived` on a session update, answered success and stored nothing; a migration that forgot the entry on that answer would have made every archived session reappear. Reading the session back costs one request per session; the run over the owner's 27,800 entries took 11.6 s against an isolated OpenCode 2.3.2. Forgetting per confirmed session instead of in batches rewrote the whole file each time: 267 s for the same run.
 
 ### Why batch archive requests and not send one per session
 

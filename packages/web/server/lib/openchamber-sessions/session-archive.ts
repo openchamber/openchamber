@@ -1,5 +1,6 @@
 import { hasMessage, hasTag } from './contracts.js';
 import type { createArchiveStore } from './archive-store.js';
+import { createArchiveMigration } from './archive-migration.js';
 import type { SessionClient } from './opencode-client-contract.js';
 
 const CONCURRENCY = 6;
@@ -113,19 +114,8 @@ export const createSessionArchive = ({ store, openCode, announce = () => {} }: S
     }
   };
 
-  const migrateEntry = (id: string) => runForSession(id, async () => {
-    const entry = await store.entry(id);
-    if (entry === undefined) return;
-    if (await pushToOpenCode(id, entry !== null) === 'failed') return;
-    await store.forget([id]);
-  });
-
-  const migrateLegacy = async () => {
-    const pending = Object.keys(await store.getAll());
-    if (pending.length === 0) return 0;
-    await mapLimited(pending, CONCURRENCY, migrateEntry);
-    return Object.keys(await store.getAll()).length;
-  };
+  const migrateArchive = createArchiveMigration({ store, openCode, runForSession });
+  const migrateLegacy = async () => (await migrateArchive()).remaining;
 
   return {
     archive: async (ids: string[], stamp: number) => {
