@@ -127,6 +127,14 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 
 ## Response contracts
 
+### `GET /api/sessions/status`
+
+The response keeps its `sessions`, `pending`, and `serverTime` fields and adds
+`openCodeDraining`, a boolean from the managed lifecycle. When true, a replaced
+OpenCode still runs sessions the current server's active list cannot report.
+Clients must preserve them while reconciling. Older hosts and the VS Code shim
+omit this additive field; they keep their existing behavior.
+
 ### `truncateNotificationText`
 - Returns empty string for non-string input.
 - Returns original text if under max length.

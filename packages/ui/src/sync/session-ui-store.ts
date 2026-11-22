@@ -438,7 +438,12 @@ export type SessionUIState = {
   clearMaterializedDraftSession: (sessionId: string) => void
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => void
   restoreForRuntimeSwitch: (apiBaseUrl?: string | null, previousRuntimeKey?: string | null) => void
-  openNewSessionDraft: (options?: Partial<NewSessionDraftState> & { automatic?: boolean }) => void
+  /**
+   * `inheritedDirectory` marks a `directoryOverride` that only forwards the
+   * current session's directory (New chat from a session), so it is no more a
+   * choice than the directory the draft would inherit by itself.
+   */
+  openNewSessionDraft: (options?: Partial<NewSessionDraftState> & { automatic?: boolean; inheritedDirectory?: boolean }) => void
   prepareChatDraftDirectory: () => Promise<string | null>
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
@@ -565,6 +570,22 @@ const persistDraftTarget = (target: PersistedDraftTarget): void => {
 }
 
 const resolveDraftProjectForDirectory = resolveProjectForSessionDirectory
+
+/** Whether `directory` is one of the project's worktrees other than its root checkout. */
+const isLinkedWorktreeOfProject = (
+  availableWorktreesByProject: ReadonlyMap<string, readonly WorktreeMetadata[]>,
+  projectPath: string | null,
+  directory: string | null,
+): boolean => {
+  const root = normalizePath(projectPath)
+  const target = normalizePath(directory)
+  if (!root || !target || target === root) return false
+  for (const [key, worktrees] of availableWorktreesByProject) {
+    if (normalizePath(key) !== root) continue
+    return worktrees.some((worktree) => normalizePath(worktree.path) === target)
+  }
+  return false
+}
 
 const getAttachmentForSession = (sessionId: string | null | undefined): SessionWorktreeAttachment | undefined => {
   if (!sessionId) return undefined
@@ -1493,7 +1514,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return persistedProject ?? fallbackProject
     })()
 
-    const directory = target === "chat" ? null : (() => {
+    const resolvedDirectory = target === "chat" ? null : (() => {
       if (explicitDirectory !== null) return explicitDirectory
       if (explicitProject) return normalizePath(explicitProject.path ?? null)
       // A chat session's directory is a managed scratch folder, never a
@@ -1502,6 +1523,19 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (persistedTarget?.directory && !isScratchDirectory(persistedTarget.directory)) return persistedTarget.directory
       return normalizePath(selectedProject?.path ?? null)
     })()
+
+    // With Auto-create worktree on, a new chat gets a worktree of its own: a
+    // worktree the draft only inherited from the last session goes back to
+    // the project root, where the switch applies. A worktree the caller picked
+    // (`directoryOverride` without `inheritedDirectory`) stays.
+    const directoryWasInherited = options?.directoryOverride === undefined || options.inheritedDirectory === true
+    const returnsToProjectRoot = directoryWasInherited
+      && options?.preserveDirectoryOverride !== true
+      && !options?.pendingWorktreeRequestId
+      && !options?.bootstrapPendingDirectory
+      && useConfigStore.getState().settingsAutoCreateWorktree
+      && isLinkedWorktreeOfProject(availableWorktreesByProject, selectedProject?.path ?? null, resolvedDirectory)
+    const directory = returnsToProjectRoot ? normalizePath(selectedProject?.path ?? null) : resolvedDirectory
 
     if (target === "chat") {
       warmChatsRootDirectory()
