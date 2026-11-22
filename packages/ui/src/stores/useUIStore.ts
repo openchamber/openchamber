@@ -71,8 +71,7 @@ export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-doubl
 export type AgentTerminalsPlacement = 'terminal-panel' | 'sidebar';
 export type SessionGoalChecker = 'classifier' | 'small-model';
 /** How sessions enter In work: only by Track, on every sent message, or when Jev says work started. */
-export const SESSION_WORK_ENTRIES = ['off', 'every-message', 'jev'] as const;
-export type SessionWorkEntry = typeof SESSION_WORK_ENTRIES[number];
+export type SessionWorkEntry = 'off' | 'every-message' | 'jev';
 /** What an approved goal spec does on send: it rides along with the typed message, or it is the message. */
 export type SessionGoalWriterSendMode = 'with-message' | 'goal-as-message';
 /** Whether a session without a goal turns the next message into one: never, after review, or straight away. */

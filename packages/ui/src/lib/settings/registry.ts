@@ -43,7 +43,7 @@ import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore, sessionRowDisplaySchema } from '@/stores/useSessionDisplayStore';
 import { sidebarLayoutSchema } from '@/stores/sidebarLayout';
-import { SESSION_WORK_ENTRIES, useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior, type SessionWorkEntry } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
 import { z } from 'zod';
@@ -209,6 +209,7 @@ const parseWorkStatusHiddenSections: SettingsParser<string[]> = mapParser(fromSc
 const parseLargeTextPasteBehavior: SettingsParser<LargeTextPasteBehavior> = parseOneOf(['ask', 'attach', 'inline', 'inline-double-paste']);
 const parseAgentTerminalsPlacement: SettingsParser<AgentTerminalsPlacement> = parseOneOf(['terminal-panel', 'sidebar']);
 const parseFileEditorKeymap: SettingsParser<FileEditorKeymap> = parseOneOf(['default', 'vim']);
+const parseSessionWorkEntry: SettingsParser<SessionWorkEntry> = parseOneOf(['off', 'every-message', 'jev']);
 
 /**
  * Removing a built-in starter must stay a durable choice, so the list is only
@@ -597,7 +598,7 @@ export const SETTINGS_REGISTRY = {
   sessionWorkEntry: field({
     scope: 'profile',
     surfaces: ['web', 'desktop', 'mobile'],
-    parse: parseOneOf(SESSION_WORK_ENTRIES),
+    parse: parseSessionWorkEntry,
     ui: uiStore('sessionWorkEntry', (v) => useUIStore.getState().setSessionWorkEntry(v)),
   }),
   sessionReviewOfferEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('sessionReviewOfferEnabled', (v) => useUIStore.getState().setSessionReviewOfferEnabled(v)) }),

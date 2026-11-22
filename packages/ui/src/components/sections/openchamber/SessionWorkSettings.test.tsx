@@ -17,7 +17,7 @@ describe('SessionWorkSettings: sessions enter In work', () => {
   let initialRouting: ReturnType<typeof useRoutingStore.getState>;
   let globalDescriptors: Map<string, PropertyDescriptor | undefined>;
 
-  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT'];
+  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'localStorage', 'sessionStorage', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'];
 
   beforeEach(() => {
     windowInstance = new Window();
@@ -32,6 +32,8 @@ describe('SessionWorkSettings: sessions enter In work', () => {
       Node: windowInstance.Node,
       localStorage: windowInstance.localStorage,
       sessionStorage: windowInstance.sessionStorage,
+      requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+      cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
       IS_REACT_ACT_ENVIRONMENT: true,
     });
     host = document.createElement('div');
