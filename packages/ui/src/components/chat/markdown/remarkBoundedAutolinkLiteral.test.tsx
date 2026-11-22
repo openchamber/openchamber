@@ -80,7 +80,9 @@ const render = (source: string, { bounded = true, record = false }: { bounded?: 
 };
 const hrefs = (html: string): string[] => [...html.matchAll(/<a\b[^>]*href="([^"]*)"/g)].map((match) => match[1]);
 
-const filler = 'word '.repeat(6000);
+// Long enough that the unbalanced `[` sits thousands of events back; the
+// reference render without the plugin is quadratic in it, so it stays modest.
+const filler = 'word '.repeat(1500);
 // Shapes where the literal tokenizer and the later mdast pass link differently,
 // so a declined attempt the tokenizer would have taken changes the output.
 const urls = [
@@ -118,14 +120,23 @@ describe('linear GFM literal autolinks', () => {
     expect(render(source)).toBe(render(source, { bounded: false }));
   });
 
-  for (const lead of ['', '[ ', '![ ', '[balanced](x) ']) {
+  for (const lead of ['', '[ ', '![ ', '[balanced](x) ', '[not a link] ']) {
     test(`URLs late in a long paragraph opening with ${JSON.stringify(lead)} render the same as without the plugin`, () => {
       for (const url of urls) {
         const source = `${lead}${filler} see ${url} done`;
         expect(render(source)).toBe(render(source, { bounded: false }));
       }
-    });
+    }, 60_000);
   }
+
+  // The remembered `[` closes later without forming a link; attempts after it
+  // must see it as balanced again.
+  test('URLs after a long label that closes without a link render the same as without the plugin', () => {
+    for (const url of urls) {
+      const source = `[open ${filler} closes] then ${url} done`;
+      expect(render(source)).toBe(render(source, { bounded: false }));
+    }
+  }, 60_000);
 
   test('a bare URL late in a long paragraph is still linked, with the CJK boundary', () => {
     expect(hrefs(render(`${filler} see https://example.com。 then www.example.org/x and a@b.co done`)))
