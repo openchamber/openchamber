@@ -41,6 +41,13 @@ describe('ClinePass quota provider', () => {
     expect(result.usage.windows.weekly.usedPercent).toBe(Number(percentUsed));
   });
 
+  it.each([[150, 100, 0], ['150', 100, 0], [-20, 0, 100], ['-20', 0, 100]])('clamps out-of-range percentage %s to %s', async (percentUsed, expectedUsed, expectedRemaining) => {
+    const result = await fetchQuota({ readAuth, fetchImpl: async () => Response.json({ data: { limits: [{ type: 'weekly', percentUsed }] } }) });
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.weekly.usedPercent).toBe(expectedUsed);
+    expect(result.usage.windows.weekly.remainingPercent).toBe(expectedRemaining);
+  });
+
   it.each([
     { type: 'constructor', percentUsed: 5 }, { type: 'toString', percentUsed: 5 },
     { type: '__proto__', percentUsed: 5 }, { type: 'quarterly', percentUsed: 5 },

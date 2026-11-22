@@ -21,6 +21,7 @@ import crypto from 'node:crypto';
 
 import { z } from 'zod';
 
+import { readBoundedResponseText } from '../shared/response-body.js';
 import { loginEndOf, loginEnded } from './space-opencode.js';
 
 const ISSUER = 'https://auth.openai.com';
@@ -117,8 +118,12 @@ export function createLoginExchange({ fetch = globalThis.fetch, now = Date.now, 
       if (response.status >= 400 && response.status < 500) error.code = 'login_refused';
       throw error;
     }
-    const text = await response.text();
-    if (text.length > MAX_ANSWER_BYTES) throw new Error('The login issuer answered with too large a body');
+    // The cap is enforced while the answer streams in, not after it has been
+    // buffered whole: a chunked answer with no declared length must not grow
+    // server memory past MAX_ANSWER_BYTES before being refused (#842).
+    const answer = await readBoundedResponseText(response, MAX_ANSWER_BYTES);
+    if (answer.tooLarge) throw new Error('The login issuer answered with too large a body');
+    const text = answer.text;
     let parsed;
     try {
       parsed = tokenAnswerSchema.safeParse(JSON.parse(text));

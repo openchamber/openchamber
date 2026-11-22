@@ -1,3 +1,4 @@
+import { readQuotaBytes } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { buildResult, toUsageWindow } from '../utils/index.js';
 
@@ -24,9 +25,12 @@ const xaiEntryOf = (auth) => {
 
 const readXaiAuth = async (readAuth) => {
   try {
-    return { entry: xaiEntryOf(await readAuth()), error: null };
-  } catch {
-    return { entry: null, error: 'Failed to read xAI OAuth credentials' };
+    return { entry: xaiEntryOf(await readAuth()), error: null, credentialReadError: null };
+  } catch (error) {
+    // Preserve the original error: it came from the shared OpenCode
+    // credential path, and the dispatcher classifies the failure from the
+    // marker fetchQuota puts on the result (see providers/index.js, #1131).
+    return { entry: null, error: 'Failed to read xAI OAuth credentials', credentialReadError: error };
   }
 };
 
@@ -278,7 +282,7 @@ const fetchUsage = async (accessToken, fetchImpl) => {
     if (status !== 0) throw new Error(`xAI billing RPC failed with status ${status}`);
   }
   if (!response.ok) throw new Error(`xAI billing request failed with HTTP ${response.status}`);
-  return parseUsage(new Uint8Array(await response.arrayBuffer()));
+  return parseUsage(new Uint8Array(await readQuotaBytes(response)));
 };
 
 export const isConfigured = (auth) => Boolean(xaiEntryOf(auth));
@@ -286,13 +290,22 @@ export const isConfigured = (auth) => Boolean(xaiEntryOf(auth));
 export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
   const { entry, error: authError } = await readXaiAuth(readAuth);
   if (authError) {
-    return buildResult({
-      providerId,
-      providerName,
-      ok: false,
-      configured: true,
-      error: authError
-    });
+    return {
+      ...buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: authError
+      }),
+      // The read failed on the shared OpenCode credential path, not on xAI's
+      // own API, so mark the result for the dispatcher's shared upstream-auth
+      // classification (#1131). The generic error text stays: passing the
+      // original message through would also classify an identical xAI
+      // provider-API error. credentialReadError is retained on the internal
+      // read result above for debugging; only this marker reaches the result.
+      credentialReadFailure: true
+    };
   }
   if (!entry) {
     return buildResult({

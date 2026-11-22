@@ -10,10 +10,23 @@ Zanim OpenChamber cokolwiek zrobi, potrzebuje co najmniej jednego połączonego 
 ## Połącz dostawcę
 
 1. Otwórz **Settings → Providers**.
-2. Otwórz menu **Add provider** i wybierz dostawcę, który nie jest jeszcze połączony.
+2. Otwórz menu **Add provider** i wybierz dostawcę, który nie jest jeszcze połączony, albo wybierz **Inne / Niestandardowe** dla punktu końcowego zgodnego z OpenAI.
 3. Zaloguj się na jeden z dwóch sposobów, zależnie od dostawcy:
    - **Klucz API** — wklej swój klucz i zapisz.
    - **Logowanie (device flow)** — OpenChamber pokazuje link i krótki kod. Otwórz link, wpisz kod i zatwierdź. OpenChamber sam dokończy łączenie.
+
+### Niestandardowi i inni dostawcy
+
+Dla bram, LLM-ów uczelnianych, Ollama, LiteLLM i podobnych API zgodnych z OpenAI:
+
+1. Wybierz **Inne / Niestandardowe** na liście dostawców.
+2. Wpisz ID dostawcy, nazwę wyświetlaną, bazowy URL (`http://` lub `https://`), klucz API lub `{env:VAR_NAME}` oraz co najmniej jedno ID i nazwę modelu.
+3. Opcjonalnie podaj poziomy rozumowania modelu, na przykład `low, medium, high`. Każdy poziom pojawia się w selektorze wariantów modelu w czacie, tak jak w przypadku wbudowanych dostawców.
+4. Opcjonalnie dodaj nagłówki żądań.
+5. Zapisz. OpenChamber zapisuje blok dostawcy w konfiguracji OpenCode i przechowuje klucz w danych uwierzytelniania OpenCode, gdy klucz jest wpisany bezpośrednio, albo zapisuje odwołanie `{env:VAR}`.
+6. Aby zmienić istniejącego niestandardowego dostawcę, otwórz go i wybierz **Edytuj**.
+
+Niestandardowi dostawcy potrzebują klucza API lub `{env:VAR_NAME}`, zanim pojawią się jako w pełni połączeni. Bez danych uwierzytelniania modele mogą się pojawić, ale wywołania w czacie będą kończyć się błędem.
 
 Gdy dostawca pokazuje się jako połączony, jego modele stają się dostępne w czacie.
 

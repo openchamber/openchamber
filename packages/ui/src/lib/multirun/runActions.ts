@@ -15,6 +15,7 @@ import { resolveRunMemberLocation, runSnapshotRef } from './keep';
 import { loadLaneFirstPrompt } from './laneData';
 import { multiRunMembershipPatch, type MultiRunMembership } from './identity';
 import { multiRunVariantLabel, readMultiRunIdentity, type MultiRunSummary } from './runs';
+import { clampMultiRunTitle } from './title';
 import { generateUuid } from '@/lib/uuid';
 
 /**
@@ -22,7 +23,7 @@ import { generateUuid } from '@/lib/uuid';
  * alone; members whose write failed keep the old title and are returned.
  */
 export async function renameRun(run: MultiRunSummary, title: string, sessionById: ReadonlyMap<string, Session>): Promise<string[]> {
-  const nextTitle = title.trim().slice(0, 200);
+  const nextTitle = clampMultiRunTitle(title);
   if (!nextTitle) return [];
   const failed: string[] = [];
   await Promise.all(run.memberIds.map(async (sessionId) => {
@@ -86,7 +87,7 @@ export async function askOtherModels(input: {
   const modelID = session.model?.id;
   if (!providerID || !modelID) throw new Error('The chat has no model to compare against');
 
-  const title = (session.title || prompt.text.split('\n')[0] || 'Run').trim().slice(0, 200);
+  const title = clampMultiRunTitle(session.title || prompt.text.split('\n')[0] || 'Run');
   const membership: MultiRunMembership = {
     version: 1,
     sessionID: session.id,

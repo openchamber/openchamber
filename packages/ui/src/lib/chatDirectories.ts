@@ -105,6 +105,17 @@ export function warmChatsRootDirectory(): Promise<void> {
   return ensureChatsRootDirectory().catch(() => undefined);
 }
 
+/**
+ * Drops the server-provided roots for every runtime. Only tests need this: the
+ * cache is keyed by runtime for the app, while every test file in a process
+ * starts from the same runtime key and would otherwise see a previous file's
+ * home directory.
+ */
+export function resetChatsRootCacheForTests(): void {
+  chatsRootByRuntime.clear();
+  chatsRootCacheByRuntime.clear();
+}
+
 export async function createChatDirectory(now = new Date()): Promise<string> {
   const runtimeKey = getRuntimeKey();
   const roots = await getChatRoots();

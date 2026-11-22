@@ -3,25 +3,36 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { StringDecoder } from 'string_decoder';
 import yaml from 'yaml';
 import {
   createExecutableSearchEnv,
   resolveExecutableLaunchTarget,
 } from './tunnels/executable-search.js';
+import { createBoundedOutputAccumulator } from './shared/bounded-output-accumulator.js';
+import { readBoundedFileSync } from './shared/bounded-file-read.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const TRY_CF_URL_REGEX = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 
+// cloudflared writes its URL and ready/fatal log lines with no regard for
+// pipe chunk boundaries, so output is matched over the shared bounded
+// accumulator (lib/shared/bounded-output-accumulator.js, #1705), never
+// per chunk.
 const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
+// spawnSync blocks the whole server event loop while it waits, so a hung
+// cloudflared binary must be bounded: probe timeouts elsewhere in the tree
+// use 5-10 s (package-manager), matching the ngrok availability checks.
+const AVAILABILITY_CHECK_TIMEOUT_MS = 5000;
 const MANAGED_TUNNEL_STARTUP_TIMEOUT_MS = 20000;
 const MANAGED_TUNNEL_LIVENESS_FALLBACK_MS = 6000;
 const TUNNEL_MODE_QUICK = 'quick';
 const TUNNEL_MODE_MANAGED_REMOTE = 'managed-remote';
 const TUNNEL_MODE_MANAGED_LOCAL = 'managed-local';
 
-export async function checkCloudflaredAvailable() {
+export async function checkCloudflaredAvailable({ timeoutMs = AVAILABILITY_CHECK_TIMEOUT_MS } = {}) {
   const target = resolveExecutableLaunchTarget('cloudflared');
   if (target) {
     try {
@@ -30,6 +41,7 @@ export async function checkCloudflaredAvailable() {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         env: target.env,
+        timeout: timeoutMs,
       });
       if (result.status === 0) {
         return { available: true, path: target.command, version: result.stdout.trim() };
@@ -200,14 +212,38 @@ function assertReadableFile(filePath, contextLabel) {
   }
 }
 
-function extractHostnameFromCloudflaredConfigDetailed(configPath) {
+// Exported for tests: the read is the seam the grown-after-stat and
+// FIFO-swap regressions pin. The bounded sync reader opens the file once
+// and judges it from the handle, so a file that grows past the cap after
+// assertReadableFile's stat — or is swapped for a FIFO — is refused here
+// instead of being read whole or blocking the server on the read.
+export function extractHostnameFromCloudflaredConfigDetailed(configPath, contextLabel = 'Managed local tunnel config') {
   if (typeof configPath !== 'string' || configPath.trim().length === 0) {
     return { hostname: null, parseError: null };
   }
 
   let raw;
   try {
-    raw = fs.readFileSync(configPath, 'utf8');
+    const result = readBoundedFileSync(configPath, MANAGED_LOCAL_CONFIG_MAX_BYTES);
+    if (!result.ok) {
+      if (result.reason === 'too-large') {
+        return {
+          hostname: null,
+          parseError: new Error(`${contextLabel} file is too large (max ${MANAGED_LOCAL_CONFIG_MAX_BYTES} bytes).`),
+        };
+      }
+      if (result.reason === 'not-regular') {
+        return {
+          hostname: null,
+          parseError: new Error(`${contextLabel} path is not a file. Select a cloudflared config file.`),
+        };
+      }
+      return {
+        hostname: null,
+        parseError: new Error('Could not read the managed local tunnel config file. Check that the file exists and is accessible.'),
+      };
+    }
+    raw = result.buffer.toString('utf8');
   } catch {
     return {
       hostname: null,
@@ -261,7 +297,7 @@ export function inspectManagedLocalCloudflareConfig({ configPath, hostname } = {
     };
   }
 
-  const configHostnameResult = extractHostnameFromCloudflaredConfigDetailed(effectiveConfigPath);
+  const configHostnameResult = extractHostnameFromCloudflaredConfigDetailed(effectiveConfigPath, requestedPath ? 'Managed local tunnel config' : 'Managed local tunnel default config');
   if (configHostnameResult.parseError) {
     return {
       ok: false,
@@ -294,6 +330,9 @@ async function waitForManagedTunnelReady(child, { modeLabel }) {
     let settled = false;
     let sawOutput = false;
 
+    const stdoutAccumulator = createBoundedOutputAccumulator();
+    const stderrAccumulator = createBoundedOutputAccumulator();
+
     const finish = (handler, value) => {
       if (settled) {
         return;
@@ -303,17 +342,21 @@ async function waitForManagedTunnelReady(child, { modeLabel }) {
       clearTimeout(hardTimeout);
       child.stdout?.off('data', onStdout);
       child.stderr?.off('data', onStderr);
+      child.stdout?.off('end', onStdoutEnd);
+      child.stderr?.off('end', onStderrEnd);
       child.off('exit', onExit);
       handler(value);
     };
 
-    const inspectChunk = (chunk) => {
-      const text = chunk.toString('utf8');
-      if (text.trim().length > 0) {
+    // A ready/fatal line can be split across pipe chunks; match only
+    // complete lines reassembled by each stream's bounded accumulator.
+    const inspectLines = (lines) => {
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          continue;
+        }
         sawOutput = true;
-      }
-      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-      for (const line of lines) {
         if (isCloudflaredReadyLogLine(line)) {
           finish(resolve, null);
           return;
@@ -325,23 +368,70 @@ async function waitForManagedTunnelReady(child, { modeLabel }) {
       }
     };
 
+    const inspectChunk = (accumulator, chunk) => {
+      const { decoded, lines } = accumulator.push(chunk);
+      if (decoded.trim().length > 0) {
+        sawOutput = true;
+      }
+      inspectLines(lines);
+    };
+
+    // cloudflared's last log line can arrive with no trailing newline:
+    // flushing releases it, so a fatal reason is not lost when the
+    // stream ends or the child exits, and a ready line still settles.
+    const inspectFlush = (accumulator) => {
+      inspectLines(accumulator.flush());
+    };
+
     const onStdout = (chunk) => {
-      inspectChunk(chunk);
+      inspectChunk(stdoutAccumulator, chunk);
     };
 
     const onStderr = (chunk) => {
-      inspectChunk(chunk);
+      inspectChunk(stderrAccumulator, chunk);
+    };
+
+    const onStdoutEnd = () => {
+      inspectFlush(stdoutAccumulator);
+    };
+
+    const onStderrEnd = () => {
+      inspectFlush(stderrAccumulator);
     };
 
     const onExit = (code) => {
+      // 'exit' can fire before a stream emits 'end', so flush both held
+      // final lines here; flush() clears them, so a later 'end' handler
+      // cannot inspect one a second time.
+      inspectFlush(stdoutAccumulator);
+      if (settled) {
+        return;
+      }
+      inspectFlush(stderrAccumulator);
+      if (settled) {
+        return;
+      }
       finish(reject, new Error(`Cloudflared exited while starting ${modeLabel} (code ${code ?? 'unknown'})`));
     };
 
     child.stdout?.on('data', onStdout);
     child.stderr?.on('data', onStderr);
+    child.stdout?.on('end', onStdoutEnd);
+    child.stderr?.on('end', onStderrEnd);
     child.once('exit', onExit);
 
     const fallbackTimer = setTimeout(() => {
+      // A fatal final line wins over the liveness fallback: flush and
+      // inspect the held partial lines before treating any output as
+      // proof the tunnel is alive.
+      inspectFlush(stdoutAccumulator);
+      if (settled) {
+        return;
+      }
+      inspectFlush(stderrAccumulator);
+      if (settled) {
+        return;
+      }
       if (sawOutput) {
         finish(resolve, null);
       }
@@ -370,18 +460,23 @@ export async function startCloudflareQuickTunnel({ originUrl }) {
   let publicUrl = null;
   let tunnelReady = false;
 
+  const stdoutAccumulator = createBoundedOutputAccumulator();
+  const stderrAccumulator = createBoundedOutputAccumulator();
+
   const onData = (chunk, isStderr) => {
-    const text = chunk.toString('utf8');
+    // The trycloudflare URL can be split across pipe chunks; match it
+    // against the bounded rolling buffer, not the single chunk.
+    const { decoded, recentText } = (isStderr ? stderrAccumulator : stdoutAccumulator).push(chunk);
 
     if (!tunnelReady) {
-      const match = text.match(TRY_CF_URL_REGEX);
+      const match = recentText.match(TRY_CF_URL_REGEX);
       if (match) {
         publicUrl = match[0];
         tunnelReady = true;
       }
     }
 
-    process.stderr.write(isStderr ? text : '');
+    process.stderr.write(isStderr ? decoded : '');
   };
 
   child.stdout.on('data', (chunk) => onData(chunk, false));
@@ -419,11 +514,17 @@ export async function startCloudflareQuickTunnel({ originUrl }) {
       }
     }, 100);
 
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
       clearTimeout(timeout);
       clearInterval(checkReady);
       cleanupTempDir();
-      if (code !== null && code !== 0) {
+      // Any exit while startup is pending is a failed startup, even a
+      // clean one after a URL was printed: the tunnel dies with the
+      // process, so resolving would hand callers a controller for a
+      // process that is already gone (Codex review, PR #1492).
+      if (signal) {
+        reject(new Error(`Cloudflared exited with signal ${signal}`));
+      } else {
         reject(new Error(`Cloudflared exited with code ${code}`));
       }
     });
@@ -478,9 +579,15 @@ export async function startCloudflareManagedRemoteTunnel({ token, hostname, toke
     // Keep stream drained, but avoid logging potentially sensitive output.
   });
 
+  // Forward through a StringDecoder: a multi-byte character split
+  // across pipe chunks must reach the log whole, not as U+FFFD
+  // replacement characters from a per-chunk decode (#1734).
+  const stderrDecoder = new StringDecoder('utf8');
   child.stderr.on('data', (chunk) => {
-    const text = chunk.toString('utf8');
-    process.stderr.write(text);
+    process.stderr.write(stderrDecoder.write(chunk));
+  });
+  child.stderr.on('end', () => {
+    process.stderr.write(stderrDecoder.end());
   });
 
   const cleanupTempTokenFile = () => {
@@ -544,7 +651,7 @@ export async function startCloudflareManagedLocalTunnel({ configPath, hostname }
     assertReadableFile(effectiveConfigPath, 'Managed local tunnel default config');
   }
 
-  const configHostnameResult = extractHostnameFromCloudflaredConfigDetailed(effectiveConfigPath);
+  const configHostnameResult = extractHostnameFromCloudflaredConfigDetailed(effectiveConfigPath, requestedPath ? 'Managed local tunnel config' : 'Managed local tunnel default config');
   if (configHostnameResult.parseError) {
     throw configHostnameResult.parseError;
   }
@@ -568,9 +675,15 @@ export async function startCloudflareManagedLocalTunnel({ configPath, hostname }
     // Keep stream drained, but avoid logging potentially sensitive output.
   });
 
+  // Forward through a StringDecoder: a multi-byte character split
+  // across pipe chunks must reach the log whole, not as U+FFFD
+  // replacement characters from a per-chunk decode (#1734).
+  const stderrDecoder = new StringDecoder('utf8');
   child.stderr.on('data', (chunk) => {
-    const text = chunk.toString('utf8');
-    process.stderr.write(text);
+    process.stderr.write(stderrDecoder.write(chunk));
+  });
+  child.stderr.on('end', () => {
+    process.stderr.write(stderrDecoder.end());
   });
 
   child.on('error', (error) => {

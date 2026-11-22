@@ -99,9 +99,16 @@ const gitFileDiffSchema = z.object({
 });
 
 async function pathDiffResponseError(response: Response, fallback: string): Promise<Error> {
-  const parsed = gitPathUnavailableBodySchema.safeParse(await response.json().catch(() => null));
+  const body: unknown = await response.json().catch(() => null);
+  const parsed = gitPathUnavailableBodySchema.safeParse(body);
   if (parsed.success && (response.status === 404 || response.status === 422)) {
     return new GitPathUnavailableError(parsed.data.error, parsed.data.code);
+  }
+  if (response.status === 413) {
+    const tooLarge = gitRangeErrorSchema.safeParse(body);
+    if (tooLarge.success) {
+      return new Error(tooLarge.data.error);
+    }
   }
   return new Error(`${fallback}: ${response.statusText}`);
 }

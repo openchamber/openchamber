@@ -31,6 +31,17 @@ Ein Ort, um längere Pläne als gespeicherte Dateien aufzubewahren. Du kannst:
 
 Du solltest danach wieder im Kontext-Tab landen — mit gespeicherter Notiz, abgehakter Todo oder gelistetem Plan; so erkennst du, dass es geklappt hat.
 
+## Löschen und Rückgängig machen
+
+Wenn du eine Notiz, einen Plan oder einen gespeicherten Speichereintrag löschst, erscheint für einige Sekunden ein Toast mit **Rückgängig**. Der Eintrag wird erst endgültig entfernt, wenn diese Zeit abgelaufen ist.
+
+## Agenten
+
+Agenten lesen und aktualisieren dieselben Notizen, Todos und Pläne über das Project-Knowledge-Tool. Bitte einen Agenten, eine Entscheidung zu notieren, ein Todo hinzuzufügen, eines abzuhaken oder einen Plan aktuell zu halten, und die Änderung erscheint sofort im Panel. Notizen, die ein Agent erstellt, sind als von einem Agenten stammend markiert. Wenn ein Agent einen Plan für dich schreibt, kann er ihn vor dir öffnen; dort liest du ihn, kommentierst Zeilen und schickst ihn an eine Session. Pläne sind einfache Markdown-Dateien, also lesen und bearbeiten Agenten sie wie jede andere Datei. Sie beginnen einen Plan mit einer kurzen Checkliste seiner Schritte und haken jeden ab, während sie ihn umsetzen, und ein offener Plan übernimmt die Änderungen innerhalb weniger Sekunden, sodass seine Vorschau zeigt, wie weit die Arbeit gediehen ist.
+
+Ein Agent arbeitet an dem Projekt, zu dem seine Session gehört, Worktrees eingeschlossen. Wenn ein Agent eine Notiz oder einen Plan ändert, während du darin tippst, überschreibt dein Getipptes die Änderung des Agenten. Agenten werden gebeten, den gelesenen Text mitzuschicken, wenn sie eine Notiz oder einen Plan vollständig ersetzen; hat er sich inzwischen geändert, wird das Schreiben abgelehnt und der Agent liest erneut.
+
+Das Tool ist standardmäßig an. Schalte es unter **Settings → General → OpenChamber Tools** mit **Project knowledge tool** aus. Wie die anderen OpenChamber-Tools ist es nur vorhanden, wenn OpenChamber seinen eigenen OpenCode-Server ausführt, also nicht mit einem externen Server oder in der VS-Code-Erweiterung.
 ## Verwandtes
 
 - [Worktree-Sessions](/worktrees/) — eine Todo in einem eigenen Branch ausführen

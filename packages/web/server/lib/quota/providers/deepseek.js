@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -5,23 +6,24 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  formatMoney
+  formatMoney,
+  asNonEmptyString
 } from '../utils/index.js';
 
 export const providerId = 'deepseek';
 export const providerName = 'DeepSeek';
-const aliases = ['deepseek'];
+export const aliases = ['deepseek'];
 const DEEPSEEK_QUOTA_URL = 'https://api.deepseek.com/user/balance';
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
-export const fetchQuota = async () => {
-  const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
+
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -57,7 +59,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     const balanceInfos = Array.isArray(payload?.balance_infos) ? payload.balance_infos : [];
     const positiveBalances = balanceInfos.filter((info) => {
       const num = toNumber(info?.total_balance);

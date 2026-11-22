@@ -39,6 +39,7 @@ import {
   SURFACE_INPUT_PATH,
   SURFACE_RESIZE_PATH,
   SURFACE_SEQ_HEADER,
+  SURFACE_TEXT_MAX,
   SURFACE_TITLE_HEADER,
   SURFACE_TITLE_MAX,
   SURFACE_VIEWER_CONTROLS_HEADER,
@@ -54,11 +55,22 @@ import {
 } from '@openchamber/sdk/schemas';
 
 import { GuestServiceError, holdGuestService, openGuestServiceRequest } from './service.js';
+import { discardResponseBody, readBoundedResponseBytes, readBoundedResponseText } from './response-body.js';
 
 const SURFACE_WS_PATH = /^\/api\/guests\/([a-z][a-z0-9-]*)\/surface\/ws$/;
 /** Input batches and clipboard text; frames never travel viewer → host. */
 const VIEWER_MESSAGE_MAX_BYTES = 256 * 1024;
 const QUICK_REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * Caps for the two text answers, sized to their schemas with room for the
+ * JSON envelope: a resize answer is two dimensions (a few dozen bytes);
+ * a clipboard answer's text is at most SURFACE_TEXT_MAX characters, whose
+ * largest JSON encoding (six bytes per escaped character) stays well
+ * under the cap. An answer over its cap is treated exactly like an
+ * unparseable one.
+ */
+const RESIZE_ANSWER_MAX_BYTES = 1024;
+const CLIPBOARD_ANSWER_MAX_BYTES = 1024 * 1024;
 const FRAME_MIMES = new Set(SURFACE_FRAME_MIMES);
 
 /** Whether this catalog row can show a surface right now. */
@@ -183,7 +195,7 @@ export const createGuestSurfaceRuntime = ({
         body: JSON.stringify(controller === 'user' && viewerId ? { controller, viewer: viewerId } : { controller }),
         timeoutMs: QUICK_REQUEST_TIMEOUT_MS,
       });
-      await response.arrayBuffer().catch(() => undefined);
+      await discardResponseBody(response);
       finished();
     } catch {
       // Advisory: the service pausing its automation is a courtesy, not a
@@ -267,8 +279,10 @@ export const createGuestSurfaceRuntime = ({
     const width = readDimension(response.headers.get(SURFACE_WIDTH_HEADER));
     const height = readDimension(response.headers.get(SURFACE_HEIGHT_HEADER));
     if (seq === null || width === null || height === null) return null;
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > SURFACE_FRAME_MAX_BYTES) return null;
+    const read = await readBoundedResponseBytes(response, SURFACE_FRAME_MAX_BYTES);
+    if (read.tooLarge) return null;
+    const bytes = read.bytes;
+    if (bytes.length === 0) return null;
     const title = (response.headers.get(SURFACE_TITLE_HEADER) || '').slice(0, SURFACE_TITLE_MAX);
     const frame = {
       seq,
@@ -308,12 +322,12 @@ export const createGuestSurfaceRuntime = ({
       }
       const { response, finished } = opened;
       if (response.status === 204) {
-        await response.arrayBuffer().catch(() => undefined);
+        await discardResponseBody(response);
         finished();
         continue;
       }
       if (response.status !== 200) {
-        await response.arrayBuffer().catch(() => undefined);
+        await discardResponseBody(response);
         finished();
         endSession(session, 'service-stopped');
         return;
@@ -394,7 +408,7 @@ export const createGuestSurfaceRuntime = ({
         },
         timeoutMs: QUICK_REQUEST_TIMEOUT_MS,
       });
-      await response.arrayBuffer().catch(() => undefined);
+      await discardResponseBody(response);
       finished();
       // 409: made on a picture the service no longer shows. Nothing reached
       // the page, and the next frame shows the viewer what is there now.
@@ -421,9 +435,10 @@ export const createGuestSurfaceRuntime = ({
         body: JSON.stringify({ width, height }),
         timeoutMs: QUICK_REQUEST_TIMEOUT_MS,
       });
-      const text = await response.text().catch(() => '');
+      const read = await readBoundedResponseText(response, RESIZE_ANSWER_MAX_BYTES).catch(() => ({ tooLarge: true }));
       finished();
       if (response.status !== 200) return;
+      const text = read.tooLarge ? '' : read.text;
       let parsed;
       try {
         parsed = surfaceResizeAnswerSchema.safeParse(JSON.parse(text));
@@ -449,8 +464,9 @@ export const createGuestSurfaceRuntime = ({
         path: SURFACE_CLIPBOARD_PATH,
         timeoutMs: QUICK_REQUEST_TIMEOUT_MS,
       });
-      const text = await response.text().catch(() => '');
+      const read = await readBoundedResponseText(response, CLIPBOARD_ANSWER_MAX_BYTES).catch(() => ({ tooLarge: true }));
       finished();
+      const text = read.tooLarge ? '' : read.text;
       let parsed;
       try {
         parsed = response.status === 200 ? surfaceClipboardAnswerSchema.safeParse(JSON.parse(text)) : { success: false };
@@ -526,6 +542,15 @@ export const createGuestSurfaceRuntime = ({
     deliverLatest(session, viewer);
 
     ws.on('message', (raw, isBinary) => {
+      // Per-frame bound: maxPayload alone is not enforced by the bundled ws
+      // under every runtime (Bun delivers the oversized message whole), so
+      // refuse it here — before it is parsed — with the same 1009 the ws
+      // layer would have used.
+      const frameBytes = typeof raw === 'string' ? Buffer.byteLength(raw) : (raw?.byteLength ?? 0);
+      if (frameBytes > VIEWER_MESSAGE_MAX_BYTES) {
+        try { ws.close(1009, 'Surface frame too large'); } catch { /* already closing */ }
+        return;
+      }
       if (isBinary) return;
       handleViewerMessage(session, viewer, raw);
     });
@@ -618,6 +643,7 @@ export const createGuestSurfaceRuntime = ({
   server.on('upgrade', upgradeHandler);
 
   return {
+    wsServer,
     /**
      * Read by the browser provider before an action: a user holding the
      * surface must not have the agent clicking under their hands.

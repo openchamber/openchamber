@@ -13,8 +13,8 @@ import { refetchSessionMessages } from '@/sync/session-actions';
 import { LongErrorText } from './LongErrorText';
 import { useContinueWithModelAction } from './continueWithModelContext';
 import { ContinueWithModelButton } from './components/ContinueWithModelButtons';
-import { findRecordedTurnError } from '@/lib/messages/assistantError';
-import { readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
+import { MessageRecoveryActions } from './MessageRecoveryActions';
+import { findRecordedTurnError, readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
   sessionId: string;
@@ -270,6 +270,7 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
             <ContinueWithModelButton onClick={continueWithModel} />
           </div>
         ) : null}
+        <MessageRecoveryActions sessionId={sessionId} directory={directory} />
       </div>
     </div>
   );

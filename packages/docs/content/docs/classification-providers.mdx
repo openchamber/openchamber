@@ -15,10 +15,10 @@ Jev never writes code or replies in your chat. It only returns a verdict, and Op
 | --- | --- |
 | [Permissions & safety net](/permissions/) | Should the agent ask you before running this action? |
 | [Auto model routing](/auto-model-routing/) | Which of your categories does this prompt belong to? |
-| [Sessions in work](/sessions-in-work/) | Does this turn look like the end of the work? |
+| [Sessions in work](/sessions-in-work/) | With **Jev decides**: does this message or turn start work? Always: does this turn look like the end of the work? |
 | [Session recap and suggestion](/sessions-in-work/#recap-and-next-message-suggestion) | Is a recap or a suggested next message worth generating after this turn? |
 
-Without a provider, the safety net and Auto are hidden, and sessions in work get no "looks done" hint. Sessions still go into work when you send a message. Recaps and suggestions still work, just without the filter.
+Without a provider, the safety net and Auto are hidden, and sessions in work get no "looks done" hint. **Jev decides** works like Off, so sessions go into work only when you track them or with **Every message**. Recaps and suggestions still work, just without the filter.
 
 ## Set it up
 
@@ -96,7 +96,7 @@ If Jev is slow or fails on a single request, nothing breaks. Each feature has a 
 
 - The safety net keeps the action waiting for you.
 - Auto sends the prompt to your fallback model.
-- No "looks done" hint appears on sessions in work.
+- No session goes into work on Jev's word, and no "looks done" hint appears.
 - The recap and suggestion are generated as if Jev didn't exist.
 
 ## What Jev sees

@@ -58,6 +58,28 @@ const EMPTY_ROW_MESSAGE_IDS: readonly string[] = [];
 //     quiet-window prepend deferral.
 const TIMELINE_ESTIMATED_ENTRY_SIZE = 320;
 
+// Timeline readiness instrumentation, gated so it costs nothing unless asked
+// for in the browser console:
+//   localStorage.setItem('openchamber:timeline:debug', '1')
+// It records the inputs that select @legendapp/list's initial-render reset:
+// the row count and the measured list footer height at each readiness cycle
+// and footer measurement.
+const TIMELINE_DEBUG_STORAGE_KEY = 'openchamber:timeline:debug';
+let timelineDebugEnabled: boolean | undefined;
+const isTimelineDebugEnabled = (): boolean => {
+    if (timelineDebugEnabled !== undefined) return timelineDebugEnabled;
+    try {
+        timelineDebugEnabled = globalThis.localStorage?.getItem(TIMELINE_DEBUG_STORAGE_KEY) === '1';
+    } catch {
+        timelineDebugEnabled = false;
+    }
+    return timelineDebugEnabled;
+};
+const logTimelineReadiness = (event: 'ready' | 'footer', entries: number, footerSize: number, cycle: number): void => {
+    if (!isTimelineDebugEnabled()) return;
+    console.debug(`[timeline] ${event}`, { entries, footerSize, cycle });
+};
+
 // Presentation-only props forwarded to the scroll container the list renders.
 // Deliberately narrow: the list owns scroll and layout callbacks on that
 // element, so only styling, focus and click-through are caller-controlled.
@@ -663,11 +685,46 @@ const TimelineList = React.memo(({
 }: TimelineListProps) => {
     const listRef = React.useRef<LegendListRef | null>(null);
     const isAtEndRef = React.useRef(true);
+    // The first render must not pass a footer. When one is present at mount,
+    // @legendapp/list ties the opening end target to it
+    // (`preserveForFooterLayout`) and re-runs the initial scroll, resetting
+    // `readyToRender` (the containers render at opacity 0 until layout and
+    // scroll finish again) whenever the footer resizes. The footer resizes
+    // when the composer band or a docked panel changes, so that reset landed
+    // at permission arrival and turn end. Child layout effects run before this
+    // one, so LegendList has already captured "no footer" when the footer is
+    // enabled below, and it is still present in the first painted frame.
+    // Mounted this way, a footer resize only extends the content: the scroll
+    // hook pins the end, and data changes still retarget with the measured
+    // footer size.
+    const [footerMounted, setFooterMounted] = React.useState(false);
+    const footerSizeRef = React.useRef(0);
+    const entriesLengthRef = React.useRef(entries.length);
+    entriesLengthRef.current = entries.length;
+    const readinessCycleRef = React.useRef(0);
+
+    React.useLayoutEffect(() => {
+        setFooterMounted(true);
+    }, []);
 
     const setListRef = React.useCallback((list: LegendListRef | null) => {
         listRef.current = list;
         registerList(list);
     }, [registerList]);
+
+    const handleListReady = React.useCallback(() => {
+        readinessCycleRef.current += 1;
+        logTimelineReadiness('ready', entriesLengthRef.current, footerSizeRef.current, readinessCycleRef.current);
+    }, []);
+
+    const handleListMetricsChange = React.useCallback((metrics: { readonly footerSize: number }) => {
+        const footerSize = Number.isFinite(metrics.footerSize) ? metrics.footerSize : 0;
+        if (footerSize !== footerSizeRef.current) {
+            footerSizeRef.current = footerSize;
+            logTimelineReadiness('footer', entriesLengthRef.current, footerSize, readinessCycleRef.current);
+        }
+        onListMetricsChange(metrics);
+    }, [onListMetricsChange]);
 
     // The list reports scroll continuously; only end-crossings are interesting,
     // so the edge is debounced to a state transition here rather than pushing a
@@ -688,7 +745,10 @@ const TimelineList = React.memo(({
     }, [entries, onTimelineDataChange]);
 
     const header = React.useMemo(() => (listHeader ? <>{listHeader}</> : undefined), [listHeader]);
-    const footer = React.useMemo(() => (listFooter ? <>{listFooter}</> : undefined), [listFooter]);
+    const footer = React.useMemo(
+        () => (footerMounted && listFooter ? <>{listFooter}</> : undefined),
+        [footerMounted, listFooter],
+    );
 
     return (
         <TimelineRowContext.Provider value={rowContext}>
@@ -719,7 +779,8 @@ const TimelineList = React.memo(({
                 // reader is held on the end by the owning hook instead.
                 maintainVisibleContentPosition={{ data: true, size: endPinningReleased }}
                 onScroll={handleScroll}
-                onMetricsChange={onListMetricsChange}
+                onMetricsChange={handleListMetricsChange}
+                onReady={handleListReady}
                 ListHeaderComponent={header}
                 ListFooterComponent={footer}
                 {...scrollContainerProps}

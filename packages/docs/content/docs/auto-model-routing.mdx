@@ -87,7 +87,75 @@ request OpenCode makes to the target, background ones such as titles included),
 and be tuned by the agent from its recorded history. These are OpenCode route
 options; see its configuration reference.
 
+OpenCode waits 10 seconds for a model's first output before it moves to the
+next one, which cuts off models that think for a while before they answer. When
+Settings saves your pools, it writes a 30-second wait into every pool that has
+none. A pool that contains other pools waits as long as the slowest pool inside
+it, because OpenCode applies only the wait of the pool you picked; you can
+choose the shortest instead, a number of your own, or no limit, on the pool's
+page under **Waiting and failover**. If a reply fails, **Try the next pool
+model** retries with the next model in the pool that has not failed for that
+message; once every model has failed, the reply lists the models it tried.
+
+Open a pool in **Settings → Routing → Model pools** to set each model's effort
+in its own row: the provider's default (no effort is sent), a default the
+pool's effort level can override, or a locked effort, which OpenChamber saves
+as `provider/model#effort`. Under **Effort levels**, a pool can offer the levels
+its models share, no levels at all, or a list you choose. Drag pools to reorder
+them; the order is saved in `opencode.json`, and OpenCode and the model picker
+list pools in that order, except that OpenCode puts pools with a level list or
+a locked model after the others. The eye button hides a pool or a model from
+the picker without taking it out of any pool.
+
+Schedules change target weights on set days or hours, for example to send less
+traffic to a provider during its peak hours. A pool's own schedules sit under
+its advanced options in **Settings → Routing → Model pools**, and
+**Schedules across pools** below the pool list changes matching targets in
+every pool, or only in the pools you list. Each schedule takes weekdays, days of
+the month, a start and end time, a timezone, and either a factor that multiplies
+the weight or a weight that replaces it. Outside its window the configured
+weights apply. OpenCode also applies schedules from its other config files,
+such as a project's `opencode.json`. Settings lists those read-only, under the
+name of the file to edit them in.
+
+Each pool can also say what it is for. In **Settings → Routing → Model pools**,
+open a pool and fill in **Description**, one line such as "long refactors across
+many files; slow; costs the most", and **Details**, a paragraph on when to use the
+pool and when not to. When a category's model is a pool, Jev reads both together
+with that category's description. OpenChamber saves them as `description` and
+`details` on the route in `opencode.json`. OpenCode ignores the two keys, so an
+editor that checks the file against OpenCode's JSON schema may flag them.
+
 Jev sorts prompts by reading the category names and descriptions, so the descriptions work as instructions. Say what belongs in the category and what doesn't. You can edit, turn off, remove or add categories, and restore a built-in one if you change your mind. Auto needs at least two categories turned on.
+
+### See which sessions share a target
+
+When a target's plan runs out, every session on that target fails over at once
+and each starts again with a cold prompt cache. **Settings → Routing → Model
+pools → Pool health** shows, for each target in each pool, how many sessions
+used it in the last 15 minutes, and warns when two or more share it.
+
+Link a target to one of your plans there to see a projection: its recent usage,
+together with every other target linked to the same plan, scaled to the plan's
+quota window. Windows counted in requests, messages or tokens get a projection;
+dollar and percent windows don't. The figure is an estimate from the last 24
+hours of OpenCode traffic and can't see usage from outside OpenCode. In a
+weighted or round-robin pool, a target at 70% or more of its window gets a
+**Lower weight** button that halves its weight, so new sessions lean toward the
+other targets.
+
+Below the targets, **Move sessions off a target before its plan runs out** is
+off by default. When it's on and a target's plan is projected at 70% or more
+with two or more sessions on it, OpenChamber switches one of those sessions to
+another target in the same pool that isn't linked to the same plan, isn't near
+its own limit and isn't failing right now,
+one session per pool every 5 minutes (adjustable), running subagents first and
+then the session idle longest. The last session on a target stays. Their caches
+restart one at a time instead of all at once. A moved session
+runs on that model directly, outside the pool, so it no longer fails over; pick
+the pool again to bring it back. Sessions on **Auto** are never moved. Recent
+moves are listed under the switch. A target with no linked plan, or no projection, can be chosen too even though
+its headroom is unknown. When OpenCode runs on another machine, rotation makes no moves.
 
 ## What happens when you send
 

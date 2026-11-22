@@ -34,6 +34,10 @@ mock.module("@/lib/opencode/client", () => ({
 }))
 
 mock.module("../session-ui-store", () => ({
+  expandSlashCommandGoalObjective: (content: string) => content,
+  materializeOpenDraftSession: async () => null,
+  resolveVariantToRecord: () => undefined,
+  routeMessage: async () => undefined,
   useSessionUIStore: {
     getState: () => ({
       setCurrentSession: (id: string | null, directoryHint?: string | null) => {

@@ -2,15 +2,19 @@ import { settingsDict } from './en.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -28,7 +32,9 @@ import { messagingI18n } from './messaging.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode is bundled with OpenChamber. Update OpenChamber to get OpenCode v2.",
@@ -141,15 +147,19 @@ export const dict = {
   ...linearIssuePickerI18n.en,
   ...referencePickerI18n.en,
   ...sessionMenuHintsI18n.en,
+  ...sessionErrorRecoveryI18n.en,
   ...sidebarLayoutI18n.en,
+  ...activityTimesI18n.en,
   ...projectKnowledgeI18n.en,
   ...linearPanelI18n.en,
   ...routingI18n.en,
+  ...poolSettingsI18n.en,
   ...pluginPanelI18n.en,
   ...surfacePanelI18n.en,
   ...fileArtifactsI18n.en,
   ...fileContentSearchI18n.en,
   ...htmlRenderI18n.en,
+  ...sessionLocationI18n.en,
   ...sessionNoticesI18n.en,
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
@@ -167,7 +177,9 @@ export const dict = {
   ...pluginsGridI18n.en,
   ...integrationsCatalogI18n['en'],
   ...sessionGoalWriterI18n['en'],
+  ...subsessionModelsI18n['en'],
   ...diffFindI18n['en'],
+  ...questionAnswersI18n['en'],
   'terminalView.actions.attachSelection': 'Attach selected output',
   'terminalView.actions.copySelection': 'Copy selected output',
   'terminalView.toast.selectionCopied': 'Output copied',
@@ -477,6 +489,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.status.sent': 'Sent',
   'sessions.scheduledTasks.dialog.status.skipped': 'Skipped',
   'sessions.scheduledTasks.dialog.status.cancelled': 'Cancelled',
+  'sessions.scheduledTasks.dialog.status.timeout': 'Timed out',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Next',
   'sessions.scheduledTasks.dialog.lastRun.label': 'Last run',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'running now',
@@ -594,6 +607,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'Show in work section',
   'sessions.sidebar.header.displayMode.showPinned': 'Show pinned section',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Detailed rows',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Sidebar rows…',
   'sessions.sidebar.activity.pinnedTitle': 'Pinned',
   'sessions.sidebar.header.displayMode.showArchived': 'Show archived sessions',
   'sessions.sidebar.header.displayMode.collapseAll': 'Collapse all',
@@ -625,6 +639,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'View',
   'sessions.sidebar.header.viewMode.projects': 'Tree',
   'sessions.sidebar.header.viewMode.timeline': 'List',
+  'sessions.sidebar.header.viewMode.headerless': 'Hide section headers',
   'sessions.sidebar.header.projectDisplay.label': 'Show projects',
   'sessions.sidebar.header.projectDisplay.all': 'All projects',
   'sessions.sidebar.header.listGrouping.label': 'Sessions',
@@ -1137,11 +1152,11 @@ export const dict = {
   'gitView.integrate.commitsMovedDescriptionSingle': 'Moved {count} commit to {branch}.',
   'gitView.integrate.commitsMovedToast': 'Commits moved',
   'gitView.integrate.commitsToMove': 'Commits to move',
-  'gitView.integrate.conflictsInFiles': 'Conflicts in files',
+  'gitView.integrate.conflictsInFiles': 'Conflicts in {count} files',
   'gitView.integrate.currentCommit': 'Current commit',
   'gitView.integrate.currentSession': 'Current session',
   'gitView.integrate.failedToMoveToast': 'Failed to move commits',
-  'gitView.integrate.moreFiles': 'More files',
+  'gitView.integrate.moreFiles': '{count} more files',
   'gitView.integrate.move': 'Move',
   'gitView.integrate.moveCommits': 'Move commits',
   'gitView.integrate.moving': 'Moving…',
@@ -1153,10 +1168,10 @@ export const dict = {
   'gitView.integrate.previewUnavailable': 'Preview unavailable',
   'gitView.integrate.showAll': 'Show all',
   'gitView.integrate.showLess': 'Show less',
-  'gitView.integrate.showingFirstCommits': 'Showing first commits',
+  'gitView.integrate.showingFirstCommits': 'Showing first {count} commits',
   'gitView.integrate.target': 'Target',
   'gitView.integrate.title': 'Re-integrate commits',
-  'gitView.integrate.toMoveCount': 'To move',
+  'gitView.integrate.toMoveCount': '{count} to move',
   'gitView.operation.abort': 'Abort',
   'gitView.operation.continue': 'Continue',
   'gitView.operation.inProgressTitle': '{operation} in progress',
@@ -1278,6 +1293,7 @@ export const dict = {
   'gitView.pr.checks.openRun': 'Open',
   'gitView.pr.checks.failedAnnotations': 'Failed annotations',
   'gitView.pr.checks.failedAnnotationsShown': 'Failed annotations (showing {shown} of {total})',
+  'gitView.pr.checks.annotationsTruncated': 'Annotations are incomplete — this run has more annotations than could be loaded.',
   'gitView.pr.field.baseBranch': 'Base branch',
   'gitView.pr.field.description': 'Description',
   'gitView.pr.field.title': 'Title',
@@ -1891,6 +1907,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'No changes in this repository',
   'diffView.unavailable.untrackedDirectoryTitle': 'Folder of new files',
   'diffView.unavailable.untrackedDirectoryDescription': 'This folder holds too many new files to list one by one. Stage it, or add it to .gitignore if it does not belong in the repository.',
+  'diffView.unavailable.tooLargeTitle': 'File is too large to diff',
+  'diffView.unavailable.tooLargeDescription': 'It is larger than the 20 MiB limit for file diffs.',
   'diffView.submodule.title': 'Submodule',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Still on commit {commit}',
@@ -2591,6 +2609,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Failed over from',
   'chat.messageBody.modelChanged.notice': 'Model changed: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Model changed: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Prefer previous',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Have model pools favor {model} for a day',
+  'chat.currentModel.label': 'Current model: {model}',
+  'chat.currentModel.labelWithPool': 'Current model: {model} from pool {pool}',
+  'chat.currentModel.menu.openHint': 'Click to pick a model',
+  'chat.currentModel.menu.timing': 'Switch',
+  'chat.currentModel.menu.directPickHelp': 'A direct pick stops pool failover until you return to the pool.',
+  'chat.currentModel.timing.immediately': 'Now (restarts a running reply)',
+  'chat.currentModel.timing.nextStep': 'At the next step',
+  'chat.currentModel.timing.nextInput': 'With the next message',
+  'chat.currentModel.menu.members': 'Models in pool {pool}',
+  'chat.currentModel.menu.returnToPool': 'Return to pool {pool}',
+  'chat.currentModel.toast.failed': 'Couldn\'t switch the model',
   'chat.generatedResult.actions.copy': 'Copy',
   'chat.generatedResult.actions.copied': 'Copied',
   'chat.generatedResult.commit.title': 'Generated commit message',
@@ -3079,6 +3110,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Needs authentication',
   'mcpDropdown.status.needsRegistration': 'Needs registration: {error}',
   'mcpDropdown.empty.configureInConfig': 'Configure MCP servers in Settings.',
+  "mcpDropdown.cacheNote": "Switching a server with code mode off makes a running session's next turn skip the prompt cache.",
   'sessionAuth.error.rateLimitTitle': 'Too many attempts',
   'sessionAuth.error.networkTitle': 'Unable to reach server',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Please wait {minutes} minute before trying again.',
@@ -3836,8 +3868,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Keep this',
   'multirun.overview.addModel.action': 'Add a model',
   'multirun.overview.addModel.hint': 'Runs the same prompt on one more model in this run',
-  'chat.parallel.settings.whereShared': 'Project directory',
-  'chat.parallel.settings.whereSharedHint': 'All runs work in your checkout. Best for questions and research.',
+  'chat.parallel.settings.whereShared': 'Shared directory',
+  'chat.parallel.settings.whereSharedHint': 'All runs work in the directory this draft is set to. Best for questions and research.',
   'chat.parallel.settings.whereWorktrees': 'Separate worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Each run gets its own branch, so code changes never collide. Keep the best one.',
   'chat.parallel.settings.baseBranchTitle': 'Base branch',

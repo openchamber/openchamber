@@ -148,6 +148,84 @@ describe('permission auto-accept runtime', () => {
     expect(fetchImpl.mock.calls.some(([url, init]) => new URL(url).pathname === '/api/session/child/permission/perm/reply' && init.method === 'POST')).toBe(true);
   });
 
+  it('leaves a permission unanswered when the session body is over the cap, cancelling the stream', async () => {
+    let cancelled = false;
+    const chunk = new TextEncoder().encode('x'.repeat(9 * 1024 * 1024));
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/session/child') return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(chunk);
+          controller.enqueue(chunk);
+          // Never closed: only the reader cancelling can end this body.
+        },
+        cancel() { cancelled = true; },
+      }));
+      if (init.method === 'POST') return Response.json({});
+      return new Response('[]');
+    });
+    const { runtime } = createRuntime({ stored: { permissionAutoAccept: { sessions: { root: 'auto' } } }, fetchImpl });
+    await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(false);
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('/reply'))).toBe(false);
+    expect(cancelled).toBe(true);
+  });
+
+  it('parses a session record at the exact 16 MiB cap and still walks its lineage', async () => {
+    const cap = 16 * 1024 * 1024;
+    const build = (pad) => JSON.stringify({ id: 'child', parentID: 'root', directory: '/project', pad: 'x'.repeat(pad) });
+    const text = build(cap - Buffer.byteLength(build(0)));
+    expect(Buffer.byteLength(text)).toBe(cap);
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/session/child') return new Response(text);
+      if (init.method === 'POST') return Response.json({});
+      return new Response('[]');
+    });
+    const { runtime } = createRuntime({ stored: { permissionAutoAccept: { sessions: { root: 'auto' } } }, fetchImpl });
+    await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(true);
+    expect(fetchImpl.mock.calls.some(([url, init]) => new URL(url).pathname === '/api/session/child/permission/perm/reply' && init.method === 'POST')).toBe(true);
+  });
+
+  it('reports an over-cap session body as a failed lookup, not an empty one', async () => {
+    const broadcastGlobalUiEvent = vi.fn();
+    const chunk = new TextEncoder().encode('x'.repeat(9 * 1024 * 1024));
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/session/child') return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(chunk);
+          controller.enqueue(chunk);
+          // Never closed: only the reader cancelling can end this body.
+        },
+      }));
+      if (init.method === 'POST') return Response.json({});
+      return new Response('[]');
+    });
+    const { runtime } = createRuntime({ stored: { permissionAutoAccept: { sessions: { root: 'auto' } } }, fetchImpl, broadcastGlobalUiEvent });
+    await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(false);
+    await flush();
+    // Like a thrown lookup (the non-ok test below), an over-cap body must
+    // end in the left-for-user broadcast; an ignored (ask) outcome would
+    // leave a connected UI holding the permission card back indefinitely.
+    expect(broadcastGlobalUiEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'openchamber:permission-auto-accept.left-for-user' }));
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('/reply'))).toBe(false);
+  });
+
+  it('still treats a non-ok session answer as a failed lookup, not an empty one', async () => {
+    const broadcastGlobalUiEvent = vi.fn();
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      const path = new URL(url).pathname;
+      if (path === '/api/session/child') return new Response('boom', { status: 503 });
+      if (init.method === 'POST') return Response.json({});
+      return new Response('[]');
+    });
+    const { runtime } = createRuntime({ stored: { permissionAutoAccept: { sessions: { root: 'auto' } } }, fetchImpl, broadcastGlobalUiEvent });
+    await expect(runtime.processPermission({ id: 'perm', sessionID: 'child' }, '/project')).resolves.toBe(false);
+    await flush();
+    // A thrown lookup is reported left-for-user as a failure; an ignored (ask) one is not.
+    expect(broadcastGlobalUiEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'openchamber:permission-auto-accept.left-for-user' }));
+  });
+
   it('fetches the lineage of a subagent first seen through a partial update', async () => {
     const fetchImpl = vi.fn(async (url, init = {}) => {
       const path = new URL(url).pathname;

@@ -130,6 +130,25 @@ describe('tunnel codec', () => {
     expect(assembler.push(fragment(new Uint8Array([2]), false))).toEqual(new Uint8Array([2]));
   });
 
+  test('assembler bounds aggregate pending bytes and pending-key count (#1024)', () => {
+    const fragment = (streamId: number, bytes: number, more: boolean) => ({
+      frameType: TunnelFrameType.WsBinary,
+      streamId,
+      payload: new Uint8Array(bytes),
+      hasMoreFragments: more,
+    });
+    // Per-message cap 100, aggregate cap 10: two 6-byte partials cannot both park.
+    const byBytes = createFragmentAssembler(100, 10);
+    expect(byBytes.push(fragment(1, 6, true))).toBeNull();
+    expect(() => byBytes.push(fragment(2, 6, true))).toThrow('fragmented messages exceed aggregate maximum size');
+    expect(byBytes.push(fragment(1, 4, false))).toEqual(new Uint8Array(10));
+
+    const byKeys = createFragmentAssembler(100, 1000, 2);
+    expect(byKeys.push(fragment(1, 1, true))).toBeNull();
+    expect(byKeys.push(fragment(2, 1, true))).toBeNull();
+    expect(() => byKeys.push(fragment(3, 1, true))).toThrow('too many pending fragmented messages');
+  });
+
   test('stream id allocator yields odd ascending ids', () => {
     const allocator = createStreamIdAllocator();
     expect([allocator.next(), allocator.next(), allocator.next()]).toEqual([1, 3, 5]);

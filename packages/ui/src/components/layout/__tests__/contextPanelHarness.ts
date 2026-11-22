@@ -76,6 +76,8 @@ export const installDom = (): DomFixture => {
     HTMLElement: dom.HTMLElement,
     HTMLInputElement: dom.HTMLInputElement,
     Event: dom.Event,
+    CustomEvent: dom.CustomEvent,
+    MutationObserver: dom.MutationObserver,
     KeyboardEvent: dom.KeyboardEvent,
     MouseEvent: dom.MouseEvent,
     ResizeObserver: dom.ResizeObserver,

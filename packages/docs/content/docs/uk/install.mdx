@@ -36,3 +36,16 @@ openchamber --ui-password be-creative-here
 ## Мобільні застосунки
 
 Встановіть застосунок для iPhone через TestFlight або застосунок для Android з останнього релізу, а потім з’єднайте його з комп’ютером. Сторінка [Мобільні застосунки та PWA](/uk/mobile/) описує обидва кроки.
+
+## Nix
+
+У NixOS або будь-якому Linux із Nix flake у репозиторії OpenChamber збирає ті самі застосунки:
+
+```bash
+nix run github:openchamber/openchamber        # вебсервер на http://localhost:3000
+nix run github:openchamber/openchamber#gui    # десктопний застосунок
+```
+
+Flake також надає `packages.openchamber` і `packages.openchamber-desktop` та модуль systemd `nixosModules.openchamber` із `host`, `port`, `openFirewall` і `uiPasswordFile`. Файл пароля читається через `LoadCredential` у systemd, тож секрет root із правами 0400 працює зі стандартним динамічним користувачем.
+
+Оновлення відбуваються через flake. У запакованого OpenCode CLI вбудований оновлювач вимкнено, бо шлях у Nix store не може оновити сам себе; щоб оновитися, потягніть flake і перезберіть.

@@ -3,9 +3,41 @@ import { readDiskCache, writeDiskCache } from './disk-cache.js';
 const DEFAULT_TTL_MS = 3 * 60 * 60 * 1000;
 const DISK_CACHE_FILE = 'skills-catalog-cache.json';
 const MAX_CONCURRENT_SCANS = 2;
+// Bound on distinct keys with a scan queued or in flight. The active-scan
+// limit alone left the pending side unbounded: a burst of distinct source
+// scans parked one inFlight entry and one queue waiter per key until each
+// settled (issue #2269: 10,000 unique keys, ~10.7 MB heap growth). Requests
+// past the cap get the typed busy result below instead of a waiter.
+export const MAX_PENDING_SCANS = 32;
+
+const busyScanResult = () => ({
+  ok: false,
+  error: {
+    kind: 'busy',
+    message: `Skills catalog is busy: ${MAX_PENDING_SCANS} scans already pending; retry shortly`,
+  },
+});
+// Bound in-memory retention: scan values are large (~57 KB each), so an
+// unbounded Map retains every catalog ever scanned for process life.
+export const MAX_CACHED_SCANS = 100;
 
 const cache = new Map();
 const inFlight = new Map();
+
+/** Remove expired entries so they do not accumulate until re-read. */
+export function pruneExpiredScans(now = Date.now()) {
+  for (const [key, entry] of cache.entries()) {
+    if (!entry || typeof entry.expiresAt !== 'number' || now >= entry.expiresAt) {
+      cache.delete(key);
+    }
+  }
+  return cache.size;
+}
+
+/** Raw entry count for tests (no implicit prune). */
+export function getScanCacheSize() {
+  return cache.size;
+}
 
 let diskLoaded = false;
 let diskWriteTimer = null;
@@ -64,18 +96,29 @@ export function getCacheKey({ normalizedRepo, ref, subpath, identityId }) {
 
 export function getCachedScan(key) {
   loadDiskEntries();
+  pruneExpiredScans();
   const entry = cache.get(key);
   if (!entry) return null;
   if (Date.now() >= entry.expiresAt) {
     cache.delete(key);
     return null;
   }
+  // Refresh LRU order so the size bound evicts the least-recently-used key.
+  cache.delete(key);
+  cache.set(key, entry);
   return entry.value;
 }
 
 export function setCachedScan(key, value, ttlMs = DEFAULT_TTL_MS) {
+  pruneExpiredScans();
   const ttl = Number.isFinite(ttlMs) ? ttlMs : DEFAULT_TTL_MS;
+  cache.delete(key);
   cache.set(key, { expiresAt: Date.now() + ttl, value });
+  while (cache.size > MAX_CACHED_SCANS) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
   scheduleDiskWrite();
 }
 
@@ -110,8 +153,10 @@ const pumpScanQueue = () => {
 /**
  * Run `loader` for a scan cache key with deduplication and a global
  * concurrency limit. Concurrent callers for the same key share one loader
- * run; at most MAX_CONCURRENT_SCANS loaders run at once. Only successful
- * (`ok: true`) results are cached.
+ * run; at most MAX_CONCURRENT_SCANS loaders run at once and at most
+ * MAX_PENDING_SCANS distinct keys may be queued or in flight — a new key
+ * past that cap resolves with the typed busy result (`error.kind: 'busy'`)
+ * instead of waiting. Only successful (`ok: true`) results are cached.
  */
 export async function scanWithCache(key, loader, { refresh = false } = {}) {
   if (!refresh) {
@@ -124,6 +169,13 @@ export async function scanWithCache(key, loader, { refresh = false } = {}) {
   const existing = inFlight.get(key);
   if (existing) {
     return existing;
+  }
+
+  // Same-key callers coalesce above; a NEW key past the pending cap is
+  // refused with the typed busy result rather than queued without bound.
+  // The refusal is not cached and holds no slot, so it drains instantly.
+  if (inFlight.size >= MAX_PENDING_SCANS) {
+    return busyScanResult();
   }
 
   const run = (async () => {

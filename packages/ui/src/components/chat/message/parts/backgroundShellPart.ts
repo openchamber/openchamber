@@ -53,17 +53,17 @@ export const toBackgroundShellPart = (part: ToolPart, phase: BackgroundShellPhas
 
     switch (phase.kind) {
         case 'running':
-            return { ...part, state: { status: 'running', input, metadata: { output: phase.output }, time: { start } } };
+            return { ...part, displayTime: { start }, state: { status: 'running', input, metadata: { output: phase.output }, time: { start } } };
         case 'finished': {
             const { completion } = phase;
             const time = { start, end: Math.max(start, completion.endedAt) };
             if (shellCompletionFailed(completion)) {
-                return { ...part, state: { status: 'error', input, error: failureReason(completion), output: completion.output, time } };
+                return { ...part, displayTime: { start, end: completion.endedAt }, state: { status: 'error', input, error: failureReason(completion), output: completion.output, time } };
             }
-            return { ...part, state: { ...state, output: completion.output, time } };
+            return { ...part, displayTime: { start, end: completion.endedAt }, state: { ...state, output: completion.output, time } };
         }
         case 'stopped':
-            return { ...part, state: { ...state, output: phase.notice, time: { start, end: Math.max(start, phase.endedAt) } } };
+            return { ...part, displayTime: { start, end: phase.endedAt }, state: { ...state, output: phase.notice, time: { start, end: Math.max(start, phase.endedAt) } } };
         case 'unknown':
             return { ...part, state: { ...state, output: withoutModelInstruction(state.output) } };
     }

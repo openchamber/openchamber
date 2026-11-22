@@ -15,7 +15,9 @@ import type { SourceControlProvider } from '@/lib/api/types';
 import React from 'react';
 
 import { SessionGoalButton, SessionGoalObjectiveCounter, SessionGoalWriterButton } from '@/components/chat/SessionGoalButton';
+import { SubsessionModelsControl } from '@/components/chat/SubsessionModelsControl';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
+import { FacadeVoiceCapture } from '@/components/dictation/FacadeVoiceCapture';
 import { Icon } from '@/components/icon/Icon';
 import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
 import { useI18n } from '@/lib/i18n';
@@ -77,6 +79,9 @@ interface ComposerFooterProps {
     onDictationInsertAndSend: (text: string) => void;
     onDictationSendStart: () => void;
     onDictationStart: () => void;
+    /** Facade capture has its own dictation origin (see useDictationOrigin); falls back to the streaming handlers when absent. */
+    onFacadeDictationInsert?: (text: string) => void;
+    onFacadeDictationStart?: () => void;
     onDictationContentHeightChange: (height: number | null) => void;
     /** Desktop only: the composer box hides its other contents while the overlay is up. */
     onDictationActiveChange?: (active: boolean) => void;
@@ -148,6 +153,8 @@ function ComposerFooterView(props: ComposerFooterProps) {
         onDictationInsertAndSend,
         onDictationSendStart,
         onDictationStart,
+        onFacadeDictationInsert,
+        onFacadeDictationStart,
         onDictationContentHeightChange,
         onDictationActiveChange,
         isBtw = false,
@@ -213,6 +220,13 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 iconSizeClass={iconSizeClass}
                             /> : null}
                             {!isBtw ? <SessionGoalWriterButton
+                                sessionId={currentSessionId}
+                                directory={directory}
+                                draftOpen={newSessionDraftOpen}
+                                footerIconButtonClass={footerIconButtonClass}
+                                iconSizeClass={iconSizeClass}
+                            /> : null}
+                            {!isBtw ? <SubsessionModelsControl
                                 sessionId={currentSessionId}
                                 directory={directory}
                                 draftOpen={newSessionDraftOpen}
@@ -308,6 +322,14 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             iconSizeClass={iconSizeClass}
                             withTooltip
                         /> : null}
+                        {!isBtw ? <SubsessionModelsControl
+                            sessionId={currentSessionId}
+                            directory={directory}
+                            draftOpen={newSessionDraftOpen}
+                            footerIconButtonClass={footerIconButtonClass}
+                            iconSizeClass={iconSizeClass}
+                            withTooltip
+                        /> : null}
                         {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                     </div>
                     <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')} data-dictation-chain="true">
@@ -326,6 +348,12 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             onStart={onDictationStart}
                             onContentHeightChange={onDictationContentHeightChange}
                             onActiveChange={onDictationActiveChange}
+                        /> : null}
+                        {!isBtw ? <FacadeVoiceCapture
+                            footerIconButtonClass={footerIconButtonClass}
+                            iconSizeClass={iconSizeClass}
+                            onInsert={onFacadeDictationInsert ?? onDictationInsert}
+                            onStart={onFacadeDictationStart ?? onDictationStart}
                         /> : null}
                         {parallelRun ? (
                             // Parallel mode keeps the ordinary send button: the strip above

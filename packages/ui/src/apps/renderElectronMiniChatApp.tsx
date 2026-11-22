@@ -13,7 +13,8 @@ import { ElectronMiniChatApp } from './ElectronMiniChatApp';
 import { initializeSharedPreferences } from './initializeSharedPreferences';
 
 export function renderElectronMiniChatApp(apis: RuntimeAPIs) {
-  initializeSharedPreferences({ logLabel: '[mini-chat-main]' });
+  // Mini Chat shares the device id but not the main window's layout state.
+  initializeSharedPreferences({ logLabel: '[mini-chat-main]', reportDeviceSettings: false });
 
   const rootElement = document.getElementById('root');
   if (!rootElement) {

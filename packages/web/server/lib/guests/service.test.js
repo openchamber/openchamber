@@ -133,6 +133,43 @@ describe('guest service proxy', () => {
     }
   });
 
+  test('a multi-byte character split across stderr chunks survives in SERVICE_FAILED (#1696)', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      // Failing service: writes the first byte of '€' (E2 82 AC) to
+      // stderr, pauses so the pipe delivers it as its own chunk, then
+      // writes the remaining bytes and exits. Decoding each chunk on
+      // its own (the old collectProcessOutput shape) turned that split
+      // into U+FFFD replacement characters in the failure diagnostic.
+      await fs.writeFile(path.join(packageRoot, 'service', 'main.js'), `
+process.stderr.write(Buffer.from([0xe2]));
+setTimeout(() => {
+  process.stderr.write(Buffer.from([0x82, 0xac]));
+  process.stderr.write(' service blew up\\n');
+  setTimeout(() => process.exit(1), 20);
+}, 100);
+`);
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      const error = await proxyGuestServiceRequest({
+        guestId: 'docker',
+        packageRoot,
+        service: {
+          entry: 'service/main.js',
+          permissions: { exec: ['docker'] },
+        },
+        granted: ['service'],
+        persistPath,
+        method: 'GET',
+        path: '/ping',
+      }).catch((caught) => caught);
+      expect(error).toMatchObject({ code: 'SERVICE_FAILED' });
+      expect(error.message).toContain('€ service blew up');
+      expect(error.message).not.toContain('\uFFFD');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('coalesces parallel first requests onto one spawn', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
     try {
@@ -385,11 +422,15 @@ describe('host shutdown', () => {
       const previousStop = stopGuestService('docker');
       accessing = spyOn(fs, 'access');
       const storeRead = Promise.withResolvers();
-      const readFile = fs.readFile.bind(fs);
-      reading = spyOn(fs, 'readFile').mockImplementation(async (...args) => {
-        const result = await readFile(...args);
+      // The store is read through the bounded reader (shared/bounded-file-read),
+      // which opens the file and reads from the handle — it never calls
+      // fs.readFile. The synchronization therefore sits on fs.open: spying on
+      // readFile here waited forever for a call that no longer happens (#1796).
+      const open = fs.open.bind(fs);
+      reading = spyOn(fs, 'open').mockImplementation(async (...args) => {
+        const handle = await open(...args);
         if (args[0] === fixture.persistPath) storeRead.resolve();
-        return result;
+        return handle;
       });
       const replacement = proxyGuestServiceRequest(request(fixture)).catch((error) => error);
       await storeRead.promise;

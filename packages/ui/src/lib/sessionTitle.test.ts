@@ -212,6 +212,25 @@ describe('bounded history loading', () => {
     } finally { release(); loader.dispose(); childStores.disposeAll(); }
   });
 
+  test('stops at the page cap when every page answers with a fresh cursor', async () => {
+    let loads = 0;
+    const state: ReturnType<SessionMessageLoader['getSnapshot']> = {
+      status: 'ready', loadingKind: null, error: null, resolved: true,
+      limit: 50, cursor: 'cursor-0', complete: false, generation: 0, updatedAt: 1,
+    };
+    const loader = {
+      ensure: async () => {},
+      loadOlder: async () => {
+        loads += 1;
+        state.cursor = `cursor-${loads}`;
+      },
+      getSnapshot: () => state,
+    };
+    await expect(loadSessionTitleTurns({ loader, target: { sessionID: 'session', directory: '/project' }, getRecords: () => [], signal: new AbortController().signal }))
+      .rejects.toThrow('Session history pagination exceeded the page limit');
+    expect(loads).toBe(20);
+  });
+
   test('does not use cached partial turns when the authoritative loader failed', async () => {
     const error = new Error('offline');
     const loader = {

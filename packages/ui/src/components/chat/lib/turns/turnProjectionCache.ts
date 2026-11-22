@@ -2,6 +2,11 @@ import type { ChatMessageEntry, TurnProjectionResult } from './types';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 
+// The values a message version is taken from: its info record and its parts
+// array. Store reducers replace both rather than mutating them (see
+// buildMessagesVersionSignature).
+type VersionedMessageValue = ChatMessageEntry['info'] | ChatMessageEntry['parts'];
+
 const TURN_PROJECTION_CACHE_MAX = 30;
 const VSCODE_TURN_PROJECTION_CACHE_MAX = 4;
 const MOBILE_TURN_PROJECTION_CACHE_MAX = 4;
@@ -18,7 +23,7 @@ const getProjectionCacheMax = () => {
   return TURN_PROJECTION_CACHE_MAX;
 };
 
-const getObjectVersion = (value: object): number => {
+const getObjectVersion = (value: VersionedMessageValue): number => {
   const cached = objectVersionByRef.get(value);
   if (cached !== undefined) return cached;
   const next = nextObjectVersion;

@@ -39,8 +39,9 @@ is opened, no event is looked at, no backfill runs, the route answers 503, and
 the UI shows no message search (no Cmd+P group, Cmd+F left alone).
 
 The runtime reads the setting at startup; `persistSettings` calls
-`setEnabled` when the key changes. Switching off stops the indexer (after the
-session being read finishes), closes the file and keeps it. Switching on
+`setEnabled` when the key changes. Switching off stops the indexer — stop
+aborts the read in flight, so the file closes without waiting for OpenCode —
+closes the file and keeps it. Switching on
 opens it and walks the session list, which re-reads every session changed
 while search was off and drops deleted ones. Start, stop and delete run one
 after another in the order asked.
@@ -87,6 +88,13 @@ after another in the order asked.
   longer has are dropped, but only when the whole list arrived; a failed page
   is not an empty list.
 - `session.updated` (rename, move) and `session.deleted` apply directly.
+
+- Every read the indexer makes carries a per-call deadline of 5 s
+  (`INDEXER_READ_TIMEOUT_MS`, the value the session-work and session-assist
+  clients use), passed as the client's `{ signal }` option and composed with
+  a run signal that `stop()` aborts. A stalled read fails on its own and is
+  logged; the drain moves to the next session. A timed-out backfill page
+  fails that walk, logged, and a later connect starts a fresh walk.
 
 ## Queries
 

@@ -4,6 +4,9 @@ import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
 import { createGitCheckIgnoreTimeoutMs } from './search.js';
+import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
+import { createTraversalBudget } from '../shared/traversal-budget.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
@@ -12,22 +15,23 @@ import {
 } from './content-search.js';
 import { isString } from '../shared/guards.js';
 import nodeFsPromises from 'node:fs/promises';
+import { constants as nodeFsConstants } from 'node:fs';
 import { renameWithRetry } from '../shared/atomic-rename.js';
 import nodePath from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
+
+// Flags for opens that must not block on a FIFO before the handle stat
+// can judge the file non-regular: O_NONBLOCK (POSIX only) keeps open()
+// itself from blocking on a FIFO with no writer (#1533) - the same
+// pattern as shared/bounded-file-read.js's openFlags. Used by the
+// fs/write identical-content check and the /api/fs/raw stream open
+// (#2298).
+const nonBlockingOpenFlags = (platform) =>
+  platform === 'win32' || nodeFsConstants.O_NONBLOCK === undefined
+    ? 'r'
+    : nodeFsConstants.O_RDONLY | nodeFsConstants.O_NONBLOCK;
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
-const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
-
-const outsideFileGrants = new Map();
-
-const pruneOutsideFileGrants = () => {
-  const now = Date.now();
-  for (const [token, grant] of outsideFileGrants.entries()) {
-    if (!grant || grant.expiresAt <= now) {
-      outsideFileGrants.delete(token);
-    }
-  }
-};
 
 const PREVIEW_GRANT_IDLE_TTL_MS = 10 * 60 * 1000;
 const PREVIEW_GRANT_MAX_ENTRIES = 256;
@@ -82,50 +86,18 @@ const sendOsPermissionDenied = (res, message) => (
   res.status(403).json({ error: message, reason: 'os-permission' })
 );
 
-export const mintOutsideFileGrant = async (targetPath, {
-  scopes = ['stat', 'read', 'raw'],
-  fsPromises = nodeFsPromises,
-  path = nodePath,
-  crypto = globalThis.crypto,
-} = {}) => {
-  const raw = typeof targetPath === 'string' ? targetPath.trim() : '';
-  if (!raw) {
-    throw new Error('Path is required');
-  }
-  const canonicalPath = await fsPromises.realpath(raw);
-  const stats = await fsPromises.stat(canonicalPath);
-  if (!stats.isFile()) {
-    throw new Error('Outside file grants require a file path');
-  }
-  pruneOutsideFileGrants();
-  const token = typeof crypto?.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const normalizedScopes = new Set(
-    (Array.isArray(scopes) ? scopes : [])
-      .filter((scope) => typeof scope === 'string' && scope.trim())
-      .map((scope) => scope.trim())
-  );
-  if (normalizedScopes.size === 0) {
-    normalizedScopes.add('read');
-  }
-  const grant = {
-    canonicalPath,
-    base: path.dirname(canonicalPath),
-    scopes: normalizedScopes,
-    expiresAt: Date.now() + OUTSIDE_FILE_GRANT_TTL_MS,
-  };
-  outsideFileGrants.set(token, grant);
-  return {
-    path: canonicalPath,
-    outsideFileGrant: token,
-    expiresAt: grant.expiresAt,
-  };
-};
+// A whole number from the environment, else null. The strict plain-decimal
+// judgement lives in shared/parse-int.js (design #802 phase 2, #804): a bare
+// Number(...) would silently honour '' and ' ' as 0, '1e3' as 1000, '0x10' as
+// 16, and '5.9' as a fractional value.
+const parsePlainDecimalInt = (raw) => parseBoundedIntWithDefault(raw, null, 0, Number.MAX_SAFE_INTEGER);
 
-const createCommandTimeoutMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw > 0) return raw;
+export const createCommandTimeoutMs = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
+  // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
+  // instead, so a larger configured timeout falls back to the default
+  // rather than killing every command immediately.
+  if (raw !== null && raw > 0 && raw <= 2_147_483_647) return raw;
   return 5 * 60 * 1000;
 };
 
@@ -133,16 +105,26 @@ const createCommandTimeoutMs = () => {
 // directory is effectively static while the app runs, so a short TTL safely
 // absorbs the burst of identical lookups a fresh client (e.g. right after a
 // page reload) fires for every project. Set to 0 to disable caching.
-const createGitReadCacheTtlMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
+export const createGitReadCacheTtlMs = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
+  if (raw !== null && raw >= 0) return raw;
   return 30 * 1000;
 };
 
-const createUploadMaxBytes = () => {
-  const raw = Number(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
-  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+export const createUploadMaxBytes = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
+  if (raw !== null && raw > 0) return raw;
   return 100 * 1024 * 1024;
+};
+
+// Per-stream byte cap for /api/fs/exec command output. A verbose command
+// otherwise grows server memory for the full command timeout. The default
+// matches the environment command runner (MAX_COMMAND_OUTPUT_BYTES in
+// ../environment/runtime.js).
+export const createExecOutputMaxBytes = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES);
+  if (raw !== null && raw > 0) return raw;
+  return 4 * 1024 * 1024;
 };
 
 const FILE_MIME_MAP = Object.freeze({
@@ -192,6 +174,13 @@ const FILE_MIME_MAP = Object.freeze({
 });
 
 const MAX_SERVE_BYTES = 100 * 1024 * 1024;
+
+// Whole-file text read cap for /api/fs/read: the handler buffers the file as a
+// UTF-8 string (plus the response copy), so unlike streamed /api/fs/raw it must
+// refuse large files up front. 16 MiB is generous for text (the UI guard is
+// 20,000 lines) while bounding per-request server memory; bulk or binary
+// content belongs on /api/fs/raw or the preview path (MAX_SERVE_BYTES).
+const MAX_READ_BYTES = 16 * 1024 * 1024;
 
 const streamUploadBody = async (req, handle, maxBytes) => {
   let received = 0;
@@ -429,8 +418,17 @@ const GIT_DIRS_SKIP_LIST = new Set(['node_modules', 'dist', 'build', '.venv', 't
 const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxDepth, maxDirs }) => {
   const results = [];
   const walkedRealPaths = new Set();
-  const queue = [{ dir: rootPath, depth: 0 }];
-  let visited = 0;
+  // The shared traversal budget (design #1391, #1393) owns this walk's
+  // counting, built from the same parameters the caller already passes:
+  // consulted for the root first and then for each directory when it is
+  // queued, so a directory counts exactly once, however the walk reached
+  // it. Depths here are 0-based (the root is depth 0) while the budget
+  // counts depth from 1, so the depth dimension is stated one higher.
+  const budget = createTraversalBudget({ maxDirs, maxDepth: maxDepth + 1 });
+  const queue = [];
+  if (budget.visitDir(1)) {
+    queue.push({ dir: rootPath, depth: 0 });
+  }
 
   const scanDirectory = async (dir, depth) => {
     let realPath;
@@ -458,7 +456,6 @@ const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxD
       }
       return;
     }
-    visited += 1;
 
     let isRepoBoundary = false;
     const subdirectories = [];
@@ -473,7 +470,9 @@ const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxD
       if (GIT_DIRS_SKIP_LIST.has(dirent.name)) {
         continue;
       }
-      if (depth >= maxDepth) {
+      if (depth + 2 > budget.maxDepth) {
+        // Past the budget's depth dimension: the directory would be
+        // refused when queued, so do not spend a link stat on it here.
         continue;
       }
       if (dirent.isSymbolicLink()) {
@@ -493,11 +492,13 @@ const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxD
 
     subdirectories.sort();
     for (const name of subdirectories) {
-      queue.push({ dir: pathModule.join(dir, name), depth: depth + 1 });
+      if (budget.visitDir(depth + 2)) {
+        queue.push({ dir: pathModule.join(dir, name), depth: depth + 1 });
+      }
     }
   };
 
-  for (let index = 0; index < queue.length && visited < maxDirs; index += 1) {
+  for (let index = 0; index < queue.length; index += 1) {
     const { dir, depth } = queue[index];
     await scanDirectory(dir, depth);
   }
@@ -535,33 +536,131 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs }) => {
+const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs, execOutputMaxBytes = 4 * 1024 * 1024, platform = process.platform }) => {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let timedOut = false;
+    let outputTooLarge = false;
+    // Decode incrementally per stream: a multi-byte character split across
+    // pipe chunks has to survive, and chunk.toString() would turn each half
+    // into U+FFFD in output the exec route returns verbatim (#1567).
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
+
+    // Overflow and timeout must end the whole command, not just the
+    // shell: a descendant that inherited the pipes keeps them open after
+    // the shell dies, and the result below resolves on 'close', which
+    // waits for pipe EOF -- so a shell-only kill can leave the result
+    // unsettled until the descendant exits on its own. The child is
+    // spawned detached (its own process group) and the kill signals that
+    // group (taskkill /T on Windows). A pid that is not an integer
+    // greater than 1 is never group-signalled (kill(-1) would hit every
+    // process we may signal); pid-less children get the direct kill.
+    // Destroying the pipes afterwards settles 'close' promptly even if
+    // a descendant escaped the group (setsid) while holding them.
+    // This mirrors lib/spaces/run-command.js killProcessTree and the
+    // git service's copy; it is local because this module is loaded
+    // standalone by packaged desktop from a fixed file set.
+    const killCommandTree = () => {
+      const pid = child?.pid;
+      if (Number.isInteger(pid) && pid > 1) {
+        if (platform === 'win32') {
+          try {
+            const killer = spawn(nodePath.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'), ['/T', '/F', '/PID', String(pid)], {
+              windowsHide: true,
+              stdio: 'ignore',
+            });
+            killer?.once?.('error', () => {
+              try { child.kill('SIGKILL'); } catch {
+              }
+            });
+          } catch {
+            try { child.kill('SIGKILL'); } catch {
+            }
+          }
+        } else {
+          try {
+            process.kill(-pid, 'SIGKILL');
+          } catch {
+            try { child.kill('SIGKILL'); } catch {
+            }
+          }
+        }
+      } else {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+        }
+      }
+      try { child.stdout?.destroy?.(); } catch {
+      }
+      try { child.stderr?.destroy?.(); } catch {
+      }
+    };
+
+    const killForOutputLimit = () => {
+      if (outputTooLarge) return;
+      outputTooLarge = true;
+      killCommandTree();
+    };
+
+    // Append at most the bytes left under the cap and report overflow, so a
+    // capped stream is truncated to the cap and never grows past it. Bytes go
+    // to the stream's decoder, which holds a split character until the rest
+    // arrives; on truncation the held tail is dropped rather than flushed as
+    // a replacement character the cap did not ask for.
+    const appendCapped = (current, currentBytes, chunk, decoder) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      if (currentBytes >= execOutputMaxBytes) {
+        return { value: current, bytes: currentBytes, exceeded: true };
+      }
+      const remaining = execOutputMaxBytes - currentBytes;
+      if (buffer.length <= remaining) {
+        return { value: current + decoder.write(buffer), bytes: currentBytes + buffer.length, exceeded: false };
+      }
+      return { value: current + decoder.write(buffer.subarray(0, remaining)), bytes: execOutputMaxBytes, exceeded: true };
+    };
+
+    // A stream that ended on its own flushes the decoder's tail; a truncated
+    // one keeps its last whole character and drops the cut sequence.
+    const flushDecoded = (value, decoder, truncated) => (truncated ? value : value + decoder.end());
 
     const child = spawn(shell, [shellFlag, command], {
       cwd: resolvedCwd,
       env: execEnv,
       windowsHide: true,
+      // Own process group so killCommandTree can signal the tree; never
+      // on Windows, where detached gives the child its own console.
+      detached: platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-      }
+      killCommandTree();
     }, commandTimeoutMs);
 
     child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString();
+      if (outputTooLarge) return;
+      const appended = appendCapped(stdout, stdoutBytes, chunk, stdoutDecoder);
+      stdout = appended.value;
+      stdoutBytes = appended.bytes;
+      stdoutTruncated = stdoutTruncated || appended.exceeded;
+      if (appended.exceeded) killForOutputLimit();
     });
 
     child.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
+      if (outputTooLarge) return;
+      const appended = appendCapped(stderr, stderrBytes, chunk, stderrDecoder);
+      stderr = appended.value;
+      stderrBytes = appended.bytes;
+      stderrTruncated = stderrTruncated || appended.exceeded;
+      if (appended.exceeded) killForOutputLimit();
     });
 
     child.on('error', (error) => {
@@ -570,8 +669,8 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
         command,
         success: false,
         exitCode: undefined,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
+        stdout: flushDecoded(stdout, stdoutDecoder, stdoutTruncated).trim(),
+        stderr: flushDecoded(stderr, stderrDecoder, stderrTruncated).trim(),
         error: (error && error.message) || 'Command execution failed',
       });
     });
@@ -583,9 +682,18 @@ const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, 
         command,
         success: exitCode === 0 && !timedOut,
         exitCode,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
+        stdout: flushDecoded(stdout, stdoutDecoder, stdoutTruncated).trim(),
+        stderr: flushDecoded(stderr, stderrDecoder, stderrTruncated).trim(),
       };
+
+      if (outputTooLarge) {
+        resolve({
+          ...base,
+          success: false,
+          error: `Command output exceeded the ${execOutputMaxBytes} byte limit (output-too-large)`,
+        });
+        return;
+      }
 
       if (timedOut) {
         resolve({
@@ -656,6 +764,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
   const execJobs = new Map();
   const commandTimeoutMs = createCommandTimeoutMs();
+  const execOutputMaxBytes = createExecOutputMaxBytes();
   const gitReadCacheTtlMs = createGitReadCacheTtlMs();
   const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
   const gitReadCache = new Map();
@@ -749,6 +858,8 @@ export const registerFsRoutes = (app, dependencies) => {
         ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() }, { refresh: !isCacheableGitReadCommand(command) })
         : { ...process.env, PATH: buildAugmentedPath() },
       commandTimeoutMs,
+      execOutputMaxBytes,
+      platform,
     }))().then((result) => {
       // Only cache successful results — failures may be transient.
       if (cacheKey && result && result.success) {
@@ -1033,9 +1144,10 @@ export const registerFsRoutes = (app, dependencies) => {
     if (!query.trim() || query.length > CONTENT_SEARCH_MAX_QUERY_LENGTH) {
       return res.status(400).json({ error: 'A search query is required' });
     }
-    const requestedLimit = isString(req.query.limit) ? Number.parseInt(String(req.query.limit), 10) : Number.NaN;
-    const limit = Number.isInteger(requestedLimit)
-      ? Math.min(Math.max(1, requestedLimit), CONTENT_SEARCH_MAX_LIMIT)
+    const requestedLimitText = isString(req.query.limit) ? String(req.query.limit) : '';
+    const requestedLimit = /^[1-9]\d*$/.test(requestedLimitText) ? Number(requestedLimitText) : null;
+    const limit = Number.isSafeInteger(requestedLimit)
+      ? Math.min(requestedLimit, CONTENT_SEARCH_MAX_LIMIT)
       : CONTENT_SEARCH_DEFAULT_LIMIT;
     const project = await resolveProjectDirectory(req);
     if (!project.directory) {
@@ -1196,8 +1308,26 @@ export const registerFsRoutes = (app, dependencies) => {
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
+      if (stats.size > MAX_READ_BYTES) {
+        return res.status(413).json({ error: 'File too large to read' });
+      }
 
-      let content = await fsPromises.readFile(canonicalPath, 'utf8');
+      // The cap is enforced during the read itself, judged from the
+      // opened handle (readBoundedFile, design #1254): the stat above
+      // is only a hint, so a file grown past MAX_READ_BYTES after it —
+      // or swapped for a non-regular file — is refused here having
+      // buffered at most the cap + 1 byte, never read whole.
+      const readBounded = async () => {
+        const bounded = await readBoundedFile(canonicalPath, MAX_READ_BYTES, { fs: fsPromises });
+        if (bounded.ok) return bounded.buffer.toString('utf8');
+        if (bounded.reason === 'too-large') return res.status(413).json({ error: 'File too large to read' });
+        if (bounded.reason === 'not-regular') return res.status(400).json({ error: 'Specified path is not a file' });
+        const missing = new Error('ENOENT: no such file or directory, open ' + canonicalPath);
+        missing.code = 'ENOENT';
+        throw missing;
+      };
+      let content = await readBounded();
+      if (typeof content !== 'string') return content;
       // Retry empty reads — concurrent writer may have truncated the file
       // between our stat and read (O_TRUNC window). If the file existed with
       // content at stat time but we read nothing, the writer hasn't finished
@@ -1205,7 +1335,8 @@ export const registerFsRoutes = (app, dependencies) => {
       if (content.length === 0 && stats.size > 0) {
         for (let attempt = 0; attempt < 3; attempt++) {
           await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
-          content = await fsPromises.readFile(canonicalPath, 'utf8');
+          content = await readBounded();
+          if (typeof content !== 'string') return content;
           if (content.length > 0) break;
         }
         if (content.length === 0) {
@@ -1296,7 +1427,27 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.end();
       }
       // Opened before any span header is set, so a failed open answers a clean error.
-      const handle = await fsPromises.open(canonicalPath, 'r');
+      // O_NONBLOCK keeps the open itself from hanging when the path was
+      // swapped for a FIFO after the stat above (#2298); regularity is then
+      // judged from the opened handle, which names the file actually opened.
+      const handle = await fsPromises.open(canonicalPath, nonBlockingOpenFlags(platform));
+      if (typeof handle.stat === 'function') {
+        let handleStats;
+        try {
+          handleStats = await handle.stat();
+        } catch (error) {
+          if (typeof handle.close === 'function') {
+            await handle.close().catch(() => {});
+          }
+          throw error;
+        }
+        if (!handleStats.isFile()) {
+          if (typeof handle.close === 'function') {
+            await handle.close();
+          }
+          return res.status(400).json({ error: 'Specified path is not a file' });
+        }
+      }
       const span = range.kind === 'range' ? range : { start: 0, end: stats.size - 1 };
       if (range.kind === 'range') {
         res.status(206);
@@ -1410,7 +1561,21 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const ext = path.extname(canonicalPath).toLowerCase();
       const mimeType = FILE_MIME_MAP[ext] || 'application/octet-stream';
-      const bytes = await fsPromises.readFile(canonicalPath);
+      // During-read cap enforcement from the opened handle, as in
+      // /api/fs/read above: the stat is only a hint (design #1254).
+      const bounded = await readBoundedFile(canonicalPath, MAX_SERVE_BYTES, { fs: fsPromises });
+      if (!bounded.ok) {
+        if (bounded.reason === 'too-large') {
+          return res.status(413).json({ error: 'File too large to serve' });
+        }
+        if (bounded.reason === 'not-regular') {
+          return res.status(400).json({ error: 'Specified path is not a file' });
+        }
+        const missing = new Error('ENOENT: no such file or directory, open ' + canonicalPath);
+        missing.code = 'ENOENT';
+        throw missing;
+      }
+      const bytes = bounded.buffer;
       // Lets the Files view annotate the page; see preview-bridge.js.
       const content = mimeType === 'text/html' ? injectPreviewBridge(bytes) : bytes;
       res.setHeader('Cache-Control', 'no-store');
@@ -1473,7 +1638,51 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
+      // Identical-content shortcut, settled from the open handle (design
+      // #1254): stat-then-read by path lets a file swapped or grown between
+      // the two calls escape the gate and buffer whole. The open fixes the
+      // file identity, the fstat judges the size, and at most one byte past
+      // the equal length is read, so a grown file falls through to the
+      // atomic write below. Over-cap and length-differing files fall
+      // through to the write the same way, without being read at all.
+      const contentByteLength = Buffer.byteLength(content, 'utf8');
+      let existing = null;
+      if (contentByteLength <= MAX_READ_BYTES && typeof fsPromises.open === 'function') {
+        let handle;
+        try {
+          handle = await fsPromises.open(writePath, nonBlockingOpenFlags(platform));
+        } catch {
+          // Any open failure skips the shortcut and falls through to the
+          // atomic write below, which never reads the target: a missing file
+          // is the ordinary case, and a write-only file the process cannot
+          // read back must still save (#1534).
+          handle = undefined;
+        }
+        if (handle) {
+          try {
+            const stat = await handle.stat();
+            const isFile = stat && typeof stat.isFile === 'function' ? stat.isFile() : true;
+            if (isFile && stat.size === contentByteLength) {
+              // One byte past the equal length: a file that grew after the
+              // fstat reads long and falls through to the write.
+              const buffer = Buffer.alloc(stat.size + 1);
+              let total = 0;
+              while (total < buffer.length) {
+                const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+                if (!bytesRead) break;
+                total += bytesRead;
+              }
+              if (total === stat.size) {
+                existing = buffer.toString('utf8', 0, total);
+              }
+            }
+          } catch {
+            existing = null;
+          } finally {
+            await handle.close();
+          }
+        }
+      }
       if (existing === content) {
         return res.json({ success: true, path: resolved.resolved });
       }
@@ -1552,6 +1761,13 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(403).json({ error: 'Access denied' });
       }
 
+      // On an explicit overwrite the replacement must keep the existing
+      // file's permission mode (#2249): the temp file is created with the
+      // process default mode, so without this the rename would silently
+      // reset the target's bits (an executable 0755 becomes 0644 under a
+      // 022 umask). Captured here, applied to the temp file below so the
+      // mode commits atomically with the content at rename time.
+      let existingMode = null;
       if (existingPath) {
         const stats = await fsPromises.stat(existingPath);
         if (stats.isDirectory()) {
@@ -1561,6 +1777,7 @@ export const registerFsRoutes = (app, dependencies) => {
           req.resume?.();
           return res.status(409).json({ error: 'File already exists', reason: 'already-exists' });
         }
+        if (typeof stats.mode === 'number') existingMode = stats.mode & 0o7777;
       }
 
       const tmp = `${writePath}.upload-${crypto.randomUUID()}`;
@@ -1582,6 +1799,7 @@ export const registerFsRoutes = (app, dependencies) => {
         if (streamError) throw streamError;
 
         if (overwrite) {
+          if (existingMode !== null) await fsPromises.chmod(tmp, existingMode);
           await renameWithRetry((from, to) => fsPromises.rename(from, to), tmp, writePath);
         } else {
           // A same-directory hard link commits without replacing a target that
@@ -1643,8 +1861,34 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.rm(resolved.resolved, { recursive: true, force: true });
-      return res.json({ success: true, path: resolved.resolved });
+      const canonicalBase = await canonicalDirectoryPath(resolved.base, fsPromises, path).catch(() => path.resolve(resolved.base));
+      if (
+        path.resolve(resolved.resolved) === path.resolve(resolved.base)
+        || path.resolve(resolved.resolved) === canonicalBase
+      ) {
+        return res.status(400).json({ error: 'Cannot delete a workspace or managed root' });
+      }
+
+      const canonicalParent = await fsPromises.realpath(path.dirname(resolved.resolved));
+      if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const deletePath = path.join(canonicalParent, path.basename(resolved.resolved));
+      const canonicalTarget = await fsPromises.realpath(deletePath).catch(() => deletePath);
+      const protectedRoots = [...new Set([resolved.base, ...managedRoots, ...chatsRoots])];
+      const canonicalProtectedRoots = await Promise.all(protectedRoots.map((root) => (
+        canonicalDirectoryPath(root, fsPromises, path).catch(() => path.resolve(root))
+      )));
+      // A recursive delete of a directory that contains a protected root
+      // (for example a relocated chats root under the config root) would
+      // remove that root too.
+      if (canonicalProtectedRoots.some((root) => isPathWithinRoot(root, canonicalTarget, path, os))) {
+        return res.status(400).json({ error: 'Cannot delete a workspace or managed root' });
+      }
+
+      await fsPromises.rm(deletePath, { recursive: true, force: true });
+      return res.json({ success: true, path: deletePath });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
@@ -1954,6 +2198,7 @@ export const registerFsRoutes = (app, dependencies) => {
                 });
 
                 let stdout = '';
+                const stdoutDecoder = new StringDecoder('utf8');
                 let settled = false;
                 let timeout = null;
                 const finish = (value) => {
@@ -1973,8 +2218,8 @@ export const registerFsRoutes = (app, dependencies) => {
                   }, gitCheckIgnoreTimeoutMs);
                 }
 
-                child.stdout.on('data', (data) => { stdout += data.toString(); });
-                child.on('close', () => finish(stdout));
+                child.stdout.on('data', (data) => { stdout += stdoutDecoder.write(data); });
+                child.on('close', () => finish(stdout + stdoutDecoder.end()));
                 child.on('error', () => finish(''));
               });
 

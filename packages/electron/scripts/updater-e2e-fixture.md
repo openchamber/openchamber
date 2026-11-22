@@ -31,6 +31,6 @@ production GitHub updater provider. It supports native x64 and arm64 hosts.
 
 The harness binds only `127.0.0.1`. Runtime override activation additionally requires
 `OPENCHAMBER_E2E=1`, the loopback URL set by the harness, and the build-time marker.
-Normal packages omit the build-time marker and always use `developing-today/openchamber` (the fork's releases).
+Normal packages omit the build-time marker and always use `developing-today-forks/openchamber` (the fork's releases).
 The renderer, IPC bridge, command-line arguments, and persistent configuration do not
 have access to the feed URL.

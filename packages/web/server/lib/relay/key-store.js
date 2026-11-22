@@ -15,11 +15,16 @@
 
 import { z } from 'zod';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 
 const SLOTS = Object.freeze({
   signing: { field: 'signingKey', legacySettingsKey: 'relaySigningKey' },
   encryption: { field: 'encryptionKey', legacySettingsKey: 'relayEncryptionKey' },
 });
+
+// Two JWK pairs serialize to a few KB. 1 MiB leaves over 100x headroom for
+// larger key types and unknown fields while keeping this persisted-file read bounded.
+const RELAY_IDENTITY_MAX_BYTES = 1024 * 1024;
 
 const jwkSchema = z.looseObject({ kty: z.string().min(1) });
 const jwkPairSchema = z.looseObject({ privateJwk: jwkSchema, publicJwk: jwkSchema });
@@ -66,17 +71,15 @@ export const createRelayKeyStore = ({
   };
 
   const readStore = async () => {
-    let raw;
-    try {
-      raw = await fsPromises.readFile(filePath, 'utf8');
-    } catch (error) {
-      if (error?.code === 'ENOENT') return {};
-      throw error;
-    }
     const corrupt = (cause) => new Error(`Relay identity file is corrupt: ${filePath} (fix or remove it, then retry)`, { cause });
+    const result = await readBoundedFile(filePath, RELAY_IDENTITY_MAX_BYTES);
+    if (!result.ok) {
+      if (result.reason === 'missing') return {};
+      throw corrupt(result);
+    }
     let json;
     try {
-      json = JSON.parse(raw);
+      json = JSON.parse(result.buffer.toString('utf8'));
     } catch (cause) {
       throw corrupt(cause);
     }

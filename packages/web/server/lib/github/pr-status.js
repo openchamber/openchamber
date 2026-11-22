@@ -185,7 +185,7 @@ const getRepoDefaultBranch = async (octokit, repo) => {
   const metaCached = repoKey ? repoMetadataCache.get(repoKey) : null;
   if (metaCached && Date.now() - metaCached.fetchedAt < REPO_DEFAULT_BRANCH_TTL_MS) {
     const defaultBranch = normalizeText(metaCached.data?.default_branch) || null;
-    if (repoKey) defaultBranchCache.set(repoKey, { defaultBranch, fetchedAt: Date.now() });
+    if (repoKey) setBoundedCacheEntry(defaultBranchCache, repoKey, { defaultBranch, fetchedAt: Date.now() });
     return defaultBranch;
   }
 
@@ -196,7 +196,7 @@ const getRepoDefaultBranch = async (octokit, repo) => {
     });
     const defaultBranch = normalizeText(response?.data?.default_branch) || null;
     if (repoKey) {
-      defaultBranchCache.set(repoKey, {
+      setBoundedCacheEntry(defaultBranchCache, repoKey, {
         defaultBranch,
         fetchedAt: Date.now(),
       });
@@ -227,7 +227,7 @@ const getRepoMetadata = async (octokit, repo) => {
     });
     const data = response?.data ?? null;
     if (repoKey) {
-      repoMetadataCache.set(repoKey, {
+      setBoundedCacheEntry(repoMetadataCache, repoKey, {
         data,
         fetchedAt: Date.now(),
       });
@@ -237,7 +237,7 @@ const getRepoMetadata = async (octokit, repo) => {
     noteIfGitHubRateLimit(error);
     if (error?.status === 404) {
       if (repoKey) {
-        repoMetadataCache.set(repoKey, {
+        setBoundedCacheEntry(repoMetadataCache, repoKey, {
           data: null,
           fetchedAt: Date.now(),
         });
@@ -351,6 +351,38 @@ const safeListPulls = async (octokit, options) => {
   }
 };
 
+// Per-head pull list (design #1528 completeness contract, #1596): the
+// per-head query in findBranchPrCandidates feeds the branch PR verdict, so
+// it paginates to a short page under a named cap instead of treating the
+// first page as the whole set. One probe past the cap: a non-empty probe
+// means the set may be incomplete, which is an error here — a partial list
+// must never resolve to "no PR" (the verdict disposition in
+// lib/github/DOCUMENTATION.md, "Collection completeness"). Per-page error
+// semantics are safeListPulls' own: 404/403 read as an empty page, other
+// errors propagate.
+const PER_HEAD_PULLS_PAGE_SIZE = 100;
+const PER_HEAD_PULLS_MAX_PAGES = 20;
+const PER_HEAD_PULLS_MAX_COUNT = PER_HEAD_PULLS_PAGE_SIZE * PER_HEAD_PULLS_MAX_PAGES;
+
+const safeListPullsComplete = async (octokit, options) => {
+  const prs = [];
+  for (let page = 1; page <= PER_HEAD_PULLS_MAX_PAGES; page += 1) {
+    const payload = await safeListPulls(octokit, { ...options, per_page: PER_HEAD_PULLS_PAGE_SIZE, page });
+    prs.push(...payload);
+    if (payload.length < PER_HEAD_PULLS_PAGE_SIZE) {
+      return prs;
+    }
+    if (page === PER_HEAD_PULLS_MAX_PAGES) {
+      const probe = await safeListPulls(octokit, { ...options, per_page: PER_HEAD_PULLS_PAGE_SIZE, page: page + 1 });
+      if (probe.length === 0) {
+        return prs;
+      }
+      throw new Error(`GitHub per-head pull list reached the ${PER_HEAD_PULLS_MAX_COUNT} safety limit and may be incomplete`);
+    }
+  }
+  return prs;
+};
+
 // Repo-level pull list, shared across every branch resolution. Ten worktree
 // branches of one repo need ONE pulls.list per state per TTL window, not ten
 // per-branch query fans. In-flight requests coalesce so concurrent branch
@@ -404,16 +436,18 @@ export const invalidateRepoPullsCache = (owner, repo, octokitOrCacheIdentity = n
     }
   }
   // A just-created PR must also clear remembered search misses for this repo.
-  const repoNameLower = normalizeText(repo).toLowerCase();
+  // Search-miss keys carry comma-separated owner/repo entries (the #1496
+  // owner-qualified search scope), so match on the full owner/repo ref.
+  const repoRefLower = normalizeLower(`${owner}/${repo}`);
   for (const key of _searchMissCache.keys()) {
     const [repoPart] = key.split('::');
-    if (repoPart && repoPart.split(',').includes(repoNameLower) && matchesIdentity(key)) {
+    if (repoPart && repoPart.split(',').includes(repoRefLower) && matchesIdentity(key)) {
       _searchMissCache.delete(key);
     }
   }
   for (const [token, key] of pendingSearchMissWrites) {
     const [repoPart] = key.split('::');
-    if (repoPart && repoPart.split(',').includes(repoNameLower) && matchesIdentity(key)) {
+    if (repoPart && repoPart.split(',').includes(repoRefLower) && matchesIdentity(key)) {
       pendingSearchMissWrites.delete(token);
     }
   }
@@ -460,14 +494,14 @@ const getRepoPulls = (octokit, repo, state, { force = false } = {}) => {
     // authoritative: this repo has no PR in this state for any branch.
     const entry = { fetchedAt: Date.now(), prs, complete: prs.length < 100 };
     if (!token.invalidated && repoPullsCache.get(key)?.token === token) {
-      repoPullsCache.set(key, entry);
+      setBoundedCacheEntry(repoPullsCache, key, entry);
     }
     return entry;
   }).catch((error) => {
     if (repoPullsCache.get(key)?.token === token) repoPullsCache.delete(key);
     throw error;
   });
-  repoPullsCache.set(key, { promise, token });
+  setBoundedCacheEntry(repoPullsCache, key, { promise, token });
   return promise;
 };
 
@@ -516,9 +550,91 @@ const rememberSearchMiss = (key) => {
   }
 };
 
-const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
+// The four repo-keyed caches in this module (default branch, repo metadata,
+// repo pulls, search-disabled) used to keep one entry per distinct repo for
+// the life of the process: their TTLs were only checked when the same key
+// was read again, and nothing capped or swept them. Bound them the way the
+// sibling caches were bound in #969/#970 and the in-file _historicalPrCache /
+// _searchMissCache precedent: writes sweep expired entries from all four
+// caches, and each cache is capped with oldest-first eviction.
+export const PR_STATUS_CACHE_MAX_ENTRIES = 500;
+
+export function getPrStatusCacheSizes() {
+  return {
+    defaultBranch: defaultBranchCache.size,
+    repoMetadata: repoMetadataCache.size,
+    repoPulls: repoPullsCache.size,
+    searchApiDisabled: _searchApiDisabledRepos.size,
+  };
+}
+
+/** Remove expired entries so they do not accumulate until the same key is re-read. */
+export function pruneExpiredPrStatusCaches(now = Date.now()) {
+  for (const [key, entry] of defaultBranchCache) {
+    if (!entry || !Number.isFinite(entry.fetchedAt) || now - entry.fetchedAt >= REPO_DEFAULT_BRANCH_TTL_MS) {
+      defaultBranchCache.delete(key);
+    }
+  }
+  for (const [key, entry] of repoMetadataCache) {
+    if (!entry || !Number.isFinite(entry.fetchedAt) || now - entry.fetchedAt >= REPO_DEFAULT_BRANCH_TTL_MS) {
+      repoMetadataCache.delete(key);
+    }
+  }
+  for (const [key, entry] of repoPullsCache) {
+    // In-flight entries ({ promise, token }) carry no fetchedAt and are not
+    // expired; the token guard in getRepoPulls owns their lifecycle.
+    if (entry && Number.isFinite(entry.fetchedAt) && now - entry.fetchedAt >= REPO_PULLS_CACHE_TTL_MS) {
+      repoPullsCache.delete(key);
+    }
+  }
+  for (const [key, disabledAt] of _searchApiDisabledRepos) {
+    if (!Number.isFinite(disabledAt) || now - disabledAt >= SEARCH_API_RETRY_MS) {
+      _searchApiDisabledRepos.delete(key);
+    }
+  }
+  return getPrStatusCacheSizes();
+}
+
+const isInFlightPullsEntry = (entry) => Boolean(entry && entry.promise && entry.token);
+
+const capCacheEntries = (cache) => {
+  while (cache.size > PR_STATUS_CACHE_MAX_ENTRIES) {
+    // Evict the oldest evictable entry. In-flight repoPulls entries are
+    // skipped: evicting one would orphan its token, so the pending response
+    // could never populate the cache and a duplicate request would start.
+    let evicted = false;
+    for (const [key, entry] of cache) {
+      if (isInFlightPullsEntry(entry)) {
+        continue;
+      }
+      cache.delete(key);
+      evicted = true;
+      break;
+    }
+    if (!evicted) {
+      break;
+    }
+  }
+};
+
+const setBoundedCacheEntry = (cache, key, value) => {
+  pruneExpiredPrStatusCaches();
+  cache.delete(key);
+  cache.set(key, value);
+  capCacheEntries(cache);
+};
+
+const searchFallbackPr = async ({ octokit, branch, repos }) => {
+  const targetRepos = (Array.isArray(repos) ? repos : [])
+    .map((entry) => {
+      const owner = normalizeText(entry?.owner);
+      const repo = normalizeText(entry?.repo);
+      return owner && repo ? { owner, repo } : null;
+    })
+    .filter(Boolean);
+
   // Build a repo key to check/store 403 status per-repo
-  const repoKey = scopedCacheKey(octokit, [...repoNames].sort().join(',').toLowerCase());
+  const repoKey = scopedCacheKey(octokit, targetRepos.map((target) => `${target.owner}/${target.repo}`).sort().join(',').toLowerCase());
 
   // Skip if this repo set returned 403 recently
   const disabledAt = repoKey ? _searchApiDisabledRepos.get(repoKey) : null;
@@ -536,38 +652,63 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
   if (writeToken) pendingSearchMissWrites.set(writeToken, missKey);
 
   try {
-    const normalizedRepoNames = new Set(repoNames.map((name) => normalizeLower(name)).filter(Boolean));
+    const normalizedTargetRepos = new Set(targetRepos.map((target) => normalizeLower(`${target.owner}/${target.repo}`)));
 
     // The Search API has a tiny quota, so it is only spent on live branch status.
     // Closed/merged history is resolved by the cheaper per-head repo queries.
-    let response;
+    const runSearch = async (subset) => octokit.rest.search.issuesAndPullRequests({
+      q: [`is:pr state:open head:${branch}`, ...new Set(subset.map((target) => `repo:${target.owner}/${target.repo}`))].join(' '),
+      per_page: 20,
+    });
+
+    let responses;
     try {
-      response = await octokit.rest.search.issuesAndPullRequests({
-        q: `is:pr state:open head:${branch}`,
-        per_page: 20,
-      });
+      responses = [await runSearch(targetRepos)];
       // If we get here, search API works for this repo — clear the disabled flag
       if (repoKey) _searchApiDisabledRepos.delete(repoKey);
     } catch (error) {
       noteIfGitHubRateLimit(error);
       if (error?.status === 403) {
-        if (repoKey) _searchApiDisabledRepos.set(repoKey, Date.now());
+        if (repoKey) setBoundedCacheEntry(_searchApiDisabledRepos, repoKey, Date.now());
         return null;
       }
       if (error?.status === 404) {
         if (missKey && pendingSearchMissWrites.has(writeToken)) rememberSearchMiss(missKey);
         return null;
       }
-      throw error;
+      if (error?.status !== 422) {
+        throw error;
+      }
+      // GitHub Search answers 422 for the WHOLE query when one repo:
+      // qualifier names a repo the token cannot access (e.g. a private
+      // parent/source added by expandRepoNetwork). That repo must not
+      // fail the whole lookup: retry scoped per repo and keep whichever
+      // targets answer, so a PR in an accessible repo is still found.
+      if (targetRepos.length <= 1) {
+        if (missKey && pendingSearchMissWrites.has(writeToken)) rememberSearchMiss(missKey);
+        return null;
+      }
+      responses = [];
+      for (const target of targetRepos) {
+        try {
+          responses.push(await runSearch([target]));
+        } catch (retryError) {
+          noteIfGitHubRateLimit(retryError);
+          if (retryError?.status === 403 || retryError?.status === 404 || retryError?.status === 422) {
+            continue;
+          }
+          throw retryError;
+        }
+      }
     }
 
-    const items = Array.isArray(response?.data?.items) ? response.data.items : [];
+    const items = responses.flatMap((entry) => (Array.isArray(entry?.data?.items) ? entry.data.items : []));
     for (const item of items) {
       const repo = parseRepoFromApiUrl(item?.repository_url);
       if (!repo) {
         continue;
       }
-      if (normalizedRepoNames.size > 0 && !normalizedRepoNames.has(normalizeLower(repo.repo))) {
+      if (normalizedTargetRepos.size > 0 && !normalizedTargetRepos.has(normalizeLower(`${repo.owner}/${repo.repo}`))) {
         continue;
       }
       try {
@@ -698,12 +839,11 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
   try {
     let historical = null;
     for (const owner of sourceOwners) {
-      const directCandidates = await safeListPulls(octokit, {
+      const directCandidates = await safeListPullsComplete(octokit, {
         owner: target.repo.owner,
         repo: target.repo.repo,
         state: includeHistory ? 'all' : 'open',
         head: `${owner}:${branch}`,
-        per_page: 100,
       });
       const openMatch = pickPreferred(directCandidates.filter((pr) => !isTerminalPr(pr)));
       if (openMatch) {
@@ -857,7 +997,7 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
     const fallbackSearch = await searchFallbackPr({
       octokit,
       branch: candidateBranch,
-      repoNames: resolvedTargets.map((target) => target.repo.repo),
+      repos: resolvedTargets.map((target) => target.repo),
     });
     if (fallbackSearch) {
       return {

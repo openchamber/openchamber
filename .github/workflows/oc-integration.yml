@@ -11,6 +11,7 @@ on:
 # group for every PR: with the default single queue a third bot
 # command silently replaces the pending second one. Key by PR/issue
 # number and queue every run.
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: false

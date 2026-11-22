@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { parse } from 'jsonc-parser';
 import { z } from 'zod';
 import { openThemeArchive } from './theme-archive.js';
+import { readBoundedResponseBytes } from '../shared/response-body.js';
 
 const identifier = z.string().min(1).max(160).regex(/^[\w-]+$/);
 const version = z.string().min(1).max(80).regex(/^[\w.+-]+$/);
@@ -49,22 +50,13 @@ async function download(url, maxBytes, signal, fetchImpl) {
       await response.body?.cancel();
       throw new Error('Catalog request failed');
     }
-    const reader = response.body.getReader();
-    const chunks = [];
-    let length = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        length += value.byteLength;
-        if (length > maxBytes) throw new Error('Catalog response too large');
-        chunks.push(value);
-      }
-    } finally {
-      await reader.cancel();
-      reader.releaseLock();
-    }
-    return Buffer.concat(chunks, length);
+    // The bounded read itself is the shared reader (design #802 phase 2,
+    // #804). The declared-length case is already refused above as a failed
+    // request, so a tooLarge answer here means the streamed body crossed
+    // the cap, which keeps its own error.
+    const bounded = await readBoundedResponseBytes(response, maxBytes);
+    if (bounded.tooLarge) throw new Error('Catalog response too large');
+    return bounded.bytes;
   }
   throw new Error('Too many catalog redirects');
 }

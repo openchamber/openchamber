@@ -14,6 +14,7 @@ let plugins;
 let refreshOpenCodeAfterConfigChange;
 let app;
 let cleanupPaths;
+const MAX_PLUGIN_FILE_BYTES = 1024 * 1024;
 
 const testUnlessRoot = typeof process.getuid === 'function' && process.getuid() === 0 ? test.skip : test;
 
@@ -359,6 +360,70 @@ describe('opencode plugin routes', () => {
       .expect(409);
 
     expect(response.body.error).toContain('already exists');
+  });
+
+  test('GET and PUT preserve plugin files at the byte limit', async () => {
+    const fileName = 'at-limit.js';
+    const filePath = path.join(rootDir, 'plugins', fileName);
+    const content = 'x'.repeat(MAX_PLUGIN_FILE_BYTES);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf8');
+    const id = plugins.encodePluginId('file', `user:${fileName}`);
+
+    const readResponse = await request(app)
+      .get(`/api/config/plugins/file/${encodeURIComponent(id)}`)
+      .expect(200);
+
+    expect(readResponse.body).toEqual({ fileName, scope: 'user', content });
+
+    const writeResponse = await request(app)
+      .put(`/api/config/plugins/file/${encodeURIComponent(id)}`)
+      .send({ content: 'updated' })
+      .expect(200);
+
+    expect(writeResponse.body).toMatchObject({ success: true, message: 'Plugin file updated.' });
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('updated');
+  });
+
+  test('GET and PUT reject oversized plugin files without changing them', async () => {
+    const fileName = 'over-limit.js';
+    const filePath = path.join(rootDir, 'plugins', fileName);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, 'original', 'utf8');
+    fs.truncateSync(filePath, MAX_PLUGIN_FILE_BYTES + 1);
+    const id = plugins.encodePluginId('file', `user:${fileName}`);
+    const tooLarge = {
+      error: `Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`,
+      code: 'PLUGIN_FILE_TOO_LARGE',
+    };
+
+    const readResponse = await request(app)
+      .get(`/api/config/plugins/file/${encodeURIComponent(id)}`)
+      .expect(413);
+    expect(readResponse.body).toEqual(tooLarge);
+
+    const writeResponse = await request(app)
+      .put(`/api/config/plugins/file/${encodeURIComponent(id)}`)
+      .send({ content: 'replacement' })
+      .expect(413);
+    expect(writeResponse.body).toEqual(tooLarge);
+    expect(fs.statSync(filePath).size).toBe(MAX_PLUGIN_FILE_BYTES + 1);
+    expect(fs.readFileSync(filePath, 'utf8').slice(0, 'original'.length)).toBe('original');
+  });
+
+  test('GET and PUT keep the missing plugin file 404 response', async () => {
+    const id = plugins.encodePluginId('file', 'user:missing.js');
+
+    const readResponse = await request(app)
+      .get(`/api/config/plugins/file/${encodeURIComponent(id)}`)
+      .expect(404);
+    expect(readResponse.body).toEqual({ error: 'Plugin file not found' });
+
+    const writeResponse = await request(app)
+      .put(`/api/config/plugins/file/${encodeURIComponent(id)}`)
+      .send({ content: 'replacement' })
+      .expect(404);
+    expect(writeResponse.body).toEqual({ error: 'Plugin file not found' });
   });
 
   test('PUT /file/:id updates file content', async () => {

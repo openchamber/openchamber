@@ -31,6 +31,17 @@ Un lugar para guardar planes más largos como archivos. Puedes:
 
 Deberías volver a la pestaña Context con tu nota guardada, tu tarea marcada o tu plan listado: así sabes que funcionó.
 
+## Eliminar y deshacer
+
+Al eliminar una nota, un plan o un recuerdo guardado se muestra un aviso con **Deshacer** durante unos segundos. El elemento solo se elimina definitivamente cuando ese tiempo se agota.
+
+## Agentes
+
+Los agentes leen y actualizan las mismas notas, tareas y planes a través de la herramienta de conocimiento del proyecto. Pide a un agente que anote una decisión, añada una tarea, marque una como completada o mantenga un plan al día, y el cambio aparecerá en el panel en cuanto se produzca. Las notas que crea un agente se marcan como procedentes de un agente. Cuando un agente escribe un plan para ti, puede abrirlo delante de ti, donde puedes leerlo, comentar líneas y enviarlo a una sesión. Los planes son archivos Markdown sencillos, así que los agentes los leen y editan como cualquier otro archivo. Empiezan un plan con una breve lista de sus pasos y marcan cada uno a medida que lo implementan, y un plan abierto recoge los cambios en un par de segundos, de modo que su vista previa muestra cuánto ha avanzado el trabajo.
+
+Un agente trabaja en el proyecto al que pertenece su sesión, worktrees incluidos. Si un agente cambia una nota o un plan mientras escribes en él, lo que escribas se guardará por encima del cambio del agente. Se pide a los agentes que envíen el texto que leyeron junto con cualquier nota o plan que reemplacen por completo; si ha cambiado desde entonces, la escritura se rechaza y el agente lo lee de nuevo.
+
+La herramienta está activada por defecto. Desactívala en **Settings → General → OpenChamber Tools** con **Project knowledge tool**. Como las demás herramientas de OpenChamber, solo está presente cuando OpenChamber ejecuta su propio servidor de OpenCode, así que no con un servidor externo ni en la extensión de VS Code.
 ## Relacionado
 
 - [Sesiones de worktree](/es/worktrees/) — ejecuta una tarea en su propia rama

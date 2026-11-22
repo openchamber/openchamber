@@ -38,6 +38,7 @@ const requiredKeys = [
   'settings.integrations.linear.mapping.teams.info',
   'settings.integrations.linear.mapping.teams.useDefault',
   'settings.integrations.linear.mapping.teams.aria',
+  'settings.integrations.linear.mapping.teams.truncated',
   'settings.integrations.linear.mapping.emptyProjects',
   'settings.integrations.linear.mapping.emptyTeams',
   'settings.integrations.linear.mapping.loadFailed',

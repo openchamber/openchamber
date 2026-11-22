@@ -664,7 +664,7 @@ export const createProviderActions = (deps) => {
   };
 
   const execute = async (action, input = {}, ctx = {}) => {
-    const handler = handlers[action];
+    const handler = Object.hasOwn(handlers, action) ? handlers[action] : null;
     if (!handler) throw badRequest(`Unsupported provider action: ${action || 'missing'}`);
     return handler(input ?? {}, ctx);
   };

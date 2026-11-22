@@ -169,15 +169,18 @@ describe('delta coalescing in the global hub', () => {
       expect(ids.every((eventId) => typeof eventId === 'string' && eventId.startsWith('oc-'))).toBe(true);
       expect(new Set(ids).size).toBe(ids.length);
       expect(ids).toEqual([...ids].sort());
-      // No OpenCode id was seen, so there is no head for a browser to adopt as its cursor.
+      // No OpenCode id was seen, so the head carries no upstream id.
       expect(hub.headEventId()).toBeUndefined();
 
       for (const event of received) {
-        // No frame sent to a browser carries a hub id as its cursor.
-        expect(JSON.parse(event.serialize()).eventId).toBeUndefined();
-        // And a hub id is not in the replay buffer: a reconnect cannot be answered from it.
-        expect(hub.replayAfter(event.eventId)).toBeNull();
+        // A local frame carries a versioned OpenChamber cursor, never the hub's own id.
+        expect(JSON.parse(event.serialize()).eventId).toMatch(/^occ1\.global\.\d+\.$/);
+        expect(JSON.parse(event.serialize()).eventId).not.toBe(event.eventId);
+        // The frames are buffered and replayable; the hub id is not what a cursor names.
+        expect(hub.replayAfter(event.eventId)).not.toBeNull();
       }
+      expect(hub.replayAfterCursor({ version: 1, stream: 'global', position: received[0].position, upstream: '' }))
+        .toHaveLength(received.length - 1);
     } finally { hub.stop(); }
   });
 
@@ -344,7 +347,8 @@ describe('events of isolated spaces in the global hub', () => {
     expect(JSON.parse(withSpaces[0].serialize())).toMatchObject({ type: 'event', directory: '/spaces/a1b2c3d4e5f6/repo', payload: { type: 'session.execution.started' } });
     hub.injectEvent({ payload: { type: 'session.execution.succeeded', data: { sessionID: 's1' } }, directory: '/spaces/a1b2c3d4e5f6/repo', spaceId: 'a1b2c3d4e5f6' });
     expect(withSpaces[1].eventId).toMatch(/^oc-/);
-    expect(hub.replayAfter(withSpaces[0].eventId)).toBeNull();
+    // Local frames are buffered: a cursor at the first replays the second.
+    expect(hub.replayAfter(withSpaces[0].eventId).map((entry) => entry.cursor)).toContain(JSON.parse(withSpaces[1].serialize()).eventId);
   });
 
   it('marks a host event with no space, so every subscriber sees it', () => {

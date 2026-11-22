@@ -55,11 +55,11 @@ const parseClaudeCodeBlob = (blob, source) => {
   };
 };
 
-const readKeychainCredential = () => {
+const readKeychainCredential = ({ execFileSyncImpl = execFileSync } = {}) => {
   if (process.platform !== 'darwin') return null;
   let raw;
   try {
-    raw = execFileSync('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], {
+    raw = execFileSyncImpl('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], {
       encoding: 'utf8',
       timeout: 10_000,
       stdio: ['ignore', 'pipe', 'ignore']
@@ -76,8 +76,8 @@ const readKeychainCredential = () => {
   }
 };
 
-const readCredentialsFile = () =>
-  parseClaudeCodeBlob(readJsonFile(path.join(claudeConfigDirectory(), '.credentials.json')), 'credentials-file');
+const readCredentialsFile = ({ readJsonFileImpl = readJsonFile } = {}) =>
+  parseClaudeCodeBlob(readJsonFileImpl(path.join(claudeConfigDirectory(), '.credentials.json')), 'credentials-file');
 
 const readOpenCodeCredential = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, OPENCODE_AUTH_ALIASES));
@@ -107,9 +107,9 @@ const readEnvCredential = () => {
  *
  * @returns {ClaudeCredential|null}
  */
-export const findClaudeCredential = (auth) =>
-  readKeychainCredential()
-  ?? readCredentialsFile()
+export const findClaudeCredential = (auth, deps = {}) =>
+  readKeychainCredential(deps)
+  ?? readCredentialsFile(deps)
   ?? readOpenCodeCredential(auth)
   ?? readEnvCredential();
 
@@ -119,8 +119,10 @@ export const findClaudeCredential = (auth) =>
  *
  * @returns {Promise<ClaudeCredential|null>}
  */
-export const loadClaudeCredential = async () =>
-  readKeychainCredential()
-  ?? readCredentialsFile()
-  ?? readOpenCodeCredential(await readOpenCodeCredentials())
-  ?? readEnvCredential();
+export const loadClaudeCredential = async (deps = {}) => {
+  const { readAuth = readOpenCodeCredentials } = deps;
+  return readKeychainCredential(deps)
+    ?? readCredentialsFile(deps)
+    ?? readOpenCodeCredential(await readAuth())
+    ?? readEnvCredential();
+};

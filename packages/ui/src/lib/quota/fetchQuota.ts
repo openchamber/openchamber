@@ -21,7 +21,7 @@ export type QuotaGiftResetType = 'FIVE_HOUR' | 'WEEK';
 export const fetchQuota = async (
   providerId: QuotaProviderId,
   { signal, timeoutMs = 30_000 }: { signal?: AbortSignal; timeoutMs?: number } = {},
-): Promise<ProviderResult> => {
+): Promise<ProviderResult[]> => {
   const controller = new AbortController();
   const abort = () => controller.abort(new DOMException('The operation was aborted.', 'AbortError'));
   if (signal?.aborted) abort();
@@ -41,16 +41,27 @@ export const fetchQuota = async (
       const failure = z.object({ error: z.string() }).safeParse(payload);
       throw new Error(failure.success ? failure.data.error : `Failed to fetch quota (${response.status})`);
     }
-    return z.object({
+    const resultSchema = z.object({
       providerId: z.literal(providerId),
       providerName: z.string(),
       ok: z.boolean(),
       configured: z.boolean(),
       error: z.string().optional(),
       planLabel: z.string().nullable().optional(),
-      usage: z.object({ windows: windowsSchema, models: z.record(z.string(), z.object({ windows: windowsSchema })).optional() }).nullable(),
+      credentialId: z.string().optional(),
+      credentialLabel: z.string().optional(),
+      credentialActive: z.boolean().optional(),
+      accountLabel: z.string().optional(),
+      usage: z.object({
+        windows: windowsSchema,
+        models: z.record(z.string(), z.object({ windows: windowsSchema })).optional(),
+        usageAvailability: z.literal('console-only').optional(),
+      }).nullable(),
       fetchedAt: z.number(),
-    }).parse(payload);
+    });
+    // The route answers a single object for a one-credential provider and an
+    // array when several stored credentials each produced a result (#481).
+    return z.array(resultSchema).min(1).parse(Array.isArray(payload) ? payload : [payload]);
   };
   try {
     return await Promise.race([readResult(), aborted]);

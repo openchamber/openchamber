@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -12,7 +13,7 @@ import {
 
 export const providerId = 'hyper';
 export const providerName = 'Charm Hyper';
-const aliases = ['hyper'];
+export const aliases = ['hyper'];
 const HYPER_QUOTA_URL = 'https://hyper.charm.land/v1/credits';
 const CREDIT_TO_USD = 0.05;
 
@@ -60,7 +61,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
     }
 
-    const payload = asObject(await response.json());
+    const payload = asObject(await readQuotaJson(response));
     const rawBalance = payload?.balance;
     const balance = toNumber(asNonEmptyString(rawBalance)
       ?? (Number.isFinite(rawBalance) ? rawBalance : null));

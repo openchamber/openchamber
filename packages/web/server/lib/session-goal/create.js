@@ -1,4 +1,4 @@
-import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
+import { appendObjectiveVersion, GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
 import { readGoalWriterSettings, writeGoalSpec } from './spec-writer.js';
 
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full prompt was delivered in the chat message …]\n\n';
@@ -33,12 +33,26 @@ export const buildGoalIntroText = (tokenBudget, spec = null) => {
     + '\n</system-reminder>';
 };
 
-const fitObjective = async ({ objective, charLimit, directory, sessionID, providerID, modelID, warn }) => {
+
+// A fixed-offset cut can land between the halves of a surrogate pair,
+// leaving a lone surrogate in the stored objective that encodes as U+FFFD
+// when the objective file is written; move a boundary that lands inside a
+// pair back to the pair boundary.
+const dropSplitHead = (text) => {
+  const last = text.charCodeAt(text.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+};
+
+const dropSplitTail = (text) => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
+const fitObjective = async ({ objective, charLimit, directory, sessionID, providerID, modelID, warn, generateSmallModelText }) => {
   if (objective.length <= charLimit) return objective;
 
   let distilled = null;
   try {
-    const { generateSmallModelText } = await import('../small-model/index.js');
     const generated = await generateSmallModelText({
       prompt: objective,
       system: [
@@ -59,9 +73,9 @@ const fitObjective = async ({ objective, charLimit, directory, sessionID, provid
     warn('goal objective distillation failed', error);
   }
 
-  if (distilled) return distilled.slice(0, charLimit);
+  if (distilled) return dropSplitHead(distilled.slice(0, charLimit));
   const half = Math.max(0, Math.floor((charLimit - TRIM_MARKER.length) / 2));
-  return `${objective.slice(0, half)}${TRIM_MARKER}${objective.slice(-half)}`;
+  return `${dropSplitHead(objective.slice(0, half))}${TRIM_MARKER}${dropSplitTail(objective.slice(-half))}`;
 };
 
 export const createSessionGoal = async ({
@@ -77,6 +91,17 @@ export const createSessionGoal = async ({
   persistSessionGoal,
   goalWriterSettings = readGoalWriterSettings(),
   writeSpec = writeGoalSpec,
+  writeObjectiveFile = writeObjective,
+  appendObjectiveVersionFile = appendObjectiveVersion,
+  generateSmallModelText = async (...args) => {
+    const smallModel = await import('../small-model/index.js');
+    return smallModel.generateSmallModelText(...args);
+  },
+  // The objective is final: "Rewrite every goal" leaves it as it is.
+  settled = false,
+  // Keep the whole objective for the progress check instead of fitting it
+  // to the goal limit; the goal records that it ignores the limit.
+  ignoreLimit = false,
 }) => {
   const warn = (message, error) => {
     if (typeof onWarning === 'function') {
@@ -87,9 +112,9 @@ export const createSessionGoal = async ({
   };
   const requested = String(objective ?? '').trim();
   let spec = null;
-  if (goalWriterSettings?.rewriteAll && requested) {
+  if (goalWriterSettings?.rewriteAll && !settled && requested) {
     try {
-      ({ spec } = await writeSpec({ request: requested, directory, providerID, modelID, settings: goalWriterSettings }));
+      ({ spec } = await writeSpec({ request: requested, directory, providerID, modelID, ignoreLimit, settings: goalWriterSettings }));
     } catch (error) {
       // The goal still runs on what the user wrote; a missing writer model
       // must not cost them the goal.
@@ -97,7 +122,7 @@ export const createSessionGoal = async ({
     }
   }
   const charLimit = goalWriterSettings?.charLimit ?? GOAL_OBJECTIVE_CHAR_LIMIT;
-  const objectiveText = await fitObjective({
+  const objectiveText = ignoreLimit ? (spec ?? requested) : await fitObjective({
     objective: spec ?? requested,
     charLimit,
     directory,
@@ -105,12 +130,18 @@ export const createSessionGoal = async ({
     providerID,
     modelID,
     warn,
+    generateSmallModelText,
   });
   if (!objectiveText) throw new Error('goal objective is required');
 
   let objectiveFile = false;
   try {
-    await writeObjective(sessionID, objectiveText);
+    await writeObjectiveFile(sessionID, objectiveText);
+    // The initial objective is the goal's first version (#1830). Best-effort:
+    // a history failure must not cost the user the goal.
+    await appendObjectiveVersionFile(sessionID, objectiveText).catch((error) => {
+      warn('goal objective version record failed', error);
+    });
     objectiveFile = true;
   } catch (error) {
     warn('goal objective file write failed, falling back to inline', error);
@@ -119,11 +150,17 @@ export const createSessionGoal = async ({
   const now = Date.now();
   const goal = {
     id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-    objective: objectiveFile ? '' : objectiveText.slice(0, charLimit),
+    // Inline only when the objective file could not be written, and then cut to
+    // the limit even for a goal that ignores it: the inline objective rides in
+    // the session metadata every goal update broadcasts to every window, so an
+    // unlimited one (up to 200,000 characters) would be resent on each update.
+    // The UI's setSessionGoal does the same; the full text still went out in
+    // the chat message. Deliberate: see #207 and the review on #205.
+    objective: objectiveFile ? '' : dropSplitHead(objectiveText.slice(0, charLimit)),
     objectiveFile,
     // Stated outright: the store merges, so a flag left out would carry over
     // from the goal this one replaces.
-    ignoreObjectiveLimit: false,
+    ignoreObjectiveLimit: ignoreLimit === true,
     status: 'active',
     tokenBudget: tokenBudget || null,
     tokensUsed: 0,

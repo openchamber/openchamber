@@ -7,11 +7,23 @@ import {
   getLinearScopes,
 } from './auth.js';
 import { isPlainObject, isString, readFiniteNumber, readTrimmedString } from './parse.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 
 const LINEAR_AUTHORIZE_URL = 'https://linear.app/oauth/authorize';
 const LINEAR_TOKEN_URL = 'https://api.linear.app/oauth/token';
 const LINEAR_REVOKE_URL = 'https://api.linear.app/oauth/revoke';
 const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
+// A user waits on the callback while the code is exchanged, so the token
+// endpoint gets enough room for a slow exchange but still has a deadline.
+const LINEAR_TOKEN_TIMEOUT_MS = 15_000;
+// Status polling calls the broker every 1.5 seconds while a user waits. The
+// deadline is shared by the overlapping polls through brokerPollsByState, so a
+// broker that takes a few seconds to answer still completes inside it.
+const LINEAR_BROKER_TIMEOUT_MS = 5_000;
+// Broker and token JSON answers are a few hundred bytes; the cap matches the
+// other bounded auth-body reads (GitLab AUTH_BODY_MAX_BYTES) and keeps an
+// operator-configured broker from buffering an unbounded body via .json().
+const LINEAR_JSON_RESPONSE_MAX_BYTES = 1024 * 1024;
 
 const pendingByState = new Map();
 const brokerPollsByState = new Map();
@@ -21,6 +33,42 @@ export class LinearOAuthError extends Error {
     super(message);
     this.name = 'LinearOAuthError';
     this.code = code;
+  }
+}
+
+// AbortSignal.timeout aborts with a TimeoutError DOMException; a body read cut
+// off by the same deadline may surface as an AbortError instead.
+function isTimeoutAbort(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError';
+}
+
+const tokenTimeoutError = () => new LinearOAuthError('Linear token request timed out', 'LINEAR_OAUTH_TIMEOUT');
+const brokerTimeoutError = () => new LinearOAuthError('Linear authorization broker request timed out', 'LINEAR_BROKER_TIMEOUT');
+
+async function fetchWithDeadline(url, options, timeoutMs, onTimeout) {
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal });
+    return { response, signal };
+  } catch (error) {
+    if (isTimeoutAbort(error)) throw onTimeout();
+    throw error;
+  }
+}
+
+async function readJsonWithDeadline(response, signal, onTimeout, onTooLarge) {
+  let bounded;
+  try {
+    bounded = await readBoundedResponseText(response, LINEAR_JSON_RESPONSE_MAX_BYTES);
+  } catch (error) {
+    if (isTimeoutAbort(error) || signal.aborted) throw onTimeout();
+    return null;
+  }
+  if (bounded.tooLarge) throw onTooLarge();
+  try {
+    return JSON.parse(bounded.text);
+  } catch {
+    return null;
   }
 }
 
@@ -80,15 +128,16 @@ function parseTokenPayload(payload) {
 }
 
 async function postForm(url, body) {
-  const response = await fetch(url, {
+  const { response, signal } = await fetchWithDeadline(url, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams(body).toString(),
-  });
-  const payload = await response.json().catch(() => null);
+  }, LINEAR_TOKEN_TIMEOUT_MS, tokenTimeoutError);
+  const payload = await readJsonWithDeadline(response, signal, tokenTimeoutError,
+    () => new LinearOAuthError('Linear token response exceeded the size limit', 'LINEAR_OAUTH_FAILED'));
   if (!response.ok) {
     const description = isPlainObject(payload)
       ? (readTrimmedString(payload.error_description) || readTrimmedString(payload.error))
@@ -103,8 +152,9 @@ async function postForm(url, body) {
   return parseTokenPayload(payload);
 }
 
-async function readJsonResponse(response, fallbackMessage) {
-  const payload = await response.json().catch(() => null);
+async function readJsonResponse(response, signal, fallbackMessage) {
+  const payload = await readJsonWithDeadline(response, signal, brokerTimeoutError,
+    () => new LinearOAuthError(`${fallbackMessage}: response exceeded the size limit`, 'LINEAR_BROKER_FAILED'));
   if (!response.ok) {
     const message = isPlainObject(payload) && readTrimmedString(payload.error)
       ? readTrimmedString(payload.error)
@@ -124,12 +174,12 @@ function brokerCallbackUrl(brokerUrl) {
 }
 
 async function registerBrokerTransaction({ brokerUrl, state, claimSecret }) {
-  const response = await fetch(`${brokerUrl}/start`, {
+  const { response, signal } = await fetchWithDeadline(`${brokerUrl}/start`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ state, claimSecret }),
-  });
-  const payload = await readJsonResponse(response, 'Could not start Linear authorization broker');
+  }, LINEAR_BROKER_TIMEOUT_MS, brokerTimeoutError);
+  const payload = await readJsonResponse(response, signal, 'Could not start Linear authorization broker');
   const redirectUri = readTrimmedString(payload.redirectUri);
   if (!redirectUri || redirectUri !== brokerCallbackUrl(brokerUrl)) {
     throw new LinearOAuthError('Linear authorization broker returned an unexpected callback URL', 'LINEAR_BROKER_FAILED');
@@ -184,15 +234,15 @@ export async function startAuthorization({ origin } = {}) {
 }
 
 async function pollBrokerState(state, pending) {
-  const response = await fetch(`${pending.broker.url}/poll`, {
+  const { response, signal } = await fetchWithDeadline(`${pending.broker.url}/poll`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ state, claimSecret: pending.broker.claimSecret }),
-  });
+  }, LINEAR_BROKER_TIMEOUT_MS, brokerTimeoutError);
   if (response.status === 202) {
     return null;
   }
-  const payload = await readJsonResponse(response, 'Could not read Linear authorization result');
+  const payload = await readJsonResponse(response, signal, 'Could not read Linear authorization result');
   const status = readTrimmedString(payload.status);
   if (status === 'complete') {
     const result = await consumeAuthorizationCallback({ code: payload.code, state });
@@ -213,11 +263,11 @@ async function pollBrokerState(state, pending) {
 
 export async function completeAuthorizationBroker(receipt) {
   if (!receipt?.url || !receipt?.state || !receipt?.claimSecret) return false;
-  const response = await fetch(`${receipt.url}/complete`, {
+  const { response } = await fetchWithDeadline(`${receipt.url}/complete`, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ state: receipt.state, claimSecret: receipt.claimSecret }),
-  });
+  }, LINEAR_BROKER_TIMEOUT_MS, brokerTimeoutError);
   if (!response.ok) {
     throw new LinearOAuthError(`Could not acknowledge Linear authorization result (${response.status})`, 'LINEAR_BROKER_FAILED');
   }
@@ -332,6 +382,7 @@ export async function revokeToken(token, tokenTypeHint) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(body).toString(),
+      signal: AbortSignal.timeout(LINEAR_TOKEN_TIMEOUT_MS),
     });
     return response.status === 200;
   } catch {

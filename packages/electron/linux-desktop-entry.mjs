@@ -10,6 +10,13 @@ import path from 'node:path';
 // GNOME re-matches open windows when the file appears, so the first launch
 // gets the icon a few seconds after this runs.
 
+// .desktop entries are a few-KiB stubs: 512 KiB matches MAX_FAVICON_BYTES in
+// main.mjs (#817) and MAX_INSTALLED_APP_ICON_BYTES (#1257) — keep the 512 KiB
+// caps in sync, including MAX_DESKTOP_ENTRY_BYTES in linux-app-discovery.mjs,
+// whose value this duplicates. Only the findForeignEntry directory scan is
+// gated at this cap; reads of our own entry file at its fixed path are not.
+export const MAX_DESKTOP_ENTRY_BYTES = 512 * 1024;
+
 const DESKTOP_FILE_NAME = 'openchamber.desktop';
 const WM_CLASS = 'openchamber';
 const MANAGED_KEY = 'X-OpenChamber-Managed';
@@ -61,8 +68,9 @@ const readDesktopKeys = (contents) => {
 
 const isManagedEntry = (keys) => keys.get(MANAGED_KEY) === 'true';
 
-const readFileOrNull = async (filePath) => {
+const readFileOrNull = async (filePath, { maxBytes } = {}) => {
   try {
+    if (maxBytes && (await fsp.stat(filePath)).size > maxBytes) return null;
     return await fsp.readFile(filePath);
   } catch (error) {
     if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null;
@@ -84,7 +92,7 @@ const findForeignEntry = async ({ directory, ownPath, appImagePath }) => {
     if (!name.endsWith('.desktop')) continue;
     const filePath = path.join(directory, name);
     if (filePath === ownPath) continue;
-    const contents = await readFileOrNull(filePath).catch(() => null);
+    const contents = await readFileOrNull(filePath, { maxBytes: MAX_DESKTOP_ENTRY_BYTES }).catch(() => null);
     if (!contents) continue;
     const keys = readDesktopKeys(contents.toString('utf8'));
     if (isManagedEntry(keys)) continue;

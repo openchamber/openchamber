@@ -6,6 +6,7 @@ import {
   applyGlobalSessionStatusSnapshot,
   getDirectoryOwnedSessionIds,
   hasActiveSubagent,
+  reconcileGlobalSessionStatusWithActive,
   setSessionParentResolver,
   useGlobalSessionStatusStore,
   replaceGlobalSessionStatusById,
@@ -335,5 +336,134 @@ describe("a background command keeps its session's turn open", () => {
     applyBackgroundShellEvents("/repo", [started])
     applyGlobalSessionStatusSnapshot("/repo", {}, ["session"])
     expect(timing().startedAt.has("session")).toBe(true)
+  })
+})
+
+// Oracle: OpenCode's `session.active` list is the authority for host sessions.
+// A session the index holds as running stays exactly when the list names it,
+// the list does not speak for it (`covers`), a write landed after the read
+// started, or this is the first read in a row to miss it; the exhaustive table
+// below derives every expectation from that rule.
+describe("reconciling the index with OpenCode's running list", () => {
+  const busy = (sessionID: string): SyncEvent => ({ type: "session.status", properties: { sessionID, status: { type: "busy" } } })
+  const running = (): string[] => [...useGlobalSessionStatusStore.getState().statusById.keys()].sort()
+  const coversAll = () => true
+  const nothingRuns = async () => new Set<string>()
+  const deferred = () => {
+    let resolve!: (value: ReadonlySet<string> | null) => void
+    const promise = new Promise<ReadonlySet<string> | null>((complete) => { resolve = complete })
+    return { promise, resolve }
+  }
+
+  test("settles exactly the covered sessions two reads in a row miss, for every combination", async () => {
+    const ids = ["a", "b", "c"]
+    for (let mask = 0; mask < 4 ** ids.length; mask += 1) {
+      replaceGlobalSessionStatusById(new Map())
+      const listed = new Set(ids.filter((_, index) => ((mask >> (index * 2)) & 1) === 1))
+      const covered = new Set(ids.filter((_, index) => ((mask >> (index * 2 + 1)) & 1) === 1))
+      applyGlobalSessionStatusEvents("/repo", ids.map(busy))
+
+      await reconcileGlobalSessionStatusWithActive(async () => listed, (sessionId) => covered.has(sessionId))
+      expect(running()).toEqual(ids)
+      await reconcileGlobalSessionStatusWithActive(async () => listed, (sessionId) => covered.has(sessionId))
+
+      const expected = ids.filter((id) => listed.has(id) || !covered.has(id))
+      expect(running()).toEqual(expected)
+      expect([...useGlobalSessionStatusStore.getState().activeSessionIds].sort()).toEqual(expected)
+    }
+  })
+
+  test("a turn OpenCode resumes after a restart survives the read that missed it", async () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("resuming")])
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    await reconcileGlobalSessionStatusWithActive(async () => new Set(["resuming"]), coversAll)
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    expect(running()).toEqual(["resuming"])
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    expect(running()).toEqual([])
+  })
+
+  test("a repeated busy event after a miss starts confirmation over", async () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("resumed")])
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    applyGlobalSessionStatusEvents("/repo", [busy("resumed")])
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    expect(running()).toEqual(["resumed"])
+  })
+
+  test("an inconclusive read resets earlier missing evidence", async () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("resumed")])
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    await reconcileGlobalSessionStatusWithActive(async () => null, coversAll)
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    expect(running()).toEqual(["resumed"])
+  })
+
+  test("overlapping callers cannot count one in-flight snapshot twice", async () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("resumed")])
+    const read = deferred()
+    const first = reconcileGlobalSessionStatusWithActive(() => read.promise, coversAll)
+    let secondRead = false
+    await reconcileGlobalSessionStatusWithActive(async () => {
+      secondRead = true
+      return new Set()
+    }, coversAll)
+    read.resolve(new Set())
+    await first
+    expect(secondRead).toBe(false)
+    expect(running()).toEqual(["resumed"])
+  })
+
+  test("a settled session counts as observed, so the host seed cannot add it back", async () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("finished-subagent")])
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    expect(useGlobalSessionStatusStore.getState().observedById.has("finished-subagent")).toBe(true)
+  })
+
+  test("a write that lands while the read is in flight wins over the read", async () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("restarted"), busy("finished")])
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    const read = deferred()
+    const reconcile = reconcileGlobalSessionStatusWithActive(() => read.promise, coversAll)
+    applyGlobalSessionStatusEvents("/repo", [busy("restarted")])
+    applyGlobalSessionStatusEvents("/repo", [busy("started-during-read")])
+    read.resolve(new Set())
+    await reconcile
+    expect(running()).toEqual(["restarted", "started-during-read"])
+  })
+
+  test("a failed read settles nothing", async () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("session")])
+    await reconcileGlobalSessionStatusWithActive(async () => null, coversAll)
+    await reconcileGlobalSessionStatusWithActive(async () => null, coversAll)
+    expect(running()).toEqual(["session"])
+  })
+
+  test("a read started before a runtime switch does not touch the new runtime's index", async () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("other-runtime")])
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    const read = deferred()
+    const reconcile = reconcileGlobalSessionStatusWithActive(() => read.promise, coversAll)
+    replaceGlobalSessionStatusById(new Map([["other-runtime", { status: { type: "busy" }, directory: "/repo" }]]))
+    read.resolve(new Set())
+    await reconcile
+    expect(running()).toEqual(["other-runtime"])
+    // The switch also forgot the earlier miss: one more read is not enough.
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    expect(running()).toEqual(["other-runtime"])
+  })
+
+  test("settling the last running subagent settles its parent's turn", async () => {
+    setSessionParentResolver((sessionId) => (sessionId === "child" ? "parent" : undefined))
+    applyGlobalSessionStatusEvents("/repo", [busy("parent"), busy("child")])
+    applyGlobalSessionStatusEvents("/repo", [{ type: "session.idle", properties: { sessionID: "parent" } }])
+    expect(useSessionActivityTimingStore.getState().startedAt.has("parent")).toBe(true)
+
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+    await reconcileGlobalSessionStatusWithActive(nothingRuns, coversAll)
+
+    expect(running()).toEqual([])
+    expect(useSessionActivityTimingStore.getState().settledMs.has("parent")).toBe(true)
   })
 })

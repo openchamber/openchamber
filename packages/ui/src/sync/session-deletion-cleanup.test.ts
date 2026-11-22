@@ -7,10 +7,12 @@ import { createInputHistoryIdentity, createInputHistorySubmission, selectInputHi
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { cleanupPersistedSessionState } from './session-deletion-cleanup';
 
 describe('cleanupPersistedSessionState', () => {
   beforeEach(() => {
+    MessageFreshnessDetector.getInstance().clearAll();
     useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {} });
     useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
     useSessionFoldersStore.setState({ foldersMap: {}, collapsedFolderIds: new Set() });
@@ -89,5 +91,17 @@ describe('cleanupPersistedSessionState', () => {
     expect(selectInputHistoryEntries(useInputHistoryStore.getState(), retained).map((entry) => entry.text)).toEqual(['retained']);
     useInputHistoryStore.getState().applyScope('global');
     expect(selectInputHistoryEntries(useInputHistoryStore.getState(), deleted).map((entry) => entry.text)).toEqual(['deleted', 'retained']);
+  });
+
+  test('clears the freshness detector session timing for the deleted session only', () => {
+    const runtimeKey = getRuntimeKey();
+    const detector = MessageFreshnessDetector.getInstance();
+    detector.recordSessionStart('session-1');
+    detector.recordSessionStart('session-2');
+
+    cleanupPersistedSessionState({ runtimeKey, directory: '/repo', sessionId: 'session-1' });
+
+    expect(detector.hasSessionTiming('session-1')).toBe(false);
+    expect(detector.hasSessionTiming('session-2')).toBe(true);
   });
 });

@@ -47,6 +47,11 @@ Isso exige o aplicativo de desktop: uma página exibida numa aba do navegador n�
 
 Uma extensão pode substituir o aplicativo de desktop aqui. Uma que declare um provedor de navegador executa seu próprio navegador no servidor do OpenChamber e responde às mesmas ações, então um agente pode navegar sem nenhum aplicativo de desktop aberto, por exemplo num servidor remoto. Escolha-a em **Configurações → Geral → Ferramentas do OpenChamber → Provedor do navegador**; sem uma extensão assim instalada, a lista mostra apenas "OpenChamber Web" e fica desativada. A escolha vale a partir da próxima ação de navegador. Se essa extensão for pausada ou removida, o OpenChamber Web volta a ser usado e um aviso informa você. Autores de extensões: veja `GUEST_SERVICES.md` no pacote do SDK.
 
+## Tamanho e aparência
+
+Pressione o botão de telefone para abrir a barra de dispositivos. Escolha um tamanho predefinido ou digite largura e altura, e a página será exibida nesse tamanho — reduzida para caber no painel quando for maior, mas ainda se medindo no tamanho que você pediu.
+
+A mesma barra força a página para claro ou escuro, para que um tema possa ser conferido sem mudar nada na sua máquina. Ela não mexe no DevTools; uma página só pode ter um depurador conectado, então feche o DevTools antes se ele estiver aberto.
 ## Ferramentas de desenvolvedor
 
 Pressione o botão de terminal na barra para abrir as ferramentas de desenvolvedor do próprio Chromium para a página — console, rede, elementos, tudo o que você espera.

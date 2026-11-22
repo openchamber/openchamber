@@ -72,6 +72,10 @@ export interface QueuedMessageSendConfig {
 export interface QueuedMessageGoal {
     objective?: string;
     tokenBudget: number | null;
+    /** The composer's goal flags (`useSessionGoalArmStore`), carried to delivery; present only when true. */
+    settled?: boolean;
+    briefAgent?: boolean;
+    ignoreLimit?: boolean;
 }
 
 /**
@@ -176,6 +180,9 @@ const serverSendConfigSchema = z.object({
 const serverGoalSchema = z.object({
     objective: z.string().min(1).optional(),
     tokenBudget: z.number().int().positive().nullable(),
+    settled: z.boolean().optional(),
+    briefAgent: z.boolean().optional(),
+    ignoreLimit: z.boolean().optional(),
 });
 
 const serverAttachmentSchema = z.object({

@@ -10,6 +10,7 @@ import type { MultiRunSummary } from '@/lib/multirun/runs';
 import type { SessionNode } from '../types';
 import { isMultiLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { formatSessionCompactDateLabel } from '../utils';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { CollapsedSessionActivityIndicator } from './collapsedActivityIndicator';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
@@ -83,6 +84,12 @@ function RunSidebarRowComponent({
     : t('sessions.sidebar.run.laneCountPlural', { count: laneCount });
   const activityNodes = React.useMemo(() => [...laneNodes], [laneNodes]);
   const activity = <CollapsedSessionActivityIndicator nodes={activityNodes} blockingSessionIds={blockingSessionIds} includeUnreadSubtasks={notifyOnSubtasks} />;
+  // Optional row elements (branch, PR badge, provider logo, project icon,
+  // goal, time). Live status always shows.
+  const rowElements = useSessionDisplayStore((state) => state.sessionRowDisplay);
+  const providerBadges = rowElements.showProviderLogo
+    ? <ProviderLogos providerIDs={run.providerIDs} ringClass="ring-sidebar opacity-60" />
+    : null;
   // Muted like an idle session title; the run's state shows in its mark.
   const titleClassName = isActive ? 'text-interactive-selection-foreground' : 'text-muted-foreground';
   const openOverview = () => useUIStore.getState().setRunOverviewKey(run.key);
@@ -127,8 +134,9 @@ function RunSidebarRowComponent({
           directoryIndicator={null}
           prBadge={null}
           zombieIndicator={null}
-          badges={<ProviderLogos providerIDs={run.providerIDs} ringClass="ring-sidebar opacity-60" />}
+          badges={providerBadges}
           hideMetaOnHoverClass=""
+          elements={rowElements}
         />
       </button>
     );
@@ -176,7 +184,7 @@ function RunSidebarRowComponent({
       >
         <ArrowsMerge className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span dir="auto" className={cn('oc-ui-start-align block min-w-0 flex-1 truncate typography-ui-label font-normal', titleClassName)}>{run.title}</span>
-        <ProviderLogos providerIDs={run.providerIDs} ringClass="ring-sidebar" />
+        {rowElements.showProviderLogo ? <ProviderLogos providerIDs={run.providerIDs} ringClass="ring-sidebar" /> : null}
         {activity}
       </button>
     </div>

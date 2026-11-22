@@ -4,15 +4,19 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -29,7 +33,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode 随 OpenChamber 一起提供。请更新 OpenChamber 以获取 OpenCode v2。",
@@ -143,15 +149,19 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n['zh-CN'],
   ...referencePickerI18n['zh-CN'],
   ...sessionMenuHintsI18n['zh-CN'],
+  ...sessionErrorRecoveryI18n['zh-CN'],
   ...sidebarLayoutI18n['zh-CN'],
+  ...activityTimesI18n['zh-CN'],
   ...projectKnowledgeI18n['zh-CN'],
   ...linearPanelI18n['zh-CN'],
   ...routingI18n['zh-CN'],
+  ...poolSettingsI18n['zh-CN'],
   ...pluginPanelI18n['zh-CN'],
   ...surfacePanelI18n['zh-CN'],
   ...fileArtifactsI18n['zh-CN'],
   ...fileContentSearchI18n['zh-CN'],
   ...htmlRenderI18n['zh-CN'],
+  ...sessionLocationI18n['zh-CN'],
   ...sessionNoticesI18n['zh-CN'],
   ...usageStatsI18n['zh-CN'],
   ...webSearchI18n['zh-CN'],
@@ -168,7 +178,9 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-CN'],
   ...integrationsCatalogI18n['zh-CN'],
   ...sessionGoalWriterI18n['zh-CN'],
+  ...subsessionModelsI18n['zh-CN'],
   ...diffFindI18n['zh-CN'],
+  ...questionAnswersI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
   'terminalView.toast.selectionCopied': '已复制输出',
@@ -478,6 +490,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': '已发送',
   'sessions.scheduledTasks.dialog.status.skipped': '已跳过',
   'sessions.scheduledTasks.dialog.status.cancelled': '已取消',
+  'sessions.scheduledTasks.dialog.status.timeout': '超时',
   'sessions.scheduledTasks.dialog.nextRun.label': '下次',
   'sessions.scheduledTasks.dialog.lastRun.label': '上次运行',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': '正在运行',
@@ -595,6 +608,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showWork': '显示进行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '显示已置顶部分',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '详细行',
+  'sessions.sidebar.header.displayMode.sidebarRows': '侧边栏行…',
   'sessions.sidebar.activity.pinnedTitle': '已置顶',
   'sessions.sidebar.header.displayMode.showArchived': '显示已归档会话',
   'sessions.sidebar.header.displayMode.collapseAll': '全部折叠',
@@ -623,6 +637,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '视图',
   'sessions.sidebar.header.viewMode.projects': '树形',
   'sessions.sidebar.header.viewMode.timeline': '列表',
+  'sessions.sidebar.header.viewMode.headerless': '隐藏分区标题',
   'sessions.sidebar.activity.chatsEmpty': '暂无聊天。',
   'chat.chatInput.chooseProject': '选择项目',
   'sessions.archivePage.allDirectories': '所有目录',
@@ -1279,6 +1294,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.checks.openRun': '打开',
   'gitView.pr.checks.failedAnnotations': '失败的注释',
   'gitView.pr.checks.failedAnnotationsShown': '失败的注释（显示 {total} 条中的 {shown} 条）',
+  'gitView.pr.checks.annotationsTruncated': '注释不完整 — 此运行的注释数量超过了可加载的数量。',
   'gitView.pr.field.baseBranch': '基准分支',
   'gitView.pr.field.description': '描述',
   'gitView.pr.field.title': '标题',
@@ -1857,6 +1873,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': '此仓库没有变更',
   'diffView.unavailable.untrackedDirectoryTitle': '新文件文件夹',
   'diffView.unavailable.untrackedDirectoryDescription': '此文件夹中的新文件太多，无法逐个列出。请暂存该文件夹，或者如果它不属于仓库，将其添加到 .gitignore。',
+  'diffView.unavailable.tooLargeTitle': '文件太大，无法显示差异',
+  'diffView.unavailable.tooLargeDescription': '它超过了文件差异 20 MiB 的上限。',
   'diffView.submodule.title': '子模块',
   'diffView.submodule.commitChanged': '提交 {from} → {to}',
   'diffView.submodule.commitUnchanged': '仍在提交 {commit}',
@@ -2557,6 +2575,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': '故障转移自',
   'chat.messageBody.modelChanged.notice': '模型已更改：{from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': '模型已更改：{from} → {to}（{reason}）',
+  'chat.messageBody.modelChanged.preferPrevious': '优先使用上一个',
+  'chat.messageBody.modelChanged.preferPreviousTitle': '让模型池在一天内优先使用 {model}',
+  'chat.currentModel.label': '当前模型：{model}',
+  'chat.currentModel.labelWithPool': '当前模型：{model}（来自模型池 {pool}）',
+  'chat.currentModel.menu.openHint': '点击选择模型',
+  'chat.currentModel.menu.timing': '切换',
+  'chat.currentModel.menu.directPickHelp': '直接选择会停止模型池的故障转移，直到你返回模型池。',
+  'chat.currentModel.timing.immediately': '立即（重新开始正在进行的回复）',
+  'chat.currentModel.timing.nextStep': '在下一步',
+  'chat.currentModel.timing.nextInput': '随下一条消息',
+  'chat.currentModel.menu.members': '模型池 {pool} 中的模型',
+  'chat.currentModel.menu.returnToPool': '返回模型池 {pool}',
+  'chat.currentModel.toast.failed': '无法切换模型',
   'chat.generatedResult.actions.copy': '复制',
   'chat.generatedResult.actions.copied': '已复制',
   'chat.generatedResult.commit.title': '生成的提交消息',
@@ -3045,6 +3076,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '需要认证',
   'mcpDropdown.status.needsRegistration': '需要注册：{error}',
   'mcpDropdown.empty.configureInConfig': '请在设置中配置 MCP 服务器。',
+  "mcpDropdown.cacheNote": "切换关闭了 Code Mode 的服务器后，正在运行的会话下一轮不会使用提示缓存。",
   'sessionAuth.error.rateLimitTitle': '尝试次数过多',
   'sessionAuth.error.networkTitle': '无法连接服务器',
   'sessionAuth.error.rateLimitDescriptionSingle': '请等待 {minutes} 分钟后再试。',
@@ -3837,8 +3869,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': '保留这个',
   'multirun.overview.addModel.action': '添加模型',
   'multirun.overview.addModel.hint': '在此运行中让另一个模型处理同一提示词',
-  'chat.parallel.settings.whereShared': '项目目录',
-  'chat.parallel.settings.whereSharedHint': '所有运行都在你的工作副本中进行。最适合提问和调研。',
+  'chat.parallel.settings.whereShared': '共享目录',
+  'chat.parallel.settings.whereSharedHint': '所有运行都在此草稿选定的目录中进行。最适合提问和调研。',
   'chat.parallel.settings.whereWorktrees': '独立工作树',
   'chat.parallel.settings.whereWorktreesHint': '每次运行使用自己的分支，代码更改不会冲突。保留最好的那个。',
   'chat.parallel.settings.baseBranchTitle': '基础分支',

@@ -3,15 +3,19 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -28,7 +32,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode is inbegrepen bij OpenChamber. Werk OpenChamber bij om OpenCode v2 te krijgen.",
@@ -142,15 +148,19 @@ export const dict = {
   ...linearIssuePickerI18n.nl,
   ...referencePickerI18n.nl,
   ...sessionMenuHintsI18n.nl,
+  ...sessionErrorRecoveryI18n.nl,
   ...sidebarLayoutI18n.nl,
+  ...activityTimesI18n.nl,
   ...projectKnowledgeI18n.nl,
   ...linearPanelI18n.nl,
   ...routingI18n.nl,
+  ...poolSettingsI18n.nl,
   ...pluginPanelI18n.nl,
   ...surfacePanelI18n.nl,
   ...fileArtifactsI18n.nl,
   ...fileContentSearchI18n.nl,
   ...htmlRenderI18n.nl,
+  ...sessionLocationI18n.nl,
   ...sessionNoticesI18n.nl,
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
@@ -167,7 +177,9 @@ export const dict = {
   ...pluginsGridI18n.nl,
   ...integrationsCatalogI18n['nl'],
   ...sessionGoalWriterI18n['nl'],
+  ...subsessionModelsI18n['nl'],
   ...diffFindI18n['nl'],
+  ...questionAnswersI18n['nl'],
   'terminalView.actions.attachSelection': 'Geselecteerde uitvoer toevoegen',
   'terminalView.actions.copySelection': 'Geselecteerde uitvoer kopiëren',
   'terminalView.toast.selectionCopied': 'Uitvoer gekopieerd',
@@ -477,6 +489,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.status.sent': 'Verzonden',
   'sessions.scheduledTasks.dialog.status.skipped': 'Overgeslagen',
   'sessions.scheduledTasks.dialog.status.cancelled': 'Geannuleerd',
+  'sessions.scheduledTasks.dialog.status.timeout': 'Time-out',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Volgende',
   'sessions.scheduledTasks.dialog.lastRun.label': 'Laatste uitvoering',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'loopt nu',
@@ -594,6 +607,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'Sectie In bewerking tonen',
   'sessions.sidebar.header.displayMode.showPinned': 'Sectie Vastgezet tonen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Gedetailleerde rijen',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Zijbalkrijen…',
   'sessions.sidebar.activity.pinnedTitle': 'Vastgezet',
   'sessions.sidebar.header.displayMode.showArchived': 'Gearchiveerde sessies tonen',
   'sessions.sidebar.header.displayMode.collapseAll': 'Alles inklappen',
@@ -625,6 +639,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'Weergave',
   'sessions.sidebar.header.viewMode.projects': 'Boom',
   'sessions.sidebar.header.viewMode.timeline': 'Lijst',
+  'sessions.sidebar.header.viewMode.headerless': 'Sectiekopteksten verbergen',
   'sessions.sidebar.header.projectDisplay.label': 'Projecten tonen',
   'sessions.sidebar.header.projectDisplay.all': 'Alle projecten',
   'sessions.sidebar.header.listGrouping.label': 'Sessies',
@@ -1129,11 +1144,11 @@ export const dict = {
   'gitView.integrate.commitsMovedDescriptionSingle': '{count} commit verplaatst naar {branch}.',
   'gitView.integrate.commitsMovedToast': 'Commits verplaatst',
   'gitView.integrate.commitsToMove': 'Te verplaatsen commits',
-  'gitView.integrate.conflictsInFiles': 'Conflicten in bestanden',
+  'gitView.integrate.conflictsInFiles': 'Conflicten in {count} bestanden',
   'gitView.integrate.currentCommit': 'Huidige commit',
   'gitView.integrate.currentSession': 'Huidige sessie',
   'gitView.integrate.failedToMoveToast': 'Kan commits niet verplaatsen',
-  'gitView.integrate.moreFiles': 'Meer bestanden',
+  'gitView.integrate.moreFiles': 'Nog {count} bestanden',
   'gitView.integrate.move': 'Verplaatsen',
   'gitView.integrate.moveCommits': 'Commits verplaatsen',
   'gitView.integrate.moving': 'Verplaatsen…',
@@ -1145,10 +1160,10 @@ export const dict = {
   'gitView.integrate.previewUnavailable': 'Voorbeeld niet beschikbaar',
   'gitView.integrate.showAll': 'Alles tonen',
   'gitView.integrate.showLess': 'Minder tonen',
-  'gitView.integrate.showingFirstCommits': 'Eerste commits worden getoond',
+  'gitView.integrate.showingFirstCommits': 'Eerste {count} commits worden getoond',
   'gitView.integrate.target': 'Doel',
   'gitView.integrate.title': 'Commits opnieuw integreren',
-  'gitView.integrate.toMoveCount': 'Te verplaatsen',
+  'gitView.integrate.toMoveCount': '{count} te verplaatsen',
   'gitView.operation.abort': 'Afbreken',
   'gitView.operation.continue': 'Doorgaan',
   'gitView.operation.inProgressTitle': '{operation} in behandeling',
@@ -1270,6 +1285,7 @@ export const dict = {
   'gitView.pr.checks.openRun': 'Openen',
   'gitView.pr.checks.failedAnnotations': 'Mislukte annotaties',
   'gitView.pr.checks.failedAnnotationsShown': 'Mislukte annotaties ({shown} van {total} getoond)',
+  'gitView.pr.checks.annotationsTruncated': 'Annotaties zijn onvolledig — deze run heeft meer annotaties dan er geladen konden worden.',
   'gitView.pr.field.baseBranch': 'Basisbranch',
   'gitView.pr.field.description': 'Beschrijving',
   'gitView.pr.field.title': 'Titel',
@@ -1883,6 +1899,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'Geen wijzigingen in deze repository',
   'diffView.unavailable.untrackedDirectoryTitle': 'Map met nieuwe bestanden',
   'diffView.unavailable.untrackedDirectoryDescription': 'Deze map bevat te veel nieuwe bestanden om ze één voor één te tonen. Stage de map, of voeg hem toe aan .gitignore als hij niet in de repository thuishoort.',
+  'diffView.unavailable.tooLargeTitle': 'Bestand is te groot voor een diff',
+  'diffView.unavailable.tooLargeDescription': 'Het overschrijdt de limiet van 20 MiB voor bestandsdiffs.',
   'diffView.submodule.title': 'Submodule',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Nog steeds op commit {commit}',
@@ -2591,6 +2609,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Failover vanaf',
   'chat.messageBody.modelChanged.notice': 'Model gewijzigd: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Model gewijzigd: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Vorige voorkeur geven',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Laat modelpools een dag lang {model} verkiezen',
+  'chat.currentModel.label': 'Huidig model: {model}',
+  'chat.currentModel.labelWithPool': 'Huidig model: {model} uit pool {pool}',
+  'chat.currentModel.menu.openHint': 'Klik om een model te kiezen',
+  'chat.currentModel.menu.timing': 'Wisselen',
+  'chat.currentModel.menu.directPickHelp': 'Een directe keuze stopt de automatische uitwijking van de pool totdat u terugkeert naar de pool.',
+  'chat.currentModel.timing.immediately': 'Nu (start een lopend antwoord opnieuw)',
+  'chat.currentModel.timing.nextStep': 'Bij de volgende stap',
+  'chat.currentModel.timing.nextInput': 'Met het volgende bericht',
+  'chat.currentModel.menu.members': 'Modellen in pool {pool}',
+  'chat.currentModel.menu.returnToPool': 'Terug naar pool {pool}',
+  'chat.currentModel.toast.failed': 'Kon het model niet wisselen',
   'chat.generatedResult.actions.copy': 'Kopiëren',
   'chat.generatedResult.actions.copied': 'Gekopieerd',
   'chat.generatedResult.commit.title': 'Gegenereerd commitbericht',
@@ -3079,6 +3110,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Authenticatie vereist',
   'mcpDropdown.status.needsRegistration': 'Registratie vereist: {error}',
   'mcpDropdown.empty.configureInConfig': 'Configureer MCP-servers in Instellingen.',
+  "mcpDropdown.cacheNote": "Een server met Code Mode uit aan- of uitzetten zorgt dat de volgende beurt van een lopende sessie de promptcache niet gebruikt.",
   'sessionAuth.error.rateLimitTitle': 'Te veel pogingen',
   'sessionAuth.error.networkTitle': 'Server niet bereikbaar',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Wacht {minutes} minuut voordat u het opnieuw probeert.',
@@ -3836,8 +3868,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Deze behouden',
   'multirun.overview.addModel.action': 'Een model toevoegen',
   'multirun.overview.addModel.hint': 'Voert dezelfde prompt uit op nog één model in deze uitvoering',
-  'chat.parallel.settings.whereShared': 'Projectmap',
-  'chat.parallel.settings.whereSharedHint': 'Alle runs werken in dezelfde checkout. Het beste voor vragen en onderzoek.',
+  'chat.parallel.settings.whereShared': 'Gedeelde map',
+  'chat.parallel.settings.whereSharedHint': 'Alle runs werken in de map waar dit concept op staat. Het beste voor vragen en onderzoek.',
   'chat.parallel.settings.whereWorktrees': 'Aparte worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Elke run krijgt een eigen branch, zodat codewijzigingen elkaar nooit botsen. Houd de beste over.',
   'chat.parallel.settings.baseBranchTitle': 'Basisbranch',

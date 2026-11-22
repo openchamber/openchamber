@@ -161,6 +161,9 @@ export function createRoutingRuntime({
   listCatalogModels = null,
   readSessionHistory = null,
   readConfigEntries = null,
+  // The `experimental.model_routes` map for a directory, so a category on a
+  // pool carries the pool's description to Jev. Unset: no pool text.
+  readModelPools = () => ({}),
   // Whether OpenChamber keeps this session's cache warm itself (`session-warming`).
   isSessionWarm = () => false,
   now = Date.now,
@@ -283,6 +286,18 @@ export function createRoutingRuntime({
 
   // v2 answers the effective config as its documents, lowest priority first.
   const readConfig = readConfigEntries ?? ((directory) => openCodeClient(directory).config.get());
+
+  // OpenCode's own config read drops the pool keys it does not know, so the
+  // descriptions come from the config files. Unreadable files mean no pool
+  // text; the categories still route on their own descriptions.
+  const modelPoolsFor = (directory) => {
+    try {
+      return readModelPools(directory);
+    } catch (error) {
+      console.warn('[routing] model pools unavailable, routing without their descriptions:', errorMessage(error));
+      return {};
+    }
+  };
 
   /**
    * "Try to preserve cache usage": the category to stay on instead of a lower
@@ -414,7 +429,9 @@ export function createRoutingRuntime({
         const { endpoint } = await resolveAccess();
         if (!endpoint) throw new Error('No classification provider is available');
         const request = (requestText ?? '').trim();
-        const { answers, ms } = await jev.ask(buildRoutingRequest({ categories: enabledCategories(config), history, request }), endpoint);
+        const { answers, ms } = await jev.ask(buildRoutingRequest({
+          categories: enabledCategories(config), history, request, pools: modelPoolsFor(directory),
+        }), endpoint);
         const result = decideRouting(answers.category, { categories: enabledCategories(config), minConfidence: config.minConfidence });
         decision.category = result.category?.id ?? null;
         decision.confidence = result.confidence;

@@ -35,6 +35,7 @@ describe('MobileToaster', () => {
     viewport = Object.assign(new windowInstance.EventTarget(), { offsetTop: 0 });
     Object.defineProperty(windowInstance, 'visualViewport', { value: viewport });
     Object.assign(globalThis, {
+      Event: windowInstance.Event, CustomEvent: windowInstance.CustomEvent,
       window: windowInstance,
       document: windowInstance.document,
       navigator: windowInstance.navigator,

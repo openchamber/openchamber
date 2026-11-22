@@ -3,15 +3,19 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -28,7 +32,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode ist in OpenChamber enthalten. Aktualisieren Sie OpenChamber, um OpenCode v2 zu erhalten.",
@@ -142,15 +148,19 @@ export const dict = {
   ...linearIssuePickerI18n.de,
   ...referencePickerI18n.de,
   ...sessionMenuHintsI18n.de,
+  ...sessionErrorRecoveryI18n.de,
   ...sidebarLayoutI18n.de,
+  ...activityTimesI18n.de,
   ...projectKnowledgeI18n.de,
   ...linearPanelI18n.de,
   ...routingI18n.de,
+  ...poolSettingsI18n.de,
   ...pluginPanelI18n.de,
   ...surfacePanelI18n.de,
   ...fileArtifactsI18n.de,
   ...fileContentSearchI18n.de,
   ...htmlRenderI18n.de,
+  ...sessionLocationI18n.de,
   ...sessionNoticesI18n.de,
   ...usageStatsI18n.de,
   ...webSearchI18n.de,
@@ -167,7 +177,9 @@ export const dict = {
   ...pluginsGridI18n.de,
   ...integrationsCatalogI18n['de'],
   ...sessionGoalWriterI18n['de'],
+  ...subsessionModelsI18n['de'],
   ...diffFindI18n['de'],
+  ...questionAnswersI18n['de'],
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',
@@ -428,6 +440,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.status.sent': 'Gesendet',
   'sessions.scheduledTasks.dialog.status.skipped': 'Übersprungen',
   'sessions.scheduledTasks.dialog.status.cancelled': 'Abgebrochen',
+  'sessions.scheduledTasks.dialog.status.timeout': 'Zeitüberschreitung',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Nächste',
   'sessions.scheduledTasks.dialog.lastRun.label': 'Letzte Ausführung',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'läuft gerade',
@@ -543,6 +556,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'Bereich In Arbeit anzeigen',
   'sessions.sidebar.header.displayMode.showPinned': 'Bereich Angeheftet anzeigen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Ausführliche Zeilen',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Seitenleisten-Zeilen…',
   'sessions.sidebar.activity.pinnedTitle': 'Angeheftet',
   'sessions.sidebar.header.displayMode.showArchived': 'Archivierte Sitzungen anzeigen',
   'sessions.sidebar.header.displayMode.collapseAll': 'Alle einklappen',
@@ -571,6 +585,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'Ansicht',
   'sessions.sidebar.header.viewMode.projects': 'Baum',
   'sessions.sidebar.header.viewMode.timeline': 'Liste',
+  'sessions.sidebar.header.viewMode.headerless': 'Abschnittsüberschriften ausblenden',
   'sessions.sidebar.activity.chatsEmpty': 'Noch keine Chats.',
   'chat.chatInput.chooseProject': 'Projekt auswählen',
   'sessions.switcher.openAria': 'Sitzungswechsler öffnen',
@@ -1033,11 +1048,11 @@ export const dict = {
   'gitView.integrate.commitsMovedDescriptionSingle': '{count} Commit nach {branch} verschoben.',
   'gitView.integrate.commitsMovedToast': 'Commits verschoben',
   'gitView.integrate.commitsToMove': 'Zu verschiebende Commits',
-  'gitView.integrate.conflictsInFiles': 'Konflikte in Dateien',
+  'gitView.integrate.conflictsInFiles': 'Konflikte in {count} Dateien',
   'gitView.integrate.currentCommit': 'Aktueller Commit',
   'gitView.integrate.currentSession': 'Aktuelle Sitzung',
   'gitView.integrate.failedToMoveToast': 'Fehler beim Verschieben der Commits',
-  'gitView.integrate.moreFiles': 'Weitere Dateien',
+  'gitView.integrate.moreFiles': '{count} weitere Dateien',
   'gitView.integrate.move': 'Verschieben',
   'gitView.integrate.moveCommits': 'Commits verschieben',
   'gitView.integrate.moving': 'Wird verschoben…',
@@ -1049,10 +1064,10 @@ export const dict = {
   'gitView.integrate.previewUnavailable': 'Vorschau nicht verfügbar',
   'gitView.integrate.showAll': 'Alle anzeigen',
   'gitView.integrate.showLess': 'Weniger anzeigen',
-  'gitView.integrate.showingFirstCommits': 'Erste Commits werden angezeigt',
+  'gitView.integrate.showingFirstCommits': 'Die ersten {count} Commits werden angezeigt',
   'gitView.integrate.target': 'Ziel',
   'gitView.integrate.title': 'Commits erneut integrieren',
-  'gitView.integrate.toMoveCount': 'Zu verschieben',
+  'gitView.integrate.toMoveCount': '{count} zu verschieben',
   'gitView.operation.abort': 'Abbrechen',
   'gitView.operation.continue': 'Fortsetzen',
   'gitView.operation.inProgressTitle': '{operation} in Bearbeitung',
@@ -1171,6 +1186,7 @@ export const dict = {
   'gitView.pr.checks.openRun': 'Öffnen',
   'gitView.pr.checks.failedAnnotations': 'Fehlgeschlagene Annotationen',
   'gitView.pr.checks.failedAnnotationsShown': 'Fehlgeschlagene Annotationen ({shown} von {total} angezeigt)',
+  'gitView.pr.checks.annotationsTruncated': 'Annotationen sind unvollständig — dieser Lauf hat mehr Annotationen, als geladen werden konnten.',
   'gitView.pr.field.baseBranch': 'Basis-Branch',
   'gitView.pr.field.description': 'Beschreibung',
   'gitView.pr.field.title': 'Titel',
@@ -1635,6 +1651,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'Keine Änderungen in diesem Repository',
   'diffView.unavailable.untrackedDirectoryTitle': 'Ordner mit neuen Dateien',
   'diffView.unavailable.untrackedDirectoryDescription': 'Dieser Ordner enthält zu viele neue Dateien, um sie einzeln aufzulisten. Stelle ihn bereit oder trage ihn in .gitignore ein, wenn er nicht ins Repository gehört.',
+  'diffView.unavailable.tooLargeTitle': 'Datei ist zu groß für einen Diff',
+  'diffView.unavailable.tooLargeDescription': 'Sie überschreitet das Limit von 20 MiB für Dateivergleiche.',
   'diffView.submodule.title': 'Submodul',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Weiterhin auf Commit {commit}',
@@ -2313,6 +2331,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Failover von',
   'chat.messageBody.modelChanged.notice': 'Modell geändert: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Modell geändert: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Vorheriges bevorzugen',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Modellpools einen Tag lang {model} bevorzugen lassen',
+  'chat.currentModel.label': 'Aktuelles Modell: {model}',
+  'chat.currentModel.labelWithPool': 'Aktuelles Modell: {model} aus Pool {pool}',
+  'chat.currentModel.menu.openHint': 'Klicken, um ein Modell zu wählen',
+  'chat.currentModel.menu.timing': 'Wechseln',
+  'chat.currentModel.menu.directPickHelp': 'Eine direkte Auswahl beendet den Pool-Fallback, bis Sie zum Pool zurückkehren.',
+  'chat.currentModel.timing.immediately': 'Sofort (startet eine laufende Antwort neu)',
+  'chat.currentModel.timing.nextStep': 'Beim nächsten Schritt',
+  'chat.currentModel.timing.nextInput': 'Mit der nächsten Nachricht',
+  'chat.currentModel.menu.members': 'Modelle im Pool {pool}',
+  'chat.currentModel.menu.returnToPool': 'Zurück zum Pool {pool}',
+  'chat.currentModel.toast.failed': 'Das Modell konnte nicht gewechselt werden',
   'chat.generatedResult.actions.copy': 'Kopieren',
   'chat.generatedResult.actions.copied': 'Kopiert',
   'chat.generatedResult.commit.title': 'Generierte Commit-Nachricht',
@@ -2794,6 +2825,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Authentifizierung erforderlich',
   'mcpDropdown.status.needsRegistration': 'Registrierung erforderlich: {error}',
   'mcpDropdown.empty.configureInConfig': 'Konfigurieren Sie MCP-Server in den Einstellungen.',
+  "mcpDropdown.cacheNote": "Wenn du einen Server mit ausgeschaltetem Code Mode umschaltest, nutzt der nächste Zug einer laufenden Sitzung den Prompt-Cache nicht.",
   'sessionAuth.error.rateLimitTitle': 'Zu viele Versuche',
   'sessionAuth.error.networkTitle': 'Server nicht erreichbar',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Bitte warten Sie {minutes} Minute, bevor Sie es erneut versuchen.',
@@ -3834,8 +3866,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Diesen behalten',
   'multirun.overview.addModel.action': 'Modell hinzufügen',
   'multirun.overview.addModel.hint': 'Derselbe Prompt auf einem weiteren Modell in diesem Lauf',
-  'chat.parallel.settings.whereShared': 'Projektverzeichnis',
-  'chat.parallel.settings.whereSharedHint': 'Alle Läufe arbeiten in deinem Checkout. Am besten für Fragen und Recherche.',
+  'chat.parallel.settings.whereShared': 'Gemeinsames Verzeichnis',
+  'chat.parallel.settings.whereSharedHint': 'Alle Läufe arbeiten in dem Verzeichnis, auf das dieser Entwurf zeigt. Am besten für Fragen und Recherche.',
   'chat.parallel.settings.whereWorktrees': 'Getrennte Worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Jeder Lauf bekommt einen eigenen Branch, Codeänderungen kollidieren nie. Behalte den besten.',
   'chat.parallel.settings.baseBranchTitle': 'Basis-Branch',

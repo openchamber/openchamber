@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
@@ -10,22 +11,68 @@ import { injectedEnvKeys } from '../injected-env.js';
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
+// The managed-servers read verifies recorded pids through an async `ps`
+// read (execFile in lifecycle.js). Tests steer it by setting
+// `recordedProcessCommand`; the callback shape matches the real execFile,
+// so lifecycle's async wrapper resolves with this stdout.
+let recordedProcessCommand = '';
+const execFileMock = vi.fn((file, args, options, callback) => callback(null, recordedProcessCommand, ''));
 
-vi.mock('node:child_process', () => ({
-  spawn: spawnMock,
-  spawnSync: spawnSyncMock,
-  // `managed-process-registry.js` (imported transitively via lifecycle.js)
-  // calls `promisify(execFile)` at module load, so the mock must expose a
-  // function here. Lifecycle tests don't exercise the reaper path, so a plain
-  // stub is enough; the registry's best-effort writes are no-ops on errors.
-  execFile: vi.fn(),
-}));
-vi.mock('./startup-performance.js', () => ({
-  recordStartupPerformance: recordStartupPerformanceMock,
-}));
-
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const {
+  createOpenCodeLifecycleRuntime,
+  getBoundedTextTail,
+  parsePositiveInt,
+  resolveHealthCheckIntervalOverrideMs,
+  resolveHealthCheckTimeoutMs,
+} = await import('./lifecycle.js');
 const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
+
+describe('getBoundedTextTail', () => {
+  it('returns the value whole when it fits', () => {
+    expect(getBoundedTextTail(String.fromCharCode(0x20ac) + 'z'.repeat(100), 103)).toBe(String.fromCharCode(0x20ac) + 'z'.repeat(100));
+    expect(getBoundedTextTail('short', 32 * 1024)).toBe('short');
+  });
+
+  it('aligns the byte cut to a UTF-8 boundary, losing at most the straddling character (#2033)', () => {
+    const value = 'a'.repeat(50) + String.fromCharCode(0x20ac) + 'b'.repeat(50);
+    // Byte length 103; a 52-byte tail starts on the euro sign's second
+    // byte, a 53-byte tail starts exactly on its lead byte.
+    expect(getBoundedTextTail(value, 52)).toBe('b'.repeat(50));
+    expect(getBoundedTextTail(value, 52)).not.toContain(String.fromCharCode(0xfffd));
+    expect(getBoundedTextTail(value, 53)).toBe(String.fromCharCode(0x20ac) + 'b'.repeat(50));
+  });
+});
+
+describe('health-check timer readers', () => {
+  it('accepts the timer maximum and ordinary values for the timeout reader', () => {
+    expect(resolveHealthCheckTimeoutMs({})).toBe(5000);
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '250' })).toBe(250);
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '2147483647' })).toBe(2_147_483_647);
+  });
+
+  it('falls back to the default above the timer maximum and for unsafe integers (timeout reader)', () => {
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '3000000000' })).toBe(5000);
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '9007199254740993' })).toBe(5000);
+  });
+
+  it("keeps positive-only semantics for the timeout reader: '0' falls back to the default", () => {
+    expect(resolveHealthCheckTimeoutMs({ OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS: '0' })).toBe(5000);
+  });
+
+  it('accepts the timer maximum and an explicit zero for the interval override reader', () => {
+    expect(resolveHealthCheckIntervalOverrideMs({})).toBe(0);
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '0' })).toBe(0);
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '1000' })).toBe(1000);
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '2147483647' })).toBe(
+      2_147_483_647
+    );
+  });
+
+  it('falls back to zero above the timer maximum and for unsafe integers (interval override reader)', () => {
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '3000000000' })).toBe(0);
+    expect(resolveHealthCheckIntervalOverrideMs({ OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS: '9007199254740993' })).toBe(0);
+  });
+});
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
@@ -38,6 +85,7 @@ afterEach(async () => {
   activeLogPath = null;
   await Promise.all(tempDataDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
   spawnSyncMock.mockReset();
+  recordedProcessCommand = '';
   recordStartupPerformanceMock.mockReset();
   globalThis.fetch = originalFetch;
   if (typeof originalOpencodeBinary === 'string') {
@@ -136,6 +184,12 @@ const createRuntime = (overrides = {}, stateOverrides = {}, envOverrides = {}) =
     normalizeApiPrefix: vi.fn(() => ''),
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
     checkOpenCodeBinary: async () => '2.0.19',
+    spawnProcess: spawnMock,
+    spawnSyncProcess: spawnSyncMock,
+    execFileProcess: (...args) => new Promise((resolve, reject) => {
+      execFileMock(...args.slice(0, 3), (error, stdout, stderr) => error ? reject(error) : resolve({ stdout, stderr }));
+    }),
+    recordStartupPerformanceEvent: recordStartupPerformanceMock,
   ensureOpencodeCliEnv: vi.fn(),
     ensureLocalOpenCodeServerPassword: vi.fn(async () => 'password'),
     resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => ({ binary, args: [], wrapperType: null })),
@@ -195,6 +249,110 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('readiness follows the child when another server rotates the log mid-startup', async () => {
+    spawnMock.mockImplementation(() => createMockChild());
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const runtime = createRuntime();
+    const started = runtime.startOpenCode();
+    await vi.waitFor(() => {
+      expect(fsSync.existsSync(activeLogPath)).toBe(true);
+    });
+    // A second server sharing the data dir crosses the cap and rotates the
+    // log; the starting child keeps writing to the renamed file via its fd.
+    fsSync.renameSync(activeLogPath, `${activeLogPath}.1`);
+    fsSync.appendFileSync(`${activeLogPath}.1`, 'opencode server listening on http://127.0.0.1:45678\n');
+    const server = await started;
+    runtime.testState.openCodeProcess = server;
+    try {
+      expect(server).toBeTruthy();
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
+  it('does not pair a replacement process with its predecessor version in the managed-servers read', async () => {
+    const pids = [process.pid, process.ppid];
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      child.pid = pids.shift() ?? child.pid;
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.19' }));
+    const runtime = createRuntime();
+    const firstServer = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = firstServer;
+    try {
+      await runtime.triggerHealthCheck();
+      const before = await runtime.getManagedServersSnapshot();
+      expect(before.servers.find((server) => server.pid === process.pid)?.version).toBe('2.0.19');
+
+      await runtime.restartOpenCode();
+
+      const after = await runtime.getManagedServersSnapshot();
+      const replacement = after.servers.find((server) => server.pid === process.ppid);
+      expect(replacement?.status).toBe('ready');
+      expect(replacement?.version).toBeNull();
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
+  it('verifies recorded-pid identity in the managed-servers read (#638)', async () => {
+    const entry = { pid: process.pid, port: 5001, binary: '/bin/opencode', startedAt: '2026-10-28T00:30:00.000Z' };
+    const runtime = createRuntime({ readRegistryEntries: async () => [entry] });
+    try {
+      // Recycled pid: the live process at the recorded pid is unrelated.
+      recordedProcessCommand = 'sleep 30\n';
+      const recycled = await runtime.getManagedServersSnapshot();
+      expect(recycled.servers.map((server) => server.pid)).toEqual([]);
+
+      // Genuine recorded server: command still identifies it, port included.
+      recordedProcessCommand = '/bin/opencode serve --hostname 127.0.0.1 --port 5001\n';
+      const genuine = await runtime.getManagedServersSnapshot();
+      expect(genuine.servers).toEqual([
+        { pid: process.pid, port: 5001, directory: null, version: null, status: 'unknown', startedAt: '2026-10-28T00:30:00.000Z', sessionCount: null },
+      ]);
+
+      // A different OpenCode server whose port merely contains the recorded
+      // port as a substring (50010 vs 5001) is not the recorded server.
+      recordedProcessCommand = '/bin/opencode serve --hostname 127.0.0.1 --port 50010\n';
+      const wrongPort = await runtime.getManagedServersSnapshot();
+      expect(wrongPort.servers).toEqual([]);
+
+      // Identity cannot be verified: no command read -> not listed.
+      recordedProcessCommand = '';
+      const unverifiable = await runtime.getManagedServersSnapshot();
+      expect(unverifiable.servers).toEqual([]);
+    } finally {
+      recordedProcessCommand = '';
+    }
+  });
+
+  it('reports the host-only session count for its own server in the managed-servers read', async () => {
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      child.pid = process.pid;
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.19' }));
+    const runtime = createRuntime({
+      getActiveSessionCount: () => 5,
+      getActiveHostSessionCount: () => 2,
+    });
+    const server = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = server;
+    try {
+      await runtime.triggerHealthCheck();
+      const snapshot = await runtime.getManagedServersSnapshot();
+      const own = snapshot.servers.find((entry) => entry.pid === process.pid);
+      expect(own?.sessionCount).toBe(2);
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
   it('journals managed launch, readiness, exit and restart as fixed actions only', async () => {
     const journal = createServerDiagnosticJournal();
     spawnMock.mockImplementation(() => {
@@ -228,10 +386,7 @@ describe('OpenCode lifecycle', () => {
   });
 
   it('records an authoritative ready terminal event for external startup', async () => {
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -260,10 +415,7 @@ describe('OpenCode lifecycle', () => {
   });
 
   it('recovers an external OPENCODE_HOST connection using its configured endpoint', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    const fetchMock = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     globalThis.fetch = fetchMock;
     const runtime = createRuntime({}, {
       openCodePort: null,
@@ -343,10 +495,7 @@ describe('OpenCode lifecycle', () => {
     const otherProject = path.join(root, 'project-b');
     await fs.mkdir(lastUsed);
     await fs.mkdir(otherProject);
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    const fetchMock = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     globalThis.fetch = fetchMock;
     const runtime = createRuntime({
       env: {
@@ -381,10 +530,7 @@ describe('OpenCode lifecycle', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-stale-'));
     const stale = path.join(root, 'worktree-a');
     await fs.mkdir(stale);
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -422,10 +568,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(chats);
     await fs.mkdir(project);
     let warmup = [];
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -462,10 +605,7 @@ describe('OpenCode lifecycle', () => {
     const current = path.join(root, 'current');
     await fs.mkdir(leftChat);
     await fs.mkdir(current);
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -497,10 +637,7 @@ describe('OpenCode lifecycle', () => {
     const surviving = path.join(root, 'still-here');
     await fs.mkdir(stale);
     await fs.mkdir(surviving);
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     // The warm pass offered both; only the first was cached as the default.
     const runtime = createRuntime({
       env: {
@@ -532,10 +669,7 @@ describe('OpenCode lifecycle', () => {
     await fs.mkdir(stale);
     await fs.mkdir(navigated);
     let current = stale;
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -571,10 +705,7 @@ describe('OpenCode lifecycle', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-perm-'));
     const locked = path.join(root, 'locked');
     await fs.mkdir(locked);
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
-    }));
+    globalThis.fetch = vi.fn(async () => Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
     const runtime = createRuntime({
       env: {
         ENV_CONFIGURED_OPENCODE_PORT: 45678,
@@ -610,9 +741,9 @@ describe('OpenCode lifecycle', () => {
     globalThis.fetch = vi.fn(async (url, init) => {
       requested.push([String(url), init?.headers?.['x-opencode-directory'] ?? null]);
       if (String(url).endsWith('/api/info')) {
-        return { ok: true, json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
+        return Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } });
       }
-      return { ok: true, json: async () => ({ data: [{ id: 'build' }] }) };
+      return Response.json({ data: [{ id: 'build' }] });
     });
     const runtime = createRuntime({
       env: {
@@ -636,6 +767,44 @@ describe('OpenCode lifecycle', () => {
     expect(agentChecks.length).toBeGreaterThan(0);
     expect(agentChecks.every(([, directory]) => directory === null)).toBe(true);
     await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('settles waitForAgentPresence within its deadline when /api/agent never answers', async () => {
+    const signals = [];
+    globalThis.fetch = vi.fn(async (url, init) => {
+      if (String(url).endsWith('/api/info')) {
+        return Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+      }
+      signals.push(init?.signal ?? null);
+      // A wedged OpenCode: accepts the request and never answers, but like a
+      // real fetch it rejects when the caller's signal aborts.
+      return new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const startedAt = Date.now();
+    await expect(runtime.waitForAgentPresence('build', 500, 50)).rejects.toThrow(
+      'Agent "build" not available after OpenCode restart',
+    );
+    // Without a per-attempt deadline the first stalled fetch never settles,
+    // so the wait would hang far past its own 500 ms deadline.
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
   });
 
   it('records an authoritative error terminal event when bootstrap fails', async () => {
@@ -718,12 +887,7 @@ describe('OpenCode lifecycle', () => {
     {
       name: 'invalid JSON',
       expectedClass: 'invalid_response',
-      fetchResult: () => ({
-        ok: true,
-        json: async () => {
-          throw new SyntaxError('Unexpected token');
-        },
-      }),
+      fetchResult: () => new Response('{', { headers: { 'content-type': 'application/json' } }),
     },
   ])('classifies and stores a counted $name health failure', async ({ expectedClass, fetchResult }) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -750,6 +914,77 @@ describe('OpenCode lifecycle', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`class=${expectedClass}`));
     warn.mockRestore();
   });
+
+  it('tracks external OpenCode health failures and recovery without restarting it', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: 'unavailable' }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }));
+    globalThis.fetch = fetchMock;
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      isExternalOpenCode: true,
+      isOpenCodeReady: true,
+    });
+
+    await runtime.triggerHealthCheck();
+
+    expect(runtime.testState.isOpenCodeReady).toBe(false);
+    expect(runtime.testState.lastOpenCodeHealthFailure).toEqual({
+      class: 'error',
+      detail: expect.any(String),
+      at: expect.any(String),
+      source: 'immediate',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:45678/api/info',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(runtime.testState.openCodeProcess).toBeNull();
+
+    await runtime.triggerHealthCheck();
+
+    expect(runtime.testState.isOpenCodeReady).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('does not wedge external health checks when the info body stalls', async () => {
+    // Headers arrive at once; the body never does. The probe's abort
+    // deadline must still fire while the body is being read — a real
+    // fetch errors the body stream when its signal aborts — or the
+    // health-check cycle promise stays pending and every later check
+    // reuses it, leaving readiness frozen at its previous value.
+    const stallingFetch = vi.fn(async (_url, init) => {
+      const stream = new ReadableStream({
+        start(controller) {
+          init.signal.addEventListener('abort', () => controller.error(init.signal.reason), { once: true });
+        },
+      });
+      return new Response(stream, { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    globalThis.fetch = stallingFetch;
+    const runtime = createRuntime({}, {
+      openCodePort: 45678,
+      isExternalOpenCode: true,
+      isOpenCodeReady: true,
+    });
+
+    await runtime.triggerHealthCheck();
+
+    expect(runtime.testState.isOpenCodeReady).toBe(false);
+    expect(stallingFetch).toHaveBeenCalledTimes(1);
+
+    // The cycle is not wedged: the next check issues a fresh probe and
+    // readiness recovers when the server answers.
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      Response.json({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    );
+    await runtime.triggerHealthCheck();
+    expect(runtime.testState.isOpenCodeReady).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  }, 20_000);
 
   it('does not mistake a live managed process wrapper for an exited child', async () => {
     const close = vi.fn(async () => {});
@@ -1388,9 +1623,31 @@ it('a rejected CLI preflight never permits desktop bootstrap', async () => {
   expect(spawnMock).not.toHaveBeenCalled();
 });
 
+describe('readiness on a log shared by several servers', () => {
+  it('takes only the listening line for the port its child was given', async () => {
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      queueMicrotask(() => {
+        // Another server's child, starting at the same time, writes first.
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:50000\n');
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => Response.json({}));
+    const server = await createRuntime({ ensureOpencodeCliEnv: vi.fn(() => 'opencode') }).startOpenCode();
+    expect(server.url).toBe('http://127.0.0.1:45678');
+  });
+});
+
 describe('managed OpenCode adoption across OpenChamber restarts', () => {
   const READY_LINE = 'opencode server listening on http://127.0.0.1:45678\n';
   const OWNED_PS_OUTPUT = 'opencode serve --hostname 127.0.0.1 --port 45678\n';
+  const readyLineFor = (command, args) => {
+    const launched = unwrapLaunch(command, args).args;
+    const port = launched[launched.indexOf('--port') + 1];
+    return `opencode server listening on http://127.0.0.1:${port}\n`;
+  };
   // Never a live pid, so a replace path cannot signal an unrelated process.
   const DEAD_PID = 2147483646;
 
@@ -1403,7 +1660,7 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
       queueMicrotask(() => child.stdout.emit('data', READY_LINE));
       return child;
     });
-    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    globalThis.fetch = vi.fn(async () => Response.json({}));
     const server = await createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode') }).startOpenCode();
     spawnMock.mockClear();
     return { dataDir, server };
@@ -1427,10 +1684,11 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     const { dataDir } = await startFirstRuntime();
     const recorded = JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
     spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
-    globalThis.fetch = vi.fn(async () => ({ ok: true }));
-    spawnMock.mockImplementationOnce(() => {
+    globalThis.fetch = vi.fn(async () => Response.json({}));
+    spawnMock.mockImplementationOnce((command, args) => {
       const child = createMockChild();
-      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      // Like OpenCode, the line names the port the child was started on.
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
       return child;
     });
 
@@ -1447,13 +1705,179 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     expect(current.binary).toBe('/opt/other/opencode');
   });
 
+  // Two OpenChamber servers on one data dir (the desktop app and `openchamber
+  // serve`) share state.json and draining.json. The recorded OpenCode may be
+  // the other server's; it must never be adopted, handed off from or drained.
+  // The test runner's parent stands in for that other server: alive, not us.
+  it('leaves an OpenCode that another live server owns alone and starts its own', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const recorded = JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    spawnMock.mockImplementationOnce((command, args) => {
+      const child = createMockChild();
+      // Like OpenCode, the line names the port the child was started on.
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
+      return child;
+    });
+
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => '/opt/other/opencode'),
+      readProcessOwner: () => process.ppid,
+    });
+    await second.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const drainingPath = path.join(dataDir, 'managed-opencode', 'draining.json');
+    const draining = fsSync.existsSync(drainingPath) ? JSON.parse(fsSync.readFileSync(drainingPath, 'utf8')).draining : [];
+    expect(draining.map((record) => record.pid)).not.toContain(recorded.pid);
+  });
+
+  it('adopts the OpenCode of the server handing off to it, and records itself as the owner', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir, server: firstServer } = await startFirstRuntime();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    // The registry names the predecessor as the owner, as it would after it spawned this OpenCode.
+    const entryPath = path.join(process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY, `${firstServer.pid}.json`);
+    const entry = JSON.parse(fsSync.readFileSync(entryPath, 'utf8'));
+    fsSync.writeFileSync(entryPath, JSON.stringify({ ...entry, ownerPid: process.ppid }));
+
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      getHandoffPredecessorPid: () => process.ppid,
+    });
+    const adopted = await second.startOpenCode();
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(adopted.pid).toBe(firstServer.pid);
+    expect(JSON.parse(fsSync.readFileSync(entryPath, 'utf8')).ownerPid).toBe(process.pid);
+  });
+
+  it('leaves an OpenCode whose owner the registry does not record alone', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const recorded = JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
+    fsSync.rmSync(path.join(process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY, `${recorded.pid}.json`), { force: true });
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    spawnMock.mockImplementationOnce((command, args) => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
+      return child;
+    });
+
+    await createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => '/opt/other/opencode') }).startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const drainingPath = path.join(dataDir, 'managed-opencode', 'draining.json');
+    const draining = fsSync.existsSync(drainingPath) ? JSON.parse(fsSync.readFileSync(drainingPath, 'utf8')).draining : [];
+    expect(draining.map((record) => record.pid)).not.toContain(recorded.pid);
+  });
+
+  it('says another server holds a pinned port instead of failing to bind', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    // A live recorded process on the pinned port, owned by another live server.
+    const statePath = path.join(dataDir, 'managed-opencode', 'state.json');
+    fsSync.writeFileSync(statePath, JSON.stringify({ ...JSON.parse(fsSync.readFileSync(statePath, 'utf8')), pid: process.ppid }));
+
+    const second = createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode'), readProcessOwner: () => process.ppid });
+    await expect(second.startOpenCode()).rejects.toThrow(/port 45678 is held by another OpenChamber server/);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('reloads its own OpenCode when another server has overwritten state.json', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    const ensureOpencodeCliEnv = vi.fn(() => 'opencode');
+    const runtime = createRuntime({ dataDir, ensureOpencodeCliEnv });
+    // The server keeps the started process in state, as restartOpenCode does.
+    runtime.testState.openCodeProcess = await runtime.startOpenCode();
+    const statePath = path.join(dataDir, 'managed-opencode', 'state.json');
+    const mine = JSON.parse(fsSync.readFileSync(statePath, 'utf8'));
+    fsSync.writeFileSync(statePath, JSON.stringify({ ...mine, pid: process.ppid, port: 51000 }));
+    ensureOpencodeCliEnv.mockImplementation(() => '/opt/other/opencode');
+    spawnMock.mockImplementationOnce((command, args) => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
+      return child;
+    });
+
+    await expect(runtime.reloadOpenCode()).resolves.toBe(true);
+  });
+
+  it('leaves an orphan another server claimed first', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    spawnMock.mockImplementationOnce((command, args) => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
+      return child;
+    });
+    // The recorded owner is gone, and another live server holds the claim on its OpenCode.
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      readProcessOwner: () => DEAD_PID,
+      claimProcess: () => process.ppid,
+    });
+    await second.startOpenCode();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps another live server\'s draining records when it rewrites draining.json', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const drainingPath = path.join(dataDir, 'managed-opencode', 'draining.json');
+    const foreign = { pid: 424242, port: 50075, binary: '/opt/other/opencode', drainStartedAt: Date.now() };
+    fsSync.writeFileSync(drainingPath, JSON.stringify({ version: 1, draining: [foreign] }));
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    globalThis.fetch = vi.fn(async () => Response.json({}));
+    spawnMock.mockImplementationOnce((command, args) => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
+      return child;
+    });
+    // This server hands off from its own OpenCode, which adds a draining record of its own.
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => '/opt/new/opencode'),
+      readProcessOwner: (pid) => (pid === foreign.pid ? process.ppid : process.pid),
+    });
+    await second.startOpenCode();
+
+    const pids = JSON.parse(fsSync.readFileSync(drainingPath, 'utf8')).draining.map((record) => record.pid);
+    expect(pids).toContain(foreign.pid);
+    expect(pids.length).toBeGreaterThan(1);
+  });
+
+  it('registers the draining OpenCode it inherits under itself', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const registry = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
+    // A draining child its predecessor left, registered to a server that is gone.
+    const inherited = { pid: 424243, port: 50076, binary: 'opencode', drainStartedAt: Date.now() };
+    fsSync.writeFileSync(path.join(dataDir, 'managed-opencode', 'draining.json'), JSON.stringify({ version: 1, draining: [inherited] }));
+    fsSync.writeFileSync(path.join(registry, `${inherited.pid}.json`), JSON.stringify({ pid: inherited.pid, ownerPid: DEAD_PID - 1, port: inherited.port, binary: 'opencode' }));
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+
+    await createRuntime({ dataDir, ensureOpencodeCliEnv: vi.fn(() => 'opencode') }).startOpenCode();
+    await vi.waitFor(() => {
+      expect(JSON.parse(fsSync.readFileSync(path.join(registry, `${inherited.pid}.json`), 'utf8')).ownerPid).toBe(process.pid);
+    });
+  });
+
   it('replaces the recorded OpenCode when the launch fingerprint changed', async () => {
     delete process.env.OPENCODE_BINARY;
     const { dataDir } = await startFirstRuntime();
     spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
-    spawnMock.mockImplementationOnce(() => {
+    spawnMock.mockImplementationOnce((command, args) => {
       const child = createMockChild();
-      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      // Like OpenCode, the line names the port the child was started on.
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
       return child;
     });
 
@@ -1467,9 +1891,10 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     delete process.env.OPENCODE_BINARY;
     const { dataDir } = await startFirstRuntime();
     spawnSyncMock.mockImplementation(() => ({ stdout: '' }));
-    spawnMock.mockImplementationOnce(() => {
+    spawnMock.mockImplementationOnce((command, args) => {
       const child = createMockChild();
-      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      // Like OpenCode, the line names the port the child was started on.
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
       return child;
     });
 
@@ -1485,9 +1910,10 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
     expect(firstServer.pid).toBe(DEAD_PID);
     spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
     globalThis.fetch = vi.fn(async () => ({ ok: false }));
-    spawnMock.mockImplementationOnce(() => {
+    spawnMock.mockImplementationOnce((command, args) => {
       const child = createMockChild();
-      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      // Like OpenCode, the line names the port the child was started on.
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
       return child;
     });
 
@@ -1498,3 +1924,166 @@ describe('managed OpenCode adoption across OpenChamber restarts', () => {
   });
 });
 
+
+describe('parsePositiveInt health env parsing (#689)', () => {
+  it('honours plain decimal spellings', () => {
+    expect(parsePositiveInt('5000', 5000)).toBe(5000);
+    expect(parsePositiveInt('250', 5000)).toBe(250);
+    expect(parsePositiveInt(' 12 ', 5000)).toBe(12);
+  });
+
+  it('falls back for non-plain-decimal spellings instead of truncating them', () => {
+    for (const invalid of [undefined, '', 'abc', '5000junk', '5000ms', '5.9', '1e3', '0x10', '-5', '0']) {
+      expect(parsePositiveInt(invalid, 5000)).toBe(5000);
+      expect(parsePositiveInt(invalid, 20)).toBe(20);
+    }
+  });
+});
+
+
+describe('managed credential rotation', () => {
+  const READY_LINE = 'opencode server listening on http://127.0.0.1:45678\n';
+  const OWNED_PS_OUTPUT = 'opencode serve --hostname 127.0.0.1 --port 45678\n';
+  // Never a live pid, so a replace path cannot signal an unrelated process.
+  const DEAD_PID = 2147483646;
+  // Fixture values only. Assertions compare SHA-256 hashes, never the
+  // values themselves, matching how a real rotation is verified.
+  const OLD_PASSWORD = 'old-fixture-password';
+  const NEW_PASSWORD = 'new-fixture-password';
+  const OLD_TOKEN = 'old-fixture-token';
+  const NEW_TOKEN = 'new-fixture-token';
+  const sha256 = (value) => createHash('sha256').update(String(value)).digest('hex');
+  const readState = (dataDir) => JSON.parse(fsSync.readFileSync(path.join(dataDir, 'managed-opencode', 'state.json'), 'utf8'));
+  const readyLineFor = (command, args) => {
+    const launched = unwrapLaunch(command, args).args;
+    const port = launched[launched.indexOf('--port') + 1];
+    return `opencode server listening on http://127.0.0.1:${port}\n`;
+  };
+  const spawnOnceWithReadyLine = () => {
+    spawnMock.mockImplementationOnce((command, args) => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', readyLineFor(command, args)));
+      return child;
+    });
+  };
+  // Credential doubles with the real contract: a reuse value wins when one
+  // is passed; with none, a fresh value is generated.
+  const credentialDoubles = () => ({
+    ensureLocalOpenCodeServerPassword: vi.fn(async ({ reusePassword }) => reusePassword ?? NEW_PASSWORD),
+    getManagedOpenCodeEnv: vi.fn(async ({ agentToolToken }) => ({
+      OPENCHAMBER_AGENT_TOOL_TOKEN: agentToolToken ?? NEW_TOKEN,
+    })),
+  });
+
+  const startFirstRuntime = async () => {
+    const dataDir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'opencode-rotate-test-'));
+    tempDataDirs.push(dataDir);
+    spawnMock.mockImplementationOnce(() => {
+      const child = createMockChild();
+      child.pid = DEAD_PID;
+      queueMicrotask(() => child.stdout.emit('data', READY_LINE));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    await createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      ensureLocalOpenCodeServerPassword: vi.fn(async () => OLD_PASSWORD),
+      getManagedOpenCodeEnv: vi.fn(async () => ({ OPENCHAMBER_AGENT_TOOL_TOKEN: OLD_TOKEN })),
+    }).startOpenCode();
+    spawnMock.mockClear();
+    spawnSyncMock.mockImplementation((cmd) => ({ stdout: cmd === 'ps' ? OWNED_PS_OUTPUT : '' }));
+    globalThis.fetch = vi.fn(async () => ({ ok: true }));
+    return { dataDir };
+  };
+
+  it('rotation start discards the saved pair and writes a fresh one', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const before = readState(dataDir);
+    expect(sha256(before.password)).toBe(sha256(OLD_PASSWORD));
+    expect(sha256(before.agentToolToken)).toBe(sha256(OLD_TOKEN));
+    spawnOnceWithReadyLine();
+
+    const doubles = credentialDoubles();
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      rotateManagedCredentials: true,
+      ...doubles,
+    });
+    await second.startOpenCode();
+
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenCalledWith({ rotateManaged: true, reusePassword: null });
+    expect(doubles.getManagedOpenCodeEnv).toHaveBeenCalledWith({ agentToolToken: null });
+    // The changed launch fingerprint hands off from the recorded process;
+    // it is never adopted with the old credentials.
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const after = readState(dataDir);
+    expect(sha256(after.password)).not.toBe(sha256(before.password));
+    expect(sha256(after.agentToolToken)).not.toBe(sha256(before.agentToolToken));
+    expect(sha256(after.password)).toBe(sha256(NEW_PASSWORD));
+    expect(sha256(after.agentToolToken)).toBe(sha256(NEW_TOKEN));
+  });
+
+  it('rotation is one start only: the next start in the same process reuses the rotated pair', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnOnceWithReadyLine();
+
+    const doubles = credentialDoubles();
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      rotateManagedCredentials: true,
+      ...doubles,
+    });
+    await second.startOpenCode();
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenLastCalledWith({ rotateManaged: true, reusePassword: null });
+
+    spawnOnceWithReadyLine();
+    await second.startOpenCode();
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenLastCalledWith({ rotateManaged: true, reusePassword: NEW_PASSWORD });
+    expect(doubles.getManagedOpenCodeEnv).toHaveBeenLastCalledWith({ agentToolToken: NEW_TOKEN });
+  });
+
+  it('a normal start reuses the saved pair and adopts the running OpenCode', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    const before = readState(dataDir);
+
+    const doubles = credentialDoubles();
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => 'opencode'),
+      ...doubles,
+    });
+    const adopted = await second.startOpenCode();
+
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenCalledWith({ rotateManaged: true, reusePassword: OLD_PASSWORD });
+    expect(doubles.getManagedOpenCodeEnv).toHaveBeenCalledWith({ agentToolToken: OLD_TOKEN });
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(adopted.pid).toBe(before.pid);
+  });
+
+  it('a handoff start still reuses the saved pair', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { dataDir } = await startFirstRuntime();
+    spawnOnceWithReadyLine();
+
+    const doubles = credentialDoubles();
+    const second = createRuntime({
+      dataDir,
+      ensureOpencodeCliEnv: vi.fn(() => '/opt/other/opencode'),
+      ...doubles,
+    });
+    await second.startOpenCode();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(doubles.ensureLocalOpenCodeServerPassword).toHaveBeenCalledWith({ rotateManaged: true, reusePassword: OLD_PASSWORD });
+    expect(doubles.getManagedOpenCodeEnv).toHaveBeenCalledWith({ agentToolToken: OLD_TOKEN });
+    const after = readState(dataDir);
+    expect(sha256(after.password)).toBe(sha256(OLD_PASSWORD));
+    expect(sha256(after.agentToolToken)).toBe(sha256(OLD_TOKEN));
+  });
+});

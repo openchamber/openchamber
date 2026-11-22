@@ -24,6 +24,12 @@ export const LOCAL_MODEL = {
   sha256: '6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e',
 };
 
+// A download that delivers no bytes for this long is stalled, not slow:
+// the model is over a gigabyte, so the bound is on silence, not on total
+// time — a slow connection that keeps delivering bytes is never cut off.
+// The dictation model downloader uses the same bound and shape (#814).
+const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
+
 /** Refuses a model that has no pinned digest, before anything is fetched or written. */
 export const assertVerifiable = (model = LOCAL_MODEL) => {
   if (!model.sha256) {
@@ -56,43 +62,111 @@ export const modelStatus = (file = modelPath(), model = LOCAL_MODEL) => {
 /**
  * Downloads the model to a partial file. The partial file becomes the model
  * only when its size and SHA-256 both match the model's pinned values;
- * otherwise it is discarded and the error says why.
+ * otherwise it is discarded and the error says why. A download that goes
+ * silent — no response, then no bytes — for stallTimeoutMs is discarded
+ * the same way, with an error that says it timed out and can be retried;
+ * without that bound a half-open connection would hold the download (and
+ * the Settings state that tracks it) forever.
  */
-export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, fetchImpl = fetch, onProgress = () => {} } = {}) => {
+export const downloadModel = async ({ file = modelPath(), model = LOCAL_MODEL, fetchImpl = fetch, createWriteStreamImpl = fs.createWriteStream, onProgress = () => {}, stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS } = {}) => {
   if (modelStatus(file, model).installed) return modelStatus(file, model);
   assertVerifiable(model);
-  const response = await fetchImpl(model.url);
-  if (!response.ok || !response.body) {
-    throw Object.assign(new Error(`Model download failed (${response.status})`), { status: 502 });
-  }
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const partial = `${file}.part`;
-  const out = fs.createWriteStream(partial);
-  const digest = createHash('sha256');
-  let received = 0;
+
+  // Stall bound for the whole transfer, mirroring the dictation model
+  // downloader (#814): the timer is armed before the fetch (so a response
+  // that never arrives counts) and re-armed on every chunk. Firing aborts
+  // the fetch through its signal and settles the raced read below, so the
+  // download rejects even when a body ignores its signal.
+  const controller = new AbortController();
+  const timeoutError = () => Object.assign(
+    new Error(`The model download timed out after ${Math.round(stallTimeoutMs / 1000)} seconds without receiving data, so it was discarded; try again`),
+    { status: 502 },
+  );
+  // Each operation races its OWN stall promise, created per call and
+  // dropped when that call settles: racing every chunk against one
+  // long-lived promise pins each settled race (and the chunk it carried)
+  // in that promise's handler list for the whole transfer, so a healthy
+  // download would retain the entire model in memory.
+  let stallTimer = null;
+  let rejectStalled = null;
+  const armStallTimer = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      const error = timeoutError();
+      rejectStalled?.(error);
+      controller.abort(error);
+    }, stallTimeoutMs);
+    stallTimer.unref?.();
+  };
+  const raceStall = (operation) => new Promise((resolve, reject) => {
+    rejectStalled = reject;
+    // Handlers stay attached after this race settles, so a late rejection
+    // of the operation (the abort landing after a stall, say) is handled
+    // rather than unhandled; the caller drops the settled race, so
+    // nothing accumulates across chunks.
+    operation.then(resolve, reject);
+  });
+
   try {
-    for await (const chunk of response.body) {
-      received += chunk.length;
-      digest.update(chunk);
-      if (!out.write(chunk)) await new Promise((resolve) => out.once('drain', resolve));
-      onProgress(received, model.bytes);
+    armStallTimer();
+    const response = await raceStall(fetchImpl(model.url, { signal: controller.signal }));
+    if (!response.ok || !response.body) {
+      throw Object.assign(new Error(`Model download failed (${response.status})`), { status: 502 });
     }
-    await new Promise((resolve, reject) => out.end((error) => (error ? reject(error) : resolve())));
-  } catch (error) {
-    out.destroy();
-    fs.rmSync(partial, { force: true });
-    throw error;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const partial = `${file}.part`;
+    const out = createWriteStreamImpl(partial);
+    const digest = createHash('sha256');
+    let received = 0;
+    const reader = response.body.getReader();
+    try {
+      while (true) {
+        const { done, value: chunk } = await raceStall(reader.read());
+        if (done) break;
+        armStallTimer();
+        received += chunk.length;
+        // The pinned size is known before the fetch, so an over-long body is
+        // refused the moment it passes that size instead of being written to
+        // disk in full and only then discarded: a broken or hostile endpoint
+        // could otherwise fill the cache disk without bound.
+        if (received > model.bytes) {
+          throw Object.assign(
+            new Error(`The model download was larger than the expected ${model.bytes} bytes, so it was discarded; try again`),
+            { status: 502 },
+          );
+        }
+        digest.update(chunk);
+        if (!out.write(chunk)) await raceStall(new Promise((resolve) => out.once('drain', resolve)));
+        onProgress(received, model.bytes);
+      }
+      await raceStall(new Promise((resolve, reject) => out.end((error) => (error ? reject(error) : resolve()))));
+    } catch (error) {
+      // Leave nothing running behind the failure: abort the fetch and
+      // cancel the body reader, or an abandoned transfer keeps consuming
+      // the connection after an early refusal (the oversize throw above
+      // is the common case). The manual reader replaced a for-await loop,
+      // which cancelled the stream implicitly on throw.
+      controller.abort(error);
+      try { await reader.cancel(); } catch { /* the body is already closed */ }
+      out.destroy();
+      fs.rmSync(partial, { force: true });
+      throw error;
+    } finally {
+      reader.releaseLock?.();
+    }
+    if (received !== model.bytes) {
+      fs.rmSync(partial, { force: true });
+      throw Object.assign(new Error('The model download was incomplete; try again'), { status: 502 });
+    }
+    if (digest.digest('hex') !== model.sha256) {
+      fs.rmSync(partial, { force: true });
+      throw Object.assign(new Error('The model download did not match its checksum, so it was discarded; try again'), { status: 502 });
+    }
+    fs.renameSync(partial, file);
+    return modelStatus(file, model);
+  } finally {
+    if (stallTimer) clearTimeout(stallTimer);
   }
-  if (received !== model.bytes) {
-    fs.rmSync(partial, { force: true });
-    throw Object.assign(new Error('The model download was incomplete; try again'), { status: 502 });
-  }
-  if (digest.digest('hex') !== model.sha256) {
-    fs.rmSync(partial, { force: true });
-    throw Object.assign(new Error('The model download did not match its checksum, so it was discarded; try again'), { status: 502 });
-  }
-  fs.renameSync(partial, file);
-  return modelStatus(file, model);
 };
 
 /**

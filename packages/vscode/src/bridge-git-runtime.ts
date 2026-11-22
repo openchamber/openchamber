@@ -642,7 +642,10 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
           signCommits === true,
           signingKey ?? null
         );
-        return { id, type, success: true, data: result };
+        // A failed write throws inside the service, so its error reaches the
+        // webview. Passing the result through keeps this handler from answering
+        // success for a write the service reported as failed.
+        return { id, type, success: result.success, data: result };
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };

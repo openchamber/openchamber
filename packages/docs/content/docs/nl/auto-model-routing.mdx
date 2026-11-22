@@ -18,13 +18,14 @@ Als alles is ingesteld, toont de pagina **Gereed**. Kies dan bovenaan de modelki
 
 ## Categorieën
 
-Elke prompt komt in één categorie terecht. Er zijn vier ingebouwde categorieën:
+Elke prompt komt in één categorie terecht. Er zijn vijf ingebouwde categorieën:
 
 | Categorie | Bedoeld voor |
 | --- | --- |
 | Eenvoudig | routinematig werk: hernoemen, tikfouten, opmaak, opmerkingen en eenvoudige opdrachten |
 | Onderzoek | code lezen en uitleggen zonder deze te wijzigen |
 | Implementeren | een duidelijke wijziging: een uitgewerkte functie, tests of een oplossing waarvan de oorzaak bekend is |
+| Beoordelen | wijzigingen inspecteren op correctheid, regressies, beveiligingsproblemen en ontbrekende tests; bevindingen rapporteren zonder te bewerken |
 | Moeilijk | bugs met onbekende oorzaak, ontwerp en planning, beveiliging, authenticatie, gelijktijdigheid, migraties en geldzaken |
 
 Per categorie kunt u instellen:
@@ -33,7 +34,41 @@ Per categorie kunt u instellen:
 - **Denken:** het denkniveau voor dat model.
 - **Agent:** de agent die deze taken uitvoert. Leeg laten behoudt de agent die het invoerveld zou gebruiken.
 
+## Auto blijft bij vergelijkbare prompts op één model
+
+Jev deelt elke prompt afzonderlijk in, dus twee vergelijkbare vervolgvragen kunnen in aangrenzende categorieën terechtkomen. Om te voorkomen dat een sessie tussen modellen heen en weer springt (en telkens de promptcache van de provider verliest), houdt Auto het model van de sessie vast, tenzij de aanwijzingen voor een wijziging consistent zijn:
+
+- Het model verlaten waarmee een sessie begon, vergt twee prompts op rij die naar hetzelfde andere model wijzen, of één prompt waar Jev zeker van is.
+- Na een sprong naar een sterker model blijft de sessie daar totdat drie prompts op rij elders heen wijzen. Een zeker antwoord verkort dat, maar nooit tot minder dan twee.
+- Een prompt die Jev niet kan plaatsen (lage zekerheid, onbekende categorie, Jev onbereikbaar) behoudt het huidige model. Het terugvalmodel bedient alleen een sessie die nog geen geschiedenis heeft.
+
+De routeringsbeslissing toont `held` wanneer Auto het model tegen het jongste antwoord van Jev in heeft behouden. Die geschiedenis leeft in het serverproces, dus een herstart laat sessies vers beginnen. Of een sessie op Auto staat, wordt bewaard, dus een herstart houdt de sessie op Auto totdat u een echt model kiest.
+
+Schakel in **Instellingen → Routering** de optie **Op het huidige model blijven** uit om elke prompt te volgen, of wijzig **Prompts om te wisselen** en **Prompts om terug te wisselen**. De zekerheid die als ‘zeker’ telt, is `stickiness.strongConfidence` in `routing.json` (standaard 0,9).
+
+## Providerpools gebruiken voor categoriemodellen
+
+OpenChamber kiest de categorie, het denkniveau en de agent. OpenCode regelt de failover tussen providers. Definieer geordende pools in de `experimental.model_routes` van OpenCode en kies daarna het routemodel voor een categorie. Stel bijvoorbeeld **Trivial** in op `opencode-route/cheap-fast`, **Implement** op `opencode-route/smart-slow`, en **Hard** en **Review** op `opencode-route/frontier-heavy`. Jev neemt nog steeds de taakbeslissing; de gekozen route probeert daarna haar providers op volgorde.
+
+OpenCode gaat naar een ander doel bij herhaalbare providerfouten, quotum- of authenticatiefouten en een gemiste deadline voor de eerste uitvoer. Voltooide verzoeken kunnen een doel ook als verslechterd markeren aan de hand van de ingestelde drempels voor latentie of doorvoer. Afkoelperiodes worden gedeeld door de sessies in het OpenCode-proces en na een herstart hersteld, en OpenCode legt elke routeringsbeslissing, poging (exacte foutcode en melding, tijden, tokenaantallen) en afkoelperiode vast in zijn database voor latere analyse. Een beurt wordt nooit opnieuw gespeeld nadat een antwoord of uitvoer van een hulpmiddel is begonnen.
+
+OpenCode leest ook de rate-limit-headers van elk antwoord en haalt verkeer weg bij een doel waarvan de provider zegt dat zijn venster op is, voordat de provider het begint te weigeren.
+
+Een pool kan ook meerdere verzoeken aan een doel doen voordat hij verdergaat (`attempts`, standaard twee in totaal), het volgende doel starten wanneer het eerste zwijgt (`hedgeAfterMs`), de verzoeken en tokens van een doel begrenzen (`budgets`, die elk verzoek tellen dat OpenCode aan het doel doet, inclusief achtergrondverzoeken zoals titels), en door de agent worden afgestemd op basis van zijn vastgelegde geschiedenis. Dit zijn routeopties van OpenCode; zie zijn configuratiereferentie.
+
+Schema's wijzigen de gewichten van doelen op vaste dagen of uren, bijvoorbeeld om een provider tijdens zijn piekuren minder verkeer te sturen. De eigen schema's van een pool staan bij de geavanceerde opties van die pool in **Instellingen → Routering → Modelpools**, en **Schema's voor alle pools** onder de lijst met pools wijzigt overeenkomende doelen in elke pool, of alleen in de pools die u opgeeft. Elk schema heeft weekdagen, dagen van de maand, een begin- en eindtijd, een tijdzone en een factor die het gewicht vermenigvuldigt of een gewicht dat het vervangt. Buiten het venster gelden de ingestelde gewichten. OpenCode past ook schema's uit zijn andere configuratiebestanden toe, zoals de `opencode.json` van een project. Instellingen toont die alleen-lezen, onder de naam van het bestand waarin u ze bewerkt.
+
+Elke pool kan ook zeggen waar hij voor dient. Open in **Instellingen → Routering → Modelpools** een pool en vul **Beschrijving** in, één regel zoals ‘lange refactorings over veel bestanden; traag; kost het meest’, en **Details**, een alinea over wanneer u de pool wel en niet gebruikt. Wanneer het model van een categorie een pool is, leest Jev beide samen met de beschrijving van die categorie. OpenChamber bewaart ze als `description` en `details` op de route in `opencode.json`. OpenCode negeert de twee sleutels, dus een editor die het bestand tegen het JSON-schema van OpenCode controleert, kan ze markeren.
+
 Jev deelt prompts in op basis van de categorienamen en beschrijvingen. Die beschrijvingen werken dus als instructies: vermeld wat wel en niet bij een categorie hoort. U kunt categorieën bewerken, uitschakelen, verwijderen of toevoegen en ingebouwde categorieën herstellen. Auto heeft minstens twee ingeschakelde categorieën nodig.
+
+### Zien welke sessies een doel delen
+
+Als het abonnement van een doel op is, schakelen alle sessies op dat doel tegelijk over, en elke sessie begint opnieuw met een koude promptcache. **Instellingen → Routering → Modelpools → Poolstatus** toont voor elk doel in elke pool hoeveel sessies het in de laatste 15 minuten hebben gebruikt, en waarschuwt als twee of meer sessies het delen.
+
+Koppel daar een doel aan een van uw abonnementen om een inschatting te zien: het recente gebruik, samen met dat van elk ander doel dat aan hetzelfde abonnement is gekoppeld, omgerekend naar het quotavenster van het abonnement. Vensters die verzoeken, berichten of tokens tellen krijgen een inschatting, vensters in dollars of procenten niet. Het getal is een schatting op basis van de laatste 24 uur OpenCode-verkeer en ziet geen gebruik buiten OpenCode. In een gewogen pool of een pool die om en om kiest, krijgt een doel op 70% of meer van zijn venster de knop **Gewicht verlagen**. Die halveert het gewicht, zodat nieuwe sessies naar de andere doelen neigen.
+
+Onder de doelen staat **Sessies van een doel halen voordat het abonnement op is**, standaard uit. Staat deze optie aan en gaat het abonnement van een doel naar 70% of meer terwijl er twee of meer sessies op zitten, dan zet OpenChamber een van die sessies over naar een ander doel in dezelfde pool dat ruimte heeft en op dat moment niet faalt. Dat gebeurt voor één sessie per pool elke 5 minuten, wat u kunt aanpassen, eerst voor lopende subagents en daarna voor de sessie die het langst stilstaat. De laatste sessie op een doel blijft staan. Zo starten hun caches een voor een opnieuw en niet allemaal tegelijk. Een verplaatste sessie draait rechtstreeks op dat model, buiten de pool, en valt dus niet meer terug op een ander doel. Kies de pool opnieuw om haar terug te halen. Sessies op **Auto** worden nooit verplaatst. Recente verplaatsingen staan onder de schakelaar. Draait OpenCode op een andere machine, dan verplaatst rotatie niets. Het doel waarheen een sessie gaat, is nooit aan hetzelfde abonnement gekoppeld als het doel dat ze verlaat. Een doel zonder gekoppeld abonnement of zonder inschatting kan ook gekozen worden, al is de ruimte dan onbekend.
 
 ## Wat gebeurt er bij het versturen?
 
@@ -50,6 +85,17 @@ Het terugvalmodel antwoordt wanneer:
 - de categorie geen eigen model heeft
 
 Kiest u een specifiek model, dan verlaat de sessie Auto. Kies opnieuw **Auto** om terug te keren. U kunt Auto ook als standaard voor nieuwe sessies instellen bij **Instellingen → Sessies**.
+
+## Abonnementen, gebruik en beoordelingen
+
+**Instellingen → Routering → Abonnementen en gebruik** bewaart wat de beoordeling niet kan meten: uw abonnementen en hun quotavensters (naam, eenheid, limiet, hoe lang het venster is, hoe het wordt gereset), kosten en vervaldatums, de datum waarop elk abonnement voor het laatst is gecontroleerd en waarvandaan, een kostenniveau voor elk model (`plan`, `common`, `medium`, `high`, met de abonnementen die het dekken), waar elke pool voor dient, en notities over hoe het gebruik heeft aangevoeld. Notities worden bewaard zoals u ze schreef en nooit herschreven. Gebruik ze voor dingen als ‘Claude was te snel op’ of ‘aan het einde van de maand heb ik altijd GPT over’; de beoordeling weegt ze tegen de gebruiksgeschiedenis.
+
+Twee knoppen starten een nieuwe chat met een opdracht die klaar is om te versturen:
+
+- **Routing beoordelen** voert `/routing-review` uit. Het leest de routeringsgeschiedenis (verzoeken, tokens, kosten, sessies, en welke pools welke provider en welk model hebben gebruikt of overgeslagen), de abonnementsgegevens en de notities, en stelt wijzigingen voor. Het verandert niets totdat u een specifieke wijziging goedkeurt.
+- **Abonnementen bijwerken** voert `/plan-update` uit. Het vindt abonnementen waarvan details ontbreken of die meer dan een maand geleden voor het laatst zijn gecontroleerd, vraagt de weinige velden die het nodig heeft, en legt uw antwoorden vast.
+
+De gegevens staan in de datamap van OpenCode als `plans.json` en `plan-notes.jsonl`, en niets daarin verloopt. De geschiedenis wordt ook bewaard; `route_usage` kan elk venster ervan lezen.
 
 ## Waar werkt het?
 

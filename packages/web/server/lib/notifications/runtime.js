@@ -1,11 +1,15 @@
 import { z } from 'zod';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { truncateNotificationText } from './message.js';
 
 /** The session id OpenCode gives an MCP elicitation form, which no session owns. */
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
+const OPEN_CODE_SESSION_FETCH_TIMEOUT_MS = 2_000;
+// Session records carry metadata; keep room for normal records while bounding a malformed response.
+const OPEN_CODE_SESSION_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 
 // What the parent walks read from an OpenCode session record: its parent and
 // the directory it runs in now. A missing or malformed location only leaves
@@ -193,8 +197,28 @@ export const createNotificationTriggerRuntime = (deps) => {
   const lastReadyNotificationAt = new Map();
   const lastErrorNotificationAt = new Map();
 
+  // Bounded like the assistant-step caches below: the runtime lives for the
+  // whole process, and a permission key only has to outlive a plausible
+  // re-delivery of the same request, so the oldest entries go first.
+  const NOTIFIED_PERMISSION_REQUEST_LIMIT = 500;
+  const SESSION_NOTIFICATION_COOLDOWN_LIMIT = 500;
+  const rememberNotifiedPermissionRequest = (requestKey) => {
+    notifiedPermissionRequests.add(requestKey);
+    while (notifiedPermissionRequests.size > NOTIFIED_PERMISSION_REQUEST_LIMIT) {
+      notifiedPermissionRequests.delete(notifiedPermissionRequests.values().next().value);
+    }
+  };
+  const rememberSessionNotificationAt = (map, sessionId, now) => {
+    map.delete(sessionId);
+    map.set(sessionId, now);
+    while (map.size > SESSION_NOTIFICATION_COOLDOWN_LIMIT) {
+      map.delete(map.keys().next().value);
+    }
+  };
+
   const sessionParentIdCache = new Map();
   const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
+  const SESSION_PARENT_CACHE_LIMIT = 500;
 
   // Sessions where the client has enabled Permission Auto-Accept. Mirrored
   // from the client-side permissionStore via POST /api/notifications/auto-accept
@@ -232,7 +256,24 @@ export const createNotificationTriggerRuntime = (deps) => {
   };
 
   const setCachedSessionParentId = (sessionId, directory, spaceId, parentID) => {
-    sessionParentIdCache.set(getSessionParentCacheKey(sessionId, directory, spaceId), { parentID: parentID ?? null, at: Date.now() });
+    const cacheKey = getSessionParentCacheKey(sessionId, directory, spaceId);
+    const now = Date.now();
+    // The TTL alone never bounded this cache: it was evaluated only when
+    // the same session was read again, so a session that is never
+    // re-read kept its entry for the life of the process. Sweep expired
+    // entries on every set, refresh the written entry's position the
+    // way rememberSessionNotificationAt does, and cap the cache at the
+    // sibling stores' limit, oldest first.
+    for (const [key, entry] of sessionParentIdCache) {
+      if (now - entry.at > SESSION_PARENT_CACHE_TTL_MS) {
+        sessionParentIdCache.delete(key);
+      }
+    }
+    sessionParentIdCache.delete(cacheKey);
+    sessionParentIdCache.set(cacheKey, { parentID: parentID ?? null, at: now });
+    while (sessionParentIdCache.size > SESSION_PARENT_CACHE_LIMIT) {
+      sessionParentIdCache.delete(sessionParentIdCache.keys().next().value);
+    }
   };
 
   const getParentIdFromPayload = (payload) => {
@@ -264,9 +305,10 @@ export const createNotificationTriggerRuntime = (deps) => {
     const id = String(info.id ?? '');
     const agent = String(info.agent ?? info.mode ?? '');
     const modelID = String(info.modelID ?? '');
-    if (!id || (!agent && !modelID)) return;
+    const providerID = String(info.providerID ?? '');
+    if (!id || (!agent && !modelID && !providerID)) return;
     assistantStepMeta.delete(id);
-    assistantStepMeta.set(id, { agent, modelID });
+    assistantStepMeta.set(id, { agent, modelID, providerID });
     const sessionId = String(info.sessionID ?? '');
     if (sessionId) {
       lastAssistantStepBySession.delete(sessionId);
@@ -288,7 +330,20 @@ export const createNotificationTriggerRuntime = (deps) => {
       merged.mode = remembered.agent;
     }
     if (!merged.modelID) merged.modelID = remembered.modelID;
+    if (!merged.providerID && remembered.providerID) merged.providerID = remembered.providerID;
     return merged;
+  };
+
+  // The session's observed model/provider pair ({ modelID, providerID })
+  // from its latest assistant message info, or null when none was observed.
+  // Consumed by the session-activity v1 snapshot (design #612, #524); the
+  // values are observed from step events, not the configured model.
+  const getRememberedSessionModelProvider = (sessionId) => {
+    const messageId = lastAssistantStepBySession.get(String(sessionId ?? ''));
+    if (!messageId) return null;
+    const remembered = assistantStepMeta.get(messageId);
+    if (!remembered || (!remembered.modelID && !remembered.providerID)) return null;
+    return { modelID: remembered.modelID || null, providerID: remembered.providerID || null };
   };
 
   const maybeCacheSessionParentFromPayload = (payload, spaceId) => {
@@ -313,10 +368,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           Accept: 'application/json',
           ...source.getOpenCodeAuthHeaders(),
         },
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(OPEN_CODE_SESSION_FETCH_TIMEOUT_MS),
       });
       if (!response.ok) return null;
-      const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
+      const session = unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_SESSION_RESPONSE_MAX_BYTES));
       return session && typeof session === 'object' ? session : null;
     } catch {
       return null;
@@ -567,7 +622,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         if (now - lastAt < PUSH_READY_COOLDOWN_MS) {
           return;
         }
-        lastReadyNotificationAt.set(sessionId, now);
+        rememberSessionNotificationAt(lastReadyNotificationAt, sessionId, now);
 
         let title = `${formatMode(info?.mode)} agent is ready`;
         let body = `${formatModelId(info?.modelID)} completed the task`;
@@ -642,7 +697,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         const now = Date.now();
         const lastAt = lastErrorNotificationAt.get(sessionId) ?? 0;
         if (now - lastAt < PUSH_READY_COOLDOWN_MS) return;
-        lastErrorNotificationAt.set(sessionId, now);
+        rememberSessionNotificationAt(lastErrorNotificationAt, sessionId, now);
 
         if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
           return;
@@ -804,6 +859,22 @@ export const createNotificationTriggerRuntime = (deps) => {
       return;
     }
 
+    // A settled form, or a waiting page that settled, cancels the
+    // session's pending question push (#2313): the prompt the 500ms
+    // debounce was armed for is already answered, so the push would
+    // buzz every device about a resolved prompt. Session-keyed,
+    // mirroring the question timer's own granularity; a settle for a
+    // session with no pending timer is a no-op (the unknown-ID
+    // precedent in the permission.replied branch below).
+    if ((payload.type === 'form.settled' || payload.type === 'openchamber:page-settled') && sessionId) {
+      const pendingTimer = pushQuestionDebounceTimers.get(sessionId);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        pushQuestionDebounceTimers.delete(sessionId);
+      }
+      return;
+    }
+
     if (payload.type === 'permission.replied' && sessionId) {
       const requestId = payload.properties?.requestID ?? payload.properties?.requestId ?? payload.properties?.id;
       const requestKey = typeof requestId === 'string' ? `${sessionId}:${requestId}` : null;
@@ -848,7 +919,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       const isAutoAnswered = async () => !spaceId && await (getIsSessionAutoAccepting?.(sessionId, notificationDirectory, requestId)
         ?? isSessionAutoAccepting(sessionId, notificationDirectory));
       if (await isAutoAnswered()) {
-        if (requestKey) notifiedPermissionRequests.add(requestKey);
+        if (requestKey) rememberNotifiedPermissionRequest(requestKey);
         return;
       }
 
@@ -861,7 +932,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         pushPermissionDebounceTimers.delete(sessionId);
 
         if (await isAutoAnswered()) {
-          if (requestKey) notifiedPermissionRequests.add(requestKey);
+          if (requestKey) rememberNotifiedPermissionRequest(requestKey);
           return;
         }
 
@@ -918,7 +989,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         if (requestKey) {
-          notifiedPermissionRequests.add(requestKey);
+          rememberNotifiedPermissionRequest(requestKey);
         }
 
         void fanoutPush(
@@ -953,10 +1024,10 @@ export const createNotificationTriggerRuntime = (deps) => {
       const response = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(OPEN_CODE_SESSION_FETCH_TIMEOUT_MS),
       });
       if (response.ok) {
-        const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
+        const session = unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_SESSION_RESPONSE_MAX_BYTES));
         if (typeof session?.title === 'string') sessionName = session.title.trim();
       }
     } catch {
@@ -981,6 +1052,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   };
 
   return {
+    getRememberedSessionModelProvider,
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,

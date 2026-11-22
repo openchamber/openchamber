@@ -21,6 +21,14 @@ const fsImpl = {
         await delay(30);
         return result;
       },
+      // The bounded readState implementations (#1766) read in chunks
+      // through handle.read; delay it the same way so the interleaving
+      // this fixture exists to force still happens.
+      read: async (...readArgs) => {
+        const result = await handle.read(...readArgs);
+        await delay(30);
+        return result;
+      },
     };
   },
 };

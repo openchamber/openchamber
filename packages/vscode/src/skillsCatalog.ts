@@ -15,6 +15,56 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BUFFER = 4 * 1024 * 1024;
 
+// Same gate as the web scan: a clone-controlled SKILL.md is never buffered
+// whole past the 4 MiB cap the git-show fallback already enforces.
+const SKILL_MD_MAX_BYTES = DEFAULT_MAX_BUFFER;
+const SKILL_MD_TOO_LARGE_WARNING = 'SKILL.md is larger than the 4 MiB size limit; skipped';
+
+// Mirror of the web copy caps (packages/web/server/lib/skills-catalog/install.js):
+// a skill is a SKILL.md plus small supporting assets, so entries (files and
+// directories) and total bytes are bounded, and no single file may exceed the
+// same 1 MiB limit the loader enforces when it reads a supporting file.
+const SKILL_COPY_MAX_ENTRIES = 1_000;
+const SKILL_COPY_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+const SKILL_SUPPORTING_FILE_MAX_BYTES = 1024 * 1024;
+
+// Mirror of readSkillMdFile in the web scan: open once and read from the
+// handle so a symlink to a device or FIFO (stat size 0) cannot make the
+// read unbounded; a non-regular file throws so the caller falls back to
+// git show.
+function isGitOutputTooLarge(result: { message?: string }): boolean {
+  return /maxbuffer/i.test(String(result?.message || ''));
+}
+
+async function readSkillMdFile(filePath: string): Promise<{ tooLarge: boolean; content: string }> {
+  // O_NONBLOCK (POSIX only): open() must not block on a FIFO with no writer
+  // before handle.stat() can reject it as non-regular.
+  const openFlags = process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+  const handle = await fs.promises.open(filePath, openFlags);
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new Error(`SKILL.md is not a regular file: ${filePath}`);
+    }
+    if (stat.size > SKILL_MD_MAX_BYTES) {
+      return { tooLarge: true, content: '' };
+    }
+    const buffer = Buffer.alloc(SKILL_MD_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > SKILL_MD_MAX_BYTES) {
+      return { tooLarge: true, content: '' };
+    }
+    return { tooLarge: false, content: buffer.toString('utf8', 0, total) };
+  } finally {
+    await handle.close();
+  }
+}
+
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
 type SkillScope = 'user' | 'project';
@@ -345,19 +395,31 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
 
       const warnings: string[] = [];
       let content = '';
+      let skillMdTooLarge = false;
 
       try {
-        content = await fs.promises.readFile(toFsPath(skillMdPath), 'utf8');
+        const diskRead = await readSkillMdFile(toFsPath(skillMdPath));
+        if (diskRead.tooLarge) {
+          skillMdTooLarge = true;
+          warnings.push(SKILL_MD_TOO_LARGE_WARNING);
+        } else {
+          content = diskRead.content;
+        }
       } catch {
         const show = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
-        if (!show.ok) {
+        if (!show.ok && isGitOutputTooLarge(show)) {
+          skillMdTooLarge = true;
+          warnings.push(SKILL_MD_TOO_LARGE_WARNING);
+        } else if (!show.ok) {
           warnings.push('Failed to read SKILL.md');
         } else {
           content = show.stdout;
         }
       }
 
-      const parsedMd = parseSkillMd(content);
+      // An oversized file was skipped, not read: parsing its empty
+      // content would report a bogus missing-frontmatter warning.
+      const parsedMd: ReturnType<typeof parseSkillMd> = skillMdTooLarge ? { frontmatter: {}, warnings: [] } : parseSkillMd(content);
       warnings.push(...parsedMd.warnings);
 
       const description = typeof parsedMd.frontmatter.description === 'string' ? parsedMd.frontmatter.description : undefined;
@@ -388,11 +450,28 @@ export async function scanSkillsRepository(options: { source: string; subpath?: 
   }
 }
 
-async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
+export async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
   const srcReal = await fs.promises.realpath(srcDir);
 
   const ensureDir = async (dirPath: string) => {
     await fs.promises.mkdir(dirPath, { recursive: true });
+  };
+
+  const copyState = { entries: 0, bytes: 0 };
+  const countEntry = (stat: fs.Stats, name?: string) => {
+    copyState.entries += 1;
+    if (copyState.entries > SKILL_COPY_MAX_ENTRIES) {
+      throw new Error(`Skill directory is too large to install: more than ${SKILL_COPY_MAX_ENTRIES} entries`);
+    }
+    if (!stat.isFile()) return;
+    const perFileLimit = name === 'SKILL.md' ? SKILL_MD_MAX_BYTES : SKILL_SUPPORTING_FILE_MAX_BYTES;
+    if (stat.size > perFileLimit) {
+      throw new Error(`Skill file is too large to install: ${stat.size} bytes exceeds the ${perFileLimit} byte limit`);
+    }
+    copyState.bytes += stat.size;
+    if (copyState.bytes > SKILL_COPY_MAX_TOTAL_BYTES) {
+      throw new Error(`Skill directory is too large to install: more than ${SKILL_COPY_MAX_TOTAL_BYTES} bytes`);
+    }
   };
 
   const walk = async (currentSrc: string, currentDst: string) => {
@@ -412,12 +491,14 @@ async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
       }
 
       if (stat.isDirectory()) {
+        countEntry(stat, entry.name);
         await ensureDir(nextDst);
         await walk(nextSrc, nextDst);
         continue;
       }
 
       if (stat.isFile()) {
+        countEntry(stat, entry.name);
         await ensureDir(path.dirname(nextDst));
         await fs.promises.copyFile(nextSrc, nextDst);
         try {
@@ -589,8 +670,31 @@ export async function installSkillsFromRepository(options: {
   }
 }
 
-const catalogCache = new Map<string, { expiresAt: number; items: SkillsCatalogItem[] }>();
+export const catalogCache = new Map<string, { expiresAt: number; items: SkillsCatalogItem[] }>();
 const CATALOG_TTL_MS = 30 * 60 * 1000;
+export const CATALOG_CACHE_MAX_ENTRIES = 500;
+
+// The TTL bounds freshness, not retention: without a sweep, an entry for a
+// source that is never requested again stays for the life of the extension
+// host, items array and all. Mirror pruneNpmInfoCache in opencodeConfig.ts:
+// expired entries are swept and the cache is capped oldest-first whenever
+// the catalog is read or a fresh entry lands.
+export const pruneCatalogCache = (now = Date.now()): void => {
+  for (const [cacheKey, entry] of catalogCache) {
+    if (now >= entry.expiresAt) {
+      catalogCache.delete(cacheKey);
+    }
+  }
+  while (catalogCache.size > CATALOG_CACHE_MAX_ENTRIES) {
+    const oldest = catalogCache.keys().next().value;
+    if (oldest === undefined) break;
+    catalogCache.delete(oldest);
+  }
+};
+
+export const clearCatalogCacheForTests = (): void => {
+  catalogCache.clear();
+};
 
 export async function getSkillsCatalog(
   workingDirectory?: string,
@@ -598,6 +702,7 @@ export async function getSkillsCatalog(
   additionalSources?: SkillsCatalogSourceConfig[],
   installedSkills?: Array<{ name: string; scope: SkillScope; source?: 'opencode' | 'agents' | 'claude' }>
 ) {
+  pruneCatalogCache();
   // The machine policy can hide the built-in catalogs (see enterprise-mode.js).
   const curated = readEnterprisePolicy().hideBuiltinSkillCatalogs ? [] : CURATED_SOURCES;
   const sources = [...curated, ...(Array.isArray(additionalSources) ? additionalSources : [])];
@@ -635,6 +740,7 @@ export async function getSkillsCatalog(
       }
       items = scanned.items || [];
       catalogCache.set(cacheKey, { expiresAt: Date.now() + CATALOG_TTL_MS, items });
+      pruneCatalogCache();
     }
 
     itemsBySource[src.id] = items.map((item) => {

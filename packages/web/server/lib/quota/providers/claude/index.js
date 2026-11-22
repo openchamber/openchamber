@@ -8,6 +8,7 @@
  * @module quota/providers/claude
  */
 
+import { readQuotaJson } from '../../utils/response-body.js';
 import { createHash } from 'crypto';
 
 import { buildResult } from '../../utils/index.js';
@@ -16,7 +17,7 @@ import { toClaudeUsage } from './transforms.js';
 
 export const providerId = 'claude';
 export const providerName = 'Claude';
-const aliases = ['anthropic', 'claude'];
+export const aliases = ['anthropic', 'claude'];
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const OAUTH_BETA_HEADER = 'oauth-2025-04-20';
@@ -65,10 +66,10 @@ const cachedResultFor = (fingerprint, planLabel) => {
 const failure = (error, { configured = true } = {}) =>
   buildResult({ providerId, providerName, ok: false, configured, error });
 
-export const isConfigured = (auth) => Boolean(findClaudeCredential(auth));
+export const isConfigured = (auth, { findCredential = findClaudeCredential } = {}) => Boolean(findCredential(auth));
 
-const fetchQuotaUncoalesced = async () => {
-  const credential = await loadClaudeCredential();
+const fetchQuotaUncoalesced = async (loadCredential) => {
+  const credential = await loadCredential();
   if (!credential) {
     return failure('Not configured', { configured: false });
   }
@@ -84,6 +85,8 @@ const fetchQuotaUncoalesced = async () => {
       ?? failure('Rate limited. Retrying soon.');
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   let response;
   try {
     response = await fetch(USAGE_URL, {
@@ -91,10 +94,14 @@ const fetchQuotaUncoalesced = async () => {
       headers: {
         Authorization: `Bearer ${credential.accessToken}`,
         'anthropic-beta': OAUTH_BETA_HEADER
-      }
+      },
+      signal: timeoutSignal
     });
   } catch (error) {
-    return failure(error instanceof Error ? error.message : 'Request failed');
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    return failure(isTimeout ? 'Request timed out' : (error instanceof Error ? error.message : 'Request failed'));
   }
 
   if (response.status === 429) {
@@ -113,7 +120,7 @@ const fetchQuotaUncoalesced = async () => {
 
   let payload;
   try {
-    payload = await response.json();
+    payload = await readQuotaJson(response);
   } catch {
     return failure('Unexpected response from Anthropic');
   }
@@ -132,10 +139,11 @@ const fetchQuotaUncoalesced = async () => {
   });
 };
 
-export const fetchQuota = () => {
+export const fetchQuota = ({ loadCredential, readAuth } = {}) => {
   if (pendingFetch) return pendingFetch;
 
-  const request = fetchQuotaUncoalesced();
+  const load = loadCredential ?? (readAuth ? () => loadClaudeCredential({ readAuth }) : loadClaudeCredential);
+  const request = fetchQuotaUncoalesced(load);
   const pending = request.finally(() => {
     if (pendingFetch === pending) pendingFetch = null;
   });

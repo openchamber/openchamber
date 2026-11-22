@@ -3,15 +3,19 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -28,7 +32,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "OpenCode, OpenChamber ile birlikte gelir. OpenCode v2 için OpenChamber’ı güncelleyin.",
@@ -81,15 +87,19 @@ export const dict = {
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,
   ...sessionMenuHintsI18n.tr,
+  ...sessionErrorRecoveryI18n.tr,
   ...sidebarLayoutI18n.tr,
+  ...activityTimesI18n.tr,
   ...projectKnowledgeI18n.tr,
   ...linearPanelI18n.tr,
   ...routingI18n.tr,
+  ...poolSettingsI18n.tr,
   ...pluginPanelI18n.tr,
   ...surfacePanelI18n.tr,
   ...fileArtifactsI18n.tr,
   ...fileContentSearchI18n.tr,
   ...htmlRenderI18n.tr,
+  ...sessionLocationI18n.tr,
   ...sessionNoticesI18n.tr,
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,
@@ -106,7 +116,9 @@ export const dict = {
   ...pluginsGridI18n.tr,
   ...integrationsCatalogI18n['tr'],
   ...sessionGoalWriterI18n['tr'],
+  ...subsessionModelsI18n['tr'],
   ...diffFindI18n['tr'],
+  ...questionAnswersI18n['tr'],
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
   'terminalView.toast.selectionCopied': 'Çıktı kopyalandı',
@@ -400,6 +412,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.status.sent': 'Gönderildi',
   'sessions.scheduledTasks.dialog.status.skipped': 'Atlandı',
   'sessions.scheduledTasks.dialog.status.cancelled': 'İptal edildi',
+  'sessions.scheduledTasks.dialog.status.timeout': 'Zaman aşımı',
   'sessions.scheduledTasks.dialog.nextRun.label': 'Sıradaki',
   'sessions.scheduledTasks.dialog.lastRun.label': 'Son çalıştırma',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': 'şimdi çalışıyor',
@@ -517,6 +530,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showWork': 'Devam eden bölümünü göster',
   'sessions.sidebar.header.displayMode.showPinned': 'Sabitlenenler bölümünü göster',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Ayrıntılı satırlar',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'Kenar çubuğu satırları…',
   'sessions.sidebar.activity.pinnedTitle': 'Sabitlenenler',
   'sessions.sidebar.header.displayMode.showArchived': 'Arşivlenmiş session\'ları göster',
   'sessions.sidebar.header.displayMode.collapseAll': 'Tümünü daralt',
@@ -545,6 +559,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'Görünüm',
   'sessions.sidebar.header.viewMode.projects': 'Ağaç',
   'sessions.sidebar.header.viewMode.timeline': 'Liste',
+  'sessions.sidebar.header.viewMode.headerless': 'Bölüm başlıklarını gizle',
   'chat.chatInput.chooseProject': 'Proje seç',
   'sessions.archivePage.allDirectories': 'Tüm dizinler',
   'sessions.sidebar.header.projectDisplay.label': 'Projeleri göster',
@@ -1038,11 +1053,11 @@ export const dict = {
   'gitView.integrate.commitsMovedDescriptionSingle': '{count} commit {branch} branch\'ine taşındı.',
   'gitView.integrate.commitsMovedToast': 'Commit\'ler taşındı',
   'gitView.integrate.commitsToMove': 'Taşınacak commit\'ler',
-  'gitView.integrate.conflictsInFiles': 'Dosyalardaki çakışmalar',
+  'gitView.integrate.conflictsInFiles': '{count} dosyadaki çakışmalar',
   'gitView.integrate.currentCommit': 'Mevcut commit',
   'gitView.integrate.currentSession': 'Mevcut session',
   'gitView.integrate.failedToMoveToast': 'Commit\'ler taşınamadı',
-  'gitView.integrate.moreFiles': 'Daha fazla dosya',
+  'gitView.integrate.moreFiles': '{count} dosya daha',
   'gitView.integrate.move': 'Taşı',
   'gitView.integrate.moveCommits': 'Commit\'leri taşı',
   'gitView.integrate.moving': 'Taşınıyor…',
@@ -1054,10 +1069,10 @@ export const dict = {
   'gitView.integrate.previewUnavailable': 'Önizleme kullanılamıyor',
   'gitView.integrate.showAll': 'Tümünü göster',
   'gitView.integrate.showLess': 'Daha az göster',
-  'gitView.integrate.showingFirstCommits': 'İlk commit\'ler gösteriliyor',
+  'gitView.integrate.showingFirstCommits': 'İlk {count} commit gösteriliyor',
   'gitView.integrate.target': 'Hedef',
   'gitView.integrate.title': 'Commit\'leri yeniden entegre et',
-  'gitView.integrate.toMoveCount': 'Taşınacak',
+  'gitView.integrate.toMoveCount': 'Taşınacak: {count}',
   'gitView.operation.abort': 'İptal et',
   'gitView.operation.continue': 'Devam et',
   'gitView.operation.inProgressTitle': '{operation} sürüyor',
@@ -1169,6 +1184,7 @@ export const dict = {
   'gitView.pr.checks.openRun': 'Aç',
   'gitView.pr.checks.failedAnnotations': 'Başarısız ek açıklamalar',
   'gitView.pr.checks.failedAnnotationsShown': 'Başarısız ek açıklamalar ({total} içinden {shown} gösteriliyor)',
+  'gitView.pr.checks.annotationsTruncated': 'Ek açıklamalar eksik — bu çalıştırmada yüklenebilenden daha fazla ek açıklama var.',
   'gitView.pr.field.baseBranch': 'Base branch',
   'gitView.pr.field.description': 'Açıklama',
   'gitView.pr.field.title': 'Başlık',
@@ -1763,6 +1779,8 @@ export const dict = {
   'diffView.nestedRepository.noChanges': 'Bu depoda değişiklik yok',
   'diffView.unavailable.untrackedDirectoryTitle': 'Yeni dosyalar klasörü',
   'diffView.unavailable.untrackedDirectoryDescription': 'Bu klasörde tek tek listelenemeyecek kadar çok yeni dosya var. Klasörü hazırlama alanına ekleyin ya da depoya ait değilse .gitignore dosyasına yazın.',
+  'diffView.unavailable.tooLargeTitle': 'Dosya diff için çok büyük',
+  'diffView.unavailable.tooLargeDescription': 'Dosya diff sınırı olan 20 MiB değerini aşıyor.',
   'diffView.submodule.title': 'Alt modül',
   'diffView.submodule.commitChanged': 'Commit {from} → {to}',
   'diffView.submodule.commitUnchanged': 'Hâlâ {commit} commit\'inde',
@@ -2421,6 +2439,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Yük devri kaynağı',
   'chat.messageBody.modelChanged.notice': 'Model değişti: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Model değişti: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Öncekini tercih et',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Model havuzlarının bir gün boyunca {model} modelini tercih etmesini sağla',
+  'chat.currentModel.label': 'Geçerli model: {model}',
+  'chat.currentModel.labelWithPool': 'Geçerli model: {model}, {pool} havuzundan',
+  'chat.currentModel.menu.openHint': 'Model seçmek için tıklayın',
+  'chat.currentModel.menu.timing': 'Geçiş',
+  'chat.currentModel.menu.directPickHelp': 'Doğrudan seçim, havuza dönene kadar havuzun yedek modele geçişini durdurur.',
+  'chat.currentModel.timing.immediately': 'Şimdi (süren yanıtı yeniden başlatır)',
+  'chat.currentModel.timing.nextStep': 'Sonraki adımda',
+  'chat.currentModel.timing.nextInput': 'Sonraki mesajla',
+  'chat.currentModel.menu.members': '{pool} havuzundaki modeller',
+  'chat.currentModel.menu.returnToPool': '{pool} havuzuna dön',
+  'chat.currentModel.toast.failed': 'Model değiştirilemedi',
   'chat.generatedResult.actions.copy': 'Kopyala',
   'chat.generatedResult.actions.copied': 'Kopyalandı',
   'chat.generatedResult.commit.title': 'Oluşturulan commit mesajı',
@@ -2897,6 +2928,7 @@ export const dict = {
   'mcpDropdown.status.needsAuth': 'Kimlik doğrulama gerekiyor',
   'mcpDropdown.status.needsRegistration': 'Kayıt gerekiyor: {error}',
   'mcpDropdown.empty.configureInConfig': 'MCP sunucularını Ayarlar\'dan yapılandırın.',
+  "mcpDropdown.cacheNote": "Code Mode kapalı bir sunucuyu açıp kapatmak, çalışan bir oturumun sonraki turunun prompt önbelleğini kullanmamasına yol açar.",
   'sessionAuth.error.rateLimitTitle': 'Çok fazla deneme',
   'sessionAuth.error.networkTitle': 'Sunucuya ulaşılamıyor',
   'sessionAuth.error.rateLimitDescriptionSingle': 'Tekrar denemeden önce {minutes} dakika bekleyin.',
@@ -3834,8 +3866,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Bunu tut',
   'multirun.overview.addModel.action': 'Model ekle',
   'multirun.overview.addModel.hint': 'Bu çalıştırmada aynı promptu bir model daha çalıştırır',
-  'chat.parallel.settings.whereShared': 'Proje dizini',
-  'chat.parallel.settings.whereSharedHint': 'Tüm çalıştırmalar çalışma kopyanızda çalışır. Sorular ve araştırma için en iyisi.',
+  'chat.parallel.settings.whereShared': 'Ortak dizin',
+  'chat.parallel.settings.whereSharedHint': 'Tüm çalıştırmalar bu taslağın ayarlandığı dizinde çalışır. Sorular ve araştırma için en iyisi.',
   'chat.parallel.settings.whereWorktrees': 'Ayrı worktree\'ler',
   'chat.parallel.settings.whereWorktreesHint': 'Her çalıştırma kendi dalını kullanır, kod değişiklikleri çakışmaz. En iyisini tutun.',
   'chat.parallel.settings.baseBranchTitle': 'Temel dal',

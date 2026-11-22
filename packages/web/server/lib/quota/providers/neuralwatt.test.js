@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../opencode/auth.js', () => ({
-  readOpenCodeCredentials: async () => ({ neuralwatt: { key: 'test-token' } }),
-}));
+const readAuth = async () => ({ neuralwatt: { key: 'test-token' } });
 
 import { fetchQuota } from './neuralwatt.js';
 
@@ -43,7 +41,7 @@ describe('NeuralWatt quota provider', () => {
   it('builds subscription window from documented payload (keyed by plan name)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_SUBSCRIPTION_PAYLOAD)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.providerId).toBe('neuralwatt');
@@ -68,7 +66,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.usage.windows.plan_limit).toBeDefined();
     expect(result.usage.windows.plan_limit.usedPercent).toBeCloseTo((13.9023 / 20.0) * 100, 4);
@@ -81,7 +79,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     const window = result.usage.windows.standard;
     expect(window).toBeDefined();
@@ -100,7 +98,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     const subWindow = result.usage.windows.standard;
     expect(subWindow).toBeDefined();
@@ -129,7 +127,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     const window = result.usage.windows.monthly;
     expect(window).toBeDefined();
@@ -152,7 +150,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     const window = result.usage.windows.monthly;
     expect(window).toBeDefined();
@@ -170,7 +168,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     const window = result.usage.windows.weekly;
     expect(window).toBeDefined();
@@ -190,7 +188,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     const window = result.usage.windows.daily;
     expect(window).toBeDefined();
@@ -209,7 +207,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     const window = result.usage.windows.billing_cycle;
     expect(window).toBeDefined();
@@ -227,7 +225,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     const window = result.usage.windows.monthly;
     expect(window.usedPercent).toBe(100);
@@ -242,7 +240,7 @@ describe('NeuralWatt quota provider', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(payload)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.usage.windows.credits_balance.valueLabel).toBe('$32.68');
     expect(result.usage.windows.credits_balance.usedPercent).toBeNull();
@@ -251,7 +249,7 @@ describe('NeuralWatt quota provider', () => {
   it('maps 401 to session-expired error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired — please re-authenticate with NeuralWatt');
@@ -264,7 +262,7 @@ describe('NeuralWatt quota provider', () => {
       json: async () => { throw new SyntaxError('Unexpected token'); },
     }));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Invalid response from provider');
@@ -277,7 +275,7 @@ describe('NeuralWatt quota provider', () => {
       key: { name: 'sample', allowance: null },
     })));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);

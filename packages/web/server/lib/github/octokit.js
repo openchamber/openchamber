@@ -30,17 +30,89 @@ const timeoutFetch = (url, options = {}) => {
 // limit, so polling unchanged PRs/checks becomes rate-limit-free. Keyed by a
 // credential digest plus URL so raw tokens do not become cache keys.
 const ETAG_CACHE_MAX_ENTRIES = 300;
+// Byte bounds for the cache (triage on #848): a per-entry cap so one
+// oversized GitHub answer is never retained, and a total budget so the
+// cache's worst-case retained bytes are bounded regardless of how many
+// entries accumulate. Only body bytes are counted.
+const ETAG_CACHE_MAX_ENTRY_BYTES = 2 * 1024 * 1024;
+const ETAG_CACHE_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const etagCache = new Map();
+let etagCacheTotalBytes = 0;
 
 const rememberEtag = (key, etag, body, headers) => {
-  etagCache.delete(key);
-  etagCache.set(key, { etag, body, headers });
-  if (etagCache.size > ETAG_CACHE_MAX_ENTRIES) {
-    const oldest = etagCache.keys().next().value;
-    if (oldest !== undefined) {
-      etagCache.delete(oldest);
-    }
+  const size = body?.byteLength ?? 0;
+  if (size > ETAG_CACHE_MAX_ENTRY_BYTES) {
+    return;
   }
+  const existing = etagCache.get(key);
+  if (existing) {
+    etagCacheTotalBytes -= existing.body?.byteLength ?? 0;
+    etagCache.delete(key);
+  }
+  etagCache.set(key, { etag, body, headers });
+  etagCacheTotalBytes += size;
+  while (etagCache.size > ETAG_CACHE_MAX_ENTRIES || etagCacheTotalBytes > ETAG_CACHE_MAX_TOTAL_BYTES) {
+    const oldest = etagCache.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    etagCacheTotalBytes -= etagCache.get(oldest)?.body?.byteLength ?? 0;
+    etagCache.delete(oldest);
+  }
+};
+
+// Reads a response body while holding at most the per-entry cap plus one
+// stream chunk in memory. A body that ends within the cap comes back as a
+// single ArrayBuffer, ready to retain. A body that crosses the cap comes
+// back as a stream that first replays the captured prefix and then
+// continues the original body, so the caller still receives every byte
+// without the cache ever materializing the whole response (#1373: an
+// absent or understated Content-Length must not defeat the cap).
+const readBodyUpToEtagCap = async (response) => {
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const body = await response.arrayBuffer();
+    return { body, oversize: body.byteLength > ETAG_CACHE_MAX_ENTRY_BYTES };
+  }
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    total += value.byteLength;
+    if (total > ETAG_CACHE_MAX_ENTRY_BYTES) {
+      const prefix = [...chunks, value];
+      let index = 0;
+      const remainder = new ReadableStream({
+        async pull(controller) {
+          if (index < prefix.length) {
+            controller.enqueue(prefix[index]);
+            index += 1;
+            return;
+          }
+          const next = await reader.read();
+          if (next.done) {
+            controller.close();
+          } else if (next.value?.byteLength) {
+            controller.enqueue(next.value);
+          }
+        },
+        cancel(reason) {
+          return reader.cancel(reason);
+        },
+      });
+      return { remainder };
+    }
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { body: merged.buffer, oversize: false };
 };
 
 const createConditionalFetch = (cacheIdentity) => async (url, options = {}) => {
@@ -67,9 +139,31 @@ const createConditionalFetch = (cacheIdentity) => async (url, options = {}) => {
   if (response.ok) {
     const etag = response.headers.get('etag');
     if (etag) {
-      const body = await response.arrayBuffer();
-      rememberEtag(cacheKey, etag, body, response.headers);
-      return new Response(body, { status: response.status, headers: response.headers });
+      // Oversized answers are returned whole but never retained: with a
+      // declared length over the per-entry cap, pass the response through
+      // unbuffered; otherwise read the body under the cap (an absent or
+      // understated Content-Length is decided by the streamed bytes, not
+      // by buffering the whole response first).
+      const declaredLength = Number(response.headers.get('content-length'));
+      if (Number.isFinite(declaredLength) && declaredLength > ETAG_CACHE_MAX_ENTRY_BYTES) {
+        return response;
+      }
+      const result = await readBodyUpToEtagCap(response);
+      // The responses rebuilt below carry this code's bytes, not the
+      // declared ones: a Content-Length that disagrees with them (the
+      // understated case, or the still-unknown streamed length) must not
+      // travel with the new body.
+      const headers = new Headers(response.headers);
+      if (result.remainder || declaredLength !== result.body.byteLength) {
+        headers.delete('content-length');
+      }
+      if (result.remainder) {
+        return new Response(result.remainder, { status: response.status, headers });
+      }
+      if (!result.oversize) {
+        rememberEtag(cacheKey, etag, result.body, response.headers);
+      }
+      return new Response(result.body, { status: response.status, headers });
     }
   }
 

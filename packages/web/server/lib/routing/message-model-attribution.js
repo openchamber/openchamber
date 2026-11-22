@@ -117,11 +117,14 @@ export const queryMessageModelAttribution = async (dbPath, { sessionID } = {}) =
 };
 
 export const registerMessageModelAttributionRoutes = (app, dependencies = {}) => {
-  const { resolveDbPath = resolveOpenCodeDbPath } = dependencies;
+  const { resolveDbPath = resolveOpenCodeDbPath, isOpenCodeLocal = () => true } = dependencies;
 
   app.get('/api/model-routes/turns', async (req, res) => {
     const sessionID = req.query?.sessionID;
     if (!sessionID) return res.status(400).json({ error: 'sessionID is required' });
+    // A remote OpenCode keeps its telemetry in its own database; a local file
+    // here could be a stale one from another install, so read nothing.
+    if (!isOpenCodeLocal()) return res.json({ available: false, reason: 'remote-opencode' });
     try {
       res.json(await queryMessageModelAttribution(resolveDbPath(), { sessionID }));
     } catch (error) {

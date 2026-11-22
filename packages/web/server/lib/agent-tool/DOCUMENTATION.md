@@ -88,6 +88,15 @@ both settings are `false`.
   a page from that tool's own call (its input and stored result), and inside
   an `execute` script the call is only an entry in `execute`'s list, so the
   page never showed.
+- A direct tool is part of the request's tool list, which providers cache as
+  the start of the prompt, so turning one on or off makes a running session's
+  next turn skip the prompt cache. A Code Mode tool changes only the catalog,
+  which OpenCode keeps as a session baseline and updates by appending a message.
+  The Settings page says which switches cost the cache for the current
+  `agentToolsCodeMode` (measured in developing-today/openchamber#149), and only
+  while `managedToolsApplyLive` from `GET /api/config/settings` is true: with an
+  external OpenCode or a user-owned `OPENCODE_CONFIG` a switch waits for a
+  restart and leaves the running session alone.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly

@@ -1,5 +1,11 @@
 name: stale
 
+# Label-only by the maintainer's decision (2026-10-27, #87): this workflow
+# adds the `stale` label after 28 days without activity and removes it when
+# the issue or pull request sees activity again (remove-stale-when-updated).
+# It must never close anything: days-before-close and days-before-pr-close
+# stay at -1. Do not re-enable closing.
+
 on:
   schedule:
     - cron: "30 1 * * *"
@@ -11,17 +17,40 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
+  # queue: max forbids cancel-in-progress: true (GitHub validation rejects
+  # the combination and the workflow dies at startup with zero jobs, #1342).
+  # Keep the literal false so a scheduled run is never replaced by a dispatch.
   cancel-in-progress: false
   queue: max
 
 jobs:
   stale:
     timeout-minutes: 10
-    if: ${{ github.repository == 'openchamber/openchamber' }}
+    if: ${{ github.repository == 'openchamber/openchamber' || github.repository == 'developing-today-forks/openchamber' }}
     runs-on: ubuntu-latest
     steps:
+      # The bot app token is preferred, but a repository that has not
+      # installed the app has no OC_REVIEW_APP_* secrets (#87): detect
+      # that here (the values themselves are never printed) so the
+      # token step is skipped and the stale step falls back to the
+      # workflow token, which the workflow permissions already cover,
+      # instead of failing in the token step (the #61 failure mode).
+      - name: Check bot app configuration
+        id: review-app
+        env:
+          REVIEW_APP_ID: ${{ secrets.OC_REVIEW_APP_ID }}
+          REVIEW_APP_PRIVATE_KEY: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$REVIEW_APP_ID" ] && [ -n "$REVIEW_APP_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::OpenChamber bot app is not configured for this repository (OC_REVIEW_APP_ID / OC_REVIEW_APP_PRIVATE_KEY secrets are unset); labelling with the workflow token instead."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate bot app token
         id: app-token
+        if: steps.review-app.outputs.configured == 'true'
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
@@ -29,27 +58,20 @@ jobs:
 
       - uses: actions/stale@1e223db275d687790206a7acac4d1a11bd6fe629 # v10.4.0
         with:
-          repo-token: ${{ steps.app-token.outputs.token }}
+          repo-token: ${{ steps.app-token.outputs.token || github.token }}
           days-before-stale: 28
-          days-before-close: 7
+          days-before-close: -1
+          days-before-pr-close: -1
           stale-issue-label: stale
           stale-pr-label: stale
           stale-issue-message: >
             This issue has been automatically marked as stale because it has not had
-            any activity in the last 28 days. It will be closed in 7 days if no
-            further activity occurs.
-          close-issue-message: >
-            This issue has been automatically closed because it has been stale for
-            7 days with no activity. If this is still relevant, please comment or
-            reopen the issue.
+            any activity in the last 28 days. Stale issues are not closed
+            automatically; the label is removed when activity resumes.
           stale-pr-message: >
             This pull request has been automatically marked as stale because it has
-            not had any activity in the last 28 days. It will be closed in 7 days
-            if no further activity occurs.
-          close-pr-message: >
-            This pull request has been automatically closed because it has been
-            stale for 7 days with no activity. If this is still relevant, please
-            comment or reopen the pull request.
+            not had any activity in the last 28 days. Stale pull requests are not
+            closed automatically; the label is removed when activity resumes.
           exempt-issue-labels: pinned,security,help wanted,accepted
           exempt-pr-labels: pinned,security,help wanted
           remove-stale-when-updated: true

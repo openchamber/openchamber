@@ -76,6 +76,20 @@ describe('settings registry', () => {
     } finally {
       useUIStore.persist.setOptions(options);
       useUIStore.setState(original, true);
+  test('applies every In work entry mode from settings and drops an unknown one', () => {
+    const original = useUIStore.getState().sessionWorkEntry;
+    try {
+      for (const mode of ['off', 'every-message', 'jev'] as const) {
+        const parsed = parseSettingsDocument({ sessionWorkEntry: mode });
+        expect(parsed).toEqual({ sessionWorkEntry: mode });
+        if (!parsed) throw new Error('Expected valid mode');
+        applySettingsToStores(parsed);
+        expect(useUIStore.getState().sessionWorkEntry).toBe(mode);
+        expect(readAutoSaveSnapshot().sessionWorkEntry).toBe(mode);
+      }
+      expect(parseSettingsDocument({ sessionWorkEntry: 'always' })).toEqual({});
+    } finally {
+      useUIStore.setState({ sessionWorkEntry: original });
     }
   });
   test('accepts only interface languages the UI ships', () => {

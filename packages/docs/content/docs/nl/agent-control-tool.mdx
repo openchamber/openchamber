@@ -23,9 +23,9 @@ De besturingstool toont projecten en modelvoorkeuren, doorzoekt de modelcatalogu
 ## Houd rekening met
 
 - Prompts naar nieuwe sessies keren standaard meteen terug. Volg de sessie in OpenChamber of vraag de agent later te kijken.
-- Een aparte worktree wordt alleen gemaakt als u erom vraagt. Niet-gecommitte wijzigingen uit uw huidige worktree worden er niet naartoe gekopieerd.
+- Een nieuwe sessie in een Git-project werkt in een nieuwe worktree, tenzij u vraagt om in de map zelf te werken; een map die geen Git-repository is, wordt gebruikt zoals ze is, en een afgesplitste sessie blijft in de map van de sessie waar ze vandaan komt. Niet-gecommitte wijzigingen uit uw huidige worktree worden niet naar een nieuwe worktree gekopieerd. Een sessie voor een pull request krijgt altijd een eigen worktree.
 - Als de checkout bezet lijkt, bijvoorbeeld omdat een andere sessie op dezelfde branch werkt, kan de agent aanbieden zijn eigen sessie naar een nieuwe worktree te verplaatsen. Hij verplaatst haar pas na uw akkoord en neemt alleen de bestanden mee die hij zelf heeft gewijzigd.
-- De tools kunnen geen sessies of worktrees verwijderen, geen projectpaden registreren, geen willekeurige shellopdrachten uitvoeren en geen willekeurige URL's aanroepen.
+- De tools kunnen geen sessies of worktrees verwijderen, geen willekeurige shellopdrachten uitvoeren en geen willekeurige URL's aanroepen. Ze kunnen een map als project toevoegen en een project uit de lijst halen; de bestanden blijven staan.
 
 ## De tools aan- of uitzetten
 

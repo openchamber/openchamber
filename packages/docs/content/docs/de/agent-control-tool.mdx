@@ -23,9 +23,9 @@ Das Steuerungswerkzeug listet Projekte und Modelleinstellungen auf, durchsucht d
 ## Beachten
 
 - Prompts an neue Sitzungen kehren standardmäßig sofort zurück. Verfolge die Sitzung in OpenChamber oder bitte den Agenten, sie später zu prüfen.
-- Ein separater Worktree entsteht nur, wenn du danach fragst. Nicht committete Änderungen aus deinem aktuellen Worktree werden nicht dorthin kopiert.
+- Eine neue Sitzung in einem Git-Projekt läuft in einem neuen Worktree, außer du bittest darum, dass sie direkt im Ordner arbeitet; ein Ordner ohne Git-Repository wird so verwendet, wie er ist, und eine abgezweigte Sitzung bleibt im Ordner der Sitzung, aus der sie stammt. Nicht committete Änderungen aus deinem aktuellen Worktree werden nicht in einen neuen Worktree kopiert. Eine Sitzung für einen Pull Request bekommt immer einen eigenen Worktree.
 - Wenn der Checkout beschäftigt wirkt, etwa weil eine andere Sitzung auf demselben Branch arbeitet, kann der Agent anbieten, seine eigene Sitzung in einen neuen Worktree zu verschieben. Er verschiebt sie erst nach deiner Zustimmung und nimmt nur die Dateien mit, die er selbst geändert hat.
-- Die Werkzeuge können keine Sitzungen oder Worktrees löschen, keine Projektpfade registrieren, keine beliebigen Shell-Befehle ausführen und keine beliebigen URLs aufrufen.
+- Die Werkzeuge können keine Sitzungen oder Worktrees löschen, keine beliebigen Shell-Befehle ausführen und keine beliebigen URLs aufrufen. Sie können einen Ordner als Projekt hinzufügen und ein Projekt aus der Liste entfernen; seine Dateien bleiben dabei unverändert.
 
 ## Werkzeuge ein- oder ausschalten
 

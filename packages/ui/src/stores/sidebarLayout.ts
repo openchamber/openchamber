@@ -7,7 +7,8 @@ import { z } from 'zod';
  * state, and how the List view lays out chats and projects.
  *
  * One value, stored per surface kind with the other sidebar toggles
- * (`sidebarLayout`). The phone sheet and VS Code keep the classic layout.
+ * (`sidebarLayout`). VS Code keeps the classic layout; the phone sheet draws
+ * the same value as the desktop and web sidebar, keeping its own order.
  */
 
 /** Live states a top-level session can be in, as the attention sections see it. */
@@ -103,7 +104,7 @@ export type SidebarLayout = {
   timelineChats: TimelineChatsPlacement;
   /** List view: sessions under one header per project; off, one combined list. */
   timelineProjectGroups: boolean;
-  /** List view: one line per session. */
+  /** Folded into `sessionRowDisplay.listLines` (display store v13); kept so stored layouts still parse. */
   timelineCompactRows: boolean;
   /** List view with Chats as a group: its place among the projects. */
   chatsGroupIndex: number;

@@ -758,7 +758,9 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
                         ? t('diffView.unavailable.nestedRepositoryTitle')
                         : error.reason === 'untracked_directory'
                             ? t('diffView.unavailable.untrackedDirectoryTitle')
-                            : t('diffView.unavailable.missingTitle')
+                            : error.reason === 'file_too_large'
+                                ? t('diffView.unavailable.tooLargeTitle')
+                                : t('diffView.unavailable.missingTitle')
                     : error instanceof Error ? error.message : String(error);
                 setResult({ status: 'error', message });
             },
@@ -1504,12 +1506,16 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             <div className="typography-ui-label font-semibold text-foreground">
                                 {diffLoadFailure.reason === 'untracked_directory'
                                     ? t('diffView.unavailable.untrackedDirectoryTitle')
-                                    : t('diffView.unavailable.missingTitle')}
+                                    : diffLoadFailure.reason === 'file_too_large'
+                                        ? t('diffView.unavailable.tooLargeTitle')
+                                        : t('diffView.unavailable.missingTitle')}
                             </div>
                             <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">
                                 {diffLoadFailure.reason === 'untracked_directory'
                                     ? t('diffView.unavailable.untrackedDirectoryDescription')
-                                    : t('diffView.unavailable.missingDescription')}
+                                    : diffLoadFailure.reason === 'file_too_large'
+                                        ? t('diffView.unavailable.tooLargeDescription')
+                                        : t('diffView.unavailable.missingDescription')}
                             </div>
                             {diffLoadFailure.reason === 'path_not_found' ? (
                                 <button

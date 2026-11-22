@@ -42,11 +42,11 @@ export const createEnvironmentActions = ({ store, runtime, listProjects }) => {
 
   const view = (names, variables) => {
     const references = Object.fromEntries(Object.entries(variables).filter(([, value]) => isVaultReference(value)));
-    const statuses = runtime.vaultStatus();
+    const statuses = runtime.vaultStatus(variables);
     return {
       names,
       references,
-      vault: Object.fromEntries(Object.keys(references).filter((name) => statuses[name]).map((name) => [name, statuses[name]])),
+      vault: Object.fromEntries(Object.keys(references).filter((name) => Object.hasOwn(statuses, name) && statuses[name]).map((name) => [name, statuses[name]])),
     };
   };
 

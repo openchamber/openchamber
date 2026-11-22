@@ -8,9 +8,39 @@ import yaml from 'yaml';
 // Path constants freeze when the module loads, so point XDG_CONFIG_HOME at a
 // scratch directory BEFORE importing. Nothing here may touch the real
 // ~/.config/opencode.
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-entity-v2-'));
+//
+// The module discovers project configs by walking the project folder's
+// ancestors to the filesystem root, so the scratch tree must not sit under a
+// folder that itself carries a config: with TMPDIR under the home folder the
+// walk escapes the tree and reads the real ~/.opencode/opencode.jsonc as a
+// project config (#1814). Pick the first candidate base whose whole ancestor
+// chain is free of discoverable configs; the usual os.tmpdir() qualifies
+// unless it is home-nested.
+const CONFIG_FILE_NAMES = ['opencode.json', 'opencode.jsonc'];
+const chainCarriesConfig = (base: string): boolean => {
+  let current = path.resolve(base);
+  while (true) {
+    const candidates = [
+      ...CONFIG_FILE_NAMES.map((name) => path.join(current, name)),
+      ...CONFIG_FILE_NAMES.map((name) => path.join(current, '.opencode', name)),
+    ];
+    if (candidates.some((candidate) => fs.existsSync(candidate))) return true;
+    const parent = path.dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+};
+const scratchBase = [os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])]
+  .find((candidate) => !chainCarriesConfig(candidate)) ?? os.tmpdir();
+const root = fs.mkdtempSync(path.join(scratchBase, 'openchamber-vscode-entity-v2-'));
 process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
 process.env.OPENCODE_CONFIG = '';
+// opencodeConfigPaths gives OPENCODE_CONFIG_DIR precedence over
+// XDG_CONFIG_HOME, so an exported one would send the module under test to a
+// different config directory than the scratch tree. Clear it before the
+// module loads and restore it afterwards (the agent-walk suite's shape).
+const previousOpenCodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
+delete process.env.OPENCODE_CONFIG_DIR;
 
 // Deferred so the env above is in place first; tsx compiles this file to CJS,
 // where top-level await is unavailable.
@@ -44,6 +74,8 @@ describe('VS Code entity modules speak OpenCode 2 shapes', () => {
     fs.rmSync(root, { recursive: true, force: true });
     delete process.env.XDG_CONFIG_HOME;
     delete process.env.OPENCODE_CONFIG;
+    if (previousOpenCodeConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR;
+    else process.env.OPENCODE_CONFIG_DIR = previousOpenCodeConfigDir;
   });
 
   test('web search locks follow OpenCode config precedence', async () => {
@@ -152,6 +184,27 @@ describe('VS Code entity modules speak OpenCode 2 shapes', () => {
     const created = path.join(projectDir, '.opencode', 'agents', 'fresh.md');
     assert.equal(fs.existsSync(created), true);
     assert.deepEqual(readMd(created), { frontmatter: { description: 'Fresh' }, body: 'Do the thing.' });
+  });
+
+  test('refuses an agent whose serialized markdown exceeds the parse cap (#1444)', async () => {
+    const { createAgent, MD_FILE_MAX_BYTES } = await loadConfig();
+    assert.throws(
+      () => createAgent('huge', { description: 'Huge', system: 'x'.repeat(MD_FILE_MAX_BYTES + 1) }, projectDir, 'project'),
+      (error: NodeJS.ErrnoException) => error.code === 'ERR_MD_FILE_TOO_LARGE',
+    );
+    assert.equal(fs.existsSync(path.join(projectDir, '.opencode', 'agents', 'huge.md')), false);
+  });
+
+  test('creates an agent whose serialized markdown is exactly at the parse cap (#1444)', async () => {
+    const { createAgent, MD_FILE_MAX_BYTES } = await loadConfig();
+    createAgent('sizer-a', { description: 'Sizer', system: 'x' }, projectDir, 'project');
+    const probePath = path.join(projectDir, '.opencode', 'agents', 'sizer-a.md');
+    const overhead = fs.statSync(probePath).size - 1;
+    const body = 'x'.repeat(MD_FILE_MAX_BYTES - overhead);
+    createAgent('sizer-b', { description: 'Sizer', system: body }, projectDir, 'project');
+    const atCapPath = path.join(projectDir, '.opencode', 'agents', 'sizer-b.md');
+    assert.equal(fs.statSync(atCapPath).size, MD_FILE_MAX_BYTES);
+    assert.equal(readMd(atCapPath).body, body);
   });
 
   test('moves a v1 JSON agent entry into the agents section of the same file', async () => {

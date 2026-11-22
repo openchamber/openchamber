@@ -31,6 +31,17 @@ Daha uzun planları kayıtlı dosyalar olarak tutmak için bir alan. Şunları y
 
 Kaydedilmiş notunuz, işaretlediğiniz yapılacak öğeniz veya listelenen planınızla Context sekmesine geri dönmüş olmanız gerekir. İşlemin gerçekleştiğini böyle anlarsınız.
 
+## Silme ve geri alma
+
+Bir notu, planı ya da kayıtlı bir belleği silmek, birkaç saniyeliğine **Geri al** içeren bir bildirim gösterir. Kayıt, ancak bu süre dolduğunda kalıcı olarak kaldırılır.
+
+## Agent'lar
+
+Agent'lar aynı notları, yapılacakları ve planları proje bilgisi aracı üzerinden okur ve günceller. Bir agent'tan bir kararı not etmesini, bir yapılacak eklemesini, birini tamamlandı işaretlemesini ya da bir planı güncel tutmasını isteyin; değişiklik olur olmaz panelde görünür. Bir agent'ın oluşturduğu notlar, bir agent'tan geldiği şeklinde işaretlenir. Bir agent sizin için bir plan yazdığında, planı önünüzde açabilir; orada planı okur, satırlara yorum yapar ve bir oturuma gönderebilirsiniz. Planlar düz Markdown dosyalarıdır, bu yüzden agent'lar onları diğer dosyalar gibi okur ve düzenler. Bir plana adımlarının kısa bir kontrol listesiyle başlarlar ve uyguladıkça her birini işaretlerler; açık bir plan değişiklikleri birkaç saniye içinde alır, böylece önizlemesi işin ne kadar ilerlediğini gösterir.
+
+Bir agent, worktree'ler dahil, oturumunun ait olduğu projede çalışır. Siz yazarken bir agent bir notu ya da planı değiştirirse, yazdıklarınız agent'ın değişikliğinin üzerine kaydedilir. Agent'lardan, bir notu ya da planı tamamen değiştirirken okudukları metni de göndermeleri istenir; metin o zamandan beri değiştiyse yazma reddedilir ve agent yeniden okur.
+
+Araç varsayılan olarak açıktır. **Settings → General → OpenChamber Tools** altında **Project knowledge tool** ile kapatın. Diğer OpenChamber araçları gibi, yalnızca OpenChamber kendi OpenCode sunucusunu çalıştırdığında vardır; harici bir sunucuyla ya da VS Code uzantısında yoktur.
 ## İlgili
 
 - [Worktree Sessions](/worktrees/) — bir yapılacak öğesini kendi branch'inde çalıştırın

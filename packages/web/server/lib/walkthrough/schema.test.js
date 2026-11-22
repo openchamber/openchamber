@@ -101,6 +101,37 @@ describe('normalizeWalkthrough', () => {
     expect(result.chapters[0].stops[0].importance).toBe('normal');
   });
 
+  it('never splits a surrogate pair at the chapter-title cap (oracle: astral char straddling offset 24)', () => {
+    const result = normalizeWalkthrough(walkthrough([
+      {
+        title: 'a'.repeat(23) + '😀' + 'tail tail tail',
+        icon: 'doc',
+        blurb: '',
+        stops: [{ title: 'A', hunks: ['h1'], importance: 'normal', prose: 'Text.' }],
+      },
+    ]), ALIASES);
+
+    const title = result.chapters[0].title;
+    expect(title).toBe('a'.repeat(23));
+    expect(title.length).toBe(23);
+    // A lone surrogate would encode as U+FFFD and not round-trip.
+    expect(new TextDecoder().decode(new TextEncoder().encode(title))).toBe(title);
+  });
+
+  it('still cuts an over-cap ASCII chapter title at exactly 24 code units', () => {
+    const result = normalizeWalkthrough(walkthrough([
+      {
+        title: 'a'.repeat(40),
+        icon: 'doc',
+        blurb: '',
+        stops: [{ title: 'A', hunks: ['h1'], importance: 'normal', prose: 'Text.' }],
+      },
+    ]), ALIASES);
+
+    expect(result.chapters[0].title).toBe('a'.repeat(24));
+    expect(result.chapters[0].title.length).toBe(24);
+  });
+
   it('caps the total number of stops', () => {
     const many = Array.from({ length: 30 }, (_, index) => ({
       title: `Stop ${index}`,

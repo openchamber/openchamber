@@ -1,19 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { spawnSync } from 'node:child_process';
-
-// Mock child_process to prevent real spawnSync calls that would hang in tests
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(),
-  spawnSync: vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })),
-}));
-
-const {
-  checkForUpdates,
-  detectPackageManager,
-  executeUpdate,
-  getCurrentVersion,
-  getUpdateCommand,
-} = await import('./package-manager.js');
+const spawnSync = vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' }));
+const packageManager = await import('./package-manager.js');
+const { checkForUpdates, detectPackageManager, executeUpdate, getCurrentVersion } = packageManager;
+const getUpdateCommand = (pm, options) => packageManager.getUpdateCommand(pm, { ...options, spawnSync });
 
 /** Helper: create a fetch mock that routes by URL pattern */
 function createFetchMock() {
@@ -60,28 +49,28 @@ describe('checkForUpdates', () => {
     prerelease: false,
     assets: [],
     body: `notes for ${tag}`,
-    html_url: `https://github.com/developing-today/openchamber/releases/tag/${tag}`,
+    html_url: `https://github.com/developing-today-forks/openchamber/releases/tag/${tag}`,
     ...extra,
   });
   const forkReleases = (...releases) => ({ ok: true, json: async () => releases });
   const upstreamCalls = () => fetchMock.mock.calls.filter(([url]) => /api\.openchamber\.dev|registry\.npmjs\.org|raw\.githubusercontent\.com\/openchamber/.test(String(url)));
 
   it('reports the highest published fork release as the update, for every app type', async () => {
-    fetchMock.when('developing-today/openchamber/releases?per_page=30', forkReleases(release('v1.9.10'), release('v1.10.0')));
+    fetchMock.when('developing-today-forks/openchamber/releases?per_page=30', forkReleases(release('v1.9.10'), release('v1.10.0')));
 
     for (const appType of ['web', 'desktop-electron', 'vscode']) {
       const result = await checkForUpdates({ currentVersion: '1.9.10', appType });
       expect(result.available).toBe(true);
       expect(result.version).toBe('1.10.0');
-      expect(result.releaseUrl).toBe('https://github.com/developing-today/openchamber/releases/tag/v1.10.0');
+      expect(result.releaseUrl).toBe('https://github.com/developing-today-forks/openchamber/releases/tag/v1.10.0');
       expect(result.manualUpdate).toBe(true);
-      expect(result.updateCommand).toContain('https://github.com/developing-today/openchamber/releases/tag/v1.10.0');
+      expect(result.updateCommand).toContain('https://github.com/developing-today-forks/openchamber/releases/tag/v1.10.0');
     }
     expect(upstreamCalls()).toHaveLength(0);
   });
 
   it('ignores drafts and prereleases when picking the latest release', async () => {
-    fetchMock.when('developing-today/openchamber/releases?per_page=30', forkReleases(
+    fetchMock.when('developing-today-forks/openchamber/releases?per_page=30', forkReleases(
       release('v1.11.0', { draft: true }),
       release('v1.10.1-rc.1', { prerelease: true }),
       release('v1.10.0'),
@@ -94,7 +83,7 @@ describe('checkForUpdates', () => {
   });
 
   it('picks the highest semver release, not the newest one created', async () => {
-    fetchMock.when('developing-today/openchamber/releases?per_page=30', forkReleases(release('v2.2.0'), release('v2.10.0'), release('v2.9.0')));
+    fetchMock.when('developing-today-forks/openchamber/releases?per_page=30', forkReleases(release('v2.2.0'), release('v2.10.0'), release('v2.9.0')));
 
     const result = await checkForUpdates({ currentVersion: '2.2.0', appType: 'web' });
 
@@ -102,7 +91,7 @@ describe('checkForUpdates', () => {
   });
 
   it('reports no update when the fork release has the installed version', async () => {
-    fetchMock.when('developing-today/openchamber/releases?per_page=30', forkReleases(release('v1.10.0')));
+    fetchMock.when('developing-today-forks/openchamber/releases?per_page=30', forkReleases(release('v1.10.0')));
 
     const result = await checkForUpdates({ currentVersion: '1.10.0', appType: 'web' });
 
@@ -110,7 +99,7 @@ describe('checkForUpdates', () => {
   });
 
   it('reports no update and does not fall back to npm when the fork feed is unreachable', async () => {
-    fetchMock.when('developing-today/openchamber/releases?per_page=30', { ok: false, status: 503, json: async () => ({}) });
+    fetchMock.when('developing-today-forks/openchamber/releases?per_page=30', { ok: false, status: 503, json: async () => ({}) });
 
     const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
 
@@ -130,7 +119,7 @@ describe('checkForUpdates', () => {
 
     expect(result.available).toBe(true);
     expect(result.version).toBe('1.10.0');
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('developing-today/openchamber/releases?per_page'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('developing-today-forks/openchamber/releases?per_page'))).toBe(false);
   });
 
   it('reports no update when the update API returns a malformed latest version', async () => {
@@ -145,6 +134,48 @@ describe('checkForUpdates', () => {
     // parseInt alone read '10junk' as 10 and claimed the upgrade; a malformed
     // version must never claim an update.
     expect(result.available).toBe(false);
+  });
+
+  // --- Response body caps (the update answers are read through the bounded reader) ---
+
+  const streamedBody = (chunks) => {
+    const state = { cancelled: false };
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        // Never closed: only the reader cancelling can end this body.
+      },
+      cancel() {
+        state.cancelled = true;
+      },
+    });
+    return { response: new Response(stream), state };
+  };
+  const oversizedJson = (value) => {
+    const json = JSON.stringify(value);
+    const half = Math.ceil(json.length / 2);
+    return [json.slice(0, half), json.slice(half), 'x'.repeat(1024 * 1024)];
+  };
+
+  it('reports no update when the update API streams an over-cap body, and cancels the stream', async () => {
+    process.env.OPENCHAMBER_UPDATE_API_URL = 'https://api.openchamber.dev/v1/update/check';
+    const { response, state } = streamedBody(oversizedJson({ latestVersion: '9.9.9', updateAvailable: true }));
+    fetchMock.when('api.openchamber.dev', { ok: true, body: response.body, headers: response.headers });
+
+    const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
+
+    expect(result.available).toBe(false);
+    expect(state.cancelled).toBe(true);
+  });
+
+  it('reports no update when the fork feed streams an over-cap body, and cancels the stream', async () => {
+    const { response, state } = streamedBody(oversizedJson([release('v9.9.9')]));
+    fetchMock.when('developing-today-forks/openchamber/releases?per_page=30', { ok: true, body: response.body, headers: response.headers });
+
+    const result = await checkForUpdates({ currentVersion: '1.9.10', appType: 'web' });
+
+    expect(result.available).toBe(false);
+    expect(state.cancelled).toBe(true);
   });
 
   it('reports no update when the installed version is malformed', async () => {
@@ -169,10 +200,10 @@ describe('checkForUpdates', () => {
         json: async () => ({
           latestVersion: '1.10.0',
           updateAvailable: true,
-          downloadUrl: 'https://github.com/developing-today/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.aab',
+          downloadUrl: 'https://github.com/developing-today-forks/openchamber/releases/download/v1.10.0/OpenChamber-1.10.0-42-android.aab',
         }),
       })
-      .when('api.github.com/repos/developing-today/openchamber/releases/tags/v1.10.0', {
+      .when('api.github.com/repos/developing-today-forks/openchamber/releases/tags/v1.10.0', {
         ok: true,
         json: async () => ({
           assets: [{ name: 'OpenChamber-1.10.0-42-android.apk', browser_download_url: 'https://downloads.example/OpenChamber-1.10.0-42-android.apk' }],
@@ -243,13 +274,13 @@ describe('getUpdateCommand', () => {
 
 describe('executeUpdate', () => {
   it('never runs the package manager and points at the fork release', () => {
-    vi.mocked(spawnSync).mockClear();
+    spawnSync.mockClear();
 
     const result = executeUpdate('npm', { targetVersion: '1.10.0' });
 
     expect(result.success).toBe(false);
     expect(result.manualUpdate).toBe(true);
-    expect(result.error).toContain('https://github.com/developing-today/openchamber/releases/latest');
+    expect(result.error).toContain('https://github.com/developing-today-forks/openchamber/releases/latest');
     expect(result.error).toContain('(v1.10.0)');
     expect(spawnSync).not.toHaveBeenCalled();
   });
@@ -267,11 +298,10 @@ describe('detectPackageManagerDetails', () => {
     // No package manager answers, as on a server where an unpacked tarball runs.
     spawnSync.mockImplementation(() => ({ status: 1, stdout: '', stderr: '' }));
     vi.resetModules();
-    const { detectPackageManagerDetails, isUnmanagedInstall } = await import('./package-manager.js');
+    const { detectPackageManagerDetails } = await import('./package-manager.js');
 
-    expect(detectPackageManagerDetails().reason).toBe('unmanaged-install');
-    expect(detectPackageManagerDetails().reason).toBe('unmanaged-install');
-    expect(isUnmanagedInstall()).toBe(true);
+    expect(detectPackageManagerDetails({ spawnSync }).reason).toBe('unmanaged-install');
+    expect(detectPackageManagerDetails({ spawnSync }).reason).toBe('unmanaged-install');
   });
 });
 
@@ -298,7 +328,7 @@ describe('checkForUpdates for the Android app', () => {
 
   const apk = (version) => ({
     name: `OpenChamber-${version}-android.apk`,
-    browser_download_url: `https://github.com/developing-today/openchamber/releases/download/v${version}/OpenChamber-${version}-android.apk`,
+    browser_download_url: `https://github.com/developing-today-forks/openchamber/releases/download/v${version}/OpenChamber-${version}-android.apk`,
   });
 
   it('uses the highest published fork release and its APK, never the upstream API', async () => {
@@ -307,12 +337,12 @@ describe('checkForUpdates for the Android app', () => {
         ok: true,
         json: async () => ({ assets: [apk('2.3.0')] }),
       })
-      .when('developing-today/openchamber/releases?per_page=30', {
+      .when('developing-today-forks/openchamber/releases?per_page=30', {
         ok: true,
         json: async () => [
           { tag_name: 'v2.4.0', draft: true, prerelease: false, assets: [] },
           { tag_name: 'v2.3.1-beta.1', draft: false, prerelease: true, assets: [] },
-          { tag_name: 'v2.3.0', draft: false, prerelease: false, body: '- fork release', html_url: 'https://github.com/developing-today/openchamber/releases/tag/v2.3.0' },
+          { tag_name: 'v2.3.0', draft: false, prerelease: false, body: '- fork release', html_url: 'https://github.com/developing-today-forks/openchamber/releases/tag/v2.3.0' },
           { tag_name: 'v2.2.0', draft: false, prerelease: false, assets: [] },
         ],
       });
@@ -321,13 +351,13 @@ describe('checkForUpdates for the Android app', () => {
 
     expect(result.available).toBe(true);
     expect(result.version).toBe('2.3.0');
-    expect(result.downloadUrl).toBe('https://github.com/developing-today/openchamber/releases/download/v2.3.0/OpenChamber-2.3.0-android.apk');
+    expect(result.downloadUrl).toBe('https://github.com/developing-today-forks/openchamber/releases/download/v2.3.0/OpenChamber-2.3.0-android.apk');
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('api.openchamber.dev'))).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('registry.npmjs.org'))).toBe(false);
   });
 
   it('reports no update and does not fall back to npm when the fork feed is unreachable', async () => {
-    fetchMock.when('developing-today/openchamber/releases?per_page=30', { ok: false, status: 503, json: async () => ({}) });
+    fetchMock.when('developing-today-forks/openchamber/releases?per_page=30', { ok: false, status: 503, json: async () => ({}) });
 
     const result = await checkForUpdates({ currentVersion: '2.2.0', appType: 'mobile-capacitor', platform: 'android' });
 

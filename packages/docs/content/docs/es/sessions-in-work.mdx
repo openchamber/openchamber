@@ -5,7 +5,7 @@ description: Mantén a la vista en la barra lateral las sesiones en las que est�
 
 # Sesiones en curso
 
-Cada sesión en la que envías un mensaje pasa al bloque **En curso**, arriba en la barra lateral, y se queda ahí hasta que la marques como hecha, sin importar cuánto hace que la abriste. Tus proyectos guardan todas las sesiones que has tenido; En curso solo reúne lo que aún no has terminado.
+El bloque **En curso**, arriba en la barra lateral, reúne las sesiones en las que estás trabajando hasta que las marques como hechas, sin importar cuánto hace que las abriste. Tus proyectos guardan todas las sesiones que has tenido; En curso solo reúne lo que aún no has terminado.
 
 ## Dónde encontrarlo
 
@@ -19,9 +19,15 @@ Para tener las sesiones ancladas en su propio bloque **Ancladas** encima de En c
 
 ## Cómo entran las sesiones
 
-Envía un mensaje en una sesión y pasa a en curso. Vale para cualquier sesión de un proyecto, incluidas las sesiones en worktrees.
+Sigue una sesión a mano, como se explica más abajo, o deja que las sesiones entren solas con **Cuándo entra una sesión en curso** en **Configuración → Sesiones → Sesiones en curso**:
 
-Una sesión que marcaste como hecha vuelve cuando envías un mensaje nuevo en ella.
+- **Desactivado**, el valor por defecto: solo entran las sesiones que sigues.
+- **Cada mensaje:** envía un mensaje en una sesión y entra. Una sesión que marcaste como hecha vuelve cuando envías un mensaje nuevo en ella.
+- **Jev decide:** con un [proveedor de clasificación](/es/classification-providers/) configurado, Jev lee cada mensaje que envías y pasa la sesión a en curso cuando pides un cambio, informas de un error o hablas de un cambio concreto que vas a hacer. Las preguntas, las explicaciones y la investigación no cuentan. Jev vuelve a mirar cuando el agente termina un turno, y así detecta el trabajo que solo se ve en la respuesta. Una sesión que marcaste como hecha solo vuelve cuando Jev ve trabajo nuevo en un mensaje enviado después. Sin proveedor de clasificación, Jev decide funciona como Desactivado.
+
+Vale para cualquier sesión de un proyecto, incluidas las sesiones en worktrees.
+
+Si habías activado tú mismo **Mostrar sesiones en curso** antes de que existiera este ajuste, empieza en **Cada mensaje**, que es como entraban las sesiones hasta entonces. Si no, empieza en Desactivado.
 
 Los chats, las sesiones archivadas, las sesiones de revisión y las ejecuciones de [tareas programadas](/es/scheduled-tasks/) nunca entran; si bifurcas una ejecución para seguir trabajando en ella, la bifurcación sí entra. Las subsesiones no entran por su cuenta; van con su sesión principal.
 
@@ -56,16 +62,19 @@ Actívalos o desactívalos en **Configuración → Chat → Asistencia de sesió
 
 ## Configuración
 
-Abre **Configuración → Sesiones → Sesiones en curso**. Hay un solo ajuste, **Mostrar sesiones en curso**, activado por defecto. Si lo desactivas, se apaga toda la función: no hay bloque y enviar un mensaje ya no pasa la sesión a en curso.
+Abre **Configuración → Sesiones → Sesiones en curso**:
+
+- **Mostrar sesiones en curso**, activado por defecto: si lo desactivas, se apaga toda la función, sin bloque y sin sesiones que entren solas.
+- **Cuándo entra una sesión en curso**: Desactivado, Cada mensaje o Jev decide, como se explica más arriba.
 
 Para ocultar solo el bloque, usa **Mostrar en curso** en el menú de visualización de la barra lateral.
 
 ## Dónde funciona
 
-El bloque y el seguimiento manual funcionan en todas partes, VS Code incluido. Pasar la sesión a en curso al enviar un mensaje, la pista «parece terminado» y el filtro de Jev para los resúmenes necesitan el servidor de OpenChamber, así que funcionan en la app de escritorio, en la app web y en el teléfono, pero no en VS Code. En VS Code sigues las sesiones a mano.
+El bloque y el seguimiento manual funcionan en todas partes, VS Code incluido. Que las sesiones entren solas, la pista «parece terminado» y el filtro de Jev para los resúmenes necesitan el servidor de OpenChamber, así que funcionan en la app de escritorio, en la app web y en el teléfono, pero no en VS Code. En VS Code sigues las sesiones a mano.
 
 ## Relacionado
 
-- [Proveedores de clasificación (Jev)](/es/classification-providers/): configura la pista «parece terminado»
+- [Proveedores de clasificación (Jev)](/es/classification-providers/): configura Jev decide y la pista «parece terminado»
 - [Chats](/es/chats/): conversaciones que se quedan fuera del trabajo en curso
 - [Objetivos de sesión](/es/session-goals/): que el agente trabaje hasta la meta

@@ -33,8 +33,9 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
     if (!raw) {
       return null;
     }
-    const parsed = parseInt(raw, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    const trimmed = String(raw).trim();
+    const parsed = /^\d+$/.test(trimmed) ? parseInt(trimmed, 10) : Number.NaN;
+    return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : null;
   })();
 
   const configuredOpenCodeHost = (() => {
@@ -55,6 +56,15 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       warnInvalidHost(`must use http or https scheme (got ${JSON.stringify(url.protocol)})`);
       return null;
+    }
+    if (url.username || url.password) {
+      // url.origin strips userinfo, so credentials embedded in the URL would
+      // otherwise be discarded silently and the attach would fail with an
+      // unexplained 401. Never log the credentials themselves.
+      logger.warn(
+        `[config] OPENCODE_HOST=${JSON.stringify(url.origin)}: URL credentials are ignored; `
+        + 'OPENCODE_SERVER_PASSWORD is the credential surface for the remote OpenCode server',
+      );
     }
     // URL drops a port equal to the scheme default (https://host:443 -> ''),
     // so read an explicitly written port from the raw value.

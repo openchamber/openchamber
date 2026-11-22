@@ -399,6 +399,10 @@ describe('the page height', () => {
         Object.defineProperty(root, 'clientHeight', { get: () => 300 - bar, configurable: true });
         Object.defineProperty(root, 'scrollHeight', { get: () => 300, configurable: true });
         root.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 300);
+        // happy-dom 21 delivers the window load event asynchronously; in a
+        // browser it precedes any page change, so let it land (and size the
+        // page at its initial height) before the page changes shape.
+        await Promise.race([new Promise((resolve) => win.addEventListener('load', resolve, { once: true })), settle()]);
         win.dispatchEvent(new win.Event('resize'));
 
         // The page's script makes a row wider than the frame.

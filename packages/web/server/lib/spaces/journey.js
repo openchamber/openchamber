@@ -48,7 +48,7 @@ import { permissionDefaultOf } from './space-permission-default.js';
 import { ROLE_GATEKEEPER, createSpaceId, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { spaceProjectPath, spaceWindowUrl } from './layout.js';
 import { LOGIN_PROVIDERS, buildStartConfig, loginEndOf, loginEnded, loginGrantOf } from './space-opencode.js';
-import { domainSchema, grantSchema, networkSchema, providerIdSchema, secretSourceSchema } from './space-records.js';
+import { domainSchema, networkSchema, providerIdSchema, secretSourceSchema, upstreamSchema } from './space-records.js';
 import { createSpaceToken } from './space-server.js';
 import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
 
@@ -90,14 +90,14 @@ const MAX_SECRET_LENGTH = 8192;
 const grantRequestSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('model'),
-    provider: grantSchema.options[0].shape.provider,
-    upstream: grantSchema.options[0].shape.upstream,
+    provider: providerIdSchema,
+    upstream: upstreamSchema,
     secret: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('typed'), value: z.string().min(1).max(MAX_SECRET_LENGTH) }).strict(),
       secretSourceSchema.options[0],
     ]),
   }).strict(),
-  z.object({ kind: z.literal('domain'), upstream: grantSchema.options[1].shape.upstream }).strict(),
+  z.object({ kind: z.literal('domain'), upstream: upstreamSchema }).strict(),
   // The host's browser login for a provider; the token is read from the host's OpenCode here.
   z.object({ kind: z.literal('login'), provider: providerIdSchema }).strict(),
   // A provider the user defined on the host; its address, key and models are read from the host's configuration here.

@@ -75,6 +75,35 @@ describe('Claude usage transforms', () => {
     expect(windows).toEqual({});
   });
 
+  it('clamps out-of-range limits-array percentages to [0, 100]', () => {
+    const { windows, models } = toClaudeUsage({
+      limits: [
+        { kind: 'session', percent: 150, resets_at: null, scope: null },
+        { kind: 'weekly_all', percent: -20, resets_at: null, scope: null },
+        { kind: 'weekly_scoped', percent: 175, resets_at: null, scope: { model: { display_name: 'Fable' } } }
+      ],
+      spend: { used: { amount_minor: 250, currency: 'USD', exponent: 2 }, limit: { amount_minor: 10000, currency: 'USD', exponent: 2 }, percent: 130, enabled: true }
+    });
+
+    expect(windows['5h'].usedPercent).toBe(100);
+    expect(windows['5h'].remainingPercent).toBe(0);
+    expect(windows['7d'].usedPercent).toBe(0);
+    expect(windows['7d'].remainingPercent).toBe(100);
+    expect(models.Fable.windows['7d'].usedPercent).toBe(100);
+    expect(windows.extra_usage.usedPercent).toBe(100);
+  });
+
+  it('clamps out-of-range legacy utilization to [0, 100]', () => {
+    const { windows } = toClaudeUsage({
+      five_hour: { utilization: 200, resets_at: null },
+      seven_day: { utilization: -5, resets_at: null }
+    });
+
+    expect(windows['5h'].usedPercent).toBe(100);
+    expect(windows['7d'].usedPercent).toBe(0);
+    expect(windows['7d'].remainingPercent).toBe(100);
+  });
+
   it('returns empty usage for a malformed payload', () => {
     expect(toClaudeUsage(null)).toEqual({ windows: {}, models: {} });
     expect(toClaudeUsage({ limits: 'nope' })).toEqual({ windows: {}, models: {} });

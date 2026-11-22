@@ -186,12 +186,47 @@ describe("request fidelity", () => {
     expect(page.cursor).toEqual({ next: "c2" })
   })
 
+  // OpenCode answers 400 to a session.list limit above 200, which failed every
+  // sidebar refresh when callers asked for 500 sessions a page.
+  test("a session list page asks for at most OpenCode's 200-session ceiling", async () => {
+    responses.push(json({ data: [sessionInfo], cursor: {} }))
+    responses.push(json({ data: [sessionInfo], cursor: {} }))
+    await opencodeClient.listSessionsPage({ global: true, limit: 500 })
+    await opencodeClient.listSessionsPage({ global: true, limit: 50 })
+    expect(requests.map((request) => request.url.searchParams.get("limit"))).toEqual(["200", "50"])
+  })
+
   test("a session created on an explicit Default thinking level is created without a variant", async () => {
     responses.push(json({ data: sessionInfo }))
     await opencodeClient.createSession({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: null } }, "/repo/app")
     expect(requests[0].url.pathname).toBe("/api/session")
     const { model } = z.object({ model: z.record(z.string(), z.string()) }).parse(requests[0].body)
     expect(model).toEqual({ id: "gpt-5.6-luna", providerID: "openai" })
+  })
+
+  test("create forwards subagentPolicy and the projected session carries the echoed policy", async () => {
+    const subagentPolicy = {
+      models: ["anthropic/claude-sonnet-5"],
+      excludedModels: ["openai/gpt-5.5"],
+    }
+    responses.push(json({ data: { ...sessionInfo, subagentPolicy } }))
+    const session = await opencodeClient.createSession({ subagentPolicy }, "/repo/app")
+    expect(requests[0].method).toBe("POST")
+    expect(requests[0].url.pathname).toBe("/api/session")
+    expect(requests[0].body).toMatchObject({ subagentPolicy })
+    expect(session.subagentPolicy).toEqual(subagentPolicy)
+  })
+
+  test("updating the subsession model policy PATCHes the whole policy", async () => {
+    const subagentPolicy = {
+      models: ["opencode-go/*", "openai/gpt-5.4"],
+      agentOverrides: { build: { models: ["openai/gpt-5.4"] } },
+    }
+    responses.push(noContent())
+    await opencodeClient.updateSessionSubagentPolicy("ses_1", subagentPolicy, "/repo/app")
+    expect(requests[0].method).toBe("PATCH")
+    expect(requests[0].url.pathname).toBe("/api/session/ses_1")
+    expect(requests[0].body).toEqual({ subagentPolicy })
   })
 
   test("releasing a location names its directory, never OpenCode's own", async () => {

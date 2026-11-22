@@ -352,6 +352,7 @@ mock.module("../session-actions", () => ({
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),
   optimisticSend: mock(async () => undefined),
+  sendMessage: mock(async () => undefined),
   refetchSessionMessages: mock(async () => undefined),
   revertToMessage: mock(async () => undefined),
   unrevertSession: mock(async () => undefined),

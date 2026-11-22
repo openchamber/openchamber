@@ -228,7 +228,9 @@ export const snapshotSshPrivateKey = async ({
     if (rejectSymlinkPath && sourcePath !== requestedPath) {
       throw Object.assign(new Error('Managed SSH key symlinks are not allowed'), { code: 'SSH_KEY_CHANGED' });
     }
-    sourceHandle = await fsImpl.open(sourcePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const sourceFlags = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW
+      | (process.platform === 'win32' ? 0 : fsConstants.O_NONBLOCK);
+    sourceHandle = await fsImpl.open(sourcePath, sourceFlags);
     const stats = await sourceHandle.stat({ bigint: true });
     if (!stats.isFile() || stats.size < 1n || stats.size > BigInt(MAX_SSH_PRIVATE_KEY_BYTES)) {
       throw Object.assign(new Error('Not an SSH private key'), { code: 'SSH_KEY_NOT_PRIVATE' });

@@ -318,6 +318,10 @@ test('diff answers from the extension host become the shared contract, and unava
     respond(await nextMessage(), { kind: 'unavailable', reason: 'path_not_found', message: 'Path not found in working tree, index, or HEAD: gone.txt' });
     await missing;
 
+    const tooLarge = assert.rejects(git.getGitFileDiff('/repo', { path: 'big.txt' }), (error) => error instanceof GitPathUnavailableError && error.reason === 'file_too_large' && error.message.includes('20 MiB'));
+    respond(await nextMessage(), { kind: 'unavailable', reason: 'file_too_large', message: 'File is too large to diff: big.txt exceeds the 20 MiB working-tree limit for file diffs' });
+    await tooLarge;
+
     // An old extension host answering the bare `{ diff }` shape is a contract break, not an empty diff.
     const invalid = assert.rejects(git.getGitDiff('/repo', { path: 'file.ts' }));
     respond(await nextMessage(), { diff: '' });

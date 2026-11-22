@@ -96,6 +96,43 @@ describe('resolveOpenCodeEnvConfig hostname', () => {
   });
 });
 
+describe('resolveOpenCodeEnvConfig port', () => {
+  it('accepts a valid port from each port env var', () => {
+    for (const key of ['OPENCODE_PORT', 'OPENCHAMBER_OPENCODE_PORT', 'OPENCHAMBER_INTERNAL_PORT']) {
+      const result = resolveOpenCodeEnvConfig({ env: { [key]: '4096' } });
+      expect(result.configuredOpenCodePort, key).toBe(4096);
+      expect(result.effectivePort, key).toBe(4096);
+    }
+  });
+
+  it('trims surrounding whitespace', () => {
+    const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_PORT: ' 4096 ' } });
+    expect(result.configuredOpenCodePort).toBe(4096);
+  });
+
+  it('rejects malformed ports instead of coercing them', () => {
+    for (const value of ['4096junk', '80.9', '0x10', 'abc', '-1']) {
+      const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_PORT: value } });
+      expect(result.configuredOpenCodePort, JSON.stringify(value)).toBeNull();
+      expect(result.effectivePort, JSON.stringify(value)).toBeNull();
+    }
+  });
+
+  it('rejects out-of-range ports', () => {
+    for (const value of ['0', '65536', '99999']) {
+      const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_PORT: value } });
+      expect(result.configuredOpenCodePort, JSON.stringify(value)).toBeNull();
+      expect(result.effectivePort, JSON.stringify(value)).toBeNull();
+    }
+  });
+
+  it('rejects a malformed port from the fallback env vars too', () => {
+    const result = resolveOpenCodeEnvConfig({ env: { OPENCHAMBER_INTERNAL_PORT: '8080junk' } });
+    expect(result.configuredOpenCodePort).toBeNull();
+    expect(result.effectivePort).toBeNull();
+  });
+});
+
 describe('resolveOpenCodeEnvConfig OPENCODE_HOST', () => {
   it('keeps an explicitly written default port', () => {
     const https = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'https://opencode.example:443' } });
@@ -108,6 +145,27 @@ describe('resolveOpenCodeEnvConfig OPENCODE_HOST', () => {
     const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'http://host:4096' } });
     expect(result.configuredOpenCodeHost).toEqual({ origin: 'http://host:4096', port: 4096 });
     expect(result.effectivePort).toBe(4096);
+  });
+
+  it('warns that URL credentials in OPENCODE_HOST are ignored', () => {
+    const logger = { warn: vi.fn() };
+    const result = resolveOpenCodeEnvConfig({
+      env: { OPENCODE_HOST: 'https://user:pass@opencode.example:4096' },
+      logger,
+    });
+    expect(result.configuredOpenCodeHost).toEqual({ origin: 'https://opencode.example:4096', port: 4096 });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('URL credentials are ignored'));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('OPENCODE_SERVER_PASSWORD'));
+    const warned = logger.warn.mock.calls.flat().join(' ');
+    expect(warned).not.toContain('user:pass');
+    expect(warned).not.toContain(':pass@');
+  });
+
+  it('does not warn for a userinfo-free OPENCODE_HOST', () => {
+    const logger = { warn: vi.fn() };
+    const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'http://host:4096' }, logger });
+    expect(result.configuredOpenCodeHost).toEqual({ origin: 'http://host:4096', port: 4096 });
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it('still rejects a host without a port', () => {

@@ -9,5 +9,10 @@ export function buildIssueContextText(args: {
     issue: args.issue,
     comments: args.comments,
   };
-  return `Linear issue context (JSON)\n${JSON.stringify(payload, null, 2)}`;
+  // Only the first comments page reaches the agent; say so when more exist
+  // on Linear, so the newest discussion is never mistaken for all of it.
+  const truncationNote = args.issue.commentsMore === true
+    ? 'Note: only the first 50 comments are included; further comments exist on Linear.\n'
+    : '';
+  return `Linear issue context (JSON)\n${truncationNote}${JSON.stringify(payload, null, 2)}`;
 }

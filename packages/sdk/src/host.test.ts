@@ -824,12 +824,18 @@ describe('connectHost', () => {
     host.dispose();
   });
 
+  type FileResultPayload =
+    | { content: string }
+    | { written: boolean }
+    | { entries: Array<{ name: string; kind: string }> }
+    | { kind: string; size: number; mtime: number };
+
   test('posts file calls and narrows their results', async () => {
     const parent = createFrame();
     const guest = createFrame();
     guest.parent = parent.parent;
     const host = connectHost({ target: guest, acceptSource: () => true });
-    const answer = (index: number, type: GuestMessage['type'], payload: object) => {
+    const answer = (index: number, type: GuestMessage['type'], payload: FileResultPayload) => {
       const posted = parent.posted[index];
       if (posted?.type !== type || !('id' in posted)) {
         throw new Error(`expected ${type}`);

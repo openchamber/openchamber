@@ -298,9 +298,11 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
 //
 // Scope is deliberately tight: GET only, an allowlist of read paths, never an
 // event stream, and never a request carrying an AbortSignal (so one caller
-// aborting can't cancel the shared fetch for the others). The entry is removed
-// as soon as the request settles, so this only ever shares overlapping in-flight
-// requests — it never serves a stale/cached response.
+// aborting can't cancel the shared fetch for the others). Authorization is
+// represented by a digest so credentials never become part of the map key; if
+// digesting is unavailable, that request bypasses coalescing. The entry is
+// removed as soon as the request settles, so this only shares overlapping reads
+// and never serves a stale response.
 // ---------------------------------------------------------------------------
 const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
 const READ_COALESCE = new Map<string, Promise<Response>>();
@@ -308,12 +310,26 @@ const READ_COALESCE = new Map<string, Promise<Response>>();
 // OpenCode 2.x scopes these reads by the `x-opencode-directory` header, not
 // the URL, so two projects asking for `/api/config` at once must not share
 // one response.
-const coalesceReadKey = (method: string, url: string, hasSignal: boolean, headers: Headers): string | null => {
+const hashAuthorization = async (authorization: string): Promise<string | null> => {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return null;
+  try {
+    const digest = await subtle.digest('SHA-256', new TextEncoder().encode(authorization));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
+};
+
+const coalesceReadKey = async (method: string, url: string, hasSignal: boolean, headers: Headers): Promise<string | null> => {
   if (hasSignal) return null;
   if (method !== 'GET') return null;
   if (url.includes('/event')) return null;
   if (!COALESCE_READ_PATH.test(url)) return null;
-  return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}`;
+  const authorization = headers.get('authorization');
+  const authorizationScope = authorization === null ? '' : await hashAuthorization(authorization);
+  if (authorization !== null && authorizationScope === null) return null;
+  return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}\u0000${authorizationScope ?? ''}`;
 };
 
 export const runtimeFetch = async (rawInput: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
@@ -372,7 +388,7 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
   // an explicit init.signal, as "has signal" and skip coalescing for safety.
   const hasSignal = requestInit.signal != null || input instanceof Request;
 
-  const key = coalesceReadKey(method, url, hasSignal, scopeHeaders);
+  const key = await coalesceReadKey(method, url, hasSignal, scopeHeaders);
   if (!key) return doFetch();
 
   const existing = READ_COALESCE.get(key);

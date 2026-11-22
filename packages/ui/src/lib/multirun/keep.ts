@@ -1,4 +1,5 @@
 import { opencodeClient } from '@/lib/opencode/client';
+import { SESSION_LIST_MAX_LIMIT } from '@/lib/opencode/sessionListLimit';
 import type { Session } from '@/lib/opencode/model';
 import { normalizePath } from '@/lib/pathNormalization';
 import { snapshotGitWorktree } from '@/lib/gitApi';
@@ -126,7 +127,7 @@ export async function keepRunMember(
       // checkout (`<worktree>/ai`) is asked too.
       const directories = [...new Set([worktree.path, current.directory].map((entry) => normalizePath(entry) ?? entry))];
       const remaining = (await Promise.all(directories.map((directory) => (
-        listGlobalSessionPages(listSessionPage, { directory, pageSize: 500 })
+        listGlobalSessionPages(listSessionPage, { directory, pageSize: SESSION_LIST_MAX_LIMIT })
       )))).flat();
       assertCurrent();
       if (remaining.some((session) => session.id !== sessionId && !session.time?.archived)) {

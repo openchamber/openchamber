@@ -30,6 +30,19 @@ export const LAYOUT_ANIMATION_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
 const ROOT_ATTRIBUTE = 'data-panel-animating';
 
+/**
+ * requestAnimationFrame is a browser global: server rendering, test runners,
+ * and torn-down frames can lack it. A frame request degrades to no frame
+ * (null) there, and the caller settles on the timer alone, so queued work is
+ * never stranded waiting for a frame that cannot fire.
+ */
+const requestFrame = (callback: FrameRequestCallback): number | null =>
+  globalThis.requestAnimationFrame?.(callback) ?? null;
+
+const cancelFrame = (id: number): void => {
+  globalThis.cancelAnimationFrame?.(id);
+};
+
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 let settleFrame: number | null = null;
 const pending = new Set<() => void>();
@@ -63,17 +76,24 @@ export const beginLayoutAnimation = (durationMs: number = LAYOUT_ANIMATION_MS): 
   if (!globalThis.document) return;
   const starting = !isLayoutAnimating();
   if (settleTimer !== null) clearTimeout(settleTimer);
-  if (settleFrame !== null) cancelAnimationFrame(settleFrame);
+  if (settleFrame !== null) cancelFrame(settleFrame);
   settleTimer = null;
   document.documentElement.setAttribute(ROOT_ATTRIBUTE, '');
   const delay = prefersReducedMotion() ? 0 : Math.max(0, durationMs);
-  settleFrame = requestAnimationFrame(() => {
+  settleFrame = requestFrame(() => {
     settleFrame = null;
     settleTimer = setTimeout(() => {
       settleTimer = null;
-      settleFrame = requestAnimationFrame(settle);
+      settleFrame = requestFrame(settle);
+      // rAF went away between the first frame and the timer: settle now
+      // instead of waiting on a frame that cannot fire.
+      if (settleFrame === null) settle();
     }, delay);
   });
+  if (settleFrame === null) {
+    // No rAF in this environment: the timer alone settles the animation.
+    settleTimer = setTimeout(settle, delay);
+  }
   if (starting) startListeners.forEach((listener) => listener());
 };
 

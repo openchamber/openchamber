@@ -136,4 +136,17 @@ describe('GET /api/model-routes/turns', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ available: false, reason: 'no-database' });
   });
+
+  it('reads no local database and answers remote-opencode when OpenCode is remote', async () => {
+    const app = express();
+    registerMessageModelAttributionRoutes(app, {
+      resolveDbPath: () => {
+        throw new Error('must not resolve a local database path');
+      },
+      isOpenCodeLocal: () => false,
+    });
+    const response = await request(app).get('/api/model-routes/turns?sessionID=s1');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ available: false, reason: 'remote-opencode' });
+  });
 });

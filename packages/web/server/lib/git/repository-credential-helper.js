@@ -4,6 +4,11 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 
 const MAX_BYTES = 64 * 1024;
+// The delegate below asks the person's own credential chain, whose helpers
+// can stall (a GUI prompt, a network store). Bound it in the same 10s class
+// as the server request so a stalled chain cannot hang the Git operation
+// that invoked this helper indefinitely (#867).
+const DELEGATE_TIMEOUT_MS = 10_000;
 
 /**
  * Git's credential helper for a repository OpenChamber gave an account.
@@ -15,6 +20,26 @@ const MAX_BYTES = 64 * 1024;
  * instead, so a closed app never blocks a push.
  */
 
+/** Terminate the delegate and every process it launched (#877). */
+const terminateDelegateTree = (child) => {
+  if (!Number.isInteger(child.pid)) {
+    try { child.kill('SIGKILL'); } catch {}
+    return;
+  }
+  if (process.platform === 'win32') {
+    try {
+      const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+        shell: false, windowsHide: true, stdio: 'ignore',
+      });
+      killer.once('error', () => { try { child.kill('SIGKILL'); } catch {} });
+      killer.once('close', (code) => { if (code !== 0) { try { child.kill('SIGKILL'); } catch {} } });
+      killer.unref?.();
+    } catch { try { child.kill('SIGKILL'); } catch {} }
+    return;
+  }
+  try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+};
+
 /** The person's own credential chain, asked outside this repository. */
 const delegate = (query) => {
   // Run from outside any repository so the local config that names this
@@ -24,10 +49,20 @@ const delegate = (query) => {
   for (const name of Object.keys(env)) {
     if (name.startsWith('GIT_CONFIG_') || name === 'GIT_DIR' || name === 'GIT_WORK_TREE') delete env[name];
   }
+  // Detached on POSIX so `git credential fill` and any credential helper it
+  // launches share one new process group that the deadline below can kill
+  // as a tree (#877); on Windows taskkill /t does the tree walk instead.
   const child = spawn('git', ['credential', 'fill'], {
-    cwd: os.tmpdir(), env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'],
+    cwd: os.tmpdir(), env, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'ignore'],
   });
   child.once('error', () => process.exit(0));
+  // On expiry the whole delegate tree is killed, not just the direct child:
+  // killing only `git credential fill` left a stalled credential helper it
+  // launched orphaned (#877). The child's 'close' below then exits 0
+  // promptly, preserving the fail-quiet contract (Git warns; nothing is
+  // emitted beyond whatever the chain already answered).
+  const deadline = setTimeout(() => terminateDelegateTree(child), DELEGATE_TIMEOUT_MS);
+  deadline.unref();
   child.stdout.pipe(process.stdout);
   child.stdin.end(query);
   // Whatever the person's chain answered, or did not, is Git's to act on;

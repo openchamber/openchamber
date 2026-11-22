@@ -35,6 +35,8 @@ export interface ProjectPlanLink {
   progress?: ProjectPlanProgress;
   /** The session the plan was last sent to with Implement or Improve. */
   session?: ProjectPlanSession;
+  /** Cost and token totals of the linked session, read live by the server; absent when unknown. */
+  metrics?: ProjectPlanMetrics;
 }
 
 export interface ProjectPlanProgress {
@@ -47,22 +49,54 @@ export interface ProjectPlanSession {
   linkedAt: number;
 }
 
+export interface ProjectPlanMetrics {
+  /** USD cost; null when neither OpenCode nor the catalog could price the session. */
+  costUsd: number | null;
+  /** Where `costUsd` came from; null exactly when `costUsd` is. */
+  costSource: 'opencode' | 'catalog' | null;
+  tokens: ProjectPlanTokenTotals | null;
+}
+
+interface ProjectPlanTokenTotals {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
 const planProgressSchema = z.object({ done: z.number().int().min(0), total: z.number().int().min(1) })
   .refine((value) => value.done <= value.total);
 const planSessionSchema = z.object({ sessionId: z.string().min(1), linkedAt: z.number() });
+const planTokenTotalsSchema = z.object({
+  input: z.number().int().min(0),
+  output: z.number().int().min(0),
+  reasoning: z.number().int().min(0),
+  cacheRead: z.number().int().min(0),
+  cacheWrite: z.number().int().min(0),
+  total: z.number().int().min(0),
+});
+const planMetricsSchema = z.object({
+  costUsd: z.number().min(0).nullable(),
+  costSource: z.enum(['opencode', 'catalog']).nullable(),
+  tokens: planTokenTotalsSchema.nullable(),
+}).refine((value) => (value.costUsd === null) === (value.costSource === null));
 
 /**
- * A plan from the server with its progress and session checked. Either field
- * that does not parse is dropped, so a malformed one shows no badge instead of
- * a wrong one.
+ * A plan from the server with its progress, session, and metrics checked.
+ * Any field that does not parse is dropped, so a malformed one shows no badge
+ * instead of a wrong one.
  */
 const toPlanLink = (plan: ProjectPlanLink): ProjectPlanLink => {
-  const { progress, session, ...link } = plan;
+  const { progress, session, metrics, ...link } = plan;
   const parsedProgress = planProgressSchema.safeParse(progress);
   const parsedSession = planSessionSchema.safeParse(session);
+  const parsedMetrics = planMetricsSchema.safeParse(metrics);
   const checked: ProjectPlanLink = link;
   if (parsedProgress.success) checked.progress = parsedProgress.data;
   if (parsedSession.success) checked.session = parsedSession.data;
+  if (parsedMetrics.success) checked.metrics = parsedMetrics.data;
   return checked;
 };
 

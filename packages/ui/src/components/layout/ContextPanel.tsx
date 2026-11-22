@@ -42,7 +42,7 @@ import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes
 import { CONTEXT_SURFACE_WIDTHS, getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
 import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
-import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
+import { useWorkStatusWidths } from '@/components/chat/work-status/useWorkStatusVisibility';
 import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
@@ -447,6 +447,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const activeTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
   const zoneView = panelState ? getZoneView(panelState, zone) : CLOSED_ZONE_VIEW;
   const workStatusReserved = useRightSlotStore((state) => state.workStatusReserved);
+  const { column: workStatusColumnWidth } = useWorkStatusWidths();
   const chatCovered = useRightSlotStore((state) => state.chatCovered);
   // The bottom zone belongs to the chat column: a page covering the chat
   // covers it too.
@@ -507,7 +508,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   });
   // The closed right zone still holds the work-status card's column.
   const otherSideReserved = otherSide === 'right' && workStatusReserved && !chatCovered && otherSideWidth === 0
-    ? WORK_STATUS_COLUMN_WIDTH
+    ? workStatusColumnWidth
     : otherSideWidth;
   const [measuredArea, setMeasuredArea] = React.useState<number | null>(null);
   const measuredAreaSizeRef = React.useRef<number | null>(null);
@@ -1042,7 +1043,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const workStatusColumn = zone === 'right' && workStatusReserved && !chatCovered;
   const expandedSize = expandedArea !== null ? `${expandedArea}px` : '100%';
   const slotSize = !isOpen
-    ? (workStatusColumn ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px')
+    ? (workStatusColumn ? `${workStatusColumnWidth}px` : '0px')
     : isExpanded
       // px, not '100%': px↔% size changes do not interpolate, which
       // would make the expand/collapse snap instead of animating.
@@ -1097,7 +1098,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // stayed blank until the session was reopened.
   const overlaid = useOpenUntilSettled(isExpanded);
   const dockedSize = !isOpen
-    ? (workStatusColumn ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px')
+    ? (workStatusColumn ? `${workStatusColumnWidth}px` : '0px')
     : `${size}px`;
 
   const panelStyle: React.CSSProperties = {

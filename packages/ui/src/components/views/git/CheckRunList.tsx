@@ -45,6 +45,12 @@ const CheckRunDetails: React.FC<{
         </div>
       ) : null}
 
+      {run.annotationsTruncated ? (
+        <div className="rounded bg-[var(--status-warning-background)]/60 px-2 py-2 typography-micro text-[var(--status-warning)]">
+          {t('gitView.pr.checks.annotationsTruncated')}
+        </div>
+      ) : null}
+
       {annotations.length > 0 ? (
         <div className="space-y-1">
           <div className="typography-micro text-muted-foreground">
@@ -142,6 +148,7 @@ export const CheckRunList: React.FC<{
         run.output?.title || run.output?.summary || run.output?.text
         || (run.annotations?.length ?? 0) > 0
         || (run.job?.steps?.length ?? 0) > 0
+        || run.annotationsTruncated
         || run.detailsUrl,
       );
       const workflowName = run.job?.workflowName;

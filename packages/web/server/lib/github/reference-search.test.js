@@ -14,7 +14,7 @@ const common = (number, repository = { name: 'app', owner: { login: 'acme' } }) 
   updatedAt: '2026-09-30T10:00:00Z',
   body: 'Steps to reproduce',
   author: { login: 'octo', avatarUrl: 'https://avatars/octo' },
-  labels: { nodes: [{ name: 'bug', color: 'd73a4a' }, null] },
+  labels: { totalCount: 1, nodes: [{ name: 'bug', color: 'd73a4a' }, null] },
   comments: { totalCount: 4 },
   repository,
 });
@@ -184,6 +184,7 @@ describe('toReference', () => {
       updatedAt: '2026-09-30T10:00:00Z',
       author: { login: 'octo', avatarUrl: 'https://avatars/octo' },
       labels: [{ name: 'bug', color: 'd73a4a' }],
+      labelTotal: 1,
       commentCount: 4,
       sourceRepo: { owner: 'acme', repo: 'app', source: 'origin' },
       state: 'open',
@@ -245,12 +246,13 @@ describe('fetchReferenceDetail', () => {
     __typename: 'PullRequest',
     number: 9,
     state: 'OPEN',
+    labels: { totalCount: 1, nodes: [{ name: 'bug', color: 'd73a4a' }] },
     reviewDecision: 'CHANGES_REQUESTED',
-    headCommit: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
+    headCommit: { nodes: [{ commit: { statusCheckRollup: { contexts: { totalCount: 2, nodes: [
       { __typename: 'CheckRun', databaseId: 1, name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: null, checkSuite: { app: { databaseId: 15368 } } },
       { __typename: 'CheckRun', databaseId: 2, name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: null, checkSuite: { app: { databaseId: 15368 } } },
     ] } } } }] },
-    reviewRequests: { nodes: [
+    reviewRequests: { totalCount: 1, nodes: [
       { requestedReviewer: { __typename: 'User', login: 'hubot', avatarUrl: null } },
       { requestedReviewer: { __typename: 'Team' } },
       { requestedReviewer: null },
@@ -263,8 +265,14 @@ describe('fetchReferenceDetail', () => {
       oid: 'abc1234', messageHeadline: 'fix: the thing', committedDate: '2026-10-01T08:00:00Z', url: 'https://github.com/acme/app/commit/abc1234',
       author: { name: 'Octo Cat', user: author },
     } }] },
-    reviews: { nodes: reviews },
-    reviewThreads: { nodes: threads },
+    reviews: { totalCount: reviews.length, nodes: reviews },
+    reviewThreads: {
+      totalCount: threads.length,
+      nodes: threads.map((thread) => ({
+        ...thread,
+        comments: { totalCount: thread.comments.nodes.length, ...thread.comments },
+      })),
+    },
   });
 
   it('reads an issue with its comments', async () => {
@@ -296,6 +304,7 @@ describe('fetchReferenceDetail', () => {
     ]);
     expect(detail?.pull).toEqual({
       reviewDecision: 'changes_requested',
+      reviewRequestTotal: 1,
       reviewers: [{ id: 'hubot', login: 'hubot', avatarUrl: undefined }],
       checks: expect.objectContaining({ state: 'failure', total: 2, success: 1, failure: 1 }),
       additions: 12,
@@ -310,7 +319,16 @@ describe('fetchReferenceDetail', () => {
         url: 'https://github.com/acme/app/commit/abc1234',
       }],
       commitTotal: 1,
+      reviewTotal: 2,
+      threadTotal: 1,
     });
+  });
+
+  it('a PR whose contexts are truncated does not report a definitive checks state (#1418)', async () => {
+    const item = pull();
+    item.headCommit.nodes[0].commit.statusCheckRollup.contexts.totalCount = 150;
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(item), owner: 'acme', repo: 'app', number: 9 });
+    expect(detail?.pull?.checks).toEqual(expect.objectContaining({ state: 'unknown', incomplete: true, contextsTotal: 150 }));
   });
 
   it('reads a review thread as its first comment with the replies under it', async () => {
@@ -324,6 +342,7 @@ describe('fetchReferenceDetail', () => {
     const opener = detail?.comments.find((comment) => comment.url === 'c1');
     expect(opener?.thread).toEqual({
       id: 'PRRT_two',
+      commentTotal: 2,
       resolved: true,
       // A resolved thread is reopened, so that is the permission that counts.
       canResolve: true,
@@ -333,7 +352,67 @@ describe('fetchReferenceDetail', () => {
     expect(detail?.comments.some((comment) => comment.url === 'c2')).toBe(false);
   });
 
+  it('surfaces label and review-request totals above the returned nodes (#1427)', async () => {
+    const item = pull();
+    // The list query returns at most six labels, the detail query at most
+    // 30 review requests; the totals are what the host reports.
+    item.labels.totalCount = 9;
+    item.reviewRequests.totalCount = 42;
+
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(item), owner: 'acme', repo: 'app', number: 9 });
+
+    expect(detail?.labelTotal).toBe(9);
+    expect(detail?.labels).toEqual([{ name: 'bug', color: 'd73a4a' }]);
+    expect(detail?.pull?.reviewRequestTotal).toBe(42);
+    expect(detail?.pull?.reviewers).toEqual([{ id: 'hubot', login: 'hubot', avatarUrl: undefined }]);
+  });
+
+  it('surfaces review, thread and thread-comment totals above the returned counts (#1419)', async () => {
+    const item = pull([
+      { author, body: 'latest', state: 'APPROVED', createdAt: '2026-10-01T11:00:00Z', url: 'r31' },
+    ], [{
+      id: 'PRRT_three', isResolved: false, viewerCanResolve: true, viewerCanUnresolve: false, viewerCanReply: true,
+      comments: { nodes: [
+        { author, body: 'opener', createdAt: '2026-10-01T09:00:00Z', url: 'c1', path: 'src/a.ts', line: 3, originalLine: 3 },
+        { author, body: 'reply', createdAt: '2026-10-01T10:00:00Z', url: 'c2', path: 'src/a.ts', line: 3, originalLine: 3 },
+      ] },
+    }]);
+    // The query caps what it returns (last 30 reviews, last 50 threads,
+    // first 50 comments per thread); the totals are what the host reports.
+    item.reviews.totalCount = 31;
+    item.reviewThreads.totalCount = 51;
+    item.reviewThreads.nodes[0].comments.totalCount = 75;
+
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(item), owner: 'acme', repo: 'app', number: 9 });
+
+    expect(detail?.pull?.reviewTotal).toBe(31);
+    expect(detail?.pull?.threadTotal).toBe(51);
+    const opener = detail?.comments.find((comment) => comment.url === 'c1');
+    expect(opener?.thread?.commentTotal).toBe(75);
+    // The returned content itself is unchanged by the totals.
+    expect(detail?.comments.map((comment) => comment.url)).toContain('r31');
+  });
+
   it('answers null for a missing number', async () => {
     expect(await fetchReferenceDetail({ octokit: graphqlReturning(null), owner: 'acme', repo: 'app', number: 9 })).toBeNull();
+  });
+});
+
+describe('reference preview body surrogate-pair cut (#1957)', () => {
+  const EMOJI = '\u{1F600}';
+  const node = (body) => ({ __typename: 'Issue', ...common(7), body, state: 'OPEN', stateReason: null });
+
+  it('a pair straddling the 20,000-char cut is dropped whole', () => {
+    const ref = toReference(node(`${'a'.repeat(19_999)}${EMOJI}${'b'.repeat(100)}`), repos);
+    expect(ref?.bodyTruncated).toBe(true);
+    expect(ref?.body).toBe('a'.repeat(19_999));
+    expect(Buffer.from(ref?.body ?? '', 'utf8').toString('utf8')).toBe(ref?.body);
+  });
+
+  it('a pair ending exactly at the limit is kept whole', () => {
+    const ref = toReference(node(`${'a'.repeat(19_998)}${EMOJI}${'b'.repeat(100)}`), repos);
+    expect(ref?.bodyTruncated).toBe(true);
+    expect(ref?.body).toBe(`${'a'.repeat(19_998)}${EMOJI}`);
+    expect(ref?.body).toHaveLength(20_000);
   });
 });

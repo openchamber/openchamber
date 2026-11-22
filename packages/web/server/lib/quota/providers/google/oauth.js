@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../../utils/response-body.js';
 import { z } from 'zod';
 
 // Installed-app clients already used by the Gemini and Antigravity providers.
@@ -39,7 +40,7 @@ const exchange = async (refreshToken, client) => {
     status = response.status;
     let data;
     try {
-      data = await response.json();
+      data = await readQuotaJson(response);
     } catch (error) {
       if (error instanceof SyntaxError) {
         return { ok: false, status, error: response.ok ? 'invalid_response' : 'http' };

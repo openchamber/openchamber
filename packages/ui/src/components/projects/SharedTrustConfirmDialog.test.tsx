@@ -52,6 +52,7 @@ beforeEach(() => {
       .map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
   );
   Object.assign(globalThis, {
+    Event: testWindow.Event, CustomEvent: testWindow.CustomEvent, MutationObserver: testWindow.MutationObserver,
     window: testWindow,
     document: testWindow.document,
     navigator: testWindow.navigator,

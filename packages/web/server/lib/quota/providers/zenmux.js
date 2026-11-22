@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readManagedCredential } from '../credentials/providers.js';
 import {
   buildResult,
@@ -10,7 +11,7 @@ import {
 
 export const providerId = 'zenmux';
 export const providerName = 'ZenMux';
-const aliases = ['zenmux'];
+export const aliases = ['zenmux'];
 const ZENMUX_BALANCE_URL = 'https://zenmux.ai/api/v1/management/payg/balance';
 
 const readStoredCredential = () => readManagedCredential(providerId);
@@ -62,7 +63,7 @@ export const fetchQuota = async ({
       });
     }
 
-    const payload = asObject(await response.json());
+    const payload = asObject(await readQuotaJson(response));
     const data = asObject(payload?.data);
     const totalCredits = parseCredits(data?.total_credits);
 

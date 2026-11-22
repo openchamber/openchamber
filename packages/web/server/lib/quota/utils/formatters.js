@@ -53,16 +53,22 @@ export const toUsageWindow = ({ usedPercent, windowSeconds, resetAt, valueLabel 
   };
 };
 
-export const buildResult = ({ providerId, providerName, ok, configured, usage, error, planLabel }) => ({
-  providerId,
-  providerName,
-  ok,
-  configured,
-  usage: usage ?? null,
-  ...(error ? { error } : {}),
-  ...(planLabel ? { planLabel } : {}),
-  fetchedAt: Date.now()
-});
+export const buildResult = ({ providerId, providerName, ok, configured, usage, error, planLabel, credentialId, credentialLabel, accountLabel }) => {
+  const result = {
+    providerId,
+    providerName,
+    ok,
+    configured,
+    usage: usage ?? null,
+    fetchedAt: Date.now()
+  };
+  if (error) result.error = error;
+  if (planLabel) result.planLabel = planLabel;
+  if (credentialId) result.credentialId = credentialId;
+  if (credentialLabel) result.credentialLabel = credentialLabel;
+  if (accountLabel) result.accountLabel = accountLabel;
+  return result;
+};
 
 export const durationToLabel = (duration, unit) => {
   if (!duration || !unit) return 'limit';

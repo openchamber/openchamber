@@ -31,6 +31,7 @@ import {
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -62,6 +63,8 @@ const KICKOFF_QUIET_MS = 3_000;
 // coalesces duplicate session.updated events.
 const RESUME_KICKOFF_MS = 250;
 const FETCH_TIMEOUT_MS = 10_000;
+// 16 MiB matches the session-list proxy cap and accommodates the 40-message audit window.
+const OPEN_CODE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const MESSAGE_FETCH_LIMIT = 40;
 const REASON_CHAR_LIMIT = 200;
 // Hard safety cap on auto-continuations per goal id. The audit and markers are
@@ -361,6 +364,12 @@ export const createSessionGoalRuntime = ({
 }) => {
   const timers = new Map();
   const inflight = new Set();
+  // Sessions whose latest continuation was charged (turnsUsed persisted)
+  // but whose prompt POST then failed (#2314). The charge already landed,
+  // so the retry tick must not charge again; the set is also the signal
+  // that the failed tick needs a re-armed timer, because a session that
+  // was idle when its continuation failed produces no new idle event.
+  const prepaidCharge = new Set();
   let stopped = false;
 
   const clearTimer = (sessionId) => {
@@ -392,7 +401,7 @@ export const createSessionGoalRuntime = ({
     } else if (!response.ok) {
       throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES));
   };
 
   const fetchRecentMessages = async (sessionId, directory) => {
@@ -435,6 +444,7 @@ export const createSessionGoalRuntime = ({
   };
 
   const settleGoal = async ({ sessionId, directory, goal, status, statusReason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
+    prepaidCharge.delete(sessionId);
     const written = await writeGoal(sessionId, directory, goal.id, () => ({
       status,
       statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
@@ -594,7 +604,7 @@ export const createSessionGoalRuntime = ({
       armTimer(sessionId, directory, idleQuietMs);
       return;
     }
-    if (isWorkingStatus(statuses[sessionId])) return;
+    if (isWorkingStatus(Object.hasOwn(statuses, sessionId) ? statuses[sessionId] : undefined)) return;
 
     const childrenWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);
     if (childrenWorking === null) {
@@ -820,14 +830,18 @@ export const createSessionGoalRuntime = ({
     }
 
     // --- Continue: persist accounting first, then re-prompt ---
-    // Order matters: if the write lands and the prompt fails, the goal just
-    // waits for the next idle tick; the reverse could double-charge a turn.
+    // Order matters: the reverse could double-charge a turn. If the write
+    // lands and the prompt fails, there may be no next idle tick — the
+    // session was idle already and a failed POST starts no turn — so the
+    // failure marks the charge prepaid and the timer re-arms (below).
     const written = await writeGoal(sessionId, directory, goal.id, (current) => ({
       tokensUsed,
       tokensBaseline,
       tokensCommitted,
       lastAccountedMessageID,
-      turnsUsed: current.turnsUsed + 1,
+      // A prepaid turn (a previous continuation whose prompt failed after
+      // its charge landed) is spent by this retry, not charged twice.
+      turnsUsed: prepaidCharge.has(sessionId) ? current.turnsUsed : current.turnsUsed + 1,
       auditFailStreak,
       statusReason: '',
       ...(audit ? { evaluationProviderID: audit.evaluationProviderID ?? '', evaluationModelID: audit.evaluationModelID ?? '' } : {}),
@@ -847,18 +861,38 @@ export const createSessionGoalRuntime = ({
     }
 
     console.log(`[session-goal] continuing ${sessionId} (turn ${written.turnsUsed}/${maxAutoTurns}, tokens ${written.tokensUsed}${written.tokenBudget ? `/${written.tokenBudget}` : ''})`);
-    await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, maxAutoTurns });
+    try {
+      await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, maxAutoTurns });
+      prepaidCharge.delete(sessionId);
+    } catch (error) {
+      prepaidCharge.add(sessionId);
+      throw error;
+    }
   };
 
   const armTimer = (sessionId, directory, quietMs) => {
     clearTimer(sessionId);
     const timer = setTimeout(() => {
       timers.delete(sessionId);
-      if (stopped || inflight.has(sessionId)) return;
+      if (stopped) return;
+      if (inflight.has(sessionId)) {
+        // A wakeup landing while a tick is still running must not be
+        // lost: that tick may have seen the session busy a moment
+        // earlier. Re-arm instead of dropping it (the dispatch-results
+        // runtime does the same).
+        armTimer(sessionId, directory, quietMs);
+        return;
+      }
       inflight.add(sessionId);
       tick(sessionId, directory)
         .catch((error) => {
           console.warn('[session-goal] tick failed:', error?.message || error);
+          // A continuation that failed after its charge landed leaves
+          // an active goal with no turn running and no idle transition
+          // coming: re-arm so the prepaid turn is retried (#2314).
+          if (!stopped && prepaidCharge.has(sessionId)) {
+            armTimer(sessionId, directory, quietMs);
+          }
         })
         .finally(() => {
           inflight.delete(sessionId);

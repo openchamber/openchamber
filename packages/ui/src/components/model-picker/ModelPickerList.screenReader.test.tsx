@@ -162,3 +162,57 @@ test('the field never points at a row that is not in the page', async () => {
     else expect(highlightedRow()).toBeNull();
   }
 });
+
+test('a multi-select list marks every chosen row and Enter chooses the highlighted one, chosen or not', async () => {
+  const chosen = new Set(['labsmall/alpha', 'labsmall/beta']);
+  const selected: string[] = [];
+  await act(async () => {
+    root.render(
+      <ModelPickerList
+        providers={providers}
+        favoriteModels={[]}
+        recentModels={[]}
+        searchQuery=""
+        onSearchQueryChange={() => {}}
+        onSelect={(entry) => selected.push(`${entry.providerID}/${entry.modelID}`)}
+        labels={labels}
+        isModelSelected={(entry) => chosen.has(`${entry.providerID}/${entry.modelID}`)}
+        autoFocus={false}
+        stickyHeaders={false}
+      />,
+    );
+  });
+
+  expect(document.querySelector('[role="listbox"]')?.getAttribute('aria-multiselectable')).toBe('true');
+  const selectedNames = Array.from(document.querySelectorAll('[role="option"][aria-selected="true"]')).map(rowName);
+  expect(selectedNames).toEqual(['Alpha', 'Beta']);
+
+  await press('ArrowDown');
+  await act(async () => {
+    field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  });
+  expect(selected).toEqual(['labsmall/beta']);
+});
+
+test('a single-select list is not multi-select and marks only the selected model', async () => {
+  await act(async () => {
+    root.render(
+      <ModelPickerList
+        providers={providers}
+        favoriteModels={[]}
+        recentModels={[]}
+        searchQuery=""
+        onSearchQueryChange={() => {}}
+        onSelect={() => {}}
+        labels={labels}
+        selectedModel={{ providerID: 'labsmall', modelID: 'beta' }}
+        autoFocus={false}
+        stickyHeaders={false}
+      />,
+    );
+  });
+
+  expect(document.querySelector('[role="listbox"]')?.hasAttribute('aria-multiselectable')).toBe(false);
+  const selectedNames = Array.from(document.querySelectorAll('[role="option"][aria-selected="true"]')).map(rowName);
+  expect(selectedNames).toEqual(['Beta']);
+});

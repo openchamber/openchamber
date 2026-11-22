@@ -1,5 +1,7 @@
 import { readEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
+import { readBoundedResponseText } from '../../web/server/lib/shared/response-body.js';
+import { readOpenCodeInfoResponse } from './opencode-info-runtime';
 
 type UpgradeCapability = {
   supported: boolean;
@@ -60,6 +62,11 @@ const getApiUrl = (manager?: OpenCodeUpgradeManager): string | null => {
   return apiUrl ? `${apiUrl.replace(/\/+$/, '')}/` : null;
 };
 
+// Same 1 MiB cap as the web copy of this read (OPENCODE_LATEST_VERSION_MAX_BYTES
+// in web routes.js): the registry is user-configured, so an oversized
+// packument must not buffer whole in the extension host.
+const OPENCODE_LATEST_VERSION_MAX_BYTES = 1024 * 1024;
+
 // OpenCode 2.x publishes as `@opencode/cli` on npm and has no GitHub release
 // assets, so the registry is the one source of "latest".
 const fetchLatestVersion = async (): Promise<string> => {
@@ -69,12 +76,28 @@ const fetchLatestVersion = async (): Promise<string> => {
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`OpenCode npm registry responded with ${response.status}`);
+  const bounded = await readBoundedResponseText(response, OPENCODE_LATEST_VERSION_MAX_BYTES);
+  if (bounded.tooLarge) {
+    throw new Error(`OpenCode npm registry latest document exceeds ${OPENCODE_LATEST_VERSION_MAX_BYTES} bytes`);
+  }
   // SAFETY: the registry answers a packument; only `version` is read, and it
   // is checked to be a string before use.
-  const payload = await response.json() as { version?: unknown };
+  // The bounded read is raw text, so strip a leading BOM first: the
+  // response.json() this replaced dropped it in its UTF-8 decode.
+  const payload = JSON.parse(bounded.text.replace(/^\uFEFF/, '')) as { version?: unknown };
   const version = typeof payload.version === 'string' ? payload.version.trim().replace(/^v/, '') : '';
   if (!version) throw new Error('Failed to resolve latest OpenCode version');
   return version;
+};
+
+// The local /api/info probe shares fetchLatestVersion's 10s deadline: it runs
+// in a Promise.all beside it, so an unbounded local stall would hang the pair.
+const OPENCODE_INFO_DEADLINE_MS = 10_000;
+let infoProbeDeadlineMs = OPENCODE_INFO_DEADLINE_MS;
+
+/** Test hook: replace the /api/info probe deadline; no argument restores the default. */
+export const setInfoProbeDeadlineForTest = (ms: number = OPENCODE_INFO_DEADLINE_MS): void => {
+  infoProbeDeadlineMs = ms;
 };
 
 export const getOpenCodeUpgradeStatus = async (manager?: OpenCodeUpgradeManager): Promise<Record<string, unknown>> => {
@@ -85,10 +108,10 @@ export const getOpenCodeUpgradeStatus = async (manager?: OpenCodeUpgradeManager)
   try {
     const [healthResponse, latestVersion] = await Promise.all([
       // OpenCode 2.0.8 replaced `/api/health` with `/api/info`.
-      fetch(new URL('/api/info', apiUrl).toString(), { method: 'GET', headers: { Accept: 'application/json', ...manager.getOpenCodeAuthHeaders() } }),
+      fetch(new URL('/api/info', apiUrl).toString(), { method: 'GET', headers: { Accept: 'application/json', ...manager.getOpenCodeAuthHeaders() }, signal: AbortSignal.timeout(infoProbeDeadlineMs) }),
       fetchLatestVersion(),
     ]);
-    const health = await healthResponse.json().catch(() => null) as { version?: unknown; error?: unknown } | null;
+    const health = await readOpenCodeInfoResponse(healthResponse);
     if (!healthResponse.ok) {
       const error = typeof health?.error === 'string' ? health.error : healthResponse.statusText || 'Failed to read OpenCode version';
       return { available: null, error, upgrade };

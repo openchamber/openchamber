@@ -1,5 +1,6 @@
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { waitForApiUrl } from './opencode-ready';
+import { readBoundedResponseBody, ResponseBodyTooLargeError } from './bounded-response-body';
 import {
   CREDENTIAL_LIST_ERROR,
   ENTERPRISE_MODE_ERROR,
@@ -55,6 +56,22 @@ const collectProxyResponseHeaders = (headers: Headers, deps: Pick<ProxyRuntimeDe
   return result;
 };
 
+const collectProxyResponsePayload = async (
+  response: Response,
+  deps: Pick<ProxyRuntimeDeps, 'collectHeaders'>,
+): Promise<ApiProxyResponsePayload> => {
+  const headers = collectProxyResponseHeaders(response.headers, deps);
+  const body = await readBoundedResponseBody(response);
+  if (shouldReturnTextBody(response.headers)) {
+    return { status: response.status, headers, bodyText: new TextDecoder().decode(body) };
+  }
+  return {
+    status: response.status,
+    headers,
+    bodyBase64: Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString('base64'),
+  };
+};
+
 // OpenCode 2.x has one event stream, `GET /api/event`.
 const isSseProxyPath = (requestPath: string): boolean => {
   try {
@@ -74,9 +91,50 @@ type ProxyRuntimeDeps = {
   sanitizeForwardHeaders: (input: Record<string, string> | undefined) => Record<string, string>;
   collectHeaders: (headers: Headers) => Record<string, string>;
   base64EncodeUtf8: (text: string) => string;
+  /** Test seam: overrides the api:proxy forward deadline; production callers omit it. */
+  proxyDeadlineMs?: number;
 };
 
 const proxyAbortControllers = new Map<string, AbortController>();
+
+// Every api:proxy forward carries this deadline, in line with the
+// api:session:message forward's 45s below: a local OpenCode that accepts a
+// connection and then stalls must fail the request, not hang it forever.
+// The signal passed to fetch also bounds the body read in
+// performApiProxyFetch, not only the wait for response headers.
+const API_PROXY_DEADLINE_MS = 45_000;
+
+const apiProxyDeadlineSignal = (deps: ProxyRuntimeDeps): AbortSignal =>
+  AbortSignal.timeout(deps.proxyDeadlineMs ?? API_PROXY_DEADLINE_MS);
+
+// AbortSignal.any is missing on the oldest supported extension hosts
+// (VS Code 1.85 ships Electron 25 / Node 18.15; AbortSignal.any needs
+// Node 18.17+), so compose the signals manually when it is unavailable,
+// mirroring packages/ui's client fetch. Dropping either source here would
+// lose caller cancellation or the proxy deadline on those hosts.
+// Intentionally separate from the web server's shared helper
+// (packages/web/server/lib/shared/bounded-fetch.js, exported for #995):
+// the extension is a separate package/bundle and cannot import the web
+// server's lib/shared, and this call site needs the bare-signal shape
+// rather than { signal, detach }. Keep the composition semantics
+// (any-source abort, already-aborted source) in step with that helper.
+const combineAbortSignals = (signals: AbortSignal[]): AbortSignal => {
+  // SAFETY: feature-detecting an optional static the oldest supported
+  // runtime lacks; the cast only reads the optional member.
+  const anyImpl = (AbortSignal as { any?: (values: AbortSignal[]) => AbortSignal }).any;
+  if (anyImpl) {
+    return anyImpl(signals);
+  }
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  }
+  return controller.signal;
+};
 
 // ---------------------------------------------------------------------------
 // In-flight read coalescing (parity with the web runtimeFetch coalescer)
@@ -93,9 +151,12 @@ const proxyAbortControllers = new Map<string, AbortController>();
 // Scope is deliberately tight: GET only, an allowlist of read paths. The shared
 // fetch runs without a per-request AbortController, so one caller's
 // `api:proxy:abort` cannot cancel the read for the others (these reads are fast
-// and idempotent — losing abort for them is harmless). The entry is removed as
-// soon as the request settles, so this only ever shares overlapping in-flight
-// requests; it never serves a stale response.
+// and idempotent — losing abort for them is harmless). It does carry the shared
+// proxy deadline, which no single caller owns: on expiry the shared fetch
+// settles with the standard failure payload, the entry is removed, and a later
+// identical read retries upstream instead of joining a dead promise. The entry
+// is removed as soon as the request settles, so this only ever shares
+// overlapping in-flight requests; it never serves a stale response.
 // ---------------------------------------------------------------------------
 const COALESCE_READ_PATH = /^\/api\/(config|location|agent|project|command|model|provider)(\b|\/|\?|$)/;
 const READ_COALESCE = new Map<string, Promise<ApiProxyResponsePayload>>();
@@ -127,16 +188,7 @@ const performApiProxyFetch = async (
 ): Promise<ApiProxyResponsePayload> => {
   try {
     const response = await fetch(targetUrl, { method, headers, body, signal });
-    const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
-    if (shouldReturnTextBody(response.headers)) {
-      return { status: response.status, headers: responseHeaders, bodyText: await response.text() };
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    return {
-      status: response.status,
-      headers: responseHeaders,
-      bodyBase64: Buffer.from(arrayBuffer).toString('base64'),
-    };
+    return await collectProxyResponsePayload(response, deps);
   } catch (error) {
     return {
       status: 502,
@@ -367,7 +419,7 @@ export async function handleProxyBridgeMessage(
           const shared = await existing;
           return { id, type, success: true, data: { ...shared, headers: { ...shared.headers } } };
         }
-        const pending = performApiProxyFetch(targetUrl, 'GET', requestHeaders, undefined, undefined, deps);
+        const pending = performApiProxyFetch(targetUrl, 'GET', requestHeaders, undefined, apiProxyDeadlineSignal(deps), deps);
         READ_COALESCE.set(coalesceKey, pending);
         pending.then(
           () => READ_COALESCE.delete(coalesceKey),
@@ -384,7 +436,14 @@ export async function handleProxyBridgeMessage(
         const data = await overlayOwnedSessionState(
           normalizedMethod,
           normalizedPath,
-          await performApiProxyFetch(targetUrl, normalizedMethod, requestHeaders, requestBody, abortController.signal, deps),
+          await performApiProxyFetch(
+            targetUrl,
+            normalizedMethod,
+            requestHeaders,
+            requestBody,
+            combineAbortSignals([abortController.signal, apiProxyDeadlineSignal(deps)]),
+            deps,
+          ),
           deps.sessionState,
         );
         return { id, type, success: true, data };
@@ -442,37 +501,30 @@ export async function handleProxyBridgeMessage(
           body: typeof bodyText === 'string' ? bodyText : '',
           signal: abortController.signal,
         });
-
-        const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
-        if (shouldReturnTextBody(response.headers)) {
-          const bodyText = await response.text();
-          const data: ApiProxyResponsePayload = {
-            status: response.status,
-            headers: responseHeaders,
-            bodyText,
-          };
-
-          return { id, type, success: true, data };
-        }
-
-        const arrayBuffer = await response.arrayBuffer();
-        const data: ApiProxyResponsePayload = {
-          status: response.status,
-          headers: responseHeaders,
-          bodyBase64: Buffer.from(arrayBuffer).toString('base64'),
-        };
-
+        const data = await collectProxyResponsePayload(response, deps);
         return { id, type, success: true, data };
       } catch (error) {
+        const isTooLarge = error instanceof ResponseBodyTooLargeError;
         const isTimeout =
           error instanceof Error &&
           ((error as Error & { name?: string }).name === 'TimeoutError' ||
             (error as Error & { name?: string }).name === 'AbortError');
+        let errorMessage = 'OpenCode message forward failed';
+        let status = 503;
+        if (isTooLarge) {
+          errorMessage = error.message;
+          status = 502;
+        } else if (isTimeout) {
+          errorMessage = 'OpenCode message forward timed out';
+          status = 504;
+        } else if (error instanceof Error) {
+          errorMessage = error.message;
+        }
         const body = JSON.stringify({
-          error: isTimeout ? 'OpenCode message forward timed out' : error instanceof Error ? error.message : 'OpenCode message forward failed',
+          error: errorMessage,
         });
         const data: ApiProxyResponsePayload = {
-          status: isTimeout ? 504 : 503,
+          status,
           headers: { 'content-type': 'application/json' },
           bodyText: body,
         };

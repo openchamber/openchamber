@@ -74,4 +74,71 @@ describe('VS Code Antigravity quota', () => {
     assert.equal(models['claude-sonnet-5-5']?.windows.weekly?.remainingPercent, 50);
     assert.ok(!JSON.stringify(result).includes('test-access'));
   });
+
+  it('maps an unparseable fallback resetTime to a null resetAt and a valid one to epoch ms', async () => {
+    globalThis.fetch = async (url, options) => {
+      if (String(url) === 'https://oauth2.googleapis.com/token') {
+        return Response.json({ access_token: 'test-access' });
+      }
+      assert.equal(new Headers(options?.headers).get('Authorization'), 'Bearer test-access');
+      if (String(url).endsWith(':retrieveUserQuotaSummary')) {
+        return Response.json({ groups: [] });
+      }
+      return Response.json({
+        models: {
+          'gemini-bad': { quotaInfo: { remainingFraction: 0.9, resetTime: 'not-a-date' } },
+          'gemini-good': { quotaInfo: { remainingFraction: 0.9, resetTime: '2026-10-25T10:00:00Z' } },
+        },
+      });
+    };
+
+    const result = await fetchQuotaForProvider('antigravity');
+
+    assert.equal(result.ok, true);
+    const models = result.usage?.models ?? {};
+    assert.equal(models['gemini-bad']?.windows['5h']?.resetAt, null);
+    assert.equal(models['gemini-good']?.windows['5h']?.resetAt, Date.parse('2026-10-25T10:00:00Z'));
+  });
+});
+
+describe("VS Code Antigravity quota usedPercent clamp - #545", () => {
+  it("clamps summary-bucket usedPercent to 100 for a negative remainingFraction", async () => {
+    globalThis.fetch = async (url) => {
+      if (String(url) === "https://oauth2.googleapis.com/token") {
+        return Response.json({ access_token: "test-access" });
+      }
+      if (String(url).endsWith(":retrieveUserQuotaSummary")) {
+        return Response.json({ groups: [{ displayName: "Gemini Models", buckets: [bucket("5h", -0.5), bucket("weekly", -0.5)] }] });
+      }
+      return Response.json({ models: { "gemini-3.8-flash": { quotaInfo: { remainingFraction: 0.9 } } } });
+    };
+
+    const result = await fetchQuotaForProvider("antigravity");
+
+    assert.equal(result.ok, true);
+    const windows = result.usage?.models?.["gemini-3.8-flash"]?.windows ?? {};
+    assert.equal(windows["5h"]?.usedPercent, 100);
+    assert.equal(windows["5h"]?.remainingPercent, 0);
+    assert.equal(windows.weekly?.usedPercent, 100);
+    assert.equal(windows.weekly?.remainingPercent, 0);
+  });
+
+  it("clamps model-data usedPercent to 100 for a negative remainingFraction when no group matches", async () => {
+    globalThis.fetch = async (url) => {
+      if (String(url) === "https://oauth2.googleapis.com/token") {
+        return Response.json({ access_token: "test-access" });
+      }
+      if (String(url).endsWith(":retrieveUserQuotaSummary")) {
+        return Response.json({ groups: [] });
+      }
+      return Response.json({ models: { "gemini-neg": { quotaInfo: { remainingFraction: -0.5, resetTime: "2026-10-25T10:00:00Z" } } } });
+    };
+
+    const result = await fetchQuotaForProvider("antigravity");
+
+    assert.equal(result.ok, true);
+    const window = result.usage?.models?.["gemini-neg"]?.windows["5h"];
+    assert.equal(window?.usedPercent, 100);
+    assert.equal(window?.remainingPercent, 0);
+  });
 });

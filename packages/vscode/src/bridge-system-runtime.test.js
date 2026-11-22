@@ -58,6 +58,7 @@ mock.module('./quotaProviders', () => ({
 }));
 mock.module('./opencodeGoQuota', () => ({ fetchOpenCodeGoUsage: mock() }));
 mock.module('./quotaCredentials', () => ({
+  MANAGED_PROVIDERS: ['exe-dev', 'cursor', 'zenmux', 'opendesign'],
   credentialStatus: mock(),
   deleteCredential: mock(),
   importCursorCredential: mock(),
@@ -68,7 +69,7 @@ mock.module('./quotaCredentials', () => ({
 }));
 mock.module('./sessionActivityWatcher', () => ({ getSessionActivitySnapshot: mock() }));
 
-const { handleSystemBridgeMessage } = await import('./bridge-system-runtime.ts');
+const { handleSystemBridgeMessage, setVersionProbeDeadlineForTest } = await import('./bridge-system-runtime.ts');
 
 const deps = {
   resolveUserPath: (value) => value,
@@ -298,5 +299,129 @@ describe('VS Code v2 migration bridge', () => {
     expect(response.success).toBe(false);
     const manager = { installV2: async () => { throw new Error('Installation failed'); } };
     await expect(handleSystemBridgeMessage({ id: 'failed', type: 'api:opencode/install-v2' }, { manager }, deps)).rejects.toThrow('Installation failed');
+  });
+});
+
+describe('VS Code system bridge api:opencode/version probe deadline (#789)', () => {
+  const versionCtx = {
+    manager: {
+      getApiUrl: () => 'http://127.0.0.1:3902',
+      getOpenCodeAuthHeaders: () => ({}),
+    },
+  };
+
+  test('settles with the error shape when /api/info never answers', async () => {
+    const originalFetch = globalThis.fetch;
+    setVersionProbeDeadlineForTest(50);
+    globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    });
+    try {
+      const started = Date.now();
+      const response = await handleSystemBridgeMessage(
+        { id: 'ver_1', type: 'api:opencode/version' },
+        versionCtx,
+        deps,
+      );
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(response?.success).toBe(true);
+      expect(response?.data?.version).toBeNull();
+      expect(String(response?.data?.error ?? '').length).toBeGreaterThan(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      setVersionProbeDeadlineForTest();
+    }
+  });
+
+  test('answers the version on the healthy path', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({ version: '2.0.21' });
+    try {
+      const response = await handleSystemBridgeMessage(
+        { id: 'ver_2', type: 'api:opencode/version' },
+        versionCtx,
+        deps,
+      );
+      expect(response?.success).toBe(true);
+      expect(response?.data?.version).toBe('2.0.21');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('VS Code system bridge api:openchamber:update-check response bound (#1062)', () => {
+  const realFetch = globalThis.fetch;
+  const CAP = 1 * 1024 * 1024;
+
+  const streamResponse = (chunks, { status = 200 } = {}) => {
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  const chunked = (text, size = 64 * 1024) => {
+    const parts = [];
+    for (let i = 0; i < text.length; i += size) parts.push(text.slice(i, i + size));
+    return parts;
+  };
+
+  const callUpdateCheck = () => handleSystemBridgeMessage(
+    { id: 'update-check', type: 'api:openchamber:update-check', payload: { currentVersion: '1.0.0' } },
+    undefined,
+    deps,
+  );
+
+  test('rejects an over-cap success body streamed without a content-length', async () => {
+    const body = JSON.stringify({ latestVersion: '9.9.9', pad: 'x'.repeat(CAP) });
+    globalThis.fetch = mock(async () => streamResponse(chunked(body)));
+    try {
+      const response = await callUpdateCheck();
+      expect(response.success).toBe(false);
+      expect(response.error).toContain('exceeded size limit');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('returns a valid at-cap update-check response unchanged', async () => {
+    const prefix = '{"latestVersion":"9.9.9","pad":"';
+    const suffix = '"}';
+    const body = prefix + 'x'.repeat(CAP - prefix.length - suffix.length) + suffix;
+    expect(body.length).toBe(CAP);
+    globalThis.fetch = mock(async () => streamResponse(chunked(body)));
+    try {
+      const response = await callUpdateCheck();
+      expect(response.success).toBe(true);
+      expect(response.data.latestVersion).toBe('9.9.9');
+      expect(response.data.pad.length).toBe(CAP - prefix.length - suffix.length);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('bounds an over-cap error body instead of returning it whole', async () => {
+    globalThis.fetch = mock(async () => streamResponse(chunked('e'.repeat(CAP + 1)), { status: 500 }));
+    try {
+      const response = await callUpdateCheck();
+      expect(response.success).toBe(false);
+      expect(response.error).toBe('Update check failed with 500');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('returns a small error body as the error text, unchanged', async () => {
+    globalThis.fetch = mock(async () => streamResponse(['boom'], { status: 503 }));
+    try {
+      const response = await callUpdateCheck();
+      expect(response).toEqual({ id: 'update-check', type: 'api:openchamber:update-check', success: false, error: 'boom' });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

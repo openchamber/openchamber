@@ -126,4 +126,176 @@ describe('OpenCode global config paths', () => {
     expect(fs.readFileSync(path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md'), 'utf8')).toBe('Current draft');
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  it('refuses an over-cap AGENTS.md from its size alone, on GET and on the PUT conflict check', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-agents-md-big-'));
+    process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
+    delete process.env.OPENCODE_CONFIG;
+
+    const [, , , , , , routes] = await loadOpenCodeModules();
+    const handlers = new Map();
+    const app = {
+      get(route, ...callbacks) { handlers.set(`GET ${route}`, callbacks.at(-1)); },
+      put(route, ...callbacks) { handlers.set(`PUT ${route}`, callbacks.at(-1)); },
+      post() {},
+      delete() {},
+      use() {},
+    };
+    routes.registerOpenCodeRoutes(app, {});
+
+    const agentsMdPath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    const oversized = 'x'.repeat(1024 * 1024 + 1);
+    fs.writeFileSync(agentsMdPath, oversized);
+
+    const readSpy = vi.spyOn(fs.promises, 'readFile');
+    try {
+      const response = { json: vi.fn(), status: vi.fn(() => response) };
+      await handlers.get('GET /api/behavior/agents-md')({}, response);
+      expect(response.status).toHaveBeenLastCalledWith(413);
+      expect(response.json).toHaveBeenLastCalledWith({
+        error: 'AGENTS.md exceeds maximum size of 1048576 bytes',
+      });
+
+      await handlers.get('PUT /api/behavior/agents-md')({
+        body: { content: 'Replacement', expectedContent: 'anything' },
+      }, response);
+      expect(response.status).toHaveBeenLastCalledWith(413);
+      expect(readSpy).not.toHaveBeenCalled();
+      expect(fs.readFileSync(agentsMdPath, 'utf8')).toBe(oversized);
+    } finally {
+      readSpy.mockRestore();
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('refuses an AGENTS.md that grows past the cap after the handle stat on GET and the PUT conflict check (#1410)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-agents-md-grown-'));
+    process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
+    delete process.env.OPENCODE_CONFIG;
+
+    const [, , , , , , routes] = await loadOpenCodeModules();
+    const handlers = new Map();
+    const app = {
+      get(route, ...callbacks) { handlers.set(`GET ${route}`, callbacks.at(-1)); },
+      put(route, ...callbacks) { handlers.set(`PUT ${route}`, callbacks.at(-1)); },
+      post() {},
+      delete() {},
+      use() {},
+    };
+    routes.registerOpenCodeRoutes(app, {});
+
+    const agentsMdPath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    fs.writeFileSync(agentsMdPath, 'x'.repeat(1024 * 1024 + 1024));
+
+    // The descriptor growth case: the handle stat answers the pre-growth
+    // size while the read meets the grown file.
+    const realOpen = fs.promises.open;
+    let requested = 0;
+    const openSpy = vi.spyOn(fs.promises, 'open').mockImplementation(async (...args) => {
+      const handle = await realOpen(...args);
+      const originalStat = handle.stat.bind(handle);
+      handle.stat = async () => {
+        const stats = await originalStat();
+        Object.defineProperty(stats, 'size', { value: 16 });
+        return stats;
+      };
+      const originalRead = handle.read.bind(handle);
+      handle.read = async (buffer, offset, length, position) => {
+        requested += length;
+        return originalRead(buffer, offset, length, position);
+      };
+      return handle;
+    });
+
+    try {
+      const response = { json: vi.fn(), status: vi.fn(() => response) };
+      await handlers.get('GET /api/behavior/agents-md')({}, response);
+      expect(response.status).toHaveBeenLastCalledWith(413);
+      expect(response.json).toHaveBeenLastCalledWith({
+        error: 'AGENTS.md exceeds maximum size of 1048576 bytes',
+      });
+      expect(requested).toBeGreaterThan(0);
+      expect(requested).toBeLessThanOrEqual(1024 * 1024 + 1);
+
+      requested = 0;
+      await handlers.get('PUT /api/behavior/agents-md')({
+        body: { content: 'Replacement', expectedContent: 'anything' },
+      }, response);
+      expect(response.status).toHaveBeenLastCalledWith(413);
+      expect(requested).toBeGreaterThan(0);
+      expect(requested).toBeLessThanOrEqual(1024 * 1024 + 1);
+      expect(fs.readFileSync(agentsMdPath, 'utf8')).toBe('x'.repeat(1024 * 1024 + 1024));
+    } finally {
+      openSpy.mockRestore();
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  it('preserves the previous AGENTS.md when replacement fails', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-agents-md-atomic-'));
+    process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
+    delete process.env.OPENCODE_CONFIG;
+
+    const [, , , , , , routes] = await loadOpenCodeModules();
+    const handlers = new Map();
+    const app = {
+      get(route, ...callbacks) { handlers.set(`GET ${route}`, callbacks.at(-1)); },
+      put(route, ...callbacks) { handlers.set(`PUT ${route}`, callbacks.at(-1)); },
+      post() {},
+      delete() {},
+      use() {},
+    };
+    routes.registerOpenCodeRoutes(app, {});
+
+    const agentsMdPath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    fs.writeFileSync(agentsMdPath, 'Old content');
+
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockRejectedValue(new Error('rename failed'));
+    try {
+      const response = { json: vi.fn(), status: vi.fn(() => response) };
+      await handlers.get('PUT /api/behavior/agents-md')({ body: { content: 'New content' } }, response);
+      expect(response.status).toHaveBeenLastCalledWith(500);
+      expect(fs.readFileSync(agentsMdPath, 'utf8')).toBe('Old content');
+      const leftovers = fs.readdirSync(path.dirname(agentsMdPath)).filter((name) => name.startsWith('AGENTS.md.tmp-'));
+      expect(leftovers).toEqual([]);
+    } finally {
+      renameSpy.mockRestore();
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('replaces a symlinked AGENTS.md rather than following it', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-agents-md-symlink-'));
+    process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
+    delete process.env.OPENCODE_CONFIG;
+
+    const [, , , , , , routes] = await loadOpenCodeModules();
+    const handlers = new Map();
+    const app = {
+      get(route, ...callbacks) { handlers.set(`GET ${route}`, callbacks.at(-1)); },
+      put(route, ...callbacks) { handlers.set(`PUT ${route}`, callbacks.at(-1)); },
+      post() {},
+      delete() {},
+      use() {},
+    };
+    routes.registerOpenCodeRoutes(app, {});
+
+    const agentsMdPath = path.join(process.env.XDG_CONFIG_HOME, 'opencode', 'AGENTS.md');
+    const targetPath = path.join(root, 'target.md');
+    fs.mkdirSync(path.dirname(agentsMdPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'Target content');
+    fs.symlinkSync(targetPath, agentsMdPath);
+
+    const response = { json: vi.fn(), status: vi.fn(() => response) };
+    await handlers.get('PUT /api/behavior/agents-md')({ body: { content: 'Replacement content' } }, response);
+    expect(fs.readFileSync(agentsMdPath, 'utf8')).toBe('Replacement content');
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('Target content');
+    const stat = fs.lstatSync(agentsMdPath);
+    expect(stat.isSymbolicLink()).toBe(false);
+    expect(stat.isFile()).toBe(true);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });

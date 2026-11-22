@@ -44,6 +44,7 @@ const createOpenCode = () => {
     failNext: null,
     failStatus: 500,
     htmlNext: null,
+    oversizedNext: null,
   };
   // v2 wraps `/api/*` payloads in `{ location, data }`; a message page is
   // `{ data, cursor }` and lists newest first.
@@ -51,6 +52,12 @@ const createOpenCode = () => {
   const fetchImpl = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
     const method = init.method ?? 'GET';
+    if (state.oversizedNext && state.oversizedNext.test(pathname)) {
+      state.oversizedNext = null;
+      return new Response(new ReadableStream({}), {
+        headers: { 'content-length': String(16 * 1024 * 1024 + 1) },
+      });
+    }
     if (state.failNext && state.failNext.test(pathname)) {
       state.failNext = null;
       return new Response('boom', { status: state.failStatus });
@@ -86,7 +93,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, persistSessionGoal } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, persistSessionGoal, fsPromises } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -111,6 +118,7 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
   if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
   if (now) options.now = now;
+  if (fsPromises) options.fsPromises = fsPromises;
   if (persistSessionGoal) options.persistSessionGoal = persistSessionGoal;
   const runtime = createMessageQueueRuntime(options);
   return {
@@ -296,6 +304,59 @@ describe('scheduled task items', () => {
   });
 });
 
+describe('per-session cap overflow', () => {
+  const scheduled = (projectId = 'project-1', overrides = {}) => item({
+    scheduledTask: { projectId, taskId: 'task-1' }, sendConfig: {}, ...overrides,
+  });
+
+  const fill = async (runtime, first) => {
+    const ids = [];
+    if (first) ids.push((await runtime.enqueue(SESSION, DIRECTORY, first)).itemId);
+    while (ids.length < 20) {
+      ids.push((await runtime.enqueue(SESSION, DIRECTORY, item({ text: `queued-${ids.length}`, content: `queued-${ids.length}` }))).itemId);
+    }
+    return ids;
+  };
+
+  it('rejects an ordinary enqueue into a full session queue and leaves all 20 items in order', async () => {
+    const { runtime, openCode } = createRuntime();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const ids = await fill(runtime);
+    await expect(runtime.enqueue(SESSION, DIRECTORY, item({ text: 'one too many' }))).rejects.toMatchObject({ status: 409 });
+    expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.id)).toEqual(ids);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('rejects an ordinary enqueue when the full queue starts with a scheduled item, without reporting it cancelled', async () => {
+    const results = [];
+    const { runtime, openCode } = createRuntime({ onScheduledTaskResult: (_task, status) => results.push(status) });
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const ids = await fill(runtime, scheduled());
+    await expect(runtime.enqueue(SESSION, DIRECTORY, item({ text: 'one too many' }))).rejects.toMatchObject({ status: 409 });
+    await settle();
+    expect(results).toEqual([]);
+    expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.id)).toEqual(ids);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('still rejects a scheduled enqueue into a full queue, and enqueues below the cap still work', async () => {
+    const { runtime, openCode } = createRuntime();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'below cap ordinary' }));
+    await runtime.enqueue(SESSION, DIRECTORY, scheduled());
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(2);
+    while (runtime.sessionSnapshot(SESSION).items.length < 20) {
+      await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'filler' }));
+    }
+    await expect(runtime.enqueue(SESSION, DIRECTORY, scheduled('project-2'))).rejects.toMatchObject({ status: 409 });
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(20);
+    runtime.stop();
+    await runtime.flush();
+  });
+});
+
 describe('auto routing', () => {
   it('switches a queued prompt and a queued command onto the routed model and agent', async () => {
     const resolveAutoSelection = vi.fn(async ({ model }) => (model?.id === 'auto'
@@ -391,6 +452,10 @@ describe('parseQueuedItemInput', () => {
     expect(parseQueuedItemInput(item()).goal).toBeUndefined();
     expect(() => parseQueuedItemInput(item({ goal: { tokenBudget: -1 } }))).toThrow(TypeError);
     expect(() => parseQueuedItemInput(item({ goal: 'yes' }))).toThrow(TypeError);
+    // The composer's goal flags: kept when true, dropped when false, refused when not boolean.
+    expect(parseQueuedItemInput(item({ goal: { tokenBudget: null, settled: true, briefAgent: false, ignoreLimit: true } })).goal)
+      .toEqual({ tokenBudget: null, settled: true, ignoreLimit: true });
+    expect(() => parseQueuedItemInput(item({ goal: { tokenBudget: null, settled: 'yes' } }))).toThrow(TypeError);
     expect(() => parseQueuedItemInput(item({ content: '', text: '', context: [{ kind: 'synthetic', text: 'x' }], goal: { tokenBudget: null } }))).toThrow(TypeError);
   });
 });
@@ -455,6 +520,37 @@ describe('a message queued as a goal', () => {
     await settle();
     expect(openCode.state.sent).toEqual([]);
     expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+  });
+
+  it('briefs the agent with the approved spec and keeps the goal\'s length choice', async () => {
+    process.env.OPENCHAMBER_DATA_DIR = makeDataDir();
+    const persisted = [];
+    const { runtime, openCode, emit } = createRuntime({
+      persistSessionGoal: async (_sessionID, _directory, goal) => { persisted.push(goal); },
+    });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      content: 'ship it',
+      text: 'ship it',
+      goal: { objective: '## Objective\nShip <it>', tokenBudget: null, settled: true, briefAgent: true, ignoreLimit: true },
+    }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({ ignoreObjectiveLimit: true });
+    const intro = openCode.state.sent.find((entry) => entry.path.endsWith('/synthetic'))?.body.text;
+    expect(intro).toContain('<goal-spec>\n## Objective\nShip &lt;it&gt;\n</goal-spec>');
+  });
+
+  it('briefs a goal queued with briefAgent and no objective with the message text', async () => {
+    process.env.OPENCHAMBER_DATA_DIR = makeDataDir();
+    const { runtime, openCode, emit } = createRuntime({ persistSessionGoal: async () => {} });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'ship <it>', text: 'ship <it>', goal: { tokenBudget: null, briefAgent: true } }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    const intro = openCode.state.sent.find((entry) => entry.path.endsWith('/synthetic'))?.body.text;
+    expect(intro).toContain('<goal-spec>\nship &lt;it&gt;\n</goal-spec>');
   });
 
   it('uses the objective the arming flow supplied', async () => {
@@ -614,6 +710,23 @@ describe('message queue runtime', () => {
     // Retried after the status fetch recovers.
     await settle(40);
     expect(openCode.state.sent).toHaveLength(1);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('keeps an oversized status answer unknown until a bounded retry succeeds', async () => {
+    const { runtime, openCode, emit } = createRuntime({ retryDelayMs: () => 10 });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    openCode.state.oversizedNext = /\/api\/session\/active$/;
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle(5);
+    expect(openCode.state.sent).toHaveLength(0);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    await settle(40);
+    expect(openCode.state.sent).toHaveLength(1);
+    runtime.stop();
+    await runtime.flush();
   });
 
   it('keeps a failed item and retries with backoff', async () => {
@@ -716,6 +829,43 @@ describe('message queue runtime', () => {
     await runtime.load();
     expect(runtime.snapshot().sessions).toEqual([]);
     expect(fs.readdirSync(dataDir).some((name) => name.startsWith('message-queue.json.corrupt-'))).toBe(true);
+  });
+
+  it('keeps a queue file of the wrong shape aside instead of overwriting it', async () => {
+    const dataDir = makeDataDir();
+    fs.writeFileSync(path.join(dataDir, 'message-queue.json'), JSON.stringify([1, 2, 3]));
+    const { runtime } = createRuntime({ dataDir });
+    await runtime.load();
+    expect(runtime.snapshot().sessions).toEqual([]);
+    expect(fs.readdirSync(dataDir).some((name) => name.startsWith('message-queue.json.corrupt-'))).toBe(true);
+  });
+
+  it('reads an empty queue file as an empty queue and persists over it', async () => {
+    const dataDir = makeDataDir();
+    fs.writeFileSync(path.join(dataDir, 'message-queue.json'), '');
+    const { runtime } = createRuntime({ dataDir });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'after empty', text: 'after empty' }));
+    await runtime.flush();
+    runtime.stop();
+    expect(fs.readdirSync(dataDir).some((name) => name.startsWith('message-queue.json.corrupt-'))).toBe(false);
+    const stored = JSON.parse(fs.readFileSync(path.join(dataDir, 'message-queue.json'), 'utf8'));
+    expect(stored.sessions[SESSION].items).toHaveLength(1);
+  });
+
+  it('refuses to treat the queue file as empty when preserving it fails', async () => {
+    const dataDir = makeDataDir();
+    fs.writeFileSync(path.join(dataDir, 'message-queue.json'), '{ not json');
+    const fsPromises = {
+      ...fs.promises,
+      rename: async () => {
+        throw new Error('rename blocked');
+      },
+    };
+    const { runtime } = createRuntime({ dataDir, fsPromises });
+    await expect(runtime.load()).rejects.toThrow('refusing to treat it as empty');
+    // The bytes are still live at the store path: nothing overwrote them.
+    expect(fs.readFileSync(path.join(dataDir, 'message-queue.json'), 'utf8')).toBe('{ not json');
   });
 
   it('refuses to remove or take the item currently being sent', async () => {
@@ -982,5 +1132,42 @@ describe('message queue runtime', () => {
       `/api/session/${SESSION}/prompt`,
     ]);
     expect(openCode.state.sent[0].body).toEqual({ sessionId: SESSION, directory: DIRECTORY });
+  });
+});
+
+describe('queued-message preview surrogate-pair cuts (#1959)', () => {
+  const EMOJI = '\u{1F600}';
+
+  it('the stored 103-char cut never persists a lone surrogate', async () => {
+    const { runtime } = createRuntime();
+    runtime.start();
+    const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item({
+      content: '', text: '', context: [{ kind: 'context', text: 'Full quoted content', metadata: { openchamberContext: { kind: 'chat-quote', quote: 'Original answer', text: 'Explain this' } } }],
+      contextPreview: `${'a'.repeat(102)}${EMOJI}${'b'.repeat(100)}`,
+    }));
+    const taken = await runtime.take(SESSION, itemId);
+    expect(taken.item.contextPreview).toBe('a'.repeat(102));
+  });
+
+  it('the projected 100-char cut never shows a lone surrogate', async () => {
+    const { runtime } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      content: '', text: '', context: [{ kind: 'context', text: 'Full quoted content', metadata: { openchamberContext: { kind: 'chat-quote', quote: 'Original answer', text: 'Explain this' } } }],
+      contextPreview: `${'a'.repeat(99)}${EMOJI}${'b'.repeat(10)}`,
+    }));
+    const projected = runtime.sessionSnapshot(SESSION).items[0];
+    expect(projected.contextPreview).toBe(`${'a'.repeat(99)}...`);
+    expect(Buffer.from(projected.contextPreview, 'utf8').toString('utf8')).toBe(projected.contextPreview);
+  });
+
+  it('a pair ending exactly at the projected limit is kept whole, no ellipsis', async () => {
+    const { runtime } = createRuntime();
+    runtime.start();
+    const preview = `${'a'.repeat(98)}${EMOJI}`;
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      content: '', text: '', context: [{ kind: 'context', text: 'Full quoted content', metadata: { openchamberContext: { kind: 'chat-quote', quote: 'Original answer', text: 'Explain this' } } }], contextPreview: preview,
+    }));
+    expect(runtime.sessionSnapshot(SESSION).items[0].contextPreview).toBe(preview);
   });
 });

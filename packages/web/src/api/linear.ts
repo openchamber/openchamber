@@ -34,6 +34,8 @@ import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 
 type LinearJson = {
   connected?: boolean;
+  source?: string;
+  code?: string;
   user?: LinearUserSummary | null;
   organization?: LinearOrganizationSummary | null;
   scope?: string;
@@ -47,6 +49,7 @@ type LinearJson = {
   hasMore?: boolean;
   issue?: LinearIssue | null;
   states?: LinearWorkflowState[];
+  statesMore?: boolean;
   defaultProjectPath?: string | null;
   teams?: LinearTeamMapping[];
   posted?: boolean;
@@ -110,6 +113,7 @@ function parseWorkspace(payload: LinearWorkspaceSummary | null | undefined): Lin
     current: payload?.current === true,
     user: parseUser(payload?.user),
     authorizedAt: readFiniteNumber(authorizedAt),
+    source: payload?.source === 'vault' ? 'vault' : payload?.source === 'oauth' ? 'oauth' : undefined,
   };
 }
 
@@ -125,6 +129,7 @@ function toAuthStatus(payload: LinearJson | null): LinearAuthStatus | null {
     user: parseUser(payload.user),
     organization: parseOrganization(payload.organization),
     scope: payload.scope?.trim() || undefined,
+    source: payload.source === 'vault' ? 'vault' : payload.source === 'oauth' ? 'oauth' : undefined,
     workspaces: payload.connected ? workspaces : undefined,
   };
 }
@@ -242,6 +247,7 @@ function parseIssueSummary(payload: LinearIssueSummary | null | undefined): Line
   return {
     ...related,
     labels: parseLabels(payload.labels),
+    labelsMore: payload.labelsMore === true,
     parent: parseRelatedIssue(payload.parent),
     subIssueProgress: parseSubIssueProgress(payload.subIssueProgress),
   };
@@ -279,6 +285,7 @@ function parseIssue(payload: LinearIssue | null | undefined): LinearIssue | null
     ...summary,
     description: readRawString(description),
     comments,
+    commentsMore: payload?.commentsMore === true,
     subIssues,
     subIssuesMore: payload?.subIssuesMore === true,
   };
@@ -325,7 +332,7 @@ function toIssueStates(payload: LinearJson | null): LinearIssueStatesResult | nu
   const states = Array.isArray(payload.states)
     ? payload.states.map(parseWorkflowState).filter((state): state is LinearWorkflowState => state != null)
     : [];
-  return { connected: true, states };
+  return { connected: true, states, statesMore: payload?.statesMore === true };
 }
 
 function toIssueUpdate(payload: LinearJson | null): LinearIssueUpdateResult | null {
@@ -441,6 +448,26 @@ export const createWebLinearAPI = (): LinearAPI => ({
       throw new Error(readErrorMessage(payload, response.statusText || 'Failed to start Linear auth'));
     }
     return started;
+  },
+
+  async authVault(tokenReference: string): Promise<LinearAuthStatus> {
+    const response = await runtimeFetch('/api/linear/auth/vault', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ tokenReference }),
+    });
+    const payload = await readLinearJson(response);
+    const status = toAuthStatus(payload);
+    if (!response.ok || !status) {
+      // SAFETY: the value asserted is the Error constructed on the next line; the assertion only declares the stable server error code attached below.
+      const error = new Error(readErrorMessage(payload, response.statusText || 'Failed to add the Linear account')) as Error & { code?: string };
+      if (payload?.code) error.code = payload.code;
+      throw error;
+    }
+    return status;
   },
 
   async authDisconnect(): Promise<{ removed: boolean }> {

@@ -43,11 +43,13 @@ export const spaceIdOfPreviewPartition = (partition) => {
  * no port open nothing is reachable.
  */
 export const spacePreviewProxyConfig = ({ deadProxyPort, localPorts }) => {
-  const port = Number.parseInt(String(deadProxyPort), 10);
+  const rawPort = String(deadProxyPort).trim();
+  const port = /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
   if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error('A dead proxy port is required');
   const bypass = ['<-loopback>'];
   for (const value of localPorts ?? []) {
-    const localPort = Number.parseInt(String(value), 10);
+    const rawLocalPort = String(value).trim();
+    const localPort = /^\d+$/.test(rawLocalPort) ? Number(rawLocalPort) : NaN;
     if (Number.isInteger(localPort) && localPort > 0 && localPort <= 65535) bypass.push(`${PREVIEW_HOSTNAME}:${localPort}`);
   }
   return {

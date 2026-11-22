@@ -14,6 +14,27 @@ describe('resolveOutboundProxyEnv', () => {
       NO_PROXY: 'corp.example,127.0.0.1,localhost,::1',
     });
   });
+
+  it('falls back to the lowercase proxy when the uppercase one is empty', () => {
+    expect(resolveOutboundProxyEnv({ HTTP_PROXY: '', http_proxy: 'http://proxy:3128' })).toEqual({
+      HTTP_PROXY: 'http://proxy:3128',
+      NO_PROXY: 'localhost,127.0.0.1,::1',
+    });
+  });
+
+  it('keeps the lowercase bypass list when the uppercase one is empty', () => {
+    expect(resolveOutboundProxyEnv({ HTTPS_PROXY: 'http://p:1', NO_PROXY: '', no_proxy: 'corp.example' })).toEqual({
+      HTTPS_PROXY: 'http://p:1',
+      NO_PROXY: 'corp.example,localhost,127.0.0.1,::1',
+    });
+  });
+
+  it('treats a whitespace-only uppercase value as unset', () => {
+    expect(resolveOutboundProxyEnv({ HTTPS_PROXY: '   ', https_proxy: 'http://proxy:3128', NO_PROXY: ' \t ', no_proxy: 'corp.example' })).toEqual({
+      HTTPS_PROXY: 'http://proxy:3128',
+      NO_PROXY: 'corp.example,localhost,127.0.0.1,::1',
+    });
+  });
 });
 
 describe('applyOutboundProxyFromEnv', () => {

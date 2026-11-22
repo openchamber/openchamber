@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { inflateRawSync } from 'node:zlib';
+import { crc32, inflateRawSync } from 'node:zlib';
 
 const LOCAL_FILE = 0x04034b50;
 const CENTRAL_DIR = 0x02014b50;
@@ -47,6 +47,7 @@ export const extractZipBuffer = async (buffer, destRoot) => {
     }
     const flags = readU16(buffer, offset + 6);
     const method = readU16(buffer, offset + 8);
+    const expectedCrc = readU32(buffer, offset + 14);
     const compressedSize = readU32(buffer, offset + 18);
     const uncompressedSize = readU32(buffer, offset + 22);
     const nameLen = readU16(buffer, offset + 26);
@@ -93,6 +94,12 @@ export const extractZipBuffer = async (buffer, destRoot) => {
       return { ok: false, code: 'extract-failed' };
     }
     if (data.length !== uncompressedSize) {
+      return { ok: false, code: 'extract-failed' };
+    }
+    // The length check cannot see a length-preserving corruption; the
+    // header CRC-32 is the archive's own integrity field, so verify it
+    // before the bytes are written anywhere.
+    if (crc32(data) !== expectedCrc) {
       return { ok: false, code: 'extract-failed' };
     }
     const target = path.resolve(destReal, ...name.split('/'));

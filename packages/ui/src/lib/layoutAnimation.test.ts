@@ -5,7 +5,7 @@ const frames: FrameRequestCallback[] = [];
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 
 type RootStub = { documentElement: { setAttribute: (name: string) => void; removeAttribute: (name: string) => void } };
-type GlobalStub = typeof globalThis | RootStub | ((callback: FrameRequestCallback) => number) | (() => void) | (() => { matches: boolean });
+type GlobalStub = typeof globalThis | RootStub | ((callback: FrameRequestCallback) => number) | (() => void) | (() => { matches: boolean }) | undefined;
 
 let reducedMotion = false;
 
@@ -144,5 +144,34 @@ describe('layoutAnimation', () => {
     await wait(5);
     runFrame();
     expect(runs).toBe(0);
+  });
+  test('settles on the timer when requestAnimationFrame is absent at entry', async () => {
+    setGlobal('requestAnimationFrame', undefined);
+    setGlobal('cancelAnimationFrame', undefined);
+    let runs = 0;
+    // A throw here is the regression: the entry call must not throw.
+    beginLayoutAnimation(5);
+    expect(isLayoutAnimating()).toBe(true);
+    expect(attributes.has('data-panel-animating')).toBe(true);
+
+    runWhenLayoutSettled(() => { runs += 1; });
+    await wait(15);
+    expect(runs).toBe(1);
+    expect(isLayoutAnimating()).toBe(false);
+    expect(attributes.has('data-panel-animating')).toBe(false);
+  });
+
+  test('settles when requestAnimationFrame disappears before the settle timer', async () => {
+    let runs = 0;
+    beginLayoutAnimation(5);
+    runWhenLayoutSettled(() => { runs += 1; });
+    runFrame();
+    setGlobal('requestAnimationFrame', undefined);
+    setGlobal('cancelAnimationFrame', undefined);
+
+    await wait(15);
+    expect(runs).toBe(1);
+    expect(isLayoutAnimating()).toBe(false);
+    expect(attributes.has('data-panel-animating')).toBe(false);
   });
 });

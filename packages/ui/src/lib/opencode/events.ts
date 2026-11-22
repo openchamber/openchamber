@@ -98,7 +98,7 @@ export type CatalogKind =
   /** Web search providers or the default choice changed (`websearch.updated`). */
   | "websearch"
 
-export type SyncEvent =
+type SyncEventPayload =
   | { type: "server.connected"; properties: Record<never, never> }
   | { type: "installation.update-available"; properties: { version: string } }
   | { type: "session.created"; properties: { info: Session } }
@@ -232,6 +232,8 @@ const finiteExit = (exit: number | "Infinity" | "-Infinity" | "NaN" | undefined)
  * Translates one wire event. Returns nothing for events the sync layer does
  * not model (usage records, inbox delivery changes, TUI events, ...).
  */
+export type SyncEvent = SyncEventPayload & { at?: number };
+
 export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
   switch (event.type) {
     case "server.connected":
@@ -525,6 +527,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           type: "text",
           text: "",
           time: { start: event.created },
+          displayTime: { start: event.created },
         }),
       ]
     case "session.text.delta":
@@ -551,6 +554,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           type: "text",
           text: event.data.text,
           time: { start: event.created, end: event.created },
+          displayTime: { end: event.created },
         }),
       ]
     case "session.reasoning.started":
@@ -562,6 +566,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           type: "reasoning",
           text: "",
           time: { start: event.created },
+          displayTime: { start: event.created },
         }),
       ]
     case "session.reasoning.delta":
@@ -586,6 +591,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           type: "reasoning",
           text: event.data.text,
           time: { start: event.created, end: event.created },
+          displayTime: { end: event.created },
         }),
       ]
 
@@ -732,7 +738,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
               id: messageIdFromEvent(event.id),
               sessionID: event.data.sessionID,
               role: "compaction",
-              time: { created: event.created },
+              time: { created: event.created, completed: event.created },
               status: "completed",
               reason: event.data.reason,
               summary: event.data.text,
@@ -751,7 +757,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
               id: event.data.inputID ?? messageIdFromEvent(event.id),
               sessionID: event.data.sessionID,
               role: "compaction",
-              time: { created: event.created },
+              time: { created: event.created, completed: event.created },
               status: "failed",
               reason: event.data.reason,
               summary: "",
@@ -897,7 +903,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
 /** Translates a wire event and tags every resulting sync event with its directory. */
 export function routeWireEvent(event: OpenCodeEvent): RoutedSyncEvent[] {
   const directory = eventDirectory(event)
-  return translateWireEvent(event).map((translated) => ({ directory, event: translated }))
+  return translateWireEvent(event).map((translated) => ({ directory, event: 'created' in event ? { ...translated, at: event.created } : translated }))
 }
 
 /** Session an event addresses, when it addresses one. */

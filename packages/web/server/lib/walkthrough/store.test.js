@@ -1,7 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'fs';
+import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The store resolves its directory at import time from the environment, so the
 // temp dir has to be in place before the module is loaded.
@@ -136,6 +138,46 @@ describe('cache entries', () => {
     expect(readCachedWalkthrough(key)).toBeNull();
   });
 
+  it('refuses an entry that grows past the cap after its handle stat', () => {
+    const key = buildCacheKey(baseKeyInput);
+    writeCachedWalkthrough(key, entry(key));
+    const filePath = path.join(__testing.ENTRIES_DIR, `${key}.json`);
+    const grown = JSON.stringify({ ...entry(key), padding: 'x'.repeat(4 * 1024 * 1024) });
+    let grew = false;
+    const growAfterStat = (stat) => {
+      if (!grew) {
+        grew = true;
+        fs.writeFileSync(filePath, grown, 'utf8');
+      }
+      return stat;
+    };
+    const originalStatSync = fs.statSync.bind(fs);
+    const originalFstatSync = fs.fstatSync.bind(fs);
+    const statSpy = vi.spyOn(fs, 'statSync').mockImplementation((...args) => {
+      const stat = originalStatSync(...args);
+      return args[0] === filePath ? growAfterStat(stat) : stat;
+    });
+    const fstatSpy = vi.spyOn(fs, 'fstatSync').mockImplementation((...args) =>
+      growAfterStat(originalFstatSync(...args)));
+
+    try {
+      expect(readCachedWalkthrough(key)).toBeNull();
+      expect(grew).toBe(true);
+    } finally {
+      statSpy.mockRestore();
+      fstatSpy.mockRestore();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('treats an entry FIFO as a cache miss without blocking', () => {
+    const key = buildCacheKey(baseKeyInput);
+    fs.mkdirSync(__testing.ENTRIES_DIR, { recursive: true });
+    const filePath = path.join(__testing.ENTRIES_DIR, `${key}.json`);
+    execFileSync('mkfifo', [filePath]);
+
+    expect(readCachedWalkthrough(key)).toBeNull();
+  });
+
   it('rejects an entry written by an incompatible version', () => {
     const key = buildCacheKey(baseKeyInput);
     writeCachedWalkthrough(key, entry(key));
@@ -229,6 +271,69 @@ describe('pointers', () => {
     } finally {
       fs.chmodSync(path.join(blocked, 'inner'), 0o755);
     }
+  });
+
+  it('skips an oversized pointer instead of buffering it whole (#1482)', async () => {
+    fs.mkdirSync(__testing.POINTERS_DIR, { recursive: true });
+    const hugePath = path.join(__testing.POINTERS_DIR, 'huge.json');
+    const huge = JSON.stringify({
+      repoRoot: '/definitely/not/here',
+      cacheKey: 'huge',
+      pad: 'x'.repeat(4 * 1024 * 1024),
+    });
+    fs.writeFileSync(hugePath, huge, 'utf8');
+    writePointer('/definitely/not/here', 'working-tree:all', {
+      repoRoot: '/definitely/not/here',
+      cacheKey: 'dead',
+    });
+
+    expect(await pruneMissingRepositories()).toBe(1);
+    expect(fs.existsSync(hugePath)).toBe(true);
+    expect(readPointer('/definitely/not/here', 'working-tree:all')).toBeNull();
+  });
+
+  it('skips a pointer that grows past the cap after its handle stat', async () => {
+    fs.mkdirSync(__testing.POINTERS_DIR, { recursive: true });
+    const filePath = path.join(__testing.POINTERS_DIR, 'growing.json');
+    const repoRoot = '/definitely/not/here';
+    const pointer = { repoRoot, cacheKey: 'growing' };
+    fs.writeFileSync(filePath, JSON.stringify(pointer), 'utf8');
+    const grown = JSON.stringify({ ...pointer, padding: 'x'.repeat(4 * 1024 * 1024) });
+    const originalStat = fsp.stat.bind(fsp);
+    const statSpy = vi.spyOn(fsp, 'stat').mockImplementation(async (...args) => {
+      const stat = await originalStat(...args);
+      if (args[0] === filePath) fs.writeFileSync(filePath, grown, 'utf8');
+      return stat;
+    });
+    const originalOpen = fs.promises.open.bind(fs.promises);
+    const openSpy = vi.spyOn(fs.promises, 'open').mockImplementation(async (...args) => {
+      const handle = await originalOpen(...args);
+      if (args[0] !== filePath) return handle;
+      const originalHandleStat = handle.stat.bind(handle);
+      handle.stat = async () => {
+        const stat = await originalHandleStat();
+        fs.writeFileSync(filePath, grown, 'utf8');
+        return stat;
+      };
+      return handle;
+    });
+
+    try {
+      await expect(pruneMissingRepositories()).resolves.toBe(0);
+      expect(fs.existsSync(filePath)).toBe(true);
+    } finally {
+      statSpy.mockRestore();
+      openSpy.mockRestore();
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('skips a pointer FIFO without blocking or deleting it', async () => {
+    fs.mkdirSync(__testing.POINTERS_DIR, { recursive: true });
+    const filePath = path.join(__testing.POINTERS_DIR, 'fifo.json');
+    execFileSync('mkfifo', [filePath]);
+
+    await expect(pruneMissingRepositories()).resolves.toBe(0);
+    expect(fs.existsSync(filePath)).toBe(true);
   });
 
   it('survives a pointer file it cannot parse', async () => {

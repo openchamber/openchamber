@@ -147,11 +147,16 @@ An open note is `NoteEditor`, a CodeMirror editor that is always editable and
 always reads as formatted text: headings, emphasis, code and links keep their
 look while you type, and Markdown markers (`#`, `**`, backticks, link targets)
 are hidden except on the lines the cursor is on. List markers show as bullets.
-Without focus every line is formatted. An earlier version opened the note
-rendered and swapped it for a plain textarea on click, so the same note looked
-like two different things depending on whether you were touching it. Escape
-leaves the note; the toolbar carries the source, date, pin and menu. The stored
-text is plain Markdown either way. The editor loads lazily, since it brings
+Without focus every line is formatted. The live preview decorates from a
+finished parse: CodeMirror's background parser publishes the tree over time, and
+decorating from the tree it had reached left the raw markers on the tail of the
+note visible until the next keystroke. Each decoration pass finishes the parse
+(a note is capped at 3000 characters) and the plugin also rebuilds when the tree
+changes, so the first paint is already formatted. An earlier version opened the
+note rendered and swapped it for a plain textarea on click, so the same note
+looked like two different things depending on whether you were touching it.
+Escape leaves the note; the toolbar carries the source, date, pin and menu. The
+stored text is plain Markdown either way. The editor loads lazily, since it brings
 CodeMirror and most visits never open a note.
 
 An open memory has its title and text as plain fields that save on blur and

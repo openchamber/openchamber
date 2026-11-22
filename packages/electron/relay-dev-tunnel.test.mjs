@@ -136,4 +136,13 @@ describe('relay dev tunnel bridge', () => {
     const remaining = await bridge.open({ targetKey: 'host:two', remotePort: 4322, webContents: windowTwo });
     expect(remaining).toEqual({ localPort: second.localPort, reused: true });
   });
+
+  test('a malformed remote port is rejected instead of coerced to another port', async () => {
+    const bridge = createRelayDevTunnelBridge({ createMessageChannel: () => new MessageChannel() });
+    bridges.push(bridge);
+    const webContents = { id: 23, isDestroyed: () => false, once: () => {}, postMessage: () => {} };
+    await expect(bridge.open({ targetKey: 'host:exe', remotePort: '8080junk', webContents })).rejects.toThrow(/valid remote port/);
+    await expect(bridge.open({ targetKey: 'host:exe', remotePort: '80.9', webContents })).rejects.toThrow(/valid remote port/);
+    await expect(bridge.open({ targetKey: 'host:exe', remotePort: 8080.5, webContents })).rejects.toThrow(/valid remote port/);
+  });
 });

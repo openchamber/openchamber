@@ -3,6 +3,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import {
+  isJsonObject,
+  preserveMalformedJsonFileSync,
+  readDurableJsonFileSync,
+  readDurableRawFileSync,
+  writeDurableJsonFileSync,
+} from '../shared/durable-json-store.js';
+
 // @simplewebauthn/server and its ASN.1 dependencies are ~130 modules; only
 // passkey registration and authentication need them, so they load on first use.
 let webauthnPending;
@@ -35,12 +43,25 @@ const decodeUserId = (value) => {
   }
 };
 
+// A plain slice at the cap can land between the halves of a surrogate pair,
+// leaving a lone high surrogate that persists to the passkey store and shows
+// up as U+FFFD in the device list; move a cut inside a pair back to the pair
+// boundary. Mirrors clipPairSafe in client-auth/pairing.js.
+const clipPairSafe = (text, limit) => {
+  if (text.length <= limit) {
+    return text;
+  }
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
+
 const normalizeLabel = (value, fallback) => {
   if (typeof value !== 'string') {
     return fallback;
   }
   const normalized = value.trim().replace(/\s+/g, ' ');
-  return normalized ? normalized.slice(0, 120) : fallback;
+  return normalized ? clipPairSafe(normalized, 120) : fallback;
 };
 
 const normalizeOptionalLabel = (value) => normalizeLabel(value, '') || null;
@@ -121,19 +142,50 @@ export const createUiPasskeys = ({
   passwordBinding,
   readSettingsFromDiskMigrated,
   storeFile = PASSKEY_STORE_FILE,
+  fs: storeFs = fs,
   rpName = DEFAULT_RP_NAME,
   challengeTtlMs = DEFAULT_CHALLENGE_TTL_MS,
 } = {}) => {
   const registrationChallenges = new Map();
   const authenticationChallenges = new Map();
 
-  const ensureStoreDirectory = () => {
-    fs.mkdirSync(path.dirname(storeFile), { recursive: true });
+  // The shared sync durable-store helpers keep the strict object check,
+  // collision-proof preservation of unreadable files, and atomic write together.
+  const readStoredValue = (replacements = 0) => {
+    const result = readDurableJsonFileSync(storeFile, { fs: storeFs, validateValue: isJsonObject });
+    if (result.state === 'valid') {
+      return result.value;
+    }
+
+    // Missing includes an empty file. Recheck it through the preserve
+    // helper so a valid replacement installed after the read is not
+    // mistaken for a fresh store.
+    const preservation = preserveMalformedJsonFileSync(storeFile, { fs: storeFs, validateValue: isJsonObject });
+    if (preservation.preserved) {
+      console.warn(`[UI Passkeys] Failed to read passkey store: preserved the unreadable file at ${preservation.preservedPath}`);
+      return undefined;
+    }
+    if (preservation.outcome === 'missing') {
+      return undefined;
+    }
+    if (preservation.outcome === 'replaced' && replacements < 3) {
+      return readStoredValue(replacements + 1);
+    }
+    if (preservation.outcome === 'replaced') {
+      throw new Error(`Passkey store changed repeatedly while reading ${storeFile}; refusing to overwrite it`);
+    }
+    throw new Error(`Failed to preserve the unreadable passkey store at ${storeFile}; refusing to overwrite it`);
   };
 
+  // The store holds passkey credential material, so its mode remains 0600.
   const persistStore = (store) => {
-    ensureStoreDirectory();
-    fs.writeFileSync(storeFile, JSON.stringify(store, null, 2));
+    const preservation = preserveMalformedJsonFileSync(storeFile, { fs: storeFs, validateValue: isJsonObject });
+    if (preservation.preserved) {
+      console.warn(`[UI Passkeys] Failed to read passkey store: preserved the unreadable file at ${preservation.preservedPath}`);
+    } else if (preservation.outcome === 'failed') {
+      throw new Error(`Failed to preserve the unreadable passkey store at ${storeFile}; refusing to overwrite it`);
+    }
+    writeDurableJsonFileSync(storeFile, JSON.stringify(store, null, 2), { fs: storeFs, mode: 0o600 });
   };
 
   const createEmptyStore = () => ({
@@ -143,22 +195,37 @@ export const createUiPasskeys = ({
     passkeys: [],
   });
 
+  // An existing empty file reads as missing under the durable-store
+  // contract, but unlike a preserved corrupt file it is still on disk,
+  // so the existence check in loadStore must not suppress persisting
+  // the fresh store: otherwise every load invents a new userID and a
+  // registration begun in one load can be finished under another.
+  const storeFileIsEmpty = () => {
+    try {
+      // The recheck goes through the durable store's bounded raw read
+      // (#2127): a plain readFileSync here would synchronously buffer
+      // whatever a concurrent writer swapped in after the initial
+      // bounded read, with no size cap and no regular-file check. Any
+      // refusal (too large, not regular, unreadable) means not empty:
+      // the fresh store must not be persisted over such a file.
+      const raw = readDurableRawFileSync(storeFile, { fs: storeFs });
+      return typeof raw === 'string' && raw.trim() === '';
+    } catch {
+      return false;
+    }
+  };
+
   const loadStore = () => {
     let store = createEmptyStore();
 
-    try {
-      if (fs.existsSync(storeFile)) {
-        const raw = fs.readFileSync(storeFile, 'utf8');
-        const parsed = JSON.parse(raw);
-        store = {
-          version: DEFAULT_STORE_VERSION,
-          userID: decodeUserId(parsed?.userID) ? parsed.userID : store.userID,
-          passwordBinding: typeof parsed?.passwordBinding === 'string' ? parsed.passwordBinding : '',
-          passkeys: Array.isArray(parsed?.passkeys) ? parsed.passkeys.map(parseStoredPasskey).filter(Boolean) : [],
-        };
-      }
-    } catch (error) {
-      console.warn('[UI Passkeys] Failed to read passkey store:', error?.message || error);
+    const parsed = readStoredValue();
+    if (parsed !== undefined) {
+      store = {
+        version: DEFAULT_STORE_VERSION,
+        userID: decodeUserId(parsed?.userID) ? parsed.userID : store.userID,
+        passwordBinding: typeof parsed?.passwordBinding === 'string' ? parsed.passwordBinding : '',
+        passkeys: Array.isArray(parsed?.passkeys) ? parsed.passkeys.map(parseStoredPasskey).filter(Boolean) : [],
+      };
     }
 
     if (!passwordBinding) {
@@ -180,7 +247,7 @@ export const createUiPasskeys = ({
       return store;
     }
 
-    if (!fs.existsSync(storeFile)) {
+    if (!storeFs.existsSync(storeFile) || storeFileIsEmpty()) {
       persistStore(store);
     }
 

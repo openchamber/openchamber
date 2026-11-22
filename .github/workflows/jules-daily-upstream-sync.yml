@@ -1,7 +1,8 @@
 name: Jules Daily Upstream Sync (OpenChamber)
 
 # Daily automated upstream sync, conflict resolution, feature-opportunity triage,
-# and safe merging for developing-today/openchamber using Google Jules.
+# and safe merging for developing-today-forks/openchamber, run by an OpenCode
+# session launched through pm-dispatch (developing-today/code#2672).
 
 on:
   schedule:
@@ -30,6 +31,11 @@ concurrency:
 
 jobs:
   daily-upstream-sync:
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -38,11 +44,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run Jules Upstream Sync Agent
-        uses: google-labs-code/jules-action@bff7875eaa123cac6742b7cfc51005b95ba4d566 # v1.0.0
+      - name: Dispatch the upstream sync via pm-dispatch
+        uses: ./.github/actions/pm-dispatch-start
         with:
-          jules_api_key: ${{ secrets.JULES_API_KEY }}
-          include_commit_log: true
+          title: "chore: daily upstream sync from openchamber/openchamber"
           prompt: >-
             Perform the daily upstream sync of OpenChamber from upstream openchamber/openchamber (branch `main`) into `main`.
 
@@ -62,7 +67,7 @@ jobs:
             ### 3. FEATURE OPPORTUNITY TRIAGE & ISSUE CREATION
             - Inspect the newly merged upstream commits (`git log ... --grep="^feat"`).
             - Identify if any new upstream capabilities, refactors, or UI surfaces could be adopted or built upon by our fork's additions (such as interactive render pages, project knowledge plans, model routing tiers, or plan cost tracking).
-            - For each identified high-value synergy, create a comprehensive GitHub issue using `gh issue create --repo developing-today/openchamber` containing:
+            - For each identified high-value synergy, create a comprehensive GitHub issue using `gh issue create --repo developing-today-forks/openchamber` containing:
               - Clear title and summary
               - Upstream commit references
               - Architectural context and user story
@@ -80,4 +85,53 @@ jobs:
             ### 5. PULL REQUEST & SAFE MERGE
             - Update the `README.md` fork notice with the latest upstream commit SHA and timestamp.
             - Open a clean, conflict-free Pull Request detailing all merged upstream commits and resolved conflicts.
-            - If tests pass cleanly and there are no regressions, proceed to merge the PR into `main`.
+            - Merge the PR into `main` only when you are reasonably certain it is correct: tests pass cleanly, there are no regressions, and the sync is conflict-free. Merging is permitted, never required — when any of that is uncertain, leave the PR open and state your confidence and what a human should check in the description.
+
+      - name: Find an open sync failure issue
+        id: failure-issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -u
+          title="chore(deps): automated upstream sync failing"
+          number=$(gh issue list --state open --search "\"$title\" in:title" --limit 100 --json number,title | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' | head -n 1)
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+          if [ -n "${number}" ]; then
+            echo "An open sync failure issue already exists: #${number}"
+          else
+            echo "No open sync failure issue."
+          fi
+
+      - name: Queue the sync failure on the existing tracker via pm-dispatch
+        if: failure() && steps.failure-issue.outputs.number != ''
+        uses: ./.github/actions/pm-dispatch-queue
+        with:
+          title: "chore(deps): automated upstream sync failing"
+          prompt: |
+            Upstream sync failed again: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. The daily upstream sync is dispatched to an OpenCode session via pm-dispatch, so a failed run means the sync could not be completed. Please triage and land the sync.
+          issue_number: ${{ steps.failure-issue.outputs.number }}
+
+      - name: Queue the sync failure via pm-dispatch (new tracker)
+        if: failure() && steps.failure-issue.outputs.number == ''
+        uses: ./.github/actions/pm-dispatch-queue
+        with:
+          title: "chore(deps): automated upstream sync failing"
+          prompt: |
+            The daily upstream-sync workflow failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. The sync is dispatched to an OpenCode session via pm-dispatch, so a workflow failure means the sync could not be completed (an unresolvable merge conflict, a dispatch failure, or a failed validation after its PR). Per Drew's escalation chain (2026-10-28), the fleet queue takes over from here: reproduce the upstream merge in a laptop worktree, resolve conflicts preserving both sides' features per the workflow prompt, verify, and land the sync as a PR. This issue is maintained by the jules-daily-upstream-sync workflow: repeat failures queue a follow-up task on this same issue instead of opening a duplicate; close it once a sync run succeeds.
+          issue: "true"
+
+      - name: Close the sync failure issue on success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -u
+          title="chore(deps): automated upstream sync failing"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          number=$(gh issue list --state open --search "\"$title\" in:title" --limit 100 --json number,title | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' | head -n 1)
+          if [ -n "${number}" ]; then
+            gh issue close "${number}" --comment "Upstream sync succeeded: ${run_url}. Closing as promised in the tracking issue body; a later failure will open a fresh tracking issue."
+          fi

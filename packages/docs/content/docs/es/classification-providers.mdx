@@ -15,10 +15,10 @@ Jev nunca escribe código ni responde en tu chat. Solo devuelve un veredicto, y 
 | --- | --- |
 | [Permisos y red de seguridad](/es/permissions/) | ¿Debe el agente preguntarte antes de ejecutar esta acción? |
 | [Enrutamiento automático de modelos](/es/auto-model-routing/) | ¿A cuál de tus categorías pertenece este prompt? |
-| [Sesiones en curso](/es/sessions-in-work/) | ¿Este turno parece el final del trabajo? |
+| [Sesiones en curso](/es/sessions-in-work/) | Con **Jev decide**: ¿este mensaje o turno empieza un trabajo? Siempre: ¿este turno parece el final del trabajo? |
 | [Resumen y sugerencia del próximo mensaje](/es/sessions-in-work/) | ¿Vale la pena generar un resumen o una sugerencia después de este turno? |
 
-Sin proveedor, la red de seguridad y Auto quedan ocultos, y las sesiones en curso no reciben la pista «parece terminado». Las sesiones siguen pasando a en curso cuando envías un mensaje. Los resúmenes y las sugerencias siguen funcionando, solo que sin el filtro.
+Sin proveedor, la red de seguridad y Auto quedan ocultos, y las sesiones en curso no reciben la pista «parece terminado». **Jev decide** funciona como Desactivado, así que las sesiones solo pasan a en curso si las sigues tú o con **Cada mensaje**. Los resúmenes y las sugerencias siguen funcionando, solo que sin el filtro.
 
 ## Configuración
 
@@ -96,7 +96,7 @@ Si Jev va lento o falla en una solicitud, no se rompe nada. Cada función tiene 
 
 - La red de seguridad deja la acción esperando tu decisión.
 - Auto manda el prompt a tu modelo de respaldo.
-- No aparece la pista «parece terminado» en las sesiones en curso.
+- Ninguna sesión pasa a en curso por decisión de Jev, y no aparece la pista «parece terminado».
 - El resumen y la sugerencia se generan como si Jev no existiera.
 
 ## Qué ve Jev

@@ -11,8 +11,12 @@ on:
 # group for every PR: with the default single queue a third bot
 # command silently replaces the pending second one. Key by PR/issue
 # number and queue every run.
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
+  # queue: max forbids cancel-in-progress: true (GitHub validation rejects
+  # the combination and the workflow dies at startup with zero jobs, #1337).
+  # Keep the literal false so every run queues, per the note above.
   cancel-in-progress: false
   queue: max
 

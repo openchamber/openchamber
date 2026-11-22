@@ -10,10 +10,23 @@ Bevor OpenChamber etwas tun kann, braucht es mindestens einen verbundenen KI-Pro
 ## Einen Provider verbinden
 
 1. Öffne **Einstellungen → Provider**.
-2. Öffne das Menü **Provider hinzufügen** und wähle einen Provider aus, der noch nicht verbunden ist.
+2. Öffne das Menü **Provider hinzufügen** und wähle einen Provider aus, der noch nicht verbunden ist, oder wähle **Andere / Benutzerdefiniert** für einen OpenAI-kompatiblen Endpunkt.
 3. Melde dich auf eine von zwei Arten an, je nach Provider:
    - **API-Schlüssel** — füge deinen Schlüssel ein und speichere.
    - **Anmeldung (Gerätefluss)** — OpenChamber zeigt einen Link und einen kurzen Code an. Öffne den Link, gib den Code ein und bestätige. OpenChamber schließt die Verbindung dann selbstständig ab.
+
+### Benutzerdefinierte und andere Provider
+
+Für Gateways, LLMs von Hochschulen, Ollama, LiteLLM und ähnliche OpenAI-kompatible APIs:
+
+1. Wähle in der Providerliste **Andere / Benutzerdefiniert**.
+2. Gib eine Provider-ID, einen Anzeigenamen, eine Basis-URL (`http://` oder `https://`), einen API-Schlüssel oder `{env:VAR_NAME}` sowie mindestens eine Modell-ID mit Namen ein.
+3. Gib optional die Reasoning-Stufen eines Modells an, zum Beispiel `low, medium, high`. Jede Stufe erscheint im Chat im Variantenwähler des Modells, genau wie bei eingebauten Providern.
+4. Füge optional Anfrage-Header hinzu.
+5. Speichere. OpenChamber schreibt den Provider-Block in die OpenCode-Konfiguration und speichert den Schlüssel in der OpenCode-Authentifizierung, direkt eingegebene Schlüssel als Schlüssel und `{env:VAR}` als Referenz.
+6. Öffne einen vorhandenen benutzerdefinierten Provider und wähle **Bearbeiten**, um ihn zu ändern.
+
+Benutzerdefinierte Provider brauchen einen API-Schlüssel oder `{env:VAR_NAME}`, bevor sie als vollständig verbunden erscheinen. Ohne Anmeldedaten werden Modelle unter Umständen angezeigt, aber Chat-Aufrufe schlagen fehl.
 
 Wenn ein Provider als verbunden angezeigt wird, sind seine Modelle im Chat verfügbar.
 

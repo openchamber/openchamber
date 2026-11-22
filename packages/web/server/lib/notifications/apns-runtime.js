@@ -9,8 +9,16 @@
 // Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
 // generic, model-based text (no session content) — see APNS.md.
 
+import {
+  isJsonObject,
+  preserveMalformedJsonFile,
+  readDurableJsonFile,
+  writeDurableJsonFile,
+} from '../shared/durable-json-store.js';
 import { sessionKeyFor, withHashedSessionKeys } from './session-key.js';
 import { parsePushKey, sealPushContent } from './push-seal.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import {
   getOrCreateRelaySigningKeypair,
   signRelayMessage as signRelayMessageShared,
@@ -24,8 +32,57 @@ const JWT_TTL_MS = 50 * 60 * 1000;
 const DEFAULT_BUNDLE_ID = 'today.developing.openchamber';
 const DEFAULT_RELAY_URL = 'https://api.openchamber.dev/v1/push/send';
 const MAX_TOKENS_PER_SESSION = 10;
+// A real APNs .p8 signing key is a few hundred bytes; the cap carries
+// generous headroom while keeping the key-file read bounded like every
+// other read in this module (#1777).
+const APNS_P8_MAX_BYTES = 64 * 1024;
 // APNs reasons that mean the token is permanently invalid → drop it.
 const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic']);
+
+// Every outbound APNs path carries a deadline: a stalled relay or APNs
+// stream settles (warn-and-continue) instead of hanging token registration
+// or the push fanout. The relay is a small JSON POST and registration is a
+// foreground phone request, so its bound is tight; APNs answers are
+// normally sub-second, so the direct bound only fires on a genuine wedge.
+const APNS_RELAY_REQUEST_TIMEOUT_MS = 10_000;
+// The relay answer is only a small results array (drop tokens for at most
+// 100 tokens — a few KB at most); cap the body read at 1 MiB (the fleet's
+// small-JSON precedent) so an oversized relay body cannot be buffered whole.
+const APNS_RELAY_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
+// APNs error bodies are tiny JSON documents ({"reason": "..."}); cap the
+// direct-mode body read at the same 1 MiB as the relay path so an oversized
+// direct response cannot be buffered whole — the 30s deadline below bounds
+// time, not bytes.
+const APNS_DIRECT_RESPONSE_MAX_BYTES = 1 * 1024 * 1024;
+const APNS_DIRECT_REQUEST_TIMEOUT_MS = 30_000;
+
+// AbortController + explicit timer (the template-runtime.js pattern in this
+// folder): the timer is clearable on settle and drivable by test fake timers.
+const APNS_COLLAPSE_ID_MAX_BYTES = 64;
+
+// APNs caps apns-collapse-id at 64 BYTES, not characters: truncate by UTF-8
+// bytes, stopping on a code-point boundary, so a multi-byte tag never
+// produces an over-cap header value and never ends in a lone surrogate.
+// ASCII tags are byte-identical to a plain slice.
+const truncateToUtf8Bytes = (value, maxBytes) => {
+  let bytes = 0;
+  let end = 0;
+  for (const char of value) {
+    const size = Buffer.byteLength(char, 'utf8');
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    end += char.length;
+  }
+  return value.slice(0, end);
+};
+
+const collapseIdForTag = (tag) => (typeof tag === 'string' ? truncateToUtf8Bytes(tag, APNS_COLLAPSE_ID_MAX_BYTES) : undefined);
+
+const createTimeoutSignal = (timeoutMs) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
+};
 
 const trimmedEnv = (name) => {
   const value = process.env[name];
@@ -89,11 +146,18 @@ export const createApnsRuntime = (deps) => {
       const ts = Date.now();
       // platform is part of the signed message so it can't be tampered en route.
       const sig = signRelayMessage(privateKey, `${ts}.${token}.${platform}`);
-      const res = await fetch(relay.registerUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token, platform, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
-      });
+      const { signal, cleanup } = createTimeoutSignal(APNS_RELAY_REQUEST_TIMEOUT_MS);
+      let res;
+      try {
+        res = await fetch(relay.registerUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ token, platform, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
+          signal,
+        });
+      } finally {
+        cleanup();
+      }
       if (!res.ok) console.warn(`[Push relay] register-token failed status=${res.status}`);
     } catch (error) {
       console.warn('[Push relay] register-token request failed:', error?.message ?? error);
@@ -106,47 +170,129 @@ export const createApnsRuntime = (deps) => {
 
   const emptyStore = () => ({ version: APNS_TOKENS_VERSION, tokensBySession: {} });
 
-  const readTokensFromDisk = async () => {
-    try {
-      const raw = await fsPromises.readFile(APNS_TOKENS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object' || parsed.version !== APNS_TOKENS_VERSION) {
-        return emptyStore();
+  // This store rides the shared durable-store primitive (#976, phase 2
+  // #978). The value judgement is the one this store always made: a JSON
+  // object at APNS_TOKENS_VERSION. Anything else on disk (unparseable
+  // bytes, another shape, another version) is malformed, and malformed
+  // bytes are device-token state, not an empty store: the primitive
+  // preserves them aside under its collision-proof name before any write
+  // can replace them. Parse errors are never logged: they can quote the
+  // file, and the file holds device tokens.
+  const isApnsTokensValue = (value) => isJsonObject(value) && value.version === APNS_TOKENS_VERSION;
+  const durableOptions = () => ({ fs: fsPromises, validateValue: isApnsTokensValue });
+
+  // Answers the preserve outcome ('preserved' | 'replaced' | 'missing' |
+  // 'failed'); the serialized spelling throws on 'failed' instead.
+  const handleCorruptApnsTokensFile = async (serialized) => {
+    if (serialized) {
+      // Already under the persist lock, so preserving inline cannot race
+      // an in-process write. A mutation must never overwrite bytes whose
+      // preservation just failed: abort instead; the caller can retry
+      // once the file is movable.
+      const preservation = await preserveMalformedJsonFile(APNS_TOKENS_FILE_PATH, durableOptions());
+      if (preservation.preserved) {
+        console.warn(`Failed to read APNs tokens file: preserved the unreadable file at ${preservation.preservedPath}`);
+      } else if (preservation.outcome === 'failed') {
+        throw new Error('Failed to preserve the unreadable APNs tokens file; refusing to overwrite it');
       }
-      const stored =
-        parsed.tokensBySession && typeof parsed.tokensBySession === 'object' ? parsed.tokensBySession : {};
-      const { bySession: tokensBySession, changed } = withHashedSessionKeys(stored);
-      if (changed && !legacyKeysScrubQueued) {
-        // Rewrite once so raw session tokens leave the disk now, not at the
-        // next registration.
-        legacyKeysScrubQueued = true;
-        void persistTokenUpdate((current) => current).catch((error) => {
-          console.warn('Failed to rewrite APNs tokens with hashed session keys:', error);
-        });
-      }
-      return { version: APNS_TOKENS_VERSION, tokensBySession };
-    } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return emptyStore();
-      }
-      console.warn('Failed to read APNs tokens file:', error);
-      return emptyStore();
+      return preservation.outcome;
     }
+    // Unlocked reader (the send path): the bytes it read are stale the
+    // moment the read returns — a concurrent persist may already have
+    // preserved the corrupt file and saved valid state in its place, and
+    // renaming the file now would move that saved state aside. Queue the
+    // preserve under the persist lock; the primitive re-reads and
+    // re-judges the on-disk bytes before renaming anything, so a valid
+    // replacement is left in place and reported as 'replaced'.
+    const run = async () => {
+      const preservation = await preserveMalformedJsonFile(APNS_TOKENS_FILE_PATH, durableOptions());
+      if (preservation.preserved) {
+        console.warn(`Failed to read APNs tokens file: preserved the unreadable file at ${preservation.preservedPath}`);
+      } else if (preservation.outcome === 'failed') {
+        console.warn('Failed to preserve the unreadable APNs tokens file');
+      }
+      return preservation.outcome;
+    };
+    persistLock = persistLock.then(run, run);
+    return persistLock;
+  };
+
+  const readTokensFromDisk = async ({ serialized = false } = {}) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let result;
+      try {
+        result = await readDurableJsonFile(APNS_TOKENS_FILE_PATH, durableOptions());
+      } catch (error) {
+        // A read failure other than absence warns and defaults, the
+        // behaviour this store always had.
+        console.warn('Failed to read APNs tokens file:', error);
+        return emptyStore();
+      }
+      if (result.state === 'missing') return emptyStore();
+      if (result.state === 'malformed') {
+        const outcome = await handleCorruptApnsTokensFile(serialized);
+        // A valid replacement landed while the malformed bytes were
+        // being judged: read that file instead of defaulting.
+        if (outcome === 'replaced') continue;
+        return emptyStore();
+      }
+      try {
+        const stored =
+          result.value.tokensBySession && typeof result.value.tokensBySession === 'object'
+            ? result.value.tokensBySession
+            : {};
+        const { bySession: tokensBySession, changed } = withHashedSessionKeys(stored);
+        if (changed && !legacyKeysScrubQueued) {
+          // Rewrite once so raw session tokens leave the disk now, not at the
+          // next registration.
+          legacyKeysScrubQueued = true;
+          void persistTokenUpdate((current) => current).catch((error) => {
+            console.warn('Failed to rewrite APNs tokens with hashed session keys:', error);
+          });
+        }
+        return { version: APNS_TOKENS_VERSION, tokensBySession };
+      } catch (error) {
+        console.warn('Failed to read APNs tokens file:', error);
+        return emptyStore();
+      }
+    }
+    return emptyStore();
   };
 
   const writeTokensToDisk = async (data) => {
-    await fsPromises.mkdir(path.dirname(APNS_TOKENS_FILE_PATH), { recursive: true });
-    await fsPromises.writeFile(APNS_TOKENS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    // Preserve before replacing, fail-closed (the primitive's contract):
+    // the serialized read in the persist path has normally judged the
+    // file already, but the write refuses on its own rather than trust
+    // that. A valid file, an absent file, and an empty file need no
+    // preservation and the write proceeds.
+    const preservation = await preserveMalformedJsonFile(APNS_TOKENS_FILE_PATH, durableOptions());
+    if (preservation.outcome === 'failed') {
+      throw new Error('Failed to preserve the unreadable APNs tokens file; refusing to overwrite it');
+    }
+    if (preservation.preserved) {
+      console.warn(`Failed to read APNs tokens file: preserved the unreadable file at ${preservation.preservedPath}`);
+    }
+    // Atomic so a crash mid-write leaves the previous store intact, and
+    // 0600 because the store holds device tokens.
+    await writeDurableJsonFile(APNS_TOKENS_FILE_PATH, JSON.stringify(data, null, 2), {
+      fs: fsPromises,
+      mode: 0o600,
+    });
   };
 
   const persistTokenUpdate = async (mutate) => {
-    persistLock = persistLock.then(async () => {
-      const current = await readTokensFromDisk();
+    const run = async () => {
+      const current = await readTokensFromDisk({ serialized: true });
       const next = mutate({ version: APNS_TOKENS_VERSION, tokensBySession: current.tokensBySession || {} });
       await writeTokensToDisk(next);
       return next;
-    });
-    return persistLock;
+    };
+    // Same queue-recovery rule as the push store: the failing caller
+    // sees the rejection, later updates must not inherit it (Codex,
+    // PR #890).
+    const result = persistLock.then(run, run);
+    persistLock = result.catch(() => {});
+    return result;
   };
 
   const normalizeTokens = (record) => {
@@ -256,7 +402,16 @@ export const createApnsRuntime = (deps) => {
     const p8Path = trimmedEnv('OPENCHAMBER_APNS_P8_PATH');
     if (!p8 && p8Path) {
       try {
-        p8 = (await fsPromises.readFile(p8Path, 'utf8')).trim();
+        // Bounded, handle-judged read (the house standard): an oversized
+        // or non-regular file at the path must land in the warn-and-
+        // continue path below, never be buffered whole or block the read
+        // - this runs on every direct-mode send, with no other deadline.
+        const keyFile = await readBoundedFile(p8Path, APNS_P8_MAX_BYTES);
+        if (keyFile.ok) {
+          p8 = keyFile.buffer.toString('utf8').trim();
+        } else {
+          console.warn('[APNs] Failed to read OPENCHAMBER_APNS_P8_PATH:', keyFile.code);
+        }
       } catch (error) {
         console.warn('[APNs] Failed to read OPENCHAMBER_APNS_P8_PATH:', error?.message ?? error);
       }
@@ -327,6 +482,10 @@ export const createApnsRuntime = (deps) => {
         },
         badge: Number.isFinite(payload?.badge) && payload.badge >= 0 ? Math.trunc(payload.badge) : undefined,
         sound: 'default',
+        // thread-id keeps the FULL tag on purpose: it is a JSON payload
+        // string, not a header, so the 64-byte apns-collapse-id cap does not
+        // apply to it — truncating it would change banner grouping for long
+        // caller tags for no protocol reason.
         'thread-id': typeof payload?.tag === 'string' ? payload.tag : undefined,
         // Wakes the Notification Service Extension so it can refresh the home/lock-screen
         // widgets (attention count + unread dot) from the push, even when the app is closed.
@@ -348,7 +507,7 @@ export const createApnsRuntime = (deps) => {
         'apns-priority': '10',
       };
       // collapse-id dedups like web-push tags; APNs caps it at 64 bytes.
-      const collapseId = typeof config.tag === 'string' ? config.tag.slice(0, 64) : undefined;
+      const collapseId = collapseIdForTag(config.tag);
       if (collapseId) headers['apns-collapse-id'] = collapseId;
 
       let req;
@@ -360,16 +519,52 @@ export const createApnsRuntime = (deps) => {
         return;
       }
 
+      // Bound the request with an own wall-clock timer armed at creation: a
+      // stream inactivity timeout may never start behind a session whose
+      // connect stalled, so only this settles every case. Destroying the
+      // request routes into the error handler below (warn + resolve) — but
+      // only when the stream is still live: on a stream APNs already closed
+      // (e.g. RST_STREAM CANCEL) destroy() is a no-op and neither 'end' nor
+      // 'error' fires, so the 'close' handler below is what settles that case.
+      const timeout = setTimeout(() => {
+        req.destroy(new Error(`APNs request timed out after ${APNS_DIRECT_REQUEST_TIMEOUT_MS}ms`));
+      }, APNS_DIRECT_REQUEST_TIMEOUT_MS);
+
       let status = 0;
       let responseBody = '';
+      let responseBodyBytes = 0;
+      let responseOverflow = false;
       req.on('response', (resHeaders) => {
         status = Number(resHeaders[':status']) || 0;
       });
       req.setEncoding('utf8');
       req.on('data', (chunk) => {
-        responseBody += chunk;
+        if (responseOverflow) return;
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        responseBodyBytes += Buffer.byteLength(text, 'utf8');
+        if (responseBodyBytes > APNS_DIRECT_RESPONSE_MAX_BYTES) {
+          // Overflow: drop the buffered body (a partial body is never
+          // authoritative — in particular it must not trigger dead-token
+          // removal) and settle through the existing error terminal
+          // handler by destroying the request.
+          responseOverflow = true;
+          responseBody = '';
+          if (typeof req.destroy === 'function') {
+            req.destroy(new Error(`APNs response body exceeded ${APNS_DIRECT_RESPONSE_MAX_BYTES} bytes`));
+          }
+          return;
+        }
+        responseBody += text;
       });
+      let terminal = false;
       req.on('end', async () => {
+        terminal = true;
+        clearTimeout(timeout);
+        if (responseOverflow) {
+          console.warn(`[APNs] push failed status=${status} reason=unknown (response body exceeded ${APNS_DIRECT_RESPONSE_MAX_BYTES} bytes)`);
+          resolve();
+          return;
+        }
         if (status === 200) {
           resolve();
           return;
@@ -388,7 +583,16 @@ export const createApnsRuntime = (deps) => {
         resolve();
       });
       req.on('error', (error) => {
+        terminal = true;
+        clearTimeout(timeout);
         console.warn('[APNs] request error:', error?.message ?? error);
+        resolve();
+      });
+      req.on('close', () => {
+        if (terminal) return;
+        terminal = true;
+        clearTimeout(timeout);
+        console.warn('[APNs] request closed before completing');
         resolve();
       });
       req.end(body);
@@ -412,7 +616,14 @@ export const createApnsRuntime = (deps) => {
   };
 
   const sendViaRelay = async (deviceTokens, payload, relay, environment) => {
-    const tokens = deviceTokens.slice(0, 100);
+    // The relay accepts at most 100 tokens per request. Chunk the group and
+    // send every chunk: slicing to the first 100 silently dropped the rest.
+    for (let offset = 0; offset < deviceTokens.length; offset += 100) {
+      await sendViaRelayChunk(deviceTokens.slice(offset, offset + 100), payload, relay, environment);
+    }
+  };
+
+  const sendViaRelayChunk = async (tokens, payload, relay, environment) => {
     const title = typeof payload?.title === 'string' && payload.title.length > 0 ? payload.title : 'OpenChamber';
     const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
     const ts = Date.now();
@@ -423,24 +634,41 @@ export const createApnsRuntime = (deps) => {
       title,
       body: typeof payload?.body === 'string' ? payload.body : '',
       badge: Number.isFinite(payload?.badge) && payload.badge >= 0 ? Math.trunc(payload.badge) : undefined,
-      collapseId: typeof payload?.tag === 'string' ? payload.tag.slice(0, 64) : undefined,
+      collapseId: collapseIdForTag(payload?.tag),
       env: environment,
       data: payload?.data && typeof payload.data === 'object' ? payload.data : undefined,
       publicKeyJwk: relayPublicJwk(publicJwk),
       ts,
       sig,
     });
+    const { signal, cleanup } = createTimeoutSignal(APNS_RELAY_REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(relay.url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: requestBody,
+        signal,
       });
       if (!res.ok) {
         console.warn(`[APNs relay] send failed status=${res.status}`);
         return;
       }
-      const data = await res.json().catch(() => null);
+      // Read the body through the bounded reader, not res.json(): the
+      // deadline bounds time, not bytes. readBoundedResponseText (not the
+      // JSON wrapper) is used so a reader error propagates: the deadline
+      // signal stays live until the body is read (see the finally below),
+      // so an abort here is a transport failure — the outer catch reports
+      // it (#993). An over-cap or malformed body keeps the null fallback:
+      // data stays null and no results are acted on.
+      const read = await readBoundedResponseText(res, APNS_RELAY_RESPONSE_MAX_BYTES);
+      let data = null;
+      if (!read.tooLarge) {
+        try {
+          data = JSON.parse(read.text.charCodeAt(0) === 0xfeff ? read.text.slice(1) : read.text);
+        } catch {
+          data = null;
+        }
+      }
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const result of results) {
         if (result && result.drop === true && typeof result.token === 'string') {
@@ -449,6 +677,10 @@ export const createApnsRuntime = (deps) => {
       }
     } catch (error) {
       console.warn('[APNs relay] request failed:', error?.message ?? error);
+    } finally {
+      // The signal stays live until the body above has been read: the body
+      // read is part of the stall surface.
+      cleanup();
     }
   };
 

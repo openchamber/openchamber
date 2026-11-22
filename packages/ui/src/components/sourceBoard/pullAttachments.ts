@@ -30,6 +30,7 @@ const failedRunText = (run: CIRun): string => {
         run.output?.summary ? `summary:\n${run.output.summary}` : null,
         failedSteps.length > 0 ? `failed steps:\n${failedSteps.join('\n')}` : null,
         annotations.length > 0 ? `annotations:\n${annotations.join('\n---\n')}` : null,
+        run.annotationsTruncated ? 'annotations truncated: the annotation list for this run is incomplete' : null,
     ].filter(Boolean).join('\n\n');
 };
 

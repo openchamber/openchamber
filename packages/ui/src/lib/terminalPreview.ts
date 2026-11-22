@@ -2,14 +2,14 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
-const LOOPBACK_URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{2,5})?(?:\/[^\s<>'"`]*)?)/gi;
+const LOOPBACK_URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{1,5})?(?:\/[^\s<>'"`]*)?)/gi;
 const PREVIEW_OUTPUT_PATTERN = /(?:➜\s*(?:Local|Network):)|\b(?:local|network|loopback|serving|listening|available|ready|started|running|server|vite|webpack|next\.js|astro|sveltekit|nuxt)\b/i;
-const PYTHON_HTTP_SERVER_PATTERN = /Serving HTTP on .*? port (\d{2,5})/i;
+const PYTHON_HTTP_SERVER_PATTERN = /Serving HTTP on .*? port (\d{1,5})(?!\d)/i;
 // portless (vercel-labs/portless) puts a dev server behind a named address:
 // it prints "-- Using port 4123" for the port it hands the server, then the
 // address itself as "  -> https://auth.myapp.localhost". The server then
 // announces its own loopback port, which is the same app without the name.
-const PORTLESS_PORT_PATTERN = /^--\s+Using port (\d{2,5})\b/;
+const PORTLESS_PORT_PATTERN = /^--\s+Using port (\d{1,5})\b/;
 const PORTLESS_URL_PATTERN = /^\s*->\s+(https?:\/\/[^\s<>'"`]+)\s*$/;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '::', '[::1]', '[::]']);
 const TRAILING_PUNCT = new Set(['.', ',', ';', ':', '!', '?']);
@@ -52,12 +52,27 @@ const normalizeLoopbackUrl = (url: string): string => {
  * a coin toss decided by which chunk the terminal emitted first, so callers
  * that must choose are given all of them instead.
  */
+/**
+ * True when the URL carries an explicit port 0. Port 0 is the "assign any
+ * free port" wildcard, never a port a server can be announced on, but
+ * `new URL()` parses it happily — so the 1–65535 range `portOf` enforces
+ * has to be applied to candidates themselves, not only where `portOf`
+ * happens to be consulted (#283).
+ */
+const hasZeroPort = (url: string): boolean => {
+  try {
+    return new URL(url).port === '0';
+  } catch {
+    return false;
+  }
+};
+
 const portOf = (url: string): number | null => {
   try {
     const parsed = new URL(url);
     if (!LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) return null;
     const port = Number.parseInt(parsed.port, 10);
-    return Number.isFinite(port) ? port : null;
+    return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
   } catch {
     return null;
   }
@@ -109,6 +124,7 @@ export const extractAnnouncedUrls = (
   const seen = new Set<string>();
   const add = (url: string) => {
     if (seen.has(url)) return;
+    if (hasZeroPort(url)) return;
     // The server behind a portless name, reached around it: the named
     // address is the one to open.
     const port = portOf(url);
@@ -134,16 +150,36 @@ export const extractAnnouncedUrls = (
     if (!PREVIEW_OUTPUT_PATTERN.test(line)) continue;
 
     const matches = Array.from(line.matchAll(LOOPBACK_URL_PATTERN));
-    if (matches.length === 0) continue;
+    // A match the URL parser rejects (a port above 65535) names no server
+    // that exists, and a pathless match followed by another digit was cut
+    // short mid-number (a 6-digit port) — either would send the preview to
+    // a wrong or unparseable address, so neither is announced.
+    const usable = matches.filter((match) => {
+      const end = (match.index ?? 0) + match[0].length;
+      const hasPath = match[1].split('/').length > 3;
+      if (!hasPath && /\d/.test(line[end] ?? '')) return false;
+      const normalized = normalizeLoopbackUrl(match[1]);
+      // A port-0 match names no server either, and it must not win the
+      // line's selection only for add() to drop it: a valid address on the
+      // same line is still announced (#285).
+      if (hasZeroPort(normalized)) return false;
+      try {
+        new URL(normalized);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (usable.length === 0) continue;
 
-    const withPort = matches.find((match) => {
+    const withPort = usable.find((match) => {
       try {
         return Boolean(new URL(normalizeLoopbackUrl(match[1])).port);
       } catch {
         return false;
       }
     });
-    add(normalizeLoopbackUrl((withPort ?? matches[0])[1]));
+    add(normalizeLoopbackUrl((withPort ?? usable[0])[1]));
   }
 
   return found;
@@ -246,6 +282,7 @@ export const extractProjectActionUrl = (
     try {
       const parsed = new URL(trimUrlTrailingPunctuation(raw));
       const loopbackPort = portOf(parsed.toString());
+      if (parsed.port === '0') continue;
       if (!isLocalNetworkHost(parsed.hostname)) continue;
       if (parsed.port && !(loopbackPort !== null && proxiedPorts.includes(loopbackPort))) candidates.push(parsed);
     } catch {

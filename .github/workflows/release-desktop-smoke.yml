@@ -39,6 +39,19 @@ on:
           - "7"
           - "14"
 
+# CI policy: .github/ci-policy.md (fleet design developing-today/code#1779;
+# Phase 1 code#1780, Phase 2 code#1781, Phase 3 code#1782).
+# Concurrency (design sec.4): dispatch-only smoke builds are keyed by the
+# repository + ref under test plus the platform selections
+# (build_macos/build_windows/build_linux), so re-dispatching the same ref
+# with the same platform set cancels the stale smoke run while smokes of
+# other refs or other platform sets run side by side. Trigger is
+# workflow_dispatch only: no issues/pull_request_target event and no
+# queue: max, so the #84 validation trap cannot occur here.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.repository }}-${{ inputs.ref }}-macos-${{ inputs.build_macos }}-windows-${{ inputs.build_windows }}-linux-${{ inputs.build_linux }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

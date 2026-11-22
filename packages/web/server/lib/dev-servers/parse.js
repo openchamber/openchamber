@@ -47,8 +47,19 @@ const splitHostPort = (value) => {
 };
 
 const toPort = (value) => {
-  const port = Number.parseInt(String(value || '').trim(), 10);
-  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+  const raw = String(value || '').trim();
+  // Strict digits: parseInt would silently truncate '5173junk' or '5173.9'
+  // to 5173 and report a listener the source output never claimed.
+  if (!/^\d+$/.test(raw)) return null;
+  const port = Number(raw);
+  return port > 0 && port <= 65535 ? port : null;
+};
+
+const toPid = (value) => {
+  const raw = String(value || '').trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const pid = Number(raw);
+  return Number.isSafeInteger(pid) ? pid : null;
 };
 
 /**
@@ -82,8 +93,7 @@ export const parseLsofListeners = (output) => {
     const value = line.slice(1);
 
     if (tag === 'p') {
-      const parsedPid = Number.parseInt(value, 10);
-      pid = Number.isInteger(parsedPid) ? parsedPid : null;
+      pid = toPid(value);
       command = '';
       continue;
     }
@@ -132,9 +142,9 @@ export const parseNetstatListeners = (output) => {
     if (port === null) continue;
     if (!isLocallyReachableHost(parsed.host)) continue;
 
-    const pid = Number.parseInt(parts[4] ?? '', 10);
+    const pid = toPid(parts[4] ?? '');
     if (byPort.has(port)) continue;
-    byPort.set(port, { port, pid: Number.isInteger(pid) ? pid : null, command: '' });
+    byPort.set(port, { port, pid, command: '' });
   }
 
   return [...byPort.values()].sort((left, right) => left.port - right.port);
@@ -193,6 +203,8 @@ export const parseProcNetTcpListeners = (output) => {
       continue;
     }
 
+    // Strict hex: parseInt would parse the valid prefix of a malformed field.
+    if (!/^[0-9a-fA-F]+$/.test(portHex)) continue;
     const port = Number.parseInt(portHex, 16);
     if (!Number.isInteger(port) || port <= 0 || port > 65535) continue;
     if (byPort.has(port)) continue;

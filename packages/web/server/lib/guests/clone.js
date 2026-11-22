@@ -26,7 +26,16 @@ export const isPublicHostname = (hostname) => {
     return !PRIVATE_IPV4.some((pattern) => pattern.test(host));
   }
   if (version === 6) {
-    return !(host === '::1' || host === '::' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('::ffff:'));
+    // Judge IPv6 ranges by the first hextet's value, not by text prefix:
+    // fe80::/10 link-local spans fe80-febf, so the old 'fe80:' prefix check
+    // judged fe81::-febf:: public (#1517). fec0::/10 is the deprecated
+    // site-local range (fec0-feff) and fc00::/7 unique-local is fc00-fdff.
+    const firstHextet = Number.parseInt(host.split(':')[0], 16);
+    const inRange = (low, high) => firstHextet >= low && firstHextet <= high;
+    return !(
+      host === '::1' || host === '::' || host.startsWith('::ffff:') ||
+      inRange(0xfe80, 0xfebf) || inRange(0xfec0, 0xfeff) || inRange(0xfc00, 0xfdff)
+    );
   }
   return host.includes('.');
 };
@@ -177,13 +186,23 @@ export const parseGitInstallUrl = (value) => {
 const STDERR_TAIL_BYTES = 4096;
 
 /**
+ * Captured stdout is bounded. The only capture caller reads a guest repo's
+ * package.json, a file the guest's remote controls, so an oversized file
+ * must not load into server memory whole. 4 MiB matches the skills-catalog
+ * git runner's buffer.
+ */
+export const MAX_CAPTURED_STDOUT_BYTES = 4 * 1024 * 1024;
+
+/**
  * Run one git command without a terminal. Resolves `{ ok: true, stdout }` on
  * exit 0 and `{ ok: false, stderr }` on a non-zero exit, a spawn error, or the
  * timeout (the child is killed). Never rejects. `stdout` is captured only
- * when `capture` is set so a clone's progress is not buffered; `stderr` keeps
+ * when `capture` is set so a clone's progress is not buffered; captured
+ * stdout over `MAX_CAPTURED_STDOUT_BYTES` kills the child and resolves
+ * `{ ok: false, error: 'output-too-large' }` with no stdout. `stderr` keeps
  * only its tail, for diagnosis.
  */
-export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, env = {} } = {}) => (
+export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT_MS, capture = false, maxCapturedStdoutBytes = MAX_CAPTURED_STDOUT_BYTES, env = {} } = {}) => (
   new Promise((resolve) => {
     let child;
     try {
@@ -208,13 +227,39 @@ export const runGit = (args, { gitBinary = 'git', cwd, timeoutMs = CLONE_TIMEOUT
     }
     /** @type {Buffer[]} */
     const chunks = [];
+    let capturedBytes = 0;
+    let overflow = false;
     if (capture && child.stdout) {
-      child.stdout.on('data', (chunk) => chunks.push(chunk));
+      child.stdout.on('data', (chunk) => {
+        if (overflow) {
+          return;
+        }
+        capturedBytes += chunk.length;
+        if (capturedBytes > maxCapturedStdoutBytes) {
+          overflow = true;
+          chunks.length = 0;
+          child.kill('SIGKILL');
+          clearTimeout(timer);
+          finish({ ok: false, error: 'output-too-large', stderr: stderrTail.toString('utf8') });
+          return;
+        }
+        chunks.push(chunk);
+      });
     }
     let stderrTail = Buffer.alloc(0);
     child.stderr?.on('data', (chunk) => {
       const joined = Buffer.concat([stderrTail, chunk]);
-      stderrTail = joined.subarray(Math.max(0, joined.length - STDERR_TAIL_BYTES));
+      const cut = Math.max(0, joined.length - STDERR_TAIL_BYTES);
+      let tail = joined.subarray(cut);
+      if (cut > 0) {
+        // The byte cut can land inside a multi-byte character; drop leading
+        // continuation bytes so the tail starts on a UTF-8 boundary instead
+        // of decoding its first character as U+FFFD at either failure site.
+        let start = 0;
+        while (start < tail.length && (tail[start] & 0xc0) === 0x80) start++;
+        tail = tail.subarray(start);
+      }
+      stderrTail = tail;
     });
     let settled = false;
     const finish = (result) => {

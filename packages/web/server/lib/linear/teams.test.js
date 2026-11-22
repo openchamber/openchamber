@@ -82,9 +82,53 @@ describe('Linear teams list', () => {
         { id: 'team-eng', key: 'ENG', name: 'Engineering' },
         { id: 'team-des', key: 'DES', name: 'Design' },
       ],
+      teamsMore: false,
     });
     expect(JSON.stringify(result)).not.toContain('access-1');
     expect(graphql).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns teamsMore when the 20-page cap is hit with a next page remaining', async () => {
+    let calls = 0;
+    const graphql = vi.fn(async () => {
+      calls += 1;
+      return jsonResponse({
+        data: {
+          teams: {
+            nodes: [{ id: `team-${calls}`, key: `T${calls}`, name: `Team ${calls}` }],
+            pageInfo: { hasNextPage: true, endCursor: `cursor-${calls + 1}` },
+          },
+        },
+      });
+    });
+    vi.stubGlobal('fetch', graphql);
+
+    const result = await listLinearTeams();
+    expect(graphql).toHaveBeenCalledTimes(20);
+    expect(result.connected).toBe(true);
+    expect(result.teamsMore).toBe(true);
+    expect(result.teams).toHaveLength(20);
+    expect(result.teams[0]).toEqual({ id: 'team-1', key: 'T1', name: 'Team 1' });
+    expect(result.teams[19]).toEqual({ id: 'team-20', key: 'T20', name: 'Team 20' });
+  });
+
+  it('returns teamsMore when a next page is claimed but no cursor is given', async () => {
+    const graphql = vi.fn(async () => jsonResponse({
+      data: {
+        teams: {
+          nodes: [{ id: 'team-eng', key: 'ENG', name: 'Engineering' }],
+          pageInfo: { hasNextPage: true, endCursor: null },
+        },
+      },
+    }));
+    vi.stubGlobal('fetch', graphql);
+
+    await expect(listLinearTeams()).resolves.toEqual({
+      connected: true,
+      teams: [{ id: 'team-eng', key: 'ENG', name: 'Engineering' }],
+      teamsMore: true,
+    });
+    expect(graphql).toHaveBeenCalledTimes(1);
   });
 
   it('clears auth and reports disconnected after a GraphQL 401', async () => {

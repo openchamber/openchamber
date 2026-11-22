@@ -14,6 +14,9 @@ import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useScopedBlockingForms, useSessions } from '@/sync/sync-context';
 import { useRequestReveal } from '@/sync/request-reveal';
+import { closeQuestionUnanswered, useQuestionDeadline } from '@/sync/question-timeouts';
+import { useDurationTickerNow } from '@/hooks/useDurationTicker';
+import { minutesUntil } from '@/lib/questionTimeout';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
@@ -21,6 +24,8 @@ import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentDock } from './WebSearchConsent';
 import { FormMarkdown } from './FormMarkdown';
 import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { answersFromFormValues, rememberPendingQuestionAnswers } from './questionAnswers';
+import { questionCallKey, questionFormCall } from '@/lib/opencode/question';
 import {
     type FormValues,
     buildFormAnswer,
@@ -99,6 +104,17 @@ const isStepAnswered = (field: FormField, values: FormValues): boolean => {
     return !(Array.isArray(answer) && answer.length === 0);
 };
 
+/** Minutes left before the Settings timeout closes the question; its own component so only it ticks. */
+const QuestionDeadlineLabel: React.FC<{ deadline: number }> = ({ deadline }) => {
+    const { t } = useI18n();
+    const now = useDurationTickerNow(true);
+    return (
+        <span className="typography-micro shrink-0 tabular-nums text-muted-foreground">
+            {t('chat.questionTimeout.remaining', { minutes: String(minutesUntil(deadline, now)) })}
+        </span>
+    );
+};
+
 const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ form, forms }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
@@ -121,6 +137,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
     const [isResponding, setIsResponding] = React.useState(false);
     const [showErrors, setShowErrors] = React.useState(false);
     const waiting = forms.length - 1;
+    const deadline = useQuestionDeadline(form.id);
     // "Open session" on a question's toast expands the dock, including for a
     // question queued behind the one shown.
     const formIds = React.useMemo(() => forms.map((item) => item.id), [forms]);
@@ -140,6 +157,15 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
         if (appliedSignatureRef.current !== fieldsSignature) return;
         saveFormDraft(form.id, { fieldsSignature, values, step });
     }, [fieldsSignature, form.id, step, values]);
+
+    // The draft above goes once the form is answered or dismissed; the
+    // answers of an agent's question stay with its call, so its transcript
+    // row can offer them again after a dismissal, a stopped turn or an error.
+    const questionCall = React.useMemo(() => questionFormCall(form), [form]);
+    React.useEffect(() => {
+        if (!questionCall || appliedSignatureRef.current !== fieldsSignature) return;
+        rememberPendingQuestionAnswers(questionCallKey(questionCall), answersFromFormValues(fields, values));
+    }, [fields, fieldsSignature, questionCall, values]);
 
     const isFromSubagent = React.useMemo(() => {
         const source = sessions.find((session) => session.id === form.sessionID);
@@ -209,6 +235,24 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
             setIsResponding(false);
         }
     }, [form.id, form.sessionID, t]);
+
+    // Answer later: the agent reads that the user will answer in a message
+    // and goes on; the question stays answerable from its transcript row.
+    const handleAnswerLater = React.useCallback(async () => {
+        if (!questionCall) return;
+        setIsResponding(true);
+        try {
+            const closed = await closeQuestionUnanswered(
+                { id: form.id, sessionId: form.sessionID, call: questionCallKey(questionCall) },
+                'later',
+                t('chat.questionTimeout.agentMessage.later'),
+            );
+            if (closed) formDrafts.delete(form.id);
+            else toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
+        } finally {
+            setIsResponding(false);
+        }
+    }, [form.id, form.sessionID, questionCall, t]);
 
     const goNext = React.useCallback(() => {
         setStep(Math.min(currentStep + 1, lastStep));
@@ -310,11 +354,16 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
                         {t('chat.formDock.waiting', { count: String(waiting) })}
                     </span>
                 ) : null}
+                {deadline !== null ? <QuestionDeadlineLabel deadline={deadline} /> : null}
                 <button type="button" onClick={() => void handleCopy('markdown')} title={t('chat.questionCard.copyMarkdown')} aria-label={t('chat.questionCard.copyMarkdown')} className={iconButtonClass}>
                     <Icon name="file-text" className="size-3" />
                 </button>
                 <button type="button" onClick={() => void handleCopy('json')} title={t('chat.questionCard.copyJson')} aria-label={t('chat.questionCard.copyJson')} className={iconButtonClass}>
                     <Icon name="code" className="size-3" />
+                </button>
+                {/* Closes it the way Dismiss does: the agent gets no answer and goes on. */}
+                <button type="button" disabled={isResponding} onClick={() => void handleDismiss()} title={t('chat.questionTimeout.close')} aria-label={t('chat.questionTimeout.close')} className={iconButtonClass}>
+                    <Icon name="close" className="size-3" />
                 </button>
             </>}
         >
@@ -362,6 +411,11 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
                         <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => void handleDismiss()}>
                             {t('chat.questionCard.dismiss')}
                         </Button>
+                        {questionCall ? (
+                            <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => void handleAnswerLater()} title={t('chat.questionTimeout.answerLaterHint')}>
+                                {t('chat.questionTimeout.answerLater')}
+                            </Button>
+                        ) : null}
                         {showErrors && !canSubmit ? (
                             <span className="typography-micro min-w-0 truncate text-[var(--status-error)]">{t('chat.formCard.missingRequired')}</span>
                         ) : null}

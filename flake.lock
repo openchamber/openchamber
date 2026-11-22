@@ -1,44 +1,118 @@
 {
   "nodes": {
+    "fleet": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1795030057,
+        "narHash": "sha256-tlIV1m85uC1LBFV8L1/QDwyP2aM8oTm6uaTlVjlItEo=",
+        "owner": "dezren39",
+        "repo": "fleet",
+        "rev": "a3c335a7416b3df2f5ebde0c98b6d9480193b1ea",
+        "type": "github"
+      },
+      "original": {
+        "owner": "dezren39",
+        "repo": "fleet",
+        "type": "github"
+      }
+    },
+    "fleet_2": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1793665075,
+        "narHash": "sha256-xa5Wy5Y+Oag+7x5iq1SEfoT/8Cp+t9gNItErSr504HM=",
+        "owner": "dezren39",
+        "repo": "fleet",
+        "rev": "082bd9e78bcac374d0b3bec89ec1ee9acd4386d1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "dezren39",
+        "repo": "fleet",
+        "type": "github"
+      }
+    },
+    "mcpx-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794968769,
+        "narHash": "sha256-a8f42Y1P0bzJ4PPHpl62bWMfI+z4YMhmBMnpw5g8WFU=",
+        "owner": "developing-today",
+        "repo": "code",
+        "rev": "d3a0db813931cf3eae942f7179ad28c5b33d77e9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "developing-today",
+        "repo": "code",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1791594108,
-        "narHash": "sha256-XK4KceonkwD8LuMAt/vNrz982mXJM5jeHAxMwsUXXAQ=",
+        "lastModified": 1793645915,
+        "narHash": "sha256-yRzh4uc8uxFv5+5TROEIH1rUL2FF1/cvfc+uq5JGGHY=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "6510408d147d8c5e6d76043e899e9251756f6a75",
+        "rev": "f9887a8a434bfba06e20dfc77bc8e0628266af84",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-unstable",
         "repo": "nixpkgs",
+        "rev": "f9887a8a434bfba06e20dfc77bc8e0628266af84",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1793645915,
+        "narHash": "sha256-yRzh4uc8uxFv5+5TROEIH1rUL2FF1/cvfc+uq5JGGHY=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "f9887a8a434bfba06e20dfc77bc8e0628266af84",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "f9887a8a434bfba06e20dfc77bc8e0628266af84",
         "type": "github"
       }
     },
     "opencode": {
       "inputs": {
+        "fleet": "fleet_2",
+        "mcpx-src": "mcpx-src",
         "nixpkgs": [
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1792346672,
-        "narHash": "sha256-4zu0+8hBvX1WtMnBU1dz9+wzr0fa+71D+PygpguED3k=",
-        "owner": "developing-today",
+        "lastModified": 1795261309,
+        "narHash": "sha256-CriaQjHmTHHa0iiZxMXCEBOfLN5hOuAjDJ9/3pNoui0=",
+        "owner": "developing-today-forks",
         "repo": "opencode",
-        "rev": "005672f9b30846d49bc19900d55db1df544c6855",
+        "rev": "b70580bbee83c4f5773e733b4859ff6afd8ea1d9",
         "type": "github"
       },
       "original": {
-        "owner": "developing-today",
+        "owner": "developing-today-forks",
         "repo": "opencode",
         "type": "github"
       }
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs",
+        "fleet": "fleet",
+        "nixpkgs": [
+          "fleet",
+          "nixpkgs"
+        ],
         "opencode": "opencode"
       }
     }

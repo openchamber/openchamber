@@ -9,14 +9,125 @@ interface SessionActivity {
   phase: ActivityPhase;
 }
 
+// External observability contract v1: design #612, phase 1 on the web server
+// in #524, this parity snapshot in #621. The extension host tracks a
+// session's phase and when that phase last changed, so lastActivityAt comes
+// from the phase map. The host has no source for the session-state status,
+// the observed model, or an in-flight tool, so those fields are explicit
+// nulls. watcherReady turns true when the event stream delivers its first
+// frame and stays true until the watcher stops, so an empty sessions map
+// with watcherReady false means the watcher has not started yet.
+interface SessionActivityV1Entry {
+  type: ActivityPhase;
+  lastActivityAt: number;
+  status: null;
+  model: null;
+  toolInFlight: null;
+}
+
+interface SessionActivityV1Snapshot {
+  version: 1;
+  serverTime: number;
+  watcherReady: boolean;
+  sessions: Record<string, SessionActivityV1Entry>;
+}
+
+export const buildSessionActivityV1Snapshot = (
+  phases: ReadonlyMap<string, { phase: ActivityPhase; updatedAt: number }>,
+  watcherReady: boolean,
+  serverTime: number,
+): SessionActivityV1Snapshot => {
+  const sessions: Record<string, SessionActivityV1Entry> = {};
+  for (const [sessionId, data] of phases) {
+    sessions[sessionId] = {
+      type: data.phase,
+      lastActivityAt: data.updatedAt,
+      status: null,
+      model: null,
+      toolInFlight: null,
+    };
+  }
+  return { version: 1, serverTime, watcherReady, sessions };
+};
+
+// Retention bound (#999): a deleted session is pruned the moment its
+// `session.deleted` event arrives. A session whose deletion this host never
+// observed (deleted while the stream was down, before the watcher started)
+// is bounded instead by this idle TTL: an entry that has sat idle for a full
+// day is a ghost, not a live session, and the reconcile pass removes it.
+export const SESSION_ACTIVITY_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export const deleteSessionActivityEntry = (
+  phases: Map<string, { phase: ActivityPhase; updatedAt: number }>,
+  sessionId: string,
+): boolean => phases.delete(sessionId);
+
+export const pruneStaleSessionActivityEntries = (
+  phases: Map<string, { phase: ActivityPhase; updatedAt: number }>,
+  now: number,
+): string[] => {
+  const removed: string[] = [];
+  for (const [sessionId, data] of phases) {
+    if (data.phase === 'idle' && now - data.updatedAt >= SESSION_ACTIVITY_IDLE_TTL_MS) {
+      phases.delete(sessionId);
+      removed.push(sessionId);
+    }
+  }
+  return removed;
+};
+
+// How often the running watcher re-runs the TTL prune while its event
+// stream stays connected (#999, Codex review on PR #1010). The reconcile
+// pass only runs before each (re)subscription, so without a periodic
+// prune a session deleted during a disconnect and marked idle on
+// reconnect would linger in the snapshot for as long as the healthy
+// connection lasted — potentially indefinitely.
+export const SESSION_ACTIVITY_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+export const pruneStaleSessionActivity = (
+  phases: Map<string, { phase: ActivityPhase; updatedAt: number }>,
+  cooldowns: Map<string, NodeJS.Timeout>,
+  now: number,
+): string[] => {
+  const removed = pruneStaleSessionActivityEntries(phases, now);
+  for (const sessionId of removed) {
+    const timer = cooldowns.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      cooldowns.delete(sessionId);
+    }
+  }
+  return removed;
+};
+
 const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number }>();
 const sessionActivityCooldowns = new Map<string, NodeJS.Timeout>();
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 
 let globalEventWatcherAbortController: AbortController | null = null;
+let sessionActivityWatcherReady = false;
 let chatViewProvider: { postMessage: (message: unknown) => void } | null = null;
 let globalEventWatcherRetryTimer: NodeJS.Timeout | null = null;
+let sessionActivityPruneTimer: NodeJS.Timeout | null = null;
 let globalEventWatcherStartToken = 0;
+
+const startSessionActivityPruneTimer = (): void => {
+  if (sessionActivityPruneTimer) {
+    return;
+  }
+  sessionActivityPruneTimer = setInterval(() => {
+    pruneStaleSessionActivity(sessionActivityPhases, sessionActivityCooldowns, Date.now());
+  }, SESSION_ACTIVITY_PRUNE_INTERVAL_MS);
+  sessionActivityPruneTimer.unref?.();
+};
+
+const clearSessionActivityPruneTimer = (): void => {
+  if (!sessionActivityPruneTimer) {
+    return;
+  }
+  clearInterval(sessionActivityPruneTimer);
+  sessionActivityPruneTimer = null;
+};
 
 const clearGlobalEventWatcherRetry = (): void => {
   if (!globalEventWatcherRetryTimer) {
@@ -33,8 +144,11 @@ const createActivityClient = (manager: OpenCodeManager, baseUrl: string): OpenCo
 
 /**
  * `GET /api/session/active` is the authoritative set of sessions running an
- * agent loop. Anything not in it is idle, including sessions this process
- * believed were busy before the stream dropped.
+ * agent loop. Anything in it is busy. Anything tracked but absent is either
+ * idle or deleted while the stream was down; absent entries are marked idle
+ * so a live session survives a reconnect, and the idle-TTL prune below
+ * removes the ones that stay idle past SESSION_ACTIVITY_IDLE_TTL_MS, so
+ * missed deletions age out instead of being kept as idle ghosts forever.
  */
 const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promise<void> => {
   const active = await client.session.active({ signal: AbortSignal.timeout(8_000) });
@@ -49,6 +163,23 @@ const reconcileSessionActivityFromStatus = async (client: OpenCodeClient): Promi
       setSessionActivityPhase(sessionId, 'idle');
     }
   }
+
+  // Absent-from-active only proves a session is not running, not that it is
+  // gone, so reconcile never deletes on absence alone. The TTL prune is the
+  // bound for sessions deleted while this host was not watching (#999).
+  pruneStaleSessionActivity(sessionActivityPhases, sessionActivityCooldowns, Date.now());
+};
+
+const removeSessionActivity = (sessionId: string): void => {
+  if (!sessionId) return;
+
+  const timer = sessionActivityCooldowns.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    sessionActivityCooldowns.delete(sessionId);
+  }
+
+  deleteSessionActivityEntry(sessionActivityPhases, sessionId);
 };
 
 const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void => {
@@ -92,13 +223,8 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void 
   }
 };
 
-export const getSessionActivitySnapshot = (): Record<string, { type: ActivityPhase }> => {
-  const snapshot: Record<string, { type: ActivityPhase }> = {};
-  for (const [sessionId, data] of sessionActivityPhases.entries()) {
-    snapshot[sessionId] = { type: data.phase };
-  }
-  return snapshot;
-};
+export const getSessionActivitySnapshot = (): SessionActivityV1Snapshot =>
+  buildSessionActivityV1Snapshot(sessionActivityPhases, sessionActivityWatcherReady, Date.now());
 
 /**
  * Live activity comes from the live channel only.
@@ -110,9 +236,12 @@ export const getSessionActivitySnapshot = (): Record<string, { type: ActivityPha
  * explicit status pushes) and they are cheap to honour.
  *
  * A finished run passes through `cooldown` so the UI does not flip the indicator
- * off the instant the last token lands.
+ * off the instant the last token lands. A deleted session is pruned outright
+ * (`session.deleted` carries no phase), including its pending cooldown timer.
  */
-const deriveSessionActivity = (event: OpenCodeEvent): SessionActivity | null => {
+type SessionActivityUpdate = SessionActivity | { sessionId: string; deleted: true };
+
+const deriveSessionActivity = (event: OpenCodeEvent): SessionActivityUpdate | null => {
   switch (event.type) {
     case 'session.status': {
       const statusType = event.data.status.type;
@@ -130,6 +259,8 @@ const deriveSessionActivity = (event: OpenCodeEvent): SessionActivity | null => 
       return { sessionId: event.data.sessionID, phase: 'idle' };
     case 'session.idle':
       return { sessionId: event.data.sessionID, phase: 'idle' };
+    case 'session.deleted':
+      return { sessionId: event.data.sessionID, deleted: true };
     default:
       return null;
   }
@@ -183,6 +314,7 @@ export const startGlobalEventWatcher = async (
 
   globalEventWatcherAbortController = new AbortController();
   const signal = globalEventWatcherAbortController.signal;
+  startSessionActivityPruneTimer();
 
   let attempt = 0;
 
@@ -212,6 +344,7 @@ export const startGlobalEventWatcher = async (
         for await (const event of client.event.subscribe({ signal })) {
           if (!connected) {
             connected = true;
+            sessionActivityWatcherReady = true;
             // A healthy connection clears the backoff, so a long-lived watcher
             // does not carry a 30s delay into its next reconnect.
             attempt = 0;
@@ -220,7 +353,11 @@ export const startGlobalEventWatcher = async (
 
           const activity = deriveSessionActivity(event);
           if (activity) {
-            setSessionActivityPhase(activity.sessionId, activity.phase);
+            if ('deleted' in activity) {
+              removeSessionActivity(activity.sessionId);
+            } else {
+              setSessionActivityPhase(activity.sessionId, activity.phase);
+            }
           }
 
           if (signal.aborted) {
@@ -245,6 +382,7 @@ export const startGlobalEventWatcher = async (
 export const stopGlobalEventWatcher = (): void => {
   globalEventWatcherStartToken += 1;
   clearGlobalEventWatcherRetry();
+  clearSessionActivityPruneTimer();
 
   if (globalEventWatcherAbortController) {
     try {
@@ -254,6 +392,7 @@ export const stopGlobalEventWatcher = (): void => {
     }
   }
   globalEventWatcherAbortController = null;
+  sessionActivityWatcherReady = false;
   chatViewProvider = null;
 
   for (const timer of sessionActivityCooldowns.values()) {

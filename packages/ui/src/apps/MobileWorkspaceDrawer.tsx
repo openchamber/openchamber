@@ -81,8 +81,7 @@ const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void; active: boolea
       <div className="min-h-0 flex-1">
         <McpDropdownContent
           active={active}
-          className="h-full"
-          listClassName="max-h-none"
+          fillHeight
           hideHeader
           mobileListDensity
         />

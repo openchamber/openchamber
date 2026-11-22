@@ -34,13 +34,14 @@ describe('ChatSettings', () => {
   let globalDescriptors: Map<string, PropertyDescriptor | undefined>;
 
   // The tab strip measures itself, so it needs ResizeObserver too.
-  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT'];
+  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT', 'requestAnimationFrame', 'cancelAnimationFrame'];
 
   beforeEach(() => {
     windowInstance = new Window();
     initialLargeTextPasteBehavior = useUIStore.getState().largeTextPasteBehavior;
     globalDescriptors = new Map(globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
     Object.assign(globalThis, {
+      Event: windowInstance.Event, CustomEvent: windowInstance.CustomEvent, MutationObserver: windowInstance.MutationObserver,
       window: windowInstance,
       document: windowInstance.document,
       HTMLElement: windowInstance.HTMLElement,
@@ -50,6 +51,8 @@ describe('ChatSettings', () => {
       localStorage: windowInstance.localStorage,
       sessionStorage: windowInstance.sessionStorage,
       IS_REACT_ACT_ENVIRONMENT: true,
+      requestAnimationFrame: windowInstance.requestAnimationFrame.bind(windowInstance),
+      cancelAnimationFrame: windowInstance.cancelAnimationFrame.bind(windowInstance),
     });
     host = document.createElement('div');
     document.body.append(host);

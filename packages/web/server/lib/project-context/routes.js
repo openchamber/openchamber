@@ -17,8 +17,11 @@ import { isRecord as isObjectRecord } from '../shared/guards.js';
 import express from 'express';
 import { z } from 'zod';
 
+import { PROJECT_TODO_ID_MAX_LENGTH } from './runtime.js';
+
 const parseJsonBody = express.json({ limit: '1mb' });
 const todoTextInput = z.string();
+const todoIdInput = z.string().max(PROJECT_TODO_ID_MAX_LENGTH).optional();
 const sessionIdInput = z.string();
 const optionalTextInput = z.string().optional();
 const optionalCompletedInput = z.boolean().optional();
@@ -30,7 +33,7 @@ const isValidationError = (error) => {
 
 const respondWithError = (res, error, fallbackMessage) => {
   const message = error instanceof Error ? error.message : fallbackMessage;
-  if (error?.status === 400 || error?.status === 404) {
+  if (error?.status === 400 || error?.status === 404 || error?.status === 413) {
     return res.status(error.status).json({ error: message });
   }
   if (isValidationError(error)) {
@@ -46,6 +49,7 @@ const hasValidTodos = (value) => (
   && value.every((todo) => (
     isObjectRecord(todo)
     && typeof todo.id === 'string'
+    && todo.id.length <= PROJECT_TODO_ID_MAX_LENGTH
     && typeof todo.text === 'string'
     && (todo.completed === undefined || typeof todo.completed === 'boolean')
     && (todo.createdAt === undefined || (typeof todo.createdAt === 'number' && Number.isFinite(todo.createdAt)))
@@ -84,9 +88,9 @@ export const registerProjectContextRoutes = (app, dependencies) => {
     if (!text.success) {
       return res.status(400).json({ error: 'text must be a string' });
     }
-    const id = optionalTextInput.safeParse(req.body.id);
+    const id = todoIdInput.safeParse(req.body.id);
     if (!id.success) {
-      return res.status(400).json({ error: 'id must be a string' });
+      return res.status(400).json({ error: `id must be a string of at most ${PROJECT_TODO_ID_MAX_LENGTH} characters` });
     }
     try {
       const { context } = await projectContextRuntime.createTodo(req.params.projectId, { text: text.data, id: id.data });

@@ -11,6 +11,20 @@ Ele explica e ordena. Não julga o seu código nem dá veredictos — isso é pa
 
 Abra pelo ícone **Percurso** na barra direita ou pelo botão **Percurso com IA** nos painéis de mudanças e de pull request. Ambos apenas abrem o painel; nada é gerado até você apertar **Gerar percurso**.
 
+## Como uma parada é marcada
+
+Cada parada nomeia o que ela aborda, explica em uma ou duas frases, e depois mostra exatamente o código que descreve. Algumas paradas carregam uma pequena etiqueta ao lado do título:
+
+| Etiqueta | O que significa |
+| --- | --- |
+| **Mudança principal** | Esta parada comanda o resto da mudança, ou carrega a maior parte do seu risco. Leia-a com atenção e leia-a primeiro. |
+| **Contexto** | Uma mudança de apoio, incluída para que o resto faça sentido. Pode passar os olhos. |
+| *(sem etiqueta)* | Um passo comum na ordem de leitura. |
+
+A etiqueta é sobre **onde gastar sua atenção**, não sobre a qualidade do código. Uma parada nunca é marcada porque algo errado foi encontrado nela — o percurso não reporta achados, severidades nem vereditos. Se você quer que o código seja julgado, essa é a ação **Review** em [Git & GitHub](/git/).
+
+As únicas marcas que realmente reportam um problema são **Desatualizado** e **Não coberto**, e as duas são sobre o próprio percurso ficar desatualizado, não sobre o seu código — veja abaixo.
+
 ## O que dá para percorrer
 
 | Escopo | O que inclui |

@@ -73,6 +73,21 @@ const trackTree = (child) => {
   liveTrees.add(child);
 };
 
+/**
+ * Registers a child spawned OUTSIDE runCommand with the same live-tree
+ * cleanup: while it runs, an exit of this process kills its whole tree via
+ * killLiveTrees. The entry leaves the set when the child itself exits or
+ * fails to spawn, mirroring runCommand's own bookkeeping above. For
+ * spawns that lead their own process group but are not run through
+ * runCommand — the git service's worktree start command (#1084).
+ */
+export const trackLiveTree = (child) => {
+  trackTree(child);
+  const untrack = () => { liveTrees.delete(child); };
+  child.once('exit', untrack);
+  child.once('error', untrack);
+};
+
 /** What an abort rejects with: the caller's own SpaceError, or one of ours for any other reason. */
 const abortReason = (signal, file, args) => (signal.reason instanceof SpaceError
   ? signal.reason
@@ -212,14 +227,28 @@ export function runCommand(file, args, options = {}) {
     const stop = () => fail(abortReason(abortSignal, file, args));
     abortSignal?.addEventListener('abort', stop, { once: true });
 
+    // Drop leading UTF-8 continuation bytes so a byte window starts on a
+    // character boundary instead of mid-character.
+    const alignToUtf8Boundary = (buffer) => {
+      let start = 0;
+      while (start < buffer.length && (buffer[start] & 0xc0) === 0x80) start++;
+      return start > 0 ? buffer.subarray(start) : buffer;
+    };
+
     // Only the last `maxOutputBytes` of the stream stay, and nothing fails.
     const window = (chunks) => (chunk) => {
       chunks.push(chunk);
       let held = heldBytes.get(chunks) + chunk.length;
       while (held - chunks[0].length >= maxOutputBytes) held -= chunks.shift().length;
       if (held > maxOutputBytes) {
-        chunks[0] = chunks[0].subarray(held - maxOutputBytes);
-        held = maxOutputBytes;
+        const trimmed = chunks[0].subarray(held - maxOutputBytes);
+        // The byte cut can land inside a multi-byte character; drop leading
+        // continuation bytes so the kept window starts on a UTF-8 boundary
+        // instead of decoding its first character as U+FFFD (the guests
+        // clone.js pattern). The window then holds a few bytes fewer.
+        const aligned = alignToUtf8Boundary(trimmed);
+        held = maxOutputBytes - (trimmed.length - aligned.length);
+        chunks[0] = aligned;
       }
       heldBytes.set(chunks, held);
     };
@@ -239,7 +268,10 @@ export function runCommand(file, args, options = {}) {
       const size = fs.fstatSync(errorFile.fd).size;
       const kept = Buffer.alloc(Math.min(size, maxOutputBytes));
       fs.readSync(errorFile.fd, kept, 0, kept.length, size - kept.length);
-      return { size, kept };
+      // The read-back window starts at a raw byte offset too: align it the
+      // same way so a straddling character is dropped whole, not decoded
+      // as U+FFFD.
+      return { size, kept: alignToUtf8Boundary(kept) };
     };
 
     child.on('error', (error) => {

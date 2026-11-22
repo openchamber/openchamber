@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { z } from 'zod';
 
 import {
@@ -41,6 +42,18 @@ const projectEntrySchema = z.object({
   variables: variablesSchema.optional(),
   command: commandSchema.optional(),
 });
+
+/**
+ * Read cap for environment.json. The write side clamps each entry:
+ * MAX_VARIABLES is 200 variables, each value at most
+ * MAX_VARIABLE_VALUE_LENGTH (32,000) characters, plus a command of at most
+ * MAX_COMMAND_LENGTH (4,000) characters, so one user or project entry
+ * serializes to roughly 6.5 MB at worst. The number of project entries has
+ * no bound, so no small maximum covers every legitimate file. 64 MiB is
+ * about ten worst-case entries: roomy for real files, and one oversized
+ * file cannot be buffered whole on this synchronous polling path.
+ */
+export const MAX_ENVIRONMENT_FILE_BYTES = 64 * 1024 * 1024;
 
 const storeSchema = z.object({
   version: z.literal(1),
@@ -96,16 +109,25 @@ export const createEnvironmentStore = ({ filePath }) => {
   };
 
   const readFromDisk = () => {
-    let raw;
+    // The shared bounded reader (../shared/bounded-file-read.js) judges the
+    // opened handle, so a FIFO at the path is refused instead of blocking
+    // this synchronous read, and a file over the cap is refused after at
+    // most cap + 1 bytes. Missing is its own answer; every other refusal
+    // and every unexpected I/O error takes the unreadable path below, so a
+    // file that exists still never reads as an empty store.
+    let result;
     try {
-      raw = fs.readFileSync(filePath, 'utf8');
+      result = readBoundedFileSync(filePath, MAX_ENVIRONMENT_FILE_BYTES);
     } catch (error) {
-      if (error?.code === 'ENOENT') return { version: 1 };
       throw new EnvironmentStoreError(`environment.json is unreadable: ${error?.code ?? 'error'}`);
+    }
+    if (!result.ok) {
+      if (result.reason === 'missing') return { version: 1 };
+      throw new EnvironmentStoreError(`environment.json is unreadable: ${result.code}`);
     }
     let parsed;
     try {
-      parsed = storeSchema.safeParse(JSON.parse(raw));
+      parsed = storeSchema.safeParse(JSON.parse(result.buffer.toString('utf8')));
     } catch {
       throw new EnvironmentStoreError('environment.json is not valid JSON');
     }

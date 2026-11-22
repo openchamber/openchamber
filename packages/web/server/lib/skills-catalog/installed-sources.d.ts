@@ -15,3 +15,4 @@ export function isInstalledFromSource(
   sourceId: string,
   skillDir: string,
 ): boolean;
+export const INSTALLED_SOURCES_MAX_BYTES: number;

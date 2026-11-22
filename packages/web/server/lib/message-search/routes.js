@@ -34,9 +34,17 @@ const querySchema = z.object({
   reasoning: z.enum(['0', '1']).catch('1'),
   order: z.enum(['asc', 'desc']).catch('desc'),
   before: text,
-  limit: z.coerce.number().int().catch(20),
   directory: z.union([z.string(), z.array(z.string())]).catch([]),
 });
+
+// The limit is judged the strict way the git routes judge their numeric
+// parameters (#554 class): the value's whole text must be digits, else the
+// default page size of 20. z.coerce reinterpreted '1e3' as 1000 (the runtime
+// then clamped it to 200) and '' / '-5' as a page size of 1 instead of 20.
+const parseLimit = (value) => {
+  const text = String(value ?? '');
+  return /^\d+$/.test(text) ? Number(text) : 20;
+};
 
 const parseBefore = (raw) => {
   const separator = raw.indexOf(':');
@@ -77,7 +85,7 @@ export const registerMessageSearchRoutes = (app, { messageSearchRuntime }) => {
         role: query.role,
         includeReasoning: query.reasoning === '1',
         before: parseBefore(query.before),
-        limit: query.limit,
+        limit: parseLimit(req.query.limit),
         order: query.order,
       });
       if (!result) return res.status(503).json({ error: 'Message search is off on this server' });

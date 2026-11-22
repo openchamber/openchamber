@@ -13,7 +13,9 @@ Each launch gets a UUID group identity; its prompt variants keep their `g1`,
 are data, not keys. Members carry a `run` or `fusion` role and their owning
 `sessionID`. Optional fields: `title` (the run's display title) and
 `autoFusion` (judge model plus the launching page id). Older markers lack them
-and stay valid; a missing title falls back to the group slug.
+and stay valid; a missing title falls back to the group slug. Titles are
+trimmed and clamped at 200 code units on a surrogate pair boundary before they
+are persisted, so a stored title never ends in a lone surrogate.
 
 OpenCode copies metadata when forking, sometimes without a `parentID`. A marker
 belongs only to the matching session ID. A copied, pending, malformed or future
@@ -65,6 +67,15 @@ The composer's parallel mode (`components/chat/composer/parallel/`) and the
 overview's "Ask another model" launch lanes; `useMultiRunStore.createMultiRun`
 creates them and `dispatchRunPrompt` sends each lane its prompt with the
 project's session knowledge. The Auto routing model is never a lane.
+An isolated run gives each lane a branch of its own
+(`laneBranches.uniqueLaneBranchName`): the `<run>/<model>` seed, suffixed past
+the repository's local branches and the launch's earlier lanes. The server
+refuses an existing branch, so without this a second run with the same title,
+or two models whose slugs match (`gpt-5`, `gpt.5`), failed those lanes. Every lane of a launch starts from one ref, read once:
+the picked base branch, else `worktreeStartFrom` (the Settings start for
+parallel runs), else the project root's `HEAD`. A failed read fails the launch
+instead of starting lanes elsewhere. A
+shared run puts every lane in `sharedDirectory`, the draft's directory.
 `runActions.askOtherModels` turns a chat into a run by writing membership onto
 it and adding lanes that re-send its first prompt; it refuses any turn but the
 first, because new lanes would start without the conversation that followed.

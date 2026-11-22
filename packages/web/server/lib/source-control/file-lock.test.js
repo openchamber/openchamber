@@ -1,8 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { withSourceControlFileLock } from './file-lock.js';
+import { withSourceControlFileLock, withSourceControlFileLockSync } from './file-lock.js';
 import { storageProcess } from './storage-process.test-support.js';
 
 const directories = [];
@@ -76,7 +77,7 @@ it('never reclaims a lock created after the abandoned one it inspected', async (
   const fsImpl = {
     ...fs,
     open: async (target, flags, mode) => {
-      if (target === lockPath && flags === 'r' && !swapped) {
+      if (target === lockPath && flags !== 'wx' && !swapped) {
         swapped = true;
         await fs.rename(lockPath, `${lockPath}.dead`);
         await fs.writeFile(lockPath, fresh, { mode: 0o600 });
@@ -132,4 +133,52 @@ it('cleans its own partial initialization failure and reports acquisition I/O fa
   await expect(withSourceControlFileLock(lockPath, () => 1, { fsImpl: { ...fs, open: async () => { throw new Error('unavailable'); } } }))
     .rejects.toMatchObject({ code: 'SOURCE_CONTROL_LOCK_FAILED', status: 500 });
   await expect(withSourceControlFileLock(lockPath, () => 1)).resolves.toBe(1);
+});
+
+// Opening a FIFO for reading blocks until a writer appears, so the reclaim
+// must open non-blocking (POSIX) and let the handle stat refuse it: the
+// async wait keeps its deadline and the sync wait must not freeze the loop.
+it.runIf(process.platform !== 'win32')('settles busy within the wait when the lock path is a FIFO (async)', async () => {
+  const lockPath = await setup();
+  execFileSync('mkfifo', [lockPath]);
+  const startedAt = Date.now();
+  await expect(withSourceControlFileLock(lockPath, () => { throw new Error('must not run'); }, { waitMs: 200 }))
+    .rejects.toMatchObject({ code: 'SOURCE_CONTROL_LOCK_BUSY', status: 503 });
+  expect(Date.now() - startedAt).toBeLessThan(5000);
+  expect((await fs.stat(lockPath)).isFIFO()).toBe(true);
+});
+
+it.runIf(process.platform !== 'win32')('settles busy promptly when the lock path is a FIFO (sync)', async () => {
+  const lockPath = await setup();
+  execFileSync('mkfifo', [lockPath]);
+  const startedAt = Date.now();
+  let thrown = null;
+  try {
+    withSourceControlFileLockSync(lockPath, () => { throw new Error('must not run'); }, { waitMs: 200 });
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toMatchObject({ code: 'SOURCE_CONTROL_LOCK_BUSY', status: 503 });
+  expect(Date.now() - startedAt).toBeLessThan(5000);
+  expect((await fs.stat(lockPath)).isFIFO()).toBe(true);
+});
+
+// An owner record is one small JSON line. A larger file at the lock path is
+// not one, however old it is: it is refused from the handle stat and never
+// buffered whole, so it stays in place and the wait settles busy.
+it('does not reclaim an oversized lock file, however old', async () => {
+  const lockPath = await setup();
+  const oversized = 'x'.repeat(5000);
+  await fs.writeFile(lockPath, oversized, { mode: 0o600 });
+  await fs.utimes(lockPath, new Date(0), new Date(0));
+  await expect(withSourceControlFileLock(lockPath, () => { throw new Error('must not run'); }, { waitMs: 25 }))
+    .rejects.toMatchObject({ code: 'SOURCE_CONTROL_LOCK_BUSY', status: 503 });
+  let thrown = null;
+  try {
+    withSourceControlFileLockSync(lockPath, () => { throw new Error('must not run'); }, { waitMs: 25 });
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toMatchObject({ code: 'SOURCE_CONTROL_LOCK_BUSY', status: 503 });
+  expect(await fs.readFile(lockPath, 'utf8')).toBe(oversized);
 });

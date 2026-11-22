@@ -27,6 +27,18 @@ Open **Instellingen → Projecten** om een eigen naam, kleur of pictogram in te 
 
 > In VS Code gebruikt OpenChamber altijd de geopende map als enige project. U hoeft daar dus geen projecten toe te voegen of ertussen te wisselen. De instellingenpagina Projecten is er verborgen.
 
+## Sessies in mappen groeperen
+
+Klik in de weergave **Tree** van de zijbalk met de rechtermuisknop op een sessie en kies **Move to folder** om haar in een map te plaatsen, of **New folder...** om er een te maken. Een map hoort bij de projecthoofdmap of bij één worktree, en de maprij heeft knoppen om haar te hernoemen of te verwijderen. Het verwijderen van een map behoudt haar sessies; zij gaan terug naar het project.
+
+Mappen worden opgeslagen op de OpenChamber-server, dus alles wat met dezelfde server verbonden is, toont dezelfde: een andere computer die erop is aangemeld, de webapp en de telefoon. Een wijziging op het ene apparaat verschijnt binnen een seconde op de andere, zonder opnieuw te laden. Elke server heeft zijn eigen mappen. Welke mappen zijn ingeklapt, blijft op elk apparaat.
+
+De telefoon toont de mappen in zijn Tree-weergave maar kan ze niet wijzigen. Verplaats sessies op de desktop of in de webapp.
+
+Wanneer een apparaat voor het eerst verbinding maakt na een update vanaf een versie die mappen op elk apparaat bewaarde, worden zijn mappen toegevoegd aan die van de server. Een map met dezelfde naam op dezelfde plaats als een map die de server al heeft, voegt zich daarbij, en haar sessies gaan mee; er gaat niets verloren. Een sessie die de server al heeft ingedeeld, blijft in de map van de server.
+
+Het verwijderen van een sessie haalt haar uit haar map, en het sluiten van een project verwijdert zijn mappen. In VS Code blijven mappen in de extensie en worden ze niet gedeeld.
+
 ## Projectomgeving
 
 Als de tools van een project uit direnv, devenv of een Nix-shell komen, vinden Git-hooks, de terminal en [projectacties](/nl/project-actions/) ze niet vanzelf. Open **Instellingen → Projecten**, kies het project en ga naar **Omgeving**. Daar kunt u:

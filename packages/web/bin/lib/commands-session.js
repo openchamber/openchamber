@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
 import { parseGoalTokenBudget } from './cli-goal.js';
@@ -82,6 +83,15 @@ const formatSessionLine = (session) => {
   return `- \`${title}\` — ${selections.join(', ')}${status ? ` — status:${status}` : ''} — \`${directory}\``;
 };
 
+const parseSubagentModels = (value) => {
+  const raw = asNonEmptyString(value);
+  if (!raw) return undefined;
+  const models = raw.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (models.length === 0) return undefined;
+  for (const model of models) validateModel(model);
+  return models;
+};
+
 const buildSessionCreatePayload = (options = {}) => {
   const directory = asNonEmptyString(options.directory);
   const projectId = asNonEmptyString(options.project);
@@ -103,12 +113,13 @@ const buildSessionCreatePayload = (options = {}) => {
   const title = asNonEmptyString(options.title) || asNonEmptyString(options.name);
   const agent = asNonEmptyString(options.agent);
   const variant = asNonEmptyString(options.variant);
+  const subagentModels = parseSubagentModels(options.subagentModels);
   const worktree = asNonEmptyString(options.worktree);
   const branch = asNonEmptyString(options.branch);
   const startRef = asNonEmptyString(options.startRef);
 
-  return {
-    ...(directory ? { directory } : {}),
+  const payload = {
+    ...(directory ? { directory: path.isAbsolute(directory) ? directory : path.resolve(directory) } : {}),
     ...(projectId ? { projectId } : {}),
     ...(title ? { title } : {}),
     ...(worktree ? { worktree: { name: worktree, ...(branch ? { branchName: branch } : {}), ...(startRef ? { startRef } : {}) } } : {}),
@@ -120,6 +131,13 @@ const buildSessionCreatePayload = (options = {}) => {
     ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
     ...(typeof options.setUpstream === 'boolean' ? { setUpstream: options.setUpstream } : {}),
   };
+  if (subagentModels) payload.subagentPolicy = { models: subagentModels };
+  // An explicit --dir is the exact location the caller prepared (often a
+  // worktree of its own). Without this flag the control service would
+  // auto-create another worktree for any git repository and the session
+  // would land elsewhere. A named --worktree keeps the explicit path.
+  if (directory && !worktree) payload.newWorktree = false;
+  return payload;
 };
 
 const buildSessionPromptPayload = (options = {}, action) => {
@@ -158,7 +176,7 @@ const validateActionWaitOptions = (options, action) => {
 
 async function sessionCommand(options = {}, action = 'help') {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [--wait] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [--wait] [OPTIONS]\n  openchamber session send --session <id> --dir <path> --prompt <text> [--wait] [OPTIONS]\n  openchamber session fork --session <id> --dir <path> --prompt <text> [--message <id>] [--wait] [OPTIONS]\n  openchamber session status --session <id> --dir <path> [OPTIONS]\n  openchamber session messages --session <id> --dir <path> [--wait] [OPTIONS]\n  openchamber session archive --session <id> --dir <path> [OPTIONS]\n  openchamber session unarchive --session <id> --dir <path> [OPTIONS]\n  openchamber session delete --session <id> --dir <path> [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include authoritative idle/busy/retry status\n\nACTION OPTIONS:\n  --session <id>          Source or target session id\n  --dir <path>            Authoritative session directory\n  --prompt <text>         Prompt to send to the session\n  --message <id>          Fork from this message (fork only; default: latest)\n  --model <provider/model>  Model for the prompt (defaults to configured selection)\n  --agent <id>            Agent for the prompt (defaults to configured selection)\n  --variant <id>          Model variant for the prompt\n  --goal                  Run the prompt as a new goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --wait                  Wait for the dispatched activity to become idle\n  --last-assistant        Include the last assistant text after waiting\n  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)\n\nCREATE OPTIONS:\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --name <title>          Alias for --title\n\nSTATUS/MESSAGES OPTIONS:\n  --last                  Return only the latest text-bearing message\n  --last-assistant        Shorthand for --last --role assistant\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
+    process.stdout.write(`OpenChamber Session Commands\n\nUSAGE:\n  openchamber session list [--dir <path>] [--limit <count>] [--with-status] [OPTIONS]\n  openchamber session create --dir <path> [--title <title>] [--wait] [OPTIONS]\n  openchamber session create --project <projectId> [--title <title>] [--wait] [OPTIONS]\n  openchamber session send --session <id> --dir <path> --prompt <text> [--wait] [OPTIONS]\n  openchamber session fork --session <id> --dir <path> --prompt <text> [--message <id>] [--wait] [OPTIONS]\n  openchamber session status --session <id> --dir <path> [OPTIONS]\n  openchamber session messages --session <id> --dir <path> [--wait] [OPTIONS]\n  openchamber session archive --session <id> --dir <path> [OPTIONS]\n  openchamber session unarchive --session <id> --dir <path> [OPTIONS]\n  openchamber session delete --session <id> --dir <path> [OPTIONS]\n\nLIST OPTIONS:\n  --dir <path>            Filter sessions by directory\n  --limit <count>         Maximum sessions to show (default: 10)\n  --all                   Include archived sessions\n  --with-status           Include authoritative idle/busy/retry status\n\nACTION OPTIONS:\n  --session <id>          Source or target session id\n  --dir <path>            Authoritative session directory\n  --prompt <text>         Prompt to send to the session\n  --message <id>          Fork from this message (fork only; default: latest)\n  --model <provider/model>  Model for the prompt (defaults to configured selection)\n  --agent <id>            Agent for the prompt (defaults to configured selection)\n  --variant <id>          Model variant for the prompt\n  --goal                  Run the prompt as a new goal\n  --goal-token-budget <n> Goal token budget (1000-100000000; requires --goal)\n  --wait                  Wait for the dispatched activity to become idle\n  --last-assistant        Include the last assistant text after waiting\n  --timeout <seconds>     Wait timeout in seconds (default: 600, max: 86400)\n\nCREATE OPTIONS:\n  --dir <path>            Create the session in this exact directory (no automatic worktree)\n  --worktree <name>       Create a git worktree before creating the session\n  --branch <name>         Branch name for --worktree\n  --start-ref, --base <ref>  Start ref for --worktree\n  --upstream              Set upstream for the worktree branch\n  --no-upstream           Do not set upstream for the worktree branch\n  --name <title>          Alias for --title\n  --subagent-models <refs>  Comma-separated provider/model refs subsessions of this session may run\n\nSTATUS/MESSAGES OPTIONS:\n  --last                  Return only the latest text-bearing message\n  --last-assistant        Shorthand for --last --role assistant\n  --limit <count>         Maximum text messages to return (default: 10)\n  --all                   Return all text-bearing messages\n  --role <role>           Filter messages: all, user, assistant\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n  -q, --quiet             Print compact output\n`);
     return;
   }
 

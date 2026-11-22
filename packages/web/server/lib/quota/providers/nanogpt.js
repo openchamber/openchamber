@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
@@ -6,7 +7,8 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  toTimestamp
+  toTimestamp,
+  asNonEmptyString
 } from '../utils/index.js';
 
 const nanoGptQuotaWindowSchema = z.object({
@@ -36,19 +38,21 @@ const nanoGptUsageSchema = z.object({
 
 const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
 
+export const REQUEST_TIMEOUT_MS = 15_000;
+
 export const providerId = 'nano-gpt';
 export const providerName = 'NanoGPT';
-const aliases = ['nano-gpt', 'nanogpt', 'nano_gpt'];
+export const aliases = ['nano-gpt', 'nanogpt', 'nano_gpt'];
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
-  const auth = await readAuth();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
+
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch, timeoutMs = REQUEST_TIMEOUT_MS } = {}) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -66,7 +70,8 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     if (!response.ok) {
@@ -79,7 +84,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
     }
 
-    const payload = nanoGptUsageSchema.parse(await response.json());
+    const payload = nanoGptUsageSchema.parse(await readQuotaJson(response));
     const windows = {};
     const state = payload.state ?? 'active';
     // A null current daily quota means no daily cap; only absent fields use legacy data.

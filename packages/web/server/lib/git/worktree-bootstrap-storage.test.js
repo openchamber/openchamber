@@ -210,3 +210,55 @@ describe('worktree bootstrap storage', () => {
     await expect(first.read(worktree)).resolves.toMatchObject({ status: 'ready', phase: 'setup-ready' });
   });
 });
+
+describe('bounded state read (#1684)', () => {
+  const grownStateFs = (filePath) => ({
+    ...fs,
+    open: async (target, flags, mode) => {
+      const handle = await fs.open(target, flags, mode);
+      // Only readState opens the state file itself (the lock opens
+      // `${filePath}.lock`), so the target alone discriminates.
+      if (target !== filePath) return handle;
+      // The handle stat claims the file is empty; the bytes behind it are
+      // the real, over-cap file - a file grown after its stat.
+      return {
+        stat: async () => {
+          const stats = await handle.stat();
+          return { isFile: () => stats.isFile(), size: 0, mode: stats.mode };
+        },
+        read: (buffer, offset, length, position) => handle.read(buffer, offset, length, position),
+        close: () => handle.close(),
+      };
+    },
+  });
+
+  it('refuses an over-cap state file with the typed error, without parsing it', async () => {
+    const dataDirectory = await temporaryDirectory('worktree-bootstrap-over-cap-');
+    const filePath = path.join(dataDirectory, 'bootstrap.json');
+    await fs.writeFile(filePath, `{"version":1,"records":{}}${' '.repeat(4096)}`, { mode: 0o600 });
+    const store = createWorktreeBootstrapStore({ filePath, maxBytes: 1024 });
+    await expect(store.read('/worktrees/anything')).rejects.toMatchObject({ code: 'WORKTREE_BOOTSTRAP_STORAGE_INVALID' });
+  });
+
+  it('refuses a state file grown after its handle stat, instead of buffering it whole', async () => {
+    const dataDirectory = await temporaryDirectory('worktree-bootstrap-grown-');
+    const filePath = path.join(dataDirectory, 'bootstrap.json');
+    await fs.writeFile(filePath, `{"version":1,"records":{}}${' '.repeat(4096)}`, { mode: 0o600 });
+    const store = createWorktreeBootstrapStore({ filePath, maxBytes: 1024, fsImpl: grownStateFs(filePath) });
+    await expect(store.read('/worktrees/anything')).rejects.toMatchObject({ code: 'WORKTREE_BOOTSTRAP_STORAGE_INVALID' });
+  });
+
+  it('refuses a FIFO promptly and the serialized operation behind it settles too', async () => {
+    if (process.platform === 'win32') return;
+    const dataDirectory = await temporaryDirectory('worktree-bootstrap-fifo-');
+    const filePath = path.join(dataDirectory, 'bootstrap.json');
+    const store = createWorktreeBootstrapStore({ filePath });
+    execFileSync('mkfifo', [filePath]);
+    const first = store.read('/worktrees/first');
+    const second = store.read('/worktrees/second');
+    await expect(first).rejects.toMatchObject({ code: 'WORKTREE_BOOTSTRAP_STORAGE_INVALID' });
+    await expect(second).rejects.toMatchObject({ code: 'WORKTREE_BOOTSTRAP_STORAGE_INVALID' });
+    await fs.rm(filePath);
+    await expect(store.read('/worktrees/first')).resolves.toBeNull();
+  });
+});

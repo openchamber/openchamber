@@ -24,6 +24,14 @@ const FILL_TIMEOUT_MS = 30 * 60_000;
 const FILL_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const ERROR_TAIL_CHARACTERS = 2_000;
 
+// A tail cut can land between the halves of a surrogate pair, leaving the
+// kept text starting with a lone low surrogate that re-encodes as U+FFFD;
+// drop that leading half so the kept tail starts on a character boundary.
+const dropSplitTailHead = (text) => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
 export function createDockerTools({ engine, owner, toolsSource, image, now, wait }) {
   const source = requireToolsSource(toolsSource);
   const key = toolsContentKey(source, image);
@@ -88,7 +96,7 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
       if (result.code !== 0) {
         throw new SpaceError(
           'tools_fill_failed',
-          `Installing ${source.description} failed: ${result.stderr.trim().slice(-ERROR_TAIL_CHARACTERS) || `exit code ${result.code}`}. Common causes: the Docker machine cannot reach the npm registry, or this version was never published.`,
+          `Installing ${source.description} failed: ${dropSplitTailHead(result.stderr.trim().slice(-ERROR_TAIL_CHARACTERS)) || `exit code ${result.code}`}. Common causes: the Docker machine cannot reach the npm registry, or this version was never published.`,
         );
       }
       if ((await readMarker()) !== 'filled') {

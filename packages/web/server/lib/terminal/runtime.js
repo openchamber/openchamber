@@ -518,6 +518,12 @@ export function createTerminalRuntime({
     send(socket, { t: 'hello', v: 3 });
     const heartbeat = setInterval(() => { try { socket.ping(); } catch { /* closed */ } }, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS);
     socket.on('message', (raw, isBinary) => {
+      // Per-frame bound: maxPayload alone is not enforced by the bundled ws
+      // under every runtime (Bun delivers the oversized message whole), so
+      // refuse it here — before it is parsed — with the same 1009 the ws
+      // layer would have used.
+      const frameBytes = typeof raw === 'string' ? Buffer.byteLength(raw) : (raw?.byteLength ?? 0);
+      if (frameBytes > TERMINAL_WS_MAX_PAYLOAD_BYTES) { try { socket.close(1009, 'Terminal frame too large'); } catch { /* already closing */ } return; }
       if (!isBinary) { send(socket, { t: 'error', v: 3, code: 'BAD_FRAME', message: 'Binary control frame required', fatal: false }); return; }
       const message = readTerminalWsControlFrame(raw);
       if (!message || message.v !== 3 || typeof message.t !== 'string') { send(socket, { t: 'error', v: 3, code: 'BAD_FRAME', message: 'Invalid terminal frame', fatal: false }); return; }
@@ -774,5 +780,5 @@ export function createTerminalRuntime({
     if (!shutdownPromise) shutdownPromise = stop();
     return shutdownPromise;
   };
-  return { shutdown };
+  return { shutdown, wsServer };
 }

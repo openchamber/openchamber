@@ -30,13 +30,16 @@ const DOM_GLOBALS = [
   'Node',
   'Element',
   'HTMLElement',
+  'Event',
+  'CustomEvent',
+  'MutationObserver',
   'IS_REACT_ACT_ENVIRONMENT',
 ] as const;
 
 const dom = new Window({ url: 'http://localhost' });
 const previousGlobals = DOM_GLOBALS.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
 for (const name of DOM_GLOBALS) {
-  const value = { window: dom, document: dom.document, localStorage: dom.localStorage, navigator: dom.navigator, Node: dom.Node, Element: dom.Element, HTMLElement: dom.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true }[name];
+  const value = { window: dom, document: dom.document, localStorage: dom.localStorage, navigator: dom.navigator, Node: dom.Node, Element: dom.Element, HTMLElement: dom.HTMLElement, Event: dom.Event, CustomEvent: dom.CustomEvent, MutationObserver: dom.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true }[name];
   Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
 }
 

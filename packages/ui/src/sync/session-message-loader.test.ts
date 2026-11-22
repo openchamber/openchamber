@@ -285,6 +285,52 @@ describe("SessionMessageLoader", () => {
     childStores.disposeAll()
   })
 
+  test("rejects a complete-history request after the page cap on ever-new cursors", async () => {
+    let calls = 0
+    const { childStores, loader } = createLoader(async ({ sessionID }) => {
+      calls += 1
+      return response([createRecord(sessionID, `msg_${calls}`)], `cursor-${calls}`)
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await expect(loader.loadComplete(target)).rejects.toThrow("Session history pagination exceeded the page cap")
+
+    // Initial page plus the 500 capped older-page loads.
+    expect(calls).toBe(501)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("commits an interactive older batch at the alignment page cap when no prompt ever arrives", async () => {
+    let calls = 0
+    const { childStores, loader } = createLoader(async ({ sessionID }) => {
+      calls += 1
+      // The initial page holds ten user prompts so ensure() is satisfied
+      // immediately: a one-prompt first page would send cold navigation
+      // into extendWindow, which walks up to the 300-record window ceiling
+      // one mock page at a time and swamps the alignment count below.
+      if (calls === 1) {
+        return response(
+          Array.from({ length: 10 }, (_, index) => createRecord(sessionID, `msg_initial_${index}`, 991 + index)),
+          "cursor-1",
+        )
+      }
+      return response([createRecord(sessionID, `msg_older_${calls}`, 990 - calls, "assistant")], `cursor-${calls}`)
+    })
+    const target = { directory: "/repo", sessionID: "session-a" }
+
+    await loader.ensure(target)
+    await loader.loadOlder(target)
+
+    // Initial page + first older page + 20 capped alignment pages, all committed.
+    expect(calls).toBe(22)
+    expect(loader.getSnapshot(target).status).toBe("ready")
+    // Ten initial prompts plus the 21 committed older records.
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]).toHaveLength(31)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("runs a requested tail refresh after an older in-flight load", async () => {
     const initial = deferred<MessagePage>()
     const refresh = deferred<MessagePage>()

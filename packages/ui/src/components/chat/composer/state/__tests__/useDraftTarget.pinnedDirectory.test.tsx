@@ -14,6 +14,7 @@ describe('useDraftTarget with a pinned draft directory', () => {
   beforeEach(() => {
     dom = new Window({ url: 'http://localhost/' });
     Object.assign(globalThis, {
+      Event: dom.Event, CustomEvent: dom.CustomEvent, MutationObserver: dom.MutationObserver,
       window: dom,
       document: dom.document,
       navigator: dom.navigator,

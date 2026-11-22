@@ -34,6 +34,7 @@ import {
   type Part,
   type Project,
   type Session,
+  type SubagentPolicy,
   type ToolPart,
   type ToolState,
   type SyntheticMessage,
@@ -50,7 +51,15 @@ export type AssistantToolItem = Extract<AssistantContentItem, { type: "tool" }>
 // Sessions
 // ---------------------------------------------------------------------------
 
-export function projectSession(info: SessionInfo): Session {
+/**
+ * A wire session as OpenCode sends it once subsession governance lands. The
+ * generated client types do not know `subagentPolicy` yet, so the field is
+ * intersected in here at the boundary; drop the intersection once the
+ * regenerated client ships the field on `SessionInfo`.
+ */
+export type SessionInfoWithSubagentPolicy = SessionInfo & { subagentPolicy?: SubagentPolicy }
+
+export function projectSession(info: SessionInfoWithSubagentPolicy): Session {
   return compact({
     id: info.id,
     parentID: info.parentID,
@@ -66,6 +75,7 @@ export function projectSession(info: SessionInfo): Session {
     time: compact({ ...info.time }),
     metadata: info.metadata,
     permissions: info.permissions,
+    subagentPolicy: info.subagentPolicy,
     revert: info.revert,
     fork: info.fork,
   })
@@ -179,6 +189,7 @@ export function projectToolPart(
     tool: tool.name,
     state,
     executed: tool.executed,
+    displayTime: compact({ start: tool.time.created, end: tool.time.completed }),
   })
 }
 
@@ -216,20 +227,26 @@ export function projectAssistantContent(
           type: "text",
           text: item.text,
           time: compact({ start: owner.created, end: owner.completed ?? (followed ? owner.created : undefined) }),
+          displayTime: {},
+          timeSource: "message",
         })
         break
       }
       case "reasoning": {
         const ordinal = reasoningOrdinal
         reasoningOrdinal += 1
-        parts.push({
+        parts.push(compact({
           id: partIds.reasoning(owner.messageID, ordinal),
           sessionID: owner.sessionID,
           messageID: owner.messageID,
           type: "reasoning",
           text: item.text,
-          time: compact({ start: item.time?.created ?? owner.created, end: item.time?.completed }),
-        })
+          time: item.time
+            ? compact({ start: item.time.created, end: item.time.completed })
+            : compact({ start: owner.created, end: owner.completed }),
+          displayTime: compact({ start: item.time?.created, end: item.time?.completed }),
+          timeSource: item.time ? undefined : "message",
+        }))
         break
       }
       case "tool":

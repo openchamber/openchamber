@@ -10,9 +10,11 @@ import {
   parsePlanMarkdown,
   resolveProjectContextId,
   type ProjectPlanLink,
+  type ProjectPlanMetrics,
   type ProjectPlanProgress,
   type ProjectRef,
 } from '@/lib/projectContextApi';
+import { PLAN_TIERS, type PlanTier } from '@/lib/routing/plansApi';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
@@ -20,7 +22,8 @@ import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { KnowledgeComposer } from './KnowledgeComposer';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
 import { KnowledgeMenu, KnowledgePinToggle } from './KnowledgeActions';
-import { formatKnowledgeDate } from './knowledgeFormat';
+import { formatKnowledgeDate, formatPlanCost, formatTokenCount } from './knowledgeFormat';
+import { readPlanActionSendMode, startPlanTierDispatch } from './planTierDispatch';
 import { planDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 
 /**
@@ -51,6 +54,29 @@ const PlanProgressLabel: React.FC<{ progress: ProjectPlanProgress }> = ({ progre
 };
 
 /**
+ * Accumulated cost of the plan's linked session (stage 1 metrics), with the
+ * token totals in the tooltip. No badge while the cost is unknown — a priced
+ * session only; the server omits metrics when it could not read the session.
+ */
+const PlanMetricsLabel: React.FC<{ metrics: ProjectPlanMetrics }> = ({ metrics }) => {
+  const { t } = useI18n();
+  if (metrics.costUsd === null) return null;
+  const cost = formatPlanCost(metrics.costUsd);
+  const title = metrics.tokens
+    ? t('rightSidebar.contextNotesTodo.plans.metrics.titleWithTokens', {
+        cost,
+        input: formatTokenCount(metrics.tokens.input),
+        output: formatTokenCount(metrics.tokens.output),
+      })
+    : t('rightSidebar.contextNotesTodo.plans.metrics.title', { cost });
+  return (
+    <span className="shrink-0 typography-micro tabular-nums text-muted-foreground" title={title}>
+      {cost}
+    </span>
+  );
+};
+
+/**
  * Saved plan markdown for the project.
  *
  * Plan mutations touch neither notes nor todos, so this section talks to the
@@ -73,6 +99,8 @@ export const PlansSection: React.FC<{
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [isImporting, setIsImporting] = React.useState(false);
   const createPlan = useProjectContextStore((state) => state.createPlan);
+  const linkPlanSession = useProjectContextStore((state) => state.linkPlanSession);
+  const [dispatchingPlanId, setDispatchingPlanId] = React.useState<string | null>(null);
   const removePlan = useProjectContextStore((state) => state.deletePlan);
   const movePlan = useProjectContextStore((state) => state.movePlan);
   const [movingPlanId, setMovingPlanId] = React.useState<string | null>(null);
@@ -105,6 +133,34 @@ export const PlansSection: React.FC<{
       }
     },
     [movePlan, movingPlanId, projectRef, t],
+  );
+
+  // Tier dispatch (#16 stage 2): start the plan's implementation session on
+  // the chosen tier, honoring the shared action send-mode preference, and
+  // link the plan to the session so its cost lands on this row's badge.
+  const handleTierDispatch = React.useCallback(
+    async (plan: ProjectPlanLink, tier: PlanTier) => {
+      if (dispatchingPlanId) return;
+      setDispatchingPlanId(plan.id);
+      try {
+        const outcome = await startPlanTierDispatch({
+          plan,
+          tier,
+          projectPath: projectRef.path,
+          mode: readPlanActionSendMode(),
+        });
+        if (!outcome.ok) {
+          toast.error(t('rightSidebar.contextNotesTodo.toast.dispatchPlanFailed'));
+          return;
+        }
+        void linkPlanSession(projectRef, plan.id, outcome.sessionId);
+      } catch {
+        toast.error(t('rightSidebar.contextNotesTodo.toast.dispatchPlanFailed'));
+      } finally {
+        setDispatchingPlanId(null);
+      }
+    },
+    [dispatchingPlanId, linkPlanSession, projectRef, t],
   );
 
   const handleDeletePlan = React.useCallback((planId: string) => {
@@ -152,9 +208,6 @@ export const PlansSection: React.FC<{
       setIsImporting(true);
       try {
         const params = new URLSearchParams({ path: result.path, allowOutsideWorkspace: 'true' });
-        if (result.outsideFileGrant) {
-          params.set('outsideFileGrant', result.outsideFileGrant);
-        }
         const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, { cache: 'no-store' });
         if (!response.ok) {
           toast.error(t('rightSidebar.contextNotesTodo.toast.readPlanFileFailed'));
@@ -309,6 +362,7 @@ export const PlansSection: React.FC<{
                       </span>
                     ) : null}
                     {plan.progress ? <PlanProgressLabel progress={plan.progress} /> : null}
+                    {plan.metrics ? <PlanMetricsLabel metrics={plan.metrics} /> : null}
                     <span className="ms-auto flex-shrink-0 typography-micro text-muted-foreground">
                       {formatKnowledgeDate(plan.createdAt)}
                     </span>
@@ -329,8 +383,16 @@ export const PlansSection: React.FC<{
                     onToggle={() => void handleTogglePinned(plan.id, !pinned)}
                   />
                   <KnowledgeMenu
-                    disabled={movingPlanId === plan.id}
+                    disabled={movingPlanId === plan.id || dispatchingPlanId === plan.id}
                     items={[
+                      ...PLAN_TIERS.map((tier) => ({
+                        id: `implement-${tier}`,
+                        label: t('rightSidebar.contextNotesTodo.plans.menu.implementWithTier', {
+                          tier: t(`settings.routing.plans.tier.${tier}`),
+                        }),
+                        hint: t('rightSidebar.contextNotesTodo.plans.menu.implementHint'),
+                        onSelect: () => void handleTierDispatch(plan, tier),
+                      })),
                       {
                         id: 'move',
                         label: shared

@@ -23,7 +23,11 @@ const parseCookies = (cookieHeader) => {
       return acc;
     }
     const value = rest.join('=').trim();
-    acc[key] = decodeURIComponent(value || '');
+    try {
+      acc[key] = decodeURIComponent(value || '');
+    } catch {
+      acc[key] = value || '';
+    }
     return acc;
   }, {});
 };
