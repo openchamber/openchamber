@@ -9,7 +9,7 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import crypto from 'node:crypto';
-import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
+import { fingerprintRemoteUrl, isDiskPathRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/config-files.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
@@ -18,6 +18,7 @@ import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from '
 import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { randomUUID } from 'crypto';
 import { worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
+import { BRANCH_CREATION_SOURCE_RE, findRestackedParent, isOwnRemoteCopy } from './branch-restack.js';
 import type { SimpleGit, BranchSummary, FileStatusResult, RemoteWithRefs } from 'simple-git';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
@@ -962,6 +963,9 @@ const resolveRemoteBranchRef = async (primaryWorktree: string, value: string) =>
 
   if (raw.startsWith('refs/remotes/') || raw.startsWith('remotes/')) {
     return parsed;
+  }
+  if (raw.startsWith('refs/')) {
+    return null;
   }
 
   const localRef = `refs/heads/${raw}`;
@@ -3122,7 +3126,9 @@ async function readStatus(normalizedDirectory: string, lightMode: boolean) {
     }
 
     const selectBaseRefForUnpublished = async () => {
-      const candidates = [];
+      const parent = status.current ? await readBranchBase(git, repoRoot, status.current).then(({ base }) => base, () => null) : null;
+      const remotes = parent ? String(await git.raw(['remote']).catch(() => '')).split('\n').map((name) => name.trim()).filter(Boolean) : [];
+      const candidates = parent ? [parent, ...remotes.map((remote) => `${remote}/${parent}`)] : [];
 
       const originHead = await git
         .raw(['symbolic-ref', '-q', 'refs/remotes/origin/HEAD'])
@@ -3552,8 +3558,6 @@ export async function getRangeFileVersions(directory: string, { base, head, path
   return { original: '', modified: '' };
 }
 
-const BRANCH_CREATION_SOURCE_RE = /^branch: Created from (.+)$/;
-
 export function parseBranchCreationSource(reflogText: string) {
   const { source, rebased } = readBranchCreation(reflogText);
   return rebased ? null : source;
@@ -3575,20 +3579,6 @@ function readBranchCreation(reflogText: string) {
     return { source, rebased };
   }
   return { source: null, rebased };
-}
-
-async function isOwnRemoteCopy(git: SimpleGit, source: string, branchName: string) {
-  const fullName = await git
-    .raw(['rev-parse', '--symbolic-full-name', source])
-    .then((value) => String(value || '').trim())
-    .catch(() => '');
-  if (!fullName.startsWith('refs/remotes/')) return false;
-  const upstream = await git
-    .raw(['rev-parse', '--symbolic-full-name', `refs/heads/${branchName}@{upstream}`])
-    .then((value) => String(value || '').trim())
-    .catch(() => '');
-  if (upstream && fullName === upstream) return true;
-  return fullName.slice('refs/remotes/'.length).split('/').slice(1).join('/') === branchName;
 }
 
 const branchParentKey = (branch: string) => `branch.${branch}.gh-merge-base`;
@@ -3664,19 +3654,29 @@ export async function getBranchBase(directory: string, branch: string) {
   }
 
   const { git, repoRoot } = await createRepositoryGitContext(directory);
+  return readBranchBase(git, repoRoot, branchName);
+}
 
+async function readBranchBase(git: SimpleGit, repoRoot: string, branchName: string) {
   const recordedParent = await git
     .raw(['config', '--get', branchParentKey(branchName)])
     .then((value) => String(value || '').trim())
     .catch(() => '');
   if (recordedParent && recordedParent !== branchName) {
     const remotes = await git.raw(['remote']).then((value) => String(value || '').split('\n').map((name) => name.trim()).filter(Boolean)).catch(() => []);
+    const recordedRefs = [];
     for (const ref of [`refs/heads/${recordedParent}`, ...remotes.map((remote) => `refs/remotes/${remote}/${recordedParent}`)]) {
       const resolves = await git
         .raw(['rev-parse', '--verify', '--quiet', ref])
         .then((value) => Boolean(String(value || '').trim()))
         .catch(() => false);
-      if (resolves) return { base: (await findNearerStackLayer(git, repoRoot, branchName, ref)) ?? recordedParent };
+      if (resolves) recordedRefs.push(ref);
+    }
+    const [recordedRef] = recordedRefs;
+    if (recordedRef) {
+      const restacked = await findRestackedParent(git, branchName, recordedRefs);
+      if (restacked) return { base: restacked };
+      return { base: (await findNearerStackLayer(git, repoRoot, branchName, recordedRef)) ?? recordedParent };
     }
   }
 
@@ -3687,26 +3687,19 @@ export async function getBranchBase(directory: string, branch: string) {
     return { base: null };
   }
 
-  const { source, rebased } = readBranchCreation(reflog);
-  if (!source || source === branchName) {
-    return { base: null };
-  }
+  const { source: createdFrom, rebased } = readBranchCreation(reflog);
+  const resolves = createdFrom && createdFrom !== branchName && /^refs\/(heads|remotes)\//.test(await git
+    .raw(['rev-parse', '--symbolic-full-name', createdFrom])
+    .then((value) => String(value || '').trim())
+    .catch(() => ''));
+  const source = resolves && !(await isOwnRemoteCopy(git, createdFrom, branchName)) ? createdFrom : null;
 
-  const resolves = await git
-    .raw(['rev-parse', '--verify', '--quiet', source])
-    .then((value) => Boolean(String(value || '').trim()))
-    .catch(() => false);
-  if (!resolves) {
-    return { base: null };
-  }
-
-  if (await isOwnRemoteCopy(git, source, branchName)) {
-    return { base: null };
-  }
-
+  const restacked = rebased ? await findRestackedParent(git, branchName, source ? [source] : []) : undefined;
+  if (restacked) return { base: restacked };
+  if (!source) return { base: null };
   const nearer = await findNearerStackLayer(git, repoRoot, branchName, source);
   if (nearer) return { base: nearer };
-  return { base: rebased ? null : source };
+  return { base: restacked === null ? null : source };
 }
 
 export async function getRangeFiles(directory: string, { base, head, includeWorkingTree = false }: RangeOptions = {}) {
@@ -5521,6 +5514,10 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context: Worktr
   if (!checkoutRemoteName) {
     checkoutRemoteName = await resolveCheckoutRemoteName(context.primaryWorktree, mode === 'existing' ? localBranch : startRef) ?? '';
   }
+  for (const urlArgs of checkoutRemoteName ? [['remote', 'get-url', checkoutRemoteName], ['remote', 'get-url', '--push', checkoutRemoteName]] : []) {
+    const url = await runGitCommand(context.primaryWorktree, urlArgs);
+    if (url.success && isDiskPathRemoteUrl(url.stdout.trim())) checkoutRemoteName = '';
+  }
 
   const branchNameConflict = (mode === 'new' || createdLocalBranch)
     && await branchNameClashesWithExistingRef(context.primaryWorktree, localBranch);
@@ -5560,7 +5557,7 @@ async function attachGitWorktreeToCandidateWithoutRemoteRollback(context: Worktr
     throw error;
   }
   await publishWorktreeTopologyChange(context.primaryWorktree);
-  if (mode === 'new' && startRef && startRef !== 'HEAD') {
+  if (mode === 'new') {
     const parent = parsedStartBranch ?? await localBranchNameOf(context.primaryWorktree, startRef);
     await recordBranchParent(context.primaryWorktree, localBranch, parent);
   }
