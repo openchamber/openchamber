@@ -14,7 +14,8 @@ import { LongErrorText } from './LongErrorText';
 import { useContinueWithModelAction } from './continueWithModelContext';
 import { ContinueWithModelButton } from './components/ContinueWithModelButtons';
 import { MessageRecoveryActions } from './MessageRecoveryActions';
-import { findRecordedTurnError, readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
+import { findRecordedTurnError } from '@/lib/messages/assistantError';
+import { readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
   sessionId: string;

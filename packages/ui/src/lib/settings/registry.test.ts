@@ -76,6 +76,9 @@ describe('settings registry', () => {
     } finally {
       useUIStore.persist.setOptions(options);
       useUIStore.setState(original, true);
+    }
+  });
+
   test('applies every In work entry mode from settings and drops an unknown one', () => {
     const original = useUIStore.getState().sessionWorkEntry;
     try {
