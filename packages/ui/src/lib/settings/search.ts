@@ -599,6 +599,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['history limit', 'prompt recall', 'remember prompts', 'composer history', 'submitted prompts', 'trim history'],
   },
   {
+    id: 'chat.question-timeout',
+    page: 'chat',
+    titleKey: 'settings.chat.questionTimeout.field',
+    descriptionKey: 'settings.chat.questionTimeout.info',
+    keywords: ['question', 'timeout', 'expire', 'agent question', 'unanswered', 'close question', 'dismiss'],
+  },
+  {
+    id: 'chat.questions-in-background',
+    page: 'chat',
+    titleKey: 'settings.chat.questionsInBackground.field',
+    descriptionKey: 'settings.chat.questionsInBackground.info',
+    keywords: ['question', 'background', 'answer later', 'keep working', 'non-blocking', 'agent question'],
+  },
+  {
     id: 'chat.model-choices',
     page: 'chat',
     titleKey: 'settings.openchamber.modelChoices.title',

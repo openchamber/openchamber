@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { clearCache, scanWithCache, setCachedScan, getCachedScan, getScanCacheSize, pruneExpiredScans, MAX_CACHED_SCANS } from './cache.js';
+import { clearCache, scanWithCache, setCachedScan, getCachedScan, getScanCacheSize, pruneExpiredScans, MAX_CACHED_SCANS, MAX_PENDING_SCANS } from './cache.js';
 
 let tempDataDir;
 
@@ -50,6 +50,36 @@ describe('scanWithCache', () => {
     await Promise.all(Array.from({ length: 6 }, (_, i) => scanWithCache(`key-${i}`, loader)));
 
     expect(peak).toBeLessThanOrEqual(2);
+  });
+
+  it('refuses new keys past the pending cap with a typed busy result, and still coalesces known keys', async () => {
+    let openGate;
+    const gate = new Promise((resolve) => { openGate = resolve; });
+    const gatedLoader = async () => {
+      await gate;
+      return { ok: true, items: [] };
+    };
+
+    const started = Array.from({ length: MAX_PENDING_SCANS }, (_, i) => scanWithCache(`pending-${i}`, gatedLoader));
+
+    const overflowLoader = vi.fn(async () => ({ ok: true, items: [] }));
+    const busy = await scanWithCache('one-too-many', overflowLoader);
+    expect(busy.ok).toBe(false);
+    expect(busy.error?.kind).toBe('busy');
+    expect(overflowLoader).not.toHaveBeenCalled();
+    expect(getCachedScan('one-too-many')).toBeNull();
+
+    const dupeLoader = vi.fn(async () => ({ ok: true, items: ['dupe'] }));
+    const dupe = scanWithCache('pending-0', dupeLoader);
+    expect(dupeLoader).not.toHaveBeenCalled();
+
+    openGate();
+    const results = await Promise.all(started);
+    expect(results.every((r) => r.ok)).toBe(true);
+    await expect(dupe).resolves.toEqual({ ok: true, items: [] });
+
+    const after = await scanWithCache('after-drain', async () => ({ ok: true, items: ['fresh'] }));
+    expect(after.items).toEqual(['fresh']);
   });
 
   it('does not cache failed scans', async () => {

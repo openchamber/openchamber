@@ -25,6 +25,7 @@ import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveAttachedLocalServerUrl, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
+import { getInstalledAppsCacheResponse, refreshInstalledAppsCache } from './installed-apps-cache.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
 import {
   BACKGROUND_START_ARG,
@@ -5119,24 +5120,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         cache = JSON.parse(await fsp.readFile(cachePath, 'utf8'));
       } catch {
       }
-      const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
-      const hasCache = Boolean(cache);
-      const isCacheStale = !cache
-        || cache.version !== INSTALLED_APPS_CACHE_VERSION
-        || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
-      const refresh = async () => {
-        const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
-        await fsp.mkdir(path.dirname(cachePath), { recursive: true });
-        await fsp.writeFile(cachePath, JSON.stringify({ version: INSTALLED_APPS_CACHE_VERSION, updatedAt: now, apps }, null, 2));
-        emitToAllWindows('openchamber:installed-apps-updated', apps);
-      };
-      if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
-        return { apps: [], hasCache: false, isCacheStale: false, supported: false };
-      }
-      if (!hasCache || isCacheStale || args.force === true) {
-        void refresh();
-      }
-      return { apps: cachedApps, hasCache, isCacheStale };
+      return getInstalledAppsCacheResponse({
+        cache,
+        now,
+        version: INSTALLED_APPS_CACHE_VERSION,
+        ttlSecs: INSTALLED_APPS_CACHE_TTL_SECS,
+        force: args.force === true,
+        supported: process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux',
+        refresh: () => refreshInstalledAppsCache({
+          cachePath,
+          now,
+          version: INSTALLED_APPS_CACHE_VERSION,
+          apps: Array.isArray(args.apps) ? args.apps : [],
+          buildApps: buildPlatformInstalledApps,
+          mkdir: () => fsp.mkdir(path.dirname(cachePath), { recursive: true }),
+          writeFile: fsp.writeFile.bind(fsp),
+          emit: emitToAllWindows,
+        }),
+        log,
+      });
     }
 
     case 'desktop_hosts_get': {
@@ -6489,11 +6491,14 @@ app.whenReady().then(async () => {
     try {
       const enabled = await readLinuxAutostartEnabled();
       if (enabled) {
-        await setLinuxAutostartEnabled({
+        const result = await setLinuxAutostartEnabled({
           enabled: true,
           appName: app.getName(),
           backgroundArg: BACKGROUND_START_ARG,
         });
+        if (!result.supported) {
+          log.info('[electron] Linux autostart entry is owned by another application', result);
+        }
       }
     } catch (error) {
       log.warn('[electron] failed to reconcile Linux autostart entry', error);

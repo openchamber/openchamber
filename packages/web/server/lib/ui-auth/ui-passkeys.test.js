@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it, mock } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -222,6 +223,89 @@ describe('ui-passkeys store durability', () => {
     const secondController = createController(storeFile);
     expect(secondController.listPasskeys(requestFor())).toEqual([]);
     expect(JSON.parse(fs.readFileSync(storeFile, 'utf8')).userID).toBe(initialized.userID);
+  });
+
+  it('initializes a whitespace-only store file in place like an empty one', () => {
+    const dir = fs.mkdtempSync(path.join(dataDir, 'whitespace-'));
+    const storeFile = path.join(dir, 'ui-passkeys.json');
+    fs.writeFileSync(storeFile, '  \n\t ');
+    const controller = createController(storeFile);
+
+    expect(controller.listPasskeys(requestFor())).toEqual([]);
+    const initialized = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
+    expect(initialized.userID.length).toBeGreaterThan(0);
+    expect(initialized.passkeys).toEqual([]);
+    expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
+    const secondController = createController(storeFile);
+    expect(secondController.listPasskeys(requestFor())).toEqual([]);
+    expect(JSON.parse(fs.readFileSync(storeFile, 'utf8')).userID).toBe(initialized.userID);
+  });
+
+  it('keeps the empty-file recheck bounded when the file grows after the initial read (#2127)', () => {
+    const dir = fs.mkdtempSync(path.join(dataDir, 'grown-'));
+    const storeFile = path.join(dir, 'ui-passkeys.json');
+    fs.writeFileSync(storeFile, '');
+    // One byte past the durable-store cap, all whitespace: an unbounded
+    // recheck would read it whole, judge it empty, and persist the fresh
+    // store over it. The bounded recheck must refuse (not empty) and
+    // leave the replaced file exactly as it found it.
+    const grown = ' '.repeat(33_554_433);
+    let delivered = 0;
+    const racingFs = {
+      ...fs,
+      // loadStore calls existsSync immediately before the empty-file
+      // recheck; swap the grown file in at exactly that point, after
+      // the initial bounded read and the preserve check have both seen
+      // the empty file.
+      existsSync: (target) => {
+        if (target === storeFile) fs.writeFileSync(storeFile, grown);
+        return fs.existsSync(target);
+      },
+      readSync: (fd, buffer, offset, length, position) => {
+        const n = fs.readSync(fd, buffer, offset, length, position);
+        delivered += n;
+        return n;
+      },
+    };
+    const controller = createUiPasskeys({
+      passwordBinding: PASSWORD_BINDING,
+      readSettingsFromDiskMigrated: async () => ({}),
+      storeFile,
+      fs: racingFs,
+    });
+
+    expect(controller.listPasskeys(requestFor())).toEqual([]);
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe(grown);
+    expect(delivered).toBeLessThanOrEqual(33_554_433);
+    expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
+  });
+
+  // A FIFO swapped in before the recheck must be refused without a read: a
+  // plain readFileSync on a FIFO with no writer blocks this test forever.
+  it.skipIf(process.platform === 'win32')('refuses a non-regular file swapped in before the empty-file recheck (#2127)', () => {
+    const dir = fs.mkdtempSync(path.join(dataDir, 'fifo-'));
+    const storeFile = path.join(dir, 'ui-passkeys.json');
+    fs.writeFileSync(storeFile, '');
+    const racingFs = {
+      ...fs,
+      existsSync: (target) => {
+        if (target === storeFile && fs.statSync(storeFile).isFile()) {
+          fs.rmSync(storeFile);
+          execFileSync('mkfifo', [storeFile]);
+        }
+        return fs.existsSync(target);
+      },
+    };
+    const controller = createUiPasskeys({
+      passwordBinding: PASSWORD_BINDING,
+      readSettingsFromDiskMigrated: async () => ({}),
+      storeFile,
+      fs: racingFs,
+    });
+
+    expect(controller.listPasskeys(requestFor())).toEqual([]);
+    expect(fs.lstatSync(storeFile).isFIFO()).toBe(true);
+    expect(siblingsMatching(storeFile, '.corrupt-')).toEqual([]);
   });
 
   it('preserves a corrupt store before overwriting it instead of silently discarding passkeys', () => {

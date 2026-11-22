@@ -5,6 +5,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -148,6 +149,7 @@ export const dict = {
   ...sessionMenuHintsI18n.nl,
   ...sessionErrorRecoveryI18n.nl,
   ...sidebarLayoutI18n.nl,
+  ...activityTimesI18n.nl,
   ...projectKnowledgeI18n.nl,
   ...linearPanelI18n.nl,
   ...routingI18n.nl,
@@ -635,6 +637,7 @@ export const dict = {
   'sessions.sidebar.header.viewMode.label': 'Weergave',
   'sessions.sidebar.header.viewMode.projects': 'Boom',
   'sessions.sidebar.header.viewMode.timeline': 'Lijst',
+  'sessions.sidebar.header.viewMode.headerless': 'Sectiekopteksten verbergen',
   'sessions.sidebar.header.projectDisplay.label': 'Projecten tonen',
   'sessions.sidebar.header.projectDisplay.all': 'Alle projecten',
   'sessions.sidebar.header.listGrouping.label': 'Sessies',
@@ -2604,6 +2607,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Failover vanaf',
   'chat.messageBody.modelChanged.notice': 'Model gewijzigd: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Model gewijzigd: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Vorige voorkeur geven',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Laat modelpools een dag lang {model} verkiezen',
+  'chat.currentModel.label': 'Huidig model: {model}',
+  'chat.currentModel.labelWithPool': 'Huidig model: {model} uit pool {pool}',
+  'chat.currentModel.menu.openHint': 'Klik om een model te kiezen',
+  'chat.currentModel.menu.timing': 'Wisselen',
+  'chat.currentModel.menu.directPickHelp': 'Een directe keuze stopt de automatische uitwijking van de pool totdat u terugkeert naar de pool.',
+  'chat.currentModel.timing.immediately': 'Nu (start een lopend antwoord opnieuw)',
+  'chat.currentModel.timing.nextStep': 'Bij de volgende stap',
+  'chat.currentModel.timing.nextInput': 'Met het volgende bericht',
+  'chat.currentModel.menu.members': 'Modellen in pool {pool}',
+  'chat.currentModel.menu.returnToPool': 'Terug naar pool {pool}',
+  'chat.currentModel.toast.failed': 'Kon het model niet wisselen',
   'chat.generatedResult.actions.copy': 'Kopiëren',
   'chat.generatedResult.actions.copied': 'Gekopieerd',
   'chat.generatedResult.commit.title': 'Gegenereerd commitbericht',
@@ -3850,8 +3866,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Deze behouden',
   'multirun.overview.addModel.action': 'Een model toevoegen',
   'multirun.overview.addModel.hint': 'Voert dezelfde prompt uit op nog één model in deze uitvoering',
-  'chat.parallel.settings.whereShared': 'Projectmap',
-  'chat.parallel.settings.whereSharedHint': 'Alle runs werken in dezelfde checkout. Het beste voor vragen en onderzoek.',
+  'chat.parallel.settings.whereShared': 'Gedeelde map',
+  'chat.parallel.settings.whereSharedHint': 'Alle runs werken in de map waar dit concept op staat. Het beste voor vragen en onderzoek.',
   'chat.parallel.settings.whereWorktrees': 'Aparte worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Elke run krijgt een eigen branch, zodat codewijzigingen elkaar nooit botsen. Houd de beste over.',
   'chat.parallel.settings.baseBranchTitle': 'Basisbranch',

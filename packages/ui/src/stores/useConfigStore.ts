@@ -33,6 +33,7 @@ import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, upd
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
 import {
+    DEFAULT_AUTO_CREATE_WORKTREE,
     DEFAULT_WORKTREE_START_FROM,
     type PullRequestWorktreeMode,
     type WorktreeStartFrom,
@@ -1844,7 +1845,7 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsDefaultAgent: undefined,
                 opencodeDefaultAgent: undefined,
                 opencodeDefaultModel: undefined,
-                settingsAutoCreateWorktree: false,
+                settingsAutoCreateWorktree: DEFAULT_AUTO_CREATE_WORKTREE,
                 settingsWorktreeStartFrom: DEFAULT_WORKTREE_START_FROM,
                 settingsWorktreeStartFromOverrides: {},
                 settingsPullRequestWorktree: 'check-out',
@@ -2853,7 +2854,7 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsDefaultModel: edited ? state.settingsDefaultModel : defaults.defaultModel,
                             settingsDefaultVariant: edited ? state.settingsDefaultVariant : defaults.defaultVariant,
                             settingsDefaultAgent: edited ? state.settingsDefaultAgent : defaults.defaultAgent,
-                            settingsAutoCreateWorktree: edited ? state.settingsAutoCreateWorktree : defaults.autoCreateWorktree ?? false,
+                            settingsAutoCreateWorktree: edited ? state.settingsAutoCreateWorktree : defaults.autoCreateWorktree ?? DEFAULT_AUTO_CREATE_WORKTREE,
                             settingsWorktreeStartFrom: edited ? state.settingsWorktreeStartFrom : defaults.worktreeStartFrom ?? DEFAULT_WORKTREE_START_FROM,
                             settingsWorktreeStartFromOverrides: edited ? state.settingsWorktreeStartFromOverrides : defaults.worktreeStartFromOverrides ?? {},
                             settingsPullRequestWorktree: edited ? state.settingsPullRequestWorktree : defaults.pullRequestWorktree ?? 'check-out',

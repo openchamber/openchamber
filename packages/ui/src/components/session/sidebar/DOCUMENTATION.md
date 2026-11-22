@@ -509,6 +509,21 @@ submenus (not in VS Code), then Collapse all / Expand all.
   Both views draw the same zone headers, with the leading icon that turns
   into the collapse chevron on hover and the Chats new-chat button; project
   headers are shared too, with the same hover actions and menu.
+- Headerless (`headerlessSidebar`, per surface, off by default; the display
+  menu's Hide section headers, issue #21) draws the same views' section order
+  with no zone, project, worktree, group or folder headers. It is a row-model
+  mode, not a CSS hide, so collapse is ignored, section dragging has no
+  headers, sticky headers are absent, and Collapse all / Expand all are
+  hidden. Each session is listed once, where the order first places it, so a
+  pinned or in-work session stays in its zone instead of repeating under its
+  project. A thin `section-divider` row marks each section boundary. Every
+  row uses a form that names its project: `timeline-by-time` when the List is
+  sorted by time, `mixed-flat` when it is compact, otherwise
+  `timeline-mixed`. The list is flat, so subsessions are not opened under
+  their parent. One whole-list limit replaces the per-container ones: 20 rows
+  plus 20 per Show more (`activity:headerless`), and search still lists every
+  match. Done/Archive navigation follows the rows actually drawn. Desktop
+  first; the phone surface keeps its own persisted choice (see #18).
 - Below Chats, Pinned and In work it renders one project
   header per project followed by that project's non-archived root sessions
   from every worktree and space, in the shared lifecycle order with pinned
@@ -583,6 +598,16 @@ submenus (not in VS Code), then Collapse all / Expand all.
 - Search filters the timeline's projects with the same rule as In work (exact
   `ses_` id, else title contains), lists every match without reveal limits,
   hides projects without matches, and counts one match per listed row.
+
+## Session times
+
+The display menu's Session times submenu (`shell/SessionTimestampSortMenu.tsx`) holds this window's choices, kept in `useSessionDisplayStore.sessionTimes` and `sessionTimestampSort` (local, not synced). By default the row looks as it did: its recorded times (created, last input, last completed output, last activity; `sync/session-activity-timestamps.ts`) and the last run's length sit in the whole-row hover card. In the row puts the chosen fields under the row; Hidden shows none. Sorting by a time keeps pins first and subsessions under their parent; sessions without that time go last in both directions.
+
+Two duration choices are off by default. Last run time when idle replaces an idle row's date with the time from its last prompt to its last activity. Counting from the last prompt makes a running row's counter span auto-continues, goal continuations and background waits, which record no new prompt. Either one falls back to the existing readout when no prompt was recorded. A row already counts while its session idles on a running subagent or background command (`useSessionTurnActivity`).
+
+### Why the times wait in the hover card by default
+
+Four extra lines on every row doubled its height and changed every list's rhythm. The hover card already carries the row's details, so the default view stays as it was and the denser modes are a choice.
 
 ## Search
 

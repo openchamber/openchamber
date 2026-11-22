@@ -245,6 +245,15 @@ export const readDurableJsonFileSync = (filePath, options = {}) => {
   return judgeRaw(raw, options.validateValue);
 };
 
+/**
+ * Sync bounded raw read: the same regular-file-checked, size-capped
+ * read the JSON reader performs, for callers that need the raw text
+ * itself (for example an emptiness recheck) rather than a judged
+ * value. Throws the same coded errors as the reader (too large, not
+ * regular, ENOENT).
+ */
+export const readDurableRawFileSync = (filePath, options = {}) => readBoundedRawSync(filePath, options);
+
 const preservedCandidate = (filePath) =>
   `${filePath}.corrupt-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 

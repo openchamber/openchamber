@@ -45,4 +45,45 @@ describe('redactHostsConfigForRemote', () => {
       localOrigin: 'http://127.0.0.1:3000',
     });
   });
+
+  test('strips URL-embedded basic-auth credentials from url and apiUrl', () => {
+    const config = {
+      hosts: [
+        {
+          id: 'a',
+          label: 'Work',
+          url: 'https://user:pass@work.test:8443/base',
+          apiUrl: 'https://user:pass@work.test:8443/api',
+          clientToken: 'secret-a',
+        },
+        { id: 'b', label: 'Plain', url: 'https://plain.test', apiUrl: 'https://plain.test/api' },
+      ],
+      defaultHostId: 'a',
+    };
+
+    const redacted = redactHostsConfigForRemote(config);
+
+    expect(redacted.hosts[0]).toEqual({
+      id: 'a',
+      label: 'Work',
+      url: 'https://work.test:8443/base',
+      apiUrl: 'https://work.test:8443/api',
+    });
+    expect(redacted.hosts[1]).toEqual({ id: 'b', label: 'Plain', url: 'https://plain.test', apiUrl: 'https://plain.test/api' });
+    expect(JSON.stringify(redacted)).not.toContain('pass');
+    // The stored config keeps its credentials: local callers and probing
+    // at use time are unaffected.
+    expect(config.hosts[0].url).toContain('user:pass@');
+  });
+
+  test('strips credentials from a label generated from the URL', () => {
+    const config = {
+      hosts: [{ id: 'c', label: 'https://user:pass@auto.test/base', url: 'https://user:pass@auto.test/base' }],
+    };
+
+    const redacted = redactHostsConfigForRemote(config);
+
+    expect(redacted.hosts[0].label).toBe('https://auto.test/base');
+    expect(JSON.stringify(redacted)).not.toContain('pass');
+  });
 });

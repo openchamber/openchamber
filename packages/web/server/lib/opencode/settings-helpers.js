@@ -566,6 +566,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.openTrackerLinksOnBoard === true || candidate.openTrackerLinksOnBoard === false) {
       result.openTrackerLinksOnBoard = candidate.openTrackerLinksOnBoard;
     }
+    if (Number.isInteger(candidate.questionTimeoutMinutes) && candidate.questionTimeoutMinutes >= 0 && candidate.questionTimeoutMinutes <= 1440) {
+      result.questionTimeoutMinutes = candidate.questionTimeoutMinutes;
+    }
+    if (candidate.questionsInBackground === true || candidate.questionsInBackground === false) {
+      result.questionsInBackground = candidate.questionsInBackground;
+    }
     if (candidate.fileTreeSide === 'left' || candidate.fileTreeSide === 'right') {
       result.fileTreeSide = candidate.fileTreeSide;
     }

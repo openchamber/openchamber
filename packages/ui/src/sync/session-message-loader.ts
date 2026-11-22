@@ -20,6 +20,7 @@ import { startSessionLoadPerformanceEvent } from "./session-load-performance"
 import { dropSessionCaches } from "./session-cache"
 import { SessionCacheRetention } from "./session-cache-retention"
 import { SESSION_CACHE_LIMIT } from "./types"
+import { recordSessionTimestampsFromHistory } from "./session-activity-timestamps"
 
 // One agent turn can span well over a hundred tool steps, so the first
 // request is sized to hold a long last turn without a follow-up read.
@@ -1203,6 +1204,10 @@ export class SessionMessageLoader {
     )
     if (!isCurrent()) return null
     // Records the page made redundant were removed before materializing;
+    recordSessionTimestampsFromHistory(target.sessionID, merged.session.map((info) => ({
+      info,
+      parts: materialized.part[info.id] ?? [],
+    })))
     // that removal is a change even when the page itself changes nothing.
     const messagesChanged = materialized.messagesChanged || state.message !== current.message
     const partsChanged = materialized.partsChanged || state.part !== current.part

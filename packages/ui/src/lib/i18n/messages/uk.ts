@@ -6,6 +6,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -159,6 +160,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionMenuHintsI18n.uk,
   ...sessionErrorRecoveryI18n.uk,
   ...sidebarLayoutI18n.uk,
+  ...activityTimesI18n.uk,
   ...projectKnowledgeI18n.uk,
   ...linearPanelI18n.uk,
   ...routingI18n.uk,
@@ -642,6 +644,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.viewMode.label": "Вигляд",
   "sessions.sidebar.header.viewMode.projects": "Деревом",
   "sessions.sidebar.header.viewMode.timeline": "Списком",
+  "sessions.sidebar.header.viewMode.headerless": "Сховати заголовки розділів",
   "sessions.sidebar.activity.chatsEmpty": "Чатів ще немає.",
   "chat.chatInput.chooseProject": "Вибрати проєкт",
   "sessions.archivePage.allDirectories": "Всі директорії",
@@ -2570,6 +2573,19 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.modelAttribution.failoverLabel": "Перемкнуто з",
   "chat.messageBody.modelChanged.notice": "Модель змінено: {from} → {to}",
   "chat.messageBody.modelChanged.noticeWithReason": "Модель змінено: {from} → {to} ({reason})",
+  "chat.messageBody.modelChanged.preferPrevious": "Віддати перевагу попередній",
+  "chat.messageBody.modelChanged.preferPreviousTitle": "Нехай пули моделей протягом дня віддають перевагу {model}",
+  "chat.currentModel.label": "Поточна модель: {model}",
+  "chat.currentModel.labelWithPool": "Поточна модель: {model} з пулу {pool}",
+  "chat.currentModel.menu.openHint": "Натисніть, щоб вибрати модель",
+  "chat.currentModel.menu.timing": "Перемкнути",
+  "chat.currentModel.menu.directPickHelp": "Прямий вибір вимикає перехід на резервну модель до повернення в пул.",
+  "chat.currentModel.timing.immediately": "Зараз (перезапускає поточну відповідь)",
+  "chat.currentModel.timing.nextStep": "На наступному кроці",
+  "chat.currentModel.timing.nextInput": "З наступним повідомленням",
+  "chat.currentModel.menu.members": "Моделі в пулі {pool}",
+  "chat.currentModel.menu.returnToPool": "Повернутися до пулу {pool}",
+  "chat.currentModel.toast.failed": "Не вдалося перемкнути модель",
   "chat.generatedResult.actions.copy": "Копіювати",
   "chat.generatedResult.actions.copied": "Скопійовано",
   "chat.generatedResult.commit.title": "Згенероване повідомлення коміту",
@@ -3851,8 +3867,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': 'Залишити цей',
   'multirun.overview.addModel.action': 'Додати модель',
   'multirun.overview.addModel.hint': 'Той самий промпт ще на одній моделі в цьому запуску',
-  'chat.parallel.settings.whereShared': 'Папка проєкту',
-  'chat.parallel.settings.whereSharedHint': 'Усі запуски працюють у вашій робочій копії. Найкраще для питань і досліджень.',
+  'chat.parallel.settings.whereShared': 'Спільна папка',
+  'chat.parallel.settings.whereSharedHint': 'Усі запуски працюють у папці, вибраній для цієї чернетки. Найкраще для питань і досліджень.',
   'chat.parallel.settings.whereWorktrees': 'Окремі worktree',
   'chat.parallel.settings.whereWorktreesHint': 'Кожен запуск отримує власну гілку, тож зміни коду не конфліктують. Залиште найкращий.',
   'chat.parallel.settings.baseBranchTitle': 'Базова гілка',

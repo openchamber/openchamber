@@ -6,6 +6,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -149,6 +150,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionMenuHintsI18n.pl,
   ...sessionErrorRecoveryI18n.pl,
   ...sidebarLayoutI18n.pl,
+  ...activityTimesI18n.pl,
   ...projectKnowledgeI18n.pl,
   ...linearPanelI18n.pl,
   ...routingI18n.pl,
@@ -473,6 +475,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': 'Widok',
   'sessions.sidebar.header.viewMode.projects': 'Drzewo',
   'sessions.sidebar.header.viewMode.timeline': 'Lista',
+  'sessions.sidebar.header.viewMode.headerless': 'Ukryj nagłówki sekcji',
   'sessions.sidebar.activity.chatsEmpty': 'Nie ma jeszcze czatów.',
   'chat.chatInput.chooseProject': 'Wybierz projekt',
   'sessions.archivePage.allDirectories': 'Wszystkie katalogi',
@@ -1191,6 +1194,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Przełączono awaryjnie z',
   'chat.messageBody.modelChanged.notice': 'Model zmieniony: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Model zmieniony: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Preferuj poprzedni',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Niech pule modeli preferują {model} przez dzień',
+  'chat.currentModel.label': 'Bieżący model: {model}',
+  'chat.currentModel.labelWithPool': 'Bieżący model: {model} z puli {pool}',
+  'chat.currentModel.menu.openHint': 'Kliknij, aby wybrać model',
+  'chat.currentModel.menu.timing': 'Przełącz',
+  'chat.currentModel.menu.directPickHelp': 'Bezpośredni wybór wyłącza przełączanie awaryjne puli do czasu powrotu do niej.',
+  'chat.currentModel.timing.immediately': 'Teraz (uruchamia ponownie trwającą odpowiedź)',
+  'chat.currentModel.timing.nextStep': 'W następnym kroku',
+  'chat.currentModel.timing.nextInput': 'Z następną wiadomością',
+  'chat.currentModel.menu.members': 'Modele w puli {pool}',
+  'chat.currentModel.menu.returnToPool': 'Wróć do puli {pool}',
+  'chat.currentModel.toast.failed': 'Nie udało się przełączyć modelu',
   'chat.generatedResult.actions.copy': 'Kopiuj',
   'chat.generatedResult.actions.copied': 'Skopiowano',
   'chat.generatedResult.commit.title': 'Wygenerowana wiadomość commita',
@@ -3855,8 +3871,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': 'Zachowaj ten',
   'multirun.overview.addModel.action': 'Dodaj model',
   'multirun.overview.addModel.hint': 'Ten sam prompt na jeszcze jednym modelu w tym uruchomieniu',
-  'chat.parallel.settings.whereShared': 'Katalog projektu',
-  'chat.parallel.settings.whereSharedHint': 'Wszystkie uruchomienia pracują w Twojej kopii roboczej. Najlepsze do pytań i badań.',
+  'chat.parallel.settings.whereShared': 'Wspólny katalog',
+  'chat.parallel.settings.whereSharedHint': 'Wszystkie uruchomienia pracują w katalogu wybranym dla tego szkicu. Najlepsze do pytań i badań.',
   'chat.parallel.settings.whereWorktrees': 'Osobne worktree',
   'chat.parallel.settings.whereWorktreesHint': 'Każde uruchomienie ma własną gałąź, więc zmiany w kodzie się nie zderzają. Zachowaj najlepsze.',
   'chat.parallel.settings.baseBranchTitle': 'Gałąź bazowa',

@@ -6,6 +6,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -149,6 +150,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionMenuHintsI18n.ja,
   ...sessionErrorRecoveryI18n.ja,
   ...sidebarLayoutI18n.ja,
+  ...activityTimesI18n.ja,
   ...projectKnowledgeI18n.ja,
   ...linearPanelI18n.ja,
   ...routingI18n.ja,
@@ -633,6 +635,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '表示',
   'sessions.sidebar.header.viewMode.projects': 'ツリー',
   'sessions.sidebar.header.viewMode.timeline': 'リスト',
+  'sessions.sidebar.header.viewMode.headerless': 'セクション見出しを隠す',
   'sessions.sidebar.activity.chatsEmpty': 'まだチャットはありません。',
   'chat.chatInput.chooseProject': 'プロジェクトを選択',
   'sessions.archivePage.allDirectories': 'すべてのディレクトリ',
@@ -2600,6 +2603,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': 'フェイルオーバー元',
   'chat.messageBody.modelChanged.notice': 'モデルが変更されました: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'モデルが変更されました: {from} → {to}（{reason}）',
+  'chat.messageBody.modelChanged.preferPrevious': '前のモデルを優先',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'モデルプールで1日間 {model} を優先する',
+  'chat.currentModel.label': '現在のモデル: {model}',
+  'chat.currentModel.labelWithPool': '現在のモデル: {model}（プール {pool}）',
+  'chat.currentModel.menu.openHint': 'クリックしてモデルを選択',
+  'chat.currentModel.menu.timing': '切り替え',
+  'chat.currentModel.menu.directPickHelp': '直接選択すると、プールに戻るまでプールのフェイルオーバーが停止します。',
+  'chat.currentModel.timing.immediately': '今すぐ（実行中の応答をやり直します）',
+  'chat.currentModel.timing.nextStep': '次のステップで',
+  'chat.currentModel.timing.nextInput': '次のメッセージで',
+  'chat.currentModel.menu.members': 'プール {pool} のモデル',
+  'chat.currentModel.menu.returnToPool': 'プール {pool} に戻る',
+  'chat.currentModel.toast.failed': 'モデルを切り替えられませんでした',
   'chat.generatedResult.actions.copy': 'コピー',
   'chat.generatedResult.actions.copied': 'コピーしました',
   'chat.generatedResult.commit.title': '生成されたコミットメッセージ',
@@ -3850,8 +3866,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': 'これを残す',
   'multirun.overview.addModel.action': 'モデルを追加',
   'multirun.overview.addModel.hint': 'この実行で同じプロンプトをもう1つのモデルに送ります',
-  'chat.parallel.settings.whereShared': 'プロジェクトディレクトリ',
-  'chat.parallel.settings.whereSharedHint': 'すべての実行があなたの作業コピーで動きます。質問や調査に最適です。',
+  'chat.parallel.settings.whereShared': '共有ディレクトリ',
+  'chat.parallel.settings.whereSharedHint': 'すべての実行がこの下書きで選んだディレクトリで動きます。質問や調査に最適です。',
   'chat.parallel.settings.whereWorktrees': '個別のワークツリー',
   'chat.parallel.settings.whereWorktreesHint': '実行ごとに専用のブランチを使うので、コードの変更が衝突しません。一番良いものを残せます。',
   'chat.parallel.settings.baseBranchTitle': 'ベースブランチ',

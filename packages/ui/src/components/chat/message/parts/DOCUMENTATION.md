@@ -89,6 +89,26 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
+### Question rows after the call ended
+
+`QuestionToolDetails` shows an agent's `question` call with every question
+and option however the call ended. Once it has ended, Answer (Answer again,
+or Answer anyway for a timed-out call) opens the questions as a form whose
+answers reach the agent as a new message. Every such answer is late, so the
+form also asks how the agent should use it (`LateAnswerMode` in
+`lib/questionTimeout.ts`: do exactly this, FYI what I would have done, or
+consider them if not done yet; the last is the default) and takes an
+optional note; both go into the message after the answers
+(`formatQuestionAnswers`). A call that `sync/question-timeouts.ts` closed on
+its timeout is drawn greyed out with "Timed out" in its row header and its
+expanded body; one left to answer later says the agent went on, not greyed.
+Either replaces the result text, which is the message OpenChamber closed it
+with. A dismissed call keeps "Not answered" with OpenCode's reason, and any
+call without returned answers offers Answer anyway. Copy questions and
+answers puts every question, its options and the answer shown (or the picks
+kept from the dock) on the clipboard as Markdown
+(`formatQuestionsAsMarkdown`).
+
 ### Bidirectional prose
 
 Shared chat CSS applies `unicode-bidi: plaintext` to prose blocks, including

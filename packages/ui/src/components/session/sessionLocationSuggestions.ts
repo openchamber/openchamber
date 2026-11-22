@@ -2,7 +2,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { formatDirectoryName } from '@/lib/utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 
-export type SessionLocationSuggestion = {
+type SessionLocationSuggestion = {
   path: string;
   label: string;
   /** Worktree branch, or null for a project root. */

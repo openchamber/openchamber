@@ -355,6 +355,8 @@ Installer output is discarded, not forwarded to clients or logs.
   - `markUserMessageSent(sessionId)`
   - `resetAllSessionActivityToIdle()`
   - `interruptBusySessionsAfterRestart()`: settles every session whose authoritative status is `busy`/`retry` or whose activity phase is still busy, broadcasts `openchamber:session-status` idle plus an OpenCode-shaped `session.error`, resets leftover activity/cooldowns, and returns the interrupted session IDs in stable order.
+  - `reconcileBusySessionsWithActive(readActiveSessionIds)`: confirms missed completions against two consecutive successful running-list reads and returns the sessions it settled. Failed reads, stream disconnects, and live status events reset missing confirmation. A duplicate busy event invalidates its candidate even when public updates are throttled. Isolated-space sessions remain outside host-list authority. Settlement uses ordinary idle status and never manufactures a turn error or changes history.
+  - `startStatusReconciliation(readActiveSessionIds)`: starts one 30-second timer for this runtime, with no requests while no sessions are busy. `dispose()` cancels it and invalidates pending reads. `index.js` supplies the validated active-list probe, rejects a port change during the read, and skips reads while a predecessor OpenCode drains. It also requests a check on watcher connection. `hasBusySessions()` reports whether a check has work to do.
   - `dispose()`
 
 The runtime maintains active-session count incrementally from idempotent activity phase transitions. Upstream stall-timeout and lifecycle health checks read it in O(1); the hourly cleanup removes activity phases older than 24 hours without broadcasting synthetic state transitions. Snapshot generation remains reserved for the session-activity API.
@@ -432,6 +434,7 @@ Liveness as landed: a recorded entry appears only while two checks pass for its 
 ## Public exports (lifecycle.js)
 - `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) is fired after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), then calls `interruptBusySessionsAfterRestart()` and broadcasts one `opencode-restart-interrupted` UI notification when interrupted turns exist (#2943).
 - Returned API:
+  - `hasDrainingOpenCode()`: reports whether a managed predecessor is still finishing its sessions. Status reconciliation must not settle those sessions from the replacement server's list. The value is exposed as the optional `openCodeDraining` field of `/api/sessions/status`.
   - `startOpenCode()`
   - `restartOpenCode()`
   - `waitForOpenCodeReady(timeoutMs?, intervalMs?)`

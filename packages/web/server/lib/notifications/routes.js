@@ -45,6 +45,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     getSessionActivitySnapshot,
     getManagedServersSnapshot = async () => ({ version: 1, serverTime: Date.now(), servers: [] }),
     getSessionStateSnapshot,
+    isOpenCodeDraining = () => false,
     getPendingBlockingRequestsSnapshot,
     getSessionAttentionSnapshot,
     getSessionState,
@@ -335,6 +336,10 @@ export const registerNotificationRoutes = (app, dependencies) => {
     res.json({
       sessions: snapshot,
       pending: typeof getPendingBlockingRequestsSnapshot === 'function' ? getPendingBlockingRequestsSnapshot() : {},
+      // A replaced OpenCode still runs the turns busy at its handoff, and the
+      // current OpenCode's running list does not name them: clients must not
+      // settle a session from that list while this is true.
+      openCodeDraining: isOpenCodeDraining() === true,
       serverTime: Date.now(),
     });
   });

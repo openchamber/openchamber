@@ -117,6 +117,7 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-control.js`
   - Sends one typed action request to the authenticated OpenChamber control endpoint and maps HTTP failures to CLI exit behavior.
+  - Owns the client-side HTTP budget per action: instant calls keep the 4 second default, while `session.create` gets the worktree provisioning budget because the server provisions a worktree even when the caller names none.
   - Must not reproduce session, scheduled-task, project-resolution, or wait orchestration.
 
 - `cli-api-target.js`

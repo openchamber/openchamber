@@ -319,6 +319,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sidebarHeaderless": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "sidebarSessionRowDisplay": {
       "scope": "profile",
       "perSurface": true
@@ -481,6 +485,12 @@
         "desktop",
         "mobile"
       ]
+    },
+    "questionTimeoutMinutes": {
+      "scope": "profile"
+    },
+    "questionsInBackground": {
+      "scope": "profile"
     },
     "autoCreateWorktree": {
       "scope": "profile"
