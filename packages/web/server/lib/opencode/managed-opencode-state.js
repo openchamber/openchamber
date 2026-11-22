@@ -5,6 +5,10 @@ import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 
 const STATE_VERSION = 1;
+// The on-disk version of the v1 state.json/draining.json pair, named for the
+// self-handoff preflight: a successor reports the version it verified it can
+// read, and the predecessor compares it against the version it writes.
+export const MANAGED_OPENCODE_STATE_VERSION = STATE_VERSION;
 // These files contain a handful of state fields and a small draining-process list.
 // Keep enough room for long executable and instance paths while bounding sync reads.
 const MANAGED_OPENCODE_STATE_MAX_BYTES = 64 * 1024;

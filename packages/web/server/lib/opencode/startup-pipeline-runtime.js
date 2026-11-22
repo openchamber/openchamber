@@ -40,6 +40,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       bootstrapOpenCodeAtStartup,
       onListenerReady = null,
       requestHandoff = null,
+      handoffProbeGate = null,
       staticRoutesRuntime,
       process,
       crypto,
@@ -144,6 +145,10 @@ export const createStartupPipelineRuntime = (dependencies) => {
     });
 
     const bindHost = serverStartupRuntime.resolveBindHost(host);
+    // A handoff-probe successor proves itself before this listen: once the server
+    // listens on the inherited socket it is already serving requests, so the
+    // predecessor's go has to arrive first. A refused gate aborts the start.
+    if (handoffProbeGate) await handoffProbeGate({ port, bindHost });
     const startupResult = await serverStartupRuntime.startListeningAndMaybeTunnel({
       port,
       bindHost,

@@ -817,8 +817,10 @@ export const createAgentToolRuntime = (dependencies) => {
    * is currently off: a tool switched on later reaches a process that already
    * knows where and how to call back, so the toggle needs no restart.
    */
-  const createChildEnv = ({ reuseToken = null } = {}) => {
-    const port = getActivePort();
+  const createChildEnv = ({ reuseToken = null, listenerPort = null } = {}) => {
+    // A handoff successor previews its launch before it listens: it passes the port it is
+    // about to serve on, which is the port the callback URL will name once it listens.
+    const port = Number.isInteger(listenerPort) && listenerPort > 0 ? listenerPort : getActivePort();
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }

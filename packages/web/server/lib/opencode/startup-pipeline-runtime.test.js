@@ -38,4 +38,55 @@ describe('startup pipeline runtime', () => {
 
     expect(order).toEqual(['listen', 'port:3901', 'detect', 'bootstrap']);
   });
+
+  const runWithGate = (gate) => {
+    const order = [];
+    const runtime = createStartupPipelineRuntime({
+      createTerminalRuntime: () => ({}),
+      createDictationRuntime: () => ({}),
+      createMessageStreamWsRuntime: () => ({}),
+      createPersistentPtyWsRuntime: () => ({}),
+      createServerStartupRuntime: () => ({
+        resolveBindHost: () => '127.0.0.1',
+        startListeningAndMaybeTunnel: async () => {
+          order.push('listen');
+          return { activePort: 3901 };
+        },
+        attachProcessHandlers: vi.fn(),
+      }),
+    });
+    const run = runtime.run({
+      app: {},
+      setupProxy: vi.fn(),
+      staticRoutesRuntime: { registerStaticRoutes: vi.fn() },
+      apiOnly: false,
+      tunnelRuntimeContext: { setActivePort: vi.fn() },
+      scheduleOpenCodeApiDetection: vi.fn(),
+      bootstrapOpenCodeAtStartup: vi.fn(),
+      process: {},
+      crypto: {},
+      server: {},
+      attachSignals: false,
+      port: 3901,
+      handoffProbeGate: async (address) => {
+        order.push('gate');
+        await gate(address);
+      },
+    });
+    return { run, order };
+  };
+
+  it('runs the handoff probe gate before listening, with the port and bind host', async () => {
+    const seen = [];
+    const { run, order } = runWithGate(async (address) => { seen.push(address); });
+    await run;
+    expect(seen).toEqual([{ port: 3901, bindHost: '127.0.0.1' }]);
+    expect(order).toEqual(['gate', 'listen']);
+  });
+
+  it('does not listen when the handoff probe gate refuses', async () => {
+    const { run, order } = runWithGate(async () => { throw new Error('preflight-failed'); });
+    await expect(run).rejects.toThrow('preflight-failed');
+    expect(order).toEqual(['gate']);
+  });
 });

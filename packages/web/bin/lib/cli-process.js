@@ -79,6 +79,12 @@ function writeInstanceOptions(instanceFilePath, options, onNotice) {
       hasUiPassword: typeof options.uiPassword === 'string',
       apiOnly: options.apiOnly === true,
       startedAt: Number.isFinite(options.startedAt) ? options.startedAt : Date.now(),
+      // What is running, so `openchamber handoff` and `status` can read it back: the
+      // install entry and version this process serves, and the handoff protocol it
+      // speaks. A file without handoffProtocol names a pre-protocol-2 instance.
+      version: options.version?.length > 0 ? options.version : undefined,
+      entry: options.entry?.length > 0 ? options.entry : undefined,
+      handoffProtocol: Number.isInteger(options.handoffProtocol) ? options.handoffProtocol : undefined,
     };
     fs.writeFileSync(instanceFilePath, JSON.stringify(toStore, null, 2), { mode: 0o600 });
   } catch (error) {

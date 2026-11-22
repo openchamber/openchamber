@@ -412,6 +412,13 @@ async function handOffInstance(instance, options = {}) {
   const pidFilePath = await getPidFilePath(instance.port);
   const fromPid = instance.pid;
   if (!Number.isInteger(fromPid) || fromPid <= 0) return { port: instance.port, ok: false, reason: 'unknown-pid' };
+  // Bootstrap: an instance started before handoff protocol 2 has no handoffProtocol in
+  // its instance file. It cannot read the request file or speak the probe protocol, so
+  // the first hop onto the feature is a one-time restart; every later hop is a handoff.
+  const instanceOptions = instance.instanceFilePath ? readInstanceOptions(instance.instanceFilePath) : null;
+  if (!Number.isInteger(instanceOptions?.handoffProtocol)) {
+    return { port: instance.port, ok: false, reason: 'predecessor-too-old', message: 'the running instance predates handoff protocol 2; restart required' };
+  }
   try {
     const target = readHandoffTarget(options.handoffEntry);
     writeHandoffRequest({
