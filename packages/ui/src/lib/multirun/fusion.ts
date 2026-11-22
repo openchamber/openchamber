@@ -94,9 +94,9 @@ const INLINE_DIFF_CONTEXT_SHARE = 0.1;
 // Rough token cost of one changed line (content plus diff framing).
 const TOKENS_PER_DIFF_LINE = 12;
 
-/** Selected lanes whose worktrees hold changes and who all have one: that is a code fusion. */
-export const fusionModeFor = (stats: ReadonlyArray<{ hasWorktree: boolean; diff: LaneDiffStat | null }>): FusionMode => (
-  stats.length > 0 && stats.every((entry) => entry.hasWorktree) && stats.some((entry) => (entry.diff?.files ?? 0) > 0)
+/** Code results keep their original base even after their work has been committed. */
+export const fusionModeFor = (stats: ReadonlyArray<{ hasWorktree: boolean; diff: LaneDiffStat | null; hasCodeResult?: boolean }>): FusionMode => (
+  stats.length > 0 && stats.every((entry) => entry.hasWorktree) && stats.some((entry) => entry.hasCodeResult || (entry.diff?.files ?? 0) > 0)
     ? 'code'
     : 'answers'
 );
@@ -205,7 +205,11 @@ export async function startRunFusion(input: {
     source.location?.worktree ? io.diffStat(source.location.worktree.path) : null
   )));
   assertCurrent();
-  const mode = fusionModeFor(sources.map((source, index) => ({ hasWorktree: Boolean(source.location?.worktree), diff: diffs[index] })));
+  const modeInputs = sources.map((source, index) => ({
+    hasWorktree: Boolean(source.location?.worktree), diff: diffs[index],
+    hasCodeResult: source.identity.role === 'fusion' && Boolean(source.identity.fusion?.baseCommit),
+  }));
+  const mode = fusionModeFor(modeInputs);
   const prompts = await loadVariantPrompts(sources, assertCurrent, io);
   const project = sources.find((source) => source.location)?.location?.project ?? null;
   const first = sources[0];
@@ -235,7 +239,9 @@ export async function startRunFusion(input: {
     const fusionBase = first.identity.fusion?.baseCommit ?? snapshots[0].head;
     baseCommit = fusionBase;
     const changedLines = diffs.reduce((total, diff) => total + (diff ? diff.insertions + diff.deletions : 0), 0);
-    const inlineDiffs = shouldInlineDiffs(changedLines, judge.contextLimit);
+    // Working-index counts do not bound committed result history. Let the
+    // model read those snapshots with Git instead of inlining unbounded diffs.
+    const inlineDiffs = !modeInputs.some((entry) => entry.hasCodeResult) && shouldInlineDiffs(changedLines, judge.contextLimit);
     const diffTexts = inlineDiffs
       ? await Promise.all(snapshots.map((snapshot) => io.rangeDiff(projectDirectory, { base: fusionBase, head: snapshot.commit })
         .then((response) => response.diff)))
@@ -277,7 +283,8 @@ export async function startRunFusion(input: {
         `Snapshot commit: ${snapshot.commit}`,
         `Session: ${source.session.id}`,
         `Started from: ${snapshot.head}`,
-        `Changes: ${stat}`,
+        `Uncommitted changes: ${stat}`,
+        ...(source.identity.fusion?.baseCommit ? ['This result includes retained code history. Read its full snapshot diff from the fusion base commit.'] : []),
         'Final answer:',
         source.reply,
       ];

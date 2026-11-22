@@ -47,7 +47,9 @@ function fixture(code: boolean) {
     locate: async (session) => ({ project: { id: 'project', path: projectPaths.get(session.id) ?? '/repo' }, worktree: code ? {
       path: session.directory, projectDirectory: '/repo', branch: session.id, label: session.id,
     } : null }),
-    diffStat: async () => ({ files: 1, insertions: 5, deletions: 1 }),
+    diffStat: async (directory) => createdDirectories.includes(directory)
+      ? { files: 0, insertions: 0, deletions: 0 }
+      : { files: 1, insertions: 5, deletions: 1 },
     snapshot: async (directory, { ref }) => {
       if (failure === 'snapshot') throw new Error('snapshot failed');
       const commit = `snapshot-${directory.split('/').pop()}-${refs.size}`;
@@ -303,9 +305,20 @@ else test('isolated runtime retains source artifacts through repeated fusion and
     const receipt = getMultiRunIdentity(first)?.fusion;
     const sourceRef = receipt?.sources[0].snapshotRef;
     if (!sourceRef || !receipt?.baseCommit) throw new Error('Snapshot receipt missing');
+    fs.writeFileSync(path.join(first.directory, 'fused-result.txt'), 'Committed fusion artifact\n');
+    git(['-C', first.directory, 'add', 'fused-result.txt']);
+    git(['-C', first.directory, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture fusion artifact']);
     fs.writeFileSync(path.join(sources[0].directory, 'result.txt'), 'Result 0 revised\n');
     const second = await fuse(created.sessionIds);
-    await fuse([first.id, second.id]);
+    const combined = await fuse([first.id, second.id]);
+    expect(new Set([first.directory, second.directory, combined.directory]).size).toBe(3);
+    expect(combined.directory).not.toBe(repo);
+    expect(getMultiRunIdentity(combined)?.fusion?.baseCommit).toBe(receipt.baseCommit);
+    const combinedSource = getMultiRunIdentity(combined)?.fusion?.sources[0];
+    if (!combinedSource?.snapshotCommit) throw new Error('Combined code snapshot missing');
+    const combinedInput = await getGitRangeDiff(repo, { base: receipt.baseCommit, head: combinedSource.snapshotCommit });
+    expect(combinedInput.diff).toContain('Committed fusion artifact');
+    expect(fs.readFileSync(path.join(first.directory, 'fused-result.txt'), 'utf8')).toBe('Committed fusion artifact\n');
     const retained = await getGitRangeDiff(repo, { base: receipt.baseCommit, head: sourceRef });
     expect(retained.diff).toContain('Result 0 original');
     expect(retained.diff).not.toContain('Result 0 revised');

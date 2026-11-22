@@ -162,7 +162,7 @@ their original worktrees, including ignored files.
 - **Answers mode** (a source shares a directory, or nothing changed): the
   fusion session runs in the project directory and receives the task prompts
   and final answers.
-- **Code mode** (every source has a worktree and at least one changed files):
+- **Code mode** (every source has a worktree and at least one changed files or carries a code-fusion receipt):
    every source is snapshotted to a unique per-pass ref, the fusion gets its own worktree (a fresh `<slug>/fusion-<UUID>` branch) at the lanes'
   starting commit, and receives a manifest: task, final
   answer, change counts and snapshot commit per lane. Diffs are inlined only
@@ -177,6 +177,9 @@ their receipts back to the original task prompts, with visited-session deduplica
 Saved source guidance, current pass instructions, and recent parent conversation
 join the fusion context. A parent read failure stops the pass rather than silently
 omitting guidance. A failed send retains the created result and snapshots for recovery.
+Code-fusion receipts keep code mode for later combinations even after a result's
+changes are committed. The new checkout and source diffs use the retained original
+base commit, so a clean working index does not omit committed result changes.
 
 Fusion results keep the group identity with role `fusion`, so they join the run
 as its first card. `autoFusion.ts` starts the configured fusion exactly once, on

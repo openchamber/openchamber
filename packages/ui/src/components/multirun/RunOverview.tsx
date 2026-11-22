@@ -218,7 +218,9 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   const fuseSources = bar.kind === 'fuse' ? finishedLaneIds.filter((id) => !bar.excluded.has(id)) : [];
   const fuseMode = fusionModeFor(fuseSources.map((id) => {
     const diff = summaries.get(id)?.diff;
-    return { hasWorktree: Boolean(worktreeById.get(id)), diff: diff?.state === 'ready' ? diff.stat : null };
+    const identity = memberById.get(id)?.identity;
+    return { hasWorktree: Boolean(worktreeById.get(id)), diff: diff?.state === 'ready' ? diff.stat : null,
+      hasCodeResult: identity?.role === 'fusion' && Boolean(identity.fusion?.baseCommit) };
   }));
 
   // Cards are only selectable while choosing fusion sources.
