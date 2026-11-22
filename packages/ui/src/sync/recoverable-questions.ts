@@ -2,6 +2,7 @@ import { create } from "zustand"
 import { z } from "zod"
 import type { SyncEvent } from "@/lib/opencode/events"
 import type { FormRequest, Message, Metadata, Part, ToolPart } from "@/lib/opencode/model"
+import { getRuntimeKey } from "@/lib/runtime-switch"
 
 type QuestionToolLink = { messageID: string; toolID: string }
 export type QuestionAskOutcome = "answered" | "dismissed" | "deferred" | "turn-death" | "shutdown" | "pending" | "unresolved"
@@ -44,6 +45,7 @@ export const resetRecoverableQuestions = (): void => {
 }
 
 const toolKey = (tool: QuestionToolLink): string => `${tool.messageID}\u0000${tool.toolID}`
+const questionKey = (sessionID: string, formID: string): string => `${sessionID}\u0000${formID}`
 
 export function formToolLink(form: FormRequest): QuestionToolLink | null {
   if (form.sessionID === "global") return null
@@ -101,11 +103,15 @@ function forgetReleasedForm(sessionID: string, formID: string): void {
   })
 }
 
+const QUESTION_DISMISSED_ERROR = "The user dismissed this question"
+
 export function classifyQuestionToolError(error: string, errorType: string | undefined, local: boolean): QuestionAskOutcome {
   if (local) return error === "Interrupted" ? "turn-death" : "unresolved"
   if (error === DEFERRED_QUESTION_NOTE) return "deferred"
-  if (errorType !== undefined && errorType !== "aborted") return "dismissed"
-  if (error === "Tool execution interrupted") return "turn-death"
+  if (errorType === "unknown" && error === QUESTION_DISMISSED_ERROR) return "dismissed"
+  if (errorType !== undefined && errorType !== "aborted" && errorType !== "unknown") return "dismissed"
+  if (error.startsWith("Tool execution interrupted")) return "turn-death"
+  if (error === "All fibers interrupted without error") return "turn-death"
   if (error === "Interaction cancelled because the location shut down") return "shutdown"
   return "unresolved"
 }
@@ -130,9 +136,9 @@ export function deriveRecoveredQuestions(
   scopeSessionIds: ReadonlySet<string>,
 ): RecoveredQuestion[] {
   const recovered: RecoveredQuestion[] = []
-  for (const [formID, seen] of recovery.seen) {
-    if (recovery.outcomes.has(formID) || !scopeSessionIds.has(seen.sessionID)) continue
-    if (state.form[seen.sessionID]?.some((form) => form.id === formID)) continue
+  for (const [key, seen] of recovery.seen) {
+    if (recovery.outcomes.has(key) || !scopeSessionIds.has(seen.sessionID)) continue
+    if (state.form[seen.sessionID]?.some((form) => form.id === seen.form.id)) continue
     const candidate = state.part[seen.tool.messageID]?.find((part) => part.id === seen.tool.toolID)
     const part = candidate?.type === "tool" ? candidate : undefined
     const outcome = recovery.dispositions.get(toolKey(seen.tool))?.outcome ?? partAskOutcome(part)
@@ -154,8 +160,9 @@ function noteQuestionFormSeen(form: FormRequest, directory: string): void {
   const tool = questionToolLink(form)
   if (!tool) return
   useRecoverableQuestionsStore.setState((state) => {
-    if (state.seen.has(form.id)) return state
-    const seen = new Map(state.seen).set(form.id, { form, directory, sessionID: form.sessionID, tool })
+    const key = questionKey(form.sessionID, form.id)
+    if (state.seen.has(key)) return state
+    const seen = new Map(state.seen).set(key, { form, directory, sessionID: form.sessionID, tool })
     const outcomes = new Map(state.outcomes)
     const dispositions = new Map(state.dispositions)
     while (seen.size > MAX_SEEN_QUESTIONS) {
@@ -176,13 +183,47 @@ export function noteQuestionFormSnapshot(directory: string, forms: readonly Form
 
 function closeQuestion(sessionID: string, formID: string, outcome: ClosedOutcome): void {
   useRecoverableQuestionsStore.setState((state) => {
-    if (state.seen.get(formID)?.sessionID !== sessionID || state.outcomes.has(formID)) return state
-    return { outcomes: new Map(state.outcomes).set(formID, outcome) }
+    const key = questionKey(sessionID, formID)
+    if (!state.seen.has(key) || state.outcomes.has(key)) return state
+    return { outcomes: new Map(state.outcomes).set(key, outcome) }
   })
 }
 
-export const noteLocalFormReplied = (sessionID: string, formID: string): void => closeQuestion(sessionID, formID, "answered")
-export const noteLocalFormCancelled = (sessionID: string, formID: string): void => closeQuestion(sessionID, formID, "dismissed")
+let liveFormRemovalClock = 0
+const liveFormRemovals = new Map<string, number>()
+const liveFormReadStarts: number[] = []
+
+const liveFormKey = (runtimeKey: string, sessionID: string, formID: string): string =>
+  `${runtimeKey}\u0000${sessionID}\u0000${formID}`
+
+function noteLiveFormRemoved(sessionID: string, formID: string): void {
+  if (liveFormReadStarts.length === 0) return
+  liveFormRemovals.set(liveFormKey(getRuntimeKey(), sessionID, formID), ++liveFormRemovalClock)
+}
+
+export function noteLocalFormReplied(sessionID: string, formID: string): void {
+  noteLiveFormRemoved(sessionID, formID)
+  closeQuestion(sessionID, formID, "answered")
+}
+
+export function noteLocalFormCancelled(sessionID: string, formID: string, message?: string): void {
+  noteLiveFormRemoved(sessionID, formID)
+  if (message === undefined) closeQuestion(sessionID, formID, "dismissed")
+}
+
+export async function readLiveForms<T>(read: () => Promise<FormRequest[]>, apply: (forms: FormRequest[]) => T): Promise<T> {
+  const startedAt = liveFormRemovalClock
+  liveFormReadStarts.push(startedAt)
+  try {
+    const forms = await read()
+    const runtimeKey = getRuntimeKey()
+    return apply(forms.filter((form) => !liveFormRemovals.has(liveFormKey(runtimeKey, form.sessionID, form.id))))
+  } finally {
+    liveFormReadStarts.splice(liveFormReadStarts.indexOf(startedAt), 1)
+    const oldestRead = liveFormReadStarts.length > 0 ? Math.min(...liveFormReadStarts) : Infinity
+    for (const [key, removedAt] of liveFormRemovals) if (removedAt <= oldestRead) liveFormRemovals.delete(key)
+  }
+}
 
 export const deferredAnswerMetadata = (formID: string): Metadata => ({ openchamber: { deferredAnswer: { formID } } })
 
@@ -194,7 +235,7 @@ const deferredAnswerFormID = (message: Message): string | undefined =>
 export function noteDeferredAnswersLoaded(messages: Readonly<Record<string, readonly Message[] | undefined>>): void {
   const { seen, outcomes } = useRecoverableQuestionsStore.getState()
   const sessions = new Set<string>()
-  for (const [formID, entry] of seen) if (!outcomes.has(formID)) sessions.add(entry.sessionID)
+  for (const [key, entry] of seen) if (!outcomes.has(key)) sessions.add(entry.sessionID)
   for (const sessionID of sessions) {
     for (const message of messages[sessionID] ?? []) {
       const formID = deferredAnswerFormID(message)
@@ -203,20 +244,21 @@ export function noteDeferredAnswersLoaded(messages: Readonly<Record<string, read
   }
 }
 
-export function submitRecoveredAnswer(formID: string, send: () => Promise<void>): Promise<void> {
+export function submitRecoveredAnswer(sessionID: string, formID: string, send: () => Promise<void>): Promise<void> {
+  const key = questionKey(sessionID, formID)
   const state = useRecoverableQuestionsStore.getState()
-  if (state.outcomes.has(formID)) return Promise.resolve()
-  const existing = state.submissions.get(formID)
+  if (state.outcomes.has(key)) return Promise.resolve()
+  const existing = state.submissions.get(key)
   if (existing) return existing
   const run = send().finally(() => {
     useRecoverableQuestionsStore.setState((current) => {
-      if (current.submissions.get(formID) !== run) return current
+      if (current.submissions.get(key) !== run) return current
       const submissions = new Map(current.submissions)
-      submissions.delete(formID)
+      submissions.delete(key)
       return { submissions }
     })
   })
-  useRecoverableQuestionsStore.setState((current) => ({ submissions: new Map(current.submissions).set(formID, run) }))
+  useRecoverableQuestionsStore.setState((current) => ({ submissions: new Map(current.submissions).set(key, run) }))
   return run
 }
 
@@ -237,10 +279,10 @@ function dropSession(sessionID: string): void {
   useRecoverableQuestionsStore.setState((state) => {
     const seen = new Map(state.seen)
     const outcomes = new Map(state.outcomes)
-    for (const [formID, entry] of seen) {
+    for (const [key, entry] of seen) {
       if (entry.sessionID !== sessionID) continue
-      seen.delete(formID)
-      outcomes.delete(formID)
+      seen.delete(key)
+      outcomes.delete(key)
     }
     const dispositions = new Map(state.dispositions)
     for (const [key, entry] of dispositions) if (entry.sessionID === sessionID) dispositions.delete(key)

@@ -49,7 +49,9 @@ interface ForwardInput {
   input: SourceControlJson;
   tokenless?: boolean;
 }
-type ReadInput<M extends SourceControlResourceMethod> = Omit<SourceControlProviderInputs[M], 'context'> & {
+type AllowUndefined<Fields> = { [Field in keyof Fields]: Record<never, never> extends Pick<Fields, Field> ? Fields[Field] | undefined : Fields[Field] };
+type ReadInput<M extends SourceControlResourceMethod> = AllowUndefined<Omit<SourceControlProviderInputs[M], 'context' | 'sourceRepo'>> & {
+  sourceRepo?: { owner: string; repo: string } | null | undefined;
   session: ProviderSession; context?: ProviderReadContext; revision?: SourceControlJson;
 };
 type SourceInput = {

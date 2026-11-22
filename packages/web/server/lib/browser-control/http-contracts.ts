@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export interface BrowserControlResponse extends ServerResponse {
   status: (code: number) => BrowserControlResponse;
-  json: (body: { error: string } | { granted: boolean } | { matched: boolean }) => void;
+  json: (body: { error: string } | { granted: boolean } | { matched: boolean } | { preferredConnectionId: string }) => void;
 }
 
 export type BrowserControlHandler = (

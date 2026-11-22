@@ -7,7 +7,7 @@ import { createRegistryToolsSource, readHostToolVersions } from './tools.js';
 describe('space boundary types', () => {
   it('does not turn coercible labels into checked strings', () => {
     const id = [123456789012];
-    const labels = parseSpaceLabels({
+    const labels = parseSpaceLabels<unknown>({
       'openchamber.space': 'true',
       'openchamber.space.id': id,
       'openchamber.space.role': 'space',

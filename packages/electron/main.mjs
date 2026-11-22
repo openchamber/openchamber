@@ -1,5 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
-import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, systemPreferences, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -17,8 +17,9 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
+import { createWindowGeometryState } from './window-geometry-state.mjs';
 import { attachWindowEvents, isNativeWindowVisible } from './window-events.mjs';
-import { createTrayController } from './tray.mjs';
+import { createTrayController, createTrayLocaleRouter } from './tray.mjs';
 import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
 import { createSessionLinkGate } from './session-link-gate.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
@@ -76,7 +77,7 @@ import {
   sanitizeClientTokenForStorage,
   sanitizeHostRelayForStorage,
 } from './desktop-hosts-storage.mjs';
-import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
+import { COMMANDS_SAFE_FOR_REMOTE, isSplashColor, parseTrayLocale, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
 import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
@@ -85,7 +86,7 @@ import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { requestRemoteHostUpdate } from './remote-host-update.mjs';
-import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
+import { assertUpdaterCapability, enableMacosDirectContentsUpdates, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
 import { checkForDesktopUpdate, downloadPendingDesktopUpdate, markDesktopUpdateDownloaded } from './updater-check.mjs';
@@ -93,6 +94,7 @@ import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
   computeQuakeBounds,
+  getQuakeDisplayBounds,
   parseQuakeHeightFraction,
   QUAKE_MODE_ENABLED_KEY,
   QUAKE_MODE_HEIGHT_KEY,
@@ -133,9 +135,9 @@ import { reconcileAppImageDesktopEntry } from './linux-desktop-entry.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { keepSessionCookies } from './browser-panel-cookies.mjs';
 import {
+  applyBrowserPanelUserAgent,
   browserPanelPermissionAuditDetails,
   browserPanelWindowOpenTarget,
-  plainChromeUserAgent,
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
@@ -323,8 +325,6 @@ const state = {
   quakeNormalBounds: null,
   quakeNormalMaximized: false,
   focusedWindowIds: new Set(),
-  windowGeometryRevisions: new Map(),
-  windowGeometryTimers: new Map(),
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
@@ -808,33 +808,9 @@ const writeWindowState = async (browserWindow) => {
   });
 };
 
+const windowGeometryState = createWindowGeometryState({ persist: writeWindowState });
 const debounceWindowStatePersist = (browserWindow, immediate = false) => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  const key = String(browserWindow.id);
-  const revision = (state.windowGeometryRevisions.get(key) || 0) + 1;
-  state.windowGeometryRevisions.set(key, revision);
-
-  const existingTimer = state.windowGeometryTimers.get(key);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-    state.windowGeometryTimers.delete(key);
-  }
-
-  const persist = async () => {
-    if (state.windowGeometryRevisions.get(key) !== revision) return;
-    state.windowGeometryTimers.delete(key);
-    await writeWindowState(browserWindow);
-  };
-
-  if (immediate) {
-    void persist();
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    void persist();
-  }, 300);
-  state.windowGeometryTimers.set(key, timer);
+  windowGeometryState.schedule(browserWindow, immediate);
 };
 
 const buildHealthUrl = (url) => {
@@ -1048,7 +1024,7 @@ const isPanelSession = (candidate) => panelSessions.has(candidate);
 const hardenPanelSession = (panelSession) => {
   if (panelSessions.has(panelSession)) return;
   panelSessions.add(panelSession);
-  panelSession.setUserAgent(plainChromeUserAgent(panelSession.getUserAgent()));
+  applyBrowserPanelUserAgent(panelSession, process.versions.electron);
 
   panelSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     const allowed = shouldAllowBrowserPanelPermission({
@@ -2221,23 +2197,6 @@ const shouldHideMainWindowToQuake = (browserWindow) => {
   return readSettingsRoot()[QUAKE_MODE_ENABLED_KEY] === true;
 };
 
-const getQuakeDisplayBounds = () => {
-  try {
-    const cursor = screen.getCursorScreenPoint();
-    const display = screen.getDisplayNearestPoint(cursor);
-    if (display?.bounds) return display.bounds;
-  } catch {
-    // A cursor that cannot be read (locked screen, RDP edge) falls through.
-  }
-  try {
-    const primary = screen.getPrimaryDisplay();
-    if (primary?.bounds) return primary.bounds;
-  } catch {
-    return null;
-  }
-  return null;
-};
-
 const showQuakeWindow = (browserWindow, heightFraction) => {
   if (!browserWindow || browserWindow.isDestroyed()) return false;
   if (!state.quakeActive) {
@@ -2258,7 +2217,7 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
     if (process.platform === 'darwin') app.focus({ steal: true });
     if (browserWindow.isMinimized()) browserWindow.restore();
     if (state.quakeNormalMaximized) browserWindow.unmaximize();
-    const displayBounds = getQuakeDisplayBounds();
+    const displayBounds = getQuakeDisplayBounds(screen);
     if (displayBounds) {
       browserWindow.setBounds(computeQuakeBounds(displayBounds, heightFraction));
     }
@@ -2517,6 +2476,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     debounceWindowStatePersist(browserWindow, true);
   });
   browserWindow.on('closed', () => {
+    windowGeometryState.cancel(browserWindow);
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       mainWindowTrayActionsReady = false;
@@ -3330,9 +3290,8 @@ const applyUpdaterChannel = (channel, source = pickUpdaterSource({ mirrorFailedA
 };
 
 const setupAutoUpdater = () => {
-  if (!app.isPackaged) {
-    return;
-  }
+  if (!app.isPackaged) return;
+  enableMacosDirectContentsUpdates({ app, systemPreferences });
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
@@ -3786,6 +3745,8 @@ const closeAllDevTunnels = () => {
   devTunnelClientPromise = null;
   pending.then((client) => client.closeAll()).catch(() => {});
 };
+
+const trayLocaleRouter = createTrayLocaleRouter((locale) => state.trayController?.setLocale(locale));
 
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
@@ -4277,6 +4238,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_tray_update':
       if (state.trayController) {
         try {
+          trayLocaleRouter.publish(browserWindow);
           state.trayController.update(args || {});
         } catch (error) {
           log.warn('[electron] tray update failed', error);
@@ -4906,6 +4868,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         visible: isNativeWindowVisible(browserWindow),
       };
 
+    case 'desktop_set_tray_locale': {
+      trayLocaleRouter.setLocale(browserWindow, parseTrayLocale(args?.locale));
+      return null;
+    }
+
     case 'desktop_set_locale': {
       if (typeof args.locale === 'string') {
         setContextMenuLocale(args.locale);
@@ -5237,15 +5204,15 @@ const BROWSER_PANEL_POPUP_WEB_PREFERENCES = {
   nodeIntegration: false,
 };
 
-const openBrowserPanelTab = (contents, url, background) => {
+const openBrowserPanelTab = (contents, { url, background, referrer }) => {
   const host = contents.hostWebContents;
   if (!host || host.isDestroyed()) {
-    loadUrlInsideWebContents(contents, url);
+    loadUrlInsideWebContents(contents, url, { httpReferrer: referrer });
     return;
   }
   host.send('openchamber:emit', {
     event: 'openchamber:browser-panel-open-tab',
-    detail: { webContentsId: contents.id, url, background },
+    detail: { webContentsId: contents.id, url, background, referrer },
   });
 };
 
@@ -5330,9 +5297,9 @@ app.on('web-contents-created', (_event, contents) => {
       };
     }
     if (target === 'tab' || target === 'background-tab') {
-      openBrowserPanelTab(contents, url, target === 'background-tab');
+      openBrowserPanelTab(contents, { url, background: target === 'background-tab', referrer });
     } else if (target === 'in-place') {
-      loadUrlInsideWebContents(contents, url);
+      loadUrlInsideWebContents(contents, url, { httpReferrer: referrer });
     }
     return { action: 'deny' };
   });
@@ -5365,31 +5332,6 @@ const isLocalSender = (webContents) => {
     return false;
   }
 };
-
-const COMMANDS_SAFE_FOR_REMOTE = new Set([
-  'desktop_hosts_get',
-  'desktop_host_probe',
-  'desktop_switch_to_local',
-  'desktop_new_window',
-  'desktop_set_menu_shortcuts',
-  'desktop_new_window_at_url',
-  'desktop_new_window_for_host',
-  'desktop_set_window_title',
-  'desktop_set_window_theme',
-  'desktop_set_close_tab_target',
-  'desktop_is_window_fullscreen',
-  'desktop_start_window_drag',
-  'desktop_minimize_current_window',
-  'desktop_toggle_current_window_maximized',
-  'desktop_close_current_window',
-  'desktop_get_current_window_state',
-  'desktop_get_app_version',
-  'desktop_get_lan_address',
-  'desktop_capture_page_rect',
-  'desktop_tray_update',
-  'desktop_tray_actions_ready',
-  'desktop_clear_session_notifications',
-]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
   if (!isLocalSender(event.sender) && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
@@ -5541,10 +5483,9 @@ const setupTray = () => {
   }
   try {
     state.trayController = createTrayController({
-      ...assets,
+      ...assets, locale: readPreferredLocale(),
       onAction: (action) => { void dispatchTrayAction(action); },
     });
-    state.trayController.update({ sessions: [], approvals: [] });
     if (!state.trayFocusListener) {
       state.trayFocusListener = (_event, browserWindow) => {
         if (browserWindow && !browserWindow.isDestroyed()) {

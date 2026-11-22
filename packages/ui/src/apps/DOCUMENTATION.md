@@ -18,6 +18,9 @@
 - A header edit writes a fresh secure entry before publishing its metadata reference. Failure preserves the old reference and credentials. Replaced and removed references are deleted after the metadata commit. Native bridge calls remain bounded by the existing secure-storage timeout.
 - Native mobile with headers uses the existing fetch-based OpenChamber event stream reader and the native WebSocket adapter behind `openRuntimeWebSocket`. Files media previews use bounded runtime HTTP reads and owned object URLs; prepared chat images use the existing validated data-URL loader. HTML previews and inline Markdown video still use browser-owned URLs without proxy headers.
 - An empty welcome-form header editor preserves a saved connection's headers. Explicit clearing belongs to the prefilled Instances edit form. Cancelling a password prompt does not erase existing header credentials.
+- A native device token belongs to every saved instance. Registration and removal go to every saved server once, each on its own: the relay binds a token to each server that registered it, so one server failing, or answering `localOnly` (a phone paired with it for the home network only, which it neither stores nor binds), leaves the others as they are. Only a phone whose active server is home-network-only and that has no other saved server skips the permission prompt and registration, and only then does the Notifications page disable the switch and explain why; with another saved server the switch stays on and a line says only the active server stays silent. Registrations and removals for saved servers run one after another (`mobilePushTokens.ts`), so removing an instance sends its unregister after a registration already on its way to it. Their direct requests pass the same `/health` identity gate as a connect probe before the saved client token is attached. The device token is kept in secure storage, so turning notifications off or removing an instance also works after a cold launch that never registered in this process. Turning notifications off removes the token from each saved server and the active runtime; removing an instance reads that server's credentials before they disappear and then unregisters from it; when that request fails, the server keeps the token.
+- A push carries `serverId` next to `sessionId`. Before opening its session the app switches to the saved instance with that identity, also on a cold start before any instance has connected, and holds the intent until the new runtime initializes. The switch accepts only an address that answers `/health` with that identity. A saved instance that never reported its identity is asked for it when a push names an unknown one. An unknown or unreachable instance leaves the session unopened rather than opening it on the active server.
+- A direct connection learns the server's identity from `/health` into `pushServerId` when it connects, so an older manually-added instance can still be matched by a later push. This field does not key the stored client token, so learning it cannot orphan the token or change the active runtime key.
 
 - Chat-side Settings entry points request the native Settings tab through `RuntimeAPIs.vscode`. They preserve chat selection, drafts and the current layout. The source's in-page dialog flag is cleared so it cannot block chat shortcuts.
 - Only the Settings root receives page navigation. The bridge parses it before applying it to stores, and the mounted root signals readiness before the host consumes pending navigation.
@@ -25,7 +28,7 @@
 - Its runtime shortcut hook registers Settings actions only and requires no chat sync context. Chat, model and session shortcuts remain with chat roots, so a key pressed in Settings cannot create an unseen draft or change a session selection there. Escape reaches an input or menu before the tab's close handler.
 - On mobile, a request for the Settings dialog opens the fullscreen Settings surface and clears the dialog flag (`mobileSettingsNavigation.ts`). It lands on the requested page when the phone shows that page, otherwise on the page list. Entry points keep calling `setSettingsDialogOpen` and need no mobile branch.
 - Mobile Settings exposes Projects in navigation, search and shared Settings links. Project chat defaults use the shared Projects page and its project-scoped save path; the main-window worktrees shortcut remains unavailable on mobile. `MobileSessionsSheet` receives shared Add project requests so its directory picker can open above Settings.
-- On mobile web, Back runs the same close ladder as the Android back button, one step per press, and the app is left only when nothing is open. Forward and traversals between routes never run the ladder. Layers closed through the UI leave no empty Back presses (`useMobileWebBackButton`, `lib/router/backGuard.ts`).
+- On mobile web, Back shares Android's layer-close ladder, one step per press, then resumes normal browser history navigation when nothing is open. Native Android additionally tries the parent-session fallback after the close ladder; mobile web does not. Forward and traversals between routes never run the ladder. Layers closed through the UI leave no empty Back presses (`useMobileWebBackButton`, `lib/router/backGuard.ts`).
 - Every route entry written while a layer is open goes through `pushRouteEntry` or `updateBrowserURL`, so it lands under the back guard. A direct `pushState` would bury the guard between two routes. A replacement keeps the guard and changes its URL; the route under it normalizes to the same place when Back reaches it.
 - Inside the mobile shell the Settings stages write no history. A `SettingsView` given `registerBackHandler` steps through its stages in state only.
 - Settings uses the existing persistence and broadcast protocol. Moving its host changes no stored format, registry key or runtime availability.
@@ -44,6 +47,7 @@
 - The connection heartbeat in the live connection's card on Instances (`MobileConnectionHeartbeat`) asks `/health` through `runtimeFetch` every 4 s, only while it is mounted and the app is in the foreground. On Capacitor the foreground comes from the native app state, since the WebView's page visibility is unreliable there. Going to the background or unmounting clears the pending ping, aborts the one in flight and stops its clock subscription. A ping with no answer within 5 s shows as "No answer", never as the last latency. Its trace steps on the shared clock's beat, four frames a second, like a spinner.
 - Keep screen awake (`mobileKeepScreenAwake`, device-local) keeps the display on in the native app always, or while the open session or a subagent below it is active in the global status store (`useKeepScreenAwake`). "While working" also needs `isConnected`, because the store keeps a lost server's last busy state; a dead server therefore releases the screen, and a reconnect holds it again only while the turn still runs. A permission request keeps the turn running, so it keeps the screen on. Android holds a screen wake lock, which the system drops when the app leaves the screen, so the hook asks again on each return. iOS turns off the idle timer through the app-local `KeepAwake` plugin, and every mount writes the current choice so a reloaded page clears what the last one set. The setting renders, and the hook acts, only where `canKeepScreenAwake` holds: the iOS app, or the Android app on a WebView that exposes `navigator.wakeLock`. The hosted mobile page never keeps the screen on.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
+- The expanded VS Code layout uses the shared `useUIStore` sidebar state (`isSidebarOpen`, `sidebarWidth`). Only the drag preview is local.
 - A sessions-sheet row is never a scroll container of its own: it clips with `oc-row-clip`, and the two-line row's 54 px box ends flush with the 32 px chevron at `top: 22`, so a drag that starts on a row scrolls the list.
 
 ### Boot, runtime changes and mini chat
@@ -83,6 +87,7 @@
 - Deep-link parsing stays independent of React, stores and Capacitor so native producers share one vocabulary. Unknown routes return null, and both authority and authority-less custom-scheme forms parse. Provider selection belongs only to Usage, including extension provider IDs.
 - Native link listeners register before connection completes so cold-launch notification and URL intents survive splash and sync remounts. A module-level holder keeps only the newest intent, consumes it before dispatch and restores it when its shell handler is absent. Legacy notification session IDs remain a fallback when no explicit URL is supplied.
 - Shortcuts can carry a first message; URL deep links cannot. A shortcut naming an unknown project leaves that message unsent in the default draft so the user chooses its destination. Session links use the shared opener, including parent-panel resolution for `/btw` forks.
+- A share from another app opens a new-session draft of its own in the projects store's active project (the first project when none is active), and in Chat only when there is no project. The sidebar lists drafts only under projects, so a Chat draft could not be reopened once the user left it. The composer document owns the rest of the handoff.
 - An agent's file request stages navigation only for the session on screen or its lineage. Unknown subagents resolve from the server; lineage traversal stops at unreadable sessions and cycles because `/btw` metadata is writable. A delayed trust decision cannot stage a path into the previously visible session's Files pane.
 - Workspace panes retain their tree position across keyboard resizes and folding so an editor's draft and focus survive size-class changes. Closing retains the pending Changes request because it keys the persistent pane. New diff and commit requests are mutually exclusive and consumed once across remounts.
 - Tablet panel opening and closing uses compositor transforms over a width changed once. Width animation repeatedly lays out chat. Closing holds space until the slide ends, except when a size-class change or a displaced panel must release it immediately to avoid squeezing chat between two panels.
@@ -101,13 +106,20 @@
 ### Changes and files
 
 - Changes waits for the requested repository before applying commit scope; a repository outside the folder cannot borrow another repository's commit selection. Explicit commit navigation ends a board-selected PR override, and every repository change clears repository-bound PR selection.
-- A changed-file request looks in Last turn first, then in its repository's freshly read working-tree status. Only an answer for the current session settles it; failed reads retain Retry. Manual navigation or leaving the scope ends the request, while repository resolution alone does not replay it.
+- A changed-file request looks in its turn first (Last turn, or the older turn its chip names), then in its repository's freshly read working-tree status. The request carries the chip's session and folder, which read the turn, and the session on screen at the click, which owns it: only an answer while that session is on screen settles it, so a chip from another session still reaches the working-tree step; failed reads retain Retry. Manual navigation or leaving the scope ends the request, while repository resolution alone does not replay it. The older turn's folder lives in the pane's navigation, not in the surface's root, so a project switch drops the selection with the owner and the list, Last turn and Git actions belong to the new project.
 - Comparison expansion belongs to the exact path, range and retry cache entry. Branch and commit views request full context from Git; PR views reconstruct full contents from GitHub's two file versions. A pure rename has no hunks to draw. New nested-repository answers supersede earlier declined-diff results.
 - Hidden workspace panes keep navigation but perform visibility-scoped reads only while shown. Entering a comparison scope reports loading during render to avoid a false empty frame; revisits retain the previous list while refreshing. Failed background folder reloads preserve the listing already on screen.
 - Mobile reverts bound concurrency because the server serializes them per repository and excess POSTs occupy connections needed for reads. Local branch creation never implicitly pushes. A failed publish before a dirty switch leaves the user on the committed branch; pull conflicts remain a merge in progress.
 - Identity selection uses the repository's bound primary remote and the same configuration answers as add and clone. Trusting system Git is confirmed in repository configuration because selecting a menu item alone cannot authorize that trust.
 - Worktree deletion handles sessions in every subfolder while their directory still exists. Archiving rolls back if removal fails; keeping sessions moves them to the project first. Teardown retries reread options at execution time, and failed remote-branch deletion preserves the worktree with its reason.
 - Files navigation remains rooted for parent traversal, while an explicit chat tool target can open outside the workspace through the editor's existing outside-workspace read path. Image-preview navigation retains the browsed folder as Back's destination. Upload completion reloads only the folder still on screen.
+- A phone file or change list keeps the offset it left when a preview or diff
+  replaces it, and a file's search results, a folder's listing and each change
+  mode are their own list. A folder child starts at its top rather than
+  inheriting the parent's offset (the list's `memoryKey`). Search results of
+  the same folder and query stay on screen while a return re-runs the search
+  (`mobileFilesList`): a loading placeholder there would clamp the restored
+  offset and be saved as the list's. A failed folder read or search is not the list.
 
 ### Native chrome, notifications and snapshots
 
@@ -124,6 +136,18 @@
 
 ## Decisions
 
+### Why mobile push registers with every saved instance and not only the connected one
+
+A phone with two saved servers stayed quiet for the one it was not connected to: the token went only to the active server, and the relay kept one owning server per token. The relay now keeps one binding per token and server (openchamber-website `apps/api`, `push_tokens`), and the app registers with every saved server, in no particular order. An ordering that left the active server registered last was weighed and dropped: it only mattered while each registration took the token from the previous server, and the relay change ships before this app. The cost is that every saved server can push to the phone.
+
+### Why a notification switch holds the tap until the runtime is ready
+
+Switching instances resets the shell and clears `ready`. Opening the session as soon as the endpoint changes would run against the previous server's stores or session list. The intent stays stashed until the shell reports ready again, then opens on the new runtime.
+
+### Why a direct connection learns its pushServerId from /health
+
+A manually added instance had no relay identity on file, so a push from it carried an id that matched no saved entry. The health probe already runs on every connect; keeping the reported id under a separate field makes a later notification switch possible without re-pairing, and without changing the key the client token is stored under.
+
 ### Why a visited extension tab keeps its frame and not a fresh load per visit
 
 The drawer keeps every visited pane mounted while hidden, and the desktop rail keeps a panel frame it has shown; an extension tab does the same, so its page keeps its place, a half-filled form and an item it was handed across tab switches and a closed drawer. The memory is one frame per extension the user opened in this run, and a frame unmounts when its extension leaves the catalog. A live screen's picture mounts only while its tab is on screen, so an unwatched surface keeps no socket open.
@@ -139,6 +163,10 @@ The secure store and localStorage cannot commit together. A new reference lets a
 ### Why navigation carries intent and not the source's stores
 
 Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action, new-snippet action and selected skill without transferring chat state or overwriting the tab's independently edited settings.
+
+### Why the VS Code sessions sidebar shares the app's sidebar state
+
+The existing store remembers the open state and width across reloads. The VS Code resize hook previews changes locally and saves on release so pointer moves do not write to storage. VS Code allows resizing from 196px to 520px to fit its smaller webview. A drag whose handle leaves the DOM (the sidebar hidden or the layout collapsed mid-drag) or loses pointer capture ends there and saves its last preview width. The desktop layout still clamps its displayed width to at least 264px to fit the toolbar.
 
 ### Why mobile web holds one back guard and not one history entry per layer
 

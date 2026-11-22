@@ -19,6 +19,7 @@ import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerDraftHistory } from './useComposerDraftHistory';
 import type { useComposerColumn } from './useComposerColumn';
 import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { SubmitOptions, ChatInputProps } from './chatInputProps';
@@ -27,6 +28,7 @@ import { useComposerSubmission } from './useComposerSubmission';
 type Dependencies = {
     inlineContext: Pick<ReturnType<typeof useComposerInlineContext>, 'isMobileCommentOpen' | 'hasDrafts' | 'attachmentsToSend' | 'inlineDraftTarget' | 'consumeDrafts'>;
     attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'waitForPendingAttachments'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOffer'>;
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'setMessage' | 'confirmedMentionsRef' | 'composerText' | 'currentChatDraftIdentityRef'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;

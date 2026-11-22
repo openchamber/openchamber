@@ -29,6 +29,7 @@ export const useChatColumnSelection = ({
     const liveSessionId = pinned ? (pinnedSessionDirectory ? pinnedSelection?.sessionId ?? null : null) : globalSessionId;
     const liveSessionDirectory = pinned ? pinnedSessionDirectory : globalSessionDirectory;
     const materializedDraftSessionId = useSessionUIStore((s) => (pinned ? null : s.materializedDraftSessionId));
+    const draftOpen = useSessionUIStore((s) => !pinned && s.newSessionDraft.open);
     const liveSelection = React.useMemo(
         () => ({ sessionId: liveSessionId, directory: liveSessionDirectory }),
         [liveSessionId, liveSessionDirectory],
@@ -48,7 +49,7 @@ export const useChatColumnSelection = ({
         return () => window.clearTimeout(timer);
     }, [holdPreviousTimeline, liveSessionId]);
     const targetSelection = holdPreviousTimeline ? shownSelectionRef.current : liveSelection;
-    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useShownSessionSelection(targetSelection);
+    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useShownSessionSelection(targetSelection, draftOpen);
     shownSelectionRef.current = { sessionId: currentSessionId, directory: currentSessionDirectory };
 
     return {

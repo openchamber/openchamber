@@ -7,7 +7,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const RULES = ['gatekeeper-standard-library', 'no-app-imports-in-opencode', 'no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports', 'no-valueof-type-escape'];
+const RULES = ['gatekeeper-standard-library', 'no-app-imports-in-opencode', 'no-module-mocks-in-tests', 'no-real-waits-in-tests', 'no-source-text-in-tests', 'no-comments', 'no-cross-runtime-imports', 'no-effects-in-components', 'no-raw-fetch', 'no-timers', 'no-wire-client-imports', 'no-valueof-type-escape', 'origin-check-awaited'];
 
 const FILES = {
   'packages/web/server/lib/type-escape.ts': [
@@ -15,6 +15,22 @@ const FILES = {
     'Object["prototype"]["valueOf"].apply(input, []);',
     'Number.prototype.valueOf.call(input);',
     'input.valueOf();',
+  ],
+  'packages/web/server/lib/origin-guard.ts': [
+    'export const guard = async (req: unknown, runtime: { isRequestOriginAllowed: (req: unknown) => Promise<boolean> }, isPasswordlessSocketOriginAllowed: (req: unknown) => Promise<boolean>) => {',
+    '  if (!runtime.isRequestOriginAllowed(req)) return 403;',
+    '  if (isPasswordlessSocketOriginAllowed(req) && req) return 200;',
+    '  const verdict = runtime.isRequestOriginAllowed(req) ? 200 : 403;',
+    '  if (!await runtime.isRequestOriginAllowed(req)) return 403;',
+    '  if (req && await isPasswordlessSocketOriginAllowed(req)) return verdict;',
+    '  const pending = runtime.isRequestOriginAllowed(req);',
+    '  if (!pending) return 403;',
+    '  const awaited = await runtime.isRequestOriginAllowed(req);',
+    '  if (!awaited) return 403;',
+    '  const later = isPasswordlessSocketOriginAllowed(req);',
+    '  if (!await later) return 403;',
+    '  return runtime.isRequestOriginAllowed(req).then((allowed) => (allowed ? 200 : 403));',
+    '};',
   ],
   'packages/web/server/lib/spaces/gatekeeper-program.cjs': [
     "const fs = require('node:fs');",
@@ -300,6 +316,10 @@ test('lib/opencode takes no import from the app folders beyond its listed edges'
   assert.deepEqual(linesOf('packages/web/server/lib/opencode/routes.js', 'no-app-imports-in-opencode'), [2]);
   assert.deepEqual(linesOf('packages/web/server/lib/opencode/feature.test.js', 'no-app-imports-in-opencode'), []);
   assert.deepEqual(linesOf('packages/web/server/lib/settings/frame.js', 'no-app-imports-in-opencode'), []);
+});
+
+test('an origin check decides a condition only after it is awaited', () => {
+  assert.deepEqual(linesOf('packages/web/server/lib/origin-guard.ts', 'origin-check-awaited'), [2, 3, 4, 7]);
 });
 
 test('the standalone gatekeeper imports only the Node standard library', () => {

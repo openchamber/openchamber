@@ -15,7 +15,7 @@ import { type useFileViewModes } from './useFilePreviewModes';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
 export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, viewModes, files }: {
-  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef'>;
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef' | 'canvasDirty'>;
   draft: Pick<ReturnType<typeof useFileDraft>, 'draftContent'>;
   fileDocument: Pick<ReturnType<typeof useFileDocument>, 'artifactSize' | 'contentDetectedBinary' | 'fileContent'>;
   scope: Pick<ReturnType<typeof useFileScope>, 'root'>;
@@ -23,7 +23,7 @@ export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, vi
   viewModes: Pick<ReturnType<typeof useFileViewModes>, 'canvasViewMode' | 'drawioViewMode' | 'htmlViewMode' | 'jsonViewMode' | 'mdViewMode' | 'mermaidViewMode' | 'svgViewMode' | 'tableViewMode' | 'textViewMode'>;
   files: ReturnType<typeof useRuntimeAPIs>['files'];
 }) {
-  const { binaryCanvasRef } = canvasState;
+  const { binaryCanvasRef, canvasDirty } = canvasState;
   const { draftContent } = draft;
   const { artifactSize, contentDetectedBinary, fileContent } = fileDocument;
   const { root } = scope;
@@ -52,7 +52,7 @@ export function useFileKinds({ canvasState, draft, fileDocument, scope, tabs, vi
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
   const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedBinary && (!isSelectedImage || isSelectedSvg) && files.writeFile);
   const isTextFile = Boolean(selectedFile && !isSelectedBinary && (!isSelectedImage || isSelectedSvg));
-  const matchedGuestFileEditor = useGuestFileEditor(selectedFile?.path);
+  const matchedGuestFileEditor = useGuestFileEditor(selectedFile?.path, canvasDirty);
   const guestFileEditor = matchedGuestFileEditor && (isTextFile || matchedGuestFileEditor.editor.content === 'binary')
     ? matchedGuestFileEditor
     : null;

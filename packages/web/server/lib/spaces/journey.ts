@@ -77,12 +77,12 @@ export interface SpaceJourneyOptions<HostSecret, ArchivedChats> {
   archiveChats?: ((request: { spaceId: string; name: ListedSpace['name']; projectDirectory: string | null; running: boolean; allowUnsaved: boolean }) => Promise<ArchivedChats>) | null;
   readHostSecret?: (name: string) => HostSecret | undefined;
   readHostLogin?: (provider: string) => Promise<StoredLogin | null>;
-  loginWindowOf?: typeof loginGrantOf;
+  loginWindowOf?: typeof loginGrantOf | undefined;
   hostProviders?: ReturnType<typeof createHostProviders>;
   hostCatalog?: ReturnType<typeof createHostCatalog>;
-  readIdleStop?: () => Promise<IdleStop>;
-  saveIdleStop?: (setting: IdleStop) => Promise<void>;
-  readPermissionDefault?: () => Promise<PermissionDefault>;
+  readIdleStop?: (() => Promise<IdleStop>) | undefined;
+  saveIdleStop?: ((setting: IdleStop) => Promise<void | object>) | undefined;
+  readPermissionDefault?: (() => Promise<PermissionDefault>) | undefined;
   folderExists?: (directory: string) => Promise<boolean>;
   resolveDirectory?: typeof path.resolve;
   announce?: (spaceId: string, payload: { type: string; properties: object }) => void;

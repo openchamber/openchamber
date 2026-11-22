@@ -2084,7 +2084,9 @@ diffs-container {
 .markdown-content code[data-streamdown="inline-code"][data-openchamber-file-link="true"] {
   background-color: transparent !important;
   background-image: none;
-  padding-inline: 0;
+  /* Without a fill the padding only gave the reference an edge that starts
+     no text selection, so a drag from just above the path selected nothing. */
+  padding: 0;
 }
 
 /* Markdown links - use theme colors */
@@ -2204,6 +2206,13 @@ diffs-container {
   background: transparent;
 }
 
+/* The table keeps its usual flow width while its scroll frame reaches into
+   spare transcript space. Release only the message text's horizontal clip. */
+.message-content-text:has(.markdown-content [data-streamdown="table-wrapper"][data-table-expanded="true"]) {
+  overflow-x: visible;
+  overflow-y: clip;
+}
+
 /* The frame goes on the scroller, or on the overlay wrapper around it, so the
    overlay thumb sits inside the frame. */
 .markdown-content [data-streamdown="table-wrapper"] > div:has(> table),
@@ -2211,6 +2220,34 @@ diffs-container {
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 0.5rem;
   background: var(--surface-elevated);
+}
+
+.markdown-content [data-streamdown="table-wrapper"][data-chat-table="true"][data-table-overflow-start="true"] > .overlay-scrollbar-wrapper::before,
+.markdown-content [data-streamdown="table-wrapper"][data-chat-table="true"][data-table-overflow-end="true"] > .overlay-scrollbar-wrapper::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  inset-block: 1px;
+  inline-size: 1.25rem;
+  pointer-events: none;
+}
+
+.markdown-content [data-streamdown="table-wrapper"][data-chat-table="true"][data-table-overflow-start="true"] > .overlay-scrollbar-wrapper::before {
+  inset-inline-start: 1px;
+  background-image: linear-gradient(to right, var(--surface-elevated), transparent);
+}
+
+.markdown-content [data-streamdown="table-wrapper"][dir="rtl"][data-chat-table="true"][data-table-overflow-start="true"] > .overlay-scrollbar-wrapper::before {
+  background-image: linear-gradient(to left, var(--surface-elevated), transparent);
+}
+
+.markdown-content [data-streamdown="table-wrapper"][data-chat-table="true"][data-table-overflow-end="true"] > .overlay-scrollbar-wrapper::after {
+  inset-inline-end: 1px;
+  background-image: linear-gradient(to right, transparent, var(--surface-elevated));
+}
+
+.markdown-content [data-streamdown="table-wrapper"][dir="rtl"][data-chat-table="true"][data-table-overflow-end="true"] > .overlay-scrollbar-wrapper::after {
+  background-image: linear-gradient(to left, transparent, var(--surface-elevated));
 }
 
 .markdown-content [data-streamdown="table"] {
@@ -2828,26 +2865,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   100% { transform: translateX(-100%); }
 }
 
-@keyframes open-file-name-marquee-scroll {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
-}
-
-/*
- * A name too long for the header scrolls past once when the file opens, then
- * stands still: the track holds the name twice, so it ends where it began.
- */
-.open-file-name-marquee-track {
-  display: inline-flex;
-  min-width: max-content;
-  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear 1;
-}
-
-.open-file-name-marquee-item {
-  flex-shrink: 0;
-  padding-right: 2rem;
-}
-
 .marquee-text {
   display: inline-block;
   white-space: nowrap;
@@ -2867,7 +2884,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .open-file-name-marquee-track,
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     animation: none;
@@ -2877,24 +2893,6 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
     display: inline;
-  }
-
-  .open-file-name-marquee-track {
-    display: block;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    will-change: auto;
-  }
-
-  .open-file-name-marquee-track .open-file-name-marquee-item {
-    display: inline;
-    padding-right: 0;
-  }
-
-  .open-file-name-marquee-track .open-file-name-marquee-item[aria-hidden="true"] {
-    display: none;
   }
 
   .waiting-dim {

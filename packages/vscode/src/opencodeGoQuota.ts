@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-export type OpenCodeGoApiKeyCredential = { apiKey: string; consoleKey: boolean };
-export type OpenCodeGoConsoleCredential = { accessToken: string; orgID: string; expires?: number | null };
+export type OpenCodeGoApiKeyCredential = { apiKey: string; consoleKey: boolean; label?: string | null };
+export type OpenCodeGoConsoleCredential = { accessToken: string; orgID: string; expires?: number | null; label?: string | null };
 type OpenCodeGoCredential = OpenCodeGoApiKeyCredential | OpenCodeGoConsoleCredential;
 
 const API_KEY_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
@@ -11,6 +11,9 @@ const MICRO_CENTS_PER_DOLLAR = 100_000_000;
 const CONSOLE_PRODUCTS = new Set(['go', 'go-plus', 'go-teams']);
 const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
 export const OPENCODE_GO_KEY_EXPIRED = 'OpenCode Go key expired. Connect an OpenCode Console account on the OpenCode card in Providers.';
+const KEY_AUTH_FAILED = 'OpenCode Go authentication failed';
+const KEY_REFUSALS = new Set([NO_CONSOLE_SUBSCRIPTION, OPENCODE_GO_KEY_EXPIRED, KEY_AUTH_FAILED]);
+export const isOpenCodeGoKeyRefusal = (error: unknown) => error instanceof Error && KEY_REFUSALS.has(error.message);
 
 const numericValue = z.union([
   z.string().transform((value) => Number(value)),
@@ -133,7 +136,7 @@ const fetchApiKeyUsage = async (credential: OpenCodeGoApiKeyCredential) => {
   const response = await fetch(API_KEY_USAGE_URL, { headers: { Accept: 'application/json', Authorization: `Bearer ${credential.apiKey}`, 'x-opencode-session': 'openchamber-usage' }, signal: AbortSignal.timeout(15_000) });
   if (response.status === 403 && credential.consoleKey) throw new Error(NO_CONSOLE_SUBSCRIPTION);
   if (response.status === 401 && apiKeyErrorSchema.safeParse(await response.json().catch(() => null)).success) throw new Error(OPENCODE_GO_KEY_EXPIRED);
-  if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) throw new Error('OpenCode Go authentication failed');
+  if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) throw new Error(KEY_AUTH_FAILED);
   if (!response.ok) throw new Error(`OpenCode Go usage API returned HTTP ${response.status}`);
   const parsed = apiKeyStatusSchema.safeParse(await response.json().catch(() => null));
   if (!parsed.success) throw new Error('OpenCode Go usage data could not be parsed');

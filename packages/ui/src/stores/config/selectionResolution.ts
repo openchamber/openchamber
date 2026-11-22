@@ -118,7 +118,31 @@ export const isMissingFromCatalog = (
     && !isAutoModel(providerId, modelId)
     && !hasProviderModel(providers, providerId, modelId);
 
-type ConfiguredDefault = { model: string | undefined; variant: string | undefined };
+type ConfiguredDefault = { model: string | undefined; variant: string | undefined; fallbackVariant?: string };
+
+type ScopeAndSettingsDefaults = {
+    projectDefaultModel?: string;
+    projectDefaultVariant?: string;
+    settingsDefaultModel?: string;
+    settingsDefaultVariant?: string;
+};
+
+const isSameModel = (a: string | undefined, b: string | undefined): boolean => {
+    const left = a ? parseModelString(a) : null;
+    const right = b ? parseModelString(b) : null;
+    return !!left && !!right && left.providerId === right.providerId && left.modelId === right.modelId;
+};
+
+export const scopeDefaultCandidates = (defaults: ScopeAndSettingsDefaults): ConfiguredDefault[] => [
+    {
+        model: defaults.projectDefaultModel,
+        variant: defaults.projectDefaultVariant,
+        fallbackVariant: !defaults.projectDefaultVariant && isSameModel(defaults.projectDefaultModel, defaults.settingsDefaultModel)
+            ? defaults.settingsDefaultVariant
+            : undefined,
+    },
+    { model: defaults.settingsDefaultModel, variant: defaults.settingsDefaultVariant },
+];
 
 export const inheritedDefaultsFor = (
     agents: Agent[],
@@ -138,12 +162,12 @@ const pickConfiguredDefault = (
     catalogLoaded: boolean,
     candidates: ConfiguredDefault[],
     settingsDefaultsLoaded: boolean,
-): { providerId: string; modelId: string; variant: string | undefined } | null => {
+): { providerId: string; modelId: string; variant: string | undefined; fallbackVariant?: string } | null => {
     for (const candidate of candidates) {
         const parsed = candidate.model ? parseModelString(candidate.model) : null;
         if (!parsed || isStaleAutoSelection(settingsDefaultsLoaded, parsed.providerId, parsed.modelId)) continue;
         if (isMissingFromCatalog(providers, catalogLoaded, parsed.providerId, parsed.modelId)) continue;
-        return { ...parsed, variant: candidate.variant };
+        return { ...parsed, variant: candidate.variant, fallbackVariant: candidate.fallbackVariant };
     }
     return null;
 };
@@ -200,12 +224,14 @@ export const resolveProviderModelSelection = ({
 
     const configured = pickConfiguredDefault(providers, catalogLoaded, configuredDefaults, fallbackPrefs.settingsDefaultsLoaded);
     if (configured) {
+        if (!hasProviderModel(providers, configured.providerId, configured.modelId)) {
+            return { providerId: configured.providerId, modelId: configured.modelId, variant: configured.variant };
+        }
+        const variant = resolveVariantOrRemembered(configured.providerId, configured.modelId, configured.variant);
         return {
             providerId: configured.providerId,
             modelId: configured.modelId,
-            variant: hasProviderModel(providers, configured.providerId, configured.modelId)
-                ? resolveVariantOrRemembered(configured.providerId, configured.modelId, configured.variant)
-                : configured.variant,
+            variant: variant === undefined ? resolveVariant(configured.providerId, configured.modelId, configured.fallbackVariant) : variant,
         };
     }
 
@@ -355,10 +381,9 @@ export const resolveDefaultAgentModelSelection = ({
     let modelId: string | undefined;
     let variant: string | null | undefined;
 
-    const configured = pickConfiguredDefault(providers, catalogLoaded, [
-        { model: projectDefaultModel, variant: projectDefaultVariant },
-        { model: settingsDefaultModel, variant: settingsDefaultVariant },
-    ], fallbackPrefs.settingsDefaultsLoaded);
+    const configured = pickConfiguredDefault(providers, catalogLoaded, scopeDefaultCandidates({
+        projectDefaultModel, projectDefaultVariant, settingsDefaultModel, settingsDefaultVariant,
+    }), fallbackPrefs.settingsDefaultsLoaded);
     if (configured) {
         providerId = configured.providerId;
         modelId = configured.modelId;
@@ -370,6 +395,9 @@ export const resolveDefaultAgentModelSelection = ({
     if (providerId || !allowFallback) {
         if (variant === undefined) {
             variant = resolveAgentOrRememberedVariant();
+        }
+        if (variant === undefined && providerId && modelId) {
+            variant = resolveVariant(providerId, modelId, configured?.fallbackVariant);
         }
         return { agentName: resolvedAgent?.name ?? projectDefaultAgent ?? settingsDefaultAgent, providerId, modelId, variant };
     }
@@ -461,6 +489,16 @@ export const resolveConfiguredDefaultVariant = (
     if (isThisModel(defaults.projectDefaultModel)) return defaults.projectDefaultVariant;
     if (isThisModel(defaults.settingsDefaultModel)) return defaults.settingsDefaultVariant;
     return undefined;
+};
+
+export const resolveInheritedDefaultVariant = (
+    defaults: ScopeAndSettingsDefaults,
+    providerId: string,
+    modelId: string,
+): string | undefined => {
+    const [scope] = scopeDefaultCandidates(defaults);
+    const parsed = scope.model ? parseModelString(scope.model) : null;
+    return parsed?.providerId === providerId && parsed.modelId === modelId ? scope.fallbackVariant : undefined;
 };
 
 export const resolveSelectionWithManualGuard = ({

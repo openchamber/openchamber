@@ -14,6 +14,7 @@ import {
   encodeJsonPayload,
   encodeTunnelFrame,
 } from './tunnel-codec.js';
+import { relayProofHeaders } from './provenance.js';
 
 interface HttpRequestPayload {
   method: string;
@@ -199,6 +200,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       headers[lower] = value;
     }
     headers['x-openchamber-relay-connection'] = connectionId;
+    Object.assign(headers, relayProofHeaders());
     headers['accept-encoding'] = 'identity';
     headers.origin = loopbackOrigin;
     return headers;
@@ -222,6 +224,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         body,
         duplex: body ? 'half' : undefined,
         signal: stream.abort.signal,
+        redirect: 'manual',
       };
       response = await fetch(url, options);
     } catch (error) {
@@ -459,6 +462,7 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     const url = `ws://127.0.0.1:${getLocalPort()}${open.path}${open.query ? `?${open.query}` : ''}`;
     const dialHeaders = {
       'x-openchamber-relay-connection': connectionId,
+      ...relayProofHeaders(),
       origin: `http://127.0.0.1:${getLocalPort()}`,
     };
     let socket;

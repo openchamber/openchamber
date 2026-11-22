@@ -479,7 +479,7 @@ const RepositoryPreview: React.FC<{
             avatarUrl: commit.author?.avatarUrl ?? null,
             committedAt: commit.committedAt,
             url: commit.url,
-        }))));
+        })), value.references ?? []));
     }, [detail, t]);
     const relative = useRelative(now);
     const descriptor = useSourceControlProvider(reference.provider);

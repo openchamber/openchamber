@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
+  isOpenCodeLatestVersionLookupFailed,
   isOpenCodeUpgradeSupported,
   resolveOpenCodeUpgradeStatusVersion,
 } from './openCodeUpdateDedup';
@@ -22,6 +23,7 @@ const upgradeResponse = z.object({
 export type OpenCodeUpgradeStatus = {
   currentVersion: string | null;
   availableVersion: string | null;
+  latestVersionLookupFailed: boolean;
   supported: boolean;
 };
 
@@ -33,7 +35,12 @@ export async function fetchOpenCodeUpgradeStatus(): Promise<OpenCodeUpgradeStatu
   const status = parsed.data;
   const currentVersion = status.currentVersion?.trim() || null;
   const availableVersion = resolveOpenCodeUpgradeStatusVersion(status) || null;
-  return { currentVersion, availableVersion, supported: isOpenCodeUpgradeSupported(status) };
+  return {
+    currentVersion,
+    availableVersion,
+    latestVersionLookupFailed: isOpenCodeLatestVersionLookupFailed(status),
+    supported: isOpenCodeUpgradeSupported(status),
+  };
 }
 
 export async function runOpenCodeUpgrade(fallbackError: string): Promise<string | null> {

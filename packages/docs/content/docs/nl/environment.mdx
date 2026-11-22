@@ -50,6 +50,10 @@ Start zonder webinterface bij `true` of `1`. De API-routes blijven beschikbaar v
 
 Origins die OpenChamber in een frame op hun eigen pagina mogen tonen, gescheiden door spaties, bijvoorbeeld `https://dash.example.com`. `*` staat elke site toe. Standaard mogen alleen OpenChamber zelf en de desktop- en mobiele apps het insluiten, zodat geen andere site over de knoppen heen kan leggen.
 
+### `OPENCHAMBER_TRUSTED_PROXIES`
+
+Adressen van reverse proxy's die op een andere machine of in een andere container draaien, gescheiden door komma's, zoals `192.168.1.10` of `172.18.0.0/16`. OpenChamber beperkt mislukte aanmeldpogingen per client en leest het adres van de client alleen uit `X-Forwarded-For` als het verzoek van deze machine of van een adres in deze lijst komt. Een proxy die niet in de lijst staat telt als één client, dus de mislukte pogingen van één persoon kunnen iedereen erachter een tijdje buitensluiten.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Stelt een andere gegevensmap in. De standaard is `~/.config/openchamber`.

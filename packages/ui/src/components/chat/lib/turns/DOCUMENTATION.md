@@ -37,11 +37,53 @@ height estimates.
   lookup skips trailing compaction, synthetic, skill and shell records and
   uses assistant completion, because intermediate summary text is not proof
   that the turn finishes.
+- A busy/retry status or explicit retry notice suppresses only the latest
+  same-session assistant error with OpenCode `retry` evidence when its completed
+  time, or retry time when completion is absent, is newer than that session's
+  last idle time. A missing idle marker means no settled boundary is known, so
+  active retry evidence is accepted. Busy alone adds no fallback; only explicit
+  retry notices retain fallback or synthetic notices. The display copy retains
+  its parts and leaves the stored error alone; previous and unmatched errors
+  remain terminal.
 - A turn containing only subagent calls or session notices keeps those rows
   visible without an Activity fold. Pages, proposed workflow runs and earlier
   text containing a UI block remain visible in chronological order; the final
   answer's text remains the answer. An `openui-lang literal` fence stays a code
   sample.
+- Show notes (`activityRenderMode: 'text'`) keeps every visible text before
+  the final answer in view the same way, in the order it was written: below the
+  latest rows while the turn runs, between the Activity header and the answer
+  once it settles, with the answer divider after it. Opening the fold returns
+  each text to the step that wrote it, so an open fold reads as the steps ran.
+  The latest-rows window counts only rows it draws; a part shown below the
+  window takes no slot in it.
+  Kept text never splits the steps around it the way a page does, and neither
+  does the answered-summary line of a form kept after it: only what Collapsed
+  would show splits them, so a turn that stops without an answer leaves no tool
+  row outside its closed fold.
+- Kept text streams as long as the message that wrote it streams (the phase
+  `ChatMessage` gives that message, `ShownPartStreamPhaseContext`); the part's
+  own end time only finishes it earlier. A finished step's part can lack an end
+  time, and a short note read as still streaming draws nothing.
+- Text shown outside the message that wrote it, kept text and text holding a
+  UI block alike, carries that message's id and a quote root of its own. A
+  selection in it is quoted and commented as that message's text, also while
+  it is drawn inside the answer's body, and the comment resolves again when
+  the text returns to its step. A quote root's stream leaves out the quote
+  roots nested in it, so the answer's stream is the same with the fold closed
+  and open. Kept text is drawn one root per part, so its roots are pieces of
+  the message's stream with the step's tool rows missing between them: a quote
+  taken there reads context only inside its own piece, a selection across two
+  pieces takes no anchor, and a quote resolved there compares context only as
+  far as its piece reaches, the match nearest where it was taken winning
+  (`lib/chatQuoteAnchor.ts`).
+- With no message in the viewport (a prompt stuck to the top edge or a message
+  mounted below it does not count), kept text is the scroll anchor, named by
+  the row that draws it and its part (`MessageViewportAnchor.kept`), so leaving
+  the session and coming back returns to it. Restoring finds the part wherever
+  it is drawn now (the answer may have arrived and taken it) and gives up once
+  the saved row is mounted without it; it never opens the fold around the step
+  that wrote it, as navigating to that step does.
 - Answered forms normally fold like completed steps, but a form after retained
   text keeps its answered-summary line so the question still separates that
   passage from the reply. Settled secret cards have no such summary and fold.
@@ -51,6 +93,18 @@ height estimates.
   resolved and assistant messages supply no working directory; a write without
   a result diff still obtains its path from the input. Renames preserve an
   already touched file's identity and first-touch order.
+- Activity holds its fold open and stops moving its row window while the
+  reader acts on its text: a shown selection menu or an open inline comment
+  editor holds it, and the last release returns it to the turn's current state.
+  A turn that settles under an open comment keeps the step it quotes mounted,
+  steps below a shown page stay outside the collapse instead of joining it, and
+  no row leaves the seven-row live window between the selection and its
+  release. The hold holds on the phone too, where the comment is written in the
+  composer. When the answer lands, the page moves to the answer row and steps
+  below it shift up without a scroll; the fold's hold context reports that
+  (`pagesShown`) so an open menu remeasures its position and quote highlight.
+  When the quoted step itself becomes the final answer it moves to its own
+  row, and the comment moves with it (message module).
 - Answer chunk offsets are valid only when parsed Markdown blocks reconstruct
   the source exactly. Row cutting and size estimation agree with the parts
   MessageBody actually renders, including hoisted pages and settled forms, so
@@ -72,8 +126,39 @@ The file list and available line counts come from the turn's own edit, write
 and patch calls. Pills open the snapshot-based session turn diff, which can
 also describe write results and delegated edits absent from those call patches.
 
+### Why retry suppression checks the current assistant and idle time
+
+A retry status can overlap the failed assistant message's saved error, and a
+stopped message can retain retry metadata. The latest same-session message's
+completion or retry time and the session idle marker share OpenCode's event
+clock. The message time must follow the authoritative idle time; without an idle
+marker, active retry evidence has no settled boundary to compare against.
+Clearing only the display copy's error preserves sync state, partial content and
+terminal notices for unmatched messages.
+
 ### Why a whole-call patch replaces per-file counts
 
 A top-level patch describes the whole call, so adding its counts to per-file
 numbers double-counts edits. Its counts belong to a single file only when the
 call touches one file; multi-file calls retain unknown per-file numbers.
+
+### Why Show notes hoists the text and not folds the tools in groups
+
+Readers opened Activity to look for what the agent wrote between its steps.
+Keeping that text in view reuses the path shown pages already take through a
+fold, so the turn keeps one Activity header, one expansion state and the row
+shapes navigation, holds and size estimates rely on. A fold per run of tools
+between two texts would show which steps each text followed, but Collapsed
+deliberately has no tool subgroups, and it needs a second row model for the
+same turn. The order is one click away in the open fold.
+
+### Why Activity yields while the reader acts on it, and not the other way round
+
+Both automatic behaviours unmount content: a settled fold renders nothing under
+its header, and the live window drops the messages older than its newest rows.
+The inline comment editor lives in the message body it quotes, so folding under
+it closed the box and lost what was typed. Holding the fold instead of moving
+the editor into the composer keeps one comment surface and one draft, and it
+keeps a plain text selection mounted while the reader copies it. The hold
+freezes the window where it was rather than clearing the trim, because letting
+the dropped rows back in would move the content the reader is pointing at.

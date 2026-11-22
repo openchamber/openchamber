@@ -98,6 +98,14 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.opencode-shared-service',
+    page: 'general',
+    titleKey: 'settings.openchamber.opencodeCli.field.useSharedService',
+    descriptionKey: 'settings.openchamber.opencodeCli.field.useSharedServiceInfo',
+    keywords: ['opencode', 'service', 'shared', 'external', 'global', 'daemon'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.agent-knowledge-tool',
     page: 'general',
     titleKey: 'settings.openchamber.tools.field.agentKnowledgeTool',
@@ -142,7 +150,7 @@ export const OPENCHAMBER_TOOLS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.openchamber.tools.workflowAutoApprove.label',
     descriptionKey: 'settings.openchamber.tools.workflowAutoApprove.info',
-    keywords: ['workflow', 'workflows', 'approve', 'approval', 'auto', 'automatic', 'start', 'without asking', 'unattended', 'overnight'],
+    keywords: ['workflow', 'workflows', 'approve', 'approval', 'auto', 'automatic', 'start', 'without asking', 'unattended', 'overnight', 'lead', 'leads'],
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWorkflowFeatureAvailable && useUIStore.getState().agentWorkflowToolEnabled,
   },
 ];

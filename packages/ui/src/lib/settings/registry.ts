@@ -14,7 +14,8 @@ import { sanitizeWorkStatusHiddenSections, sanitizeWorkStatusSectionOrder } from
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { STT_PROMPT_MAX_LENGTH, readTranscriptionPrompt, setTranscriptionPrompt } from '@/stores/useTranscriptionPromptStore';
+import { useUIStore, type DocumentAttachBehavior, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { hiddenSidebarSectionsSchema, SIDEBAR_SESSION_BATCH_MAX, SIDEBAR_SESSION_BATCH_MIN, sidebarPinListsSchema, sidebarSectionsSchema } from '@/lib/sidebarSections';
 import { z } from 'zod';
@@ -153,6 +154,7 @@ const parseMobileKeyboardModeValue = mapParser(parseTrimmedString, (value) => no
 const parseDraftStarters: SettingsParser<DraftStarterRef[]> = mapParser(fromSchema(z.array(z.unknown())), sanitizeStarterRefs);
 const parseWorkStatusHiddenSections: SettingsParser<string[]> = mapParser(fromSchema(z.array(z.unknown())), (value) => sanitizeWorkStatusHiddenSections(value));
 const parseLargeTextPasteBehavior: SettingsParser<LargeTextPasteBehavior> = parseOneOf(['ask', 'attach', 'inline', 'inline-double-paste']);
+const parseDocumentAttachBehavior: SettingsParser<DocumentAttachBehavior> = parseOneOf(['ask', 'save', 'convert']);
 const parseFileEditorKeymap: SettingsParser<FileEditorKeymap> = parseOneOf(['default', 'vim']);
 
 const withOfferedBuiltInStarters = (starters: DraftStarterRef[], snapshot: SettingsSiblingView): DraftStarterRef[] => {
@@ -188,6 +190,7 @@ export const SETTINGS_REGISTRY = {
   lastDirectory: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
   homeDirectory: field({ scope: 'instance', parse: parseNonEmptyString }),
   opencodeBinary: field({ scope: 'instance', parse: parseTrimmedString }),
+  useGlobalOpenCodeService: field({ scope: 'instance', parse: parseBoolean }),
   serverUpdateChannel: field({ scope: 'instance', surfaces: ['web'], parse: parseOneOf(['stable', 'canary']) }),
   projects: field<ProjectEntry[]>({ scope: 'instance', parse: parseProjects }),
   activeProjectId: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
@@ -251,6 +254,7 @@ export const SETTINGS_REGISTRY = {
   agentKnowledgeToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentKnowledgeToolEnabled', (v) => useUIStore.getState().setAgentKnowledgeToolEnabled(v)) }),
   agentWorkflowToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowToolEnabled', (v) => useUIStore.getState().setAgentWorkflowToolEnabled(v)) }),
   agentWorkflowAutoApprove: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowAutoApprove', setUi('agentWorkflowAutoApprove')) }),
+  agentWorkflowAutoApproveLeads: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowAutoApproveLeads', setUi('agentWorkflowAutoApproveLeads')) }),
   isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('isolatedSpacesEnabled', (v) => useUIStore.getState().setIsolatedSpacesEnabled(v)) }),
   isolatedSpacesIdleStop: field({
     scope: 'instance',
@@ -300,6 +304,7 @@ export const SETTINGS_REGISTRY = {
   sttModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttModel') }),
   sttLocalModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttLocalModel') }),
   sttLanguage: field({ scope: 'profile', parse: parseTrimmedStringUpTo(64), ui: configField('sttLanguage') }),
+  sttPrompt: field({ scope: 'profile', parse: parseTextUpTo(STT_PROMPT_MAX_LENGTH), ui: { read: readTranscriptionPrompt, write: setTranscriptionPrompt, autoSave: false } }),
   sttCorrectTranscript: field({ scope: 'profile', parse: parseBoolean, ui: configField('sttCorrectTranscript') }),
 
   tunnelProvider: field({ scope: 'instance', parse: mapParser(parseNonEmptyTrimmedString, (value) => value.toLowerCase()) }),
@@ -434,6 +439,7 @@ export const SETTINGS_REGISTRY = {
   enterToSendConfigured: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('enterToSendConfigured', (v) => useUIStore.getState().setEnterToSendConfigured(v)) }),
   mobileReturnKeySends: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('mobileReturnKeySends', (v) => useUIStore.getState().setMobileReturnKeySends(v)) }),
   largeTextPasteBehavior: field({ scope: 'profile', parse: parseLargeTextPasteBehavior, ui: uiStore('largeTextPasteBehavior', (v) => useUIStore.getState().setLargeTextPasteBehavior(v)) }),
+  documentAttachBehavior: field({ scope: 'profile', parse: parseDocumentAttachBehavior, ui: uiStore('documentAttachBehavior', (v) => useUIStore.getState().setDocumentAttachBehavior(v)) }),
   savePastedImagesAsFiles: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('savePastedImagesAsFiles', (v) => useUIStore.getState().setSavePastedImagesAsFiles(v)) }),
   followUpBehavior: field({
     scope: 'profile',
@@ -488,6 +494,9 @@ export const SETTINGS_REGISTRY = {
   defaultModel: field({ scope: 'profile', parse: parseNonEmptyString }),
   defaultVariant: field({ scope: 'profile', parse: parseNonEmptyString }),
   defaultAgent: field({ scope: 'profile', parse: parseNonEmptyString }),
+  chatsDefaultModel: field({ scope: 'profile', parse: parseNonEmptyString }),
+  chatsDefaultVariant: field({ scope: 'profile', parse: parseNonEmptyString }),
+  chatsDefaultAgent: field({ scope: 'profile', parse: parseNonEmptyString }),
   smallModelUseDefault: field({ scope: 'profile', parse: parseBoolean }),
   smallModelOverride: field({ scope: 'profile', parse: parseNonEmptyString }),
   smallModelVariant: field({ scope: 'profile', parse: parseNonEmptyString }),

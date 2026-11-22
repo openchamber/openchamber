@@ -1,13 +1,11 @@
 import { EnvironmentPatchError, isProjectId, parseProjectPatch, parseUserPatch } from './store.js';
 import type { EnvironmentStore } from './store.js';
 import type { EnvironmentRuntime } from './runtime.js';
+import type { Response } from '../shared/http-contracts.js';
 
 type ProjectView = ReturnType<EnvironmentStore['describeProject']> & { status: ReturnType<EnvironmentRuntime['projectStatus']> };
 type EnvironmentResponseBody = ReturnType<EnvironmentStore['describeUser']> | ProjectView | { error: string };
-interface EnvironmentResponse {
-  status: (code: number) => EnvironmentResponse;
-  json: (body: EnvironmentResponseBody) => EnvironmentResponse;
-}
+type EnvironmentResponse = Response<EnvironmentResponseBody>;
 type EnvironmentRequest = { params: { projectId: string }; body: unknown };
 type EnvironmentHandler = (req: EnvironmentRequest, res: EnvironmentResponse) =>
   EnvironmentResponse | undefined | Promise<EnvironmentResponse | undefined>;
@@ -17,10 +15,12 @@ export interface EnvironmentRouteApp {
   post: (path: string, handler: EnvironmentHandler) => void;
 }
 
-export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, runtime, listProjects }: {
+export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, runtime, listProjects, readClaudeConfigDir, onClaudeConfigChanged }: {
   store: EnvironmentStore;
   runtime: Pick<EnvironmentRuntime, 'projectStatus' | 'invalidateProject' | 'reloadProject'>;
   listProjects: () => Promise<{ id: string; path: string }[]>;
+  readClaudeConfigDir?: () => string | undefined;
+  onClaudeConfigChanged?: () => void;
 }) => {
   const respondWithError = (res: EnvironmentResponse, cause: unknown, fallback: string) => {
     if (cause instanceof EnvironmentPatchError) return res.status(400).json({ error: cause.message });
@@ -49,7 +49,12 @@ export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, run
 
   app.put('/api/environment', async (req, res) => {
     try {
-      return res.json(await store.updateUser(parseUserPatch(req.body)));
+      const patch = parseUserPatch(req.body);
+      const touchesClaude = Boolean(patch.variables && Object.hasOwn(patch.variables, 'CLAUDE_CONFIG_DIR'));
+      const before = touchesClaude ? readClaudeConfigDir?.() : undefined;
+      const result = await store.updateUser(patch);
+      if (touchesClaude && readClaudeConfigDir?.() !== before) onClaudeConfigChanged?.();
+      return res.json(result);
     } catch (error) {
       return respondWithError(res, error, 'Failed to save environment variables');
     }
@@ -69,8 +74,9 @@ export const registerEnvironmentRoutes = (app: EnvironmentRouteApp, { store, run
     const projectId = requireProjectId(req, res);
     if (!projectId) return undefined;
     try {
-      await store.updateProject(projectId, parseProjectPatch(req.body));
-      runtime.invalidateProject(projectId);
+      const patch = parseProjectPatch(req.body);
+      await store.updateProject(projectId, patch);
+      if (patch.variables !== undefined || patch.command !== undefined) runtime.invalidateProject(projectId);
       return res.json(projectView(projectId));
     } catch (error) {
       return respondWithError(res, error, 'Failed to save project environment');

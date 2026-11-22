@@ -7,6 +7,7 @@ import { isRelayModeActive } from './relay/runtime-tunnel';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage } from './browser/hostCapability';
+import { parseBrowserControlEvent, type BrowserControlEvent } from './browser/controlEvents';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
 import { prWatchUpdatedEventSchema, type PrWatchUpdatedEvent } from '@/sync/pr-watch';
@@ -44,21 +45,6 @@ type WorktreeChangedEvent = {
   directories: string[];
   changedAt: number;
 };
-
-type BrowserControlRequestEvent = {
-  type: 'browser-control-request';
-  requestId: string;
-  action: string;
-  parameters: Record<string, unknown>;
-  context: BrowserControlRequestContext;
-};
-
-const browserControlRequestContextSchema = z.object({
-  directory: z.string().min(1).nullable().catch(null),
-  sessionId: z.string().min(1).nullable().catch(null),
-});
-export type BrowserControlRequestContext = z.infer<typeof browserControlRequestContextSchema>;
-const UNKNOWN_BROWSER_CONTROL_CONTEXT: BrowserControlRequestContext = { directory: null, sessionId: null };
 
 const fileOpenRequestSchema = z.object({
   path: z.string().min(1),
@@ -102,6 +88,7 @@ type SourceControlProvidersChangedEvent = { type: 'source-control-providers-chan
 type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
 
 type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
+type QuotaCredentialsChangedEvent = { type: 'quota-credentials-changed' };
 
 type GuestsChangedEvent = { type: 'guests-changed' };
 
@@ -242,13 +229,14 @@ type OpenChamberEvent =
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
   | WorktreeChangedEvent
-  | BrowserControlRequestEvent
+  | BrowserControlEvent
   | FileOpenRequestEvent
   | PlanOpenRequestEvent
   | BrowserProviderResetEvent
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
   | QuotaProvidersChangedEvent
+  | QuotaCredentialsChangedEvent
   | GuestsChangedEvent
   | GuestMarksChangedEvent
   | GuestServiceEvent
@@ -423,6 +411,15 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 
 const guestServiceEventSchema = z.object({ guestId: z.string().min(1), topic: z.string().min(1), data: z.json() });
 
+const signalEvents = new Map<string, OpenChamberEvent>([
+  ['openchamber:source-control-providers-changed', { type: 'source-control-providers-changed' }],
+  ['openchamber:tracker-providers-changed', { type: 'tracker-providers-changed' }],
+  ['openchamber:quota-providers-changed', { type: 'quota-providers-changed' }],
+  ['openchamber:quota-credentials-changed', { type: 'quota-credentials-changed' }],
+  ['openchamber:guests-changed', { type: 'guests-changed' }],
+  ['openchamber:guest-marks-changed', { type: 'guest-marks-changed' }],
+]);
+
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'openchamber:terminal-sessions-changed') {
     for (const listener of listeners) listener({ type: 'terminal-sessions-changed' });
@@ -588,28 +585,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
-  if (envelope.type === 'openchamber:source-control-providers-changed') {
-    for (const listener of listeners) listener({ type: 'source-control-providers-changed' });
-    return;
-  }
-
-  if (envelope.type === 'openchamber:tracker-providers-changed') {
-    for (const listener of listeners) listener({ type: 'tracker-providers-changed' });
-    return;
-  }
-
-  if (envelope.type === 'openchamber:quota-providers-changed') {
-    for (const listener of listeners) listener({ type: 'quota-providers-changed' });
-    return;
-  }
-
-  if (envelope.type === 'openchamber:guests-changed') {
-    for (const listener of listeners) listener({ type: 'guests-changed' });
-    return;
-  }
-
-  if (envelope.type === 'openchamber:guest-marks-changed') {
-    for (const listener of listeners) listener({ type: 'guest-marks-changed' });
+  const signal = signalEvents.get(envelope.type);
+  if (signal) {
+    for (const listener of listeners) listener(signal);
     return;
   }
 
@@ -714,27 +692,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
-  if (envelope.type === 'openchamber:browser-control-request') {
-    const properties = getEventProperties(envelope.properties);
-    const requestId = typeof properties?.requestId === 'string' ? properties.requestId : '';
-    const action = typeof properties?.action === 'string' ? properties.action : '';
-    if (!requestId || !action) {
-      return;
-    }
-
-    const rawParameters = properties?.parameters;
-    const nextEvent: BrowserControlRequestEvent = {
-      type: 'browser-control-request',
-      requestId,
-      action,
-      parameters: rawParameters && typeof rawParameters === 'object' && !Array.isArray(rawParameters)
-        ? rawParameters as Record<string, unknown>
-        : {},
-      context: browserControlRequestContextSchema.safeParse(properties?.context).data ?? UNKNOWN_BROWSER_CONTROL_CONTEXT,
-    };
-    for (const listener of listeners) {
-      listener(nextEvent);
-    }
+  const browserControlEvent = parseBrowserControlEvent(envelope);
+  if (browserControlEvent) {
+    for (const listener of listeners) listener(browserControlEvent);
     return;
   }
 

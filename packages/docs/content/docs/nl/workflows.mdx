@@ -13,7 +13,7 @@ Workflows passen bij werk met veel vergelijkbare, onafhankelijke stukken: een re
 
 De workflowtool staat standaard uit. Open **Instellingen → Algemeen → OpenChamber-tools** en zet **Workflowtool** aan. Lopende sessies krijgen de tool bij hun volgende beurt. Zet u hem weer uit, dan verdwijnen de tool en de instructies erover uit elke sessie en wordt het Workflows-paneel verborgen. Bestaande runs komen terug zodra u hem weer aanzet.
 
-Workflows hebben de eigen OpenCode-server van OpenChamber nodig. Ze zijn niet beschikbaar wanneer OpenChamber via `OPENCODE_HOST` of skip-start met een externe OpenCode-server verbindt, en niet in de VS Code-extensie.
+Workflows werken automatisch met de beheerde OpenCode-server van OpenChamber, en werken ook op een lokale externe of gedeelde OpenCode-server nadat u de OpenChamber-plugin in uw globale OpenCode-configuratie hebt geregistreerd via **Instellingen → Algemeen → OpenCode-server** (zie [OpenCode-server](/nl/opencode-server/#openchamber-tools-inschakelen-op-een-externe-lokale-server)). Ze zijn niet beschikbaar op een OpenCode-server op afstand of in de VS Code-extensie.
 
 ## Een workflow uitvoeren
 
@@ -29,9 +29,15 @@ Agents van een lopende workflow kunnen zelf geen workflow starten.
 
 ## Runs starten zonder goedkeuring
 
-Zet onder **Workflowtool** de optie **Runs starten zonder mijn goedkeuring** aan om een run die de agent start meteen te laten beginnen. De kaart toont hem als lopend, zonder knop **Workflow uitvoeren**, en u kunt hem nog steeds beëindigen met **Stoppen**. Dit is bedoeld voor werk dat u hebt afgesproken en daarna hebt losgelaten: u vraagt de agent bijvoorbeeld een paar modellen te proberen op een kleine pilot en het hele werk met het beste uit te voeren, en hij kan die run starten terwijl u weg bent.
+Onder **Workflowtool** bepaalt **Runs starten zonder mijn goedkeuring** of een run die de agent start op uw klik wacht:
 
-De agent stelt het plan en de modellen nog steeds in de chat voor voordat hij een run start. De instelling slaat alleen de klik over. De server leest haar bij elke run, dus met het vakje uitgevinkt wacht elke run weer op u. De limieten hieronder blijven gelijk.
+- **Nee**: elke run wacht tot u **Workflow uitvoeren** kiest
+- **Voor leads**: runs die een [lead](/nl/leads/) start beginnen meteen, elke andere sessie wacht nog steeds
+- **Altijd**: elke run begint meteen
+
+Een run die meteen begint, staat op zijn kaart als lopend, zonder knop **Workflow uitvoeren**, en u kunt hem nog steeds beëindigen met **Stoppen**. Dit is bedoeld voor werk dat u hebt afgesproken en daarna hebt losgelaten: u vraagt de agent bijvoorbeeld een paar modellen te proberen op een kleine pilot en het hele werk met het beste uit te voeren, en hij kan die run starten terwijl u weg bent.
+
+Een gewone sessie stelt het plan en de modellen nog steeds in de chat voor voordat ze een run start; de instelling slaat alleen de klik over. Een lead voert zijn werk zelfstandig uit, dus met **Voor leads** kan hij een run starten zonder eerst te vragen. De server leest de instelling bij elke run, dus zet u haar terug op **Nee**, dan wacht elke run weer op u. De limieten hieronder blijven gelijk.
 
 ## Modellen en kosten
 

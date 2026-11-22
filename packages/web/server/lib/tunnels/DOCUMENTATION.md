@@ -31,7 +31,8 @@ In enterprise mode (`../enterprise-mode.js`) no tunnel starts at all: Cloudflare
   unsupported port; saved defaults apply only to modes listing that port.
 - Request fields remain unchecked until normalization. An explicit own
   `configPath` overrides defaults even when its value is undefined.
-- Tunnel-locality checks account for forwarded client addresses even when the Host header says localhost. Tailscale passes Host through, so a remote caller can choose it; forwarded non-loopback addresses can only reduce trust. Login rate-limit buckets use Express's trusted-proxy resolution.
+- Tunnel-locality checks account for forwarded client addresses even when the Host header says localhost. Tailscale passes Host through, so a remote caller can choose it; forwarded non-loopback addresses can only reduce trust. The bootstrap-exchange budget keys on the client the same way as login (`../ui-auth/DOCUMENTATION.md`): `X-Forwarded-For` counts only through loopback or `OPENCHAMBER_TRUSTED_PROXIES` peers. `/connect` is outside the relay's HTTP allowlist, so the exchange never arrives through the relay.
+- Raw WebSocket upgrades have no Express hostname. While a tunnel is active, a forwarded public host can require tunnel authentication; a forwarded local name cannot lift it. An open host terminal is bound to its tunnel session until disconnect, revocation, replacement or expiry. Expiry timers recheck the deadline because the supported 30-day lifetime exceeds a single Node timer.
 
 ## TypeScript boundaries
 

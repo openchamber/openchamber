@@ -599,6 +599,19 @@ describe('scheduled-task model check', () => {
     expect(projectConfigRuntime.upsertScheduledTask).not.toHaveBeenCalled();
   });
 
+  it('refuses an overlong prompt before the target or catalog is consulted', async () => {
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const validateTarget = vi.fn(async () => { throw Object.assign(new Error('trust the folder'), { statusCode: 403 }); });
+    const { service, projectConfigRuntime } = createService({ readModelCatalog, scheduledTasksRuntime: { validateTarget } });
+
+    await expect(service.upsert('project-test', {
+      ...task({ prompt: 'x'.repeat(20_001), providerID: 'p', modelID: 'm' }), targetSessionId: 'ses_1',
+    })).rejects.toMatchObject({ statusCode: 400, message: 'execution.prompt is invalid: at most 20000 characters, got 20001' });
+    expect(validateTarget).not.toHaveBeenCalled();
+    expect(readModelCatalog).not.toHaveBeenCalled();
+    expect(projectConfigRuntime.upsertScheduledTask).not.toHaveBeenCalled();
+  });
+
   it('accepts the upstream modelID of an entry whose id is a display override', async () => {
     // The fire path dispatches `modelID`; the session routes match either form.
     const { service } = createService({

@@ -2,12 +2,10 @@
 
 ## Purpose
 
-`packages/web/server/lib/shared/guards.js` exposes the small value predicates and
-coercions that several feature modules used to define privately. It is neutral:
-it knows nothing about git, OpenCode, projects, or any other domain, and it
-imports nothing. Consolidating the copies means a value can no longer be a
-string on one route and not a string on another because two files spelled the
-check differently.
+`guards.ts` exposes the small value predicates and coercions that several
+feature modules used to define privately. It re-exports from `object-guards.ts`,
+which has no imports or feature dependencies. Sharing the predicates keeps
+the acceptance rules the same across routes.
 
 Only the dominant, behavior-defining spelling of each guard belongs here.
 Variants that answer differently for real inputs stay with their owner.
@@ -115,8 +113,8 @@ imports nothing and reads only the supplied items, limit and task.
 
 `object-guards.ts` owns `isPlainObject`, `isRecord`, `isBoolean`, `isString`
 and `asNonEmptyString`.
-The JavaScript entry re-exports these functions themselves, preserving identity
-for Linear, GitLab and OpenCode consumers. Unknown inputs narrow to
+The `guards.js` entry re-exports the same functions, preserving identity for
+Linear, GitLab and OpenCode consumers. Unknown inputs narrow to
 `Record<string, unknown>` or `boolean`. An already typed object uses a boolean
 overload: retaining its existing shape avoids inventing unknown properties in a
 discriminated union or replacing optional fields in a weak interface.
@@ -137,13 +135,13 @@ shared folder. A parser must be directly exported, take exactly one plain
 any return branches, internal helpers, extra parameters and nested callbacks
 do not receive the exception.
 
-### Why the entry remains a JavaScript re-export
+### Why the entry has only re-exports
 
-`guards.js` contains only re-exports from `object-guards.ts`, so callers retain
-their import paths and function identity. The standalone Node fixture in
-`fs/routes.test.js` already emits `object-guards.ts` and copies this entry.
-Keeping the entry preserves that packaged-layout contract without changing
-the filesystem module's fixture.
+`guards.ts` re-exports the original functions, so callers keep their `.js`
+import paths and function identity. The standalone Node fixture in
+`fs/routes.test.js` compiles `object-guards.ts` and copies `guards.ts` as
+`guards.js`. The entry has no type syntax, so the copy runs as JavaScript
+without the source resolver.
 
 ## HTTP and WebSocket contracts
 

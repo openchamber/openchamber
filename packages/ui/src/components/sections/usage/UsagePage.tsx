@@ -76,6 +76,8 @@ export const UsagePage: React.FC = () => {
   const providerMeta = providers.find((provider) => provider.id === selectedProviderId);
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
+  const accountLabel = selectedResult?.accountLabel;
+  const isOpenCodeGo = selectedProviderId === 'opencode-go';
   const refreshError = selectedProviderId ? refreshErrors[selectedProviderId] : undefined;
   const selectedProviderError = refreshError
     ? usage
@@ -178,9 +180,9 @@ export const UsagePage: React.FC = () => {
             plan: selectedResult.planLabel,
             time: formatTime(lastUpdated, timeFormatPreference),
           })
-        ) : selectedResult?.accountLabel ? (
+        ) : accountLabel && !isOpenCodeGo ? (
           t('settings.usage.page.header.lastUpdatedWithAccount', {
-            account: selectedResult.accountLabel,
+            account: accountLabel,
             time: formatTime(lastUpdated, timeFormatPreference),
           })
         ) : (
@@ -233,10 +235,13 @@ export const UsagePage: React.FC = () => {
       )}
 
       {usage?.windows && Object.keys(usage.windows).length > 0 && (
-        <SettingsSection settingsItem="usage.model-quotas">
+        <SettingsSection
+          settingsItem="usage.model-quotas"
+          description={isOpenCodeGo && accountLabel ? <bdi className="wrap-anywhere">{accountLabel}</bdi> : undefined}
+        >
           <div className="divide-y divide-[var(--surface-subtle)]">
             {Object.entries(usage.windows).map(([label, window]) => (
-              <UsageCard key={label} title={label} window={window} providerId={selectedProviderId} />
+              <UsageCard key={label} title={label} window={window} providerId={selectedProviderId} showGiftReset />
             ))}
           </div>
         </SettingsSection>
@@ -288,6 +293,7 @@ export const UsagePage: React.FC = () => {
                             title={label}
                             subtitle={getDisplayModelName(model.name)}
                             window={window}
+                            providerId={selectedProviderId}
                             showToggle
                             toggleEnabled={isShown}
                             toggleDisabled={isShown && visibleModelNames.size === 1}
@@ -341,6 +347,7 @@ export const UsagePage: React.FC = () => {
                             title={label}
                             subtitle={getDisplayModelName(model.name)}
                             window={window}
+                            providerId={selectedProviderId}
                             showToggle
                             toggleEnabled={isShown}
                             toggleDisabled={isShown && visibleModelNames.size === 1}

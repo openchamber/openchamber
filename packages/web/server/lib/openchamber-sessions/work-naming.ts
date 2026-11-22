@@ -1,5 +1,6 @@
 
 import { z } from 'zod';
+import { readLead } from '../session-lead/metadata.js';
 import type { setWorktreeTaskTitle as setWorktreeTaskTitleDefault } from '../git/service.js';
 import type { SessionInfo } from '@opencode/client';
 
@@ -47,6 +48,7 @@ const readWorkTitle = (session: NamingSession | null) => {
 
 interface WorkNamingDependencies {
   getSession: (sessionID: string) => Promise<NamingSession | null>;
+  renameSession?: ((sessionID: string, title: string) => Promise<void>) | null;
   listWorktrees: (directory: string) => Promise<{ path: string }[]>;
   setWorktreeTaskTitle: typeof setWorktreeTaskTitleDefault;
   readPlaceholderBranch?: (directory: string) => Promise<string | null>;
@@ -60,6 +62,7 @@ const hasStatus = (value: unknown): value is { status: unknown } =>
 
 export const createWorkNamer = ({
   getSession,
+  renameSession = null,
   listWorktrees,
   setWorktreeTaskTitle,
   readPlaceholderBranch = async () => null,
@@ -105,6 +108,14 @@ export const createWorkNamer = ({
     const session = await getSession(sessionId);
     if (!session) throw createError(`Session not found: ${sessionId}`, 404);
     const directory = directoryOf(session);
+
+    if (readLead(session.metadata) && renameSession) {
+      if (readWorkTitle(session)?.by === 'user') {
+        return { task: 'lead', sessionId: session.id, title: asText(session.title), named: false, reason: 'The user named this lead; keep their name.' };
+      }
+      if (asText(session.title) !== title) await renameSession(session.id, title);
+      return { task: 'lead', sessionId: session.id, title, named: true };
+    }
 
     const space = await nameSpaceTask(directory, title);
     if (space) return space;

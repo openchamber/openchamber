@@ -24,6 +24,7 @@ import { processVSCodePermissionAutoAccept } from "./vscode-permission-auto-acce
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
+import { dropFormDraftsForRequest } from "@/components/chat/formDrafts"
 import { applyGlobalSessionStatusEvent } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
@@ -318,7 +319,10 @@ export function handleEvent(
   }
 
   if (payload.type === "form.created") {
-    notifyFormCreated(payload.properties.form, resolvedDirectory)
+    const { form } = payload.properties
+    const pending = getDirectoryEventState(store, batch).form[form.sessionID]?.some((item) => item.id === form.id)
+    if (!pending) dropFormDraftsForRequest(expectedRuntimeKey, form.sessionID, form.id)
+    notifyFormCreated(form, resolvedDirectory)
   }
 
   if (payload.type === "form.settled") {
@@ -368,9 +372,6 @@ export function handleEvent(
     case "session.patched":
     case "session.deleted":
       cloneField("session", (value) => [...value])
-      cloneField("permission", (value) => ({ ...value }))
-      cloneField("form", (value) => ({ ...value }))
-      cloneField("part", (value) => ({ ...value }))
       cloneField("sessionEventRevision", (value) => ({ ...(value ?? {}) }))
       cloneField("sessionDeletedRevision", (value) => ({ ...(value ?? {}) }))
       break

@@ -1,7 +1,7 @@
 import React from 'react';
 import { AnimatePresence } from 'motion/react';
 import { ComposerFloatingPanel } from '../composer/ui/ComposerFloatingPanel';
-import type { Message, Part } from '@/lib/opencode/model';
+import type { FormRequest, Message, Part } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
@@ -23,18 +23,25 @@ import {
     useRecoveredQuestions,
 } from '@/sync/sync-context';
 import { useStreamingStore } from '@/sync/streaming';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { destroyBtwSession, filterBtwTailMessages, promoteBtwSession, type BtwSessionRef } from '@/lib/btw';
 import type { BtwPanelState } from './useBtwPanelState';
+import { attachSyntheticContext } from '../lib/attachSyntheticContext';
+import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { ChatSurfaceProvider } from '../ChatSurfaceContext';
 import { ChatTranscriptDirectoryContext } from '../chatColumnSession';
 import { useMobileAutocompleteMaxHeight } from '../useMobileAutocompleteMaxHeight';
 import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
 import { FormCard } from '../FormCard';
+import { useDropSettledFormDrafts } from '@/hooks/useDropSettledFormDrafts';
 import { SessionErrorNotice } from '../SessionErrorNotice';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
+
+const formCardKey = (form: FormRequest, directory: string, runtimeKey: string): string =>
+    [runtimeKey, directory, form.sessionID, form.id].join('\u0000');
 
 const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; hidden: boolean; onExit: () => void }> = ({
     parentSessionId,
@@ -147,7 +154,7 @@ const useBtwSessionData = (
     const sessionRecoveredQuestions = useRecoveredQuestions(sessionId, directory);
 
     const tailRecords = React.useMemo(
-        () => filterBtwTailMessages(messageRecords, boundaryMessageID),
+        () => attachSyntheticContext(filterBtwTailMessages(messageRecords, boundaryMessageID).filter((record) => !readSessionNotice(record.info))),
         [boundaryMessageID, messageRecords],
     );
 
@@ -404,6 +411,8 @@ const BtwMessages: React.FC<{
     maxHeight?: number;
 }> = ({ sessionRef, data, bodyRef, contentRef, onBodyScroll, maxHeight }) => {
     const { t } = useI18n();
+    const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
+    useDropSettledFormDrafts({ sessionId: sessionRef.btwSessionId, directory: sessionRef.directory }, data.sessionForms, data.sessionRecoveredQuestions, runtimeKey);
 
     if (data.isEmpty) {
         return (
@@ -442,10 +451,10 @@ const BtwMessages: React.FC<{
                 {data.sessionForms.length > 0 || data.sessionPermissions.length > 0 || data.sessionRecoveredQuestions.length > 0 ? (
                     <div>
                         {data.sessionForms.map((form) => (
-                            <FormCard key={form.id} form={form} />
+                            <FormCard key={formCardKey(form, sessionRef.directory, runtimeKey)} form={form} keepDraft directory={sessionRef.directory} />
                         ))}
                         {data.sessionRecoveredQuestions.map((question) => (
-                            <FormCard key={question.form.id} form={question.form} recovered={question} />
+                            <FormCard key={formCardKey(question.form, question.directory, runtimeKey)} form={question.form} recovered={question} />
                         ))}
                         {data.sessionPermissions.map((permission) => (
                             <PermissionCard key={permission.id} permission={permission} />

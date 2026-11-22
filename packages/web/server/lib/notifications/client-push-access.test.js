@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRemoteClientAuthRuntime } from '../client-auth/remote-clients.js';
+import { consumeRelayProof, relayProofHeaders } from '../relay/provenance.js';
 import { createUiAuth } from '../ui-auth/ui-auth.js';
 import { createApnsRuntime } from './apns-runtime.js';
 import { createClientPushAccess } from './client-push-access.js';
@@ -72,7 +73,7 @@ describe('client push access', () => {
       }),
       PUSH_SUBSCRIPTIONS_FILE_PATH: path.join(dir, 'push-subscriptions.json'),
       readSettingsFromDiskMigrated: async () => ({}),
-      writeSettingsToDisk: async () => {},
+      updateSettingsFromDisk: async (mutate) => mutate({}),
       getInvalidSessionKeys,
     });
     access = createClientPushAccess({
@@ -167,7 +168,9 @@ describe('client push access', () => {
     expect(await access.isLocalOnlyRequest({ headers: { authorization: `Bearer ${created.token}` } }, 'cookie-session')).toBe(true);
     expect(await notify()).toEqual({ phones: ['phone-anywhere'], browsers: [] });
 
-    await clients.authenticateBearerToken(created.token, { headers: { 'x-openchamber-relay-connection': '1' } });
+    const relayed = { headers: { 'x-openchamber-relay-connection': '1', ...relayProofHeaders() } };
+    consumeRelayProof(relayed);
+    await clients.authenticateBearerToken(created.token, relayed);
 
     expect(await access.isLocalOnlyRequest(noBearer, clientToken(created.client))).toBe(false);
     expect(await notify()).toEqual({ phones: ['phone-anywhere', 'phone-home'], browsers: ['https://push.test/home'] });

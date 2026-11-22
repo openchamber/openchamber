@@ -12,6 +12,11 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 
 ## Invariants
 
+- `upsertScheduledTask` refuses a task with a name over 80 characters or a
+  prompt over 20,000 characters, both counted after trimming. The error names
+  the limit and the submitted fields are not stored. A refused update can still
+  write task state or reconcile loop files through the scheduler's separate
+  sync. A stored task over either limit still lists with its text cut to fit.
 - Failed chat creation removes only an empty directory. Non-recursive removal
   preserves any files that appear before cleanup.
 - A default variant belongs to the model selected from the same settings scope.
@@ -39,6 +44,10 @@ the same server-owned membership rule.
 
 Storage clamps task names to 80 characters. Rejecting longer loop names keeps
 discovery identity keys equal to the stored task names.
+
+Loop sync still cuts a markdown body over 20,000 characters to the limit.
+Rejecting the file would make its loop unpausable and give no feedback to the
+person saving the file.
 
 ### Why loop approval excludes the enabled flag
 
@@ -258,8 +267,17 @@ and rejoining tokens would discard line breaks and collapse argument spacing.
 A task either pins them (`execution.providerID`, `modelID`, `variant`, `agent`)
 or sets `execution.useDefaults: true`. Such a task reads the session defaults
 when each run starts (`session-defaults.js`: the project's `defaultModel` /
-`defaultVariant` / `defaultAgent`, then the global ones), so changing a default
-reaches it on its next run without editing it. With nothing set, the session is
+`defaultVariant` / `defaultAgent`, then the global ones; a Chats-scope task
+reads the Chats defaults from `readChatsDefaults` in `chats-scope.js` in the
+project's place; `createReadSessionDefaults` matches the Chats storage id, the
+one runs carry, not `CHATS_SCOPE_PUBLIC_ID`), so changing a default
+reaches it on its next run without editing it. Each such run reads the run
+directory's model list first: a default model that list lacks or disables is
+skipped for the next one, and a thinking level the chosen model doesn't offer
+is dropped. A failed or empty read keeps the configured model, because only a
+catalog that was read proves a model gone. Auto is OpenChamber's routing
+choice and never in that list, so it passes the check and the run routes. An empty project or Chats level on
+the global model takes the global level. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
@@ -381,7 +399,7 @@ Linux start ticks are field 22 of `/proc/<pid>/stat`. The process name in
 parentheses can contain spaces and parentheses, so parsing starts after the
 last closing parenthesis before selecting the start-time field.
 
-### Why some implementations remain JavaScript
+### TypeScript boundaries
 
 `loops.ts` imports `parseMdFile`, `writeMdFile`, `getAncestors` and
 `findWorktreeRoot` from `../opencode/markdown-files.js` and
@@ -409,23 +427,34 @@ it. Candidate discovery retains its array check and checks individual candidate
 fields; a candidate may be a primitive, an array or an object. The membership
 cache contains promises of directory ownership, not session records.
 
-`service.js` inspects raw task payloads before project-config normalizes them.
+`service.ts` checks the task container before project-config normalizes it.
+Model validation reads the raw execution fields with the same nullish fallback
+as optional chaining. Target validation accepts the raw session id and parses
+it with Zod. Cancellation compares the raw task id against stored string ids
+without coercion. Public operations still reject missing ids through the
+existing string parser.
+
 `ScheduledTaskRunResult.error` and `statusCode` remain unknown because
-existing-session admission forwards unchecked thrown fields.
-`OpenChamberControlError` accepts only a string message and numeric status.
-Widening that class's stored status exposes the same mismatch in
-`Response.status(number)` across control, session, share-page and workflow
-routes. Those routes require a runtime narrowing to consume an unchecked
-status through the existing HTTP contract. A type-only conversion cannot add
-that narrowing or declare the forwarded value validated. `routes.js` has the
-same boundary directly and still depends on the JavaScript service.
-Typing the service also removes an inferred unchecked result from
-`createOpenChamberControlService.execute`. Its result then remains unknown
-at `guests/service-host-api.ts` reads of `messages` and `sessionStatus`.
-That caller needs an action-specific result contract or validation before
-those reads; narrowing its declared result without either would conceal the
-unchecked boundary. Control actions also pass nullable task ids to service
-operations, whose existing string parsing must continue to reject missing ids.
+existing-session admission forwards unchecked thrown fields. The control error
+lets `Error` coerce the message and stores the status unchanged. Guest service
+callbacks use the specific session actions' result contracts; general control
+execution can still return unchecked results from other actions.
+
+Status falls back to reading project configs when the injected runtime has no
+callable status reader. The worktree resolver normally reports the input
+directory when Git cannot resolve a checkout. A resolver that throws also
+falls through to the directory-not-found response.
+
+### Which thrown status values a route forwards
+
+`routes.ts` reads thrown fields through `controlErrorFields`, preserving inherited
+properties, primitive property reads and nullish fallbacks. A thrown `statusCode`
+is used only when it is an integer; anything else is answered as the route's
+generic failure, as it was when Express rejected the value.
+Task body object checks still accept arrays. Candidate and enabled reads retain
+primitive property access. SSE connection metadata is attached to the original
+response object, which remains the client set's identity until close or a failed
+heartbeat removes it.
 
 ### Why the runtime uses the project owner's task contracts
 
@@ -486,7 +515,7 @@ retain the journal when absence cannot be confirmed.
   - Frontmatter parsing into scheduled-task definitions
   - `syncProject` reconciles discovered loops with the persisted task list on every project sync (startup, task list load, task save/delete)
 
-- `packages/web/server/lib/scheduled-tasks/routes.js`
+- `packages/web/server/lib/scheduled-tasks/routes.ts`
   - Scheduled task CRUD endpoints
   - Listing tasks reconciles loop files first, so opening the Scheduled Tasks UI discovers file additions, edits, and removals without a server restart
   - Loop-file endpoints toggle `enabled` in frontmatter or delete the authoritative markdown file, then reconcile the project

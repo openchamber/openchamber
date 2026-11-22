@@ -26,7 +26,7 @@ import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
-import { delimiterForPath, parseDelimitedText, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow } from './delimitedText';
+import { parseDelimitedText, setDelimitedField, shiftDelimitedColumn, shiftDelimitedRow, type TableDelimiter } from './delimitedText';
 import { columnName } from '@/sync/document-attachments';
 import { markSeen, traceTableRows } from './cellTraces';
 import { chartProgram } from './tableChart';
@@ -885,10 +885,10 @@ export const TableGrid: React.FC<{
 export const TableArtifact: React.FC<{
   path: string;
   content: string;
+  delimiter: TableDelimiter;
   sizeBytes: number | null;
   onContentChange?: (content: string) => void;
-}> = ({ path, content, sizeBytes, onContentChange }) => {
-  const delimiter = delimiterForPath(path);
+}> = ({ path, content, delimiter, sizeBytes, onContentChange }) => {
   const table = React.useMemo(() => parseDelimitedText(content, delimiter), [content, delimiter]);
   const undoStack = React.useRef<string[]>([]);
   const redoStack = React.useRef<string[]>([]);

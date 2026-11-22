@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "2.7.2",
+  "version": "2.8.0",
   "private": false,
   "type": "module",
   "main": "./build/server/index.js",
@@ -40,7 +40,6 @@
     "type-check:server": "node scripts/check-server-types.mjs",
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src && bun run lint:server",
     "lint:server": "node scripts/check-server-types.mjs --lint",
-    "conversion:waves": "node scripts/server-conversion-waves.mjs",
     "smoke:server-build": "node scripts/smoke-server-build.mjs",
     "test": "vitest run",
     "start": "bun bin/cli.js serve"
@@ -51,8 +50,8 @@
     "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.3.0",
-    "@opencode/schema": "2.3.0",
+    "@opencode/client": "2.3.2",
+    "@opencode/schema": "2.3.2",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
     "bun-pty": "0.6.0",
@@ -125,6 +124,7 @@
   "files": [
     "dist",
     "build",
+    "bin/cli.js",
     "public",
     "package.json",
     "README.md"

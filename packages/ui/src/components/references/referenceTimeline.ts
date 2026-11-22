@@ -1,4 +1,4 @@
-import type { ReviewCommentExcerpt } from '@/lib/api/types';
+import type { SourceControlReferenceLink, ReviewCommentExcerpt } from '@/lib/api/types';
 
 
 export type ReferenceCommentItem = {
@@ -41,16 +41,29 @@ export type ReferenceCommitGroup = {
     commits: ReferenceCommitItem[];
 };
 
-export type ReferenceTimelineEntry = ReferenceCommentItem | ReferenceCommitGroup;
+export type ReferenceTimelineEntry = ReferenceCommentItem | ReferenceCommitGroup | ReferenceReferenceItem;
+
+export type ReferenceReferenceItem = {
+    kind: 'reference';
+    key: string;
+    reference: SourceControlReferenceLink;
+};
 
 const entryTime = (entry: ReferenceTimelineEntry): number => Date.parse(
-    (entry.kind === 'comment' ? entry.createdAt : entry.commits[0]?.committedAt) ?? '',
+    (entry.kind === 'comment'
+        ? entry.createdAt
+        : entry.kind === 'reference' ? entry.reference.createdAt : entry.commits[0]?.committedAt) ?? '',
 ) || 0;
 
-export const buildReferenceTimeline = (comments: ReferenceCommentItem[], commits: ReferenceCommitItem[]): ReferenceTimelineEntry[] => {
+export const buildReferenceTimeline = (
+    comments: ReferenceCommentItem[],
+    commits: ReferenceCommitItem[],
+    references: SourceControlReferenceLink[] = [],
+): ReferenceTimelineEntry[] => {
     const singles: ReferenceTimelineEntry[] = [
         ...comments,
         ...commits.map((commit): ReferenceCommitGroup => ({ kind: 'commits', key: `commit:${commit.sha}`, commits: [commit] })),
+        ...references.map((reference, index): ReferenceReferenceItem => ({ kind: 'reference', key: `reference:${reference.url}#${index}`, reference })),
     ];
     const ordered = singles.map((entry, index) => ({ entry, index }))
         .sort((left, right) => entryTime(left.entry) - entryTime(right.entry) || left.index - right.index)

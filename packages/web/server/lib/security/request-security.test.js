@@ -144,6 +144,24 @@ describe('request security runtime', () => {
     expect(await allowed({ host: '127.0.0.1:3000' })).toBe(true);
   });
 
+  test('answers every origin check with a promise, on the fast path and the settings path', async () => {
+    const runtime = createRuntime();
+
+    const fastPath = runtime.isRequestOriginAllowed({
+      headers: { origin: 'openchamber-ui://app', host: '192.168.1.130:1202' },
+      socket: {},
+    });
+    expect(fastPath).toBeInstanceOf(Promise);
+    expect(await fastPath).toBe(true);
+
+    const settingsPath = runtime.isRequestOriginAllowed({
+      headers: { origin: 'https://dash.example.com', host: '127.0.0.1:3000' },
+      socket: {},
+    });
+    expect(settingsPath).toBeInstanceOf(Promise);
+    expect(await settingsPath).toBe(false);
+  });
+
   test('lets only the app, its shells and named embedders frame it', () => {
     expect(buildFrameAncestorsPolicy()).toBe("frame-ancestors 'self' openchamber-ui://app capacitor://localhost https://localhost");
     expect(buildFrameAncestorsPolicy({ allowLocalDevOrigins: true })).toContain('http://127.0.0.1:*');
@@ -176,10 +194,12 @@ describe('request security runtime', () => {
     expect(await runtime.isRequestOriginAllowed({
       headers: { origin: 'https://public.example', 'x-forwarded-host': ['public.example', 'other.example'] },
     })).toBe(true);
-    expect(runtime.isRequestOriginAllowed({ headers: { origin: ['https://public.example'] } })).toBe(false);
-    expect(() => runtime.isRequestOriginAllowed({
+    expect(await runtime.isRequestOriginAllowed({ headers: { origin: ['https://public.example'] } })).toBe(false);
+    const malformed = runtime.isRequestOriginAllowed({
       headers: { origin: 'https://public.example', 'x-forwarded-host': [] },
-    })).toThrow(TypeError);
+    });
+    expect(malformed).toBeInstanceOf(Promise);
+    await expect(malformed).rejects.toThrow(TypeError);
     expect(runtime.getUiSessionTokenFromRequest({ headers: { cookie: ['oc_ui_session=value'] } })).toBeNull();
     expect(runtime.getUiSessionTokenFromRequest({ headers: { cookie: 'oc_ui_session=%bad' } })).toBe('%bad');
   });

@@ -808,6 +808,17 @@ OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/chat-quote-popo
 
 It skips without Chrome and fails on an explicit invalid Chrome path, the same as the JSON tree test.
 
+## Paused goal row regression
+
+`session-goal-row.browser.test.mjs` renders the real `SessionGoalRow` with the UI stylesheet in the phone layout (`mobile-pointer`, touch, 360, 375 and 390 px, plus a 768 px row) in an isolated Vite fixture with its own optimizer cache. Only the row's goal hooks and its action are stubbed: a paused goal with a long objective and a token budget. In every locale it checks that the localized paused hint shows whole beside Resume, Resume's localized label shows whole beside its icon, Resume stays inside the row and the row does not overflow; on the narrow widths the token count must be gone (the goal dialog keeps it), on the wide row it must show whole. A longer translation or a layout change that gives the count priority fails it. Like the tests around it, it stays on loopback and stops what it started.
+
+The app draws in the system font, so the fixture pins `--font-sans` to fonts `pdfjs-dist` ships and fails when they do not load or Chrome paints Latin and Cyrillic hints in another face. Each case runs twice: in Liberation Sans Regular (Arial widths) and in Liberation Sans Bold drawn at normal weight, a wide face standing in for DejaVu Sans, which CI's Ubuntu falls back to and which cut the Polish hint at 390 px when the count stayed in the row. Arabic, Hebrew and CJK text still comes from the host's fonts.
+
+```bash
+node --test scripts/perf/session-goal-row.browser.test.mjs
+OPENCHAMBER_TEST_CHROME=/path/to/chrome node --test scripts/perf/session-goal-row.browser.test.mjs
+```
+
 ## Rendered page layout regression
 
 `html-render-page-fit.browser.test.mjs` builds the real rendered-page document through `buildHtmlRenderDocument` in an isolated Vite fixture that has its own optimizer cache, and compares the document root's `scrollWidth` with its `clientWidth` inside frames 420, 720 and 960 px wide. A page whose pictures carry a `1px` border at `width: 100%`, and one with a bare embedded frame, must not scroll sideways; a page with a 1200 px block still must, because a page wider than its frame keeps its scrollbar (#4949). Like the two tests above, it stays on loopback and stops what it started.

@@ -8,13 +8,31 @@ export const FAKE_FORGE_FORK = { owner: 'octo', name: 'teapot' };
 export const FAKE_FORGE_STRANGER = { owner: 'mona', name: 'kettle' };
 
 type ForgeComment = { id: number; body: string; created_at: string };
+type ForgePerson = { id: number; login: string; full_name?: string; email?: string; avatar_url?: string };
+type ForgeReview = { user: ForgePerson; state: string; stale?: boolean; dismissed?: boolean };
 type ForgeItem = {
   number: number;
   title: string;
   body: string;
   state: 'open' | 'closed';
   comments: ForgeComment[];
-  pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean };
+  pull: null | { head: string; headRepo: number; base: string; sha: string; merged: boolean; requestedReviewers?: ForgePerson[]; reviews?: ForgeReview[] };
+};
+
+type ForgeTimelineUser = { id: number; login: string; avatar_url?: string };
+type ForgeTimelineTarget = {
+  number?: number;
+  html_url?: string;
+  title?: string;
+  pull_request?: object | null;
+  repository?: { full_name?: string };
+};
+type ForgeTimelineEvent = {
+  type?: string;
+  created_at?: string;
+  user?: ForgeTimelineUser;
+  ref_issue?: ForgeTimelineTarget;
+  ref_comment?: { created_at?: string; user?: ForgeTimelineUser };
 };
 
 export type FakeForgeWrite = { method: string; path: string };
@@ -70,12 +88,27 @@ export const startFakeForge = async (): Promise<FakeForge> => {
   const treeAt = (sha: string) => trees.get(sha) ?? MAIN_TREE;
   const items: ForgeItem[] = [
     { number: 1, title: 'Kettle whistles too early', body: 'It whistles at 80°C.', state: 'open', comments: [], pull: null },
-    { number: 2, title: 'Steep longer', body: 'Three minutes, not two.', state: 'open', comments: [], pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false } },
+    {
+      number: 2, title: 'Steep longer', body: 'Three minutes, not two.', state: 'open', comments: [],
+      pull: {
+        head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false,
+        requestedReviewers: [{ id: 11, login: 'cid' }],
+        reviews: [
+          { user: { id: 9, login: 'ann' }, state: 'APPROVED' },
+          { user: { id: 10, login: 'bob' }, state: 'REQUEST_CHANGES', stale: true },
+          { user: { id: 12, login: 'dee' }, state: 'APPROVED' },
+          ...Array.from({ length: 50 }, () => ({ user: { id: 11, login: 'cid' }, state: 'REQUEST_REVIEW' })),
+          { user: { id: 12, login: 'dee' }, state: 'APPROVED', dismissed: true },
+          { user: { id: 9, login: 'ann' }, state: 'PENDING' },
+        ],
+      },
+    },
   ];
   let commentId = 100;
   let origin = '';
 
   const user = { ...FAKE_FORGE_USER, login: FAKE_FORGE_OWNER, avatar_url: '' };
+  const octo = { ...FAKE_FORGE_USER, id: 9, login: 'octo', avatar_url: 'https://avatars.example.com/octo.png' };
   type RepoJson = {
     id: number; name: string; full_name: string; owner: { id: number; login: string }; html_url: string; clone_url: string;
     default_branch: string; fork: boolean; parent: RepoJson | null;
@@ -117,6 +150,38 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       issue_url: item.pull ? '' : itemUrl, pull_request_url: item.pull ? itemUrl : '',
     };
   };
+  const timelineJson = (item: ForgeItem): ForgeTimelineEvent[] => {
+    const target = (number: number) => {
+      const linked = items.find((entry) => entry.number === number) ?? item;
+      return {
+        number,
+        html_url: issueJson(linked).html_url,
+        title: linked.title,
+        repository: { full_name: `${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}` },
+      };
+    };
+    if (item.number === 1) {
+      const pull = target(2);
+      return [
+        { type: 'pull_ref', created_at: '2026-10-04T10:00:00Z', user, ref_issue: pull },
+        { type: 'comment_ref', created_at: '2026-10-05T10:00:00Z', user, ref_issue: pull, ref_comment: { created_at: '2026-10-03T10:00:00Z', user: octo } },
+        { type: 'issue_ref', created_at: '2026-10-06T10:00:00Z', user, ref_issue: pull },
+        { type: 'issue_ref', created_at: '2026-10-07T10:00:00Z', user, ref_issue: { html_url: `${origin}/${FAKE_FORGE_OWNER}/${FAKE_FORGE_REPO}/issues/9` } },
+        { type: 'issue_ref', created_at: '2026-10-08T10:00:00Z', user, ref_issue: { number: 9 } },
+        { type: 'close', created_at: '2026-10-09T10:00:00Z' },
+      ];
+    }
+    return [
+      { type: 'issue_ref', created_at: '2026-10-06T10:00:00Z', user, ref_issue: target(1) },
+      {
+        type: 'issue_ref', created_at: '2026-10-02T10:00:00Z', user,
+        ref_issue: {
+          number: 5, title: 'Steam wand', html_url: `${origin}/${FAKE_FORGE_STRANGER.owner}/${FAKE_FORGE_STRANGER.name}/issues/5`,
+          repository: { full_name: `${FAKE_FORGE_STRANGER.owner}/${FAKE_FORGE_STRANGER.name}` },
+        },
+      },
+    ];
+  };
   const pullJson = (item: ForgeItem) => {
     const pull = item.pull;
     if (!pull) return null;
@@ -128,6 +193,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       head: branchOf(pull.head, pull.sha, pull.headRepo),
       base: branchOf(pull.base, branches.get(pull.base) ?? SHA_A),
       merge_base: MERGE_BASE,
+      requested_reviewers: pull.requestedReviewers ?? [],
     };
   };
   const byNumber = (value: string | undefined) => items.find((item) => item.number === Number(value));
@@ -210,6 +276,7 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       const item = byNumber(number);
       if (!item?.pull) return notFound;
+      if (method === 'GET' && action === 'reviews' && rest.length === 3) return { status: 200, body: page(item.pull.reviews ?? [], url, response) };
       if (method === 'GET' && rest.length === 2) return { status: 200, body: pullJson(item) };
       if (method === 'GET' && action === 'files' && rest.length === 3) {
         const base = treeAt(MERGE_BASE);
@@ -268,6 +335,9 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       const item = byNumber(number);
       if (!item) return notFound;
       if (method === 'GET' && rest.length === 2) return { status: 200, body: issueJson(item) };
+      if (method === 'GET' && action === 'timeline' && rest.length === 3) {
+        return { status: 200, body: page(timelineJson(item), url, response) };
+      }
       if (method === 'PATCH' && rest.length === 2) {
         const body = await readBody(request);
         if (body.state !== 'open' && body.state !== 'closed') return { status: 422, body: { message: 'state is open or closed' } };
@@ -310,9 +380,10 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify(answer.body));
-    }, (error: Error) => {
+    }, () => {
       response.statusCode = 500;
-      response.end(JSON.stringify({ message: error.message }));
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ message: 'The fake forge could not handle this request.' }));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));

@@ -1,6 +1,7 @@
 
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { readEffortRevision, rememberEffort } from "@/lib/modelEfforts"
+import { draftSessionMetadata } from "./draft-session-metadata"
 import { create } from "zustand"
 import { type Metadata, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
@@ -16,10 +17,10 @@ import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { fetchResponseStyleInstruction } from "@/lib/responseStyle"
 import { attachmentWireName } from "@/lib/attachmentIdentity"
-import { filesForModel } from "./text-model-images"
+import { filesForModel } from "./model-attachment-paths"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
-import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
+import { fileDraftSessionInFolder } from "./draft-folder-target"
 import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
 import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useCommandsStore"
 import { selectAvailableSkillsForDirectory, useSkillsStore } from "@/stores/useSkillsStore"
@@ -28,7 +29,7 @@ import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { prepareUserMessageResume } from "./user-message-resume"
 import { normalizePath } from "@/lib/pathNormalization"
 import { descendingId } from "@/lib/opencode/ids"
-import { CHAT_DRAFT_PROJECT_ID, captureChatDirectoryCleanup as captureChatCleanup, createChatDirectory, deleteChatDirectory, getChatsRoot, getChatsRootFromDirectory, isChatDirectoryPath, resolveChatsRootDirectory, warmChatsRootDirectory } from "@/lib/chatDirectories"
+import { CHAT_DRAFT_PROJECT_ID, captureChatDirectoryCleanup as captureChatCleanup, createChatDirectory, deleteChatDirectory, getChatsRoot, isChatDirectoryPath, resolveChatsRootDirectory, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { isSpaceDirectoryClosedToNewSessions } from "@/lib/spaces/spaces-store"
@@ -144,7 +145,7 @@ export function resolveGoalObjective(content: string, directory: string | null |
 }
 
 
-export async function routeMessage(params: {
+export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRuntime"> & {
   runtimeKey?: string
   sessionId: string
   directory?: string | null
@@ -167,7 +168,7 @@ export async function routeMessage(params: {
   markBusy?: boolean
 }): Promise<'command' | 'prompt' | 'shell'> {
   const assertRuntimeCurrent = () => {
-    if (params.runtimeKey !== undefined && params.runtimeKey !== getRuntimeKey()) {
+    if (params.isCurrentRuntime?.() === false || (params.runtimeKey !== undefined && params.runtimeKey !== getRuntimeKey())) {
       throw new Error("Message was not sent because the runtime changed.")
     }
   }
@@ -201,7 +202,7 @@ export async function routeMessage(params: {
     return 'shell'
   }
 
-  const sendFiles = await filesForModel(params, [...(params.files ?? []), ...(params.additionalParts ?? []).flatMap((part) => part.files ?? [])], requestDirectory)
+  const sendFiles = await filesForModel(params, [...(params.files ?? []), ...(params.additionalParts ?? []).flatMap((part) => part.files ?? [])], requestDirectory, params.isCurrentRuntime ?? captureRuntimeInstance())
 
   let skills = params.skills
   if (params.content.startsWith("/")) {
@@ -356,6 +357,7 @@ export type NewSessionDraftState = {
   target: NewSessionDraftTarget
   preparedChatDirectory?: string | null
   workDraftId?: string
+  lead?: boolean
 }
 
 export type SetCurrentSessionOptions = {
@@ -647,7 +649,7 @@ const applyDraftTargetSelectionDefaults = (
     const currentProject = selectedProject?.path
       ? useProjectsStore.getState().projects.find((project) => normalizePath(project.path) === normalizePath(selectedProject.path))
       : undefined
-    useConfigStore.getState().applyDefaultModelAgentSelection({
+    useConfigStore.getState().applyDefaultModelAgentSelection(draft.target === 'chat' ? undefined : {
       projectDefaultAgent: currentProject?.defaultAgent,
       projectDefaultModel: currentProject?.defaultModel,
       projectDefaultVariant: currentProject?.defaultVariant,
@@ -888,7 +890,6 @@ const createSessionWithDraftLifecycle = async (
 ): Promise<Session | null> => {
   const store = useSessionUIStore.getState()
   const draft = store.newSessionDraft
-  const targetFolderId = draft.targetFolderId
 
   try {
     const resolved = await resolveCreatableDraftDirectory(draft, directoryOverride)
@@ -898,15 +899,7 @@ const createSessionWithDraftLifecycle = async (
     if (!session) return null
 
     useSessionUIStore.getState().closeNewSessionDraft()
-
-    if (targetFolderId) {
-      const currentStore = useSessionUIStore.getState()
-      const scopeDirectory = directory || currentStore.lastLoadedDirectory || session.directory
-      const scopeKey = getChatsRootFromDirectory(scopeDirectory) ?? scopeDirectory
-      if (scopeKey) {
-        useSessionFoldersStore.getState().addSessionToFolder(scopeKey, targetFolderId, session.id)
-      }
-    }
+    fileDraftSessionInFolder(draft, session.id, session.directory)
 
     return session
   } catch (error) {
@@ -945,13 +938,6 @@ const draftSessionCreateSelection = (selection: DraftSessionSelection): SessionC
   model: { providerID: selection.providerID, id: selection.modelID, variant: selection.variant },
   agent: trimAgent(selection.agent),
 })
-
-const draftSessionMetadata = (draft: NewSessionDraftState): Metadata | undefined => {
-  const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
-  return draftPins.notes.length > 0 || draftPins.plans.length > 0
-    ? { openchamber: { project_context_pins: draftPins } }
-    : undefined
-}
 
 const resolveDraftTargetDirectory = async (draft: NewSessionDraftState): Promise<string | null> => {
   const store = useSessionUIStore.getState()
@@ -1045,13 +1031,7 @@ const finishDraftSession = (
       })
   }
 
-  if (draft.targetFolderId) {
-    const scopeDirectory = requestedDirectory || useSessionUIStore.getState().lastLoadedDirectory || created.directory
-    const scopeKey = getChatsRootFromDirectory(scopeDirectory) ?? scopeDirectory
-    if (scopeKey) {
-      useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draft.targetFolderId, created.id)
-    }
-  }
+  fileDraftSessionInFolder(draft, created.id)
 
   return createdDirectory
 }
@@ -1523,6 +1503,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       syntheticParts: options?.syntheticParts,
       targetFolderId: options?.targetFolderId,
       projectContextPins: options?.projectContextPins,
+      lead: options?.lead === true ? true : undefined,
     }
 
     set({
@@ -1808,15 +1789,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   ) => {
     const capturedTarget = options?.target
     const effortRevision = options?.effortRevision ?? readEffortRevision(providerID, modelID)
-    const isCurrentRuntimeInstance = captureRuntimeInstance()
+    const isCurrentRuntimeInstance = options?.isCurrentRuntime ?? captureRuntimeInstance()
     const capturedRuntimeKey = capturedTarget?.runtimeKey ?? getRuntimeKey()
-    if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
+    if (!isCurrentRuntimeInstance() || (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey())) {
       throw new Error("Message was not sent because the runtime changed.")
     }
     return runAfterOpenCodeStartup(async () => {
       const draft = options?.draftSnapshot ?? get().newSessionDraft
       const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
-      if (capturedRuntimeKey !== getRuntimeKey()) {
+      if (capturedRuntimeKey !== getRuntimeKey() || !isCurrentRuntimeInstance()) {
         throw new Error("Message was not sent because the runtime changed.")
       }
       const responseStyleInstruction = inputMode === "shell"
@@ -1939,7 +1920,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
         try {
           const draftRoute = await routeMessage({
-            runtimeKey: capturedRuntimeKey,
+            runtimeKey: capturedRuntimeKey, isCurrentRuntime: isCurrentRuntimeInstance,
             sessionId,
             directory: sessionDirectory,
             content,
@@ -2077,7 +2058,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? useSelectionStore.getState().captureSessionSelectionSentSettlement(targetSessionId, providerID, modelID, effectiveAgent, variant)
         : undefined
       const routed = await routeMessage({
-        runtimeKey: capturedRuntimeKey,
+        runtimeKey: capturedRuntimeKey, isCurrentRuntime: isCurrentRuntimeInstance,
         sessionId: targetSessionId || "",
         directory: currentSessionDirectory,
         content,

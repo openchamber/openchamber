@@ -2,6 +2,7 @@
 import { sessionKeyFor, withHashedSessionKeys } from './session-key.js';
 import { parsePushKey, sealPushContent } from './push-seal.js';
 import {
+  deriveServerId,
   getOrCreateRelaySigningKeypair,
   signRelayMessage as signRelayMessageShared,
 } from '../relay/signing-key.js';
@@ -56,6 +57,7 @@ interface ApnsConfig {
 interface RelayConfig {
   url: string;
   registerUrl: string;
+  unregisterUrl: string;
   clearUrl: string;
   environment: ApnsEnvironment | null;
 }
@@ -167,6 +169,8 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
 
   const signRelayMessage = (privateKey: KeyObject, message: string) => signRelayMessageShared({ crypto }, privateKey, message);
 
+  const getServerId = async () => deriveServerId({ crypto }, (await getOrCreateRelayKeypair()).publicJwk);
+
   const relayPublicJwk = (publicJwk: RelayPublicJwk) => ({
     kty: publicJwk.kty,
     crv: publicJwk.crv,
@@ -192,6 +196,33 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
     }
   };
 
+
+  let warnedRelayCannotUnregister = false;
+
+  const unregisterTokenFromRelay = async (token: string) => {
+    const relay = resolveRelayConfig();
+    if (!relay) return;
+    try {
+      const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
+      const ts = Date.now();
+      const sig = signRelayMessage(privateKey, `unregister.${ts}.${token}`);
+      const res = await postToRelay(
+        relay.unregisterUrl,
+        JSON.stringify({ token, publicKeyJwk: relayPublicJwk(publicJwk), ts, sig }),
+        '[Push relay] unregister-token',
+      );
+      if (res.status === 404) {
+        if (!warnedRelayCannotUnregister) {
+          warnedRelayCannotUnregister = true;
+          console.warn('[Push relay] the relay cannot unregister tokens yet; the binding stays until the token dies');
+        }
+        return;
+      }
+      if (!res.ok) console.warn(`[Push relay] unregister-token failed status=${res.status}`);
+    } catch (error) {
+      console.warn('[Push relay] unregister-token request failed:', hasErrorProperties(error) ? describeRelayError(error) : String(error));
+    }
+  };
 
   const emptyStore = (): ApnsStore => ({ version: APNS_TOKENS_VERSION, tokensBySession: {} });
 
@@ -292,15 +323,20 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
   const removeApnsToken = async (uiSessionToken: string, deviceToken: string) => {
     if (!uiSessionToken || !deviceToken) return;
     const sessionKey = sessionKeyFor(uiSessionToken);
-    await persistTokenUpdate((current) => {
+    let removed = false;
+    const next = await persistTokenUpdate((current) => {
       const tokensBySession = { ...(current.tokensBySession || {}) };
-      const filtered = normalizeTokens(tokensBySession[sessionKey]).filter(
-        (entry) => entry.deviceToken !== deviceToken,
-      );
+      const existing = normalizeTokens(tokensBySession[sessionKey]);
+      const filtered = existing.filter((entry) => entry.deviceToken !== deviceToken);
+      removed = filtered.length < existing.length;
       if (filtered.length === 0) delete tokensBySession[sessionKey];
       else tokensBySession[sessionKey] = filtered;
       return { version: APNS_TOKENS_VERSION, tokensBySession };
     });
+    if (!removed) return;
+    const stillRegistered = Object.values(next.tokensBySession)
+      .some((entries) => normalizeTokens(entries).some((entry) => entry.deviceToken === deviceToken));
+    if (!stillRegistered) await unregisterTokenFromRelay(deviceToken);
   };
 
   const removeApnsTokenFromAllSessions = async (deviceToken: JsonValue | undefined) => {
@@ -487,6 +523,7 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
     return {
       url,
       registerUrl: url.replace(/\/send$/, '/register-token'),
+      unregisterUrl: url.replace(/\/send$/, '/unregister-token'),
       clearUrl: url.replace(/\/send$/, '/clear'),
       environment: override === 'sandbox' ? 'sandbox' : override === 'production' ? 'production' : null,
     };
@@ -610,10 +647,17 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
     pushType: 'alert',
   });
 
+  const withServerId = (payload: ApnsPayload, serverId: string): ApnsPayload => ({
+    ...payload,
+    data: { ...payload.data, serverId },
+  });
+
   const sendApnsToAllUiSessions = async ({ sealed, ...payload }: ApnsPayload = {}, _options = {}) => {
     const sealedContent = sealed ?? { title: payload.title, body: payload.body };
     const devices = await readDeliverableDevices();
     if (devices.length === 0) return;
+    const serverId = await getServerId().catch(() => null);
+    const routedPayload = serverId ? withServerId(payload, serverId) : payload;
     const sealedDevices = devices.filter((entry): entry is ApnsDevice & { pushKey: string } => Boolean(entry.pushKey));
     const tokensByEnvironment = groupByEnvironment(devices.filter((entry) => !entry.pushKey));
 
@@ -621,17 +665,17 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
     if (relay) {
       await Promise.all([
         ...[...tokensByEnvironment].map(([environment, deviceTokens]) =>
-          sendViaRelay(deviceTokens, payload, relay, relay.environment ?? environment)),
+          sendViaRelay(deviceTokens, routedPayload, relay, relay.environment ?? environment)),
         ...sealedDevices.map((entry) =>
-          sendViaRelay([entry.deviceToken], sealedPayloadFor(payload, sealedContent, entry.pushKey), relay, relay.environment ?? entry.environment)),
+          sendViaRelay([entry.deviceToken], sealedPayloadFor(routedPayload, sealedContent, entry.pushKey), relay, relay.environment ?? entry.environment)),
       ]);
       return;
     }
-    await sendViaDirectApns(tokensByEnvironment, directAlertRequest(payload));
+    await sendViaDirectApns(tokensByEnvironment, directAlertRequest(routedPayload));
     for (const entry of sealedDevices) {
       await sendViaDirectApns(
         new Map([[entry.environment, [entry.deviceToken]]]),
-        directAlertRequest(sealedPayloadFor(payload, sealedContent, entry.pushKey)),
+        directAlertRequest(sealedPayloadFor(routedPayload, sealedContent, entry.pushKey)),
       );
     }
   };
@@ -678,21 +722,21 @@ export const createApnsRuntime = (deps: ApnsDependencies) => {
 
   const clearApnsNotifications = async ({ tags, badge }: ApnsClearRequest = {}) => {
     const clearTags = (Array.isArray(tags) ? tags : [])
-      .filter((tag) => tag && tag.length <= MAX_CLEAR_ENTRY_LENGTH)
-      .slice(0, MAX_CLEAR_TAGS);
+      .filter((tag) => tag && tag.length <= MAX_CLEAR_ENTRY_LENGTH);
     if (clearTags.length === 0) return;
     const devices = await readDeliverableDevices();
     if (devices.length === 0) return;
     const tokensByEnvironment = groupByEnvironment(devices);
-    const request = { tags: clearTags, badge };
-
     const relay = resolveRelayConfig();
-    if (relay) {
-      await Promise.all([...tokensByEnvironment].map(([environment, deviceTokens]) =>
-        clearViaRelay(deviceTokens, request, relay, relay.environment ?? environment)));
-      return;
+    for (let offset = 0; offset < clearTags.length; offset += MAX_CLEAR_TAGS) {
+      const request = { tags: clearTags.slice(offset, offset + MAX_CLEAR_TAGS), badge };
+      if (relay) {
+        await Promise.all([...tokensByEnvironment].map(([environment, deviceTokens]) =>
+          clearViaRelay(deviceTokens, request, relay, relay.environment ?? environment)));
+      } else {
+        await sendViaDirectApns(tokensByEnvironment, { body: buildClearBody(request), pushType: 'background' });
+      }
     }
-    await sendViaDirectApns(tokensByEnvironment, { body: buildClearBody(request), pushType: 'background' });
   };
 
   const sealedPayloadFor = (payload: ApnsPayload, content: PushContent, pushKey: string) => ({

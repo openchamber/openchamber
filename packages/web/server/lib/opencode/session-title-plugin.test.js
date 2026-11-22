@@ -86,6 +86,9 @@ describe('session title plugin', () => {
     // example language and drifts on a Chinese first message, so the prompt pins
     // the output language and carries an example in another language.
     expect(title.system).toContain('检查项目的 git 记录和未完成的计划 → 项目进度检查');
+    // An English first message of one word and a path took the language of
+    // that Chinese example, so the prompt says when a path's words count.
+    expect(title.system).toContain('Words inside a path or file name count only when the message has no other words');
   });
 
   it('does nothing when there is no title agent', async () => {

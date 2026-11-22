@@ -13,7 +13,7 @@ Bir iş akışı büyük bir görevi birçok küçük parçaya böler ve her par
 
 İş akışı aracı varsayılan olarak kapalıdır. **Ayarlar → Genel → OpenChamber Araçları** bölümünü açın ve **Workflow aracı** ayarını açın. Çalışan oturumlar aracı bir sonraki turda alır; aracı yeniden kapattığınızda araç ve onunla ilgili talimatlar tüm oturumlardan kalkar ve İş akışları paneli gizlenir. Mevcut çalıştırmalar aracı yeniden açtığınızda geri gelir.
 
-İş akışları OpenChamber'ın kendi OpenCode sunucusunu gerektirir. OpenChamber `OPENCODE_HOST` ya da skip-start ile harici bir OpenCode sunucusuna bağlandığında ve VS Code eklentisi içinde kullanılamaz.
+İş akışları OpenChamber'ın yönetilen OpenCode sunucusuyla otomatik olarak çalışır ve OpenChamber eklentisini **Ayarlar → Genel → OpenCode Sunucusu** bölümünden genel OpenCode yapılandırmanıza kaydettikten sonra yerel bir harici veya paylaşılan OpenCode sunucusunda da çalışır (bkz. [OpenCode Sunucusu](/tr/opencode-server/#harici-yerel-bir-sunucuda-openchamber-araçlarını-etkinleştirin)). Uzak bir OpenCode sunucusunda ya da VS Code eklentisi içinde kullanılamaz.
 
 ## İş akışı çalıştırma
 
@@ -29,9 +29,15 @@ Durdurulmuş ya da başarısız bir çalıştırma **Sürdür** ile devam ettiri
 
 ## Çalıştırmaları onay olmadan başlatma
 
-**Workflow aracı** altında **Çalıştırmaları onayım olmadan başlat** ayarını açarsanız agent'ın başlattığı bir çalıştırma hemen başlar. Kartı onu çalışıyor olarak gösterir, **Workflow'u çalıştır** düğmesi olmaz ve yine de **Durdur** ile durdurabilirsiniz. Bu, üzerinde anlaşıp sonra başından ayrıldığınız işler içindir: örneğin agent'tan küçük bir pilotta birkaç modeli denemesini ve tüm işi en iyisiyle çalıştırmasını istersiniz, o da siz yokken bu çalıştırmayı başlatabilir.
+**Workflow aracı** altındaki **Çalıştırmaları onayım olmadan başlat** ayarı, agent'ın başlattığı bir çalıştırmanın tıklamanızı bekleyip beklemeyeceğini belirler:
 
-Agent bir çalıştırmayı başlatmadan önce planı ve modelleri yine sohbette önerir. Ayar yalnızca tıklamayı atlar. Sunucu ayarı her çalıştırmada okur, bu yüzden kutunun işaretini kaldırdığınızda her çalıştırma yeniden sizi bekler. Aşağıdaki sınırlar aynı kalır.
+- **Hayır**: her çalıştırma siz **Workflow'u çalıştır** seçeneğini seçene kadar bekler
+- **Liderler için**: bir [liderin](/tr/leads/) başlattığı çalıştırmalar hemen başlar, diğer tüm oturumlar yine bekler
+- **Her zaman**: her çalıştırma hemen başlar
+
+Hemen başlayan bir çalıştırma kartında çalışıyor olarak görünür, **Workflow'u çalıştır** düğmesi olmaz ve yine de **Durdur** ile durdurabilirsiniz. Bu, üzerinde anlaşıp sonra başından ayrıldığınız işler içindir: örneğin agent'tan küçük bir pilotta birkaç modeli denemesini ve tüm işi en iyisiyle çalıştırmasını istersiniz, o da siz yokken bu çalıştırmayı başlatabilir.
+
+Normal bir oturum bir çalıştırmayı başlatmadan önce planı ve modelleri yine sohbette önerir; ayar yalnızca tıklamayı atlar. Lider işini kendisi yürütür, bu yüzden **Liderler için** seçiliyken önce sormadan bir çalıştırma başlatabilir. Sunucu ayarı her çalıştırmada okur, bu yüzden **Hayır** seçeneğine döndüğünüzde her çalıştırma yeniden sizi bekler. Aşağıdaki sınırlar aynı kalır.
 
 ## Modeller ve maliyet
 

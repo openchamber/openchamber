@@ -407,9 +407,9 @@ export const parseChatWidth: SettingsParser<'default' | 'wider' | 'full'> = (val
   return legacy.data ? 'full' : 'default';
 };
 
-const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'summary']));
+const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'text', 'summary']));
 
-export const parseActivityRenderMode: SettingsParser<'collapsed' | 'summary'> = (value, raw) => {
+export const parseActivityRenderMode: SettingsParser<'collapsed' | 'text' | 'summary'> = (value, raw) => {
   if (raw.chatRenderMode === 'sorted') return 'collapsed';
   const direct = activityRenderModeSchema.safeParse(value);
   return direct.success ? direct.data : undefined;

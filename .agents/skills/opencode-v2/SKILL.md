@@ -141,6 +141,11 @@ gap.
   5 seconds for the location's plugins. `agent.list` waited in 2.2.0 to 2.2.6
   and answers early again since 2.2.7: the first read of a cold location is an
   empty list, then `agent.updated` follows within a second. The recovery stays.
+  OpenChamber's server session selection works around it by reading
+  `model.list` first, which waits for activation, and `agent.list` after it
+  (`openchamber-sessions/selection-inputs.ts`); a `ServiceUnavailableError`
+  with `service: 'plugin'` from that read refuses default selection with 503.
+  Restore the parallel reads once `agent.list` itself waits for activation.
 - **Plugin providers exist only in the running OpenCode.** Nothing about them
   reaches `opencode.json` or `auth.json`; `/api/provider` is the only view, and
   it strips `options.fetch`, so nothing tells a directly callable provider from

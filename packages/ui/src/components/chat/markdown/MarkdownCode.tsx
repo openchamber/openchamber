@@ -130,7 +130,7 @@ function RunnableCode({ reply, ...props }: CodeProps & { reply: NonNullable<Mark
   const ReplyCommandCode = useReplyCommandCode();
   if (!ReplyCommandCode) return <MarkdownCodeBlock {...props} command={null} />;
   return (
-    <ReplyCommandCode reply={reply} directory={directory} source={sourceOf(props.node)}>
+    <ReplyCommandCode reply={reply} directory={directory} language={languageOf(props.className)} source={sourceOf(props.node)}>
       {(command) => <MarkdownCodeBlock {...props} command={command} />}
     </ReplyCommandCode>
   );

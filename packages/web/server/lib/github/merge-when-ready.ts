@@ -9,9 +9,9 @@ interface MergeProject {
 }
 
 interface MergeTarget {
-  number: number;
-  base: string;
-  headSha: string;
+  number?: number;
+  base?: string;
+  headSha?: string;
 }
 
 const pullSchema = z.object({
@@ -59,7 +59,7 @@ export async function enableMergeWhenReady(octokit: Octokit, project: MergeProje
       throw invalidProviderPayload('GitHub did not confirm auto-merge');
     }
   }
-  return { merged: false, outcome: 'auto-merge' };
+  return { merged: false, outcome: 'auto-merge' as const };
 }
 
 export async function cancelWaitingMerge(octokit: Octokit, project: MergeProject, target: MergeTarget) {
@@ -84,5 +84,5 @@ export async function cancelWaitingMerge(octokit: Octokit, project: MergeProject
       throw invalidProviderPayload('GitHub did not confirm disabling auto-merge');
     }
   }
-  return { merged: false, outcome: 'cancelled' };
+  return { merged: false, outcome: 'cancelled' as const };
 }

@@ -13,7 +13,7 @@ Los workflows encajan con trabajo de muchas piezas parecidas e independientes: r
 
 La herramienta de workflows está desactivada de forma predeterminada. Abre **Configuración → General → Herramientas de OpenChamber** y activa **Herramienta de workflows**. Las sesiones en curso la reciben en su siguiente turno; al desactivarla de nuevo, la herramienta y sus instrucciones desaparecen de todas las sesiones y el panel Workflows se oculta. Las ejecuciones que ya tienes vuelven al activarla otra vez.
 
-Los workflows necesitan el servidor OpenCode propio de OpenChamber. No están disponibles cuando OpenChamber se conecta a un servidor OpenCode externo mediante `OPENCODE_HOST` o skip-start, ni dentro de la extensión de VS Code.
+Los workflows funcionan automáticamente con el servidor OpenCode gestionado por OpenChamber, y también funcionan en un servidor OpenCode local externo o compartido después de registrar el plugin de OpenChamber en tu configuración global de OpenCode desde **Configuración → General → Servidor de OpenCode** (consulta [OpenCode Server](/es/opencode-server/#activar-las-herramientas-de-openchamber-en-un-servidor-local-externo)). No están disponibles en un servidor OpenCode remoto ni dentro de la extensión de VS Code.
 
 ## Ejecutar un workflow
 
@@ -29,9 +29,15 @@ Los agentes de un workflow en ejecución no pueden iniciar un workflow propio.
 
 ## Iniciar ejecuciones sin aprobación
 
-En **Herramienta de workflows**, activa **Iniciar ejecuciones sin mi aprobación** para que una ejecución que inicia el agente empiece enseguida. Su tarjeta la muestra en curso, sin el botón **Ejecutar workflow**, y aún puedes terminarla con **Detener**. Sirve para trabajo que acordaste y luego dejaste en marcha: por ejemplo, le pides al agente que pruebe algunos modelos en un piloto pequeño y ejecute todo el trabajo con el mejor, y puede iniciar esa ejecución mientras no estás.
+En **Herramienta de workflows**, **Iniciar ejecuciones sin mi aprobación** decide si una ejecución que inicia el agente espera tu clic:
 
-El agente sigue proponiendo el plan y los modelos en el chat antes de iniciar una ejecución. El ajuste solo se salta el clic. El servidor lo lee en cada ejecución, así que con la casilla desmarcada cada ejecución vuelve a esperarte. Los límites de abajo no cambian.
+- **No**: cada ejecución espera hasta que selecciones **Ejecutar workflow**
+- **Para leads**: las ejecuciones que inicia un [lead](/es/leads/) empiezan enseguida, las demás sesiones siguen esperando
+- **Siempre**: cada ejecución empieza enseguida
+
+Una ejecución que empieza enseguida aparece en curso en su tarjeta, sin el botón **Ejecutar workflow**, y aún puedes terminarla con **Detener**. Sirve para trabajo que acordaste y luego dejaste en marcha: por ejemplo, le pides al agente que pruebe algunos modelos en un piloto pequeño y ejecute todo el trabajo con el mejor, y puede iniciar esa ejecución mientras no estás.
+
+Una sesión normal sigue proponiendo el plan y los modelos en el chat antes de iniciar una ejecución; el ajuste solo se salta el clic. Un lead lleva su trabajo por su cuenta, así que con **Para leads** puede iniciar una ejecución sin preguntar antes. El servidor lee el ajuste en cada ejecución, así que al volver a **No** cada ejecución vuelve a esperarte. Los límites de abajo no cambian.
 
 ## Modelos y coste
 

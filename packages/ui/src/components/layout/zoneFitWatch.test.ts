@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { useUIStore } from '@/stores/useUIStore';
-import { watchZoneFit, type SidebarFoldReason } from './zoneFitWatch';
+import { getZoneView } from '@/lib/workspace/zones';
+import { isZoneDisplaced, watchZoneFit, type SidebarFoldReason } from './zoneFitWatch';
 
 const directory = '/repo';
 let rowWidth = 1600;
@@ -88,5 +89,25 @@ describe('watchZoneFit with an expanded zone', () => {
     store().openContextPanelTab(directory, { mode: 'terminal' });
     toggleExpanded();
     expect(sidebar()).toEqual({ open: true, foldedForExpanded: false });
+  });
+});
+
+describe('watchZoneFit displacing the other side', () => {
+  test('a side closed to make room counts as displaced until it comes back', () => {
+    rowWidth = 600;
+    store().moveContextSurfaceToZone('terminal', 'left');
+    watch();
+    store().openContextPanelTab(directory, { mode: 'terminal' });
+    expect(getZoneView(store().contextPanelByDirectory[directory], 'right').isOpen).toBe(false);
+    expect(isZoneDisplaced(directory, 'right')).toBe(true);
+    store().closeContextZone(directory, 'left');
+    expect(getZoneView(store().contextPanelByDirectory[directory], 'right').isOpen).toBe(true);
+    expect(isZoneDisplaced(directory, 'right')).toBe(false);
+  });
+
+  test('a side the user closes is not displaced', () => {
+    watch();
+    store().closeContextZone(directory, 'right');
+    expect(isZoneDisplaced(directory, 'right')).toBe(false);
   });
 });

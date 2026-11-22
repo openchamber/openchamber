@@ -57,7 +57,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
   guestId: string;
   contribution: SourceControlContribution;
   guest: { name: string; version: string };
-}): Readonly<ProviderDescriptor> {
+}): Readonly<ProviderDescriptor & { extension: NonNullable<ProviderDescriptor['extension']> }> {
   const fail: (reason: string) => never = (reason) => { throw invalidContribution(guestId, reason); };
   const id = extensionProviderId(guestId);
   if (!id) fail('the guest id cannot name a provider');
@@ -185,6 +185,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }: {
       cliTransport: false,
       ...tokenPresentation,
       urls: Object.freeze({
+        ...presentation.urls,
         changeRequest: freezeList(presentation.urls.changeRequest),
         issue: freezeList(presentation.urls.issue),
       }),

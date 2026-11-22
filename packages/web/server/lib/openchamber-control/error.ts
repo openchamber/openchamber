@@ -26,7 +26,7 @@ export interface ControlErrorFields extends ControlErrorDetails {
 export const controlErrorFields = (cause: unknown): ControlErrorFields | undefined => cause == null ? undefined : Object(cause);
 
 export class OpenChamberControlError extends Error {
-  statusCode: number;
+  statusCode: ControlErrorFields['statusCode'];
   declare partial?: unknown;
   declare partialAction?: unknown;
   declare sessionId?: unknown;
@@ -37,7 +37,7 @@ export class OpenChamberControlError extends Error {
   declare busy?: 'queued' | 'running';
   declare stash?: ControlErrorStash;
 
-  constructor(message: string | undefined, statusCode = 500, details: ControlErrorDetails = {}) {
+  constructor(message: ControlErrorFields['message'], statusCode: ControlErrorFields['statusCode'] = 500, details: ControlErrorDetails = {}) {
     super(message);
     this.name = 'OpenChamberControlError';
     this.statusCode = statusCode;

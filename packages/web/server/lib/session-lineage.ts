@@ -31,7 +31,7 @@ export const sessionParentId = (record: SessionRecord | readonly unknown[] | nul
   return link.success ? link.data.metadata.openchamber.parentID : null;
 };
 
-export const isOperatorChildSession = (record: SessionRecord | null | undefined) => linkedSessionSchema.safeParse(record).data?.metadata.openchamber.kind === OPERATOR_CHILD_KIND;
+export const isOperatorChildSession = (record: SessionRecord | readonly unknown[] | null | undefined) => linkedSessionSchema.safeParse(record).data?.metadata.openchamber.kind === OPERATOR_CHILD_KIND;
 
 const createdSchema = z.object({
   type: z.literal('session.created'),

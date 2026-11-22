@@ -17,7 +17,16 @@
     "preserveSymlinks": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.js", "server/**/*.ts", "bin/**/*.js", "bin/**/*.ts"],
+  "include": [
+    "server/**/*.ts",
+    "bin/**/*.ts",
+    "bin/cli.js",
+    "server/index.js",
+    "server/lib/dictation/local/worker-process.js",
+    "server/lib/git/credential-helper.js",
+    "server/lib/git/repository-credential-helper.js",
+    "server/lib/git/ssh-wrapper.js"
+  ],
   "exclude": [
     "**/*.d.ts",
     "**/*.test.*",
@@ -25,7 +34,7 @@
     "**/*.test-support.*",
     "**/*.fixture.*",
     "**/test-support/**",
-    "**/*-live-support.js",
+    "**/*-live-support.*",
     "server/built-in-extensions/**",
     "build",
     "node_modules"

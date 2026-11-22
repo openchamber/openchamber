@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'events';
 
 import { DictationStreamManager } from './stream-manager.js';
@@ -100,6 +100,59 @@ function waitFor(predicate, timeoutMs = 1000) {
 }
 
 describe('DictationStreamManager', () => {
+  it('uses longer segments for OpenAI-compatible dictation while keeping local bounds', async () => {
+    const local = new FakeSttSession();
+    const cloud = new FakeSttSession();
+    const manager = new DictationStreamManager({
+      emit: () => {},
+      createSttSession: async (options) => ({ session: options.provider === 'openai-compatible' ? cloud : local }),
+    });
+    await manager.handleStart('local', FORMAT, {});
+    await manager.handleStart('cloud', FORMAT, { provider: 'openai-compatible' });
+    const audio = loudChunkBase64(16000);
+    for (let seq = 0; seq < 30; seq += 1) {
+      for (const dictationId of ['local', 'cloud']) {
+        manager.handleChunk({ dictationId, seq, audioBase64: audio });
+      }
+    }
+    expect(local.commits).toBe(1);
+    expect(cloud.commits).toBe(0);
+    manager.cleanupAll();
+  });
+
+  it('cuts OpenAI-compatible audio at a pause after 60 seconds or at the 120-second cap', async () => {
+    for (const withPause of [true, false]) {
+      const session = new FakeSttSession();
+      const { manager } = createManager(session);
+      await manager.handleStart('cloud', FORMAT, { provider: 'openai-compatible' });
+      const audio = loudChunkBase64(16000);
+      const duration = withPause ? 60 : 119;
+      for (let seq = 0; seq < duration; seq += 1) {
+        manager.handleChunk({ dictationId: 'cloud', seq, audioBase64: audio });
+      }
+      expect(session.commits).toBe(0);
+      const last = withPause
+        ? speechWithGapBase64({ before: 4000, gap: 4000, after: 8000 })
+        : audio;
+      manager.handleChunk({ dictationId: 'cloud', seq: duration, audioBase64: last });
+      expect(session.commits).toBe(1);
+      manager.cleanupAll();
+    }
+  });
+
+  it('budgets finalization for the duration of a committed long segment', async () => {
+    const session = new FakeSttSession();
+    const { manager, messages } = createManager(session);
+    await manager.handleStart('cloud', FORMAT, { provider: 'openai-compatible' });
+    const audio = loudChunkBase64(16000);
+    for (let seq = 0; seq < 59; seq += 1) {
+      manager.handleChunk({ dictationId: 'cloud', seq, audioBase64: audio });
+    }
+    manager.handleFinish('cloud', 58);
+    expect(messages.find((message) => message.type === 'finish_accepted').payload.timeoutMs).toBeGreaterThanOrEqual(98500);
+    manager.cleanupAll();
+  });
+
   it('retains unchecked segment keys and joins unchecked transcript values', async () => {
     const session = new FakeSttSession();
     const { manager, messages } = createManager(session);
@@ -398,6 +451,186 @@ describe('DictationStreamManager', () => {
 
     expect(session.commits).toBe(0);
     expect(session.clears).toBe(1);
+  });
+
+  describe('resume after a reconnect', () => {
+    const OPTIONS = {
+      provider: 'local',
+      localModel: 'parakeet',
+      language: 'de',
+      correct: false,
+    };
+
+    function createResumingManager() {
+      const sessions = [];
+      const messages = [];
+      const manager = new DictationStreamManager({
+        emit: (msg) => messages.push(msg),
+        createSttSession: async () => {
+          const session = new FakeSttSession();
+          sessions.push(session);
+          return { session };
+        },
+      });
+      return { manager, messages, sessions };
+    }
+
+    const lastAck = (messages) =>
+      [...messages].reverse().find((message) => message.type === 'ack');
+
+    it('continues an existing stream without a new session or replayed audio', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64() });
+      const appendedBefore = sessions[0].appended.length;
+      expect(appendedBefore).toBe(2);
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+
+      expect(sessions.length).toBe(1);
+      expect(sessions[0].closed).toBe(false);
+      expect(sessions[0].appended.length).toBe(appendedBefore);
+      expect(lastAck(messages).payload.ackSeq).toBe(1);
+
+      manager.handleCancel('d1');
+    });
+
+    it('starts a new stream when the decoding options changed', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      await manager.handleStart('d1', FORMAT, { ...OPTIONS, localModel: 'other-model' });
+
+      expect(sessions.length).toBe(2);
+      expect(sessions[0].closed).toBe(true);
+      expect(lastAck(messages).payload.ackSeq).toBe(-1);
+
+      manager.handleCancel('d1');
+    });
+
+    it('starts a new stream when only the transcription prompt changed', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+      const compatible = {
+        provider: 'openai-compatible',
+        openaiCompatible: { baseUrl: 'http://stt.local', model: 'whisper', prompt: 'Names: Ada' },
+      };
+
+      await manager.handleStart('d1', FORMAT, compatible);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      await manager.handleStart('d1', FORMAT, {
+        ...compatible,
+        openaiCompatible: { ...compatible.openaiCompatible, prompt: 'Names: Grace' },
+      });
+
+      expect(sessions.length).toBe(2);
+      expect(sessions[0].closed).toBe(true);
+      expect(lastAck(messages).payload.ackSeq).toBe(-1);
+
+      manager.handleCancel('d1');
+    });
+
+    it('resumes a stream that already sealed its finish, until final goes out', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleFinish('d1', 0);
+      expect(manager.streams.get('d1')?.finishSealed).toBe(true);
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+
+      // The stream lives until `final`. A client that lost the socket between
+      // `finish` and `final` must not get an empty new stream: that would
+      // throw its finished audio away.
+      expect(sessions.length).toBe(1);
+      expect(sessions[0].closed).toBe(false);
+      expect(lastAck(messages).payload.ackSeq).toBe(0);
+
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+      expect(messages.find((m) => m.type === 'final').payload.text).toBe('hello world');
+      expect(sessions[0].closed).toBe(true);
+    });
+
+    it('treats a repeated finish as a renewal: two acceptances, one final', async () => {
+      const { manager, messages, sessions } = createResumingManager();
+
+      await manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+      manager.handleFinish('d1', 0);
+      manager.handleFinish('d1', 0);
+
+      await waitFor(() => messages.some((m) => m.type === 'final'));
+
+      expect(messages.filter((m) => m.type === 'finish_accepted').length).toBe(2);
+      expect(messages.filter((m) => m.type === 'final').length).toBe(1);
+      // The tail was committed once, not twice.
+      expect(sessions[0].commits).toBe(1);
+      expect(sessions[0].closed).toBe(true);
+    });
+
+    function createSlowManager() {
+      const sessions = [];
+      const pending = [];
+      const messages = [];
+      const manager = new DictationStreamManager({
+        emit: (msg) => messages.push(msg),
+        // Holds every session until the test releases it, like a local model
+        // that takes seconds to load.
+        createSttSession: () => new Promise((resolve) => {
+          const session = new FakeSttSession();
+          sessions.push(session);
+          pending.push(() => resolve({ session }));
+        }),
+      });
+      const releaseAll = () => pending.splice(0).forEach((release) => release());
+      return { manager, messages, sessions, releaseAll };
+    }
+
+    it('answers a start repeated while the session loads with the loading session', async () => {
+      const { manager, messages, sessions, releaseAll } = createSlowManager();
+
+      const first = manager.handleStart('d1', FORMAT, OPTIONS);
+      const repeated = manager.handleStart('d1', FORMAT, OPTIONS);
+      releaseAll();
+      await Promise.all([first, repeated]);
+
+      expect(sessions.length).toBe(1);
+      expect(manager.streams.get('d1')?.stt).toBe(sessions[0]);
+      expect(messages.filter((m) => m.type === 'ack').map((m) => m.payload.ackSeq)).toEqual([-1]);
+
+      manager.handleCancel('d1');
+    });
+
+    it('closes a session that finishes loading after its dictation was cancelled', async () => {
+      const { manager, messages, sessions, releaseAll } = createSlowManager();
+
+      const start = manager.handleStart('d1', FORMAT, OPTIONS);
+      manager.handleCancel('d1');
+      releaseAll();
+      await start;
+
+      expect(sessions[0].closed).toBe(true);
+      expect(manager.streams.has('d1')).toBe(false);
+      expect(messages.some((m) => m.type === 'ack')).toBe(false);
+    });
+
+    it('closes the loading session when a start with other options replaces it', async () => {
+      const { manager, sessions, releaseAll } = createSlowManager();
+
+      const first = manager.handleStart('d1', FORMAT, OPTIONS);
+      const replaced = manager.handleStart('d1', FORMAT, { ...OPTIONS, localModel: 'other-model' });
+      releaseAll();
+      await Promise.all([first, replaced]);
+
+      expect(sessions.length).toBe(2);
+      expect(sessions[0].closed).toBe(true);
+      expect(manager.streams.get('d1')?.stt).toBe(sessions[1]);
+
+      manager.handleCancel('d1');
+    });
   });
 
   describe('correction pass', () => {

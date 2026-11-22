@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="tile_new_session">Neue Sitzung</string>
+    <string name="tile_new_session_description">Neue OpenChamber-Sitzung starten</string>
+    <string name="sealed_push_channel_name">Agent-Updates</string>
+    <string name="widget_usage_label">Nutzung</string>
+    <string name="widget_sessions_label">Sitzungen</string>
+    <string name="widget_usage_description">Nutzungskontingente verbundener Anbieter</string>
+    <string name="widget_sessions_description">Letzte Sitzungen und Verknüpfung für neuen Chat</string>
+    <string name="widget_open_to_sync">OpenChamber öffnen zum Synchronisieren</string>
+    <string name="widget_refresh">Aktualisieren</string>
+    <string name="widget_new_session">Neue Sitzung</string>
+</resources>

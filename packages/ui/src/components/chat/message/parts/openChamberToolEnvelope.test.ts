@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { JsonValue } from '@/lib/opencode/model';
-import { hasOpenChamberView, parseOpenChamberEnvelope, secretRowView, sessionsListedSchema, tightestWindow } from './openChamberToolEnvelope';
+import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope, secretRowView, sessionsListedSchema, tightestWindow } from './openChamberToolEnvelope';
 
 const envelope = (body: { [key: string]: JsonValue }) => JSON.stringify({ schemaVersion: 1, ...body });
 
@@ -35,6 +35,16 @@ describe('sessionsListedSchema', () => {
   });
 });
 
+describe('openChamberVerbKey', () => {
+  test('names a brief call by what it did, also from a reloaded row that kept only the call', () => {
+    const shell = { action: 'lead.brief' };
+    expect(openChamberVerbKey({ ...shell, data: { saved: true, length: 5, limit: 12000 } }, undefined)).toBe('chat.toolPart.openchamber.action.leadBriefSave');
+    expect(openChamberVerbKey({ ...shell, data: { brief: '# Goal', limit: 12000, empty: false } }, undefined)).toBe('chat.toolPart.openchamber.action.leadBriefRead');
+    expect(openChamberVerbKey(shell, { action: 'lead.brief', parameters: { edits: '[{"find":"a","replace":"b"}]' } })).toBe('chat.toolPart.openchamber.action.leadBriefSave');
+    expect(openChamberVerbKey(shell, { code: 'await tools.openchamber(...)' })).toBe('chat.toolPart.openchamber.action.leadBrief');
+  });
+});
+
 describe('hasOpenChamberView', () => {
   test('has a view only for a successful action it knows, with the data that view reads', () => {
     const link = { url: 'https://github.com/acme/demo/pull/42', number: 42, title: 'Fix', kind: 'pull', id: 'acme/demo#42' };
@@ -65,6 +75,11 @@ describe('hasOpenChamberView', () => {
     expect(view('pr.unwatch', { watching: [{ url: 'https://github.com/a/b/pull/2', number: 2, title: 'Other', status: 'open' }], stopped: true })).toBe(true);
     expect(view('work.name', { task: 'worktree', title: 'Login timeout', named: true, branch: 'fix/login' })).toBe(true);
     expect(view('file.open', { path: '/repo/a.md', size: 10, opened: true })).toBe(true);
+    expect(view('lead.brief', { sessionId: 'ses_1', saved: true, length: 7570, limit: 12000, file: '/data/leads/ses_1.md' })).toBe(true);
+    expect(view('lead.brief', { sessionId: 'ses_1', brief: '', limit: 12000, empty: true })).toBe(true);
+    expect(view('lead.digest', { sessionId: 'ses_1', saved: true, digest: { needsYou: [{ question: 'Q?', options: ['a'] }], now: ['x'], news: [], suggestions: [], updatedAt: 1 } })).toBe(true);
+    expect(view('lead.digest', { sessionId: 'ses_1', saved: true, digest: { needsYou: [], now: [], news: [], suggestions: [], updatedAt: 1 } })).toBe(false);
+    expect(view('lead.digest', { sessionId: 'ses_1', saved: true, digest: {} })).toBe(false);
     expect(view('browser.click', { ok: true, clicked: 'button', label: 'Save', url: 'http://localhost:3000/' })).toBe(true);
     expect(view('browser.scroll', { ok: true, scrollY: 400, maxScrollY: 1200, atTop: false, atBottom: false })).toBe(true);
     expect(view('browser.inspect', { ok: true, selector: '#save', tag: 'button', label: 'Save', styles: { color: 'red' } })).toBe(true);
@@ -79,12 +94,83 @@ describe('hasOpenChamberView', () => {
 
 describe('tightestWindow', () => {
   const window = (usedPercent: number | null) => ({ usedPercent, remainingPercent: usedPercent === null ? null : 100 - usedPercent, resetAt: null });
+  const spend = (spent: number | null) => ({
+    usedPercent: null,
+    remainingPercent: null,
+    resetAt: null,
+    value: { kind: 'spend' as const, spent, limit: null },
+  });
 
   test('is the window closest to its limit, skipping ones without a share', () => {
     const provider = { providerId: 'go', ok: true, usage: { windows: { '5h': window(1), weekly: window(82), credits: window(null) } } };
     expect(tightestWindow(provider)?.key).toBe('weekly');
     expect(tightestWindow({ providerId: 'x', ok: true, usage: { windows: { credits: window(null) } } })).toBeNull();
     expect(tightestWindow({ providerId: 'x', ok: false, usage: null })).toBeNull();
+  });
+
+  test('falls back to the monthly total for an uncapped monthly key', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: { windows: { monthly_total: spend(226.64), monthly_credits: spend(14.3) } },
+    };
+    expect(tightestWindow(provider)?.key).toBe('monthly_total');
+  });
+
+  test('keeps a cap ahead of the monthly total', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: { windows: { monthly: window(82), monthly_total: spend(5) } },
+    };
+    expect(tightestWindow(provider)?.key).toBe('monthly');
+  });
+
+  test('a threshold-zero cap still outranks the monthly total', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: {
+        windows: {
+          monthly: { ...window(null), valueLabel: '$0.00 / $0.00' },
+          monthly_total: spend(5),
+        },
+      },
+    };
+    expect(tightestWindow(provider)?.key).toBe('monthly');
+  });
+
+  test('a set cap with an unreadable amount still outranks the monthly total', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: {
+        windows: {
+          monthly_total: spend(5),
+          key_limit: { ...window(null), value: { kind: 'spend' as const, spent: null, limit: 30 } },
+        },
+      },
+    };
+    expect(tightestWindow(provider)?.key).toBe('key_limit');
+  });
+
+  test('shows a readable OpenRouter counter when the monthly total is unknown', () => {
+    const provider = {
+      providerId: 'openrouter',
+      ok: true,
+      usage: { windows: { monthly_total: spend(null), monthly_credits: spend(3.18) } },
+    };
+    expect(tightestWindow(provider)?.key).toBe('monthly_credits');
+  });
+
+  test('keeps the generic rule for another provider with a monthly_total window', () => {
+    const requests = (count: number) => ({ ...window(null), value: { kind: 'requests' as const, count } });
+    const provider = {
+      providerId: 'ext-quota',
+      ok: true,
+      usage: { windows: { daily: requests(12), monthly_total: requests(300) } },
+    };
+    expect(tightestWindow(provider)).toBeNull();
   });
 });
 
@@ -100,6 +186,11 @@ describe('secretRowView', () => {
     expect(run({ answer: { status: 'ran', outcome: 'not-started', exitCode: null } })?.key).toBe('chat.toolPart.openchamber.action.secretRunNotStarted');
     expect(run({ answer: { status: 'declined' } })?.key).toBe('chat.toolPart.openchamber.action.secretRunDeclined');
     expect(run({ answer: { answered: false, reason: 'chat' } })?.key).toBe('chat.toolPart.openchamber.action.secretRunNotRun');
+  });
+
+  test('names the values a finished run could not save', () => {
+    expect(secretRowView({ ok: true, action: 'secret.run', data: { answer: { status: 'ran', outcome: 'exited', exitCode: 0 }, notSaved: ['API_TOKEN'] } }))
+      .toEqual({ key: 'chat.toolPart.openchamber.action.secretRun', output: '', notSaved: ['API_TOKEN'] });
   });
 
   test('leaves other answers alone', () => {

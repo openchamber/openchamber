@@ -7,11 +7,9 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { normalizePath } from './fileViewPaths';
-import { type FilesViewOptions } from './fileViewTypes';
 
-export function useFileScope({ isMobile, mode, visible }: {
+export function useFileScope({ isMobile, visible }: {
   isMobile: boolean;
-  mode: FilesViewOptions['mode'];
   visible: boolean;
 }) {
   const showHidden = useDirectoryShowHidden();
@@ -22,7 +20,7 @@ export function useFileScope({ isMobile, mode, visible }: {
   const currentDirectory = panelContentDirectory(useDraftSpaceTarget(), panelDirectory) ?? '';
   const root = normalizePath(currentDirectory.trim());
   const panelRoot = normalizePath(panelDirectory.trim());
-  const treeEnabled = isMobile || mode === 'full';
+  const treeEnabled = isMobile;
   const treeActive = treeEnabled && visible;
   const runtimeKey = useGitStore((state) => state.runtimeKey);
   const fileScope = JSON.stringify([runtimeKey, root]);

@@ -18,6 +18,7 @@ let host: HTMLDivElement;
 let restore: Array<() => void>;
 let searches: Array<{ query: string; type: string; toggled: boolean; signal?: AbortSignal; resolve: (hits: ProjectFileSearchHit[]) => void }>;
 let picked: string[];
+let fetchMock: ReturnType<typeof spyOn<typeof globalThis, 'fetch'>>;
 const globals = new Map<string, PropertyDescriptor | undefined>();
 const directory = '/mention-test';
 const sdk = OpenCode.make({ baseUrl: 'http://mention.test', fetch: () => new Promise<Response>(() => undefined) });
@@ -43,7 +44,7 @@ beforeEach(async () => {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   // Keep unrelated bootstrap requests pending.
-  const fetch = spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(() => undefined));
+  fetchMock = spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(() => undefined));
   ({ I18nProvider } = await import('@/lib/i18n'));
   ({ SyncProvider } = await import('@/sync/sync-context'));
   ({ RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext'));
@@ -54,16 +55,19 @@ beforeEach(async () => {
   const { useConfigStore } = await import('@/stores/useConfigStore');
   const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
   const { useUIStore } = await import('@/stores/useUIStore');
+  const { useGuestsStore } = await import('@/lib/guests/store');
+  const priorGuests = useGuestsStore.getState();
   const priorSearch = useFileSearchStore.getState();
   const priorConfig = useConfigStore.getState();
   const priorDirectory = useDirectoryStore.getState();
   const priorUI = useUIStore.getState();
   restore = [
-    () => fetch.mockRestore(),
+    () => fetchMock.mockRestore(),
     () => useFileSearchStore.setState(priorSearch),
     () => useConfigStore.setState(priorConfig),
     () => useDirectoryStore.setState(priorDirectory),
     () => useUIStore.setState(priorUI),
+    () => useGuestsStore.setState(priorGuests, true),
   ];
   searches = [];
   picked = [];
@@ -100,6 +104,8 @@ afterEach(async () => {
 
 const handle = React.createRef<FileMentionHandle>();
 
+let mentioned: string[] = [];
+
 const type = (searchQuery: string) => act(async () => root.render(
   <SyncProvider sdk={sdk} directory="">
     <I18nProvider>
@@ -109,6 +115,7 @@ const type = (searchQuery: string) => act(async () => root.render(
           searchQuery={searchQuery}
           onClose={() => undefined}
           onFileSelect={(file) => picked.push(file.relativePath ?? file.path)}
+          onExtensionMentionSelect={(mention) => mentioned.push(mention.id)}
         />
       </RuntimeAPIContext.Provider>
     </I18nProvider>
@@ -311,4 +318,34 @@ test('the keyboard keeps its row while results update, and Enter picks the row i
   await press('ArrowDown');
   await press('Enter');
   expect(picked).toEqual(['src/map.ts', 'src/apple.ts']);
+});
+
+test('an extension\'s rows leave a list held for a pending search once its folders stop covering the composer\'s directory', async () => {
+  mentioned = [];
+  const { useGuestsStore } = await import('@/lib/guests/store');
+  const tracker = (folders: string[]) => ({
+    id: 'tracker', name: 'Tracker', icon: 'apps', capabilities: { requested: [], granted: [] }, mentions: { label: 'Issues' }, folders,
+  });
+  useGuestsStore.setState({ guests: [tracker([directory])] });
+  fetchMock.mockImplementation((input) => (String(input).includes('/api/guests/mentions/search')
+    ? Promise.resolve(new Response(JSON.stringify({ groups: [{ guestId: 'tracker', label: 'Issues', items: [{ id: 'ISSUE-1', title: 'Fix the app' }] }] }), { headers: { 'Content-Type': 'application/json' } }))
+    : new Promise<Response>(() => undefined)));
+  const shownIssue = () => host.textContent?.includes('Fix the app') ?? false;
+
+  await type('ap');
+  await settleDebounce();
+  await answer('ap', ['src/app.ts']);
+  expect(shownIssue()).toBe(true);
+
+  // A new letter holds the rows while it searches; the folder list changes meanwhile.
+  await type('app');
+  expect(busy()).toBe(true);
+  await act(async () => useGuestsStore.setState({ guests: [tracker(['/elsewhere'])] }));
+  expect(busy()).toBe(true);
+  expect(shownIssue()).toBe(false);
+  await press('ArrowDown');
+  await press('ArrowDown');
+  await press('Enter');
+  expect(mentioned).toEqual([]);
+  expect(picked).toEqual(['src/app.ts']);
 });

@@ -13,8 +13,7 @@ import { useI18n } from '@/lib/i18n';
 import { formatGoalTokens } from '@/lib/sessionGoalMetadata';
 import { cn } from '@/lib/utils';
 import type { ModelFieldErrors, ModelRow } from './custom-provider-form';
-
-const MODEL_CAPABILITIES = ['text', 'image', 'audio', 'video', 'pdf'] as const;
+import { MODEL_CAPABILITIES } from './model-capabilities';
 
 export type ModelTextField = 'id' | 'name' | 'variants' | 'contextWindow' | 'maxOutputTokens';
 export type ModelCapabilityList = 'inputCapabilities' | 'outputCapabilities';

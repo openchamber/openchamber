@@ -1,5 +1,9 @@
 // external: https://www.rfc-editor.org/rfc/rfc4180#section-2 Quoted fields accept delimiters, newlines and doubled quotes.
 
+import type { TableDelimiter } from './tableDelimiter';
+
+export type { TableDelimiter };
+
 type DelimitedTable = {
   header: string[];
   rows: string[][];
@@ -11,13 +15,9 @@ type DelimitedTable = {
 
 export const DEFAULT_TABLE_ROW_CAP = 100_000;
 
-export const delimiterForPath = (filePath: string): ',' | '\t' => (
-  filePath.toLowerCase().endsWith('.tsv') ? '\t' : ','
-);
-
 export const parseDelimitedText = (
   content: string,
-  delimiter: ',' | '\t',
+  delimiter: TableDelimiter,
   rowCap: number = DEFAULT_TABLE_ROW_CAP,
 ): DelimitedTable => {
   const records: string[][] = [];
@@ -97,7 +97,7 @@ const fieldText = (value: string, delimiter: string): string => (
   value.includes(delimiter) || /["\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 );
 
-export const setDelimitedField = (content: string, delimiter: ',' | '\t', record: number, column: number, value: string): string => {
+export const setDelimitedField = (content: string, delimiter: TableDelimiter, record: number, column: number, value: string): string => {
   const start = content.charCodeAt(0) === 0xfeff ? 1 : 0;
   let recordIndex = 0;
   let fieldIndex = 0;
@@ -199,7 +199,7 @@ const recordSpans = (content: string, delimiter: string): Array<{ start: number;
   return records;
 };
 
-export const shiftDelimitedRow = (content: string, delimiter: ',' | '\t', record: number, delta: 1 | -1): string => {
+export const shiftDelimitedRow = (content: string, delimiter: TableDelimiter, record: number, delta: 1 | -1): string => {
   const records = recordSpans(content, delimiter);
   const target = records[record];
   if (!target) return content;
@@ -209,7 +209,7 @@ export const shiftDelimitedRow = (content: string, delimiter: ',' | '\t', record
   return `${content.slice(0, target.start)}${width === 1 ? '""' : delimiter.repeat(width - 1)}${ending}${content.slice(target.start)}`;
 };
 
-export const shiftDelimitedColumn = (content: string, delimiter: ',' | '\t', column: number, delta: 1 | -1): string => {
+export const shiftDelimitedColumn = (content: string, delimiter: TableDelimiter, column: number, delta: 1 | -1): string => {
   const records = recordSpans(content, delimiter);
   let result = content;
   for (const { fields } of [...records].reverse()) {

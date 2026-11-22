@@ -28,7 +28,7 @@ const healthSchema = z.object({
   openCodeSecureConnection: z.boolean().optional(),
   openCodePort: z.number().int().min(1).max(65535).optional(),
   opencodeViaWsl: z.boolean().optional(),
-  opencodeBinarySource: z.enum(['bundled', 'env', 'path', 'fallback', 'where', 'shell', 'policy', 'settings', 'wsl', 'unknown']).nullish().catch(null),
+  opencodeBinarySource: z.enum(['bundled', 'env', 'path', 'fallback', 'where', 'shell', 'policy', 'settings', 'wsl', 'shared-service', 'external', 'unknown']).nullish().catch(null),
   opencodeLaunchWrapperType: z.enum(['bun-shebang', 'cmd-wrapper', 'node-launcher', 'node-shebang']).nullish().catch(null),
   lastOpenCodeError: z.string().nullish().catch(null),
 }).refine((health) => health.openCodeRunning !== undefined && health.isOpenCodeReady !== undefined);

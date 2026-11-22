@@ -1,11 +1,12 @@
 import crypto from 'crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Request, Response, NextFunction, RequestHandler } from '../shared/http-contracts.js';
+import { rateLimitKey } from '../security/client-address.js';
 import type { BearerRequest, ClientInput, CreatedClient, RemoteClient } from '../client-auth/contracts.js';
 import type { PasskeyOptions } from './ui-passkeys.js';
 
 type AuthRequest = Pick<IncomingMessage, 'headers' | 'method' | 'url'> & Partial<Pick<Request, 'query' | 'originalUrl' | 'baseUrl' | 'path' | 'secure'>>;
-type CookieResponse = Pick<Response, 'setHeader'> | null;
+type CookieResponse = { setHeader: (name: string, value: string) => void } | null;
 
 export interface ClientAuthentication {
   ok: boolean;
@@ -121,22 +122,7 @@ let rateLimitCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
 const rateLimitLocks = new Map<string, Promise<boolean>>();
 
-const getClientIp = (req: Request) => {
-  const ip = req.ip || req.socket?.remoteAddress;
-  if (ip) {
-    if (ip.startsWith('::ffff:')) {
-      return ip.substring(7);
-    }
-    return ip;
-  }
-  return null;
-};
-
-const getRateLimitKey = (req: Request) => {
-  const ip = getClientIp(req);
-  if (ip) return ip;
-  return 'rate-limit:no-ip';
-};
+const getRateLimitKey = (req: Request) => rateLimitKey(req, 'rate-limit:no-ip');
 
 const getRateLimitConfig = (key: string) => {
   if (key === 'rate-limit:no-ip') {
@@ -325,7 +311,7 @@ const parseCookies = (cookieHeader: Request['headers']['cookie']): Record<string
   }, {});
 };
 
-export const getBearerTokenFromRequest = (req: Pick<Request, 'headers'> | null | undefined) => {
+export const getBearerTokenFromRequest = (req: Partial<Pick<Request, 'headers'>> | null | undefined) => {
   const header = req?.headers?.authorization;
   const value = Array.isArray(header) ? header[0] : header;
   if (isString(value)) {

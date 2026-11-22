@@ -47,6 +47,13 @@ export function getMultiRunMembership(session: Session): MultiRunMembership | nu
 }
 
 export function getMultiRunIdentity(session: Session, legacyDirectory = session.directory): MultiRunIdentity | null {
+  return resolveMultiRunIdentity(session, () => legacyDirectory);
+}
+
+export function resolveMultiRunIdentity(
+  session: Session,
+  readLegacyDirectory: () => string | null | undefined,
+): MultiRunIdentity | null {
   const parsedOpenchamber = parseMetadata(openchamberSchema, session.metadata?.openchamber);
   const openchamber = parsedOpenchamber.success ? parsedOpenchamber.data : null;
   if (openchamber && Object.hasOwn(openchamber, 'multirun')) {
@@ -60,8 +67,9 @@ export function getMultiRunIdentity(session: Session, legacyDirectory = session.
   }
   if (session.parentID || openchamber?.kind === 'btw' || openchamber?.kind === 'review') return null;
   const title = parseMultiRunSessionTitle(session.title);
-  const scope = normalizePath(legacyDirectory);
-  if (!title || !scope) return null;
+  if (!title) return null;
+  const scope = normalizePath(readLegacyDirectory());
+  if (!scope) return null;
   const group: MultiRunMembership['group'] = { kind: 'legacy', scope };
   return {
     group, groupSlug: title.groupSlug, runGroup: title.runGroup,

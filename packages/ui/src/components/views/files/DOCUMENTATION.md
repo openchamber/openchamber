@@ -62,13 +62,21 @@ when the server stopped at its deadline, when the regular expression is invalid
 failed; none of these is shown as an empty result. The server side is in
 `packages/web/server/lib/fs/DOCUMENTATION.md`.
 
-Desktop `FilesView` in editor-only mode neither loads nor constructs its unused
-tree. In the context panel the panel's tab strip owns the open files: closing
+`FilesView` is the open file's editor and has no tab row of its own. On the
+desktop it neither loads nor constructs a tree. In the context panel the
+panel's tab strip owns the open files: closing
 a file from the editor (Cmd/Ctrl+W in the desktop app, which the window menu
 turns into `openchamber:close-tab` through `lib/closeTabTarget.ts`, or the
 unsaved-changes prompt that may come first) goes through `onCloseFile` to
-`closeContextFile`, which closes that tab exactly as its close button does. Mobile retains its tree. The context panel passes actual visibility,
-including the panel's open state, its active tab, and the editor toggle, to each file surface.
+`closeContextFile`, which closes that tab exactly as its close button does. Mobile
+retains its tree. Opening a file replaces the tree in the same scroll area on a
+phone, so the tree keeps its offset per workspace root and returns to it before
+repainting; a search's results and a folder child's listing are their own lists
+(`memoryKey` on the tree's scroller). A root read still loading or failed,
+search results of another folder or query, a failed search, and a cleared
+search's rows still on screen are not the list. The context panel passes actual
+visibility, including the panel's open state, its active tab, and the editor
+toggle, to each file surface.
 Hidden surfaces retain drafts, loaded content and scroll state. They stop
 directory and file metadata polling; reopening checks freshness once before
 normal polling resumes. The visible open file is watched by OpenCode
@@ -83,7 +91,7 @@ refresh after file mutations does. Each directory failure remains local and
 preserves its previous successful snapshot.
 
 Opening a file outside the workspace reads it directly through the active
-runtime, in both editor-only and full Files modes. Chat navigation and file
+runtime, on the desktop and on the phone. Chat navigation and file
 loading do not request native file grants. Server-backed text reads and metadata
 requests have a 30-second deadline, including response-body reads, so a stalled
 request reaches the existing error handler instead of leaving loading pending.
@@ -252,11 +260,12 @@ drawn by pdf.js, see below), `MediaArtifact` (native audio/video
 element, duration and dimensions once metadata loads, a stated failure when
 the runtime cannot decode the codec), `FontArtifact` (a specimen under a
 throwaway `FontFace` family removed when the tab closes), `TableArtifact`
-(CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
+(CSV/TSV through `delimitedText.ts`, the separator read from the file's first
+records rather than its extension, see below; capped rows stated in the meta line),
 `OfficeArtifact` (docx, xlsx, pptx, odt, ods, odp, read-only, see below),
 and `BinaryArtifact` (name, type, size, download, and the desktop's open in
 the default app; never a decode attempt). `view/useArtifactPreview`
-is the single switch both the docked and the fullscreen viewer use.
+is the single switch the viewer uses.
 
 A file that cannot be shown fills the pane with `ContentState`
 (`components/ui/content-state.tsx`): icon, title, one sentence, actions. A
@@ -320,7 +329,63 @@ in the tree leaves the focus on the row, and the viewer unmounts while the
 next image loads, which drops the focus to the page; a listener on the viewer
 alone missed both. A viewer that is laid out nowhere, behind another tab of
 the panel, ignores the keys, and the first viewer to handle a key marks it
-handled, so the docked viewer behind the fullscreen one cannot step twice.
+handled, so a second viewer on the page cannot step on the same key.
+
+An image's meta bar has a fullscreen toggle everywhere but the phone layout
+(`useFileImageFullscreen`; the tablet layout keeps it). It opens
+`renderFileImageFullscreen`, a full-size shared `Dialog` over the whole window
+that renders the same `ImageArtifact` through `renderImageArtifact`: the same
+`src`, neighbours and gestures, starting at fit. The arrow-key scope is the
+context panel or the overlay (`data-image-fullscreen`), whichever holds the
+viewer, and the overlay's viewer listens on the overlay itself: Base UI's
+popup stops arrow keys from bubbling on to the document. Other dialogs, such
+as the phone's workspace drawer, keep the document listener. A step from the
+overlay opens the neighbour in the panel as the docked arrows do, and the
+overlay follows the selection. While the next image loads, or when its read
+fails, the overlay keeps a bar with the name and the exit button, so it can be
+left without a keyboard. It closes when the panel is hidden (on a tablet, when
+the workspace drawer closes or switches to another tab: `MobileFilesSurface`
+passes the drawer's visibility down, because the drawer keeps Files mounted
+behind other tabs) or the selection
+is a file other than an image; an SVG shown as source stays (shown as an image,
+with its folder's arrows, since the image navigation keeps listing neighbors
+while the overlay is open), and a step that briefly leaves no file selected does
+not close it. Escape and the exit button
+close it everywhere. In the desktop app Ctrl/⌘+W closes the overlay first and
+leaves the file tab open, as it does the Settings window; Electron's menu sends
+that chord as the close-tab event, while in a browser the chord belongs to the
+browser. Its bar is the header's height and padded by
+`--oc-titlebar-start-inset` and `--oc-titlebar-end-inset` (published by
+`Header`), so the window controls the OS draws over the page (macOS traffic
+lights, an installed web app's window controls overlay) never cover its
+buttons. The desktop app's Windows controls are different: the page draws them
+in the header, and the overlay covers them like any modal, as the Settings
+window does; the exit button stays reachable and the controls work again once
+the overlay closes. It carries the
+header's `header-safe-area` class too, so on an iPad its buttons sit below the
+status bar as the header's do. The dialog portals out of the mobile shell, so
+it carries `oc-side-safe-area` itself: the background stays full bleed and the
+bar and arrows keep clear of a side cutout. Its `DialogContent` is `fullWindow`,
+so in an installed app window 768 px wide or narrower it still fills the window
+with square corners. On close the
+focus goes to the docked toggle, which a step may have remounted, so the docked
+arrows keep working.
+
+### Why a dialog over the window and not the panel's fullscreen
+
+The panel `<aside>` clips and isolates its content, so nothing inside it can
+cover the window. The shared dialog brings the focus trap, Escape, focus return
+and `oc-dialog-open`, which turns off the title bar's drag regions under it;
+the composer's key and paste redirect and the chat arrow navigation already
+skip `[role="dialog"]`. The overlay therefore sets no global flag such as
+`isImagePreviewOpen`: a flag every automatic close must clear can stick, and a
+stuck one silently stops typing from reaching the composer.
+
+### Why the overlay shares the docked `src` and does not fetch again
+
+Both viewers render inside `FilesView`, which owns the object URL and revokes
+it when the selection changes, so the overlay lives no longer than its URL. A
+second fetch would double the bytes and need its own revoke.
 
 Non-text artifacts the browser must own (PDF, audio, video, fonts) are loaded
 through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
@@ -447,7 +512,8 @@ An empty last column takes what is left of a wide pane. Without it the browser
 stretches every column past its width, and a drag starts from a width the column
 does not hold, so its edge jumps away from the pointer.
 
-A CSV edit replaces one field in the text (`setDelimitedField`) and goes through
+A CSV edit replaces one field in the text (`setDelimitedField`, with the same
+separator `resolveDelimiter` gave the table) and goes through
 the editor's draft, so it saves and guards like typing. A workbook edit goes
 through `workbook/WorkbookSession`, and these must stay true:
 
@@ -502,6 +568,14 @@ step each:
   An ODS document is refused whole when it holds named ranges, database ranges,
   validations, conditional formats, drawings, merged or matrix cells: those keep
   addresses in their own notation or span the lines that would move.
+
+### Why the separator comes from the content and not the extension
+
+A `.csv` file is not always comma-separated. Spreadsheets in locales that use a decimal comma export semicolon-separated files under the `.csv` extension, and a tab-separated file saved as `.csv` is just as common. Reading by extension alone turned those files into a single column, with every value on a line inside one cell.
+
+`resolveDelimiter` (`previews/tableDelimiter.ts`) reads the first records with each candidate separator, comma, semicolon and tab, and compares only the candidates the file actually uses. Among those it prefers one whose split keeps quotes where RFC 4180 allows them (at the start of a field, closed before the next separator or line end), then the one that holds its column count over the most records it actually splits, then the one that gives the wider table, then the comma. The order matters in every direction: a semicolon export reads as one column under a comma, so the wider table wins that tie; a comma file whose values happen to contain semicolons reads as two ragged columns under a semicolon, so the steadier column count keeps the comma; and a comma file with a quoted header next to a semicolon-laden value would read as wider under the semicolon, but that split puts a quote in the middle of a field, so the comma wins. A separator that never appears does not compete, so a comma file with a missing trailing field is not handed to a semicolon that splits nothing. A file with no separator at all keeps the comma it would have had before, so nothing changes for a one-column file. The parser itself stays forgiving for files no candidate reads cleanly.
+
+A `.tsv` path stays a hard hint for the tab and is not sniffed, because that extension names the separator itself. The separator belongs to the loaded file, not to the draft: `view/useTableDelimiter` reads it once per loaded source (the file revision, plus whether the path is `.tsv`) and hands the same value to the preview, the cell and row edits, and the XLSX export. An edit can write a field that reads differently under another separator (a semicolon file accepts an unquoted comma), so sniffing the draft would move the column boundaries mid-edit; a save and a rename or move of the open file keep the separator, a reload or another file reads it again. The sniffer lives apart from `delimitedText.ts` so the view hooks can hold it without importing the lazily loaded parser.
 
 ### Large tables
 
@@ -923,7 +997,7 @@ editor: an extension's file editor (`contributes.fileEditors`, see
 `packages/sdk/DOCUMENTATION.md`). It exposes `FileCanvasHandle`
 (`fileCanvas.ts`); `getContent(purpose)` returns a `FileCanvasRead`: a
 snapshot, `null` for nothing yet, or a failure message. A failure fails the
-save or keeps the canvas open on a source or fullscreen toggle; it never falls
+save or keeps the canvas open on a source toggle; it never falls
 back to the stale text draft.
 
 An extension editor claims a file when an active extension's pattern matches
@@ -943,9 +1017,7 @@ handed at mount, so `FilesView` remounts it with a `key` of path plus
 `canvasRemountNonce` whenever it must adopt content it did not author (a load,
 an external write, a toggle back from the source view, a discard). Its own
 save adopts content without a remount so the viewport is not reset. Exactly
-one instance is mounted, in the docked chain or in the fullscreen overlay;
-entering or leaving fullscreen moves unsaved edits through the text draft, as
-the source toggle does, and the other slot remounts from it.
+one instance is mounted.
 
 ### Canvas handoff invariants
 
@@ -988,10 +1060,9 @@ built-in view with a toast. Its snapshot is bytes, written with
 write uploads use, with the stat baseline cleared so the poll does not take
 the write for an external change. The binary guards (`isBinaryFile`,
 `contentDetectedBinary`) that refuse text saves step aside only while a binary
-editor owns the file (`binaryCanvasRef`). There is no source toggle; moving to
-or from fullscreen saves unsaved changes first, because bytes cannot travel
-through the draft. An external change reloads the file and remounts the
-editor with the new bytes, unless it has unsaved changes.
+editor owns the file (`binaryCanvasRef`). There is no source toggle. An
+external change reloads the file and remounts the editor with the new bytes,
+unless it has unsaved changes.
 
 ## Excalidraw drawings
 

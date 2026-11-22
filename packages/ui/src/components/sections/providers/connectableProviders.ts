@@ -25,17 +25,24 @@ export const POPULAR_PROVIDERS: readonly PopularProvider[] = [
 
 const POPULAR_IDS = new Set(POPULAR_PROVIDERS.map((provider) => provider.id));
 
+const listCatalogProviders = (catalog: IntegrationCatalog): ConnectableProvider[] => catalog.integrations
+  .filter((integration) => !integration.id.startsWith('mcp_')
+    && !catalog.webSearchIds?.has(integration.id)
+    && !isWebSearchIntegration(integration))
+  .map((integration) => ({ id: integration.id, name: integration.name || integration.id }))
+  .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+export const listCanonicalProviders = (catalog: IntegrationCatalog): ConnectableProvider[] =>
+  listCatalogProviders(catalog).filter((provider) => !provider.id.includes('://'));
+
 export const listConnectableProviders = (
   catalog: IntegrationCatalog,
   listedProviderIds: ReadonlySet<string>,
-): ConnectableProvider[] => catalog.integrations
-  .filter((integration) => integration.connections.length === 0
-    && !integration.id.startsWith('mcp_')
-    && !catalog.webSearchIds?.has(integration.id)
-    && !isWebSearchIntegration(integration)
-    && !listedProviderIds.has(integration.id))
-  .map((integration) => ({ id: integration.id, name: integration.name || integration.id }))
-  .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+): ConnectableProvider[] => listCatalogProviders({
+  ...catalog,
+  integrations: catalog.integrations.filter((integration) => integration.connections.length === 0
+    && !listedProviderIds.has(integration.id)),
+});
 
 interface ConnectableProviderGroups {
   popular: Array<ConnectableProvider & PopularProvider>;

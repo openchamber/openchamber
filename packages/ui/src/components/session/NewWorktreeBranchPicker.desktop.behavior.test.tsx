@@ -7,7 +7,18 @@ import { Window } from 'happy-dom';
  * happy-dom cannot reproduce Chromium's visibility scan; the observer checks
  * commit-time focus, before Base UI's passive focus effect.
  */
-const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { value: string; label: string }[]) => Promise<void>) => {
+type ListEndCallback = (entries: Array<{ isIntersecting: boolean }>) => void;
+const listEndObservers = new Set<ListEndCallback>();
+class FakeIntersectionObserver {
+  constructor(private readonly callback: ListEndCallback) {}
+  observe() { listEndObservers.add(this.callback); }
+  disconnect() { listEndObservers.delete(this.callback); }
+}
+const revealListEnd = () => {
+  for (const callback of [...listEndObservers]) callback([{ isIntersecting: true }]);
+};
+
+const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { value: string; label: string }[]) => Promise<void>, remoteBranches = ['main'], isMobile = false) => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const globals = {
@@ -26,6 +37,7 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
     PointerEvent: dom.PointerEvent,
     MutationObserver: dom.MutationObserver,
     ResizeObserver: dom.ResizeObserver,
+    IntersectionObserver: FakeIntersectionObserver,
     getComputedStyle: dom.getComputedStyle.bind(dom),
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
     cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
@@ -50,11 +62,11 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
           value=""
           placeholder="Choose a branch…"
           title="Based on"
-           localBranches={['main', 'feature/one', 'feature/two']}
-          remoteBranches={['main']}
+          localBranches={['main', 'feature/one', 'feature/two']}
+          remoteBranches={remoteBranches}
           isLoading={false}
-          isMobile={false}
-           onSelect={(branch) => selected.push(branch)}
+          isMobile={isMobile}
+          onSelect={(branch) => selected.push(branch)}
         />
       </I18nProvider>,
     ));
@@ -80,10 +92,10 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
     });
     observer.disconnect();
 
-    const search = document.querySelector<HTMLInputElement>('input[data-slot="command-input"]');
+    const search = document.querySelector<HTMLInputElement>(isMobile ? 'input[placeholder="Search branches..."]' : 'input[data-slot="command-input"]');
     if (!search) throw new Error('Missing branch search input');
     await run(search, selected);
-    expect(focusedWhenPopupLanded).toBe('command-input');
+    if (!isMobile) expect(focusedWhenPopupLanded).toBe('command-input');
   } finally {
     await act(async () => root.unmount());
     await dom.happyDOM.abort();
@@ -95,6 +107,40 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
 };
 
 describe('NewWorktreeBranchPicker desktop dropdown', () => {
+  test('a long list grows when its end comes into view, on the phone too', async () => {
+    const branches = Array.from({ length: 450 }, (_, index) => `origin/branch-${String(index).padStart(3, '0')}`);
+    await openDesktopDropdown(async (_search, selected) => {
+      const button = (text: string) => [...document.querySelectorAll('button')].find((element) => element.textContent === text);
+      expect(button('origin/branch-196')).toBeDefined();
+      expect(button('origin/branch-197')).toBeUndefined();
+      await act(async () => revealListEnd());
+      expect(button('origin/branch-396')).toBeDefined();
+      await act(async () => revealListEnd());
+      await act(async () => button('origin/branch-449')!.click());
+      expect(selected).toEqual([{ value: 'remotes/origin/branch-449', label: 'origin/branch-449' }]);
+    }, branches, true);
+  });
+  test('large branch lists mount a bounded window, grow at the end and reset on search', async () => {
+    const branches = Array.from({ length: 450 }, (_, index) => `origin/branch-${String(index).padStart(3, '0')}`);
+    await openDesktopDropdown(async (search, selected) => {
+      const items = () => [...document.querySelectorAll('[cmdk-item]')];
+      expect(items()).toHaveLength(200);
+      expect([...document.querySelectorAll('button')].some((element) => element.textContent === 'Next')).toBe(false);
+      await act(async () => revealListEnd());
+      expect(items()).toHaveLength(400);
+      await act(async () => revealListEnd());
+      expect(items()).toHaveLength(453);
+      expect(items()[452]?.getAttribute('data-value')).toBe('remotes/origin/branch-449');
+      await act(async () => {
+        search.focus();
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(search, 'branch-449');
+        search.dispatchEvent(new window.Event('input', { bubbles: true }));
+      });
+      expect(items()[0]?.getAttribute('data-value')).toBe('remotes/origin/branch-449');
+      await act(async () => search.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+      expect(selected).toEqual([{ value: 'remotes/origin/branch-449', label: 'origin/branch-449' }]);
+    }, branches);
+  });
   for (const keys of [['ArrowDown', 'ArrowUp'], ['n', 'p']]) {
     test(`${keys.join('/')} navigate filtered branches and Enter selects from the focused search`, async () => {
       await openDesktopDropdown(async (search, selected) => {

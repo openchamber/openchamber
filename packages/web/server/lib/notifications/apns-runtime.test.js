@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApnsRuntime } from './apns-runtime.js';
 import { openPushContent } from './push-seal.js';
+import { deriveServerId } from '../relay/signing-key.js';
 
 // A real P-256 key so the ES256 signing path (direct mode) runs for real.
 const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -91,6 +92,31 @@ afterEach(() => {
 });
 
 describe('apns runtime relay mode (default)', () => {
+  it('removing a token unbinds it on the relay once no session on this server holds it, and never sends a token it did not hold', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const isUnregister = ([url]) => String(url) === 'https://relay.test/v1/push/unregister-token';
+
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+    await runtime.addOrUpdateApnsToken('s2', 'tokenA');
+
+    await runtime.removeApnsToken('s1', 'tokenA');
+    expect(fetchMock.mock.calls.filter(isUnregister)).toHaveLength(0);
+
+    await runtime.removeApnsToken('never-registered', 'tokenA');
+    await runtime.removeApnsToken('s1', 'tokenNeverHeld');
+    expect(fetchMock.mock.calls.filter(isUnregister)).toHaveLength(0);
+
+    await runtime.removeApnsToken('s2', 'tokenA');
+    const unregisterCalls = fetchMock.mock.calls.filter(isUnregister);
+    expect(unregisterCalls).toHaveLength(1);
+    const body = JSON.parse(unregisterCalls[0][1].body);
+    expect(body.token).toBe('tokenA');
+    expect(await verifyRelaySignature(body.publicKeyJwk, `unregister.${body.ts}.tokenA`, body.sig)).toBe(true);
+  });
+
   it('registers tokens (signed) and posts signed generic text, dropping dead tokens', async () => {
     const fetchMock = vi.fn(async (url) =>
       isRegister([url])
@@ -136,7 +162,8 @@ describe('apns runtime relay mode (default)', () => {
     expect(sent.body).toBe('My session');
     expect(sent.badge).toBe(3);
     expect(sent.env).toBe('production');
-    expect(sent.data).toEqual({ sessionId: 'sess1' });
+    expect(sent.data).toMatchObject({ sessionId: 'sess1' });
+    expect(sent.data.serverId).toBe(deriveServerId({ crypto }, sent.publicKeyJwk));
     expect(sent.publicKeyJwk).toMatchObject({ kty: 'EC', crv: 'P-256' });
     const sendMessage = `${sent.ts}.${[...sent.tokens].sort().join(',')}.${sent.title}`;
     expect(await verifyRelaySignature(sent.publicKeyJwk, sendMessage, sent.sig)).toBe(true);
@@ -505,6 +532,22 @@ describe('clearing handled notifications from the phones', () => {
     expect(fetchMock.mock.calls.filter(isSend)).toHaveLength(0);
     expect(warn.mock.calls.filter(([line]) => String(line).includes('cannot clear'))).toHaveLength(1);
     warn.mockRestore();
+  });
+
+  it('clears more tags than the relay accepts per request', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+    const tags = Array.from({ length: 21 }, (_, index) => `question-ses_${index}@${index + 1}`);
+
+    await runtime.clearApnsNotifications({ tags, badge: 1 });
+
+    const requests = fetchMock.mock.calls.filter(isClear).map(([, init]) => JSON.parse(init.body));
+    expect(requests.map((request) => request.tags.length)).toEqual([20, 1]);
+    expect(requests.flatMap((request) => request.tags)).toEqual(tags);
+    expect(requests.map((request) => request.badge)).toEqual([1, 1]);
   });
 
   it('sends a background push without an alert in direct mode', async () => {

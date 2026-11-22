@@ -1,3 +1,41 @@
+## [2.8.0] - 2026-11-22
+
+### New
+
+- Line comments can be written in the chat composer with `openchamber.lineCommentPlacement` set to `chat` (thanks to @gaojunran).
+- Chat: Activity has a third mode, Show notes, that folds tool rows and keeps what the agent wrote between steps in view (thanks to @yulia-ivashko).
+- Sessions: leads started in the app show in the sidebar.
+
+### Improvements
+
+- Chat: wide Markdown tables expand to the chat's width (thanks to @chaosmanage).
+- Chat: a dropped provider connection shows as a retry while OpenCode retries, with no failed turn (thanks to @mv2sa).
+
+### Fixes
+
+- Sidebar: the wide sessions sidebar forgot its width (thanks to @fake-monkey).
+- Chat: an answered question could come back after a reload (thanks to @sergiopadure and @DeryFerd).
+- Chat: live reasoning didn't show (thanks to @Cyneric).
+
+## [2.7.3] - 2026-11-19
+
+### New
+
+- Chat: rename the session from the chat header (thanks to @cemarta7).
+- Chat: a waiting question stays answerable after you send a message of your own (thanks to @sergiopadure).
+
+### Improvements
+
+- Chat: a question folds to its header while you scroll up to read (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Startup: the extension failed to start with "Configured OpenCode binary not found" when OpenChamber's settings still pointed at the OpenCode the desktop app used to carry.
+- Settings: opening Settings from a command without context failed (thanks to @Cyneric).
+- Chat: subagent rows crashed the chat on some cached sessions.
+- Chat: backslashes before a period or a question mark disappeared from your message (thanks to @denishsharma).
+- Chat: a collapsed tool card shows a preview of structured output (thanks to @Cyneric).
+
 ## [2.7.2] - 2026-11-15
 
 ### New

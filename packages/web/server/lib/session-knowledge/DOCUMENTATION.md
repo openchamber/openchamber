@@ -43,6 +43,8 @@ source:
 | `openchamber.checkout` | the directory and branch the session works on |
 | `openchamber.response-style` | the user's current response style |
 | `openchamber.extensions` | what active extensions add: their UI block components and their instructions (`../guests/agent-context.js`) |
+| `openchamber.lead` | for a lead only: how a lead works (`../session-lead/`) |
+| `openchamber.lead-brief` | for a lead only: its brief, also written right after `lead.brief` saves it |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
 before the prompt request, the queue, scheduled tasks and dispatched sessions
@@ -147,8 +149,8 @@ tool, so it never linked anything. It goes into `openchamber.guidance`.
 
 The same sessions are told how to hand work to another session
 (`DISPATCH_GUIDANCE`). Every guidance line that names an action of the
-`openchamber` tool writes the call path out as `tools.openchamber` inside
-`execute`. Told only "the openchamber tool", an agent looked for a direct tool
+`openchamber` tool names `tools.openchamber` inside `execute`, and the direct
+`openchamber` tool when `execute` is unavailable. Told only "the openchamber tool", an agent looked for a direct tool
 of that name, found `openchamber_secret` and `openchamber_render`, and called
 those again and again (#6608). The guidance also sends part of the
 agent's own task to its subagent tool, so a dispatch stays something the user
@@ -204,12 +206,12 @@ depends on how the user works.
 
 ### Invariants
 
-`ui-blocks-guidance.js` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
+`ui-blocks-guidance.ts` is generated from `packages/ui/src/components/chat/uiBlocks/guidance.ts` by `bun run --cwd packages/ui ui-blocks:generate`. Changes to the guidance originate in that source so regeneration preserves them.
 
 A session whose agent has the managed `openchamber_render` tool (the setting is
 on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
 is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated
-from the UI's block catalog into `ui-blocks-guidance.js`, see
+from the UI's block catalog into `ui-blocks-guidance.ts`, see
 `packages/ui/src/components/chat/uiBlocks/DOCUMENTATION.md`) and when a page
 still beats them (`RENDER_PAGE_GUIDANCE`): how something looks, or a custom
 drawing the block components do not cover. Data is never a page, even when the
@@ -263,7 +265,8 @@ most expensive one, and dozens of those cost many times a cheap model.
 
 The tools whose call the chat draws (`openchamber_render`,
 `openchamber_secret`, `openchamber_workflow`) are direct tools; the rest sit
-behind Code Mode (`../agent-tool/DOCUMENTATION.md`). A session that has any of
+behind Code Mode when `execute` is available and are direct tools otherwise
+(`../agent-tool/DOCUMENTATION.md`). A session that has any of
 the direct ones is told, by name, that they are called directly and never from
 inside a Code Mode `execute` script (`directToolsGuidance`). OpenCode's Code
 Mode teaches the model that tools live in `execute`'s catalog: a model that
@@ -315,15 +318,3 @@ tool-availability callbacks retain their existing fallback values.
 String guards reject non-string and blank request values before trimming.
 Caught pin-write failures expose their message without assuming an Error
 instance or a string message.
-
-`ui-blocks-guidance.js` remains generated JavaScript because
-`UI_BLOCKS_GUIDANCE_PATH` in
-`packages/ui/src/components/chat/uiBlocks/guidanceModule.ts` owns its output
-path. Converting the output requires that symbol to target
-`ui-blocks-guidance.ts`. Renaming only the output would leave the generator
-writing the old filename and its generated-content test reading that filename.
-
-The remaining conversion requires a runtime output-path change in the UI
-generator. Server-only type corrections, type exports, helper conversions and
-dependency declarations cannot redirect that generator. Keep the generated
-JavaScript until the assignment includes changing `UI_BLOCKS_GUIDANCE_PATH`.

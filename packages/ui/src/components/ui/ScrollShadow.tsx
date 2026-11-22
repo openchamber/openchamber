@@ -70,10 +70,12 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
       onVisibilityChange,
     });
 
+    const mergedRef = React.useMemo(() => mergeRefs(internalRef, ref), [ref]);
+
     return (
       <Component
         {...rest}
-        ref={mergeRefs(internalRef, ref)}
+        ref={mergedRef}
         className={className}
         data-orientation={orientation}
         data-scroll-shadow={dataScrollShadow ?? true}

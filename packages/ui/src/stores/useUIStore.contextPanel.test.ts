@@ -16,7 +16,7 @@ const getTerminalTab = (directory: string) => getContextPanelTabs(directory).fin
 const originalPersistOptions = useUIStore.persist.getOptions();
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [], contextZoneSizes: {} });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextZoneReturnStack: {}, contextRailOrder: [], contextZoneSizes: {} });
   useTerminalStore.getState().clearAll();
 });
 
@@ -1451,5 +1451,167 @@ describe('useUIStore workspace zones', () => {
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
+  });
+});
+
+describe('useUIStore context zone return stack', () => {
+  const directory = '/repo';
+  const panel = () => useUIStore.getState().contextPanelByDirectory[directory];
+  const activeTab = () => {
+    const state = panel();
+    return state?.tabs.find((tab) => tab.id === state.activeTabId) ?? null;
+  };
+
+  beforeEach(() => {
+    useUIStore.setState({ contextSurfaceZones: {} });
+  });
+
+  test('closing a panel opened from another panel unwinds the return stack until the zone closes', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.openContextFile(directory, '/repo/src/app.ts');
+
+    expect(activeTab()?.mode).toBe('file');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(true);
+    expect(activeTab()?.mode).toBe('diff');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(true);
+    expect(activeTab()?.mode).toBe('git');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('an explicit rail switch clears the stack and clicking the active rail icon closes immediately', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.openContextSurface(directory, 'notes');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.openContextSurface(directory, 'diff');
+    expect(panel()?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextZoneReturnStack).toEqual({});
+  });
+
+  test('switching tabs within the same surface keeps the return target', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextFile(directory, '/repo/a.ts');
+    store.openContextFile(directory, '/repo/b.ts');
+    const firstFileTab = panel()?.tabs.find((tab) => tab.targetPath === '/repo/a.ts');
+    if (!firstFileTab) throw new Error('expected first file tab');
+
+    store.setActiveContextPanelTab(directory, firstFileTab.id);
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+
+    expect(panel()?.isOpen).toBe(true);
+    expect(activeTab()?.mode).toBe('git');
+  });
+
+  test('jumping back to an earlier mode avoids return loops', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.openContextFile(directory, '/repo/src/app.ts');
+    store.openContextDiff(directory, 'src/other.ts');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(activeTab()?.mode).toBe('file');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(activeTab()?.mode).toBe('git');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('moving the previous surface to another zone skips it when closing the current panel', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.moveContextSurfaceToZone('git', 'left');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('plain closeContextZone closes immediately and clears the return stack', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+
+    store.closeContextZone(directory, 'right');
+    expect(panel()?.isOpen).toBe(false);
+    expect(useUIStore.getState().contextZoneReturnStack).toEqual({});
+  });
+
+  test('opening a panel in another zone does not push onto the first zone stack', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('diff', 'left');
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+
+    store.closeContextZone(directory, 'left', { returnToPrevious: true });
+    expect(panel()?.zones.left.isOpen).toBe(false);
+    expect(panel()?.isOpen).toBe(true);
+    expect(activeTab()?.mode).toBe('git');
+  });
+
+  test('moving a visible surface into another zone clears the destination return stack', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('notes', 'left');
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    store.openContextSurface(directory, 'notes');
+
+    store.moveContextSurfaceToZone('notes', 'right');
+    expect(activeTab()?.mode).toBe('notes');
+
+    store.closeContextZone(directory, 'right', { returnToPrevious: true });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('eligibleTabIds skips hidden tabs when closing a panel', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface(directory, 'git');
+    store.openContextDiff(directory, 'src/app.ts');
+    const diffTabId = panel()?.activeTabId;
+    if (!diffTabId) throw new Error('expected diff tab');
+
+    store.closeContextZone(directory, 'right', {
+      returnToPrevious: true,
+      eligibleTabIds: new Set([diffTabId]),
+    });
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('evicting old directory panels prunes their return stacks', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface('/dir-0', 'git');
+    store.openContextDiff('/dir-0', 'src/app.ts');
+    const dir0 = useUIStore.getState().contextPanelByDirectory['/dir-0'];
+    useUIStore.setState({
+      contextPanelByDirectory: {
+        ...useUIStore.getState().contextPanelByDirectory,
+        '/dir-0': { ...dir0, touchedAt: 1 },
+      },
+    });
+    expect(useUIStore.getState().contextZoneReturnStack['/dir-0']).toBeDefined();
+
+    for (let index = 1; index <= 20; index += 1) {
+      store.openContextSurface(`/dir-${index}`, 'git');
+    }
+
+    expect(useUIStore.getState().contextPanelByDirectory['/dir-0']).toBeUndefined();
+    expect(useUIStore.getState().contextZoneReturnStack['/dir-0']).toBeUndefined();
   });
 });

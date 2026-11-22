@@ -87,6 +87,33 @@ const cacheLifetimeOf = (model: z.infer<typeof modelListSchema>[number] | null |
   return null;
 };
 
+type OpenCodeReader = Pick<SessionWarmingRuntimeOptions, 'buildOpenCodeUrl' | 'getOpenCodeAuthHeaders'> & { fetchImpl: typeof fetch };
+
+const readOpenCodeJson = async ({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders }: OpenCodeReader, route: string, directory: string) => {
+  const response = await fetchImpl(buildOpenCodeUrl(route, ''), {
+    headers: {
+      Accept: 'application/json',
+      'x-opencode-directory': encodeURIComponent(directory),
+      ...getOpenCodeAuthHeaders(),
+    },
+    signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`OpenCode answered ${response.status}`);
+  }
+  return unwrapOpenCodeResponse(await response.json());
+};
+
+export const readSessionCacheLifetime = async (reader: OpenCodeReader, sessionId: string, directory: string) => {
+  const session = sessionModelSchema.safeParse(await readOpenCodeJson(reader, `/api/session/${encodeURIComponent(sessionId)}`, directory));
+  if (!session.success) return null;
+  const models = modelListSchema.safeParse(await readOpenCodeJson(reader, '/api/model', directory));
+  const { id, providerID } = session.data.model;
+  const model = models.success ? models.data.find((item) => item.id === id && item.providerID === providerID) : null;
+  return cacheLifetimeOf(model);
+};
+
 const statusPayloadSchema = z.object({
   type: z.literal('session.status'),
   properties: z.object({
@@ -209,35 +236,11 @@ export const createSessionWarmingRuntime = ({
     }
   };
 
-  const readJson = async (route: string, directory: string) => {
-    const response = await fetchImpl(buildOpenCodeUrl(route, ''), {
-      headers: {
-        Accept: 'application/json',
-        'x-opencode-directory': encodeURIComponent(directory),
-        ...getOpenCodeAuthHeaders(),
-      },
-      signal: AbortSignal.timeout(STATUS_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new Error(`OpenCode answered ${response.status}`);
-    }
-    return unwrapOpenCodeResponse(await response.json());
+  const readPingInterval = async (sessionId: string, directory: string) => {
+    const lifetime = await readSessionCacheLifetime({ fetchImpl, buildOpenCodeUrl, getOpenCodeAuthHeaders }, sessionId, directory).catch(() => null);
+    return lifetime ? lifetime * CACHE_LIFETIME_SHARE : WARMING_INTERVAL_MS;
   };
 
-  const readPingInterval = async (sessionId: string, directory: string) => {
-    try {
-      const session = sessionModelSchema.safeParse(await readJson(`/api/session/${encodeURIComponent(sessionId)}`, directory));
-      if (!session.success) return WARMING_INTERVAL_MS;
-      const models = modelListSchema.safeParse(await readJson('/api/model', directory));
-      const { id, providerID } = session.data.model;
-      const model = models.success ? models.data.find((item) => item.id === id && item.providerID === providerID) : null;
-      const lifetime = cacheLifetimeOf(model);
-      return lifetime ? lifetime * CACHE_LIFETIME_SHARE : WARMING_INTERVAL_MS;
-    } catch {
-      return WARMING_INTERVAL_MS;
-    }
-  };
 
   const schedulePing = (sessionId: string, entry: WarmingEntry, at: number) => {
     if (entry.warmUntil === null || at >= entry.warmUntil) {

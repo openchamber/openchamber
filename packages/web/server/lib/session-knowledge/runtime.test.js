@@ -179,6 +179,10 @@ describe('when to link', () => {
     expect(DISPATCH_GUIDANCE).toContain('tools.openchamber inside execute');
     expect(SESSION_LINK_GUIDANCE).toContain('tools.openchamber inside a Code Mode execute script');
     expect(WORK_NAME_GUIDANCE).toContain('tools.openchamber inside execute');
+    for (const guidance of [SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, DISPATCH_GUIDANCE, WORKFLOW_GUIDANCE]) {
+      expect(guidance).toContain('if execute is unavailable');
+      expect(guidance).toContain('openchamber directly');
+    }
     expect(DISPATCH_GUIDANCE).toContain('session.send');
     expect(DISPATCH_GUIDANCE).toContain('subagent tool');
   });
@@ -582,6 +586,31 @@ describe('size', () => {
     expect(memory).not.toContain('- Project decision number 0 about something');
     const shown = memory.split('\n').filter((line) => line.startsWith('- Project decision')).length;
     expect(memory).toContain(`${300 - shown} older titles did not fit here; memory.list gives every title.`);
+  });
+});
+
+describe('lead', () => {
+  const base = { notes: [], plans: [], memory: { global: [], project: [] } };
+
+  test('tells a lead how to lead and what its brief says, and nobody else', () => {
+    const lead = buildKnowledgeEntries({ ...base, linking: true, lead: { brief: '# Goal\nShip it' } });
+    expect(lead[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('This session is a lead');
+    expect(lead[KNOWLEDGE_ENTRY_KEYS.leadBrief]).toContain('# Goal\nShip it');
+    expect(buildKnowledgeEntries({ ...base, linking: true, lead: { brief: null } })[KNOWLEDGE_ENTRY_KEYS.leadBrief]).toContain('no brief yet');
+
+    for (const entries of [buildKnowledgeEntries({ ...base, linking: true, lead: null }), buildKnowledgeEntries({ ...base, linking: false, lead: { brief: 'x' } })]) {
+      expect(entries[KNOWLEDGE_ENTRY_KEYS.lead]).toBe('');
+      expect(entries[KNOWLEDGE_ENTRY_KEYS.leadBrief]).toBe('');
+    }
+  });
+
+  test('leaves the lead entries as they are when the session or its brief cannot be read', () => {
+    const unknown = buildKnowledgeEntries({ ...base, linking: true, lead: undefined });
+    expect(KNOWLEDGE_ENTRY_KEYS.lead in unknown).toBe(false);
+    expect(KNOWLEDGE_ENTRY_KEYS.leadBrief in unknown).toBe(false);
+    const unreadableBrief = buildKnowledgeEntries({ ...base, linking: true, lead: { brief: undefined } });
+    expect(unreadableBrief[KNOWLEDGE_ENTRY_KEYS.lead]).toContain('This session is a lead');
+    expect(KNOWLEDGE_ENTRY_KEYS.leadBrief in unreadableBrief).toBe(false);
   });
 });
 

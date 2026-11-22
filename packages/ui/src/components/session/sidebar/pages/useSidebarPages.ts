@@ -17,7 +17,7 @@ function builtinPageIcon(id: BuiltinPageId): IconName {
     case 'scheduled': return 'calendar-schedule';
     case 'archive': return 'archive';
     case 'stats': return 'bar-chart';
-    case 'integrations': return 'store-2';
+    case 'integrations': return 'apps-2-add';
   }
 }
 

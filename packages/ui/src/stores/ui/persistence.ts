@@ -5,6 +5,7 @@ import { sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/se
 import type { PersistOptions } from 'zustand/middleware';
 import {
   normalizeLargeTextPasteBehavior,
+  documentAttachBehaviorSchema,
   normalizeFileEditorKeymap,
   DEFAULT_EDITOR_FONT_SIZE,
   DEFAULT_CONTEXT_EDITOR_TREE_WIDTH,
@@ -234,6 +235,7 @@ export const uiStorePersistOptions = {
 
     state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
     state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
+    state.documentAttachBehavior = documentAttachBehaviorSchema.parse(state.documentAttachBehavior);
 
     if (state.toolJsonViewMode !== 'summary'
       && state.toolJsonViewMode !== 'formatted'
@@ -405,6 +407,7 @@ export const uiStorePersistOptions = {
     agentMemoryViewedAt: state.agentMemoryViewedAt,
     inputSpellcheckEnabled: state.inputSpellcheckEnabled,
     largeTextPasteBehavior: state.largeTextPasteBehavior,
+    documentAttachBehavior: state.documentAttachBehavior,
     enterToSend: state.enterToSend,
     enterToSendConfigured: state.enterToSendConfigured,
     mobileReturnKeySends: state.mobileReturnKeySends,

@@ -84,12 +84,18 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     });
 
     const { turnExpansion, toggleTurnActivity, expandTurnActivity } = useTurnExpansion(activityRenderMode);
-    const { baseDisplayMessages, displayMessages } = useDisplayMessages(messages, sessionKey, directory, retryOverlay);
+    const { baseDisplayMessages, displayMessages } = useDisplayMessages(
+        messages,
+        sessionKey,
+        directory,
+        retryOverlay,
+    );
     const { projection, allEntries, trailingStreamingEntry, rows, stickyRowIndices } = useTimelineRows(sessionKey, displayMessages, {
         showTurnChangedFiles,
         showReasoningTraces,
         stickyUserHeader,
         defaultActivityExpanded,
+        keepActivityText: activityRenderMode === 'text',
         turnExpansion,
     });
     const footerWithApprovals = useApprovalFooter(sessionKey, directory, baseDisplayMessages, trailingStreamingEntry, listFooter);

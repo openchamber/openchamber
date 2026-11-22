@@ -28,6 +28,10 @@ and the shared contracts are `.ts` files.
 - `opencode-load.js`: the `OpenCode load` line of the export. It counts the locations OpenCode has loaded (`GET /api/debug/location`, which does not start one) and walks the process tree under the pid `/api/info` reports, from one `ps` call. Only counts and megabytes leave it: no paths, names or commands. Processes are not counted on Windows, which has no `ps`, or when that pid is not an OpenCode process on this machine (OpenCode on another host or inside WSL); the result says `null` for that part, never zero. The check against a reused pid accepts a command naming `opencode`, or a direct child of this server: the desktop's bundled OpenCode runs as the app's own executable (or Node in development), whose command does not name it.
 - `startup-performance.js`: opt-in startup phase diagnostics with fixed labels and numeric metadata allowlists.
 
+Startup label lookups accept `undefined` because callers can omit `outcome`
+and `routeClass`. The sets contain only approved strings, so an omitted label
+fails the same membership check as an unrecognized label.
+
 ## Proxy error lines
 
 `../opencode/proxy.js` logs upstream failures as `[proxy] OpenCode proxy error: method=… route=… function=… class=… message="…"`, using the vocabulary above. The `function` field names the handler (`forwardSseRequest`, `forwardSanitizedSessionListRequest`, `forwardSessionGetRequest`, `forwardMessageListRequest`, `onApiProxyError`). Lines written by older versions in the `[proxy] OpenCode <label> proxy error: fetch failed` form keep their known route and handler; any other old proxy line is counted as filtered.

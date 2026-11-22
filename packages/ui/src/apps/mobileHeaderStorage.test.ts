@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, expect, test } from 'bun:test';
+import { afterAll, beforeEach, expect, spyOn, test } from 'bun:test';
 
 // Exercise the real Capacitor plugin proxy against an in-memory native bridge.
 // This file runs in its own process, like the rest of the UI test suite.
@@ -46,7 +46,9 @@ Object.defineProperty(globalThis, 'window', {
     },
   }),
 });
-const { upsertMobileConnection, loadMobileConnections, loadMobileConnectionHeaders, autoConnectLastInstance } = await import('./mobileConnections');
+const { upsertMobileConnection, loadMobileConnections, loadMobileConnectionHeaders, autoConnectLastInstance, reprobeActiveConnection } = await import('./mobileConnections');
+const { loadStoredPushToken, syncPushTokenToSavedConnections } = await import('./mobilePushTokens');
+const { getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 
 beforeEach(() => {
   secrets.clear();
@@ -109,4 +111,51 @@ test('unavailable or malformed secure headers cannot become an empty successful 
   for (const key of secrets.keys()) secrets.set(key, JSON.stringify({ url, values: { 'invalid header': 'value' } }));
   await expect(loadMobileConnectionHeaders(saved[0].id)).rejects.toThrow();
   expect(await autoConnectLastInstance()).toEqual({ status: 'unreachable', label: 'Protected' });
+});
+
+test('learning a direct server identity keeps the token key and active runtime stable', async () => {
+  const address = 'https://manual.example';
+  await upsertMobileConnection({
+    label: 'Manual', candidates: [{ kind: 'direct', url: address }], clientToken: 'token-manual',
+  });
+  const fetchMock = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.endsWith('/health')) return Response.json({ status: 'ok', serverId: 'srv-manual' });
+    if (url.endsWith('/auth/session')) return Response.json({ authenticated: true, scope: 'client' });
+    return Response.json({ ok: true });
+  });
+  try {
+    expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+    const saved = (await loadMobileConnections())[0];
+    expect(saved).toMatchObject({ pushServerId: 'srv-manual' });
+    expect(saved.serverId).toBeUndefined();
+    expect(getRuntimeKey()).toBe(address);
+    expect(await reprobeActiveConnection({ fast: false })).not.toBe('no-connection');
+  } finally {
+    fetchMock.mockRestore();
+    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+  }
+});
+
+test('the device token survives the process so a later removal can unregister', async () => {
+  await syncPushTokenToSavedConnections({ token: 'device-token', platform: 'ios', environment: 'production' }, 'register');
+  expect(await loadStoredPushToken()).toMatchObject({ token: 'device-token', platform: 'ios', environment: 'production' });
+  await syncPushTokenToSavedConnections({ token: 'device-token' }, 'unregister');
+  expect(await loadStoredPushToken()).toBeNull();
+});
+
+test('a failed unregister keeps the durable token for the next launch', async () => {
+  await upsertMobileConnection({
+    label: 'Unreadable', serverId: 'srv-unreadable',
+    candidates: [{ kind: 'direct', url: 'https://unreadable.example' }], clientToken: 'token-unreadable',
+  });
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://unreadable.example', runtimeKey: 'server:srv-unreadable', clientToken: 'token-unreadable' });
+  secrets.clear();
+  try {
+    await syncPushTokenToSavedConnections({ token: 'device-token' }, 'register');
+    await syncPushTokenToSavedConnections({ token: 'device-token' }, 'unregister');
+    expect(await loadStoredPushToken()).toMatchObject({ token: 'device-token' });
+  } finally {
+    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+  }
 });

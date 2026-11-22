@@ -4,7 +4,7 @@ import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
-import { usePushDeliveryLocalOnly } from '@/hooks/usePushDeliveryLocalOnly';
+import { pushDeliveryLocalOnlyHintKey, usePushDeliveryLocalOnly } from '@/hooks/usePushDeliveryLocalOnly';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -149,7 +149,9 @@ export const NotificationSettings: React.FC = () => {
     }
   };
 
-  const localOnlyDevice = usePushDeliveryLocalOnly(isNativeApp);
+  const pushLocalOnly = usePushDeliveryLocalOnly(isNativeApp);
+  const localOnlyDevice = pushLocalOnly === 'device';
+  const pushLocalOnlyHintKey = pushDeliveryLocalOnlyHintKey(pushLocalOnly);
 
   const canShowNotifications = isDesktop || isVSCode || (isNativeApp && !localOnlyDevice) || (isBrowser && typeof Notification !== 'undefined' && Notification.permission === 'granted');
 
@@ -472,7 +474,7 @@ export const NotificationSettings: React.FC = () => {
               }}
               label={t('settings.notifications.page.delivery.enableLabel')}
               disabled={localOnlyDevice}
-              description={localOnlyDevice ? t('settings.notifications.page.delivery.localOnlyDevice') : undefined}
+              description={pushLocalOnlyHintKey ? t(pushLocalOnlyHintKey) : undefined}
               info={
                 isBrowser
                   ? t('settings.notifications.page.delivery.browserPermissionHint')

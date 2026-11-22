@@ -14,11 +14,8 @@ export type SelectedLineRange = {
 
 export interface FilesViewProps {
   visible?: boolean;
-  mode?: 'full' | 'editor-only';
   onCloseFile?: (path: string) => void;
 }
 
 export type TextViewMode = 'view' | 'edit';
 export type PreviewViewMode = 'preview' | 'edit';
-
-export type FilesViewOptions = Required<Pick<FilesViewProps, 'mode' | 'visible'>> & Pick<FilesViewProps, 'onCloseFile'>;

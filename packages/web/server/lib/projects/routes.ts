@@ -5,15 +5,15 @@ import { createProjectIdFromPath } from './project-id.js';
 import { isProjectSetupValidationError } from './project-setup.js';
 import type { Application, Response } from '../shared/http-contracts.js';
 import type { DirectoryValidation, SessionProject } from './contracts.js';
-import type { JsonObject } from '../shared/json-values.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 import type { createProjectConfigRuntime } from './project-config.js';
 
 export interface ProjectDirectoryDependencies {
   fsPromises: Pick<typeof import('node:fs/promises'), 'mkdir'>;
   validateDirectoryPath: (directory: string) => Promise<DirectoryValidation>;
-  readSettingsFromDisk: () => Promise<JsonObject>;
-  sanitizeProjects: (projects: JsonObject[string]) => SessionProject[] | null | undefined;
-  persistSettings: (settings: { projects: SessionProject[]; activeProjectId: string; lastDirectory: string }) => Promise<JsonObject>;
+  readSettingsFromDisk: () => Promise<SettingsDocument>;
+  sanitizeProjects: (projects: SettingsDocument[string]) => SessionProject[] | null | undefined;
+  persistSettings: (settings: { projects: SessionProject[]; activeProjectId: string; lastDirectory: string }) => Promise<SettingsDocument>;
 }
 
 export interface ProjectSetupDependencies {

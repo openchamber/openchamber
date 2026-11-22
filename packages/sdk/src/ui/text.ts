@@ -13,7 +13,7 @@ export type TextProps = {
 
 export type TextHandle = Handle<TextProps>;
 
-const MARKDOWN_TOKEN = /(!?)\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g;
+const MARKDOWN_TOKEN = /(!?)\[([^[\]]*)\]\((https?:\/\/[^()\s]+)\)/g;
 
 export const isHttpUrl = (value: string): boolean => {
   try {

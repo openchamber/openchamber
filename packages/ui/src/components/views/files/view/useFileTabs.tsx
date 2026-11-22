@@ -1,8 +1,7 @@
 import React from 'react';
-import { getDisambiguatingFolders } from '@/lib/path-utils';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { type FileNode } from './fileViewTypes';
-import { normalizePath, toComparablePath, isPathWithinRoot, getDisplayPath } from './fileViewPaths';
+import { normalizePath, toComparablePath, isPathWithinRoot } from './fileViewPaths';
 import { type useFileScope } from './useFileScope';
 
 export function useFileTabs({ scope }: {
@@ -36,11 +35,6 @@ export function useFileTabs({ scope }: {
   }, []);
 
   const openFiles = React.useMemo(() => openPaths.map(toFileNode), [openPaths, toFileNode]);
-  const openFileFolders = React.useMemo(
-    () => getDisambiguatingFolders(openPaths.map((path) => getDisplayPath(root, path))),
-    [openPaths, root],
-  );
-  const getOpenFileFolder = (path: string) => openFileFolders.get(getDisplayPath(root, path));
   const effectiveSelectedPath = React.useMemo(() => {
     if (selectedPath) {
       const comparableSelected = toComparablePath(selectedPath);
@@ -75,32 +69,5 @@ export function useFileTabs({ scope }: {
   const resolveFileReadOptions = React.useCallback((path: string) => ({
     allowOutsideWorkspace: Boolean(root && !isPathWithinRoot(path, root)),
   }), [root]);
-  const editorTabsScrollRef = React.useRef<HTMLDivElement>(null);
-  const [editorTabsOverflow, setEditorTabsOverflow] = React.useState<{ start: boolean; end: boolean }>({ start: false, end: false });
-  const updateEditorTabsOverflow = React.useCallback(() => {
-    const el = editorTabsScrollRef.current;
-    if (!el) return;
-    const fromStart = Math.abs(el.scrollLeft);
-    setEditorTabsOverflow({
-      start: fromStart > 2,
-      end: fromStart + el.clientWidth < el.scrollWidth - 2,
-    });
-  }, []);
-  const updateEditorTabsOverflowRef = React.useRef(updateEditorTabsOverflow);
-  updateEditorTabsOverflowRef.current = updateEditorTabsOverflow;
-  React.useEffect(() => {
-    const el = editorTabsScrollRef.current;
-    if (!el) return;
-    const handler = () => updateEditorTabsOverflowRef.current();
-    handler();
-    el.addEventListener('scroll', handler, { passive: true });
-    const ro = new ResizeObserver(handler);
-    ro.observe(el);
-    return () => {
-      el.removeEventListener('scroll', handler);
-      ro.disconnect();
-    };
-  }, [openFiles.length]);
-
-  return { openPaths, expandedPaths, expandedPathSet, removeOpenPath, removeOpenPathsByPrefix, removeUnselectedOpenPath, removeExpandedPathsByPrefix, setSelectedPath, toggleExpandedPath, expandPaths, toFileNode, openFiles, getOpenFileFolder, selectedFile, selectedFilePath, selectedFilePathRef, selectedFileIsOutsideWorkspace, selectedFileReadOptions, resolveFileReadOptions, editorTabsScrollRef, editorTabsOverflow };
+  return { openPaths, expandedPaths, expandedPathSet, removeOpenPath, removeOpenPathsByPrefix, removeUnselectedOpenPath, removeExpandedPathsByPrefix, setSelectedPath, toggleExpandedPath, expandPaths, toFileNode, openFiles, selectedFile, selectedFilePath, selectedFilePathRef, selectedFileIsOutsideWorkspace, selectedFileReadOptions, resolveFileReadOptions };
 }

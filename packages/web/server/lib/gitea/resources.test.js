@@ -131,6 +131,31 @@ describe('Gitea change request context', () => {
     expect(commentReads[0].url.searchParams.has('page')).toBe(false);
   });
 
+  it('reads one state per reviewer, the latest review deciding and asked reviewers still pending', async () => {
+    const ann = { id: 7, login: 'ann' };
+    const bo = { id: 8, login: 'bob' };
+    const review = (id, user, state, submittedAt, stale = false) => ({ id, user, state, stale, submitted_at: submittedAt });
+    const { service } = setup(contextRoutes({
+      'GET /repos/alice/app/pulls/1': { ...fixtures.forkPull, requested_reviewers: [{ id: 9, login: 'cy' }, { id: 7, login: 'ann' }] },
+      'GET /repos/alice/app/pulls/1/reviews': [
+        review(1, ann, 'COMMENT', '2026-10-01T09:00:00Z'),
+        review(2, bo, 'APPROVED', '2026-10-01T09:30:00Z'),
+        // A stale review still says what its author decided.
+        review(3, ann, 'REQUEST_CHANGES', '2026-10-01T10:00:00Z', true),
+        // A dismissed approval is no longer in force, so its author is not approved.
+        { ...review(4, { id: 10, login: 'di' }, 'APPROVED', '2026-10-01T10:30:00Z'), dismissed: true },
+        // A private draft after an approval leaves the approval in place.
+        review(5, bo, 'PENDING', '2026-10-01T11:00:00Z'),
+      ],
+    }));
+
+    const result = await service.changeRequestContext('/repo', 1, { includeTimeline: true, remote: 'origin' });
+
+    expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
+      ['ann', 'changes_requested'], ['bob', 'approved'], ['di', 'pending'], ['cy', 'pending'],
+    ]);
+  });
+
   it('keeps commits made within one second in the order Gitea lists them', async () => {
     const sameSecond = fixtures.commits.map((commit) => ({
       ...commit, commit: { ...commit.commit, committer: { ...commit.commit.committer, date: '2026-10-22T17:40:14+03:00' } },
@@ -747,5 +772,205 @@ describe('Gitea label filtering', () => {
     await expect(service.listIssues('/repo', { labels: ['bug,docs'] }))
       .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
     expect(calls).toHaveLength(0);
+  });
+});
+
+
+describe('Gitea cross-references', () => {
+  const timelineEntry = (overrides = {}) => ({
+    id: 1,
+    type: 'issue_ref',
+    ref_issue: {
+      id: 12,
+      number: 12,
+      title: 'Related bug',
+      html_url: `${ORIGIN}/bob/app/issues/12`,
+      repository: { full_name: 'bob/app' },
+      pull_request: null,
+    },
+    ref_action: 'close',
+    user: { id: 3, login: 'carol', avatar_url: `${ORIGIN}/avatars/carol` },
+    created_at: '2026-10-23T10:00:00+03:00',
+    ...overrides,
+  });
+  const author = { login: 'carol', avatarUrl: `${ORIGIN}/avatars/carol` };
+
+  it("reads an issue's cross-references from its timeline", async () => {
+    const { service, calls } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': [timelineEntry()],
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin', { includeReferences: true });
+
+    expect(issue.references).toEqual([{
+      kind: 'issue',
+      number: 12,
+      title: 'Related bug',
+      url: `${ORIGIN}/bob/app/issues/12`,
+      repo: 'bob/app',
+      createdAt: '2026-10-23T10:00:00+03:00',
+      author,
+    }]);
+    const read = calls.find((call) => call.url.pathname === '/api/v1/repos/bob/app/issues/6/timeline');
+    expect(read.url.searchParams.get('limit')).toBe('50');
+  });
+
+  it('finds a recent mention past a first timeline page full of ordinary events', async () => {
+    const comment = (id) => ({ id, type: 'comment', body: 'ok', created_at: '2026-10-01T10:00:00Z' });
+    const pages = {
+      1: Array.from({ length: 50 }, (_, index) => comment(index + 1)),
+      2: Array.from({ length: 50 }, (_, index) => comment(index + 51)),
+      3: [comment(101), timelineEntry({ id: 102 })],
+    };
+    const { service, calls } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': (call) => new Response(
+        JSON.stringify(pages[call.url.searchParams.get('page')] ?? []),
+        { headers: { 'x-total-count': '102' } },
+      ),
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin', { includeReferences: true });
+
+    expect(issue.references).toEqual([expect.objectContaining({ number: 12, url: `${ORIGIN}/bob/app/issues/12` })]);
+    // The read stays bounded: the first page and the last two.
+    const read = calls.filter((call) => call.url.pathname === '/api/v1/repos/bob/app/issues/6/timeline');
+    expect(read.map((call) => call.url.searchParams.get('page')).sort()).toEqual(['1', '2', '3']);
+  });
+
+  it("adds a pull request timeline's references only when they are asked for, a cross-repository one included", async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/pulls/1.diff': fixtures.forkPullDiff,
+      'GET /repos/alice/app/pulls/1/files': fixtures.forkPullFiles,
+      'GET /repos/alice/app/issues/1/comments': fixtures.comments,
+      'GET /repos/alice/app/pulls/1/reviews': fixtures.reviews,
+      [`GET /repos/alice/app/pulls/1/reviews/${fixtures.reviews[1].id}/comments`]: fixtures.reviewComments,
+      'GET /repos/alice/app/pulls/1/commits': fixtures.commits,
+      'GET /repos/alice/app/issues/1/timeline': [
+        timelineEntry({
+          type: 'pull_ref',
+          ref_issue: {
+            id: 7, number: 7, title: 'Follow-up', html_url: `${ORIGIN}/alice/app/pulls/7`, repository: { full_name: 'alice/app' }, pull_request: {},
+          },
+        }),
+        timelineEntry({
+          id: 2,
+          ref_issue: {
+            id: 3, number: 3, title: 'Upstream bug', html_url: `${ORIGIN}/carol/lib/issues/3`, repository: { full_name: 'carol/lib' }, pull_request: null,
+          },
+        }),
+      ],
+    });
+
+    const plain = await service.changeRequestContext('/repo', 1, { remote: 'origin' });
+    expect(plain).not.toHaveProperty('references');
+    // The timeline alone, as every preview outside the Source Board reads it, carries none.
+    const timelineOnly = await service.changeRequestContext('/repo', 1, { includeTimeline: true, remote: 'origin' });
+    expect(timelineOnly).not.toHaveProperty('references');
+    expect(calls.some((call) => call.url.pathname.endsWith('/issues/1/timeline'))).toBe(false);
+
+    const result = await service.changeRequestContext('/repo', 1, { includeTimeline: true, includeReferences: true, remote: 'origin' });
+    expect(result.references).toEqual([
+      {
+        kind: 'pull', number: 7, title: 'Follow-up', url: `${ORIGIN}/alice/app/pulls/7`, repo: 'alice/app', createdAt: '2026-10-23T10:00:00+03:00', author,
+      },
+      {
+        kind: 'issue', number: 3, title: 'Upstream bug', url: `${ORIGIN}/carol/lib/issues/3`, repo: 'carol/lib', createdAt: '2026-10-23T10:00:00+03:00', author,
+      },
+    ]);
+  });
+
+  it('reads a comment that mentions the item as the comment, not as a bare reference', async () => {
+    const { service } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': [
+        timelineEntry({
+          id: 15,
+          type: 'comment_ref',
+          ref_issue: {
+            id: 2, number: 2, title: 'Scratch: pull request demo', html_url: `${ORIGIN}/bob/app/pulls/2`,
+            repository: { full_name: 'bob/app' }, pull_request: { id: 2 },
+          },
+          ref_comment: {
+            id: 15, body: 'Refs #1 so the timeline has a cross-reference.',
+            user: { id: 9, login: 'nebula', avatar_url: `${ORIGIN}/avatars/nebula` },
+            created_at: '2026-11-16T03:03:02+08:00',
+          },
+          user: { id: 3, login: 'carol', avatar_url: `${ORIGIN}/avatars/carol` },
+          created_at: '2026-11-16T03:03:02+08:00',
+        }),
+        timelineEntry({
+          id: 16,
+          type: 'comment_ref',
+          ref_issue: {
+            id: 9, number: 9, title: 'Plain issue mention', html_url: `${ORIGIN}/bob/app/issues/9`,
+            repository: { full_name: 'bob/app' }, pull_request: null,
+          },
+          ref_comment: {
+            id: 16, body: 'Also refs #1.', user: { id: 9, login: 'nebula', avatar_url: `${ORIGIN}/avatars/nebula` },
+            created_at: '2026-11-16T04:00:00+08:00',
+          },
+          created_at: '2026-11-16T04:00:00+08:00',
+        }),
+      ],
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin', { includeReferences: true });
+
+    const nebula = { login: 'nebula', avatarUrl: `${ORIGIN}/avatars/nebula` };
+    expect(issue.references).toEqual([
+      {
+        kind: 'pull', number: 2, title: 'Scratch: pull request demo', url: `${ORIGIN}/bob/app/pulls/2`,
+        repo: 'bob/app', createdAt: '2026-11-16T03:03:02+08:00', author: nebula,
+      },
+      {
+        kind: 'issue', number: 9, title: 'Plain issue mention', url: `${ORIGIN}/bob/app/issues/9`,
+        repo: 'bob/app', createdAt: '2026-11-16T04:00:00+08:00', author: nebula,
+      },
+    ]);
+  });
+
+  it('keeps one row when the same item is mentioned more than once', async () => {
+    const { service } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': [
+        timelineEntry({ id: 20, type: 'comment_ref', ref_comment: { created_at: '2026-10-24T10:00:00Z' } }),
+        timelineEntry({ id: 21, type: 'comment_ref', ref_comment: { created_at: '2026-10-23T10:00:00Z' } }),
+      ],
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin', { includeReferences: true });
+    expect(issue.references).toHaveLength(1);
+    expect(issue.references[0].createdAt).toBe('2026-10-23T10:00:00Z');
+  });
+
+  it('ignores timeline events that name no readable item', async () => {
+    const { service } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': [
+        // A comment reference needs its own ref_issue to point anywhere.
+        timelineEntry({ id: 1, type: 'comment_ref', ref_issue: undefined }),
+        timelineEntry({ id: 2, type: 'commit_ref' }),
+        // A reference the timeline names without a number or a URL is dropped.
+        timelineEntry({ id: 3, ref_issue: { number: '12', html_url: `${ORIGIN}/bob/app/issues/12` } }),
+        timelineEntry({ id: 4, ref_issue: { number: 12 } }),
+        timelineEntry({ id: 5, ref_issue: undefined }),
+      ],
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin', { includeReferences: true });
+    expect(issue).not.toHaveProperty('references');
+  });
+
+  it('keeps an issue readable when its timeline cannot be read', async () => {
+    const { service } = setup({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+      'GET /repos/bob/app/issues/6/timeline': () => new Response('{}', { status: 500 }),
+    });
+
+    const issue = await service.getIssue('/repo', 6, undefined, 'origin', { includeReferences: true });
+    expect(issue).toMatchObject({ number: 6 });
+    expect(issue).not.toHaveProperty('references');
   });
 });

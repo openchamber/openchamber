@@ -5,6 +5,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGuestBadgeStore } from './badge-store.ts';
 import { parseGuestCatalogJson } from './parse.ts';
 import { useGuestsStore } from './store.ts';
+import { closeGuestTabsOutsideChangedFolders } from './tabs.ts';
 
 const alignCatalogRuntime = (runtimeKey: string): void => {
   const store = useGuestsStore.getState();
@@ -63,7 +64,9 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
       store.markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'invalid-response', status: response.status });
       return;
     }
+    const previous = useGuestsStore.getState().guests;
     useGuestsStore.getState().replaceCatalog(catalog.guests, runtimeKey, catalog.unreadable, catalog.opencodePlugins);
+    closeGuestTabsOutsideChangedFolders(previous, catalog.guests);
   } catch {
     useGuestsStore.getState().markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'network' });
   }

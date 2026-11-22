@@ -83,9 +83,30 @@ describe('runWorkflowSandbox', () => {
         () => { throw new Error('boom') },
         () => agent('works'),
       ])
-    `, { onAgent: async ({ prompt }) => { if (prompt === 'fails') throw new Error('no'); return prompt; } });
+    `, { onAgent: async ({ prompt }) => prompt === 'fails' ? null : prompt });
     await expect(sandbox.result).resolves.toEqual([null, null, 'works']);
     expect(logs).toEqual(['A task in parallel() failed: boom']);
+  });
+
+  it('ends the run when an agent call is refused, not just the call', async () => {
+    // A rejected host operation means the call was invalid, not that the
+    // agent failed: answering null would let the script treat a bug as an
+    // outcome.
+    const { sandbox } = run("return agent('work', { forkFrom: 'gone' })", { onAgent: async () => { throw new TypeError('forkFrom "gone" must name a successfully completed agent in this run'); } });
+    await expect(sandbox.result).rejects.toThrow('forkFrom "gone"');
+  });
+
+  it.each([
+    ['a function forkFrom', "return agent('work', { forkFrom: () => 'a' })", 'forkFrom must be'],
+    ['a BigInt id', "return agent('work', { id: 1n })", 'id must be'],
+    ['a valid forkFrom beside an unserializable option', "return agent('work', { forkFrom: 'a', schema: { const: 1n } })", 'must be JSON-serializable'],
+    ['a bad name inside parallel()', "return parallel([() => agent('work', { id: 1n }), () => 'other'])", 'id must be'],
+  ])('fails the run on %s before the call reaches the host', async (_case, body, message) => {
+    // A JSON round trip would drop a function and stringify the options of a
+    // BigInt, so the host would start a fresh agent with no name at all.
+    const { sandbox, calls } = run(body);
+    await expect(sandbox.result).rejects.toThrow(message);
+    expect(calls).toEqual([]);
   });
 
   it('gives the script nothing of the host', async () => {

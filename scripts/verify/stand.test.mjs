@@ -1,11 +1,11 @@
 import assert from "node:assert/strict"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough, Writable } from "node:stream"
 import { test } from "node:test"
 
-import { closeStandLog, gitIn, parseStandSessions, readStandSessions, resetProject, resetWorktrees } from "./stand.mjs"
+import { closeStandLog, deleteSavedDrafts, gitIn, parseStandSessions, readStandSessions, resetProject, resetWorktrees } from "./stand.mjs"
 
 const projectAt = (root) => {
   const project = join(root, "project")
@@ -188,6 +188,42 @@ test("shutdown drains a closed pipe before closing its log", async (t) => {
   assert.equal(chunks.join(""), "last output\n")
 })
 
+test("reset empties the project's .opencode folder and keeps the folder itself", () => {
+  const root = mkdtempSync(join(tmpdir(), "verify-worktree-reset-"))
+  try {
+    const project = projectAt(root)
+    resetWorktrees({ root, project })
+    const folder = join(project, ".opencode")
+    const before = statSync(folder).ino
+    mkdirSync(join(folder, "commands"))
+    writeFileSync(join(folder, "commands/net-helper.md"), "Template")
+    writeFileSync(join(folder, "opencode.json"), "{}")
+    resetWorktrees({ root, project })
+    assert.deepEqual(readdirSync(folder), [])
+    assert.equal(statSync(folder).ino, before, "OpenCode stops reading a config folder that was removed and made again at once")
+    assert.equal(gitIn(project, ["status", "--porcelain"]).trim(), "")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("reset replaces a linked .opencode folder without touching what it points at", () => {
+  const root = mkdtempSync(join(tmpdir(), "verify-worktree-reset-"))
+  try {
+    const project = projectAt(root)
+    const outside = join(root, "outside")
+    mkdirSync(outside)
+    writeFileSync(join(outside, "keep.txt"), "keep")
+    symlinkSync(outside, join(project, ".opencode"), "junction")
+    resetWorktrees({ root, project })
+    assert.equal(readFileSync(join(outside, "keep.txt"), "utf8"), "keep")
+    assert.equal(lstatSync(join(project, ".opencode")).isSymbolicLink(), false)
+    assert.deepEqual(readdirSync(join(project, ".opencode")), [])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("a failed Git cleanup rebuilds the fixture and reports the reason", () => {
   const root = mkdtempSync(join(tmpdir(), "verify-worktree-reset-"))
   try {
@@ -245,5 +281,27 @@ test("recovery recreates a project removed by a scenario", () => {
     assert.equal(resetProject({ root, project }), null)
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("reset deletes every saved draft through the server and stops on a refused delete", async () => {
+  const requests = []
+  const stub = (answers) => {
+    globalThis.fetch = async (url, init = {}) => {
+      requests.push(`${init.method ?? "GET"} ${new URL(url).pathname}`)
+      return answers(init.method ?? "GET", new URL(url).pathname)
+    }
+  }
+  const realFetch = globalThis.fetch
+  try {
+    stub((method) => method === "GET" ? Response.json({ drafts: [{ id: "a b" }, { id: "gone" }] }) : new Response(null, { status: requests.length === 3 ? 404 : 200 }))
+    await deleteSavedDrafts("http://stand")
+    assert.deepEqual(requests, ["GET /api/session-drafts", "DELETE /api/session-drafts/a%20b", "DELETE /api/session-drafts/gone"])
+    stub((method) => method === "GET" ? Response.json({ drafts: [{ id: "a" }] }) : new Response(null, { status: 500 }))
+    await assert.rejects(deleteSavedDrafts("http://stand"), /Deleting saved draft a answered 500/)
+    stub(() => new Response(null, { status: 503 }))
+    await assert.rejects(deleteSavedDrafts("http://stand"), /saved drafts answered 503/)
+  } finally {
+    globalThis.fetch = realFetch
   }
 })

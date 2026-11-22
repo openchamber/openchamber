@@ -6,6 +6,7 @@ import { SyncProvider } from '@/sync/sync-context';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { GitLogEntry, GitStatus } from '@/lib/api/types';
+import type { MobileChangesInitialDiff } from '@/hooks/useMobileChangesNavigation';
 import type {
   ChangeRequest, ChangeRequestStatus, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlUser,
 } from '@/lib/source-control/types';
@@ -549,10 +550,10 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     if (!button) throw new Error(`Missing file ${path}`);
     await act(async () => { button.click(); });
   };
-  const renderPane = (initialDiff: { path: string; staged: boolean; scope?: 'turn' } | null) => act(async () => {
+  const renderPane = (initialDiff: MobileChangesInitialDiff | null, rootDirectory = '/repo') => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
-      <MobileChangesPane rootDirectory="/repo"
-        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
+      <MobileChangesPane rootDirectory={rootDirectory}
+        repository={{ rootIsGitRepo: true, gitDirectory: rootDirectory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true, unreadable: null }}
         visible initialDiff={initialDiff} />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
@@ -600,8 +601,34 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     await renderPane({ path: '/repo/src/retried.ts', staged: false, scope: 'turn' });
     expect(container.querySelector('h2')?.textContent).toBe('retried.ts');
     expect(container.textContent).toContain('Last turn');
-    // Without it the same request lands on Changes, on that file.
-    await renderPane({ path: '/repo/src/working.png', staged: false, scope: 'turn' });
+    // A historical chip selects the snapshot belonging to its user turn.
+    turnDiffs.mockResolvedValue([
+      { file: 'src/older.ts', status: 'modified', additions: 2, deletions: 1,
+        patch: 'diff --git a/src/older.ts b/src/older.ts\nindex 1111111..2222222 100644\nBinary files a/src/older.ts and b/src/older.ts differ\n' },
+    ]);
+    const olderChip: MobileChangesInitialDiff = { path: '/repo/src/older.ts', staged: false, scope: 'turn', turnId: 'user-older', sessionId: 'ses_pinned', directory: '/repo' };
+    await renderPane(olderChip);
+    expect(turnDiffs.mock.calls.some(([id, options]) => id === 'ses_pinned' && options?.from === 'user-older' && options.directory === '/repo')).toBe(true);
+    expect(container.querySelector('h2')?.textContent).toBe('older.ts');
+    expect(container.textContent).toContain('Earlier turn');
+    expect(container.querySelector('[title="src/retried.ts"]')).toBeNull();
+    await click('[aria-label="Back"]');
+    // Another project on screen drops the older turn with its folder; the
+    // request stays consumed, so nothing pins the pane back to it.
+    await renderPane(olderChip, '/other');
+    await renderPane(olderChip);
+    expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');
+    // A new click on the chip selects that turn again.
+    await renderPane({ ...olderChip });
+    expect(container.querySelector('h2')?.textContent).toBe('older.ts');
+    await click('[aria-label="Back"]');
+    const callsBeforeLastTurn = turnDiffs.mock.calls.length;
+    await chooseMode('Last turn');
+    expect(turnDiffs.mock.calls.slice(callsBeforeLastTurn).some(([id, options]) => id === 'ses_turn' && !options?.from)).toBe(true);
+    expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Last turn');
+    // Without the file the same request lands on Changes, on that file, also
+    // when the chip came from another chat than the one on screen.
+    await renderPane({ path: '/repo/src/working.png', staged: false, scope: 'turn', turnId: 'user-older', sessionId: 'ses_pinned', directory: '/repo' });
     expect(container.querySelector('h2')?.textContent).toBe('working.png');
     expect(container.textContent).not.toContain('Last turn');
     await click('[aria-label="Back"]');

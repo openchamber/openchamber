@@ -40,6 +40,17 @@ export const expandHome = (pattern: string, homeDir: string) => {
   return pattern;
 };
 
+export const resolveGuestFolders = (folders: readonly string[], homeDir: string, nodePath = defaultPath): string[] | null => {
+  const resolved: string[] = [];
+  for (const folder of folders) {
+    const expanded = expandHome(folder, homeDir);
+    if (!nodePath.isAbsolute(expanded)) return null;
+    const normalized = nodePath.resolve(expanded);
+    if (!resolved.includes(normalized)) resolved.push(normalized);
+  }
+  return resolved;
+};
+
 export const globToRegExp = (pattern: string) => {
   let source = '^';
   let index = 0;

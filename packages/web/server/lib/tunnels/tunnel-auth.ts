@@ -1,5 +1,8 @@
 import crypto from 'crypto';
 import type { NextFunction, Request, Response } from '../shared/http-contracts.js';
+import { rateLimitKey } from '../security/client-address.js';
+
+type ScopeRequest = Pick<Request, 'headers' | 'socket' | 'connection'> & Partial<Pick<Request, 'hostname'>>;
 
 interface BootstrapRecord {
   id: string;
@@ -44,6 +47,7 @@ const isText = (value: unknown): value is string => typeof value === 'string';
 
 const BOOTSTRAP_TOKEN_COOKIE_SAFE_BYTES = 32;
 const TUNNEL_SESSION_COOKIE_NAME = 'oc_tunnel_session';
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 const CONNECT_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const CONNECT_RATE_LIMIT_LOCK_MS = 10 * 60 * 1000;
@@ -154,7 +158,7 @@ const normalizeIpCandidate = (candidate: string | null | undefined) => {
   return withoutZone;
 };
 
-const getSocketRemoteIp = (req: Request) => {
+const getSocketRemoteIp = (req: ScopeRequest) => {
   const remoteAddress = req?.socket?.remoteAddress || req?.connection?.remoteAddress;
   return normalizeIpCandidate(remoteAddress);
 };
@@ -212,7 +216,7 @@ const isPrivateOrLoopbackIp = (candidate: string | null | undefined) => {
   return isPrivateOrLoopbackIpv4(normalized);
 };
 
-const isLocalHost = (host: string | null, req: Request) => {
+const isLocalHost = (host: string | null, req: ScopeRequest) => {
   if (!host) {
     return false;
   }
@@ -228,7 +232,7 @@ const isLoopbackIp = (candidate: string) => {
   return normalized === '::1' || Boolean(normalized?.startsWith('127.'));
 };
 
-const isForwardedForRemoteClient = (req: Request) => {
+const isForwardedForRemoteClient = (req: ScopeRequest) => {
   const header = req?.headers?.['x-forwarded-for'];
   const value = Array.isArray(header) ? header.join(',') : header;
   if (!value) {
@@ -237,24 +241,7 @@ const isForwardedForRemoteClient = (req: Request) => {
   return value.split(',').some((entry) => entry.trim() && !isLoopbackIp(entry));
 };
 
-const getClientIp = (req: Request) => {
-  const ip = req.ip || req.socket?.remoteAddress;
-  if (ip) {
-    if (ip.startsWith('::ffff:')) {
-      return ip.substring(7);
-    }
-    return ip;
-  }
-  return null;
-};
-
-const getRateLimitKey = (req: Request) => {
-  const ip = getClientIp(req);
-  if (ip) {
-    return ip;
-  }
-  return 'connect-rate-limit:no-ip';
-};
+const getRateLimitKey = (req: Request) => rateLimitKey(req, 'connect-rate-limit:no-ip');
 
 const rateLimitMaxForKey = (key: string) => {
   if (key === 'connect-rate-limit:no-ip') {
@@ -266,11 +253,13 @@ const rateLimitMaxForKey = (key: string) => {
 export const createTunnelAuth = () => {
   let activeTunnelId: string | null = null;
   let activeTunnelHost: string | null = null;
+  let activeTunnelOrigin: string | null = null;
   let activeTunnelMode: string | null = null;
   let activeTunnelPublicUrl: string | null = null;
   let bootstrapRecord: BootstrapRecord | null = null;
 
   const tunnelSessions = new Map<string, TunnelSession>();
+  const activeSessionBindings = new Set<() => void>();
   const connectRateLimiter = new Map<string, ConnectRateLimitRecord>();
 
   const clearTunnelSessionCookie = (req: Request, res: Response) => {
@@ -296,7 +285,8 @@ export const createTunnelAuth = () => {
     res.setHeader('Set-Cookie', header);
   };
 
-  const classifyRequestScope = (req: Request) => {
+  const classifyRequestScope = (req: ScopeRequest) => {
+    if (!activeTunnelId) return 'local';
     const hostHeader = normalizeHost(isText(req.headers.host) ? req.headers.host : '');
     const reqHost = normalizeHost(isText(req.hostname) ? req.hostname : '') || hostHeader;
 
@@ -304,11 +294,10 @@ export const createTunnelAuth = () => {
       return 'tunnel';
     }
 
-    if (isLocalHost(reqHost, req) && !(activeTunnelId && isForwardedForRemoteClient(req))) {
-      return 'local';
-    }
-
-    if (!activeTunnelId) {
+    const forwardedHost = req.headers['x-forwarded-host'];
+    const rawPublicForward = req.hostname === undefined && isText(forwardedHost)
+      && !isLocalHost(normalizeHost(forwardedHost.split(',')[0]), req);
+    if (isLocalHost(reqHost, req) && !isForwardedForRemoteClient(req) && !rawPublicForward) {
       return 'local';
     }
 
@@ -328,6 +317,11 @@ export const createTunnelAuth = () => {
     return 1;
   };
 
+  const releaseActiveBindings = () => {
+    for (const invalidate of activeSessionBindings) invalidate();
+    activeSessionBindings.clear();
+  };
+
   const invalidateTunnelSessions = (tunnelId: string, reason = 'tunnel-stopped') => {
     const revokedAt = nowTs();
     let count = 0;
@@ -338,6 +332,7 @@ export const createTunnelAuth = () => {
         count += 1;
       }
     }
+    if (tunnelId === activeTunnelId) releaseActiveBindings();
     return count;
   };
 
@@ -354,13 +349,17 @@ export const createTunnelAuth = () => {
     publicUrl: string;
     mode?: string | null;
   }) => {
+    if (activeTunnelId !== tunnelId) releaseActiveBindings();
     activeTunnelId = tunnelId;
     activeTunnelMode = mode;
     activeTunnelPublicUrl = publicUrl || null;
     try {
-      activeTunnelHost = normalizeHost(new URL(publicUrl).host);
+      const url = new URL(publicUrl);
+      activeTunnelHost = normalizeHost(url.host);
+      activeTunnelOrigin = url.origin;
     } catch {
       activeTunnelHost = null;
+      activeTunnelOrigin = null;
     }
   };
 
@@ -370,6 +369,7 @@ export const createTunnelAuth = () => {
     }
     activeTunnelId = null;
     activeTunnelHost = null;
+    activeTunnelOrigin = null;
     activeTunnelMode = null;
     activeTunnelPublicUrl = null;
     bootstrapRecord = null;
@@ -481,7 +481,7 @@ export const createTunnelAuth = () => {
     connectRateLimiter.delete(key);
   };
 
-  const getTunnelSessionFromRequest = (req: Request) => {
+  const getTunnelSessionFromRequest = (req: Pick<Request, 'headers'>) => {
     const cookies = parseCookies(req.headers.cookie);
     const token = cookies[TUNNEL_SESSION_COOKIE_NAME];
     if (!token) {
@@ -505,6 +505,24 @@ export const createTunnelAuth = () => {
     }
     session.lastSeenAt = nowTs();
     return session;
+  };
+
+  const bindTunnelSession = (req: Pick<Request, 'headers'>, invalidate: () => void) => {
+    const session = getTunnelSessionFromRequest(req);
+    if (!session) return null;
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleExpiry = () => {
+      const remaining = session.expiresAt - nowTs();
+      if (remaining <= 0) { invalidate(); return; }
+      timer = setTimeout(scheduleExpiry, Math.min(remaining, MAX_TIMER_DELAY_MS));
+      timer.unref();
+    };
+    activeSessionBindings.add(invalidate);
+    scheduleExpiry();
+    return () => {
+      clearTimeout(timer);
+      activeSessionBindings.delete(invalidate);
+    };
   };
 
   const requireTunnelSession = (req: Request, res: Response, next: NextFunction) => {
@@ -635,11 +653,13 @@ export const createTunnelAuth = () => {
     getBootstrapStatus,
     requireTunnelSession,
     getTunnelSessionFromRequest,
+    bindTunnelSession,
     exchangeBootstrapToken,
     listTunnelSessions,
     clearTunnelSessionCookie,
     getActiveTunnelId: () => activeTunnelId,
     getActiveTunnelHost: () => activeTunnelHost,
+    getActiveTunnelOrigin: () => activeTunnelOrigin,
     getActiveTunnelMode: () => activeTunnelMode,
   };
 };

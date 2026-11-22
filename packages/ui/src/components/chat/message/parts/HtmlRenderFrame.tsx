@@ -161,9 +161,9 @@ function HtmlRenderDocument({
                     pendingRevealRef.current = anchor;
                 }
             },
-            clearSelection: () => {
+            clearSelection: (dismiss = true) => {
                 frame.contentWindow?.postMessage(htmlRenderClearSelectionMessage(), '*');
-                dispatchFrameSelection(frame, { text: '', rect: NO_RECT, dismiss: true });
+                dispatchFrameSelection(frame, { text: '', rect: NO_RECT, dismiss });
             },
         };
         handleRef.current = handle;
@@ -205,9 +205,9 @@ function HtmlRenderDocument({
             if (message?.kind === 'decline-placed') submitRef.current.onDeclinePlaced?.(message.placed);
             if (message?.kind === 'selection') {
                 const handle = handleRef.current;
-                if (message.text) {
+                if (message.text || message.dismiss) {
                     window.getSelection()?.removeAllRanges();
-                    if (handle) clearOtherPageSelections(handle);
+                    if (handle) clearOtherPageSelections(handle, Boolean(message.text));
                 }
                 dispatchFrameSelection(frame, {
                     text: message.text,

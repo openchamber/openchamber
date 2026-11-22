@@ -12,6 +12,7 @@ import type { ChangeRequestReviewStateResult } from '@openchamber/ui/lib/source-
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { z } from 'zod';
 import { providerPath } from './source-control-providers';
+import { parseSourceReferenceLinks } from './source-reference-link';
 
 type ReferencesFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
 
@@ -105,6 +106,13 @@ const referenceCommentFields = {
   }).optional().catch(undefined),
 };
 
+const reviewerStateSchema = z.object({
+  id: z.string(),
+  login: z.string(),
+  avatarUrl: z.string().optional(),
+  state: z.enum(['pending', 'approved', 'changes_requested', 'commented', 'dismissed']),
+});
+
 const referenceDetailResultSchema = z.discriminatedUnion('connected', [
   z.object({ connected: z.literal(false) }),
   z.object({
@@ -127,9 +135,14 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
         answer: z.object({ chosen: z.boolean(), canChange: z.boolean() }).optional(),
       })),
       commentTotal: z.number(),
+      references: z.array(z.unknown()).optional().transform((value) => (value === undefined ? undefined : parseSourceReferenceLinks(value))).catch(undefined),
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
         reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
+        reviewerStates: z.array(z.unknown()).transform((entries) => entries.flatMap((entry) => {
+          const parsed = reviewerStateSchema.safeParse(entry);
+          return parsed.success ? [parsed.data] : [];
+        })).optional().catch(undefined),
         checks: checksSummarySchema.nullable().optional(),
         additions: z.number(),
         deletions: z.number(),
@@ -242,19 +255,24 @@ export const fetchRepositoryReferenceDetail = async (
   fetch: ReferencesFetch,
   context: SourceControlReadContext,
   item: RepositoryItemRef & { kind?: 'discussion' },
+  options: { includeReferences?: boolean } = {},
 ): Promise<RepositoryReferenceDetailResult> => {
   const query = readContextQuery(context);
   query.set('owner', item.owner);
   query.set('repo', item.repo);
   query.set('number', String(item.number));
   if (item.kind === 'discussion') query.set('kind', 'discussion');
+  if (options.includeReferences) query.set('references', '1');
   const host = item.host?.trim();
 
   if (host && host !== 'github.com') {
     query.set('host', host);
   }
   const response = await fetch(providerPath(context, '/references/detail'), { query, headers: { Accept: 'application/json' } });
-  return readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
+  const result = await readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
+  if (!result.connected || result.detail === null) return result;
+  if (result.detail.references && result.detail.references.length === 0) delete result.detail.references;
+  return result;
 };
 
 const reviewPersonSchema = z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable();

@@ -294,6 +294,12 @@ var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
 // packages/sdk/examples/source-control-provider/service/main.ts
+var reviewerStatesPath = `./reviewer-states${".js"}`;
+var { readReviews, withReviewerStates } = await import(reviewerStatesPath);
+var referencesPath = "./references.js";
+var { readReferences, withReferences } = await import(referencesPath);
+var diffPath = "./diff.js";
+var { mapChangedFile, splitUnifiedDiff } = await import(diffPath);
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
 var serviceToken = process.env.OPENCHAMBER_SERVICE_TOKEN ?? "";
 if (!port || !serviceToken) {
@@ -474,42 +480,6 @@ var mapComment = (call, raw, fallbackUrl) => {
   stamp(comment, raw);
   return comment;
 };
-var FILE_STATUSES = new Map([["added", "added"], ["deleted", "removed"], ["removed", "removed"], ["renamed", "renamed"]]);
-var mapChangedFile = (raw) => {
-  const file = { path: raw.filename, status: FILE_STATUSES.get(raw.status ?? "") ?? "modified" };
-  if (raw.additions !== undefined)
-    file.additions = raw.additions;
-  if (raw.deletions !== undefined)
-    file.deletions = raw.deletions;
-  if (raw.changes !== undefined)
-    file.changes = raw.changes;
-  return file;
-};
-var splitUnifiedDiff = (diff) => {
-  const parts = new Map;
-  const chunks = diff.split(/^(?=diff --git )/m).filter((chunk) => chunk.startsWith("diff --git "));
-  for (const chunk of chunks) {
-    const lines = chunk.split(`
-`);
-    const plus = lines.find((line) => line.startsWith("+++ "));
-    const minus = lines.find((line) => line.startsWith("--- "));
-    const renamed = lines.find((line) => line.startsWith("rename to "));
-    let path = "";
-    if (plus && plus !== "+++ /dev/null")
-      path = plus.slice(4).replace(/^b\//, "");
-    else if (renamed)
-      path = renamed.slice("rename to ".length);
-    else if (minus && minus !== "--- /dev/null")
-      path = minus.slice(4).replace(/^a\//, "");
-    else
-      path = lines[0].match(/^diff --git a\/.+? b\/(.+)$/)?.[1] ?? "";
-    if (path)
-      parts.set(path.replace(/\t.*$/, ""), chunk.endsWith(`
-`) ? chunk : `${chunk}
-`);
-  }
-  return parts;
-};
 var listState = (state) => {
   if (state === "closed" || state === "merged")
     return "closed";
@@ -591,6 +561,9 @@ var findBranchPull = async (call, repo, branch) => {
   }
   throw new CallError(`The repository has more open pull requests than this Git host scans (${STATUS_SCAN_PAGES * SCAN_SIZE})`, 502, "SCAN_LIMIT");
 };
+var readItemReferences = (call, input, repo, number) => readReferences(input.includeReferences === true ? (page, limit) => api(call, "GET", `${repo}/issues/${number}/timeline`, {
+  query: { page: String(page), limit: String(limit) }
+}) : null);
 var unsupported = async (_call, _input, request) => {
   throw new CallError(`${request.method} is not something this Git host offers`, 501, "UNSUPPORTED");
 };
@@ -644,25 +617,23 @@ var handlers = {
   },
   changeRequestContext: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
-    const number = integer(input, "number");
-    const repo = repoPath(project);
-    const includeDiff = input.includeDiff === true;
-    const [raw, { data: comments }, diff, changed] = await Promise.all([
+    const number = integer(input, "number"), repo = repoPath(project), includeDiff = input.includeDiff === true;
+    const [raw, { data: comments }, diff, changed, reviews, references] = await Promise.all([
       readPull(call, project, number),
       api(call, "GET", `${repo}/issues/${number}/comments`),
       includeDiff ? apiText(call, `${repo}/pulls/${number}.diff`) : Promise.resolve(""),
-      includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([])
+      includeDiff ? readChangedFiles(call, repo, number) : Promise.resolve([]),
+      input.includeTimeline === true ? readReviews(SCAN_SIZE, (page, limit) => api(call, "GET", `${repo}/pulls/${number}/reviews`, { query: { page: String(page), limit: String(limit) } })) : Promise.resolve(null),
+      readItemReferences(call, input, repo, number)
     ]);
-    const pull = mapPull(call, raw, project);
-    const patches = splitUnifiedDiff(diff);
+    const pull = mapPull(call, raw, project), patches = splitUnifiedDiff(diff);
     const files = changed.map((file) => {
-      const mapped = mapChangedFile(file);
-      const patch = patches.get(mapped.path);
+      const mapped = mapChangedFile(file), patch = patches.get(mapped.path);
       if (patch)
         mapped.patch = patch;
       return mapped;
     });
-    return {
+    const context = withReviewerStates({
       identity: call.identity,
       project,
       changeRequest: pull,
@@ -671,7 +642,8 @@ var handlers = {
       files,
       diff,
       ci: null
-    };
+    }, reviews, raw.requested_reviewers ?? []);
+    return withReferences(context, references);
   },
   listIssues: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"));
@@ -684,10 +656,13 @@ var handlers = {
   },
   getIssue: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));
-    const { data } = await api(call, "GET", `${repoPath(project)}/issues/${integer(input, "number")}`);
+    const [{ data }, references] = await Promise.all([
+      api(call, "GET", `${repoPath(project)}/issues/${integer(input, "number")}`),
+      readItemReferences(call, input, repoPath(project), integer(input, "number"))
+    ]);
     if (data.pull_request)
       throw new CallError(`#${data.number} is a pull request`, 404);
-    return mapIssue(call, data, project);
+    return withReferences(mapIssue(call, data, project), references);
   },
   issueComments: async (call, input) => {
     const { project } = await resolveRepo(call, text(input, "directory"), text(input, "remote"), selectorOf(input, "project"));

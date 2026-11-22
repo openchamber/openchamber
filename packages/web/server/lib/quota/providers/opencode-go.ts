@@ -59,6 +59,7 @@ interface GoMeter {
 }
 
 interface GoAuthFields {
+  label?: unknown;
   key?: unknown;
   token?: unknown;
   type?: unknown;
@@ -82,7 +83,6 @@ const isString = (value: unknown): value is string => typeof value === 'string';
 
 export const providerId = 'opencode-go';
 export const providerName = 'OpenCode Go';
-const aliases = ['opencode-go'];
 
 const API_KEY_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 const CONSOLE_STATUS_URL = 'https://opencode.ai/console/api/go/status';
@@ -94,6 +94,8 @@ const ORGANIZATION_ID_PATTERN = /^(?:org|wrk)_[A-Za-z0-9]+$/;
 const CONSOLE_PRODUCTS = new Set(['go', 'go-plus', 'go-teams']);
 const NO_CONSOLE_SUBSCRIPTION = 'No active OpenCode Go subscription on the selected Console account';
 const API_KEY_EXPIRED = 'OpenCode Go key expired. Connect an OpenCode Console account on the OpenCode card in Providers.';
+const KEY_AUTH_FAILED = 'OpenCode Go authentication failed';
+const KEY_REFUSALS = new Set([NO_CONSOLE_SUBSCRIPTION, API_KEY_EXPIRED, KEY_AUTH_FAILED]);
 const REQUEST_TIMEOUT_MS = 15_000;
 
 const API_KEY_WINDOW_FIELDS = {
@@ -180,7 +182,7 @@ export const fetchOpenCodeGoUsage = async (apiKey: string, fetchImpl = fetch, { 
   if (response.status === 403 && consoleKey) throw new Error(NO_CONSOLE_SUBSCRIPTION);
   if (response.status === 401 && await isExpiredKeyResponse(response)) throw new Error(API_KEY_EXPIRED);
   if (response.status === 401 || response.status === 403) {
-    throw new Error('OpenCode Go authentication failed');
+    throw new Error(KEY_AUTH_FAILED);
   }
   if (!response.ok) throw new Error(`OpenCode Go usage API returned HTTP ${response.status}`);
   const windows = parseOpenCodeGoUsage(await response.json().catch(() => null));
@@ -262,13 +264,17 @@ export const fetchConsoleBillingBalance = async ({ access, orgID }: Pick<Console
 
 const readKey = (entry: GoAuthFields | null) => asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 
-const getApiKey = (auth: LegacyAuthFile) => {
-  const own = readKey(asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases))));
-  if (own) return { key: own, consoleKey: false };
-  const consoleEntry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, [CONSOLE_INTEGRATION_ID])));
-  if (!consoleEntry || consoleEntry.type === 'oauth') return null;
-  const key = readKey(consoleEntry);
-  return key ? { key, consoleKey: true } : null;
+interface GoApiKey {
+  key: string;
+  consoleKey: boolean;
+  label: string | null;
+}
+
+const getApiKey = (auth: LegacyAuthFile, integrationID: typeof CONSOLE_INTEGRATION_ID | typeof providerId): GoApiKey | null => {
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, [integrationID])));
+  if (!entry || entry.type === 'oauth') return null;
+  const key = readKey(entry);
+  return key ? { key, consoleKey: integrationID === CONSOLE_INTEGRATION_ID, label: asNonEmptyString(entry.label) } : null;
 };
 
 const getConsoleCredential = (auth: LegacyAuthFile) => {
@@ -278,17 +284,22 @@ const getConsoleCredential = (auth: LegacyAuthFile) => {
   const orgID = asNonEmptyString(entry.orgID);
   if (!access || entry.server !== CONSOLE_SERVER || !orgID || !ORGANIZATION_ID_PATTERN.test(orgID)) return null;
   const expires = toNumber(entry.expires);
-  return { access, orgID, expires };
+  return { access, orgID, expires, label: asNonEmptyString(entry.label) };
 };
 
-export const isConfigured = (auth: LegacyAuthFile) => Boolean(getConsoleCredential(auth) || getApiKey(auth));
+export const isConfigured = (auth: LegacyAuthFile) => Boolean(getConsoleCredential(auth) || getApiKey(auth, CONSOLE_INTEGRATION_ID) || getApiKey(auth, providerId));
+
+const fetchKeyUsage = async ({ key, consoleKey }: GoApiKey, fetchImpl: typeof fetch) => (
+  await fetchConsoleGoUsageWithKey(key, fetchImpl) ?? fetchOpenCodeGoUsage(key, fetchImpl, { consoleKey })
+);
 
 const fetchGoQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: OpenCodeGoQuotaDependencies = {}) => {
   try {
     deleteLegacyOpenCodeGoCredential();
     const auth = await readAuth();
     const consoleCredential = getConsoleCredential(auth);
-    const apiKey = getApiKey(auth);
+    const consoleKey = getApiKey(auth, CONSOLE_INTEGRATION_ID);
+    const apiKey = getApiKey(auth, providerId);
     const consoleFailure: ConsoleFailure = {};
     if (consoleCredential) {
       try {
@@ -308,18 +319,24 @@ const fetchGoQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fe
                 valueLabel: `$${formatMoney(balance)}`,
               }),
             };
-        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows } });
+        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows }, accountLabel: consoleCredential.label });
       } catch (consoleError) {
         if (!apiKey) throw consoleError;
         consoleFailure.error = consoleError;
       }
+    } else if (consoleKey) {
+      try {
+        const windows = await fetchKeyUsage(consoleKey, fetchImpl);
+        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows }, accountLabel: consoleKey.label });
+      } catch (consoleError) {
+        if (!apiKey || !(consoleError instanceof Error) || !KEY_REFUSALS.has(consoleError.message)) throw consoleError;
+      }
     }
     if (!apiKey) return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
-    const windows = await fetchConsoleGoUsageWithKey(apiKey.key, fetchImpl)
-      ?? await fetchOpenCodeGoUsage(apiKey.key, fetchImpl, { consoleKey: apiKey.consoleKey }).catch((keyError) => {
-        throw consoleFailure.error && keyError.message === API_KEY_EXPIRED ? consoleFailure.error : keyError;
-      });
-    return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows } });
+    const windows = await fetchKeyUsage(apiKey, fetchImpl).catch((keyError) => {
+      throw consoleFailure.error && keyError.message === API_KEY_EXPIRED ? consoleFailure.error : keyError;
+    });
+    return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows }, accountLabel: apiKey.label });
   } catch (error) {
     return buildResult({ providerId, providerName, ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
   }

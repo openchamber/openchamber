@@ -1,4 +1,6 @@
 import React from 'react';
+import { useBlockDelivery } from './useBlockDelivery';
+import { useReplyDraftPersistence, type ReplyDraftStorage } from '@/hooks/useReplyDraftPersistence';
 import { z } from 'zod';
 import { Icon } from '@/components/icon/Icon';
 import { Button as UiButton } from '@/components/ui/button';
@@ -248,6 +250,7 @@ function CardNoteSlot({ decision, card, children }: { decision: string; card: Bl
   const path = React.useContext(PathContext);
   const note = form.notes.get(decision) ?? '';
   const [open, setOpen] = React.useState(note !== '');
+  const [opened, setOpened] = React.useState(false);
   const place = noteSlot(card);
   if (!place || (form.disabled && !note)) return <>{children}</>;
   const element = open ? (
@@ -258,7 +261,7 @@ function CardNoteSlot({ decision, card, children }: { decision: string; card: Bl
       disabled={form.disabled}
       onChange={(event) => form.setNote(decision, event.target.value)}
       rows={1}
-      autoFocus
+      autoFocus={opened}
     />
   ) : null;
   const trailing = form.disabled ? null : !open ? (
@@ -269,7 +272,10 @@ function CardNoteSlot({ decision, card, children }: { decision: string; card: Bl
       className="text-muted-foreground hover:bg-transparent hover:text-foreground"
       aria-label={t('chat.uiBlock.note.add')}
       title={t('chat.uiBlock.note.add')}
-      onClick={() => setOpen(true)}
+      onClick={() => {
+        setOpen(true);
+        setOpened(true);
+      }}
     >
       <Icon name="sticky-note" className="size-4" />
     </UiButton>
@@ -310,11 +316,11 @@ function AnsweredCard({ title, decision }: { title: string; decision: string }) 
   const button = form.chosen.get(decision) ?? null;
   const note = form.notes.get(decision)?.trim() ?? '';
   return (
-    <div className="oc-box flex flex-col gap-0.5 py-2">
-      <div className="flex items-center gap-2">
+    <div className="oc-box @container flex flex-col gap-0.5 py-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 @[32rem]:flex-nowrap">
+        <CardTitle title={title} className="min-w-0 basis-full @[32rem]:order-1 @[32rem]:flex-1 @[32rem]:truncate @[32rem]:[&_p]:truncate" />
         <Icon name="checkbox-circle" className="size-4 shrink-0 text-[var(--status-success)]" />
-        <CardTitle title={title} className="min-w-0 flex-1 truncate" />
-        <span className="max-w-[50%] shrink-0 truncate typography-ui-label font-medium text-[var(--primary-text)]">
+        <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-[var(--primary-text)] @[32rem]:order-2 @[32rem]:max-w-[50%] @[32rem]:flex-none">
           {button ?? t('chat.uiBlock.note.label')}
         </span>
         {!form.disabled && (
@@ -322,7 +328,7 @@ function AnsweredCard({ title, decision }: { title: string; decision: string }) 
             type="button"
             variant="ghost"
             size="xs"
-            className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+            className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground @[32rem]:order-3"
             onClick={() => form.reopen(decision)}
           >
             {t('chat.uiBlock.change')}
@@ -1336,10 +1342,11 @@ function addKitStyles() {
   document.head.append(style);
 }
 
-export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }: {
+export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions, draft }: {
   source: string;
   complete: boolean;
   host?: UiBlockHost;
+  draft?: ReplyDraftStorage;
   actions?: React.ReactNode;
   onNotDrawn?: (errors: string[]) => void;
 }) {
@@ -1363,15 +1370,15 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
   React.useEffect(() => {
     if (notDrawnErrors) onNotDrawn?.(notDrawnErrors);
   }, [notDrawnErrors, onNotDrawn]);
-  const [values, setValues] = React.useState<Record<string, UiBlockFieldValue>>(() => host.answered?.values ?? {});
-  const [chosen, setChosen] = React.useState<Chosen>(() => chosenFrom(host));
-  const [notes, setNotes] = React.useState<Notes>(() => notesFrom(host));
-  const [sending, setSending] = React.useState(false);
-  const [sent, setSent] = React.useState(host.answered !== null);
-  const [failed, setFailed] = React.useState(false);
+  const [initialDraft] = React.useState(() => host.answered ? undefined : draft?.load());
+  const [values, setValues] = React.useState<Record<string, UiBlockFieldValue>>(() => host.answered?.values ?? initialDraft?.values ?? {});
+  const [chosen, setChosen] = React.useState<Chosen>(() => initialDraft ? new Map(initialDraft.chosen) : chosenFrom(host));
+  const [notes, setNotes] = React.useState<Notes>(() => initialDraft ? new Map(initialDraft.notes) : notesFrom(host));
+  const { sending, sent, setSent, failed, delivering, deliver } = useBlockDelivery(host.answered !== null, draft?.save);
   const pageNote = (answer: UiBlockHost['answered']) => (answer && 'note' in answer ? answer.note ?? '' : '');
-  const [note, setNote] = React.useState(() => pageNote(host.answered));
-  const [noteOpen, setNoteOpen] = React.useState(() => pageNote(host.answered) !== '');
+  const [note, setNote] = React.useState(() => initialDraft?.note ?? pageNote(host.answered));
+  const [noteOpen, setNoteOpen] = React.useState(note !== '');
+  const [noteOpened, setNoteOpened] = React.useState(false);
   const [shownAnswer, setShownAnswer] = React.useState(host.answered);
   if (host.answered !== shownAnswer) {
     setShownAnswer(host.answered);
@@ -1384,6 +1391,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
       setSent(true);
     }
   }
+  useReplyDraftPersistence(draft, values, chosen, notes, note, sent, host.answered !== null);
   const root = parsed.kind === 'ready' ? parsed.root : null;
   const frameName = React.useMemo(() => (root ? answeringFrame(root, extensionBlocks) : null), [extensionBlocks, root]);
   const trimmedNote = note.trim();
@@ -1396,21 +1404,6 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
   }), [fields, values]);
   const disabled = !host.submit || !complete || sending || sent;
 
-  const delivering = React.useRef(false);
-  const deliver = React.useCallback((send: () => Promise<void>) => {
-    if (delivering.current) return Promise.resolve(false);
-    delivering.current = true;
-    setSending(true);
-    setFailed(false);
-    return send().then(() => {
-      setSent(true);
-      return true;
-    }, () => {
-      delivering.current = false;
-      setFailed(true);
-      return false;
-    }).finally(() => setSending(false));
-  }, []);
   const replyAnswer = React.useCallback((choices: Chosen) => {
     const answer: UiBlockReplyAnswerData = {
       picks: [],
@@ -1453,7 +1446,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
       setChosen((current) => new Map(current).set(name, text));
     };
     if (!await deliver(send)) throw new Error('The answer did not reach the agent.');
-  }, [answerValues, chosen, deliver, disabled, fields, host, replyAnswer, t, trimmedNote]);
+  }, [answerValues, chosen, deliver, delivering, disabled, fields, host, replyAnswer, t, trimmedNote]);
   const extensionContext = React.useMemo(() => ({
     blocks: extensionBlocks,
     complete,
@@ -1515,12 +1508,15 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
       disabled={disabled}
       onChange={(event) => setNote(event.target.value)}
       rows={2}
-      autoFocus={!sent}
+      autoFocus={noteOpened && !sent}
       maxLength={4000}
     />
-  ) : !disabled ? <NoteToggle onOpen={() => setNoteOpen(true)} /> : null;
+  ) : !disabled ? <NoteToggle onOpen={() => {
+    setNoteOpen(true);
+    setNoteOpened(true);
+  }} /> : null;
   const slot = slotPlace && noteElement ? { ...slotPlace, element: noteElement } : null;
-  const canSendChosen = host.kind === 'reply' && !sent && chosen.size > 0 && (chosen.size < decisions.length || failed);
+  const canSendChosen = host.kind === 'reply' && !sent && chosen.size > 0;
   const sendButton = host.kind === 'page' && complete && decisions.length === 0 && (!frameName || (trimmedNote !== '' && !chosen.has(frameName))) && Boolean(host.submit || sent)
     ? { label: host.answered?.button ?? t('chat.uiBlock.send'), variant: 'primary' }
     : null;

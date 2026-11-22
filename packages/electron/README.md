@@ -215,7 +215,7 @@ IPC results if its endpoint changes while the read is pending.
 | `app-cache.mjs` | Help > Clear Cache: drops the HTTP cache only, keeps site storage (device settings, pinned sessions, login cookies), reloads windows |
 | `session-link-gate.mjs` | Whether the main window's current document listens for session links: it does once it asks for its pending links, or after a fallback delay for a remote page that never asks. Until then links wait in the queue |
 | `pairing-deep-link.mjs` | Validates an `openchamber://connect` pairing link for the confirmation prompt. After the user confirms, the main window's renderer redeems it (`desktop_take_pending_host_actions`) with the same code as Import Link, so relay-only links pair over the E2EE tunnel. `openchamber://host/<id>` for a host with a relay leg goes through the same queue |
-| `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: splash colour parsing, host list without credentials |
+| `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: the commands remote pages may invoke, splash colour parsing, tray locale codes, host list without credentials |
 | `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |
 | `windows-app-discovery.mjs` | Windows "Open in": which apps are installed, their icons, and launch candidates. Every `where.exe` and PowerShell lookup is awaited, because a synchronous spawn per candidate froze the window for the whole scan |
 | `linux-app-discovery.mjs` | Linux "Open in": installed FreeDesktop entries, their icons, launch candidates and the chain that runs them. The generic "Terminal" id tries `xdg-terminal-exec` first with `--dir=<path>`, the only spelling the reference implementation parses. The binary runs only after its file, or the file a packaged launcher forwards to, shows support for `--dir=`, and `--print-id` runs bounded only where that file lists it, because older versions ignore that flag and `--help` and open a terminal. Explicit apps reach it only after their own entry fails. Every terminal candidate starts in the project directory; entries get it as an argument through `%f`/`%F` or a known working-directory option. A single-instance terminal without either opens in its own directory. A candidate that exits non-zero within 1 second counts as failed and the chain moves on (#6092) |
@@ -459,6 +459,19 @@ window and works while the main window is hidden or minimized without revealing
 it. The menu can open with cached usage; the renderer pushes a new tray snapshot
 when the fetch lands. No quota timer runs for the tray.
 
+The tray menu and tooltip use `tray-locales.mjs`, sharing locale normalization
+and common actions with `menu-locales.mjs`. The controller seeds the initial
+empty menu in the preferred locale before the renderer sends live state.
+The controller retains its last snapshot so `desktop_set_tray_locale` can rebuild
+labels immediately, even while session activity is idle. That command is
+remote-safe and accepts only a locale the tray has labels for, so a window
+loading its UI from a remote instance moves the tray to its language while
+`desktop_set_locale` (native menus) stays local-only. Only the window that
+published the snapshot the tray shows relabels it; a Mini Chat or another
+window's locale is kept and applied when that window publishes next. The renderer resolves
+instance and quota fallback text again when its dictionary loads; user-provided
+host and session names remain literal.
+
 ## Bundled OpenCode server
 
 Packaged Desktop builds include OpenCode's server at the exact `@opencode/server` version pinned in `devDependencies` of `packages/electron/package.json` (OpenChamber requires OpenCode 2.x), built from OpenCode's npm packages rather than shipped as OpenCode's CLI binary. `prepare:opencode-server` bundles `opencode-server/serve.mjs` with Bun into `resources/opencode-server`, downloads the target platform's native packages (node-pty, the file watcher, FFF and its FFI binding, OpenCode's persistent PTY daemon) from npm at the versions their parent packages name, caches them under `packages/electron/.cache/opencode-server`, and stages their files under `resources/opencode-server/assets` with a `manifest.json`. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. `verify:opencode-server` and `verify:opencode-server:packaged` check the version, read the header of every native file (Mach-O, PE or ELF, `scripts/binary-architecture.mjs`) against the target architecture, and run `--version`: on the packaged app's own executable on macOS and Windows when this host can run it, else on Node, which needs no native code for it (the Linux executable loads GTK first, which CI runners need not have). The app runs the server on its own executable with `ELECTRON_RUN_AS_NODE=1`; `opencode-server/DOCUMENTATION.md` has the contract.
@@ -571,6 +584,12 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   drops session cookies (no expiry) on quit, and many sign-ins live in one, so
   before quitting they are rewritten with an expiry (`browser-panel-cookies.mjs`),
   as Chrome keeps them when it continues where you left off.
+  Pages see a plain Chrome user agent, without the `OpenChamber/` and
+  `Electron/` tokens, because some sites refuse Electron. Google's sign-in
+  hosts (`accounts.google.com`, `accounts.youtube.com`) are the exception:
+  Google rejects an embedded browser that claims to be Chrome ("This browser
+  or app may not be secure") and lets one that names Electron through, so
+  requests to those hosts get the `Electron/` token back in their header.
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;
@@ -584,8 +603,11 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
   `window.open` that keeps its opener as a popup. A link aimed at a new tab is
   noopener by default and becomes a panel tab
-  (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
-  isolated space keep everything in place, so nothing leaves the space's session.
+  (`openchamber:browser-panel-open-tab` to the renderer). The event carries
+  Electron's referrer URL and policy for the new tab's first load; a renderer
+  older than the shell ignores it. Pages of an isolated space keep everything in
+  place, so nothing leaves the space's session; a link loaded in place sends the
+  same referrer.
   Popups close with the window that opened them and do not count as app windows
   when closing the last one hides the app on macOS.
 
@@ -609,7 +631,7 @@ Add new native capabilities in this order:
 
 1. Add or update the `preload.mjs` bridge only if a new renderer-facing shape is needed.
 2. Add the real command handling in `main.mjs` under `openchamber:invoke`.
-3. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities. A command added to `COMMANDS_SAFE_FOR_REMOTE` takes input from, and answers, another server's page: parse what it stores and strip credentials from what it returns (`remote-page-policy.mjs`). Splash colours, for example, end up in the trusted splash page, and `desktop_hosts_get` hands remote pages the host list without tokens or auth headers.
+3. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities. A command added to `COMMANDS_SAFE_FOR_REMOTE` (`remote-page-policy.mjs`) takes input from, and answers, another server's page: parse what it stores and strip credentials from what it returns (`remote-page-policy.mjs`). Splash colours, for example, end up in the trusted splash page, and `desktop_hosts_get` hands remote pages the host list without tokens or auth headers.
 4. Keep shared UI runtime contracts in `packages/ui` and server/runtime APIs in `packages/web` when the behavior is not inherently native.
 
 ## Update channels and Canary

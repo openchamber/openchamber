@@ -39,8 +39,9 @@ const page = (html: string, url = 'http://localhost:3000/'): Window => {
   return win;
 };
 
+const INPUT_DEADLINE = Number.MAX_SAFE_INTEGER;
 const fakeDriver = (fake: Fake) => createPageDriver({
-  withInput: (step) => step(),
+  withInput: (step) => step(INPUT_DEADLINE),
   // What the driver hands over is JSON, as over IPC.
   drive: async (op, args = {}) => z.json().parse(await fakeStep(fake, op, args)),
 });
@@ -159,11 +160,27 @@ describe('page driver', () => {
     const result = await fakeDriver(fake).type({ selector: '#q', value: 'new', submit: true });
 
     expect(fake.steps.filter((step) => ['insertText', 'press'].includes(step.op)).map((step) => step.args)).toEqual([
-      { text: 'new' },
-      { key: 'Enter' },
+      { text: 'new', expiresAt: INPUT_DEADLINE },
+      { key: 'Enter', expiresAt: INPUT_DEADLINE },
     ]);
     // The fake inserts nothing, so the field still holds what it had.
     expect(result).toMatchObject({ typed: true, selector: '#q', value: 'old' });
+  });
+
+  test('typing inside an outer action keeps its deadline and stops once it passed', async () => {
+    const fake = twoFrames();
+    fake.frames[0].win.document.body.insertAdjacentHTML('beforeend', '<input id="q" value="old">');
+    const driver = fakeDriver(fake);
+    const later = Date.now() + 60_000;
+
+    await driver.press({ key: 'Tab' }, later);
+    expect(fake.steps.filter((step) => step.op === 'press').map((step) => step.args)).toEqual([{ key: 'Tab', expiresAt: later }]);
+
+    // The reply to the dialog check came back after the outer action timed out.
+    fake.steps.length = 0;
+    await expect(driver.type({ selector: '#q', value: 'late' }, Date.now() - 1)).rejects.toThrow('did not take the input in time');
+    await expect(driver.press({ selector: '#q', key: 'Enter' }, Date.now() - 1)).rejects.toThrow('did not take the input in time');
+    expect(fake.steps.map((step) => step.op)).toEqual(['dialog', 'dialog']);
   });
 
   test('a click that opens a dialog answers with it, and later actions refuse until it is answered', async () => {

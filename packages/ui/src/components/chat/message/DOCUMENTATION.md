@@ -38,14 +38,25 @@ turn projection and scroll-follow policy.
   its voice overlay owns focus. Mobile composer comment mode keeps the quote
   until attach, cancel or a scope change; changing sessions or starting a new
   draft closes the menu even when no selection event fires.
+- An open desktop comment on message text follows its message when the timeline
+  remounts the body in another row, as when a working step becomes the final
+  answer: the leaving menu hands its quote, typed text and pasted images to the
+  next menu of the same session and message that can resolve the quote
+  (`selectionCommentHandoff.ts`), within two seconds; every leave and take
+  drops the drafts past that deadline, so abandoned ones do not pile up. The next menu takes the draft in a
+  passive effect, because it renders inside the body whose ref it reads and
+  React attaches that ref after the menu's layout effects. A menu hidden with
+  its session and shown again does not take back its own draft, so hiding
+  still closes the comment.
 - Attachment focus belongs to the column's composer before comment images are
   attached. Images from an abandoned comment never enter the composer.
 - Hidden user continuations are determined by display normalization, keeping
   neighbouring visible turns continuous. Linked-item display parts preserve
   their context identity and stay client-only; their backing data stays outside
   the ordinary file shape. Provider descriptor changes refresh chip labels.
-- Message comparison includes tool output, synthetic shell-action state and
-  compaction summaries, so streamed state changes reach memoized rows.
+- Message comparison includes assistant error identity, tool output, synthetic
+  shell-action state and compaction summaries, so error-only and streamed changes
+  reach memoized rows.
 - Image preview measurements belong to their URL. An effect-based reset can
   race the load event of a cached image and leave the viewer incorrectly sized.
 - A quote popover's shadow belongs to the outer box that hugs its card. Keeping
@@ -121,6 +132,19 @@ own layer with `translateZ(0)` adds GPU tiles without improving containment.
 A long answer can span several virtualized rows, and earlier text can be folded
 or unmounted. Export renders every text part afresh so it includes the whole
 reply and settled highlighting.
+
+### Why the PNG carries the app's loaded fonts
+
+The export SVG runs outside the chat document. Its font scanner can read
+stylesheet rules, but the app loads its appearance fonts through `FontFace`.
+The font loader registers each URL-based face at once and reads its data for
+the SVG in the background, so the exporter can add it alongside stylesheet
+fonts such as KaTeX, usually without another request on Save. The screen face
+never waits for that read, so startup and terminal refits keep their timing.
+Without the embedded copy, longer fallback glyphs can wrap inside a code chip
+measured with the original font. A failed read is not kept: the image still
+saves without that face, and the next Save reads it again. A face still loading when Save starts is waited for, up to 2 seconds, so the PNG embeds the face the layout was measured with.
+The VS Code webview retains its existing font policy and skips the CDN prefetch.
 
 ### Why plan dialogs mount lazily and not on every streaming message
 

@@ -82,6 +82,12 @@ own data fetching and reconciliation; the layout's right slot owns column width.
 - Quota aliases identify the same billed account. `claude-agent` and
   `claude-code` use the Claude subscription reported by `claude`; `kilocode` and
   `kilo-code` use the Kilo Gateway account reported by `kilo`.
+- A compact usage summary prefers the provider's cap rows. When OpenRouter
+  reports a monthly total and no cap, the total is the summary, so monthly
+  spending cannot displace a lifetime or monthly cap. When the total is unknown
+  because one counter is unreadable, a readable counter is the summary under its
+  own label; the total is never replaced by a guess. Other providers keep the
+  generic shortest-window rule even when a window is named `monthly_total`.
 - Built-in section ids stay stable because saved order and visibility use them.
   Hidden-state checks test membership of available sections because stale ids
   from removed sections can inflate a count.
@@ -99,6 +105,15 @@ own data fetching and reconciliation; the layout's right slot owns column width.
   the transcript.
 
 ## Decisions
+
+### Why the monthly total is found by its window key and not by row order
+
+The Usage page shows the monthly total and its category rows beside a cap, so a
+compact summary has extra spend rows to ignore. The selector finds the total by
+its `monthly_total` window key and treats a row with a share or a value label as
+a cap, so a monthly or lifetime cap wins even when the total has the same
+duration. Following the provider's insertion order would let a category row
+become the summary.
 
 ### Why guest meters jump and not glide
 
@@ -889,13 +904,21 @@ Selection rules live in `usageHeadline.ts` and are pinned by
 - provider ids are matched directly, with a small alias table for the ones that
   diverge from OpenCode's (`openai`/`chatgpt` → `codex`, `anthropic` → `claude`,
   `gemini` → `google`);
+- an extension's group is keyed `ext-<guestId>`, so a direct id can never be
+  one: when the direct match finds nothing, an extension whose
+  `contributes.quota.providers` is exactly the composer's provider id (no alias)
+  is taken instead. That list is a credential grant and a reply does not say
+  whose windows it reports, so an extension declaring several credentials stays
+  in the expanded list only. A declaring extension with no row that has a value
+  to show (a failed first read, a reset time without an amount) is skipped for the next one; a direct id match wins when both could
+  claim the provider, so a built-in keeps the headline it always had;
 - model-scoped rows are skipped while any provider-level row exists — a
   per-model quota is not the provider's;
 - rows without a window duration (credit balances, tool counters) are a last
   resort, never preferred over a real window;
-- **no match means no headline.** The section falls back to the display-mode
-  label, because showing an unmatched provider's quota would read as the active
-  one.
+- **no match in either place means no headline.** The section falls back to the
+  display-mode label, because showing an unmatched provider's quota would read
+  as the active one.
 
 ## Provider status line
 

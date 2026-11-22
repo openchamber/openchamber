@@ -23,6 +23,9 @@ export interface AttachedFile {
     vscodeSource?: 'file' | 'selection';
     agentPath?: string;
     sourceDocumentId?: string;
+    saveOnSend?: boolean;
+    saveCopyOnSend?: boolean;
+    original?: { mimeType: string; dataUrl: string; saveOnSend?: boolean };
 }
 
 export type EditPermissionMode = 'allow' | 'ask' | 'deny' | 'full';

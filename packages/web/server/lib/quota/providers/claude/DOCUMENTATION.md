@@ -9,9 +9,10 @@ belong to the parent module. Its Claude semantics are documented in
 
 ## Invariants
 
-- Credential discovery checks the macOS Keychain, the Claude Code credentials
-  file, OpenCode credentials and the environment in that order. OpenCode is
-  queried only when the local sources have no token.
+- Without an explicit Claude home, credential discovery checks the macOS
+  Keychain, the Claude Code credentials file, OpenCode credentials and the
+  environment in that order. An explicit home checks only that home's Keychain
+  entry and credentials file.
 - Credentials are read-only. Expiry is epoch milliseconds when reported, and
   absent refresh tokens, expiry and subscription labels remain null.
 - Keychain and file JSON are unchecked external values. Object checks accept

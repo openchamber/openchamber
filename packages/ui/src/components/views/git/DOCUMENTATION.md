@@ -107,6 +107,12 @@ operation contracts belong to the runtime APIs and source-control modules.
 - Integration cannot be cancelled or closed while its operation runs; its
   dialog remains available to show progress. Net-deletion celebration waits
   for the push when a commit includes one.
+- A diff tab takes the zone the Git panel sits in, so opening one unmounts the
+  changes list. Its offset is kept per runtime and repository in a module-level
+  map and restored before the remounted list paints (`ChangesPanel`'s `memoryKey`).
+  A list of 1,000 rows or more is virtualized: the virtualizer reads its first
+  offset while rendering, before the scroller mounts, and writes it to the
+  scroller when it attaches, so its `initialOffset` is the saved offset.
 
 ## Decisions
 

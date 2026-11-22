@@ -1,6 +1,7 @@
 import http from 'node:http';
 
 import {
+  NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX,
   NOTIFICATIONS_PROVIDER_PATH,
   NotificationsOutboundError,
   createNotificationsOutbound,
@@ -36,7 +37,10 @@ const readBody = (req: http.IncomingMessage): Promise<string> => new Promise((re
 type Failure = Extract<NotificationsProviderResult, { ok: false }>;
 
 const failure = (message: string, status?: number): Failure => {
-  const error: Failure['error'] = { message };
+  // OpenChamber rejects an error message over this cap as "not a notifications
+  // answer", which hides the real failure, so every message is bounded here, at
+  // the one place a failure is built, including the relayed exception text.
+  const error: Failure['error'] = { message: message.slice(0, NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX) || 'Unexpected failure' };
   if (status !== undefined) error.status = status;
   return { ok: false, error };
 };

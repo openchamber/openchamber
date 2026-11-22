@@ -17,6 +17,12 @@ This module owns OpenChamber's settings persistence: the instance and profile fi
 
 ## Decisions
 
+### Why settings preserve the transcription prompt as typed
+
+`settings-dictation.ts` keeps `sttPrompt` untrimmed because the client applies
+the save response to the field as the user types. Dictation trims it when
+starting a transcription.
+
 ### Why request values and sanitized settings have separate types
 
 `settings-helpers.ts` keeps unchecked settings fields schema-derived and unknown;
@@ -43,6 +49,23 @@ the schema. Its output includes undefined and keeps object fields optional;
 it does not claim an optional inner schema or an `unwrap` result the runtime
 does not provide.
 
+### Why persistence readers keep unchecked field values
+
+Instance reads accept every non-null object, including arrays. Preference reads
+reject arrays as containers, check the version and entry layout, and leave each
+stored value unchecked. Both readers therefore use the schema-derived
+`SettingsDocument` fields. A successful file read does not establish sanitized
+projects, tunnel presets, notification text or permission modes.
+
+Property guards preserve primitive boxing where legacy code reads optional
+properties. Null project entries and non-list tunnel presets still fail during
+queued persistence. Array checks and own-property checks remain at dictionary
+and file boundaries, including token string checks that reject inherited object
+members. Internal migration inputs and sanitized project paths no longer need
+object or string rechecks. Filesystem error-code guards retain the existing
+object acceptance rule. Temporary-file cleanup and an invalid legacy directory
+remain best-effort operations.
+
 ### Why orphan recovery runs once and not on every settings read
 
 Unmatched orphan files remain on disk, so repeating the scan adds filesystem work without new evidence. The process remembers the first attempt, including before its first await, to prevent concurrent and frequent settings reads from repeating it.
@@ -64,6 +87,13 @@ Validation probes every project's filesystem path. Theme and window-state saves 
   - `readSettingsFromDiskMigrated()`
   - `writeSettingsToDisk(settings)`
   - `persistSettings(changes)`
+  - `updateSettingsFromDisk(mutate)`: read-modify-write for a server-side feature
+    writer that owns one field, such as the relay config or the VAPID keys. The
+    mutation receives the current document inside the same write queue as
+    `persistSettings`, so a feature write and a user save cannot revert each
+    other. A mutation that returns the document it received writes nothing.
+    Writing a whole document with `writeSettingsToDisk` outside that
+    queue can overwrite a concurrent save.
   - `registerSessionProject(resolveProject)`: resolves one project against the
     latest registry inside the settings write queue and appends only if absent.
     It preserves unrelated keys and navigation pointers, writes only the instance

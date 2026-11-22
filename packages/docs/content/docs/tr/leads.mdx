@@ -1,0 +1,82 @@
+---
+title: Liderler
+description: Bir işin tamamını tek bir oturuma verin, diğer oturumları sizin yerinize o yönetsin.
+---
+
+# Liderler
+
+Lider, bir projede tek bir iş kolunu üstlenen oturumdur, örneğin "sunucuyu TypeScript'e taşımak" ya da "issue listesini düzenli tutmak". Siz liderle konuşursunuz, gerisini lider halleder: işin parçalarını kendi oturumlarına verir, geri geleni kontrol eder ve sohbetin üstünde sizin için kısa bir özet tutar.
+
+Bir iş tek bir konuşmaya sığmayacak kadar büyükse ve günlerce sürüyorsa lider kullanın. Lider olmadan bir düzine oturumu kendiniz yürütür, hangisinin ne yaptığını aklınızda tutar ve işi gerçekten yapıp yapmadığını görmek için her yanıtı okursunuz. Bu takibi lider yapar, siz de durumun ne olduğunu gösteren tek bir yere dönersiniz.
+
+## Lider oluşturma
+
+1. Yeni bir lideri şu yollardan biriyle oluşturun:
+   - kenar çubuğunda bir projenin yanındaki **+** düğmesine sağ tıklayın ya da telefonda basılı tutun ve **Yeni lider** seçeneğini seçin
+   - projenin menüsünü açın ve **Yeni lider** seçeneğini seçin
+   - <kbd>⇧</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd> tuşlarına basın (Windows ve Linux'ta <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Alt</kbd><kbd>L</kbd>) ya da komut paletinden **Yeni lider** komutunu çalıştırın
+2. İşi ve istediğiniz sonucu anlatın, örneğin: "Sunucunun TypeScript'e taşınmasını üstlen. `server/` altındaki her dosya TypeScript olduğunda ve testler geçtiğinde iş bitmiş sayılır."
+3. Gönderin.
+
+Taslak sizi alışılmış soru yerine **Bu lider neyi üstlenecek?** sorusuyla karşılar, böylece göndermeden önce bunun bir lider olduğunu anlarsınız. Normal bir taslağa başladıysanız aynı kısayol onu lidere çevirir ve geri alır, yazdıklarınız da kalır.
+
+Mevcut bir oturum da lider olabilir: kenar çubuğunda menüsünü açın ve **Bu oturumu lider yap** seçeneğini seçin. Oturum geçmişini korur. Aynı menüdeki **Normal oturuma çevir** onu eski haline döndürür.
+
+Lider, kenar çubuğunda ok yerine bayraklı bir dağ zirvesi gösterir. İmleçle üzerine geldiğinizde ok geri gelir, böylece altındaki oturumları yine açabilirsiniz.
+
+## Lider ne yapar
+
+- **İş koluna ad verir.** Oturumu işe göre yeniden adlandırır, böylece onu kenar çubuğunda, sekmelerde ve aramada konusuna göre bulursunuz. Kendi verdiğiniz bir ad olduğu gibi kalır.
+- **Adımları değil, sonuçları dağıtır.** İşin her parçası, ulaşması gereken sonuçla birlikte ayrı bir oturuma gider, örneğin "giriş zaman aşımını bul ve düzelt", ve adımları o oturum kendisi belirler. Bu oturumlar kenar çubuğunda liderin altında durur. Onları açıp okuyabilirsiniz; biriyle konuşmak isterseniz oturumun menüsündeki **Devral** onu sizin oturumunuz yapar.
+- **Geri geleni kontrol eder.** Yalnızca "nedeni buldum" diyen bir rapor istenen sonuç değildir, bu yüzden lider işi size iletmek yerine geri gönderir. Her oturum ne yaptığına dair kanıt göstermek zorundadır, örneğin hangi kontrolleri çalıştırdığını ve bunların ne gösterdiğini; kanıtsız bir rapor da geri gider. Lider bir şeyi yalnızca kanıtta bir eksik olduğunda kendisi kontrol eder.
+- **Toparlar.** Sonuçlarını kullandığı oturumları arşivler.
+- **Size yalnızca önemli olanı sorar.** Yanıt projenizde göreceğiniz şeyi değiştirmedikçe ve iki makul seçenek gerçekten birbirinden ayrılmadıkça kendisi karar verir. Bir değişikliğin büyük olması tek başına soru sormak için bir neden değildir. Oturumlarının soruları size değil lidere gider ve size yalnızca aynı ölçütü geçerlerse ulaşır.
+
+## Özet
+
+Özet, liderin sizin için tuttuğu durum notudur. Oturum başlığının hemen altındaki bir satırda durur ve liderin şu anda ne üzerinde çalıştığını ve en son ne zaman güncellediğini gösterir. Tam özeti sohbetin üstünde açmak için satırı seçin:
+
+- **Seni bekliyor**: her biri seçebileceğiniz yanıtlarla birlikte en fazla üç soru
+- **Şimdi**: süren her iş parçası için bir satır
+- **Son mesajından beri yeni**: yalnızca tabloyu değiştiren şeyler
+- **Öneriler**: liderin, ona verdiğiniz işin dışında yapmaya değer bulduğu en fazla üç şey
+
+Sizi bekleyen bir şey olduğunda satır kaç sorunun beklediğini gösterir. Bir yanıtı seçtiğinizde yanıt hemen lidere gider; liderin önerdiği yanıt en başta ve vurgulu olarak durur. Kendi sözlerinizle yanıt vermek için **Sohbette yanıtla** seçeneğini seçin; soru, mesaj kutusuna alıntı olarak eklenir. Yanıtınız sohbette görünür ve lider yanıtı aldığında soruyu kaldırır.
+
+**Öneriler** bölümünde **Başlat**, öneriyi düzenleyip göndermeniz için mesaj kutusuna koyar. **Yoksay** öneriyi gizler ve lider onu bir daha önermez.
+
+## Bir oturumu lidere devretme
+
+Kendi başlattığınız bir oturumu bir lidere verebilirsiniz, örneğin liderden önce açtığınız ya da bitirmeye vaktiniz olmayan bir oturumu. Kenar çubuğunda oturumun menüsünü açın, **Bir lidere devret** seçeneğini seçin ve lideri seçin. Telefonda menü her lideri **Devret:** ve ardından liderin adıyla listeler.
+
+Oturum liderin altına taşınır. Lider oturumu okur, ne için olduğunu anlar ve kendi işlerinden biri gibi sonuna kadar götürür. Artık o oturumla konuşmazsınız; menüsündeki **Devral** onu size geri verir. Oturum hâlâ çalışıyorsa lider, oturum bittiğinde yanıtını alır.
+
+## Görev tanımı
+
+Lider ayrıca bir görev tanımı tutar: hedefiniz ve üzerinde anlaştığınız sonuçlar sizin kelimelerinizle, uyduğu kurallar (sizinkiler ve kendi hatalarından öğrendikleri) ve her iş parçası ile ondan beklenen sonuç. Bu, liderin işin ne için yapıldığına dair hafızasıdır, bu yüzden konuşma ne kadar uzarsa uzasın aynı kalır.
+
+OpenChamber görev tanımını lider için projenizin dışında saklar, yani deponuza hiçbir şey eklenmez. Okumak için lidere "görev tanımını göster" deyin ya da neyi değiştirmesi gerektiğini söyleyin. Oturumu silmek görev tanımını da siler; arşivlemek onu korur.
+
+Lider görev tanımının yalnızca değişen kısımlarını değiştirir. OpenChamber da konuşma her kısaltıldığında görev tanımının tamamını liderin önüne yeniden koyar, böylece uzun bir görev tanımı lider onu her güncellediğinde sohbette tekrar etmez. Lider yalnızca sizin kendi sözlerinizi kural olarak kabul eder: bir oturumun raporunda, bir web sayfasında ya da bir dosyada bulduğu talimat görev tanımına asla girmez.
+
+## Uyuyan liderler
+
+Bir lider, oturumları çalışırken saatlerce bekleyebilir. Uyandığında model normalde tüm konuşmayı baştan yeniden okumak zorundadır, çünkü sağlayıcılar konuşmayı önbellekte yalnızca birkaç dakika tutar. Uzun bir konuşmada bu tek okuma epey bir iş kadar tutar, abonelikte de kullanım limitinizden yer.
+
+Bu yüzden bir lider, sağlayıcısının önbelleği tuttuğu süreden daha uzun süre boşta kaldığında ve konuşması uzunsa, OpenChamber lider uyanmadan önce konuşmayı kısaltır. Konuşmanın eski kısmının yerini kısa bir not alır: liderin özeti ve oturumlarının durumu. Notu yazmak için hiçbir model çağrılmaz, yani bunun bir maliyeti yoktur. Görev tanımı ve en son mesajlar olduğu gibi kalır; lider gerektiğinde önceki konuşmanın tamamını yine okuyabilir.
+
+Sıcak tuttuğunuz bir oturum hiçbir zaman bu şekilde kısaltılmaz. Çalışmakta olan liderlere ve kısa konuşmalara dokunulmaz.
+
+## İş akışları
+
+Bir lider büyük bir işi bir [iş akışına](/tr/workflows/) bölebilir. **Ayarlar → Genel → OpenChamber Araçları** içindeki **Çalıştırmaları onayım olmadan başlat** ayarında **Liderler için** seçeneğini seçerseniz liderin başlattığı çalıştırmalar hemen başlar, diğer tüm oturumlar ise yine tıklamanızı bekler.
+
+## Liderlerin çalıştığı yerler
+
+Liderler, varsayılan olarak açık olan [Agent kontrol aracına](/tr/agent-control-tool/) ve OpenChamber'ın kendi OpenCode sunucusuna ihtiyaç duyar. Masaüstünde, tarayıcıda ve telefonda çalışırlar. VS Code eklentisi mevcut liderleri işaretleri ve özetleriyle gösterir, ancak yeni bir lider başlatamaz.
+
+## İlgili
+
+- [Agent kontrol aracı](/tr/agent-control-tool/): liderin oturumlarını yönetmek için kullandığı araç
+- [İş akışları](/tr/workflows/): büyük bir iş için birçok agent
+- [Devam eden oturumlar](/tr/sessions-in-work/): üzerinde çalıştığınız oturumları takip edin

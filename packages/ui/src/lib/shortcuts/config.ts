@@ -135,6 +135,12 @@ const SHORTCUT_GROUPS = {
         'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label',
     },
     {
+      id: 'new_lead',
+      defaultBinding: 'mod+shift+alt+l',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.new_lead.label',
+    },
+    {
       id: 'new_mini_chat',
       defaultBinding: 'mod+alt+n',
       customizable: true,
@@ -447,6 +453,12 @@ const SHORTCUT_GROUPS = {
       defaultBinding: 'mod+k c',
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_theme.label',
+    },
+    {
+      id: 'toggle_reasoning_traces',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label',
     },
     {
       id: 'open_archive',

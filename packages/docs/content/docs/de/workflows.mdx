@@ -13,7 +13,7 @@ Workflows passen zu Arbeit mit vielen ähnlichen, voneinander unabhängigen Teil
 
 Das Workflow-Werkzeug ist standardmäßig aus. Öffne **Einstellungen → Allgemein → OpenChamber-Werkzeuge** und schalte **Workflow-Werkzeug** ein. Laufende Sitzungen erhalten es beim nächsten Zug. Schaltest du es wieder aus, verschwinden das Werkzeug und die Anweisungen dazu aus jeder Sitzung, und das Workflows-Panel wird ausgeblendet. Vorhandene Läufe sind wieder da, sobald du es einschaltest.
 
-Workflows brauchen den eigenen OpenCode-Server von OpenChamber. Sie sind nicht verfügbar, wenn OpenChamber über `OPENCODE_HOST` oder skip-start mit einem externen OpenCode-Server verbunden ist, und nicht in der VS-Code-Erweiterung.
+Workflows funktionieren automatisch mit dem verwalteten OpenCode-Server von OpenChamber und auch auf einem lokalen externen oder gemeinsamen OpenCode-Server, sobald du das OpenChamber-Plugin unter **Einstellungen → Allgemein → OpenCode-Server** in deiner globalen OpenCode-Konfiguration registrierst (siehe [OpenCode-Server](/de/opencode-server/#openchamber-werkzeuge-auf-einem-externen-lokalen-server-aktivieren)). Auf einem entfernten OpenCode-Server oder in der VS-Code-Erweiterung sind sie nicht verfügbar.
 
 ## Einen Workflow ausführen
 
@@ -29,9 +29,15 @@ Agenten eines laufenden Workflows können keinen eigenen Workflow starten.
 
 ## Läufe ohne Freigabe starten
 
-Schalte unter **Workflow-Werkzeug** die Option **Läufe ohne meine Freigabe starten** ein, damit ein Lauf, den der Agent startet, sofort beginnt. Seine Karte zeigt ihn als laufend, ohne die Schaltfläche **Workflow ausführen**, und du kannst ihn weiterhin mit **Stoppen** beenden. Das ist für Arbeit gedacht, die ihr abgesprochen habt und die du dann allein lässt: Du bittest den Agenten zum Beispiel, in einem kleinen Pilotlauf einige Modelle auszuprobieren und die ganze Aufgabe mit dem besten auszuführen, und er kann diesen Lauf starten, während du weg bist.
+Unter **Workflow-Werkzeug** legt **Läufe ohne meine Freigabe starten** fest, ob ein Lauf, den der Agent startet, auf deinen Klick wartet:
 
-Der Agent schlägt den Plan und die Modelle weiterhin im Chat vor, bevor er einen Lauf startet. Die Einstellung erspart nur den Klick. Der Server liest sie bei jedem Lauf, also wartet bei deaktiviertem Kästchen jeder Lauf wieder auf dich. Die Grenzen unten bleiben gleich.
+- **Nein**: jeder Lauf wartet, bis du **Workflow ausführen** wählst
+- **Für Leads**: Läufe, die ein [Lead](/de/leads/) startet, beginnen sofort, jede andere Sitzung wartet weiterhin
+- **Immer**: jeder Lauf beginnt sofort
+
+Ein Lauf, der sofort beginnt, erscheint auf seiner Karte als laufend, ohne die Schaltfläche **Workflow ausführen**, und du kannst ihn weiterhin mit **Stoppen** beenden. Das ist für Arbeit gedacht, die ihr abgesprochen habt und die du dann allein lässt: Du bittest den Agenten zum Beispiel, in einem kleinen Pilotlauf einige Modelle auszuprobieren und die ganze Aufgabe mit dem besten auszuführen, und er kann diesen Lauf starten, während du weg bist.
+
+Eine normale Sitzung schlägt den Plan und die Modelle weiterhin im Chat vor, bevor sie einen Lauf startet. Die Einstellung erspart nur den Klick. Ein Lead führt seine Arbeit selbstständig, deshalb kann er mit **Für Leads** einen Lauf starten, ohne vorher zu fragen. Der Server liest die Einstellung bei jedem Lauf, wenn du also zurück auf **Nein** stellst, wartet jeder Lauf wieder auf dich. Die Grenzen unten bleiben gleich.
 
 ## Modelle und Kosten
 

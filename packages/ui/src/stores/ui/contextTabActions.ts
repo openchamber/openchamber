@@ -1,8 +1,8 @@
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from '../useFilesViewTabsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
-import { getZoneView, resolveZoneActiveTabId, withZoneView, zoneOfMode } from '@/lib/workspace/zones';
+import { forgetBrowserTabOpenedWithAddress, noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
+import { CONTEXT_ZONES, getZoneView, resolveZoneActiveTab, resolveZoneActiveTabId, withZoneView, zoneOfMode } from '@/lib/workspace/zones';
 import type { ContextPanelTab, ContextPanelDirectoryState, UIStore, UIStoreSlice } from './types';
 import {
   normalizeDirectoryPath,
@@ -21,6 +21,9 @@ import {
   setContextPanelTabTargetPath,
   moveContextPanelFileTabs,
   clampContextPanelRoots,
+  pushContextZoneReturnEntry,
+  clearContextZoneReturnStack,
+  pruneContextZoneReturnStacks,
 } from './contextPanelState';
 
 let browserTabSequence = 0;
@@ -122,7 +125,7 @@ export const createContextTabActions: UIStoreSlice<
           stagedDiff: mostRecent.stagedDiff,
           diffScope: mostRecent.diffScope,
           targetDirectory: null,
-        });
+        }, { recordReturn: false });
         return;
       }
       state.setActiveContextPanelTab(normalizedDirectory, mostRecent.id);
@@ -133,7 +136,7 @@ export const createContextTabActions: UIStoreSlice<
       return;
     }
 
-    state.openContextPanelTab(normalizedDirectory, { mode });
+    state.openContextPanelTab(normalizedDirectory, { mode }, { recordReturn: false });
   },
 
   openContextPanelTab: (directory, tab, options) => {
@@ -151,18 +154,30 @@ export const createContextTabActions: UIStoreSlice<
         }
       : tab;
 
-    const showsFile = nextTab.mode === 'file' && Boolean(nextTab.targetPath) && options?.reveal !== false;
+    const reveals = options?.reveal !== false;
+    const showsFile = nextTab.mode === 'file' && Boolean(nextTab.targetPath) && reveals;
 
     set((state) => {
+      const placement = state.contextSurfaceZones;
       const prev = state.contextPanelByDirectory[normalizedDirectory];
-      const current = touchContextPanelState(prev, state.contextSurfaceZones);
+      const current = touchContextPanelState(prev, placement);
+      const zone = zoneOfMode(placement, nextTab.mode);
+      const prevView = getZoneView(current, zone);
+      const prevActiveTab = prevView.isOpen ? resolveZoneActiveTab(current, placement, zone) : null;
+      const contextZoneReturnStack = !reveals
+        ? state.contextZoneReturnStack
+        : options?.recordReturn === false
+          ? clearContextZoneReturnStack(state.contextZoneReturnStack, normalizedDirectory, zone)
+          : pushContextZoneReturnEntry(state.contextZoneReturnStack, normalizedDirectory, zone, prevActiveTab, nextTab.mode);
       const byDirectory = {
         ...state.contextPanelByDirectory,
-        [normalizedDirectory]: upsertContextPanelTab(current, nextTab, state.contextSurfaceZones, options),
+        [normalizedDirectory]: upsertContextPanelTab(current, nextTab, placement, options),
       };
 
+      const clamped = clampContextPanelRoots(byDirectory, 20);
       return {
-        contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20),
+        contextPanelByDirectory: clamped,
+        contextZoneReturnStack: pruneContextZoneReturnStacks(contextZoneReturnStack, clamped),
         contextEditorVisible: showsFile || state.contextEditorVisible,
       };
     });
@@ -180,6 +195,16 @@ export const createContextTabActions: UIStoreSlice<
     set((state) => {
       const placement = state.contextSurfaceZones;
       const current = touchContextPanelState(state.contextPanelByDirectory[normalizedDirectory], placement);
+      const zone = zoneOfMode(placement, 'pr');
+      const prevView = getZoneView(current, zone);
+      const prevActiveTab = prevView.isOpen ? resolveZoneActiveTab(current, placement, zone) : null;
+      const contextZoneReturnStack = pushContextZoneReturnEntry(
+        state.contextZoneReturnStack,
+        normalizedDirectory,
+        zone,
+        prevActiveTab,
+        'pr',
+      );
       const withBranch = current.tabs.some(isTrackerBranchTab)
         ? current
         : upsertContextPanelTab(current, { mode: 'pr' }, placement, { reveal: false });
@@ -193,7 +218,11 @@ export const createContextTabActions: UIStoreSlice<
           targetDirectory: targetDirectory === normalizedDirectory ? null : targetDirectory,
         }, placement),
       };
-      return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+      const clamped = clampContextPanelRoots(byDirectory, 20);
+      return {
+        contextPanelByDirectory: clamped,
+        contextZoneReturnStack: pruneContextZoneReturnStacks(contextZoneReturnStack, clamped),
+      };
     });
     return buildContextPanelTabID('pr', dedupeKey);
   },
@@ -372,10 +401,16 @@ export const createContextTabActions: UIStoreSlice<
       const showsFile = targetTab.mode === 'file' && Boolean(targetTab.targetPath);
       const zone = zoneOfMode(state.contextSurfaceZones, targetTab.mode);
       const view = getZoneView(current, zone);
+      const prevActiveTab = view.isOpen ? resolveZoneActiveTab(current, state.contextSurfaceZones, zone) : null;
+      const sameModeSwitch = view.isOpen && prevActiveTab?.mode === targetTab.mode;
 
       if (view.activeTabId === normalizedTabID && view.isOpen) {
         return showsFile ? { contextEditorVisible: true } : state;
       }
+
+      const contextZoneReturnStack = sameModeSwitch
+        ? state.contextZoneReturnStack
+        : clearContextZoneReturnStack(state.contextZoneReturnStack, normalizedDirectory, zone);
 
       const byDirectory = {
         ...state.contextPanelByDirectory,
@@ -388,8 +423,10 @@ export const createContextTabActions: UIStoreSlice<
         }, zone, { isOpen: true, activeTabId: normalizedTabID }),
       };
 
+      const clamped = clampContextPanelRoots(byDirectory, 20);
       return {
-        contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20),
+        contextPanelByDirectory: clamped,
+        contextZoneReturnStack: pruneContextZoneReturnStacks(contextZoneReturnStack, clamped),
         contextEditorVisible: showsFile || state.contextEditorVisible,
       };
     });
@@ -486,6 +523,14 @@ export const createContextTabActions: UIStoreSlice<
       }
 
       const next = closeContextPanelTabs(current, normalizedTabIds, placement);
+      let contextZoneReturnStack = state.contextZoneReturnStack;
+
+      for (const zone of CONTEXT_ZONES) {
+        if (getZoneView(current, zone).isOpen && !getZoneView(next, zone).isOpen) {
+          contextZoneReturnStack = clearContextZoneReturnStack(contextZoneReturnStack, normalizedDirectory, zone);
+        }
+      }
+
       const fileView = getZoneView(next, zoneOfMode(placement, 'file'));
       const activeTab = next.tabs.find((tab) => tab.id === fileView.activeTabId);
       const returnedToTree = fileView.isOpen && activeTab?.mode === 'file' && !activeTab.targetPath;
@@ -494,13 +539,16 @@ export const createContextTabActions: UIStoreSlice<
         [normalizedDirectory]: next,
       };
 
+      const clamped = clampContextPanelRoots(byDirectory, 20);
       return {
-        contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20),
+        contextPanelByDirectory: clamped,
+        contextZoneReturnStack: pruneContextZoneReturnStacks(contextZoneReturnStack, clamped),
         contextEditorTreeVisible: returnedToTree || state.contextEditorTreeVisible,
       };
     });
 
     for (const tab of closedTabs) {
+      if (tab.mode === 'browser') forgetBrowserTabOpenedWithAddress(normalizedDirectory, tab.id);
       if (tab.mode === 'file' && tab.targetPath) {
         useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, tab.targetPath);
       }

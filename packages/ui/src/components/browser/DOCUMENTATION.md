@@ -27,7 +27,7 @@ Cross-origin iframe pages are opaque to the app. Inspection, console and page an
 
 ### Why the webview mounts with its resolved source
 
-A background view can lose an imperative initial navigation or ignore a later source mutation. Tunnel resolution completes before the element mounts; a failed resolution supplies a blank source with an explicit error so the panel can finish mounting without loading the wrong machine's page.
+A background view can lose an imperative initial navigation or ignore a later source mutation. Tunnel resolution completes before the element mounts; a failed resolution supplies a blank source with an explicit error so the panel can finish mounting without loading the wrong machine's page. A tab opened from a page's link is the one exception: `src` cannot carry a referrer policy, so it mounts at `about:blank` and loads its address with the page's referrer once the guest is ready ([why](../../lib/browser/DOCUMENTATION.md#why-a-tab-opened-from-a-link-loads-after-dom-ready)).
 
 ### Why opening waits for both loading and rendering
 
@@ -44,6 +44,12 @@ Capture and real input require 2 drawn frames. A timely interval with no frames 
 ### Why agent input preserves user focus
 
 Focus emulation keeps page pickers and clipboard operations working while the user types in the app. If emulation is unavailable, real focus is held only during input and released before navigation waits; focus the user already placed in the page, or deliberately moves during the action, remains theirs.
+
+`browser.type` and `browser.press` are the exception: they always hold real focus on the page, in a hidden tab too, because Chromium sends keyboard input to the focused widget even under emulation, so emulated focus let typed text land in the chat composer. The hold starts once the input stage is drawn and ends when the action finishes or its deadline passes, then focus returns to where the user had it when the hold started; keys the user types meanwhile go to the page. A window has one keyboard focus, so keyboard actions in different tabs of one window take turns: the next one takes focus only after the previous one released it, and an action whose deadline passed while it waited never takes it. The rejected alternative is keeping emulation for keyboard actions, which reports success while the text goes elsewhere. This stays until the browser moves to its own `WebContentsView`.
+
+### Why keyboard input carries one deadline
+
+The keyboard action's drawn stage owns the deadline (`usePageDrawn`) and passes it explicitly to the page driver, so the driver's own dialog check cannot open a fresh one; the driver refuses to focus a target once it passed, and every step of a keyboard action (the `Delete`, the inserted text, the optional `Enter`) carries that same time, and the shell refuses any key event past it, a key release included. A timed-out action keeps running in the background, and a later action may have focused the page again, so a per-step deadline or a focus check alone would let its late input type into the next action or the user's draft.
 
 ### Why the focus guard extends beyond the action
 

@@ -516,7 +516,7 @@ describe('managed agent tool runtime', () => {
       'workflow.check', 'workflow.run', 'workflow.status', 'workflow.result', 'workflow.stop', 'workflow.resume', 'workflow.save', 'workflow.list',
     ]);
     const parameters = tools.openchamber_workflow.input.properties.parameters.properties;
-    expect(parameters.script.description).toContain('agent(prompt, { label, phase, agent, model, schema })');
+    expect(parameters.script.description).toContain('agent(prompt, { id, forkFrom, label, phase, agent, model, schema })');
     expect(Object.keys(parameters)).toEqual(['script', 'name', 'args', 'runId', 'agent', 'overwrite']);
     // The answer tool comes along, direct; the managed config denies it outside workflow agents.
     expect(tools.openchamber_workflow_answer.options).toEqual({ codemode: false });
@@ -793,7 +793,7 @@ describe('managed agent tool runtime', () => {
 
     expect(Object.keys(tools)).toEqual(['openchamber_secret']);
     expect(Object.keys(tools.openchamber_secret.input.properties.parameters.properties).sort())
-      .toEqual(['args', 'inputs', 'label', 'placeholder', 'program', 'reason', 'timeoutMs']);
+      .toEqual(['args', 'inputs', 'label', 'placeholder', 'program', 'reason', 'saved', 'timeoutMs']);
     expect(tools.openchamber_secret.options).toEqual({ codemode: false });
     expect(tools.openchamber_secret.description.length).toBeLessThanOrEqual(2048);
     // A chat message ends the wait, like a page's.
@@ -852,6 +852,7 @@ describe('managed agent tool runtime', () => {
   it.each([
     ['secret.request', { action: 'request', label: 'Token', reason: 'Deploy' }],
     ['secret.run', { action: 'run', program: 'wrangler', args: ['deploy'], reason: 'Deploy', inputs: [{ env: 'TOKEN', label: 'Token' }] }],
+    ['secret.forget', { action: 'forget', saved: 'true' }],
   ])('keeps a %s card waiting through an agent or queued prompt, and ends it for the user', async (action, input) => {
     const { runtime, dataDir } = await createRuntime();
     const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeSecret: true });
@@ -1264,6 +1265,7 @@ describe('managed agent tool runtime', () => {
     ['browser.type', 'openchamber_web', { selector: '#q', value: 'x', submit: 'yes' }, 'submit'],
     ['knowledge.save', 'openchamber_knowledge', { kind: 'todo', id: 't1', completed: 'false' }, 'completed'],
     ['notify.send', 'openchamber_notify', { title: 't', showWhenFocused: 1 }, 'showWhenFocused'],
+    ['secret.forget', 'openchamber_secret', { saved: 'yes' }, 'saved'],
   ])('refuses a %s whose boolean %s field is not a boolean', async (action, tool, input, field) => {
     const { runtime, executeAction } = await createRuntime();
     const result = await runtime.execute({ input: { action, ...input }, sessionID: 'ses_1', tool });

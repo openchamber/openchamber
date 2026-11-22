@@ -17,6 +17,7 @@ const createPersistedScheduleService = async (schedule) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
   let failRename = false;
   let syncsUntilFailure = 0;
+  let syncWritesState = false;
   const config = createProjectConfigRuntime({
     fsPromises: {
       ...fs,
@@ -50,6 +51,9 @@ const createPersistedScheduleService = async (schedule) => {
     scheduledTasksRuntime: {
       syncProject: async (id) => {
         if (syncsUntilFailure > 0 && --syncsUntilFailure === 0) throw new Error('fixture scheduler sync failed');
+        if (syncWritesState) {
+          for (const { id: taskId } of await config.listScheduledTasks(id)) await config.updateScheduledTaskState(id, taskId, { updatedAt: Date.now() });
+        }
         return config.listScheduledTasks(id);
       },
     },
@@ -59,10 +63,12 @@ const createPersistedScheduleService = async (schedule) => {
   return {
     upsert, task, history, unrelated,
     update: (input) => service.execute('schedule.update', { projectId: 'project-1', taskId: task.id, ...input }),
+    create: (input) => service.execute('schedule.create', { projectId: 'project-1', daily: '09:00', model: 'provider/model', ...input }),
     bytes: () => fs.readFile(file, 'utf8'),
     read: async () => JSON.parse(await fs.readFile(file, 'utf8')),
     failWrite: (value) => { failRename = value; },
     failPostSaveSync: () => { syncsUntilFailure = 2; },
+    syncWritesState: () => { syncWritesState = true; },
     cleanup: () => fs.rm(root, { recursive: true, force: true }),
   };
 };
@@ -133,6 +139,72 @@ describe('persisted schedule.update patches', () => {
       expect(await fixture.bytes()).toBe(before);
       await fixture.update({ name: 'Recovered' });
       expect((await fixture.read()).scheduledTasks[0].name).toBe('Recovered');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    ['prompt', 20_000, 'execution.prompt is invalid: at most 20000 characters'],
+    ['name', 80, 'task.name is invalid: at most 80 characters'],
+  ])('refuses a %s over the limit on update and create, and saves one at the limit whole', async (field, limit, message) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      fixture.syncWritesState();
+      const withoutState = ({ scheduledTasks, ...rest }) => ({ ...rest, scheduledTasks: scheduledTasks.map(({ state: _state, ...task }) => task) });
+      const before = await fixture.read();
+      await expect(fixture.update({ [field]: 'x'.repeat(limit + 1) })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      await expect(fixture.create({ name: 'New', prompt: 'Run', [field]: 'x'.repeat(limit + 1) })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      const after = await fixture.read();
+      expect(withoutState(after)).toEqual(withoutState(before));
+      expect(after.scheduledTasks[0].state.updatedAt).not.toBe(before.scheduledTasks[0].state.updatedAt);
+
+      await fixture.update({ [field]: 'x'.repeat(limit) });
+      const saved = (await fixture.read()).scheduledTasks[0];
+      expect(field === 'name' ? saved.name : saved.execution.prompt).toBe('x'.repeat(limit));
+      await fixture.create({ name: 'New', prompt: 'Run', [field]: 'y'.repeat(limit) });
+      expect((await fixture.read()).scheduledTasks).toHaveLength(3);
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('refuses a source branch over 200 characters as a client error, not a server error', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update({ runInWorktree: true, baseBranch: 'b'.repeat(201) }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('baseBranch is invalid: at most 200 characters, got 201') });
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ runInWorktree: true, baseBranch: 'b'.repeat(200) });
+      expect((await fixture.read()).scheduledTasks[0].baseBranch).toBe('b'.repeat(200));
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('refuses a source branch with a space or control character as a client error', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      for (const baseBranch of ['feature/with space', 'feature/tab\there']) {
+        await expect(fixture.update({ runInWorktree: true, baseBranch }))
+          .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('baseBranch is invalid: a branch name cannot contain spaces or control characters') });
+      }
+      expect(await fixture.bytes()).toBe(before);
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    ['kind', { kind: 'hourly' }, 'schedule.kind is invalid'],
+    ['timezone', { kind: 'daily', times: ['09:00'], timezone: 'Mars/Base' }, 'schedule.timezone is invalid'],
+    ['times entry', { kind: 'daily', times: ['9am'] }, 'schedule.times is invalid'],
+    ['daily without times', { kind: 'daily', times: [] }, 'schedule.times is invalid'],
+    ['weekly without times', { kind: 'weekly', weekdays: [1] }, 'schedule.times is invalid'],
+    ['weekdays', { kind: 'weekly', times: ['09:00'], weekdays: [7] }, 'schedule.weekdays is invalid'],
+    ['once date', { kind: 'once', date: '2099-13-40', time: '09:00' }, 'schedule.date is invalid'],
+    ['once time', { kind: 'once', date: '2099-05-06', time: '25:00' }, 'schedule.time is invalid'],
+  ])('refuses a bad schedule %s as a client error, not a server error', async (_name, schedule, message) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.upsert('project-1', { ...fixture.task, schedule }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+      expect(await fixture.bytes()).toBe(before);
     } finally { await fixture.cleanup(); }
   });
 
@@ -1011,6 +1083,28 @@ describe('OpenChamber control service', () => {
       expect(client.session.list).toHaveBeenCalledTimes(1);
     });
 
+    it('lists the sessions the caller created with ownWork, with their status, and archives only those', async () => {
+      const archive = vi.fn(async () => ({ archived: [], failedIds: [] }));
+      const { service, client } = createService();
+      const child = (id, parentID) => session(id, { metadata: { openchamber: { kind: 'operator-child', parentID } } });
+      const records = [child('mine', 'ses_lead'), child('theirs', 'ses_other'), session('plain'), session('sub', { parentID: 'ses_lead' })];
+      client.session.active.mockResolvedValue({ mine: { type: 'running' } });
+      client.session.list.mockResolvedValue({ data: records });
+      client.session.get.mockImplementation(async ({ sessionID }) => records.find((record) => record.id === sessionID));
+
+      const result = await service.execute('session.list', { mine: true }, '/repo', { contextSessionId: 'ses_lead' });
+      expect(result.sessions.map(({ id, status }) => [id, status.type])).toEqual([['mine', 'busy']]);
+      await expect(service.execute('session.list', { mine: true }, '/repo')).rejects.toMatchObject({ statusCode: 400 });
+
+      const { service: archiving, client: archiveClient } = createService({ sessionService: { archive } });
+      archiveClient.session.get.mockImplementation(async ({ sessionID }) => records.find((record) => record.id === sessionID));
+      await expect(archiving.execute('session.archive', { sessionId: 'theirs' }, '/repo', { contextSessionId: 'ses_lead' })).rejects.toMatchObject({ statusCode: 403 });
+      await expect(archiving.execute('session.archive', { sessionId: 'plain' }, '/repo', { contextSessionId: 'ses_lead' })).rejects.toMatchObject({ statusCode: 403 });
+      expect(archive).not.toHaveBeenCalled();
+      expect(await archiving.execute('session.archive', { sessionId: 'mine' }, '/repo', { contextSessionId: 'ses_lead' })).toEqual({ sessionId: 'mine', archived: true });
+      expect(archive).toHaveBeenCalledWith({ ids: ['mine'] });
+    });
+
     it('never answers busy with an empty list it could not read', async () => {
       const { service, client } = createService();
       client.session.active.mockRejectedValue(new Error('unavailable'));
@@ -1112,7 +1206,7 @@ describe('OpenChamber control service', () => {
     expect(client.session.list).not.toHaveBeenCalled();
   });
 
-  it('projects only ordered text content from session messages', async () => {
+  it('projects ordered text content, with what the user attached as context, from session messages', async () => {
     const { service, client } = createService();
     client.message.list.mockResolvedValue({ data: [
       {
@@ -1121,6 +1215,9 @@ describe('OpenChamber control service', () => {
       },
       { id: 'msg_user', type: 'user', time: { created: 10 }, text: 'Question' },
       { id: 'msg_tool', type: 'assistant', time: { created: 15 }, content: [{ type: 'tool' }] },
+      { id: 'msg_quote', type: 'synthetic', time: { created: 9 }, text: 'The user selected this fragment:\n> old answer\n\nThe user wrote: why?', metadata: { openchamberContext: { kind: 'chat-quote' } } },
+      { id: 'msg_notice', type: 'synthetic', time: { created: 12 }, text: 'A plugin notice', metadata: { source: 'some-plugin' } },
+      { id: 'msg_choice', type: 'synthetic', time: { created: 25 }, text: 'The user picked MIT', metadata: { openchamberUiBlockAnswer: { block: 'b1' } } },
     ] });
 
     await expect(service.execute('session.messages', {
@@ -1134,10 +1231,22 @@ describe('OpenChamber control service', () => {
       role: 'all',
       sessionStatus: { type: 'idle' },
       messages: [
+        { id: 'msg_quote', role: 'user', createdAt: 9, completedAt: null, model: null, text: 'The user selected this fragment:\n> old answer\n\nThe user wrote: why?', attached: true },
         { id: 'msg_user', role: 'user', createdAt: 10, completedAt: null, model: null, text: 'Question' },
         { id: 'msg_assistant', role: 'assistant', createdAt: 20, completedAt: 30, model: 'openai/gpt-5.4-mini', text: 'First answer' },
+        { id: 'msg_choice', role: 'user', createdAt: 25, completedAt: null, model: null, text: 'The user picked MIT', attached: true },
       ],
     });
+  });
+
+  it('keeps an attachment before the prompt it came with, also when both share a millisecond', async () => {
+    const { service, client } = createService();
+    client.message.list.mockResolvedValue({ data: [
+      { id: 'msg_2_prompt', type: 'user', time: { created: 10 }, text: 'Why is that?' },
+      { id: 'msg_1_quote', type: 'synthetic', time: { created: 10 }, text: 'The user selected this fragment', metadata: { openchamberContext: { kind: 'chat-quote' } } },
+    ] });
+    const { messages } = await service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', last: true });
+    expect(messages.map((message) => message.id)).toEqual(['msg_2_prompt']);
   });
 
   it('follows the message cursor so all: true returns the whole history', async () => {

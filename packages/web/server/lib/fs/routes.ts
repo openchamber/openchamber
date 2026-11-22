@@ -1,5 +1,6 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { canonicalDirectoryPath } from './canonical-path.js';
+import { containedMkdirPath, containedPath, containedRenamePaths, containedWritePath, isPathWithinRoot } from './workspace-target.js';
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
@@ -351,15 +352,6 @@ const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
 
 const gitReadEntryBytes = (key: string, result: CommandResult) =>
   key.length + (result?.stdout?.length || 0) + (result?.stderr?.length || 0);
-
-const isPathWithinRoot = (resolvedPath: string, rootPath: string | null | undefined, path: typeof nodePath, os: FsRouteDependencies['os']) => {
-  const resolvedRoot = path.resolve(rootPath || os.homedir());
-  const relative = path.relative(resolvedRoot, resolvedPath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    return false;
-  }
-  return true;
-};
 
 const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, managedRoots }: WorkspacePathOptions & { managedRoots: string[] }): WorkspacePathResult => {
   const normalized = normalizeDirectoryPath(targetPath);
@@ -895,30 +887,31 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(400).json({ error: 'Path is required' });
       }
 
-      let resolvedPath = '';
       if (allowOutsideWorkspace) {
         console.warn('Rejected outside-workspace mkdir without trusted directory grant');
         return res.status(403).json({ error: 'Outside workspace directory creation requires a grant' });
-      } else {
-        const resolved = await resolveWorkspacePathFromContext({
-          fsPromises,
-          req,
-          targetPath: dirPath,
-          resolveProjectDirectory,
-          path,
-          os,
-          normalizeDirectoryPath,
-          managedRoots,
-          chatsRoots,
-        });
-        if (!resolved.ok) {
-          return res.status(400).json({ error: resolved.error });
-        }
-        resolvedPath = resolved.resolved;
+      }
+      const resolved = await resolveWorkspacePathFromContext({
+        fsPromises,
+        req,
+        targetPath: dirPath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        managedRoots,
+        chatsRoots,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      const mkdirPath = await containedMkdirPath(resolved, { fsPromises, path, os });
+      if (!mkdirPath) {
+        return res.status(403).json({ error: 'Access denied' });
       }
 
-      await fsPromises.mkdir(resolvedPath, { recursive: true });
-      return res.json({ success: true, path: resolvedPath });
+      await fsPromises.mkdir(mkdirPath, { recursive: true });
+      return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       if (isOsPermissionError(error)) {
         return sendOsPermissionDenied(res, 'Access denied');
@@ -1564,14 +1557,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(400).json({ error: resolved.error });
       }
 
-      const writePath = await fsPromises.realpath(resolved.resolved).catch((error) => {
-        if (isErrorObject(error) && error.code === 'ENOENT') {
-          return resolved.resolved;
-        }
-        throw error;
-      });
-      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
-      if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
+      const writePath = await containedWritePath(resolved, { fsPromises, path, os });
+      if (!writePath) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -1748,7 +1735,12 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.rm(resolved.resolved, { recursive: true, force: true });
+      const deletePath = await containedPath(resolved, { fsPromises, path, os });
+      if (!deletePath) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      await fsPromises.rm(deletePath, { recursive: true, force: true });
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
@@ -1807,6 +1799,11 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(400).json({ error: 'Source and destination must share the same workspace root' });
       }
 
+      const renamePaths = await containedRenamePaths(resolvedOld, resolvedNew, { fsPromises, path, os });
+      if (!renamePaths) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
       if (
         resolvedOld.resolved !== resolvedNew.resolved
         && isPathWithinRoot(resolvedNew.resolved, resolvedOld.resolved, path, os)
@@ -1815,8 +1812,8 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
       }
 
       const [sourceStats, destinationStats] = await Promise.all([
-        fsPromises.lstat(resolvedOld.resolved),
-        fsPromises.lstat(resolvedNew.resolved).catch((error) => {
+        fsPromises.lstat(renamePaths.sourcePath),
+        fsPromises.lstat(renamePaths.destinationPath).catch((error) => {
           if (errorFields(error)?.code === 'ENOENT') return null;
           throw error;
         }),
@@ -1825,7 +1822,7 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
         return res.status(409).json({ error: 'Destination path already exists', reason: 'already-exists' });
       }
 
-      await fsPromises.rename(resolvedOld.resolved, resolvedNew.resolved);
+      await fsPromises.rename(renamePaths.sourcePath, renamePaths.destinationPath);
       return res.json({ success: true, path: resolvedNew.resolved });
     } catch (error) {
       const err = error;

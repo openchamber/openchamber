@@ -79,8 +79,9 @@ describe('openchamber events', () => {
       expect(MockEventSource.instances).toHaveLength(0);
       expect(controller).toBeDefined();
       controller?.enqueue(new TextEncoder().encode('data: {"type":"openchamber:event-stream-ready"}\n\n'));
-      for (let i = 0; i < 20 && !events.length; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(events).toEqual(['event-stream-ready']);
+      controller?.enqueue(new TextEncoder().encode('data: {"type":"openchamber:quota-credentials-changed","properties":{}}\n\n'));
+      for (let i = 0; i < 20 && events.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).toEqual(['event-stream-ready', 'quota-credentials-changed']);
     } finally {
       unsubscribe();
       fetchSpy.mockRestore();

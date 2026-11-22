@@ -14,7 +14,7 @@ const openPull = {
   draft: false,
   base: { ref: 'main' },
   head: { ref: 'feature', label: 'acme:feature' },
-  user: { login: 'contributor' },
+  user: { id: 2, login: 'contributor' },
   created_at: '2026-10-01T00:00:00Z',
   updated_at: '2026-10-02T00:00:00Z',
 };
@@ -42,7 +42,7 @@ describe('resource error boundaries', () => {
   });
 });
 
-const makeResources = (permission) => createGitHubResources({
+const makeResources = (permission, octokit = {}) => createGitHubResources({
   load: async () => ({
     rateLimit: {
       isGitHubRateLimited: () => false,
@@ -53,6 +53,7 @@ const makeResources = (permission) => createGitHubResources({
   accountOf: () => ({
     user: { login: 'octocat' },
     octokit: {
+      graphql: octokit.graphql,
       rest: {
         pulls: { get: async () => ({ data: openPull }) },
         checks: {
@@ -62,6 +63,7 @@ const makeResources = (permission) => createGitHubResources({
           getCombinedStatusForRef: async () => { throw httpError(500, 'statuses unavailable'); },
           getCollaboratorPermissionLevel: permission,
         },
+        ...(octokit.rest ?? {}),
       },
     },
   }),
@@ -222,6 +224,38 @@ describe('changeRequestStatus merge permission', () => {
   });
 });
 
+test('the GitHub picker looks up a pasted Enterprise PR URL in its named repository', async () => {
+  const host = 'git.example.com';
+  const repo = { owner: 'acme', repo: 'app', host };
+  const url = `https://${host}/acme/app/pull/42`;
+  const pull = {
+    __typename: 'PullRequest', number: 42, title: 'Update the app', url, body: '',
+    createdAt: openPull.created_at, updatedAt: openPull.updated_at,
+    author: null, labels: null, comments: { totalCount: 0 }, headRepository: null,
+    repository: { name: 'app', owner: { login: 'acme' } },
+    state: 'OPEN', isDraft: false, headRefName: 'feature', baseRefName: 'main', headRefOid: 'abc',
+  };
+  const graphql = vi.fn(async (document) => document.includes('ReferenceLookup')
+    ? { a0: { issueOrPullRequest: pull } }
+    : { search: { issueCount: 0, nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } });
+  const resources = createGitHubResources({
+    load: async () => ({ rateLimit: { isGitHubRateLimited: () => false } }),
+    accountOf: () => ({ octokit: { graphql } }),
+    resolveRepo: async () => ({ repo }),
+    resolveNetwork: async () => [{ ...repo, source: 'origin' }, { owner: 'upstream', repo: 'app', source: 'upstream' }],
+  });
+  const read = (query) => resources.references({ session, directory: '/repo', kind: 'pull', state: 'open', query });
+
+  const result = await read(`${url}/files`);
+  expect(result.items).toMatchObject([{ kind: 'pull', number: 42, url }]);
+  expect(graphql).toHaveBeenCalledTimes(1);
+  expect(graphql).toHaveBeenCalledWith(expect.stringContaining('ReferenceLookup'), { number: 42, o0: 'acme', n0: 'app' });
+
+  graphql.mockClear();
+  await read(`https://${host}/unrelated/app/pull/42`);
+  expect(graphql).not.toHaveBeenCalled();
+});
+
 describe('listChangeRequests filters', () => {
   const makeListResources = () => {
     const list = vi.fn(async () => ({ data: [], headers: {} }));
@@ -295,5 +329,130 @@ describe('listChangeRequests filters', () => {
       per_page: 50,
       page: 1,
     }));
+  });
+});
+
+
+const timelineIssue = {
+  number: 1,
+  title: 'First issue',
+  html_url: 'https://github.com/acme/app/issues/1',
+  state: 'open',
+  user: { id: 1, login: 'octocat' },
+  labels: [],
+};
+
+const crossReference = {
+  createdAt: '2026-11-12T16:47:27Z',
+  willCloseTarget: false,
+  actor: { login: 'gaojunran' },
+  source: {
+    __typename: 'Issue',
+    number: 5,
+    title: 'Mentioning issue',
+    url: 'https://github.com/acme/app/issues/5',
+    repository: { nameWithOwner: 'acme/app' },
+  },
+};
+
+const timelineGraphql = (nodes = [crossReference]) => vi.fn(async () => ({
+  repository: { issueOrPullRequest: { timelineItems: { nodes } } },
+}));
+
+const timelineRest = () => ({
+  issues: {
+    get: async () => ({ data: timelineIssue }),
+    listComments: async () => ({ data: [] }),
+  },
+  pulls: {
+    get: async () => ({ data: openPull }),
+    listReviewComments: async () => ({ data: [] }),
+    listFiles: async () => ({ data: [] }),
+  },
+});
+
+const expectedReference = {
+  kind: 'issue',
+  number: 5,
+  title: 'Mentioning issue',
+  url: 'https://github.com/acme/app/issues/5',
+  repo: 'acme/app',
+  createdAt: '2026-11-12T16:47:27Z',
+  willCloseTarget: false,
+};
+
+describe('GitHub timeline references', () => {
+  test('an issue read carries references only when they are asked for', async () => {
+    const graphql = timelineGraphql();
+    const asked = makeResources(undefined, { graphql, rest: timelineRest() });
+    const issue = await asked.getIssue({ session, directory: '/repo', number: 1, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeReferences: true });
+    expect(issue.references).toHaveLength(1);
+    expect(issue.references[0]).toMatchObject(expectedReference);
+    expect(graphql).toHaveBeenCalledTimes(1);
+
+    const quietGraphql = timelineGraphql();
+    const quiet = makeResources(undefined, { graphql: quietGraphql, rest: timelineRest() });
+    const plain = await quiet.getIssue({ session, directory: '/repo', number: 1, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 } });
+    expect(plain).not.toHaveProperty('references');
+    expect(quietGraphql).not.toHaveBeenCalled();
+  });
+
+  test('a change request context carries references only when they are asked for, never for the timeline alone', async () => {
+    const graphql = timelineGraphql();
+    const asked = makeResources(undefined, { graphql, rest: timelineRest() });
+    const context = await asked.changeRequestContext({ session, directory: '/repo', number: 42, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeTimeline: true, includeReferences: true });
+    expect(context.references).toHaveLength(1);
+    expect(context.references[0]).toMatchObject(expectedReference);
+    expect(graphql).toHaveBeenCalledTimes(1);
+
+    const quietGraphql = timelineGraphql();
+    const quiet = makeResources(undefined, { graphql: quietGraphql, rest: timelineRest() });
+    const plain = await quiet.changeRequestContext({ session, directory: '/repo', number: 42, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeTimeline: true });
+    expect(plain).not.toHaveProperty('references');
+    expect(quietGraphql).not.toHaveBeenCalled();
+  });
+
+  test('a failed timeline read leaves the item readable without references', async () => {
+    const graphql = vi.fn(async () => { throw httpError(502, 'timeline unavailable'); });
+    const resources = makeResources(undefined, { graphql, rest: timelineRest() });
+
+    const issue = await resources.getIssue({ session, directory: '/repo', number: 1, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeReferences: true });
+    expect(issue).toMatchObject({ number: 1, title: 'First issue' });
+    expect(issue).not.toHaveProperty('references');
+
+    const context = await resources.changeRequestContext({ session, directory: '/repo', number: 42, remote: 'origin', context: { repositoryId: 'repo-1', bindingRevision: 1 }, includeTimeline: true, includeReferences: true });
+    expect(context.changeRequest).toMatchObject({ number: 42 });
+    expect(context).not.toHaveProperty('references');
+  });
+});
+
+describe('resolveChangeRequestSource classification', () => {
+  const headSha = 'a'.repeat(40);
+  const resolveSource = (headRepo) => createGitHubResources({
+    load: async () => ({ rateLimit: { isGitHubRateLimited: () => false } }),
+    accountOf: () => ({
+      octokit: { rest: { pulls: { get: async () => ({ data: {
+        ...openPull, user: { id: 1, login: 'contributor' }, head: { ref: 'feature', sha: headSha, repo: {
+          name: headRepo.name, owner: { login: headRepo.owner },
+          html_url: `https://git.example.com/${headRepo.owner}/${headRepo.name}`,
+          clone_url: `https://git.example.com/${headRepo.owner}/${headRepo.name}.git`,
+        } },
+      } }) } } },
+    }),
+    resolveRepo: async () => ({ repo: { owner: 'acme', repo: 'app', host: 'git.example.com' } }),
+    resolveNetwork: async () => [{ owner: 'acme', repo: 'app', source: 'origin' }],
+  }).resolveChangeRequestSource({
+    session: { ...session, instance: 'git.example.com' },
+    context: { directory: '/repo', primaryRemote: 'origin' },
+    project: { id: 'acme/app', owner: 'acme', name: 'app' },
+    number: 42, expectedHeadSha: headSha, requestedRemoteName: 'origin',
+  });
+
+  test('a head GitHub spells differently from the remote is the same repository', async () => {
+    expect(await resolveSource({ owner: 'Acme', name: 'App' })).toMatchObject({ classification: 'same-repository' });
+  });
+
+  test('a head in another repository is a contributor fork', async () => {
+    expect(await resolveSource({ owner: 'someone', name: 'app' })).toMatchObject({ classification: 'contributor-fork' });
   });
 });

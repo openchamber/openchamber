@@ -196,13 +196,19 @@ Hangi model sağlayıcılarının kullanılabileceğine OpenChamber değil, Open
 }
 ```
 
-Reddedilen bir sağlayıcı, biri ona anahtar eklese bile görünmez. Politikaları bir projenin kaldıramayacağı genel `~/.config/opencode/opencode.jsonc` dosyasına koyun ya da son sözü söyleyen bir OpenCode Console çalışma alanından dağıtın. Kurumsal mod, OpenChamber'ın kendisinin bunun üzerine gönderdiklerini kapsar.
+Reddedilen bir sağlayıcı, biri ona anahtar eklese bile görünmez. Politikaları OpenCode'un sistem yapılandırmasına (Linux'ta `/etc/opencode/opencode.jsonc`, Windows'ta `%ProgramData%\opencode\opencode.jsonc`, macOS'ta `/Library/Application Support/opencode/opencode.jsonc`) koyun ve yukarıdaki Windows örneğindeki gibi, klasörüne yalnızca yöneticilerin yazmasına izin verin ya da bir OpenCode Console çalışma alanından dağıtın. Sistem yapılandırmasının yolu, OpenCode'u çalıştıran makinedeki yoldur. Yukarıdaki Docker kurulumunda OpenCode konteynerin içinde çalışır, bu yüzden dosyayı oraya salt okunur bağlayın, `docker-compose.yml` içindeki `volumes` altına: `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`. İkisi de kullanıcının genel `~/.config/opencode/opencode.jsonc` dosyasından ve projenin dosyalarından önceliklidir; sistem yapılandırması ayrıca Console'dan da önceliklidir. Console politikaları yalnızca çalışma alanı bağlıyken geçerlidir ve bağlantı kesildiğinde temizlenir; bu yüzden bağlantı kesildikten sonra da geçerli kalması gereken kısıtlamaları sistem yapılandırmasına koyun. Genel dosya bir projenin politikaları kaldırmasını engeller, ama kullanıcı onu düzenleyebilir. Kurumsal mod, OpenChamber'ın kendisinin bunun üzerine gönderdiklerini kapsar.
 
-Ajanın web aramaları ve sayfa getirmeleri de OpenCode üzerinden arama hizmetine ve sayfaların kendisine gider. Ağınızdan çıkmamaları gerekiyorsa, bunları aynı türden bir politikayla reddedin:
+Ajanın web aramaları ve sayfa getirmeleri de OpenCode üzerinden arama hizmetine ve sayfaların kendisine gider. Ağınızdan çıkmamaları gerekiyorsa, bunları aynı türden bir politikayla reddedin. Yapılandırmada zaten politikalar varsa, iki `tool.use` girdisini listenin sonuna ekleyin ve sağlayıcı girdilerini ve diğer politikaları koruyun. Dosyada hem üst düzey bir `policies` dizisi hem de `experimental.policies` varsa, girdileri üst düzey olana ekleyin: OpenCode önce `experimental.policies` dizisini okur ve eşleşen son girdi geçerli olur. Yeni bir yapılandırmada örnek tek başına çalışır:
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## İlgili

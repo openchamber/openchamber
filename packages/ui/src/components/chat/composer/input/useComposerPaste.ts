@@ -251,15 +251,18 @@ export function useComposerPaste({
                     insertTextAtSelection(typedText);
                 }
                 if (resolution.restoreFocus) {
-                    if (composerRef.current) {
-                        composerRef.current.focus({ preventScroll: isCapacitorApp() });
+                    const editor = composerRef.current;
+                    if (editor) {
+                        const { start, end } = editor.getSelection();
+                        editor.focus({ preventScroll: isCapacitorApp() });
+                        editor.setSelection(start, end);
                     } else {
                         mobileShell.expand();
                     }
                 }
             };
 
-            setLargeTextPasteOffer({ id: offerId, resolve: resolveLargePaste });
+            setLargeTextPasteOffer({ id: offerId, kind: 'text', resolve: resolveLargePaste });
             return;
         }
 

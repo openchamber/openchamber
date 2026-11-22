@@ -46,7 +46,7 @@ import { hasOpenDropdown } from '@/hooks/keyboard-shortcut-dom';
 import { ComposerEditor } from '../../composer/editor/ComposerEditor';
 import { composerAutoCorrect } from '../../composer/editor/autocorrect';
 import { MobileCommentComposer } from '../../composer/comment/MobileCommentComposer';
-import { DraftTargetSelectors, MobileDraftTargetTriggers } from '../../composer/ui/DraftTargetSelectors';
+import { ComposerDraftTargets } from '../../composer/ui/ComposerDraftTargets';
 import { ComposerAutocompletePopups } from '../../composer/ui/ComposerAutocompletePopups';
 import { ComposerFooter } from '../../composer/ui/ComposerFooter';
 import { MobilePillComposer } from '../../composer/ui/MobilePillComposer';
@@ -228,9 +228,13 @@ export function renderComposerForm({
             ) : null}
             <div className={cn('chat-input-column relative overflow-visible', isComposerExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 {!mobileCommentActive ? (<>
-                {!isMobile && (showDraftTargetSelectors || draftPresentationExiting) && selectedDraftProject ? (
-                    <div className={draftPresentationClassName}>
-                        <DraftTargetSelectors
+                <ComposerDraftTargets
+                            isVSCode={isVSCode}
+                            isMobile={isMobile}
+                            showSelectors={showDraftTargetSelectors}
+                            exiting={draftPresentationExiting ?? false}
+                            presentationClassName={draftPresentationClassName}
+                            onOpenPicker={handleMobileDraftPickerChange}
                             projects={draftProjects}
                             selectedProject={selectedDraftProject}
                             selectedDirectory={selectedDraftDirectory}
@@ -248,18 +252,7 @@ export function renderComposerForm({
                             onCreateSpace={handleCreateSpace}
                             onCreateCustomWorktree={handleCreateCustomWorktree}
                             theme={currentTheme}
-                        />
-                    </div>
-                ) : null}
-                {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
-                    <MobileDraftTargetTriggers
-                        selectedProject={selectedDraftProject}
-                        selectedBranchLabel={selectedDraftBranchLabel}
-                        showBranchSelector={shouldShowDraftBranchSelector}
-                        theme={currentTheme}
-                        onOpenPicker={handleMobileDraftPickerChange}
-                    />
-                ) : null}
+                />
                 </>) : null}
                 <div
                     data-dictation-host="true"
@@ -319,6 +312,7 @@ export function renderComposerForm({
                     {largeTextPasteOffer ? (
                         <LargeTextPasteChoice
                             key={largeTextPasteOffer.id}
+                            kind={largeTextPasteOffer.kind}
                             takeFocus={!isMobile}
                             expanded={isComposerExpanded}
                             onChoose={(action, explicitlyChosen) => largeTextPasteOffer.resolve(action, explicitlyChosen)}
@@ -437,6 +431,7 @@ export function renderComposerForm({
                         >
                             <ComposerEditor
                                 ref={composerRef}
+                                scriptAwareWords
                                 viewStore={composerViewStore}
                                 data-testid="chat-input"
                                 value={composerText.get()}

@@ -20,7 +20,9 @@ import {
   guestCopiesDir,
   isCopiedGuestRoot,
   readExtensionStore,
+  setGuestFolders,
   updateExtensionStore,
+  withGuestFolders,
 } from './persist.js';
 import type { GitOrigin, ExtensionStore } from './persist.js';
 import type { GuestPackage, JsonValue } from './contracts.js';
@@ -29,7 +31,7 @@ import type { AddressLookup, PublicAddress } from './clone.js';
 import type { TcpNetConnectOpts } from 'node:net';
 import { isString } from './input-guards.js';
 
-type InstallOptions = { openchamberVersion?: string | undefined; replace?: boolean };
+type InstallOptions = { openchamberVersion?: string | undefined; replace?: boolean; folders?: readonly string[] | undefined };
 type GitInstallOptions = InstallOptions & {
   gitBinary?: string | undefined;
   gitIdentityId?: string | undefined;
@@ -61,7 +63,7 @@ export const parseInstallRequest = (body: JsonValue | undefined) => {
   return parsed.success ? parsed.data : null;
 };
 
-const persistGuest = async (guest: GuestPackage, root: string, source: 'path' | 'git' | 'zip', persistPath: string, { replace = false, origin = null }: { replace?: boolean; origin?: GitOrigin | null } = {}): Promise<InstallResult> => {
+const persistGuest = async (guest: GuestPackage, root: string, source: 'path' | 'git' | 'zip', persistPath: string, { replace = false, origin = null, folders }: { replace?: boolean; origin?: GitOrigin | null; folders?: readonly string[] | undefined } = {}): Promise<InstallResult> => {
   if (isReservedBuiltInId(guest.id)) return { ok: false, code: 'reserved-id' };
   const stored = await readExtensionStore(persistPath);
   const storedRoots = await Promise.all(stored.paths.map((entry) => resolveGuestPackageRoot(entry)));
@@ -69,6 +71,7 @@ const persistGuest = async (guest: GuestPackage, root: string, source: 'path' | 
     if (!replace) {
       return { ok: false, code: 'already-installed', id: guest.id };
     }
+    if (folders) await setGuestFolders(guest.id, persistPath, folders);
     return {
       ok: true,
       replaced: true,
@@ -79,6 +82,7 @@ const persistGuest = async (guest: GuestPackage, root: string, source: 'path' | 
         capabilityGrants: stored.capabilityGrants?.[guest.id] ?? [],
         enabled: !stored.disabledGuests?.[guest.id],
         storageId: stored.storageIds?.[guest.id],
+        folders: folders ? [...folders] : stored.guestFolders?.[guest.id],
       }),
     };
   }
@@ -94,20 +98,24 @@ const persistGuest = async (guest: GuestPackage, root: string, source: 'path' | 
     }
   }
   let storageId: NonNullable<ExtensionStore['storageIds']>[string];
+  let savedFolders: string[] | undefined;
   await updateExtensionStore(persistPath, (after) => {
     storageId = after.storageIds?.[guest.id] ?? randomUUID();
+    const guestFolders = folders ? withGuestFolders(after.guestFolders, guest.id, folders) : after.guestFolders;
+    savedFolders = guestFolders?.[guest.id];
     return {
       ...after,
       paths: after.paths.includes(root) ? after.paths : [...after.paths, root],
       sources: { ...after.sources, [root]: source },
       gitOrigins: origin ? { ...after.gitOrigins, [root]: origin } : after.gitOrigins,
       storageIds: { ...after.storageIds, [guest.id]: storageId },
+      guestFolders,
     };
   });
   return {
     ok: true,
     replaced: Boolean(clash),
-    guest: toPublicGuest({ ...guest, source, path: root, capabilityGrants: [], enabled: true, storageId }),
+    guest: toPublicGuest({ ...guest, source, path: root, capabilityGrants: [], enabled: true, storageId, folders: savedFolders }),
   };
 };
 
@@ -115,7 +123,7 @@ const removeDir = async (dir: string) => {
   await fs.rm(dir, { recursive: true, force: true });
 };
 
-const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVersion, replace = false, origin = null }: CopiedInstallOptions): Promise<InstallResult> => {
+const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVersion, replace = false, origin = null, folders }: CopiedInstallOptions): Promise<InstallResult> => {
   const copies = guestCopiesDir(persistPath);
   await fs.mkdir(copies, { recursive: true });
   const staging = path.join(copies, `.tmp-${process.pid}-${Date.now()}`);
@@ -161,7 +169,7 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
       await removeDir(staging);
     }
     const root = await fs.realpath(dest);
-    const persisted = await persistGuest(inspected.guest, root, source, persistPath, { replace, origin });
+    const persisted = await persistGuest(inspected.guest, root, source, persistPath, { replace, origin, folders });
     if (!persisted.ok) {
       await removeDir(dest);
       return persisted;
@@ -270,12 +278,13 @@ export const downloadZip = async (url: string, { request = requestHttpsPinned, l
   return null;
 };
 
-export const installGuestFromZipBuffer = async (buffer: Buffer, persistPath: string, { openchamberVersion, replace = false }: InstallOptions = {}) => (
+export const installGuestFromZipBuffer = async (buffer: Buffer, persistPath: string, { openchamberVersion, replace = false, folders }: InstallOptions = {}) => (
   installCopiedGuest({
     source: 'zip',
     persistPath,
     openchamberVersion,
     replace,
+    folders,
     prepare: async (staging) => {
       const extracted = await extractZipBuffer(buffer, staging);
       return extracted.ok ? { ok: true, root: staging } : extracted;
@@ -283,7 +292,7 @@ export const installGuestFromZipBuffer = async (buffer: Buffer, persistPath: str
   })
 );
 
-export const installGuestFromPath = async (rawPath: string, persistPath: string, { openchamberVersion, replace = false }: InstallOptions = {}): Promise<InstallResult> => {
+export const installGuestFromPath = async (rawPath: string, persistPath: string, { openchamberVersion, replace = false, folders }: InstallOptions = {}): Promise<InstallResult> => {
   if (!path.isAbsolute(rawPath)) {
     return { ok: false, code: 'invalid-path' };
   }
@@ -294,7 +303,7 @@ export const installGuestFromPath = async (rawPath: string, persistPath: string,
       if (!buffer) {
         return { ok: false, code: 'not-found' };
       }
-      return installGuestFromZipBuffer(buffer, persistPath, { openchamberVersion, replace });
+      return installGuestFromZipBuffer(buffer, persistPath, { openchamberVersion, replace, folders });
     }
   } catch {
     return { ok: false, code: 'not-found' };
@@ -312,17 +321,17 @@ export const installGuestFromPath = async (rawPath: string, persistPath: string,
   if (blocked.length > 0) {
     return { ok: false, code: 'enterprise-mode', capabilities: blocked };
   }
-  return persistGuest(inspected.guest, root, 'path', persistPath, { replace });
+  return persistGuest(inspected.guest, root, 'path', persistPath, { replace, folders });
 };
 
-export const installGuestFromUrl = async (rawUrl: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, gitIdentityId }: GitInstallOptions = {}): Promise<InstallResult> => {
+export const installGuestFromUrl = async (rawUrl: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, gitIdentityId, folders }: GitInstallOptions = {}): Promise<InstallResult> => {
   if (isHttpsZipUrl(rawUrl)) {
     try {
       const buffer = await downloadZip(rawUrl);
       if (!buffer) {
         return { ok: false, code: 'extract-failed' };
       }
-      return installGuestFromZipBuffer(buffer, persistPath, { openchamberVersion, replace });
+      return installGuestFromZipBuffer(buffer, persistPath, { openchamberVersion, replace, folders });
     } catch {
       return { ok: false, code: 'extract-failed' };
     }
@@ -331,10 +340,10 @@ export const installGuestFromUrl = async (rawUrl: string, persistPath: string, {
   if (!gitSource) {
     return { ok: false, code: 'invalid-url' };
   }
-  return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref, gitIdentityId });
+  return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref, gitIdentityId, folders });
 };
 
-export const installGuestFromGitSource = async (source: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, ref, gitIdentityId, lookup }: GitInstallOptions = {}) => {
+export const installGuestFromGitSource = async (source: string, persistPath: string, { openchamberVersion, replace = false, gitBinary, ref, gitIdentityId, lookup, folders }: GitInstallOptions = {}) => {
   const origin: GitOrigin = { url: source };
   if (ref) origin.ref = ref;
   if (gitIdentityId) origin.gitIdentityId = gitIdentityId;
@@ -344,6 +353,7 @@ export const installGuestFromGitSource = async (source: string, persistPath: str
     openchamberVersion,
     replace,
     origin,
+    folders,
     prepare: async (staging) => {
       const cloned = await cloneGitRepository(source, staging, { gitBinary, ref, gitIdentityId, lookup });
       return cloned.ok ? { ok: true, root: staging } : cloned;
@@ -351,13 +361,13 @@ export const installGuestFromGitSource = async (source: string, persistPath: str
   });
 };
 
-export const installGuest = async (request: z.infer<typeof installBodySchema>, persistPath: string, { openchamberVersion, gitBinary }: GitInstallOptions = {}) => {
+export const installGuest = async (request: z.infer<typeof installBodySchema>, persistPath: string, { openchamberVersion, gitBinary, folders }: GitInstallOptions = {}) => {
   const replace = Boolean(request.replace);
   if (request.url) {
-    return installGuestFromUrl(request.url, persistPath, { openchamberVersion, replace, gitBinary, gitIdentityId: request.gitIdentityId });
+    return installGuestFromUrl(request.url, persistPath, { openchamberVersion, replace, gitBinary, gitIdentityId: request.gitIdentityId, folders });
   }
   if (request.path === undefined) throw Object.assign(new TypeError('The "path" argument must be of type string. Received undefined'), { code: 'ERR_INVALID_ARG_TYPE' });
-  return installGuestFromPath(request.path, persistPath, { openchamberVersion, replace });
+  return installGuestFromPath(request.path, persistPath, { openchamberVersion, replace, folders });
 };
 
 export const uninstallGuest = async (id: string, persistPath: string, { preserveStorageId = false } = {}): Promise<{ ok: true } | InstallFailure> => {
@@ -395,11 +405,13 @@ export const uninstallGuest = async (id: string, persistPath: string, { preserve
     delete capabilityScopes[id];
     const disabledGuests = { ...(stored.disabledGuests ?? {}) };
     delete disabledGuests[id];
+    const guestFolders = { ...(stored.guestFolders ?? {}) };
+    if (!preserveStorageId) delete guestFolders[id];
     const serviceSocketOverrides = { ...(stored.serviceSocketOverrides ?? {}) };
     delete serviceSocketOverrides[id];
     const storageIds = { ...(stored.storageIds ?? {}) };
     if (!preserveStorageId) delete storageIds[id];
-    return { paths: kept, sources, gitOrigins, capabilityGrants, capabilityScopes, disabledGuests, serviceSocketOverrides, storageIds };
+    return { paths: kept, sources, gitOrigins, capabilityGrants, capabilityScopes, disabledGuests, guestFolders, serviceSocketOverrides, storageIds };
   });
   await stopGuestService(id);
   forgetServiceFailure(id);

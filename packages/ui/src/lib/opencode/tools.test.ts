@@ -21,6 +21,7 @@ import {
   executeNamespace,
   renderedPage,
   requestedSecret,
+  requestedSecretForget,
   requestedSecretRun,
   openChamberCallSummary,
   secretRunCommandLine,
@@ -479,6 +480,21 @@ describe("requestedSecret", () => {
     expect(isShownInPlace("openchamber_secret", running(input))).toBe(true)
     expect(openChamberToolCall("openchamber_secret", input)?.awaitsAnswer).toBe(true)
     expect(openChamberToolCall("openchamber_secret", { action: "secret.forget" })?.awaitsAnswer).toBe(false)
+    // Forgetting the project's saved secrets waits for the user's confirmation.
+    expect(openChamberToolCall("openchamber_secret", { action: "secret.forget", parameters: { saved: "true" } })?.awaitsAnswer).toBe(true)
+  })
+})
+
+describe("requestedSecretForget", () => {
+  const running = (input: ToolInput): ToolState => ({ status: "running", input, time: { start: 1 } })
+
+  test("draws the confirmation card only for a running forget of saved secrets", () => {
+    expect(requestedSecretForget("openchamber_secret", running({ action: "secret.forget", saved: true }))).toBe(true)
+    expect(requestedSecretForget("openchamber_secret", running({ action: "forget", parameters: { saved: "true" } }))).toBe(true)
+    expect(isShownInPlace("openchamber_secret", running({ action: "secret.forget", saved: true }))).toBe(true)
+    expect(requestedSecretForget("openchamber_secret", running({ action: "secret.forget" }))).toBe(false)
+    expect(isShownInPlace("openchamber_secret", running({ action: "secret.forget" }))).toBe(false)
+    expect(requestedSecretForget("openchamber_secret", { status: "completed", input: { action: "secret.forget", saved: true }, output: "", time: { start: 1, end: 2 } })).toBe(false)
   })
 })
 

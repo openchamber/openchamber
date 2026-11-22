@@ -899,8 +899,8 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
         activeContextsCommitByDirectory.set(directoryKey, requestId);
         set((state) => {
           const directoryRegistrations = state.activeContextRegistrations[directoryKey] ?? {};
-          const current = directoryRegistrations[ownerId];
-          if (current?.requestId === requestId && hasSameReadContexts(current.contexts, contexts)) {
+          if (directoryRegistrations[ownerId]
+            && Object.values(directoryRegistrations).every((registration) => hasSameReadContexts(registration.contexts, contexts))) {
             return state;
           }
 

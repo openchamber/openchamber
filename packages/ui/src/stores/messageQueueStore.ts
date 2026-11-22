@@ -5,6 +5,7 @@ import type { SyncEvent } from '@/lib/opencode/events';
 import { createInputHistoryIdentity, createInputHistorySubmission, useInputHistoryStore } from './useInputHistoryStore';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
+import { serverAttachmentSchema, toAttachedFile, toServerAttachment, type ServerQueueAttachmentInput } from './messageQueueAttachments';
 import { contextPartMetadataSchema, type ContextPartMetadata } from '@/lib/messages/contextParts';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -126,7 +127,6 @@ export const parseMessageQueueKey = (key: string): MessageQueueTarget | null => 
     return createMessageQueueTarget(sessionParts.join('\n'), directory, runtimeKey);
 };
 
-
 const serverSendConfigSchema = z.object({
     providerID: z.string().min(1),
     modelID: z.string().min(1),
@@ -137,17 +137,6 @@ const serverSendConfigSchema = z.object({
 const serverGoalSchema = z.object({
     objective: z.string().min(1).optional(),
     tokenBudget: z.number().int().positive().nullable(),
-});
-
-const serverAttachmentSchema = z.object({
-    id: z.string(),
-    filename: z.string(),
-    mimeType: z.string(),
-    size: z.number(),
-    source: z.enum(['local', 'server', 'vscode']),
-    serverPath: z.string().optional(),
-    agentPath: z.string().optional(),
-    dataUrl: z.string().optional(),
 });
 
 const serverContextPartSchema = z.discriminatedUnion('kind', [
@@ -204,46 +193,6 @@ const serverTakeAllResponseSchema = serverSessionResponseSchema.extend({ items: 
 
 type ServerQueueSession = z.infer<typeof serverSessionSchema>;
 type ServerQueueItem = z.infer<typeof serverItemSchema>;
-type ServerQueueAttachment = z.infer<typeof serverAttachmentSchema>;
-
-const decodeDataUrl = (dataUrl: string): ArrayBuffer | null => {
-    const commaIndex = dataUrl.indexOf(',');
-    if (!dataUrl.startsWith('data:') || commaIndex === -1) return null;
-    const meta = dataUrl.slice(5, commaIndex);
-    const payload = dataUrl.slice(commaIndex + 1);
-    try {
-        if (meta.endsWith(';base64')) {
-            const binary = atob(payload);
-            const buffer = new ArrayBuffer(binary.length);
-            const bytes = new Uint8Array(buffer);
-            for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-            return buffer;
-        }
-        const encoded = new TextEncoder().encode(decodeURIComponent(payload));
-        const buffer = new ArrayBuffer(encoded.byteLength);
-        new Uint8Array(buffer).set(encoded);
-        return buffer;
-    } catch {
-        return null;
-    }
-};
-
-const toAttachedFile = (attachment: ServerQueueAttachment): AttachedFile => {
-    const dataUrl = attachment.dataUrl ?? '';
-    const bytes = dataUrl ? decodeDataUrl(dataUrl) : null;
-    const file: AttachedFile = {
-        id: attachment.id,
-        file: new File(bytes ? [bytes] : [], attachment.filename, { type: attachment.mimeType }),
-        dataUrl,
-        mimeType: attachment.mimeType,
-        filename: attachment.filename,
-        size: attachment.size,
-        source: attachment.source,
-    };
-    if (attachment.serverPath) file.serverPath = attachment.serverPath;
-    if (attachment.agentPath) file.agentPath = attachment.agentPath;
-    return file;
-};
 
 const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     const message: QueuedMessage = {
@@ -263,8 +212,6 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     return message;
 };
 
-type ServerQueueAttachmentInput = Omit<ServerQueueAttachment, 'dataUrl'> & { dataUrl: string };
-
 type ServerQueueItemInput = {
     content: string;
     text: string;
@@ -280,18 +227,23 @@ type ServerQueueRequestBody =
     | { directory: string; item: ServerQueueItemInput }
     | { itemIds: string[] };
 
-const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInput => {
-    const input: ServerQueueAttachmentInput = {
-        id: attachment.id,
-        filename: attachment.filename,
-        mimeType: attachment.mimeType,
-        size: attachment.size,
-        source: attachment.source,
-        dataUrl: attachment.dataUrl,
-    };
-    if (attachment.serverPath) input.serverPath = attachment.serverPath;
-    if (attachment.agentPath) input.agentPath = attachment.agentPath;
-    return input;
+const QUEUE_REQUEST_BUDGET_BYTES = 40 * 1024 * 1024;
+
+const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+const withOriginalsWithinBudget = (item: ServerQueueItemInput): ServerQueueItemInput => {
+    const originals = item.attachments.map((attachment) => attachment.original);
+    const attachments = item.attachments.map(({ original: _original, ...attachment }) => attachment);
+    let bytes = jsonBytes({ ...item, attachments });
+    const kept = attachments.map((attachment, index) => {
+        const original = originals[index];
+        if (!original) return attachment;
+        const cost = jsonBytes({ original });
+        if (bytes + cost > QUEUE_REQUEST_BUDGET_BYTES) return attachment;
+        bytes += cost;
+        return { ...attachment, original };
+    });
+    return { ...item, attachments: kept };
 };
 
 const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessageSendConfig): ServerQueueItemInput => {
@@ -306,7 +258,7 @@ const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessag
     if (message.goal) item.goal = message.goal;
     const contextPreview = getQueuedMessagePreview({ content: '', context: message.context });
     if (contextPreview) item.contextPreview = contextPreview;
-    return item;
+    return withOriginalsWithinBudget(item);
 };
 
 const requestJson = async <T,>(schema: z.ZodType<T>, path: string, init?: RuntimeFetchOptions): Promise<T> => {

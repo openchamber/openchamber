@@ -22,14 +22,17 @@ import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { getTypeToCommentText } from '@/lib/typeToComment';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
-import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
+import { useLiveActivityHold } from '@/hooks/useLiveActivityHold';
+import { useCommentQuoteRects } from '@/hooks/useCommentQuoteRects';
+import { useSelectionCommentHandoff } from '@/hooks/useSelectionCommentHandoff';
 import {
     useMobileCommentComposerController,
     useMobileCommentDraft,
 } from '../composer/comment/MobileCommentComposerContext';
 import { appendWithLineBreaks } from '../composer/text';
 import { SelectionApprovalButton } from './SelectionApprovalButton';
+import { SelectionCommentInput } from './SelectionCommentInput';
 import { GUEST_ITEM_MESSAGE_TEXT_MAX } from '@openchamber/sdk';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
@@ -41,8 +44,8 @@ import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import { frameRectInApp, onFrameSelection } from './frameSelection';
+import { ownsSelection } from './selectionOwner';
 import { captureChatQuoteAnchor, findChatQuoteRoots, findUiRenderQuoteRoot, resolveChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
@@ -82,17 +85,6 @@ const normalizeDistilledInsight = (insight: string): string => (
   insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
 );
 
-const messageIdOf = (node: Node): string | null => (
-  (node instanceof Element ? node : node.parentElement)?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null
-);
-
-const ownsSelection = (container: HTMLElement, range: Range): boolean => {
-  if (container.contains(range.commonAncestorContainer)) return true;
-  if (!container.contains(range.startContainer)) return false;
-  const messageId = messageIdOf(container);
-  return messageId !== null && messageId === messageIdOf(range.endContainer);
-};
-
 const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false, uiRenderSelection = false }) => {
   const guestActions = useGuestActions();
   const { t } = useI18n();
@@ -105,40 +97,13 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const [selectedAnchor, setSelectedAnchor] = React.useState<ChatQuoteAnchor | null>(null);
   const [commentMode, setCommentMode] = React.useState(false);
   const commentModeRef = React.useRef(false);
+  const foldPagesShown = useLiveActivityHold(position.show);
   const [commentText, setCommentText] = React.useState('');
-
-  const [commentRects, setCommentRects] = React.useState<DOMRect[] | null>(null);
-  const updateCommentRects = React.useCallback(() => {
-    const range = pendingSelectionRef.current?.range;
-    if (!range) {
-      setCommentRects(null);
-      return;
-    }
-
-    setCommentRects(collectSelectionOverlayRects(range));
-  }, []);
-
-  React.useEffect(() => {
-    if (!commentMode) return;
-    let frame: number | null = null;
-    const scheduleUpdate = () => {
-      if (frame !== null) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = null;
-        updateCommentRects();
-      });
-    };
-    document.addEventListener('scroll', scheduleUpdate, { capture: true, passive: true });
-    window.addEventListener('resize', scheduleUpdate);
-    return () => {
-      if (frame !== null) window.cancelAnimationFrame(frame);
-      document.removeEventListener('scroll', scheduleUpdate, { capture: true });
-      window.removeEventListener('resize', scheduleUpdate);
-    };
-  }, [commentMode, updateCommentRects]);
+  const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
+  const { commentRects, setCommentRects, updateCommentRects } = useCommentQuoteRects(pendingSelectionRef, commentMode);
 
   const commentImagePaste = useCommentImagePaste();
-  const { attachCitedImages, discardPastedImages } = commentImagePaste;
+  const { attachCitedImages, discardPastedImages, snapshotPastedImages, adoptPastedImages } = commentImagePaste;
   const isDraggingRef = React.useRef(false);
   const [isOpening, setIsOpening] = React.useState(false);
   const [isAddingToNotes, setIsAddingToNotes] = React.useState(false);
@@ -146,7 +111,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
   const menuHeightRef = React.useRef(DESKTOP_MENU_FALLBACK_HEIGHT_PX);
   const anchorRectRef = React.useRef<DOMRect | null>(null);
-  const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
   const mouseUpTimeoutRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
@@ -352,6 +316,23 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     }
   }, [commentMode, commentText, getDesktopPosition, isMobile, position.show]);
 
+  const followAnchor = React.useCallback(() => {
+    const pending = pendingSelectionRef.current;
+    const rect = pending?.range?.getBoundingClientRect() ?? pending?.measureRect?.();
+    if (!rect) return;
+    anchorRectRef.current = rect;
+    const boundary = containerRef.current
+      ?.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]')
+      ?.getBoundingClientRect();
+    setAnchorVisible(!boundary || (rect.bottom > boundary.top && rect.top < boundary.bottom));
+    const next = getDesktopPosition(rect);
+    setPosition((prev) => (
+      prev.x === next.x && prev.y === next.y && prev.placement === next.placement
+        ? prev
+        : { ...prev, ...next }
+    ));
+  }, [containerRef, getDesktopPosition]);
+
   React.useEffect(() => {
     if (!position.show || isMobile) {
       return;
@@ -361,20 +342,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       if (frame !== null) return;
       frame = window.requestAnimationFrame(() => {
         frame = null;
-        const pending = pendingSelectionRef.current;
-        const rect = pending?.range?.getBoundingClientRect() ?? pending?.measureRect?.();
-        if (!rect) return;
-        anchorRectRef.current = rect;
-        const boundary = containerRef.current
-          ?.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]')
-          ?.getBoundingClientRect();
-        setAnchorVisible(!boundary || (rect.bottom > boundary.top && rect.top < boundary.bottom));
-        const next = getDesktopPosition(rect);
-        setPosition((prev) => (
-          prev.x === next.x && prev.y === next.y && prev.placement === next.placement
-            ? prev
-            : { ...prev, ...next }
-        ));
+        followAnchor();
       });
     };
     document.addEventListener('scroll', follow, { capture: true, passive: true });
@@ -382,7 +350,16 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       if (frame !== null) window.cancelAnimationFrame(frame);
       document.removeEventListener('scroll', follow, { capture: true });
     };
-  }, [containerRef, getDesktopPosition, isMobile, position.show]);
+  }, [followAnchor, isMobile, position.show]);
+
+  const foldPagesShownRef = React.useRef(foldPagesShown);
+  React.useLayoutEffect(() => {
+    if (foldPagesShownRef.current === foldPagesShown) return;
+    foldPagesShownRef.current = foldPagesShown;
+    if (!position.show || isMobile) return;
+    followAnchor();
+    if (commentModeRef.current) updateCommentRects();
+  }, [foldPagesShown, followAnchor, isMobile, position.show, updateCommentRects]);
 
   React.useEffect(() => {
     if (!position.show || isMobile) {
@@ -629,6 +606,26 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
   const handleOpenComment = React.useCallback(() => openComment(''), [openComment]);
 
+  useSelectionCommentHandoff({
+    handoffKey: currentSessionId && !uiRenderSelection && !frameSelections && !isMobile ? `${currentSessionId}:${readingKey}` : null,
+    containerRef,
+    messageId: readingKey,
+    readDraft: () => (commentMode && selectedAnchor ? {
+      plainText: selectedText, markdownText: selectedTextMarkdown, messageId: selectedMessageId,
+      anchor: selectedAnchor, commentText, pastedImages: snapshotPastedImages(),
+    } : null),
+    restore: (draft, range) => {
+      pendingSelectionRef.current = { plainText: draft.plainText, markdownText: draft.markdownText, messageId: draft.messageId, rect: range.getBoundingClientRect(), range };
+      showMenu();
+      adoptPastedImages(draft.pastedImages);
+      setSelectedAnchor(draft.anchor);
+      setCommentText(draft.commentText);
+      setCommentMode(true);
+      commentModeRef.current = true;
+      updateCommentRects();
+    },
+  });
+
   React.useEffect(() => {
     if (!position.show || !anchorVisible || commentMode || isMobile) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -787,39 +784,14 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     : null;
 
   const commentInput = (
-    <div
-      className={cn(
-        'oc-glass-popover oc-glass-floating relative flex items-end gap-2 rounded-3xl',
-        'ps-4',
-        'py-1 pe-1',
-        'transition-[opacity,transform] duration-200 ease-out',
-        isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
-      )}
-    >
-      <CommentTextEditor
-        value={commentText}
-        onChange={setCommentText}
-        onSubmit={handleAttachComment}
-        onCancel={hideMenu}
-        enterSubmits
-        imagePaste={commentImagePaste}
-        placeholder={t('chat.textSelection.comment.placeholder')}
-        className="w-64 max-w-[70vw] py-1.5 text-sm leading-5 text-foreground"
-      />
-      <HoverTooltip label={t('chat.textSelection.comment.attach')}>
-        <button
-          type="button"
-          onClick={handleAttachComment}
-          className={cn(
-            'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity duration-150',
-            'h-8 w-8'
-          )}
-          aria-label={t('chat.textSelection.comment.attach')}
-        >
-          <Icon name="attachment-2" className="h-4 w-4" />
-        </button>
-      </HoverTooltip>
-    </div>
+    <SelectionCommentInput
+      value={commentText}
+      onChange={setCommentText}
+      onSubmit={handleAttachComment}
+      onCancel={hideMenu}
+      imagePaste={commentImagePaste}
+      opening={isOpening}
+    />
   );
 
   if (isMobile) {

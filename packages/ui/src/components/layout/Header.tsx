@@ -536,7 +536,6 @@ export const Header: React.FC = () => {
 
 
 
-
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const titlebarLeftInset = React.useMemo(() => {
     if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
@@ -563,7 +562,8 @@ export const Header: React.FC = () => {
       return;
     }
     document.documentElement.style.setProperty('--oc-titlebar-start-inset', titlebarStartInset);
-  }, [titlebarStartInset]);
+    document.documentElement.style.setProperty('--oc-titlebar-end-inset', titlebarEndInset);
+  }, [titlebarEndInset, titlebarStartInset]);
 
   const headerInsetSpacerWidth = isSidebarOpen ? '0.75rem' : 'var(--oc-titlebar-start-inset, 0.75rem)';
   const headerControlsSpacerWidth = isSidebarOpen

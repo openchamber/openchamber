@@ -196,13 +196,19 @@ Quais provedores de modelos podem ser usados é o OpenCode que decide, não o Op
 }
 ```
 
-Um provedor negado desaparece mesmo que alguém adicione uma chave para ele. Coloque as políticas no arquivo global `~/.config/opencode/opencode.jsonc`, onde um projeto não consegue removê-las, ou distribua-as a partir de um workspace do OpenCode Console, que tem a palavra final. O modo empresarial cobre, além disso, o que o próprio OpenChamber envia.
+Um provedor negado desaparece mesmo que alguém adicione uma chave para ele. Coloque as políticas na configuração do sistema do OpenCode (`/etc/opencode/opencode.jsonc` no Linux, `%ProgramData%\opencode\opencode.jsonc` no Windows, `/Library/Application Support/opencode/opencode.jsonc` no macOS) e deixe só os administradores escreverem na pasta dela, como no exemplo do Windows acima, ou distribua-as a partir de um workspace do OpenCode Console. O caminho da configuração do sistema é o da máquina que roda o OpenCode. Na configuração com Docker acima, o OpenCode roda dentro do contêiner, então monte o arquivo lá como somente leitura, em `volumes` no `docker-compose.yml`: `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`. Os dois têm prioridade sobre o arquivo global `~/.config/opencode/opencode.jsonc` do usuário e sobre os arquivos do projeto, e a configuração do sistema também tem prioridade sobre o Console. As políticas do Console só valem enquanto o workspace está conectado e são removidas quando ele se desconecta, então restrições que precisam continuar valendo depois de uma desconexão vão na configuração do sistema. O arquivo global não deixa um projeto removê-las, mas o usuário pode editá-lo. O modo empresarial cobre, além disso, o que o próprio OpenChamber envia.
 
-As buscas na web e os acessos a páginas feitos pelo agente também passam pelo OpenCode, até o serviço de busca e até as próprias páginas. Se eles não devem sair da sua rede, negue-os com o mesmo tipo de política:
+As buscas na web e os acessos a páginas feitos pelo agente também passam pelo OpenCode, até o serviço de busca e até as próprias páginas. Se eles não devem sair da sua rede, negue-os com o mesmo tipo de política. Se a configuração já tem políticas, adicione as duas entradas `tool.use` no fim da lista e mantenha as entradas dos provedores e quaisquer outras políticas. Se o arquivo tem tanto um array `policies` de nível superior quanto `experimental.policies`, adicione-as ao de nível superior: o OpenCode lê `experimental.policies` primeiro, e vale a última entrada correspondente. Numa configuração nova, o exemplo funciona sozinho:
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## Relacionado

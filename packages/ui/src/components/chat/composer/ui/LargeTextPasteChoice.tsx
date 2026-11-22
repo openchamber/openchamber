@@ -5,7 +5,23 @@ import { cn } from '@/lib/utils';
 
 export type LargeTextPasteChoiceAction = 'attach' | 'inline';
 
+export type LargeTextPasteChoiceKind = 'text' | 'documents';
+
+const LABEL_KEYS = {
+    text: {
+        title: 'chat.chatInput.largeTextPaste.title',
+        attach: 'chat.chatInput.largeTextPaste.attach',
+        inline: 'chat.chatInput.largeTextPaste.inline',
+    },
+    documents: {
+        title: 'chat.chatInput.documentAttach.title',
+        attach: 'chat.chatInput.documentAttach.save',
+        inline: 'chat.chatInput.documentAttach.convert',
+    },
+} as const;
+
 type LargeTextPasteChoiceProps = {
+    kind: LargeTextPasteChoiceKind;
     takeFocus: boolean;
     expanded?: boolean;
     onChoose: (action: LargeTextPasteChoiceAction, explicitlyChosen: boolean) => void;
@@ -20,8 +36,9 @@ const buttonClassName = cn(
     'transition-colors duration-150',
 );
 
-export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ takeFocus, expanded = false, onChoose, onTypeThrough }) => {
+export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ kind, takeFocus, expanded = false, onChoose, onTypeThrough }) => {
     const { t } = useI18n();
+    const labels = LABEL_KEYS[kind];
     const attachRef = React.useRef<HTMLButtonElement>(null);
     const inlineRef = React.useRef<HTMLButtonElement>(null);
 
@@ -61,7 +78,8 @@ export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ take
     return (
         <div
             role="group"
-            aria-label={t('chat.chatInput.largeTextPaste.title')}
+            aria-label={t(labels.title)}
+            data-composer-choice="true"
             onKeyDown={handleKeyDown}
             onBlur={handleBlur}
             onMouseDown={(event) => event.preventDefault()}
@@ -74,11 +92,11 @@ export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ take
             )}
         >
             <button ref={attachRef} type="button" className={buttonClassName} onClick={() => onChoose('attach', true)}>
-                {t('chat.chatInput.largeTextPaste.attach')}
+                {t(labels.attach)}
             </button>
             <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
             <button ref={inlineRef} type="button" className={buttonClassName} onClick={() => onChoose('inline', true)}>
-                {t('chat.chatInput.largeTextPaste.inline')}
+                {t(labels.inline)}
             </button>
         </div>
     );

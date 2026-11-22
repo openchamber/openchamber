@@ -4,7 +4,7 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, DEFAULT_UI_FONT_WEIGHT } from '@/li
 import { getStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
 import { sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
-import { DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR, DEFAULT_EDITOR_FONT_SIZE, DEFAULT_CONTEXT_EDITOR_TREE_WIDTH } from './preferences';
+import { DEFAULT_DOCUMENT_ATTACH_BEHAVIOR, DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR, DEFAULT_EDITOR_FONT_SIZE, DEFAULT_CONTEXT_EDITOR_TREE_WIDTH } from './preferences';
 import type { UIStore } from './types';
 
 const LEFT_SIDEBAR_DEFAULT_WIDTH = 280;
@@ -17,6 +17,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'sidebarFoldedForExpandedZone'
   | 'sidebarWidth'
   | 'contextPanelByDirectory'
+  | 'contextZoneReturnStack'
   | 'contextRailOrder'
   | 'contextRailHiddenSurfaces'
   | 'mobileWorkspaceTabOrder'
@@ -195,6 +196,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'agentSecretToolEnabled'
   | 'agentWorkflowToolEnabled'
   | 'agentWorkflowAutoApprove'
+  | 'agentWorkflowAutoApproveLeads'
   | 'isolatedSpacesEnabled'
   | 'permissionDefaultMode'
   | 'agentMemoryFeatureAvailable'
@@ -206,6 +208,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'projectKnowledgePlanRequest'
   | 'inputSpellcheckEnabled'
   | 'largeTextPasteBehavior'
+  | 'documentAttachBehavior'
   | 'enterToSend'
   | 'enterToSendConfigured'
   | 'mobileReturnKeySends'
@@ -242,6 +245,7 @@ export const createInitialUIState = (): Pick<UIStore,
   sidebarFoldedForExpandedZone: false,
   sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
   contextPanelByDirectory: {},
+  contextZoneReturnStack: {},
   contextRailOrder: [],
   contextRailHiddenSurfaces: [],
   mobileWorkspaceTabOrder: [],
@@ -425,6 +429,7 @@ export const createInitialUIState = (): Pick<UIStore,
   agentSecretToolEnabled: true,
   agentWorkflowToolEnabled: false,
   agentWorkflowAutoApprove: false,
+  agentWorkflowAutoApproveLeads: false,
   isolatedSpacesEnabled: false,
   permissionDefaultMode: 'ask',
   agentMemoryFeatureAvailable: false,
@@ -436,6 +441,7 @@ export const createInitialUIState = (): Pick<UIStore,
   projectKnowledgePlanRequest: null,
   inputSpellcheckEnabled: false,
   largeTextPasteBehavior: DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR,
+  documentAttachBehavior: DEFAULT_DOCUMENT_ATTACH_BEHAVIOR,
   enterToSend: false,
   enterToSendConfigured: false,
   mobileReturnKeySends: false,

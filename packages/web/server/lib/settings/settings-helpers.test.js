@@ -959,6 +959,15 @@ describe('settings registry gate', () => {
     const invalid = helpers.sanitizeSettingsUpdate({ selectionApprovalText: null });
     expect(helpers.mergePersistedSettings({ selectionApprovalText: 'previous' }, invalid).selectionApprovalText).toBe('previous');
   });
+  it('keeps the transcription prompt as typed, clears it, and refuses one over the cap', () => {
+    const helpers = createTestHelpers();
+    for (const text of ['Español e inglés.\nTérminos: 東京 ', '']) {
+      const changes = helpers.sanitizeSettingsUpdate({ sttPrompt: text });
+      const stored = helpers.mergePersistedSettings({ sttPrompt: 'previous' }, changes);
+      expect(helpers.formatSettingsResponse(JSON.parse(JSON.stringify(stored))).sttPrompt).toBe(text);
+    }
+    expect(helpers.sanitizeSettingsUpdate({ sttPrompt: 'x'.repeat(4097) })).not.toHaveProperty('sttPrompt');
+  });
   const registryPath = join(dirname(testFilePath), 'settings-registry.json');
   const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
   const persistableKeys = Object.entries(registry.fields)
@@ -972,15 +981,15 @@ describe('settings registry gate', () => {
   const validValues = {
     themeId: 'openchamber-dark', locale: 'zh-CN', useSystemTheme: true, themeVariant: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
     splashBgLight: '#fff', splashFgLight: '#000', splashBgDark: '#000', splashFgDark: '#fff',
-    lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode',
+    lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode', useGlobalOpenCodeService: true,
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
     desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarWorktreeNameByBranch: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
-    agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentTerminalToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, agentWorkflowAutoApprove: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
+    agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentMemoryDreamingEnabled: true, agentMemoryDreamingModel: 'openai/gpt-mini', agentMemoryDreamingVariant: 'low', agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentUsageToolEnabled: true, agentTerminalToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, agentWorkflowAutoApprove: true, agentWorkflowAutoApproveLeads: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionIncludeInWork: true, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, worktreeArchiveOnDoneEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'], terminalCloseOnExit: false, terminalOpenOnProjectAction: false,
-    openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttCorrectTranscript: true,
+    openInAppId: 'vscode', dictationEnabled: true, dictationAutoSend: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttEndpointPath: '/speech_to_text', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en', sttPrompt: 'Español e inglés.\nOpenChamber', sttCorrectTranscript: true,
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelHttpsPort: 8443, tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
@@ -997,11 +1006,11 @@ describe('settings registry gate', () => {
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, agentBrowserSharesLogins: true, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
-    largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
+    largeTextPasteBehavior: 'attach', documentAttachBehavior: 'save', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     fontSize: 100, chatFontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', uiFontWeight: 'balanced', padding: 100, cornerRadius: 8,
     shortcutOverrides: { 'chat.send': 'mod+enter' },
-    defaultModel: 'anthropic/claude', defaultVariant: 'high', defaultAgent: 'build', smallModelUseDefault: false, smallModelOverride: 'anthropic/haiku', smallModelVariant: 'high',
+    defaultModel: 'anthropic/claude', defaultVariant: 'high', defaultAgent: 'build', chatsDefaultModel: 'anthropic/claude', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan', smallModelUseDefault: false, smallModelOverride: 'anthropic/haiku', smallModelVariant: 'high',
     walkthroughModelOverride: 'anthropic/claude', walkthroughModelVariant: 'high', zenModel: 'zen/model', fallbackModel: 'openai/gpt', fallbackVariant: 'high', accountSwitchProviders: ['anthropic'],
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, lastUsedEfforts: { 'anthropic/claude': 'high', 'openai/gpt-5': null }, providerOrder: ['anthropic'],
@@ -1115,6 +1124,25 @@ describe('settings registry gate', () => {
       fileEditorWrapLines: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+
+  it('keeps every office document choice and drops an unknown one', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    for (const mode of ['ask', 'save', 'convert']) {
+      const accepted = helpers.sanitizeSettingsUpdate({ documentAttachBehavior: mode });
+      expect(accepted).toEqual({ documentAttachBehavior: mode });
+      expect(helpers.formatSettingsResponse(helpers.mergePersistedSettings({}, accepted))).toMatchObject({ documentAttachBehavior: mode });
+    }
+    expect(helpers.sanitizeSettingsUpdate({ documentAttachBehavior: 'attach' })).toEqual({});
+  });
+
+  it('trims a mode choice and drops one that is not text', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: ' inline ', documentAttachBehavior: ' save ', fileEditorKeymap: ' vim ' }))
+      .toEqual({ largeTextPasteBehavior: 'inline', documentAttachBehavior: 'save', fileEditorKeymap: 'vim' });
+    for (const value of [1, null, ['save'], { mode: 'save' }]) {
+      expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: value, documentAttachBehavior: value, fileEditorKeymap: value })).toEqual({});
+    }
   });
 });
 

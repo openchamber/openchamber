@@ -1,7 +1,9 @@
+import type { JsonValue } from '../shared/json-values.js';
+
 const GITHUB_HOST = 'github.com';
 
 interface SourceOptions {
-  subpath?: string | null | undefined;
+  subpath?: JsonValue | undefined;
 }
 
 interface ParsedSourceBase {
@@ -41,7 +43,7 @@ function splitSourceRef(source: string) {
   return { base: source.slice(0, hashIndex).trim(), ref: ref || null };
 }
 
-export function parseSkillRepoSource(input?: string | null, options: SourceOptions = {}): (ParsedSourceBase & { ref: string | null }) | InvalidSource {
+export function parseSkillRepoSource(input?: JsonValue, options: SourceOptions = {}): (ParsedSourceBase & { ref: string | null }) | InvalidSource {
   const parsed = parseSkillRepoBase(input, options);
   if (!parsed.ok) return parsed;
   const { ref } = splitSourceRef(isSourceString(input) ? input.trim() : '');
@@ -51,7 +53,7 @@ export function parseSkillRepoSource(input?: string | null, options: SourceOptio
   return { ...parsed, ref };
 }
 
-function parseSkillRepoBase(input: string | null | undefined, options: SourceOptions): ParsedSourceBase | InvalidSource {
+function parseSkillRepoBase(input: JsonValue | undefined, options: SourceOptions): ParsedSourceBase | InvalidSource {
   const raw = splitSourceRef(isSourceString(input) ? input.trim() : '').base;
   if (!raw) {
     return { ok: false, error: { kind: 'invalidSource', message: 'Repository source is required' } };

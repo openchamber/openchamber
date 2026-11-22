@@ -13,6 +13,25 @@ export function findServerTypeScript(root = webRoot) {
     .map((file) => path.join(root, folder, file)));
 }
 
+export const JAVASCRIPT_ENTRIES = [
+  'bin/cli.js',
+  'server/index.js',
+  'server/lib/dictation/local/worker-process.js',
+  'server/lib/git/credential-helper.js',
+  'server/lib/git/repository-credential-helper.js',
+  'server/lib/git/ssh-wrapper.js',
+];
+
+const NOT_IMPLEMENTATION = /(?:\.(?:test|spec|fixture|test-support|bench)\.|(?:^|\/)(?:tests?|__tests__|test-support)(?:\/|$)|-live-support\.)/;
+
+export function findServerJavaScript(root = webRoot) {
+  return ['server', 'bin'].flatMap((folder) => fs.readdirSync(path.join(root, folder), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.relative(root, path.join(entry.parentPath, entry.name)).replaceAll(path.sep, '/')))
+    .filter((file) => file.endsWith('.js') && !file.startsWith('server/built-in-extensions/')
+      && !NOT_IMPLEMENTATION.test(file) && !JAVASCRIPT_ENTRIES.includes(file));
+}
+
 const COMMAND_LENGTH_BUDGET = 20_000;
 
 export function batchByCommandLength(files, budget = COMMAND_LENGTH_BUDGET) {
@@ -38,6 +57,11 @@ export function checkServerTypes(root = webRoot, lint = process.argv.includes('-
   const paired = findPairedDeclarations(files);
   if (paired.length) {
     for (const file of paired) console.error(`${file}: delete the paired .d.ts when converting its implementation`);
+    return 1;
+  }
+  const javascript = findServerJavaScript(root);
+  if (javascript.length) {
+    for (const file of javascript) console.error(`${file}: server and CLI code is TypeScript. Write this module as .ts; only the entries Node runs by file name stay JavaScript (JAVASCRIPT_ENTRIES in packages/web/scripts/check-server-types.mjs).`);
     return 1;
   }
   if (lint) {

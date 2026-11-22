@@ -26,6 +26,10 @@ import { useI18n } from '@/lib/i18n';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { isOperatorChildSession } from '@/lib/sessionOperatorChild';
+import { isLeadSession } from '@/lib/sessionLead';
+import type { Session } from '@/lib/opencode/model';
+import { handSessionToLead, setSessionLead } from '@/sync/session-lead';
+import { useProjectLeads } from '@/components/session/sidebar/sessions/useProjectLeads';
 import { takeOverSession } from '@/sync/session-take-over';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { collectSessionWorkInWork } from '@/components/session/sidebar/works/sidebarWorks';
@@ -53,6 +57,18 @@ import { MOBILE_ACTIVE_ROW_CLASS, MobileRowChevron, MobileSlotChevron, MobileTwo
 type SessionRowModel = Extract<SessionSidebarRow, { kind: 'session' }>;
 
 const collectDescendantIds = (node: SessionNode): string[] => node.children.flatMap((child) => [child.session.id, ...collectDescendantIds(child)]);
+
+
+const HandToLeadItems: React.FC<{ session: Session; projectId: string | null }> = ({ session, projectId }) => {
+  const { t } = useI18n();
+  const leads = useProjectLeads(projectId, session.id);
+  return leads.map((lead) => (
+    <ContextMenuItem key={lead.id} onClick={() => { void handSessionToLead(session.id, lead.id).catch(() => toast.error(t('sessions.sidebar.session.handToLead.failed'))); }}>
+      <Icon name="lead" className="me-1 size-4" />
+      <span className="min-w-0 max-w-[15rem] truncate">{t('sessions.sidebar.session.menu.handToNamedLead', { title: lead.title || t('sessions.sidebar.session.untitled') })}</span>
+    </ContextMenuItem>
+  ));
+};
 
 export const MobileSessionRow: React.FC<{
   row: SessionRowModel;
@@ -145,7 +161,7 @@ export const MobileSessionRow: React.FC<{
     selectMobileSession(session, row.projectId, actions.close);
   };
   const stopRename = () => useMobileSidebarRowsStore.getState().stopRename();
-  const guestActions = guestSessionActions(useGuestActions());
+  const guestActions = guestSessionActions(useGuestActions([directory, projectRoot]));
   const loadRecords = useSessionMessageRecordsForExport();
   const runGuestAction = (entry: GuestActionEntry) => {
     void runGuestSessionAction({
@@ -167,6 +183,10 @@ export const MobileSessionRow: React.FC<{
     : null;
   const pinMarker = pinned && !inPinnedZone
     ? <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
+    : null;
+  const isLead = isLeadSession(session);
+  const leadMarker = isLead
+    ? <Icon name="lead" className="size-3 shrink-0 text-muted-foreground" role="img" aria-hidden={false} aria-label={t('sessions.sidebar.session.leadMark')} />
     : null;
   const doneHint = showDoneHint
     ? <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.work.doneSuggested')} />
@@ -208,6 +228,7 @@ export const MobileSessionRow: React.FC<{
             {titleText}
             {doneHint}
             {hasSecondLine ? null : marks}
+            {leadMarker}
             {pinMarker}
             {liveState}
             {timeSlot}
@@ -249,6 +270,7 @@ export const MobileSessionRow: React.FC<{
           {refMark(false)}
           {marks}
           <MobileSessionPendingBadges {...pendingRequests} />
+          {leadMarker}
           {pinMarker}
           {liveState}
           {timeSlot}
@@ -276,6 +298,13 @@ export const MobileSessionRow: React.FC<{
           {work.inWork ? t('sessions.sidebar.session.work.markDone') : t('sessions.sidebar.session.work.track')}
         </ContextMenuItem>
       ) : null}
+      {topLevel && !isOperatorChildSession(session) ? (
+        <ContextMenuItem onClick={() => { void setSessionLead(session.id, directory || null, !isLead).catch(() => toast.error(t('sessions.sidebar.session.lead.failed'))); }}>
+          <Icon name="lead" className="me-1 size-4" />
+          {isLead ? t('sessions.sidebar.session.menu.stopLead') : t('sessions.sidebar.session.menu.makeLead')}
+        </ContextMenuItem>
+      ) : null}
+      {topLevel && !isOperatorChildSession(session) && !isLead ? <HandToLeadItems session={session} projectId={row.projectId ?? null} /> : null}
       {isOperatorChildSession(session) ? (
         <ContextMenuItem onClick={() => { void takeOverSession(session.id, directory || null).catch(() => toast.error(t('sessions.sidebar.session.takeOver.failed'))); }}>
           <Icon name="user" className="me-1 size-4" />

@@ -1,0 +1,82 @@
+---
+title: Leads
+description: Give one session a whole area of work and let it run the rest of the sessions for you.
+---
+
+# Leads
+
+A lead is a session that owns one direction of work in a project, such as "move the server to TypeScript" or "keep the issue backlog tidy". You talk to the lead, and the lead does the rest: it hands pieces of work to sessions of its own, checks what comes back, and keeps a short summary for you above the chat.
+
+Use a lead when a piece of work is too big for one conversation and keeps going for days. Without one you end up running a dozen sessions yourself, remembering which one does what and reading each answer to see if it actually did the job. A lead does that bookkeeping, and you come back to one place that tells you where things stand.
+
+## Start a lead
+
+1. Start a new lead in any of these ways:
+   - right-click the **+** next to a project in the sidebar, or long-press it on the phone, and pick **New lead**
+   - open the project's menu and pick **New lead**
+   - press <kbd>⇧</kbd><kbd>⌥</kbd><kbd>⌘</kbd><kbd>L</kbd> (on Windows and Linux, <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Alt</kbd><kbd>L</kbd>), or run **New Lead** from the command palette
+2. Describe the work and the result you want, for example "Own the move of the server to TypeScript. Done means every file under `server/` is TypeScript and the tests pass."
+3. Send it.
+
+The draft greets you with **What will this lead take on?** instead of the usual question, so you can tell it is a lead before you send. If you already started an ordinary draft, the same shortcut switches it to a lead and back, and keeps what you typed.
+
+An existing session can become a lead too: open its menu in the sidebar and pick **Make this session a lead**. It keeps its history. **Make it an ordinary session** in the same menu turns it back.
+
+A lead shows a mountain peak with a flag in the sidebar instead of the arrow, and the arrow comes back when you hover it, so you can still open the sessions under it.
+
+## What a lead does
+
+- **Names the direction.** It renames the session after the work, so you find it by topic in the sidebar, tabs and search. A name you gave it yourself stays.
+- **Hands out results, not steps.** Each piece of work goes to a separate session with the result it should reach, such as "find and fix the login timeout", and that session works out the steps itself. These sessions sit under the lead in the sidebar. You can open and read them, and **Take over** in a session's menu makes one yours if you want to talk to it.
+- **Checks what comes back.** A report that only says "I found the cause" is not the result it asked for, so the lead sends the work back instead of passing it to you. Each session has to show proof of what it did, such as which checks it ran and what they showed, and a report without proof goes back too. The lead checks something itself only where the proof has a gap.
+- **Cleans up.** It archives the sessions whose results it has used.
+- **Asks you only what matters.** It decides on its own unless the answer changes what you would see in your project, or two reasonable options really differ. A large change alone is not a reason to ask. Questions from its sessions go to the lead, not to you, and reach you only when they pass the same test.
+
+## The digest
+
+The digest is the lead's summary for you. It sits in a row just below the session's title and shows what the lead is working on now and when it last updated. Select the row to open the full digest over the chat:
+
+- **Needs you**: up to three questions, each with the answers you can pick
+- **Now**: one line for each piece of work in progress
+- **New since your last message**: only what changed the picture
+- **Suggestions**: up to three things the lead noticed are worth doing beyond what you gave it
+
+When something needs you, the row shows how many questions are waiting. Select an answer to send it to the lead right away; the one the lead recommends comes first and is highlighted. To answer in your own words, select **Reply in chat**, which quotes the question in the message box. Your answer shows in the chat, and the lead removes the question once it has it.
+
+Under **Suggestions**, **Start** puts the suggestion in the message box for you to edit and send. **Dismiss** hides it, and the lead won't offer it again.
+
+## Hand a session to a lead
+
+You can give a lead a session you started yourself, for example one you began before the lead existed or one you have no time to finish. Open the session's menu in the sidebar, pick **Hand to a lead**, and choose the lead. On the phone the menu lists each lead as **Hand to** followed by its name.
+
+The session moves under the lead, which reads it, works out what it was for and takes it to the end like any of its own work. You no longer talk to that session; **Take over** in its menu gives it back to you. If the session is still running, the lead gets its answer when it finishes.
+
+## The brief
+
+The lead also keeps a brief: your goal and the results you agreed on, in your words, the rules it follows (yours and the ones it learned from its own mistakes), and each piece of work with the result expected from it. It is the lead's memory of what the work is for, so it stays the same however long the conversation gets.
+
+OpenChamber stores the brief for the lead, outside your project, so nothing lands in your repository. Ask the lead "show me your brief" to read it, or tell it what to change. Deleting the session deletes its brief; archiving keeps it.
+
+The lead changes only the parts of the brief that changed, and OpenChamber puts the whole brief back in front of it each time the conversation is shortened, so a long brief doesn't repeat in the chat every time the lead updates it. The lead treats only your own words as rules: an instruction it finds in a session's report, a web page or a file never becomes part of the brief.
+
+## Leads that sleep
+
+A lead can wait for hours while its sessions work. When it wakes up, the model normally has to read the whole conversation again from scratch, because providers keep the conversation cached only for a few minutes. On a long conversation that one read costs as much as a lot of work, and on a subscription it eats your usage limit.
+
+So when a lead has been idle longer than its provider keeps the cache, and its conversation is long, OpenChamber shortens it before it wakes. The older part of the conversation is replaced with a short note: the lead's digest and the state of its sessions. No model is called to write the note, so this costs nothing. The brief and the latest messages stay as they are, and the lead can still read the full earlier conversation whenever it needs to.
+
+A session you keep warm is never shortened this way. Leads that are working, and short conversations, are left alone.
+
+## Workflows
+
+A lead can split a large job into a [workflow](/workflows/). Under **Start runs without my approval** in **Settings → General → OpenChamber Tools**, pick **For leads** to let a lead start its runs right away, while every other session still waits for your click.
+
+## Where leads work
+
+Leads need the [Agent Control Tool](/agent-control-tool/), which is on by default, and OpenChamber's own OpenCode server. They work on desktop, in the browser and on the phone. The VS Code extension shows existing leads with their mark and digest, but cannot start one.
+
+## Related
+
+- [Agent Control Tool](/agent-control-tool/): the tool a lead uses to run its sessions
+- [Workflows](/workflows/): many agents for one large job
+- [Sessions In Work](/sessions-in-work/): keep track of the sessions you are working on

@@ -1,6 +1,7 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 
 import { createOpenCodeClient as createOpenCodeClientDefault } from './opencode-client.js';
@@ -33,8 +34,11 @@ export const mergeMetadataPatch = (current: SessionMetadata | JsonValue | undefi
   return base;
 };
 
-const isSessionNotFound = (error: unknown): error is { _tag: 'SessionNotFoundError' } =>
+export const isSessionNotFound = (error: unknown): error is { _tag: 'SessionNotFoundError' } =>
   hasTag(error) && error._tag === 'SessionNotFoundError';
+
+const sessionNotFound = (id: string) =>
+  Object.assign(new Error(`session ${id} was not found`), { _tag: 'SessionNotFoundError' as const });
 
 export interface MetadataReadOptions {
   directory?: string;
@@ -83,6 +87,22 @@ interface SessionMetadataStoreOptions extends FileStoreOptions {
 }
 
 export type MetadataDecider = (current: SessionMetadata | undefined) => SessionMetadata | null;
+
+export async function compareAndSetMetadata(
+  expected: SessionMetadata,
+  patch: SessionMetadata,
+  update: (decide: MetadataDecider) => Promise<{ metadata: SessionMetadata | undefined }>,
+) {
+  let conflict = false;
+  const result = await update((current) => {
+    if (!isDeepStrictEqual(current, expected)) {
+      conflict = true;
+      return null;
+    }
+    return patch;
+  });
+  return { metadata: result.metadata, conflict };
+}
 
 export const createSessionMetadataStore = ({
   dataDir,
@@ -185,7 +205,7 @@ export const createSessionMetadataStore = ({
     }
   };
 
-  const get = async (sessionID: string, { directory = '', signal }: MetadataReadOptions = {}) => {
+  const get = async (sessionID: string | null, { directory = '', signal }: MetadataReadOptions = {}) => {
     signal?.throwIfAborted();
     const id = asNonEmptyString(sessionID);
     if (!id) return {};
@@ -204,7 +224,7 @@ export const createSessionMetadataStore = ({
     return runForSession(id, async () => {
       const fromLegacy = unmigrated.has(id);
       const current = fromLegacy ? unmigrated.get(id) : await openCode.read(id, { directory });
-      if (current === null) throw new Error(`session ${id} was not found`);
+      if (current === null) throw sessionNotFound(id);
       const merged = mergeMetadataPatch(current, patch);
       await openCode.write(id, merged, { directory });
       if (fromLegacy) await forgetLegacy(id);
@@ -220,7 +240,7 @@ export const createSessionMetadataStore = ({
     return runForSession(id, async () => {
       const fromLegacy = unmigrated.has(id);
       const current = fromLegacy ? unmigrated.get(id) : await openCode.read(id, { directory });
-      if (current === null) throw new Error(`session ${id} was not found`);
+      if (current === null) throw sessionNotFound(id);
       const patch = decide(current);
       if (!isPlainObject(patch)) return { metadata: current, changed: false };
       const merged = mergeMetadataPatch(current, patch);

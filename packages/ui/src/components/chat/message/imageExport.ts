@@ -1,6 +1,7 @@
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 import type { VSCodeAPI } from '@/lib/api/types';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { loadedAppFontCSS } from '@/lib/fontLoader';
 import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import type { Theme } from '@/types/theme';
 
@@ -85,6 +86,34 @@ export const cloneMessageImageExportSource = (source: HTMLElement): HTMLElement 
     return clone;
 };
 
+export const collapseMessageImageExportTables = (clone: HTMLElement): void => {
+    clone.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"]').forEach((wrapper) => {
+        delete wrapper.dataset.chatTable;
+        delete wrapper.dataset.tableOverflowStart;
+        delete wrapper.dataset.tableOverflowEnd;
+        if (wrapper.dataset.tableExpanded !== 'true') return;
+        delete wrapper.dataset.tableExpanded;
+        const table = wrapper.querySelector<HTMLTableElement>('[data-streamdown="table"]');
+        const frame = table?.closest<HTMLElement>('.overlay-scrollbar-wrapper');
+        if (frame && wrapper.contains(frame)) {
+            frame.style.removeProperty('transform');
+            frame.style.removeProperty('width');
+        }
+        const widths = table?.dataset.collapsedWidths?.split(',').map(Number);
+        if (!table || !widths?.length || widths.some((width) => !Number.isFinite(width))) return;
+        const capped = table.dataset.collapsedCapped ?? '';
+        table.style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
+        table.querySelectorAll<HTMLElement>(':scope > colgroup > col').forEach((col, index) => {
+            if (widths[index] !== undefined) col.style.width = `${widths[index]}px`;
+        });
+        table.querySelectorAll<HTMLTableRowElement>('tr').forEach((row) => {
+            Array.from(row.cells).forEach((cell, index) => {
+                cell.style.setProperty('--oc-table-code-wrap', capped[index] === '1' ? 'normal' : 'nowrap');
+            });
+        });
+    });
+};
+
 export type MessageImageSaveResult = 'saved' | 'canceled';
 
 type VSCodeImageSavePayload = { saved?: boolean; canceled?: boolean; error?: string };
@@ -132,6 +161,7 @@ const prepareMessageImageClone = (source: HTMLElement): HTMLElement => {
         transform: none;
         contain: none;
     `;
+    collapseMessageImageExportTables(clone);
     clone.querySelectorAll<HTMLElement>('[data-code-wrap]').forEach((root) => {
         root.setAttribute('data-code-wrap', 'true');
     });
@@ -162,8 +192,9 @@ export const saveMessageImageExport = async ({ source, width, fileName, vscode }
 }): Promise<MessageImageSaveResult> => {
     let wrapper: HTMLDivElement | null = null;
     try {
-        const { toPng } = await import('html-to-image');
-        const backgroundColor = window.getComputedStyle(document.documentElement).getPropertyValue('--surface-background').trim()
+        const { getFontEmbedCSS, toPng } = await import('html-to-image');
+        const rootStyle = window.getComputedStyle(document.documentElement);
+        const backgroundColor = rootStyle.getPropertyValue('--surface-background').trim()
             || window.getComputedStyle(source).backgroundColor
             || window.getComputedStyle(document.body).backgroundColor;
         wrapper = document.createElement('div');
@@ -183,6 +214,11 @@ export const saveMessageImageExport = async ({ source, width, fileName, vscode }
         const clone = prepareMessageImageClone(source);
         wrapper.appendChild(clone);
         document.body.appendChild(wrapper);
+        const stylesheetFontCSS = await getFontEmbedCSS(wrapper);
+        const appFontCSS = await loadedAppFontCSS([
+            rootStyle.getPropertyValue('--font-sans'),
+            rootStyle.getPropertyValue('--font-mono'),
+        ]);
         if (width) fitMessageImageExportLayout(wrapper, clone, width);
         const bounds = wrapper.getBoundingClientRect();
         const canvasWidth = Math.ceil(bounds.width);
@@ -193,6 +229,7 @@ export const saveMessageImageExport = async ({ source, width, fileName, vscode }
             height: canvasHeight,
             pixelRatio: resolveMessageImageExportPixelRatio(canvasWidth, canvasHeight),
             backgroundColor,
+            fontEmbedCSS: [stylesheetFontCSS, appFontCSS].filter(Boolean).join('\n'),
         });
         return await deliverMessageImage(dataUrl, fileName, vscode);
     } finally {

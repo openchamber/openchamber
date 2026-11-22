@@ -263,7 +263,7 @@ export const PullRequestSection: React.FC<{
   const confirmation = useConfirmDialog();
   const sourceControlAuthEntries = useSourceControlAuthStore((state) => state.entries);
   const { isMobile, hasTouchInput, screenWidth } = useDeviceInfo();
-  const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const requestWalkthroughTarget = useWalkthroughStore((state) => state.requestTarget);
   const showWalkthroughAction = !isMobile && screenWidth >= 768 && !isVSCodeRuntime();
 
@@ -1078,7 +1078,7 @@ export const PullRequestSection: React.FC<{
                       },
                       context: readContext,
                     });
-                    openContextSurface(directory, 'walkthrough');
+                    openContextPanelTab(directory, { mode: 'walkthrough', targetDirectory: null });
                   }}
                   aria-label={t('walkthrough.action.open')}
                 >

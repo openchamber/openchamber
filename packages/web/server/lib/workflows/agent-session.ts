@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 import { readDispatchOutcome } from '../dispatch-results/runtime.js';
 import type { DispatchResultsOptions } from '../dispatch-results/runtime.js';
+import { WORKFLOW_ANSWER_TOOL } from '../openchamber-control/actions.js';
+import { isSessionNotFound } from '../openchamber-sessions/session-metadata-store.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import type { SessionActivityOptions } from '../opencode/session-activity.js';
 import { hasErrorMessage } from './contracts.js';
@@ -20,6 +22,7 @@ const recordSchema = z.object({ id: z.string().min(1), type: z.string() });
 const permissionRuleSchema = z.object({ action: z.string(), resource: z.string(), effect: z.enum(['allow', 'deny', 'ask']) });
 const sessionSchema = z.object({
   id: z.string().min(1),
+  agent: z.string().nullish(),
   model: z.object({ id: z.string().min(1), providerID: z.string().min(1), variant: z.string().optional() }).nullish(),
   location: z.object({ directory: z.string().min(1) }).nullish(),
   permissions: z.array(permissionRuleSchema).optional(),
@@ -63,6 +66,9 @@ const parseModelRef = (value: string) => {
   if (variant) ref.variant = variant;
   return ref;
 };
+
+const sameModel = (a: ModelRef, b: ModelRef | null | undefined) =>
+  Boolean(b) && a.providerID === b?.providerID && a.id === b.id && (a.variant ?? null) === (b.variant ?? null);
 
 const workflowAgentMetadata = (parentSessionId: string) => ({ openchamber: { kind: 'workflow-agent', parentID: parentSessionId } });
 
@@ -129,7 +135,8 @@ export const createWorkflowAgentSessions = ({
 
   const latestIdleId = async (client: WorkflowSessionClient, sessionId: string) => {
     const records = await readRecords(client, sessionId);
-    const idle = (records ?? []).map((record) => recordSchema.safeParse(record)).find(
+    if (!records) throw new Error(`Could not read the records of session ${sessionId}`);
+    const idle = records.map((record) => recordSchema.safeParse(record)).find(
       (parsed): parsed is z.ZodSafeParseSuccess<z.infer<typeof recordSchema>> => parsed.success && parsed.data.type === 'idle',
     );
     return idle?.data.id ?? null;
@@ -171,10 +178,31 @@ export const createWorkflowAgentSessions = ({
     }
   };
 
-  const start: AgentSessions['start'] = async ({ directory, parentSessionId, title, agent, model, allowTools = [], text, signal, onSession }) => {
+  const start: AgentSessions['start'] = async ({ directory, parentSessionId, forkFromSessionId, title, agent, model, allowTools = [], text, signal, onSession }) => {
     const client = await getClient(directory);
     let modelRef = model ? parseModelRef(model) : null;
     if (model && !modelRef) throw new Error(`model must be provider/model or provider/model#variant, got ${model}`);
+    if (forkFromSessionId) {
+      const source = sessionSchema.parse(await client.session.get({ sessionID: forkFromSessionId }));
+      if (signal.aborted) throw new WorkflowAgentStopped();
+      const created = sessionSchema.parse(await client.session.fork({ sessionID: forkFromSessionId }));
+      await onSession(created.id);
+      if (signal.aborted) throw new WorkflowAgentStopped();
+      const permissions: z.infer<typeof permissionRuleSchema>[] = [
+        ...(source.permissions ?? []).filter((rule) => rule.action !== WORKFLOW_ANSWER_TOOL),
+        { action: WORKFLOW_ANSWER_TOOL, resource: '*', effect: allowTools.includes(WORKFLOW_ANSWER_TOOL) ? 'allow' : 'deny' },
+      ];
+      await client.session.update({ sessionID: created.id, title, metadata: workflowAgentMetadata(parentSessionId), permissions });
+      const useAgent = agent ?? source.agent;
+      if (useAgent && useAgent !== created.agent) await client.session.switchAgent({ sessionID: created.id, agent: useAgent });
+      const useModel = modelRef ?? source.model;
+      if (useModel && !sameModel(useModel, created.model)) {
+        const { variant, ...ref } = useModel;
+        await client.session.switchModel({ sessionID: created.id, model: variant === undefined ? ref : { ...ref, variant } });
+      }
+      const outcome = await prompt(client, created.id, text, signal);
+      return { sessionId: created.id, outcome };
+    }
     const parent = sessionSchema.parse(await client.session.get({ sessionID: parentSessionId }));
     if (!modelRef && parent.model) modelRef = parent.model;
     const request: WorkflowSessionRequest = {
@@ -217,5 +245,26 @@ export const createWorkflowAgentSessions = ({
     };
   };
 
-  return { start, createSession, followUp, interrupt, readUsage, postSynthetic, stop: unsubscribe };
+  const sessionGone: AgentSessions['sessionGone'] = async ({ directory, sessionId, signal }) => {
+    const bounded = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
+    let onAbort = () => {};
+    const abandoned = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(bounded.reason);
+      if (bounded.aborted) onAbort();
+      else bounded.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      await Promise.race([abandoned, (async () => {
+        const client = await getClient(directory);
+        await client.session.get({ sessionID: sessionId });
+      })()]);
+      return false;
+    } catch (error) {
+      return !bounded.aborted && isSessionNotFound(error);
+    } finally {
+      bounded.removeEventListener('abort', onAbort);
+    }
+  };
+
+  return { start, createSession, followUp, interrupt, readUsage, sessionGone, postSynthetic, stop: unsubscribe };
 };

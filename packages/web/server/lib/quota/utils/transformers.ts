@@ -1,11 +1,12 @@
 import { z } from 'zod';
-import type { TokenWindowDurations, TokenWindowLimit } from './contracts.js';
+import type { TokenWindowLimit } from './contracts.js';
 
-export { asNonEmptyString } from '../../shared/guards.js';
+export { asNonEmptyString } from '../../shared/object-guards.js';
 
 const isObject = (value: unknown): value is object => value !== null && typeof value === 'object';
 const isNumber = (value: unknown): value is number => typeof value === 'number';
 const isString = (value: unknown): value is string => typeof value === 'string';
+const isSymbol = (value: unknown): value is symbol => typeof value === 'symbol';
 
 export const asObject = z.custom<object | null>(isObject).catch(null).parse;
 
@@ -37,6 +38,10 @@ export const normalizeTimestamp = z.unknown().transform((value) => {
   return value < 1_000_000_000_000 ? value * 1000 : value;
 }).parse;
 
+interface TokenWindowDurations {
+  readonly [unit: PropertyKey]: number | { toString(): string } | undefined;
+}
+
 const ZAI_TOKEN_WINDOW_SECONDS: TokenWindowDurations = {
   3: 60 * 60,
   6: 7 * 24 * 60 * 60
@@ -44,9 +49,10 @@ const ZAI_TOKEN_WINDOW_SECONDS: TokenWindowDurations = {
 
 export const resolveWindowSeconds = (limit: TokenWindowLimit | null | undefined) => {
   if (!limit || !limit.number) return null;
-  const unitSeconds = limit.unit === undefined ? undefined : ZAI_TOKEN_WINDOW_SECONDS[limit.unit];
+  const unit = limit.unit;
+  const unitSeconds = unit === undefined ? undefined : ZAI_TOKEN_WINDOW_SECONDS[isSymbol(unit) ? unit : String(unit)];
   if (!unitSeconds) return null;
-  return unitSeconds * limit.number;
+  return +unitSeconds * +limit.number;
 };
 
 export const resolveWindowLabel = (windowSeconds: number | null | undefined) => {

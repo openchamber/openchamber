@@ -12,7 +12,7 @@ const temporaryQuotaDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openc
 process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
 // Credentials come from the running OpenCode; serve a fixed list so the
 // providers treat themselves as configured and go straight to fetch.
-const key = (integrationID: string): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label: 'default', active: true, value: { type: 'key', key: 'test-token' } });
+const key = (integrationID: string, label = 'default'): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label, active: true, value: { type: 'key', key: 'test-token' } });
 const oauth = (integrationID: string, metadata?: { enterpriseUrl?: string }): CredentialEntry => ({
   id: `cred_${integrationID}`,
   integrationID,
@@ -116,6 +116,55 @@ const stubFetchFailing = (json: () => Promise<unknown>, init: MockResponseInit):
   globalThis.fetch = (async () => ({ json, ...init }) as unknown as Response) as typeof fetch;
 };
 
+describe('Google plugin credentials', () => {
+  afterEach(() => configureOpenCodeCredentials({ list: async () => baseCredentialList() }));
+
+  test('still discovers a direct Google OAuth login', async () => {
+    configureOpenCodeCredentials({ list: async () => [{
+      id: 'cred_google', integrationID: 'google', label: 'direct', active: true,
+      value: { type: 'oauth', methodID: 'oauth', access: 'test-token', refresh: 'test-refresh', expires: Date.now() + 3_600_000 },
+    }] });
+    assert.equal((await listConfiguredQuotaProviders()).includes('google'), true);
+  });
+
+  test('still discovers a Gemini CLI Google login', async () => {
+    configureOpenCodeCredentials({ list: async () => [{
+      id: 'cred_google', integrationID: 'google', label: 'gemini', active: true,
+      value: { type: 'oauth', methodID: 'gemini-cli', access: 'test-token', refresh: 'test-refresh', expires: Date.now() + 3_600_000 },
+    }] });
+    assert.equal((await listConfiguredQuotaProviders()).includes('google'), true);
+  });
+
+  test('keeps a legacy Google login without a method ID', async () => {
+    // Credentials saved before OpenCode recorded login methods carry no method ID.
+    const legacy: CredentialEntry = {
+      id: 'cred_google', integrationID: 'google', label: 'legacy', active: true,
+      value: { type: 'oauth', methodID: 'oauth', access: 'test-token', refresh: 'test-refresh', expires: Date.now() + 3_600_000 },
+    };
+    Reflect.deleteProperty(legacy.value, 'methodID');
+    configureOpenCodeCredentials({ list: async () => [legacy] });
+    const requests: string[] = [];
+    stubFetchReturning(async (url) => { requests.push(url); return Response.json({ buckets: [] }); });
+    assert.equal((await listConfiguredQuotaProviders()).includes('google'), true);
+    assert.equal((await fetchQuotaForProvider('google')).configured, true);
+    assert.equal(requests.some((url) => url.includes('googleapis.com')), true);
+  });
+
+  for (const expires of [1, Date.now() + 3_600_000]) {
+    test(`does not discover or request plugin credentials with expiry ${expires}`, async () => {
+      configureOpenCodeCredentials({ list: async () => [{
+        id: 'cred_google', integrationID: 'google', label: 'plugin', active: true,
+        value: { type: 'oauth', methodID: 'antigravity', access: 'placeholder', refresh: 'placeholder', expires },
+      }] });
+      let requests = 0;
+      stubFetchReturning(async () => { requests++; throw new Error('Unexpected request'); });
+      assert.equal((await listConfiguredQuotaProviders()).includes('google'), false);
+      assert.equal((await fetchQuotaForProvider('google')).configured, false);
+      assert.equal(requests, 0);
+    });
+  }
+});
+
 test('dispatches Charm Hyper through the generic quota API', async () => {
   stubFetchReturning(async () => Response.json({ balance: 100 }));
   const result = await fetchQuotaForProvider('hyper');
@@ -162,6 +211,18 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
       assert.equal(result.ok, true);
       assert.equal(new Headers(request?.headers).get('Authorization'), 'Bearer test-token');
       assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
+      // The label the credential carries in OpenCode names the account the meters belong to.
+      assert.equal(result.accountLabel, 'default');
+    });
+
+    test("names the account from the credential's label", async () => {
+      configureOpenCodeCredentials({ list: async () => [key('opencode-go', 'outlook')] });
+      stubFetchReturning(async () => mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } }));
+
+      const result = await fetchQuotaForProvider('opencode-go');
+
+      assert.equal(result.ok, true);
+      assert.equal(result.accountLabel, 'outlook');
     });
 
     test('reports an absent subscription on a 403', async () => {
@@ -177,6 +238,43 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
       assert.equal(result.configured, true);
       assert.equal(result.error, 'OpenCode Go key expired. Connect an OpenCode Console account on the OpenCode card in Providers.');
     });
+  });
+
+  // #6679: OpenCode sends Go requests with the Console card's key whenever its workspace has Go.
+  test('prefers a key on the Console integration over the OpenCode Go key, which stays the fallback', async () => {
+    configureOpenCodeCredentials({ list: async () => [key('opencode', 'console'), key('opencode-go', 'go')] });
+    try {
+      stubFetchReturning(async () => mockResponse({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } }));
+      assert.equal((await fetchQuotaForProvider('opencode-go')).accountLabel, 'console');
+
+      let reads = 0;
+      stubFetchReturning(async (url) => {
+        if (url.includes('/console/')) return mockResponse({}, { ok: false, status: 403 });
+        reads += 1;
+        return reads === 1
+          ? mockResponse({}, { ok: false, status: 403 })
+          : mockResponse({ usage: { rolling: { percent: 10, resetsAt: '2026-08-12T12:00:00.000Z' } } });
+      });
+      const fallback = await fetchQuotaForProvider('opencode-go');
+      assert.equal(fallback.ok, true);
+      assert.equal(fallback.accountLabel, 'go');
+      assert.equal(fallback.usage!.windows['5h']!.usedPercent, 10);
+
+      reads = 0;
+      stubFetchReturning(async (url) => {
+        if (url.includes('/console/')) return mockResponse({}, { ok: false, status: 403 });
+        reads += 1;
+        return reads === 1
+          ? mockResponse({}, { ok: false, status: 403 })
+          : mockResponse({ error: { type: 'authentication_error', code: 'api_key_expired' } }, { ok: false, status: 401 });
+      });
+      assert.equal((await fetchQuotaForProvider('opencode-go')).error, 'OpenCode Go key expired. Connect an OpenCode Console account on the OpenCode card in Providers.');
+
+      stubFetchReturning(async () => mockResponse({}, { ok: false, status: 503 }));
+      assert.equal((await fetchQuotaForProvider('opencode-go')).error, 'OpenCode Go usage API returned HTTP 503');
+    } finally {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    }
   });
 
   // #5278: the usage API floors its percent, so 17.657% came back as 17 while
@@ -279,6 +377,8 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows.monthly!.usedPercent, 50);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$12.34');
     assert.equal(result.usage!.windows.credits_balance!.usedPercent, null);
+    // The label the credential carries in OpenCode names the account the meters belong to.
+    assert.equal(result.accountLabel, 'default');
   });
 
   test('accepts a wrk_ workspace id from the Console sign-in', async () => {
@@ -763,10 +863,13 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.equal(new Headers(requestInit?.headers).get('Authorization'), 'Bearer test-token');
     assert.equal(new Headers(requestInit?.headers).get('Accept-Encoding'), 'identity');
     assert.ok(requestInit?.signal instanceof AbortSignal);
-    assert.deepEqual(Object.keys(result.usage!.windows), ['daily']);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['daily', 'monthly_total', 'monthly_credits', 'monthly_byok']);
     assert.equal(result.usage!.windows.daily!.windowSeconds, 86400);
     assert.equal(result.usage!.windows.daily!.valueLabel, '$0.00 / $30.00');
     assert.ok(typeof result.usage!.windows.daily!.resetAt === 'number');
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: 3.17561396, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: null, limit: null });
   });
 
   const withStubbedConfigFile = async (configJson: string, run: () => Promise<void>): Promise<void> => {
@@ -884,19 +987,161 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.equal(requested.url, 'https://openrouter.ai/api/v1/key');
   });
 
-  test('maps an unlimited null-limit key to a monthly spent window', async () => {
+  test('maps an unlimited null-limit key to monthly total and category windows', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
-      data: { limit: null, limit_remaining: null, limit_reset: null, usage_monthly: 12.5, is_management_key: false },
+      data: { limit: null, limit_remaining: null, limit_reset: null, usage_monthly: 12.5, byok_usage_monthly: 5, is_management_key: false },
     })));
 
     const result = await fetchQuotaForProvider('openrouter');
 
     assert.equal(result.ok, true);
-    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly']);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly_total', 'monthly_credits', 'monthly_byok']);
+    const total = result.usage!.windows.monthly_total!;
+    assert.equal(total.usedPercent, null);
+    assert.equal(total.windowSeconds, 30 * 86400);
+    assert.deepEqual(total.value, { kind: 'spend', spent: 17.5, limit: null });
+    assert.equal(total.valueLabel, undefined);
+    assert.ok(typeof total.resetAt === 'number');
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: 12.5, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: 5, limit: null });
+  });
+
+  test('shows a set cap as unknown beside the monthly rows when its remaining amount is unreadable', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: null, limit_reset: 'monthly', usage_monthly: 5, byok_usage_monthly: 2, is_management_key: false },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, true);
+    const cap = result.usage!.windows.monthly!;
+    assert.equal(cap.usedPercent, null);
+    assert.equal(cap.valueLabel, undefined);
+    assert.deepEqual(cap.value, { kind: 'spend', spent: null, limit: 30 });
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 7, limit: null });
+  });
+
+  test('treats a blank remaining amount as unreadable rather than a fully spent cap', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: '  ', limit_reset: 'monthly', usage_monthly: 5, byok_usage_monthly: 2, is_management_key: false },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.monthly!.usedPercent, null);
-    assert.equal(result.usage!.windows.monthly!.windowSeconds, 30 * 86400);
-    assert.equal(result.usage!.windows.monthly!.valueLabel, '$12.50 spent');
-    assert.ok(typeof result.usage!.windows.monthly!.resetAt === 'number');
+    assert.deepEqual(result.usage!.windows.monthly!.value, { kind: 'spend', spent: null, limit: 30 });
+  });
+
+  test('sums the captured monthly counters before display rounding', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: {
+        usage_monthly: 14.297788398,
+        byok_usage_monthly: 212.345956722,
+        limit: null,
+        limit_remaining: null,
+        limit_reset: null,
+        include_byok_in_limit: false,
+        is_management_key: false,
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 226.64374512, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: 14.297788398, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: 212.345956722, limit: null });
+  });
+
+  test('hides exact-zero categories while the zero total stays visible', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { usage_monthly: 0, byok_usage_monthly: 0, limit: null, limit_remaining: null, limit_reset: null },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly_total']);
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 0, limit: null });
+  });
+
+  for (const [label, counters, credits, byok] of [
+    ['BYOK', { usage_monthly: 4, byok_usage_monthly: 'nope' }, 4, null],
+    ['Credits', { usage_monthly: null, byok_usage_monthly: 7 }, null, 7],
+    ['blank BYOK', { usage_monthly: 4, byok_usage_monthly: ' ' }, 4, null],
+    ['blank Credits', { usage_monthly: '', byok_usage_monthly: 7 }, null, 7],
+  ] as const) {
+    test(`keeps a valid category and marks an unreadable ${label} amount unknown`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse({
+        data: { ...counters, limit: null, limit_remaining: null, limit_reset: null },
+      })));
+
+      const result = await fetchQuotaForProvider('openrouter');
+
+      assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: null, limit: null });
+      assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: credits, limit: null });
+      assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: byok, limit: null });
+    });
+  }
+
+  for (const [includeByok, limitRemaining, capUsed] of [[false, 25, 5], [true, -75, 105]] as const) {
+    test(`keeps cap usage at limit minus remaining when include_byok_in_limit is ${includeByok}`, async () => {
+      stubFetchReturning(() => Promise.resolve(mockResponse({
+        data: {
+          limit: 30,
+          limit_remaining: limitRemaining,
+          limit_reset: 'monthly',
+          include_byok_in_limit: includeByok,
+          usage_monthly: 5,
+          byok_usage_monthly: 100,
+        },
+      })));
+
+      const result = await fetchQuotaForProvider('openrouter');
+      const cap = result.usage!.windows.monthly!;
+
+      assert.equal(cap.valueLabel, `$${capUsed.toFixed(2)} / $30.00`);
+      assert.equal(cap.usedPercent, Math.min(100, (capUsed / 30) * 100));
+      assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 105, limit: null });
+    });
+  }
+
+  test('keeps usable monthly counters when the cap is malformed', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: null, usage_monthly: 5, byok_usage_monthly: 2 },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.monthly, undefined);
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: 7, limit: null });
+  });
+
+  test('keeps a usable cap and shows both monthly counters unknown', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: 25, limit_reset: 'monthly', usage_monthly: 'bad', byok_usage_monthly: -1 },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly', 'monthly_total', 'monthly_credits', 'monthly_byok']);
+    assert.equal(result.usage!.windows.monthly!.valueLabel, '$5.00 / $30.00');
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: null, limit: null });
+  });
+
+  test('keeps a usable cap when both monthly counters are missing', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      data: { limit: 30, limit_remaining: 25, limit_reset: 'monthly' },
+    })));
+
+    const result = await fetchQuotaForProvider('openrouter');
+
+    assert.deepEqual(Object.keys(result.usage!.windows), ['monthly', 'monthly_total', 'monthly_credits', 'monthly_byok']);
+    assert.deepEqual(result.usage!.windows.monthly_total!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_credits!.value, { kind: 'spend', spent: null, limit: null });
+    assert.deepEqual(result.usage!.windows.monthly_byok!.value, { kind: 'spend', spent: null, limit: null });
   });
 
   test('maps a lifetime cap to a key_limit window without reset metadata', async () => {
@@ -910,6 +1155,7 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.ok(window);
     assert.equal(window!.windowSeconds, null);
     assert.equal(window!.resetAt, null);
+    assert.ok(result.usage!.windows.monthly_total);
   });
 
   test('maps an unrecognized reset period to a key_limit window', async () => {
@@ -922,6 +1168,7 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.ok(result.usage!.windows.key_limit);
     assert.equal(result.usage!.windows.key_limit!.windowSeconds, null);
     assert.equal(result.usage!.windows.key_limit!.resetAt, null);
+    assert.ok(result.usage!.windows.monthly_total);
   });
 
   test('clamps percent at 100 while leaving the money label unclamped', async () => {
@@ -947,6 +1194,7 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.ok(window);
     assert.equal(window!.windowSeconds, 604800);
     assert.equal(new Date(window!.resetAt!).getUTCDay(), 1);
+    assert.ok(result.usage!.windows.monthly_total);
   });
 
   test('rejects management keys with an inference-key error', async () => {
@@ -1668,6 +1916,134 @@ describe('Claude quota provider (VS Code parity)', () => {
     } finally {
       configureOpenCodeCredentials({ list: async () => baseCredentialList() });
     }
+  });
+});
+
+// Settles only when the request's deadline fires. Node 18 (VS Code 1.85) rejects with a generic
+// AbortError rather than the signal's TimeoutError reason, so the stubs do the same.
+const untilAborted = (signal?: AbortSignal | null) => new Promise<never>((_resolve, reject) => {
+  signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+});
+
+// Headers arrive, then the body never does.
+const stalledBody = (status: number, signal?: AbortSignal | null) => ({
+  ok: status === 200,
+  status,
+  headers: new Headers(),
+  json: () => untilAborted(signal),
+});
+
+describe('Claude and Codex usage requests (VS Code parity)', () => {
+  const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+  const requestedTimeouts: number[] = [];
+
+  beforeEach(() => {
+    requestedTimeouts.length = 0;
+    AbortSignal.timeout = (milliseconds: number) => {
+      requestedTimeouts.push(milliseconds);
+      return realTimeout(5);
+    };
+    // A usage endpoint that never answers: the request settles only when its signal aborts.
+    stubFetchReturning((_url, init) => new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) return;
+      signal.addEventListener('abort', () => reject(signal.reason));
+    }));
+  });
+
+  afterEach(() => {
+    AbortSignal.timeout = realTimeout;
+    configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+  });
+
+  for (const providerId of ['claude', 'codex']) {
+    test(`gives up on a ${providerId} usage request that is never answered`, async () => {
+      // A Claude credential of its own, so an earlier test's rate-limit cooldown does not answer instead.
+      configureOpenCodeCredentials({
+        list: async () => [
+          ...baseCredentialList().filter((entry) => entry.integrationID !== 'anthropic'),
+          { ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'timeout-token', refresh: 'timeout-refresh', expires: 0 } },
+        ],
+      });
+
+      const result = await fetchQuotaForProvider(providerId);
+
+      assert.deepEqual(requestedTimeouts, [15_000]);
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'Request timed out');
+    });
+
+    test(`reports a ${providerId} body that stalls after headers as a timeout on Node 18`, async () => {
+      configureOpenCodeCredentials({
+        list: async () => [
+          ...baseCredentialList().filter((entry) => entry.integrationID !== 'anthropic'),
+          { ...oauth('anthropic'), value: { type: 'oauth', methodID: 'test', access: 'stall-token', refresh: 'stall-refresh', expires: 0 } },
+        ],
+      });
+      stubFetchReturning(async (_url, init) => stalledBody(200, init?.signal));
+
+      const result = await fetchQuotaForProvider(providerId);
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'Request timed out');
+    });
+  }
+
+  describe('Codex sign-in refused by access enforcement', () => {
+    const REFUSED = { error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule' } };
+    let codexHome: string;
+
+    beforeEach(() => {
+      codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+      process.env.CODEX_HOME = codexHome;
+      fs.writeFileSync(
+        path.join(codexHome, 'auth.json'),
+        JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct_cli' } }),
+      );
+    });
+
+    afterEach(() => {
+      delete process.env.CODEX_HOME;
+      fs.rmSync(codexHome, { recursive: true, force: true });
+    });
+
+    test('reports a 401 whose body never arrives as a timeout, not an expired session', async () => {
+      stubFetchReturning(async (_url, init) => stalledBody(401, init?.signal));
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.error, 'Request timed out');
+    });
+
+    for (const [when, stall] of [
+      ['before headers', (signal?: AbortSignal | null) => untilAborted(signal)],
+      ['after headers', (signal?: AbortSignal | null) => Promise.resolve(stalledBody(200, signal))],
+    ] as const) {
+      test(`reports a CLI request that stalls ${when} as a timeout`, async () => {
+        stubFetchReturning(async (_url, init) => new Headers(init?.headers).get('authorization') === 'Bearer cli-token'
+          ? stall(init?.signal)
+          : Response.json(REFUSED, { status: 401 }));
+
+        const result = await fetchQuotaForProvider('codex');
+
+        assert.equal(result.error, 'Request timed out');
+      });
+    }
+
+    test('keeps the usage-page guidance when the CLI account ID is not a valid header', async () => {
+      fs.writeFileSync(
+        path.join(codexHome, 'auth.json'),
+        JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct\nbad' } }),
+      );
+      stubFetchReturning(async (_url, init) => {
+        const headers = new Headers(init?.headers);
+        return Response.json(REFUSED, { status: headers.get('authorization') === 'Bearer cli-token' ? 403 : 401 });
+      });
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.match(result.error ?? '', /chatgpt\.com\/settings\/usage/);
+    });
   });
 });
 

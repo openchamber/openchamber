@@ -1,22 +1,22 @@
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
-import type { ClientOptions } from 'openai';
-import type { TranscriptionCreateParamsNonStreaming } from 'openai/resources/audio/transcriptions';
+import type { SpeechClientOptions, SpeechTranscriptionParams } from 'openai';
 
 const DEFAULT_TRANSCRIPTION_PATH = '/audio/transcriptions';
 
 export interface TranscribeAudioOptions {
   audioBuffer: Buffer;
   mimeType: string;
-  model: string;
-  baseURL?: string | undefined;
-  apiKey?: string | undefined;
-  language?: string | undefined;
-  endpointPath?: string | undefined;
+  model: unknown;
+  baseURL?: Parameters<typeof normalizeCustomOpenAIBaseURL>[0];
+  apiKey?: unknown;
+  language?: unknown;
+  prompt?: string | undefined;
+  endpointPath?: Parameters<typeof normalizeEndpointPath>[0];
 }
 
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, endpointPath }: TranscribeAudioOptions) {
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, prompt, endpointPath }: TranscribeAudioOptions) {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -33,8 +33,9 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
   }
   const normalizedEndpointPath = endpointPathResult.value;
 
-  const clientOpts: ClientOptions = {
+  const clientOpts: SpeechClientOptions = {
     apiKey: apiKey || 'not-required',
+    fetchOptions: { redirect: 'manual' },
   };
   clientOpts.baseURL = normalizedBaseURL;
   if (normalizedEndpointPath) {
@@ -52,12 +53,13 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
 
   const file = await OpenAI.toFile(audioBuffer, filename, { type: mimeType });
 
-  const params: TranscriptionCreateParamsNonStreaming<'json'> = {
+  const params: SpeechTranscriptionParams = {
     file,
     model,
     response_format: 'json',
   };
   if (language) params.language = language;
+  if (prompt) params.prompt = prompt;
   const result = await client.audio.transcriptions.create(params);
 
   return result.text ?? '';

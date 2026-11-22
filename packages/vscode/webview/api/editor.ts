@@ -6,13 +6,14 @@ export const createVSCodeEditorAPI = (): EditorAPI => ({
   openFile: async (path: string, line?: number, column?: number) => {
     await sendBridgeMessage('editor:openFile', { path, line, column });
   },
-  openDiff: async (original: string, modified: string, label?: string, options?: { line?: number; patch?: string }) => {
+  openDiff: async (original: string, modified: string, label?: string, options?: { line?: number; patch?: string; snapshot?: boolean }) => {
     await sendBridgeMessage('editor:openDiff', {
       original,
       modified,
       label,
       line: options?.line,
       patch: options?.patch,
+      snapshot: options?.snapshot,
     });
   },
 });

@@ -18,7 +18,7 @@ interface Identity { provider: string; instance: string }
 interface UserInput {
   id?: number | string; login: string; avatarUrl?: unknown; avatar_url?: unknown; name?: unknown; email?: unknown;
 }
-interface User extends Identity { id: string; username: string; avatarUrl?: string; name?: string; email?: string }
+export interface User extends Identity { id: string; username: string; avatarUrl?: string; name?: string; email?: string }
 interface ProjectInput {
   owner: string; repo: string; url?: unknown; cloneUrl?: unknown; sshUrl?: unknown; defaultBranch?: unknown;
   defaultBranchSha?: unknown; remoteName?: unknown;
@@ -63,7 +63,7 @@ interface AccountInput {
   id: string; credentialId?: string; credentialRevision?: number; providerUserId?: string; providerUserStatus?: string;
   user?: UserInput; scope?: string; current?: boolean; source?: string; status?: string; usable?: boolean;
 }
-interface PullInput {
+export interface PullInput {
   number?: unknown; title?: unknown; html_url?: unknown; state?: unknown; user?: unknown;
   base?: { ref?: unknown } | null;
   head?: { ref?: unknown; repo?: {

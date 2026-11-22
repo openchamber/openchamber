@@ -333,10 +333,10 @@ describe('TerminalView project action tab indicator', () => {
     expect(useTerminalStore.getState().getDirectoryState('/repo')!.tabs).toHaveLength(2);
   });
 
-  const exitActiveTab = async (label: string) => {
+  const exitActiveTab = async (label: string, mode: 'interactive' | 'command' = 'interactive') => {
     const store = useTerminalStore.getState();
     const tab = store.getDirectoryState('/repo')!.tabs.find((entry) => entry.label === label)!;
-    store.setTabSessionId('/repo', tab.id, `srv-${label}`);
+    store.setTabSessionId('/repo', tab.id, `srv-${label}`, { mode });
     store.setActiveTab('/repo', tab.id);
     connectBehavior = (_sessionId, handlers) => {
       void Promise.resolve().then(() => handlers.onEvent({ type: 'exit', exitCode: 0 }));
@@ -360,6 +360,33 @@ describe('TerminalView project action tab indicator', () => {
 
     expect(closeCalls).toEqual([]);
     expect(useTerminalStore.getState().getDirectoryState('/repo')!.tabs.find((tab) => tab.id === tabId)?.lifecycle).toBe('exited');
+  });
+
+  test('a reply command keeps its output even when interactive terminals close on exit', async () => {
+    const tabId = await exitActiveTab('Interactive', 'command');
+    expect(closeCalls).toEqual([]);
+    expect(useTerminalStore.getState().getDirectoryState('/repo')!.tabs.find((tab) => tab.id === tabId)?.lifecycle).toBe('exited');
+    expect(readBufferContent('/repo', tabId)).toContain('terminalView.stream.processExitedMessage');
+  });
+
+  test('a reply command whose server session vanished stays exited with its output and starts no shell', async () => {
+    const store = useTerminalStore.getState();
+    const tab = store.getDirectoryState('/repo')!.tabs.find((entry) => entry.label === 'Interactive')!;
+    store.setTabSessionId('/repo', tab.id, 'srv-reply', { mode: 'command' });
+    store.appendToBuffer('/repo', tab.id, 'reply output');
+    store.setActiveTab('/repo', tab.id);
+    connectBehavior = (_sessionId, handlers) => {
+      void Promise.resolve().then(() => {
+        handlers.onError?.(Object.assign(new Error('Terminal session not found'), { code: 'SESSION_NOT_FOUND' }), true);
+      });
+      return { close: () => undefined };
+    };
+    await act(async () => root.render(React.createElement(TerminalView, { visible: true })));
+    await flushEffects();
+    const after = useTerminalStore.getState().getDirectoryState('/repo')!.tabs.find((entry) => entry.id === tab.id)!;
+    expect(after).toMatchObject({ terminalSessionId: null, lifecycle: 'exited', mode: 'command' });
+    expect(readBufferContent('/repo', tab.id)).toContain('reply output');
+    expect(createSessionCalls).toEqual([]);
   });
 
   test('a project action that exits closes its tab too', async () => {

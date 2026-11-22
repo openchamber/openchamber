@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React from 'react';
-import type { UsageWindow } from '@/types';
+import type { QuotaProviderId, UsageWindow } from '@/types';
 
 const dom = new Window();
 Object.assign(globalThis, { window: dom, document: dom.document, CustomEvent: dom.CustomEvent, localStorage: dom.localStorage, HTMLElement: dom.HTMLElement, Event: dom.Event });
@@ -31,11 +31,13 @@ const percentWindow: UsageWindow = {
 };
 
 const containers: HTMLElement[] = [];
-const render = (window: UsageWindow) => {
+const render = (window: UsageWindow, providerId?: QuotaProviderId, title = 'credits_balance') => {
   const container = document.createElement('div');
   document.body.appendChild(container);
   containers.push(container);
-  flushSync(() => createRoot(container).render(<I18nProvider><UsageCard title="credits_balance" window={window} /></I18nProvider>));
+  flushSync(() => createRoot(container).render(
+    <I18nProvider><UsageCard title={title} window={window} providerId={providerId} /></I18nProvider>,
+  ));
   return container;
 };
 
@@ -87,4 +89,49 @@ test('a window with a percentage keeps its progress bar and caption', () => {
 
   expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('42');
   expect(container.textContent).toContain('used');
+});
+
+test('Claude reset labels stay stable across second-level drift at a minute boundary', () => {
+  const resets = (resetAt: number, providerId: QuotaProviderId) => render({ ...percentWindow, resetAt }, providerId).textContent;
+  const daysAhead = (days: number, hour: number, minute = 0) => {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    date.setHours(hour, minute, 0, 0);
+    return date.getTime();
+  };
+  for (const resetAt of [daysAhead(3, 19, 40), daysAhead(5, 13)]) {
+    const onMinute = resets(resetAt, 'claude');
+    expect(onMinute).toContain('Resets ');
+    expect(resets(resetAt - 1_000, 'claude')).toBe(onMinute);
+    expect(resets(resetAt + 1_000, 'claude')).toBe(onMinute);
+    expect(resets(resetAt + 60_000, 'claude')).not.toBe(onMinute);
+    expect(resets(resetAt - 1_000, 'codex')).not.toBe(resets(resetAt, 'codex'));
+  }
+});
+
+test('a monthly spending row shows its money without a quota bar and marks an unreadable amount', () => {
+  const total = render(
+    { ...balanceWindow, valueLabel: undefined, value: { kind: 'spend', spent: 226.64374512, limit: null } },
+    undefined,
+    'monthly_total',
+  );
+  expect(total.textContent).toContain('Monthly Total');
+  expect(total.textContent).toContain('$226.64');
+  expect(total.textContent).toContain('spent');
+  expect(total.querySelector('[role="progressbar"]')).toBeNull();
+
+  const unknown = render(
+    { ...balanceWindow, valueLabel: undefined, value: { kind: 'spend', spent: null, limit: null } },
+    undefined,
+    'monthly_byok',
+  );
+  expect(unknown.textContent).toContain('Monthly BYOK');
+  expect(unknown.textContent).toContain('Unknown');
+
+  const zero = render(
+    { ...balanceWindow, valueLabel: undefined, value: { kind: 'spend', spent: 0, limit: null } },
+    undefined,
+    'monthly_total',
+  );
+  expect(zero.textContent).toContain('$0.00');
 });

@@ -2,12 +2,13 @@ import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
 import { adoptRelayTunnel, getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { serveTestHttp } from '@/lib/test-http-server';
 
-import { autoConnectLastInstance, createMobilePasswordOperationTracker, isActiveRuntimeConnection, loadMobileConnectionHeaders, loadMobileConnections, migrateLegacyInlineTokenRecords, reprobeActiveConnection, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { autoConnectLastInstance, createMobilePasswordOperationTracker, isActiveRuntimeConnection, loadMobileConnectionHeaders, loadMobileConnections, migrateLegacyInlineTokenRecords, reprobeActiveConnection, switchToSavedInstance, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { forgetPushTokenForConnection, nativePushHasTarget, syncPushTokenToSavedConnections } from './mobilePushTokens';
 import { buildMobileHeaderValues } from './mobileRequestHeaders';
 
 const originalFetch = globalThis.fetch;
@@ -42,6 +43,16 @@ const restoreGlobals = () => {
 };
 
 const STORAGE_KEY = 'openchamber.mobile.connections.v1';
+
+// Every request these tests spy on carries an absolute URL. Compare its origin,
+// not a string prefix: https://protected.example.attacker.test shares the prefix.
+const requestOrigin = (raw: string): string | undefined => {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return undefined;
+  }
+};
 
 const testRelay: MobileRelayConfig = {
   relayUrl: 'wss://relay.example/tunnel',
@@ -85,7 +96,7 @@ describe('mobile HTTP headers', () => {
       const requestUrl = input instanceof Request ? input.url : String(input);
       const headers = new Headers(init?.headers);
       requests.push({ url: requestUrl, headers });
-      if (requestUrl.startsWith(url) && headers.get('CF-Access-Client-Secret') !== 'client-secret') return new Response(null, { status: 403 });
+      if (requestOrigin(requestUrl) === url && headers.get('CF-Access-Client-Secret') !== 'client-secret') return new Response(null, { status: 403 });
       if (requestUrl.endsWith('/health')) return Response.json({ status: 'ok' });
       if (requestUrl.endsWith('/auth/session')) return Response.json({ authenticated: true });
       return Response.json({ ok: true });
@@ -100,12 +111,12 @@ describe('mobile HTTP headers', () => {
       const session = requests.find((request) => request.url === `${url}/auth/session`);
       expect(session?.headers.get('Authorization')).toBe('Bearer client-token');
       expect(requests[0].headers.has('Authorization')).toBe(false);
-      expect(requests.filter((request) => request.url.startsWith(url)).every((request) => request.headers.get('CF-Access-Client-Id') === 'client-id')).toBe(true);
+      expect(requests.filter((request) => requestOrigin(request.url) === url).every((request) => request.headers.get('CF-Access-Client-Id') === 'client-id')).toBe(true);
 
       await upsertMobileConnection({ label: 'Other', candidates: [{ kind: 'direct', url: 'https://other.example' }] });
       expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
       expect(getRuntimeExtraHeadersSync()).toEqual({});
-      expect(requests.filter((request) => request.url.startsWith('https://other.example')).every((request) => !request.headers.has('CF-Access-Client-Secret'))).toBe(true);
+      expect(requests.filter((request) => requestOrigin(request.url) === 'https://other.example').every((request) => !request.headers.has('CF-Access-Client-Secret'))).toBe(true);
     } finally {
       switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
       fetchSpy.mockRestore();
@@ -118,7 +129,7 @@ describe('mobile HTTP headers', () => {
     const fallbackHeaders: Headers[] = [];
     const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const target = String(input);
-      if (target.startsWith(url)) return new Response(null, { status: 503 });
+      if (requestOrigin(target) === url) return new Response(null, { status: 503 });
       fallbackHeaders.push(new Headers(init?.headers));
       return Response.json(target.endsWith('/health') ? { status: 'ok' } : { authenticated: true });
     });
@@ -757,6 +768,386 @@ describe('relay probe while the runtime is on the relay', () => {
       expect(outcome).toEqual({ status: 'unreachable', label: 'Relay' });
     } finally {
       restoreRelayGlobals();
+    }
+  });
+});
+
+describe('push notifications across saved instances', () => {
+  test('registers and unregisters on every saved server once', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Server A', serverId: 'srv-a',
+        candidates: [{ kind: 'direct', url: 'https://a.example' }], clientToken: 'token-a',
+      });
+      await upsertMobileConnection({
+        label: 'Server B', serverId: 'srv-b',
+        candidates: [{ kind: 'direct', url: 'https://b.example' }], clientToken: 'token-b',
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://b.example', runtimeKey: 'server:srv-b', clientToken: 'token-b' });
+      const calls: { url: string; method: string; token: string }[] = [];
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = String(input);
+        calls.push({ url, method: init?.method || 'GET', token: new Headers(init?.headers).get('Authorization') ?? '' });
+        return Response.json({ ok: true });
+      });
+      const pushCalls = () => calls
+        .filter((call) => call.url.endsWith('/api/push/apns-token'))
+        .map((call) => `${call.method} ${call.url} ${call.token}`)
+        .sort();
+      try {
+        expect(await syncPushTokenToSavedConnections({ token: 'device-token', platform: 'ios', environment: 'production' }, 'register')).toBe(true);
+        expect(pushCalls()).toEqual([
+          'POST https://a.example/api/push/apns-token Bearer token-a',
+          'POST https://b.example/api/push/apns-token Bearer token-b',
+        ]);
+
+        calls.length = 0;
+        await syncPushTokenToSavedConnections({ token: 'device-token' }, 'unregister');
+        expect(pushCalls()).toEqual([
+          'DELETE https://a.example/api/push/apns-token Bearer token-a',
+          'DELETE https://b.example/api/push/apns-token Bearer token-b',
+        ]);
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a home-network-only active server stops push only when no other saved server can deliver', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Home', serverId: 'srv-home',
+        candidates: [{ kind: 'direct', url: 'https://home.example' }], clientToken: 'token-home',
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://home.example', runtimeKey: 'server:srv-home', clientToken: 'token-home' });
+      expect(nativePushHasTarget({ localOnly: true })).toBe(false);
+      expect(nativePushHasTarget({ localOnly: false })).toBe(true);
+
+      await upsertMobileConnection({
+        label: 'Office', serverId: 'srv-office',
+        candidates: [{ kind: 'direct', url: 'https://office.example' }], clientToken: 'token-office',
+      });
+      expect(nativePushHasTarget({ localOnly: true })).toBe(true);
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      restoreGlobals();
+    }
+  });
+
+  test('removing an instance unregisters it after a registration already on its way there', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Server A', serverId: 'srv-a',
+        candidates: [{ kind: 'direct', url: 'https://a.example' }], clientToken: 'token-a',
+      });
+      await upsertMobileConnection({
+        label: 'Server B', serverId: 'srv-b',
+        candidates: [{ kind: 'direct', url: 'https://b.example' }], clientToken: 'token-b',
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://a.example', runtimeKey: 'server:srv-a', clientToken: 'token-a' });
+      const seen: string[] = [];
+      let releaseRegistration: () => void = () => undefined;
+      const registrationHeld = new Promise<void>((resolve) => { releaseRegistration = resolve; });
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (!url.startsWith('https://b.example/api/push/apns-token')) return Response.json({ ok: true, status: 'ok', serverId: url.startsWith('https://b.') ? 'srv-b' : 'srv-a' });
+        seen.push(init?.method ?? 'GET');
+        if (init?.method === 'POST') await registrationHeld;
+        return Response.json({ ok: true });
+      });
+      const settle = async (done: () => boolean) => {
+        for (let turn = 0; turn < 1000 && !done(); turn += 1) await Promise.resolve();
+      };
+      try {
+        const registering = syncPushTokenToSavedConnections({ token: 'device-token' }, 'register');
+        await settle(() => seen.includes('POST'));
+        const serverB = (await loadMobileConnections()).find((connection) => connection.label === 'Server B');
+        if (!serverB) throw new Error('missing server B');
+        await forgetPushTokenForConnection(serverB);
+        await settle(() => seen.includes('DELETE'));
+        expect(seen).toEqual(['POST']);
+
+        releaseRegistration();
+        await registering;
+        await settle(() => seen.includes('DELETE'));
+        expect(seen).toEqual(['POST', 'DELETE']);
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a notification from a saved server that never told its identity still finds it', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Server A', serverId: 'srv-a',
+        candidates: [{ kind: 'direct', url: 'https://a.example' }], clientToken: 'token-a',
+      });
+      await upsertMobileConnection({
+        label: 'Old manual', candidates: [{ kind: 'direct', url: 'https://old.example' }], clientToken: 'token-old',
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://a.example', runtimeKey: 'server:srv-a', clientToken: 'token-a' });
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.startsWith('https://old.example/health')) return Response.json({ status: 'ok', serverId: 'srv-old' });
+        if (url.startsWith('https://old.example/auth/session')) return Response.json({ authenticated: true, scope: 'client' });
+        return Response.json({ status: 'ok', serverId: 'srv-a' });
+      });
+      try {
+        expect(await switchToSavedInstance('srv-old')).toBe('switched');
+        expect(getRuntimeApiBaseUrl()).toBe('https://old.example');
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a notification never switches to an address that now answers as another server', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Server A', serverId: 'srv-a',
+        candidates: [{ kind: 'direct', url: 'https://a.example' }], clientToken: 'token-a',
+      });
+      await upsertMobileConnection({
+        label: 'Server B', candidates: [{ kind: 'direct', url: 'https://b.example' }], clientToken: 'token-b',
+      });
+      const saved = await loadMobileConnections();
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]')
+        .map((entry: { label: string }) => (entry.label === 'Server B' ? { ...entry, pushServerId: 'srv-b' } : entry))));
+      expect(saved).toHaveLength(2);
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://a.example', runtimeKey: 'server:srv-a', clientToken: 'token-a' });
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.startsWith('https://b.example/health')) return Response.json({ status: 'ok', serverId: 'srv-stranger' });
+        if (url.startsWith('https://b.example/auth/session')) return Response.json({ authenticated: true, disabled: true });
+        return Response.json({ status: 'ok', serverId: 'srv-a' });
+      });
+      try {
+        expect(await switchToSavedInstance('srv-b')).toBe('unavailable');
+        expect(getRuntimeApiBaseUrl()).toBe('https://a.example');
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('does not hand the token to a direct address that reports another server', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Server A', serverId: 'srv-a',
+        candidates: [{ kind: 'direct', url: 'https://a.example' }], clientToken: 'token-a',
+      });
+      await upsertMobileConnection({
+        label: 'Server B', serverId: 'srv-b',
+        candidates: [{ kind: 'direct', url: 'https://b.example' }], clientToken: 'token-b',
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://b.example', runtimeKey: 'server:srv-b', clientToken: 'token-b' });
+      const calls: string[] = [];
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.startsWith('https://a.example/health')) return Response.json({ status: 'ok', serverId: 'srv-other' });
+        if (url.startsWith('https://b.example/health')) return Response.json({ status: 'ok', serverId: 'srv-b' });
+        return Response.json({ ok: true });
+      });
+      try {
+        await syncPushTokenToSavedConnections({ token: 'device-token' }, 'register');
+        expect(calls).not.toContain('https://a.example/api/push/apns-token');
+        expect(calls).toContain('https://b.example/api/push/apns-token');
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('an unreachable or home-network-only active server leaves the other servers registered', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Server A', serverId: 'srv-a',
+        candidates: [{ kind: 'direct', url: 'https://a.example' }], clientToken: 'token-a',
+      });
+      await upsertMobileConnection({
+        label: 'Server B', serverId: 'srv-b',
+        candidates: [{ kind: 'direct', url: 'https://b.example' }], clientToken: 'token-b',
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://b.example', runtimeKey: 'server:srv-b', clientToken: 'token-b' });
+      let activeAnswer: 'down' | 'local-only' = 'down';
+      const pushes: string[] = [];
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith('/api/push/apns-token')) pushes.push(url);
+        if (url.startsWith('https://b.example/health') && activeAnswer === 'down') return new Response(null, { status: 503 });
+        if (url === 'https://b.example/api/push/apns-token') return Response.json({ ok: true, localOnly: true });
+        return Response.json({ ok: true });
+      });
+      try {
+        expect(await syncPushTokenToSavedConnections({ token: 'device-token' }, 'register')).toBe(false);
+        expect(pushes).toEqual(['https://a.example/api/push/apns-token']);
+
+        pushes.length = 0;
+        activeAnswer = 'local-only';
+        expect(await syncPushTokenToSavedConnections({ token: 'device-token' }, 'register')).toBe(true);
+        expect(pushes.sort()).toEqual(['https://a.example/api/push/apns-token', 'https://b.example/api/push/apns-token']);
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('learning a manual server identity keeps a paired entry and its relay', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Paired', serverId: 'srv-pair',
+        candidates: [
+          { kind: 'direct', url: 'https://lan.example' },
+          { kind: 'relay', relay: { ...testRelay, serverId: 'srv-pair' } },
+        ],
+        clientToken: 'token-pair',
+      });
+      await upsertMobileConnection({
+        label: 'Manual', candidates: [{ kind: 'direct', url: 'https://manual.example' }], clientToken: 'token-manual',
+      });
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith('/health')) return Response.json({ status: 'ok', serverId: 'srv-pair' });
+        if (url.endsWith('/auth/session')) return Response.json({ authenticated: true, scope: 'client' });
+        return Response.json({ ok: true });
+      });
+      try {
+        expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+        const connections = await loadMobileConnections();
+        expect(connections).toHaveLength(2);
+        expect(connections.find((connection) => connection.label === 'Manual')?.pushServerId).toBe('srv-pair');
+        expect(connections.find((connection) => connection.label === 'Paired')?.candidates).toEqual([
+          { kind: 'direct', url: 'https://lan.example' },
+          { kind: 'relay', relay: { ...testRelay, serverId: 'srv-pair' } },
+        ]);
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('moves to the next direct address when one answers with an error', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Multi', serverId: 'srv-multi',
+        candidates: [
+          { kind: 'direct', url: 'https://bad.example' },
+          { kind: 'direct', url: 'https://good.example' },
+        ],
+        clientToken: 'token-multi',
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://bad.example', runtimeKey: 'server:srv-multi', clientToken: 'token-multi' });
+      const pushes: string[] = [];
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith('/health')) return Response.json({ status: 'ok', serverId: 'srv-multi' });
+        if (url.endsWith('/api/push/apns-token')) {
+          pushes.push(url);
+          if (url.startsWith('https://bad.example')) return new Response(null, { status: 503 });
+        }
+        return Response.json({ ok: true });
+      });
+      try {
+        await syncPushTokenToSavedConnections({ token: 'device-token' }, 'register');
+        expect(pushes).toEqual([
+          'https://bad.example/api/push/apns-token',
+          'https://good.example/api/push/apns-token',
+        ]);
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a direct connect learns the server identity for a later notification', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Manual', candidates: [{ kind: 'direct', url: 'https://manual.example' }], clientToken: 'token-manual',
+      });
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.endsWith('/health')) return Response.json({ status: 'ok', serverId: 'srv-manual' });
+        if (url.endsWith('/auth/session')) return Response.json({ authenticated: true, scope: 'client' });
+        return Response.json({ ok: true });
+      });
+      try {
+        expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+        expect((await loadMobileConnections())[0]).toMatchObject({ pushServerId: 'srv-manual' });
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a notification tap switches to the saved instance that sent it', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Server A', serverId: 'srv-a',
+        candidates: [{ kind: 'direct', url: 'https://a.example' }], clientToken: 'token-a',
+      });
+      await upsertMobileConnection({
+        label: 'Server B', serverId: 'srv-b',
+        candidates: [{ kind: 'direct', url: 'https://b.example' }], clientToken: 'token-b',
+      });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://a.example', runtimeKey: 'server:srv-a', clientToken: 'token-a' });
+      const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.startsWith('https://b.example/health')) return Response.json({ status: 'ok', serverId: 'srv-b' });
+        if (url.startsWith('https://b.example/auth/session')) return Response.json({ authenticated: true, scope: 'client' });
+        return Response.json({ ok: true });
+      });
+      try {
+        expect(await switchToSavedInstance('srv-b')).toBe('switched');
+        expect(getRuntimeApiBaseUrl()).toBe('https://b.example');
+        expect(getRuntimeKey()).toBe('server:srv-b');
+        expect(await switchToSavedInstance('srv-b')).toBe('active');
+        expect(await switchToSavedInstance('missing')).toBe('unavailable');
+      } finally {
+        fetchSpy.mockRestore();
+        switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: '' });
+      }
+    } finally {
+      restoreGlobals();
     }
   });
 });

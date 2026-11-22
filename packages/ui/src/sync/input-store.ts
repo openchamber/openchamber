@@ -4,21 +4,32 @@ import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import type { InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
-import { HeicConversionError, prepareAttachmentFiles } from "./attachment-files"
+import {
+  fileReferenceNoteText,
+  HeicConversionError,
+  isDocumentAttachmentFilename,
+  PATH_NOTE_MEDIA_TYPE,
+  prepareAttachmentFiles,
+  savedFileNoteText,
+  withRestoredPathNoteMarker,
+} from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { pathForDroppedFile } from "@/lib/desktop"
 import { assignFileAttachmentFilenames, attachmentBasename } from "@/lib/attachmentIdentity"
 import { formatFileSize } from "@/lib/fileSize"
 import { formatMessage, useI18nStore } from "@/lib/i18n/store"
+import type { RejectedSharedFile } from "@/lib/nativeSharedFiles"
 import { opencodeClient } from "@/lib/opencode/client"
+import { captureRuntimeInstance } from "@/lib/runtime-switch"
 
 const FILE_URI_PREFIX = "file://"
-const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
-const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+export const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
 const INTAKE_REDACTED_FILENAME = /\.(har|ipynb)$/i
 const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
+const heldSavesInFlight = new Map<string | null, Promise<string[]>>()
 
 const attachedFilesFor = (state: InputState, target?: ChatDraftIdentity | null): AttachedFile[] => {
   if (!target) return state.attachedFiles
@@ -114,16 +125,25 @@ export const prepareLocalAttachments = async (
   return attachedFiles
 }
 
+const prepareBinaryAttachment = async (file: File): Promise<AttachedFile> => {
+  const mimeType = file.type.split(";", 1)[0]?.trim() || "application/octet-stream"
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    file,
+    dataUrl: await readFileAsDataUrl(file, mimeType),
+    mimeType,
+    filename: file.name,
+    size: file.size,
+    source: "local",
+  }
+}
+
 const prepareFileReference = async (file: File, path: string): Promise<AttachedFile> => {
-  const note = new File(
-    [`File on disk: ${path} (${formatFileSize(file.size)}). Its content is not in this message. Read what you need from it with your tools.\n`],
-    file.name,
-    { type: "text/plain" },
-  )
+  const note = new File([fileReferenceNoteText(path, formatFileSize(file.size))], file.name, { type: "text/plain" })
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     file: note,
-    dataUrl: await readFileAsDataUrl(note, "text/plain"),
+    dataUrl: await readFileAsDataUrl(note, PATH_NOTE_MEDIA_TYPE),
     mimeType: "text/plain",
     filename: file.name,
     size: file.size,
@@ -133,17 +153,74 @@ const prepareFileReference = async (file: File, path: string): Promise<AttachedF
   }
 }
 
-const saveWhereOpenCodeRuns = async (file: File, directory: string | undefined): Promise<string | null> => {
+const prepareSavedCopyNote = async (attached: AttachedFile, path: string): Promise<AttachedFile> => {
+  const note = new File(
+    [savedFileNoteText(attached.filename, path, "The same file is attached to this message.")],
+    attached.filename,
+    { type: "text/plain" },
+  )
+  return {
+    id: `${attached.id}-saved-copy`,
+    file: note,
+    dataUrl: await readFileAsDataUrl(note, PATH_NOTE_MEDIA_TYPE),
+    mimeType: "text/plain",
+    filename: attached.filename,
+    size: note.size,
+    source: "local",
+    agentPath: path,
+    serverPath: path,
+  }
+}
+
+const saveWhereOpenCodeRuns = async (
+  file: File,
+  directory: string | undefined,
+  isCurrentRuntime: () => boolean,
+): Promise<string | null> => {
   try {
     const [result] = await opencodeClient.writeOpenCodeTempFiles(directory, [
       { filename: file.name, bytes: new Uint8Array(await file.arrayBuffer()) },
-    ])
+    ], { isCurrentRuntime })
     if (result && "path" in result) return result.path
     if (result) console.warn("[chat] Saving an attachment failed", result.error.name)
   } catch (error) {
     console.warn("[chat] Saving an attachment failed", error instanceof Error ? error.name : "unknown")
   }
   return null
+}
+
+const saveHeldFiles = async (
+  get: () => InputState,
+  target: ChatDraftIdentity | null,
+  directory: string | undefined,
+  sentIds: ReadonlySet<string>,
+): Promise<string[]> => {
+  const isCurrentRuntime = captureRuntimeInstance()
+  const held = attachedFilesFor(get(), target).filter((file) => sentIds.has(file.id) && (file.saveOnSend || file.saveCopyOnSend))
+  const failed: string[] = []
+  for (const file of held) {
+    const path = await saveWhereOpenCodeRuns(file.file, directory, isCurrentRuntime)
+    if (!path) {
+      failed.push(file.filename)
+      continue
+    }
+    let replacement: AttachedFile[]
+    if (file.saveCopyOnSend) {
+      const { saveCopyOnSend: _held, ...sent } = file
+      replacement = [sent, await prepareSavedCopyNote(file, path)]
+    } else {
+      replacement = [{
+        ...await prepareFileReference(file.file, path),
+        id: file.id,
+        filename: file.filename,
+        original: { mimeType: file.mimeType, dataUrl: file.dataUrl, saveOnSend: true },
+      }]
+    }
+    const files = attachedFilesFor(get(), target)
+    if (!files.some((entry) => entry.id === file.id)) continue
+    get().setAttachedFiles(files.flatMap((entry) => (entry.id === file.id ? replacement : [entry])), target ?? undefined)
+  }
+  return failed
 }
 
 const getDataUrlByteSize = (url: string): number => {
@@ -199,6 +276,19 @@ export type ComposerAddress = {
   attachments: ChatDraftIdentity | null
 }
 
+export type PendingDraftContent = {
+  draftId: number
+  files: File[]
+  text: string | null
+  rejected: RejectedSharedFile[]
+  accept?: () => void
+}
+
+export type AddAttachedFileOptions = {
+  shared?: boolean
+  saveOnSend?: "reference" | "copy"
+}
+
 export type PendingInputMode = "replace" | "append" | "append-inline" | "slash-command"
 
 export type InputState = {
@@ -218,6 +308,7 @@ export type InputState = {
   pinnedSyntheticParts: Map<string, SyntheticContextPart[]>
   pendingPresetSubmit: { text: string; type: "command" | "skill" } | null
   pendingDraftSubmit: { draftId: number; text: string } | null
+  pendingDraftContent: PendingDraftContent | null
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
   attachedFiles: AttachedFile[]
@@ -236,6 +327,8 @@ export type InputState = {
   consumePendingPresetSubmit: () => { text: string; type: "command" | "skill" } | null
   requestDraftSubmit: (draftId: number, text: string) => void
   consumePendingDraftSubmit: (draftId: number | null) => string | null
+  requestDraftContent: (draftId: number, content: { files: File[]; text?: string | null; rejected?: RejectedSharedFile[]; accept?: () => void }) => void
+  consumePendingDraftContent: (draftId: number | null) => Omit<PendingDraftContent, "draftId"> | null
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
   requestBtwComposer: (request: PendingBtwComposerRequest) => void
@@ -243,7 +336,13 @@ export type InputState = {
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null, target?: string | null) => void
   consumePendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
   getPendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
-  addAttachedFile: (file: File, target?: ChatDraftIdentity | null, onAttached?: (files: readonly AttachedFile[]) => void) => Promise<boolean>
+  addAttachedFile: (
+    file: File,
+    target?: ChatDraftIdentity | null,
+    onAttached?: (files: readonly AttachedFile[]) => void,
+    options?: AddAttachedFileOptions,
+  ) => Promise<boolean>
+  saveAttachmentsHeldForSend: (target: ChatDraftIdentity | null, directory: string | undefined, sentIds: ReadonlySet<string>) => Promise<string[]>
   removeAttachedFile: (id: string) => void
   getAttachedFiles: (target?: ChatDraftIdentity | null) => AttachedFile[]
   setAttachedFiles: (files: AttachedFile[], target?: ChatDraftIdentity | null) => void
@@ -281,6 +380,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pinnedSyntheticParts: new Map(),
   pendingPresetSubmit: null,
   pendingDraftSubmit: null,
+  pendingDraftContent: null,
   pendingGuestIssue: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
@@ -355,6 +455,29 @@ export const useInputStore = create<InputState>()((set, get) => ({
     return pendingDraftSubmit.draftId === draftId ? pendingDraftSubmit.text : null
   },
 
+  requestDraftContent: (draftId, content) => set({
+    pendingDraftContent: {
+      draftId,
+      files: content.files,
+      text: content.text?.trim() || null,
+      rejected: content.rejected ?? [],
+      accept: content.accept,
+    },
+  }),
+
+  consumePendingDraftContent: (draftId) => {
+    const { pendingDraftContent } = get()
+    if (pendingDraftContent === null || draftId === null) return null
+    if (pendingDraftContent.draftId !== draftId) return null
+    set({ pendingDraftContent: null })
+    return {
+      files: pendingDraftContent.files,
+      text: pendingDraftContent.text,
+      rejected: pendingDraftContent.rejected,
+      accept: pendingDraftContent.accept,
+    }
+  },
+
   setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),
 
   consumePendingGuestIssue: () => {
@@ -394,19 +517,35 @@ export const useInputStore = create<InputState>()((set, get) => ({
     target === null ? get().pendingSyntheticParts : get().pinnedSyntheticParts.get(target) ?? null
   ),
 
-  addAttachedFile: async (file: File, target?: ChatDraftIdentity | null, onAttached?: (files: readonly AttachedFile[]) => void) => {
+  addAttachedFile: async (file, target, onAttached, options) => {
     const generation = attachmentReadGeneration
+    const isStale = () => !(options?.shared && target) && generation !== attachmentReadGeneration
     const referencePath = INTAKE_REDACTED_FILENAME.test(file.name) ? null : pathForDroppedFile(file)
-    const attachReference = async (path: string): Promise<boolean> => {
-      const reference = await prepareFileReference(file, path)
-      if (generation !== attachmentReadGeneration) return false
-      set((state) => appendAttachedFiles(state, [reference], target))
-      onAttached?.([reference])
+    const land = (files: AttachedFile[]): boolean => {
+      set((state) => appendAttachedFiles(state, files, target))
+      onAttached?.(files)
       return true
     }
+    const attachReference = async (path: string): Promise<boolean> => {
+      const reference = await prepareFileReference(file, path)
+      return isStale() ? false : land([reference])
+    }
+    const holdUntilSend = async (): Promise<boolean> => {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.overSendLimit', {
+          name: file.name,
+          size: formatFileSize(MAX_ATTACHMENT_BYTES),
+        }))
+      }
+      const held = await prepareBinaryAttachment(file)
+      return isStale() ? false : land([{ ...held, saveOnSend: true }])
+    }
+
+    if (options?.saveOnSend === "reference") return holdUntilSend()
 
     if (file.size > MAX_INLINE_ATTACHMENT_BYTES) {
       if (referencePath) return attachReference(referencePath)
+      if (options?.saveOnSend === "copy") return holdUntilSend()
       const limit = file.size > MAX_ATTACHMENT_BYTES
         ? { key: 'chat.fileAttachment.toast.overSendLimit', bytes: MAX_ATTACHMENT_BYTES } as const
         : { key: 'chat.fileAttachment.toast.tooLarge', bytes: MAX_INLINE_ATTACHMENT_BYTES } as const
@@ -422,24 +561,36 @@ export const useInputStore = create<InputState>()((set, get) => ({
       try {
         attachedFiles = await prepareLocalAttachments(file, reservedFilenames)
       } catch (error) {
-        if (!(error instanceof HeicConversionError) || generation !== attachmentReadGeneration) return false
-        const path = referencePath ?? await saveWhereOpenCodeRuns(file, target?.directory)
-        if (path) return attachReference(path)
-        throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.heicConversionFailed', {
-          name: file.name,
-        }))
+        if (!(error instanceof HeicConversionError) || isStale()) return false
+        return referencePath ? attachReference(referencePath) : holdUntilSend()
       }
-      if (generation !== attachmentReadGeneration) return false
-      if (!attachedFiles) return referencePath ? attachReference(referencePath) : false
+      if (isStale()) return false
+      if (!attachedFiles) {
+        if (referencePath) return attachReference(referencePath)
+        if (INTAKE_REDACTED_FILENAME.test(file.name) || isDocumentAttachmentFilename(file.name)) return false
+        attachedFiles = [await prepareBinaryAttachment(file)]
+        if (isStale()) return false
+      }
 
       const generatedFilenames = attachedFiles.slice(1).map((attachment) => attachment.filename)
       if (hasGeneratedFilenameCollision(generatedFilenames, attachedFilesFor(get(), target))) continue
 
-      set((state) => appendAttachedFiles(state, attachedFiles, target))
-      onAttached?.(attachedFiles)
-      return true
+      return land(options?.saveOnSend === "copy"
+        ? attachedFiles.map((attached) => ({ ...attached, saveCopyOnSend: true }))
+        : attachedFiles)
     }
     return false
+  },
+
+  saveAttachmentsHeldForSend: (target, directory, sentIds) => {
+    const key = target ? getChatDraftIdentityKey(target) : get().attachmentDraftKey
+    const inFlight = heldSavesInFlight.get(key)
+    if (inFlight) return inFlight
+    const saving = saveHeldFiles(get, target, directory, sentIds)
+    heldSavesInFlight.set(key, saving)
+    const settle = () => { heldSavesInFlight.delete(key) }
+    saving.then(settle, settle)
+    return saving
   },
 
   removeAttachedFile: (id) =>
@@ -544,10 +695,11 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addRestoredAttachment: ({ url, mimeType, filename }, target) => {
     const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const basename = attachmentBasename(filename)
+    const dataUrl = withRestoredPathNoteMarker(url)
     const attached: AttachedFile = {
       id,
       file: new File([], basename, { type: mimeType }),
-      dataUrl: url,
+      dataUrl,
       mimeType,
       filename: basename,
       agentPath: basename !== filename ? filename : undefined,

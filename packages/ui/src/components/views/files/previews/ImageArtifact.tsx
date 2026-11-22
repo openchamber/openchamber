@@ -36,18 +36,39 @@ let lastPointerRegion: Element | null = null;
 
 const ARROW_KEY_OWNERS = '[role="tablist"], [role="menu"], [role="menubar"], [role="listbox"], [role="radiogroup"], [role="slider"], [role="combobox"], [role="tree"], [role="grid"], [role="toolbar"]';
 
+const FULLSCREEN_SCOPE = '[data-image-fullscreen]';
+
+const ARROW_KEY_SCOPE = `[data-context-panel], ${FULLSCREEN_SCOPE}`;
+
 const NEIGHBOR_BUTTON_CLASS = 'absolute top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring';
 
-type ImageArtifactProps = {
+export type ImageFullscreenToggle = { active: boolean; toggle: () => void };
+
+export const ImageFullscreenButton: React.FC<ImageFullscreenToggle> = ({ active, toggle }) => {
+  const { t } = useI18n();
+  const label = active ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen');
+  return (
+    <ButtonTooltip side="bottom" label={label}>
+      <Button variant="ghost" size="xs" aria-label={label} data-image-fullscreen-toggle={active ? 'exit' : 'enter'} onClick={toggle}>
+        <Icon name={active ? 'fullscreen-exit' : 'fullscreen'} className="size-3.5" />
+      </Button>
+    </ButtonTooltip>
+  );
+};
+
+export type ImageArtifactProps = {
   src: string;
   name: string;
   sizeBytes: number | null;
   neighbors?: { previous: ImageNeighbor; next: ImageNeighbor } | null;
   onRetry?: () => void;
   download?: React.ReactNode;
+  fullscreen?: ImageFullscreenToggle;
+  lead?: string;
+  barClassName?: string;
 };
 
-const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes, neighbors, onRetry, download }) => {
+const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes, neighbors, onRetry, download, fullscreen, lead, barClassName }) => {
   const { t, direction } = useI18n();
   const [scale, setScale] = React.useState<number | null>(null);
   const [natural, setNatural] = React.useState<Size | null>(null);
@@ -228,7 +249,7 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
     if (event.key !== previousKey && event.key !== nextKey) return;
     const viewer = viewerRef.current;
     if (!viewer || viewer.getClientRects().length === 0) return;
-    const scope = viewer.closest('[data-context-panel]') ?? viewer;
+    const scope = viewer.closest(ARROW_KEY_SCOPE) ?? viewer;
     const target = event.target;
     if (target === document.body) {
       if (!lastPointerRegion || !scope.contains(lastPointerRegion)) return;
@@ -242,15 +263,18 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
   const keyDownRef = React.useRef(handleKeyDown);
   keyDownRef.current = handleKeyDown;
   React.useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => keyDownRef.current(event);
+    const keyRoot: EventTarget = viewerRef.current?.closest(FULLSCREEN_SCOPE) ?? document;
+    const onKeyDown = (event: Event) => {
+      if (event instanceof KeyboardEvent) keyDownRef.current(event);
+    };
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
-      lastPointerRegion = target?.closest('[data-context-panel]') ?? target;
+      lastPointerRegion = target?.closest(ARROW_KEY_SCOPE) ?? target;
     };
-    document.addEventListener('keydown', onKeyDown);
+    keyRoot.addEventListener('keydown', onKeyDown);
     document.addEventListener('pointerdown', onPointerDown, true);
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      keyRoot.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('pointerdown', onPointerDown, true);
     };
   }, []);
@@ -266,6 +290,8 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ArtifactMetaBar
+        lead={lead}
+        className={barClassName}
         items={[formatArtifactDimensions(natural), formatArtifactSize(sizeBytes)]}
         actions={(
           <>
@@ -314,6 +340,7 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
                 {t('filesView.artifact.image.fit')}
               </Button>
             </ButtonTooltip>
+            {fullscreen ? <ImageFullscreenButton {...fullscreen} /> : null}
           </>
         )}
       />

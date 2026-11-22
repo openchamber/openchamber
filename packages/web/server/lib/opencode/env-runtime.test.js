@@ -313,10 +313,10 @@ describe('OpenCode env runtime', () => {
   });
 
   it.each([
-    '/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode',
-    'C:\\Program Files\\OpenChamber\\resources\\opencode-cli\\opencode.exe',
-    '/opt/OpenChamber/resources/opencode-cli/',
-    '"/Applications/OpenChamber Canary.app/Contents/Resources/opencode-cli/opencode"',
+    '/missing/OpenChamber.app/Contents/Resources/opencode-cli/opencode',
+    'C:\\missing\\OpenChamber\\resources\\opencode-cli\\opencode.exe',
+    '/missing/OpenChamber/resources/opencode-cli/',
+    '"/missing/OpenChamber Canary.app/Contents/Resources/opencode-cli/opencode"',
   ])('treats a saved path to the CLI older desktop builds shipped as no setting: %s', async (retired) => {
     const { runtime, state } = createRuntime({ opencodeBinary: retired });
     await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBeNull();

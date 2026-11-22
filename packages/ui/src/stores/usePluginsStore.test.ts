@@ -1,51 +1,11 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
-const originalFetch = globalThis.fetch;
+const environment = directoryEnvironment({ home: '/workspace', fakeTimers: false });
 
 import type { PluginEntry, PluginFile, RegistryResult } from './usePluginsStore';
 
-let activeProjectPath = '/workspace/project';
-
-const refreshAfterOpenCodeRestartMock = mock(async () => undefined);
-const startConfigUpdateMock = mock(() => undefined);
-const finishConfigUpdateMock = mock(() => undefined);
-
-mock.module('@/stores/useProjectsStore', () => ({
-  useProjectsStore: {
-    getState: () => ({
-      getActiveProject: () => ({ path: activeProjectPath }),
-    }),
-  },
-}));
-
-mock.module('@/lib/opencode/client', () => ({
-  OpencodeApiError: Error,
-  normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
-  opencodeClient: {
-    getDirectory: () => '/fallback/project',
-  },
-}));
-
-mock.module('@/stores/useAgentsStore', () => ({
-  refreshAfterOpenCodeRestart: refreshAfterOpenCodeRestartMock,
-}));
-
-mock.module('@/lib/configUpdate', () => ({
-  startConfigUpdate: startConfigUpdateMock,
-  finishConfigUpdate: finishConfigUpdateMock,
-}));
-
-// mock.module is process-global in bun: another test file (e.g.
-// useCommandsStore.test.ts) may have replaced '@/lib/runtime-fetch' with its
-// own stub before this file runs. Register our own mock so this suite always
-// reaches its fetch double regardless of test file ordering. Delegating to
-// globalThis.fetch (instead of this file's double directly) keeps later test
-// files that stub global fetch working if this registration outlives us.
-mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
-}));
-
-const { usePluginsStore } = await import('./usePluginsStore');
 
 const entry: PluginEntry = {
   id: 'config:user:plugin-a',
@@ -104,6 +64,18 @@ const handleFetch = async (input: RequestInfo | URL, init?: RequestInit): Promis
   return queuedResponses.shift() ?? jsonResponse(pluginListPayload);
 };
 const fetchMock = mock(handleFetch);
+environment.respond(async (url, init) => {
+  if (url.pathname.startsWith('/api/config/plugins')) return fetchMock(`${url.pathname}${url.search}`, init);
+  if (url.pathname === '/api/plugin') return Response.json({ data: [] });
+  if (url.pathname === '/api/fs/home') return Response.json({ home: '/workspace', chatsRoot: '/workspace/chats' });
+  if (url.pathname === '/api/location' || url.pathname === '/api/session') return Response.json({}, { status: 401 });
+  throw new Error(`Unexpected request: ${url}`);
+});
+const { useProjectsStore } = await import('./useProjectsStore');
+const { usePluginsStore } = await import('./usePluginsStore');
+const selectProject = (path: string) => {
+  useProjectsStore.setState({ projects: [{ id: path, path }], activeProjectId: path });
+};
 
 const queueFetchResponses = (responses: Response[]) => {
   queuedResponses = [...responses];
@@ -137,15 +109,10 @@ const flushPluginFollowUps = async (): Promise<void> => {
 
 describe('usePluginsStore', () => {
   beforeEach(() => {
-    activeProjectPath = '/workspace/project';
+    selectProject('/workspace/project');
     resetStore();
     fetchCalls.length = 0;
     queuedResponses = [];
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-  });
-
-  afterAll(() => {
-    globalThis.fetch = originalFetch;
   });
 
   test('loadPlugins calls config plugins endpoint once and populates entries/files', async () => {
@@ -168,32 +135,33 @@ describe('usePluginsStore', () => {
       fetchMock.mockImplementation((input) => new Promise<Response>((resolve) => {
         pending.set(String(input), resolve);
       }));
-      const finish = (directory: string, response: Response) => {
+      const finish = async (directory: string, response: Response) => {
+        await environment.settle();
         const resolve = pending.get(`/api/config/plugins?directory=${encodeURIComponent(directory)}`);
         if (!resolve) throw new Error('Expected pending plugin request');
         resolve(response);
       };
       try {
-        activeProjectPath = '/project-a';
+        selectProject('/project-a');
         const first = usePluginsStore.getState().loadPlugins({ force: true });
-        activeProjectPath = '/project-b';
+        selectProject('/project-b');
         const second = usePluginsStore.getState().loadPlugins({ force: true });
-        finish('/project-a', jsonResponse(pluginListPayload, { status }));
+        await finish('/project-a', jsonResponse(pluginListPayload, { status }));
         expect(await first).toBe(false);
         expect(usePluginsStore.getState().isLoading).toBe(true);
-        finish('/project-b', jsonResponse({ entries: [{ ...entry, spec: 'plugin-b' }], files: [] }));
+        await finish('/project-b', jsonResponse({ entries: [{ ...entry, spec: 'plugin-b' }], files: [] }));
         expect(await second).toBe(true);
         expect(usePluginsStore.getState().loadedDirectory).toBe('/project-b');
         expect(usePluginsStore.getState().entries[0]?.spec).toBe('plugin-b');
         expect(usePluginsStore.getState().isLoading).toBe(false);
 
-        activeProjectPath = '/project-a';
+        selectProject('/project-a');
         const late = usePluginsStore.getState().loadPlugins({ force: true });
-        activeProjectPath = '/project-b';
+        selectProject('/project-b');
         const current = usePluginsStore.getState().loadPlugins({ force: true });
-        finish('/project-b', jsonResponse({ entries: [{ ...entry, spec: 'current-b' }], files: [] }));
+        await finish('/project-b', jsonResponse({ entries: [{ ...entry, spec: 'current-b' }], files: [] }));
         expect(await current).toBe(true);
-        finish('/project-a', jsonResponse(pluginListPayload, { status }));
+        await finish('/project-a', jsonResponse(pluginListPayload, { status }));
         expect(await late).toBe(false);
         expect(usePluginsStore.getState().loadedDirectory).toBe('/project-b');
         expect(usePluginsStore.getState().entries[0]?.spec).toBe('current-b');
@@ -206,18 +174,16 @@ describe('usePluginsStore', () => {
   }
 
   test('runtime roundtrip with the same directory reloads the owning catalog within TTL', async () => {
-    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-    const runtimeWindow = { __OPENCHAMBER_API_BASE_URL__: 'https://runtime-a.test' };
-    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: runtimeWindow });
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-a.test' });
     try {
       queueFetchResponses([jsonResponse(pluginListPayload)]);
       await usePluginsStore.getState().loadPlugins({ force: true });
       expect(usePluginsStore.getState().loadedRuntimeKey).toBe('url:https://runtime-a.test');
-      runtimeWindow.__OPENCHAMBER_API_BASE_URL__ = 'https://runtime-b.test';
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.test' });
       queueFetchResponses([jsonResponse({ entries: [{ ...entry, spec: 'from-b' }], files: [] })]);
       await usePluginsStore.getState().loadPlugins({ force: true });
       expect(usePluginsStore.getState().loadedRuntimeKey).toBe('url:https://runtime-b.test');
-      runtimeWindow.__OPENCHAMBER_API_BASE_URL__ = 'https://runtime-a.test';
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-a.test' });
       queueFetchResponses([jsonResponse(pluginListPayload), jsonResponse({ results: [] })]);
       await usePluginsStore.getState().loadPlugins();
       await flushPluginFollowUps();
@@ -225,8 +191,7 @@ describe('usePluginsStore', () => {
       expect(usePluginsStore.getState().entries).toEqual([entry]);
       expect(fetchCalls).toHaveLength(4);
     } finally {
-      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
-      else Reflect.deleteProperty(globalThis, 'window');
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://local.test' });
     }
   });
 

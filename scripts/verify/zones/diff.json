@@ -730,10 +730,10 @@
     {
       "id": "reveal",
       "name": "Opening a file in Changes from the chat",
-      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/"],
+      "sources": ["packages/ui/src/components/views/DiffView.tsx", "packages/ui/src/components/views/diffView/", "packages/ui/src/components/chat/message/body/TurnChangedFilePills.tsx"],
       "what": "A file named in the chat (an edit tool's Open file diff, a changed file under the answer) opens Changes at that file with its diff open.",
       "reach": "In a session where the agent edited a file, click Open file diff on the edit row, or the changed file under the answer.",
-      "proof": "Changes opens with that file's diff expanded, without a click in the panel.",
+      "proof": "Changes opens with that file's diff expanded, without a click in the panel. Chips under two replies that changed the same file open the patch from each reply: the latest as Last turn, the older as its own selection.",
       "scenarios": [
         {
           "id": "tool-row",
@@ -755,7 +755,7 @@
         {
           "id": "turn-file",
           "kind": "path",
-          "title": "A changed file under the answer opens Last turn in Changes with that file expanded",
+          "title": "A changed file under the latest answer opens Last turn in Changes with that file expanded",
           "steps": [
             {"do": "settings", "values": {"showTurnChangedFiles": true}},
             {"do": "session.create", "as": "s", "title": "Diff reveal turn file"},
@@ -765,6 +765,45 @@
             {"do": "see", "on": "panel.surfaceOn", "surface": "diff"},
             {"do": "see", "on": "diff.mode", "text": "Last turn: 1"},
             {"do": "see", "on": "diff.added", "text": "const isAbortError"}
+          ]
+        },
+        {
+          "id": "older-turn-file",
+          "kind": "path",
+          "title": "Two chips for the same file open their own turn's changes; only the latest is Last turn",
+          "steps": [
+            {"do": "settings", "values": {"showTurnChangedFiles": true}},
+            {"do": "session.create", "as": "s", "title": "Diff reveal historical turn file"},
+            {"do": "session.send", "session": "s", "prompt": "Write the verify notes file."},
+            {"do": "file.write", "path": "notes/verify-notes.md", "content": "# Verify notes\n\nout-of-turn note\nsecond-note-line\n"},
+            {"do": "session.send", "session": "s", "prompt": "Write the verify notes file."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.changedFile", "path": "notes/verify-notes.md", "count": 2},
+            {"do": "click", "on": "chat.changedFile", "path": "notes/verify-notes.md", "index": 0},
+            {"do": "see", "on": "diff.mode", "text": "Earlier turn: 1"},
+            {"do": "see", "on": "diff.added", "text": "second-note-line"},
+            {"do": "click", "on": "chat.changedFile", "path": "notes/verify-notes.md", "index": 1},
+            {"do": "see", "on": "diff.mode", "text": "Last turn: 1"},
+            {"do": "see", "on": "diff.removed", "text": "out-of-turn note"},
+            {"do": "click", "on": "chat.changedFile", "path": "notes/verify-notes.md", "index": 0},
+            {"do": "see", "on": "diff.added", "text": "second-note-line"},
+            {"do": "gone", "on": "diff.removed", "text": "out-of-turn note"}
+          ]
+        },
+        {
+          "id": "older-turn-mobile",
+          "kind": "path",
+          "title": "Historical turn chips open the correct diff in the phone layout",
+          "steps": [
+            {"do": "settings", "values": {"showTurnChangedFiles": true}},
+            {"do": "session.create", "as": "s", "title": "Historical turn mobile changed files"},
+            {"do": "session.send", "session": "s", "prompt": "Write the verify notes file."},
+            {"do": "file.write", "path": "notes/verify-notes.md", "content": "# Verify notes\n\nout-of-turn note\nsecond-note-line\n"},
+            {"do": "session.send", "session": "s", "prompt": "Write the verify notes file."},
+            {"do": "open", "session": "s", "phone": true},
+            {"do": "see", "on": "chat.changedFile", "path": "notes/verify-notes.md", "count": 2},
+            {"do": "click", "on": "chat.changedFile", "path": "notes/verify-notes.md", "index": 0},
+            {"do": "see", "on": "diff.added", "text": "second-note-line"}
           ]
         }
       ]

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { MessageSearchRouteRuntime } from './contracts.js';
+import type { Response } from '../shared/http-contracts.js';
 
 type MessageResult = NonNullable<ReturnType<MessageSearchRouteRuntime['search']>>;
 type SessionResult = NonNullable<ReturnType<MessageSearchRouteRuntime['searchSessions']>>;
@@ -9,10 +10,7 @@ type RouteBody = Awaited<ReturnType<MessageSearchRouteRuntime['status']>>
   | (Omit<SessionResult, 'next'> & { next: string | null })
   | { error: unknown };
 
-interface RouteResponse {
-  status: (code: number) => RouteResponse;
-  json: (payload: RouteBody) => RouteResponse;
-}
+type RouteResponse = Response<RouteBody>;
 
 type RouteHandler = (req: { query: Partial<z.input<typeof querySchema>> }, res: RouteResponse) => RouteResponse | Promise<RouteResponse>;
 

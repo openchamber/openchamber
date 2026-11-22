@@ -239,6 +239,20 @@ aborts pending requests and clears samples, even while an earlier credential
 refresh is pending. This invalidation bypasses catalog refresh coalescing so a
 previous account's answer cannot land in the new account's readout. Visible
 readouts request their replacement selection; a hidden tray waits until opened.
+Saving or removing `CLAUDE_CONFIG_DIR` in General Settings follows the same
+invalidation through `openchamber:quota-credentials-changed` on the control
+stream. Every connected client drops only the Claude sample and pending Claude
+read (`reconcileClaudeSelection`), including when the selected home cannot
+supply credentials; other providers keep their numbers and requests. A
+provider-list answer requested before the change no longer decides Claude, and
+with no readout visible the store forgets it loaded, so the next readout to open
+reads Claude again.
+Claude results carry a non-secret `selection` revision of the home they were
+read from. A failed refresh keeps the previous sample only while that revision
+matches, so a home changed during a control-stream gap, or edited in OpenCode's
+service file without any announcement, replaces the old account's numbers on
+the next read. A reconnect therefore rereads Claude when a readout is visible
+instead of clearing every provider.
 `lib/quota/fetchQuota.ts` validates response payloads and bounds the complete
 request, including JSON body delivery. Compact usage cards and Settings display
 refresh errors alongside retained data. The mobile popover makes at most one
@@ -413,9 +427,13 @@ the chats get their own, keyed by instance and folder
 another browser keeps its own sets (tabs are what one window looks at;
 drafts and pins, which are data, live on the server). The shown set is
 `tabIds`/`previewTabId`, so every action works on what the strip shows;
-`enterScope` swaps it with the stored one. A worktree or space shown for the
-first time opens with the sessions the user started there as pinned tabs, no
-subagents; a project root opens with none, since it can hold hundreds. The
+`enterScope` swaps it with the stored one. Pinning more tabs never closes one.
+A pinned tab leaves its set when the user closes it, when `removeTabs` drops
+its session, when the session moves to another folder, when another lane of
+its run takes the shared slot, or with its whole set when that set ages out of
+the 40 kept scopes. A worktree or space shown for the first time opens with the
+10 most recent sessions the user started there as pinned tabs, no subagents; a
+project root opens with none, since it can hold hundreds. The
 strip enters a new scope only once the global session list has loaded, so a
 seed is never taken from a partial list and stored empty for good. At most 40
 other scopes are kept, the least recently shown dropped first. `removeTabs`
@@ -430,6 +448,20 @@ kept showing its tab, because the strip renders any tab whose session exists.
 The global set is left alone, since it is the other setting's. Version 1 moved the version-0 single
 set into the global scope. How the strip itself looks and behaves is in
 `components/layout/DOCUMENTATION.md`.
+
+### Why pinned tabs have no limit
+
+A cap that closes the leftmost pinned tab to make room for a new one closes,
+without a word, the long-running session the user keeps coming back to. It made
+sense while every opened session got a tab. With the preview tab only a send, a
+double-click, a drag or a new session pins one, so the set grows only as the
+user works. A set holds ids only, and the strip scrolls when its tabs overflow.
+Deletion cleanup (`sync/session-deletion-cleanup.ts`) drops a deleted
+session's id from the global set and from every set of the server it was
+deleted on, so ids that can never render again do not pile up. Sets of other
+servers keep it: an imported session keeps its id, so the same id on another
+server is a different, live session.
+An archived session keeps its id, so restoring it brings its tab back.
 
 ### Session / project coordination stores
 
@@ -632,6 +664,36 @@ entry is not a request to replace a user's choice. Directory snapshots retain
 the effort override separately from its inherited value, including explicit
 `Default`. Fresh drafts inherit their project's effort before the global one.
 
+A chat takes the Chats defaults (`chatsDefaultAgent`, `chatsDefaultModel`,
+`chatsDefaultVariant`, from Settings > Sessions > Chats) in the project's place.
+That holds for any folder under the managed Chats root, a root inside a
+registered checkout included, and for an open chat draft before its folder is
+active. The rest of the cascade is unchanged, so an empty Chats field falls to
+the global default. Changing a Chats default reaches an open chat draft and
+nothing else, and only the fields the draft still follows: a model, agent or
+thinking level picked in the draft stays. While a chat draft is open on a Chats
+model or agent, changing the New sessions default leaves that draft alone. In a
+new draft, switching to an agent with no model of its own falls back to the
+project or Chats default model before the global one; an existing session keeps
+falling back to the global model.
+
+A thinking level belongs to its model. An empty project or Chats level on the
+same model as New sessions takes the remembered level for that model first,
+then the New sessions level (`scopeDefaultCandidates`, `fallbackVariant`); on a
+different model it never borrows the New sessions level. Switching agents in a
+draft resolves the same order (`resolveInheritedDefaultVariant`), and a Chats
+level change recomputes the inherited level of a draft whose hand-picked model
+is the Chats model, keeping only a thinking level picked in the draft.
+
+### Why the Chats defaults take the project's slot
+
+A chat has no project, so the Chats defaults fill the project's place in the one
+cascade the composer, the session routes and scheduled tasks share. A rung of
+their own between project and global was the alternative. It would add a third
+configured candidate to every resolver and a three-way rule for which model a
+saved thinking level belongs to, for a case where the project rung is always
+empty.
+
 A session started from outside the composer (the Plan/Todo send dialog, and a
 new worktree session it creates) starts on the defaults of the directory it
 runs in. `resolveDirectoryDefaultSelection(directory)` runs the same cascade on
@@ -771,7 +833,7 @@ Session folders are stored by the OpenChamber server and shared by all of its cl
 
 Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone; it reaches the server as a `forget-sessions` change, so the chat leaves its folder on every client. Closing a project sends `forget-scopes` for its root, its archive and each of its worktrees, so its folders do not come back when the project is added again. A session that moves (an agent's `session_move`, another client, the app's own move) leaves the folders of every scope that no longer holds it: `followSessionMove`, called from `relocateSession`, sends an `unassign` for each scope that does not contain the destination or that contains it only around a worktree holding it (`folderScopeKeepsMovedSession` in `lib/sessionFolders/folderScopes.ts`). Before, the id stayed in the old scope's folder, and the session showed in that folder after it moved. Archived scopes are kept: restoring a session moves it, and its archived placement is the restore's to settle.
 
-Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts have shared bounds of 50 sessions and 1 MiB of serialized data, and no count bound per session. At a bound the store refuses the new comment or the edit that grows it and evicts nothing, because each draft is something the person wrote and has not sent; the field keeps the text and a localized toast says why. Context already written comes back past the bounds: a failed send, a fork, and a reverted or edited message restore everything they took. A browser annotation and a VS Code editor comment pass the bounds too, because their field has closed by the time they reach the store and a refusal would lose the text. Pins retain every valid composite key across runtimes without silent age/count eviction and are never pruned from the first startup list. Confirmed local deletion and routed deletion events clear immediately; after an authoritative baseline exists, a later complete omission also cleans persisted state. Ambiguous session-only legacy drafts and pins are not claimed.
+Chat composer drafts, confirmed mentions, inline-comment drafts, and pinned sessions use the same runtime/directory/session ownership rule. Chat drafts use a bounded shared envelope and notify mounted composers when authoritative deletion clears their identity, preventing unmount autosave from resurrecting deleted text. Inline drafts have shared bounds of 50 sessions and 1 MiB of serialized data, and no count bound per session. At a bound the store refuses the new comment or the edit that grows it and evicts nothing, because each draft is something the person wrote and has not sent; the field keeps the text and a localized toast says why. An inline-comment draft filed by a surface that writes elsewhere (a VS Code code comment, `composing`) is the composer's open row from the moment it arrives: every keystroke is written to the store, so a reload or a surface swap loses nothing and a snapshot always carries the text the editor thread follows. Finishing it clears the flag; finishing it with no text removes it, while every other draft survives an empty edit because its attachment can be the quote itself. Context already written comes back past the bounds: a failed send, a fork, and a reverted or edited message restore everything they took. A browser annotation and a VS Code editor comment pass the bounds too, because their field has closed by the time they reach the store and a refusal would lose the text. Pins retain every valid composite key across runtimes without silent age/count eviction and are never pruned from the first startup list. Confirmed local deletion and routed deletion events clear immediately; after an authoritative baseline exists, a later complete omission also cleans persisted state. Ambiguous session-only legacy drafts and pins are not claimed.
 
 Input history keeps both runtime-wide and runtime/directory/session buckets in one bounded browser-storage envelope. The per-bucket cap is configurable from 1 through 100 and defaults to 40. Recall defaults to the current session's bucket merged with the visible transcript's user prompts; the runtime-wide bucket is opt-in through the Chat setting. Lowering the limit trims older entries from every bucket at once and cannot restore what it discards. Every scope change, limit change, append, and session cleanup rereads the latest durable envelope before applying its mutation, so a stale tab preserves history written by another tab. A failed write retains bounded before/after snapshots. The next mutation applies that local delta to the latest durable data, preserving pending appends and session deletions together with unrelated changes from other tabs. A successful durable write clears the pending delta.
 
@@ -782,6 +844,8 @@ Composer draft edits remain immediate in memory and use a trailing durable-write
 ### `useTerminalStore.ts`
 
 `useTerminalStore` owns terminal tab arrangement per directory plus PTY scrollback.
+
+Tabs retain the server's interactive or command launch mode during adoption and attachment. A `terminal` tab in command mode (a reply command) keeps that mode when its session is cleared, persists it and hydrates exited with no session, so a reload never starts an interactive shell in it; its id equals its server session id, so reconciliation adopts the session back into it.
 
 Scrollback is deliberately **not** stored on the tab. `buffers` is a separate map keyed by
 directory and tab id, and `getBuffer()` returns a shared frozen empty buffer for tabs that
@@ -977,7 +1041,7 @@ project. Borrowing the active project's catalog for an open chat offered that
 project's agents, which the session cannot run (#5522).
 A chat draft has no folder until its first character, so it reads the managed
 Chats root, on start or reconnect too, where its commands and skills already
-come from. The app's directory stays on the project, so opening a session in
+come from, and starts on the Chats defaults. The app's directory stays on the project, so opening a session in
 that directory re-activates its catalog with no directory change to trigger it.
 Reading the active project's catalog instead started the chat on that project's
 `default_agent`, and the first send failed with the agent missing (#6283).
@@ -1357,7 +1421,7 @@ After meaningful Git/PR store changes, verify manually:
 - Server drafts serialize writes per draft and retain failed-save local text as newer than the server. Final removal prevents pending saves from resurrecting sent or discarded drafts. Loads started before writes cannot overwrite them; failed deletion restores a still-server-owned draft. Stored attachments travel by id and load bytes when another device opens the draft.
 - Folder snapshot reads bypass the browser request cache so a hanging write cannot block them. Batches preserve changes queued after dispatch, and a failing write retains its own backoff. Malformed pending entries drop individually; malformed tombstones remove nothing.
 - Session pins derive from server-shared metadata with optimistic clicks and unmigrated local pins overlaid. Unknown session ids stay in tab sets until absence is authoritative because a partial list cannot destroy the user's working set. Closing a tab never deletes its session.
-- Pin intent can precede creation of its tab and remains transient. Moving a tab or sending pins a preview. Multi-run members reuse their shared tab slot without changing its preview state, and opening the newest pinned tab never evicts that new tab.
+- Pin intent can precede creation of its tab and remains transient. Moving a tab or sending pins a preview. Multi-run members reuse their shared tab slot without changing its preview state. Apart from that slot, opening, pinning, dragging or moving a tab never closes another pinned tab.
 - Multi-run lanes receive standing project context like ordinary sends. A lane's goal starts before its prompt; goal failure leaves it unstarted, and prompt failure stops that goal because a goal without a turn never settles and blocks auto-fusion. A failed unpopulated checkout is removed with its branch.
 - A folded work has no selectable child rows, so range selection cannot include its hidden sessions. A selected session shown in another scope toggles the same session off.
 - Snippet registry authority expires with its directory's load cache because files can change outside this client. Only a complete fresh list can rule out expansion locally. Post-mutation reads bypass pre-mutation requests, and retired callers receive the replacement list. Rename and move update list and editor selection together.

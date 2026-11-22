@@ -41,9 +41,12 @@ changed, and shows the matching excerpt under the title.
 The search covers the global active and archived cache, which does not
 bootstrap directories or load transcripts. `resolveSidebarSearchScope` admits a
 conversation by its directory: any known directory, and any folder under a
-project or one of its worktrees. VS Code keeps to its workspace directories and
-sends them with the content request; with none known the hook stays disabled,
-so an empty directory list cannot become a request for every directory.
+project or one of its worktrees. Known directory keys and candidate paths use
+the same path normalization, including raw Windows managed-chat directories.
+VS Code keeps to its exact workspace directories for metadata search, and
+`useConversationSearch` marks message search unsupported there before any
+request; with no directory known the hook stays disabled, so an empty directory
+list cannot become a request for every directory.
 The search text and its scope are plain state of the sidebar (and of the
 phone's sheet for its own field); nothing is stored. Excerpts and other message
 matches open through `openSessionLink`, so opening an archived match does not
@@ -113,6 +116,16 @@ Search admits a chat by its folder, and a folder is known as a chat only after
 the server names the chats root, which can arrive after the session list. The
 admitted directories depend on that root, so chats join a search when it lands
 instead of staying out until the session list next changes.
+
+### Why known directory keys are normalized inside the scope
+
+Callers hand the scope directories as they got them; a managed chat's folder
+comes as OpenCode reports it, with backslashes on Windows. The scope normalizes
+those keys itself, once per scope, rather than each caller. The normalization
+is a local admission check: it decides which conversations the sidebar search
+shows, and no request carries the normalized keys. A Windows chat missing from
+search results is filtered here.
+
 - `list/useSidebarGroupStatus.ts` subscribes to project and standalone Chats
   directories together. Chats uses the same `activity:chats` identity for status
   and row projection, including a Chats-only sidebar. An unresolved global list
@@ -437,6 +450,26 @@ one session the user may want to open.
   it; closing the dialog cancels the Done. Archive on Done keeps its own guard
   after that: a worker still running in the worktree keeps it.
 
+### Leads
+
+A lead (`metadata.openchamber.lead`, `lib/sessionLead.ts`, server side in
+`packages/web/server/lib/session-lead/`) is a session the user marked to run
+a direction through its own workers. Its one mark is an agent's head
+branching to three sessions (`lead`) in the one-line row's chevron slot, the way the worktree icon
+sits in a group header: the title starts where every row's title starts, and
+with workers under it the mark gives way to the chevron on hover or focus
+(`SessionLeadSlot`); on touch the mark stays and a tap on it still toggles.
+Two-line rows show the mark with the row's marks, the phone beside the title.
+The row's states are any session's: no count of workers. A lead starts from
+New lead (a draft with its own welcome heading): in the project menu, and in
+the menu of the project's "+" (right click on desktop, long press on the
+phone; a plain click or tap still opens an ordinary draft), and the `new_lead`
+shortcut (⇧⌥⌘L) and palette command, which on an open draft switch it between
+session and lead and keep what was typed. The session menu
+makes an existing session a lead and turns it back. Hand to a lead in the session menu (a submenu of the project's leads on desktop, one item per lead on the phone) gives an ordinary top-level session to a lead as its own `ownWork` child; the server does the hand-over (`lead.handover`). VS Code
+has neither start, because its agent has no `openchamber` tool, but shows
+existing leads.
+
 ### Why a running worker asks before Done and not after
 
 Archive on Done reads whether the worktree is busy only after the work left
@@ -706,7 +739,18 @@ the same Mark all as read.
   collapse and is saved in local storage (`oc.sessions.activityCollapse`). The
   display menu's Collapse all / Expand all set every project and the zones
   (`SIDEBAR_ACTIVITY_KEYS`: Pages, Chats, Pinned, In work and the list by time)
-  together. Session folders keep their own collapse state. Zone and project
+  together. Session folders keep their own collapse state. Project collapse is
+  the instance's (`projects[].sidebarCollapsed`), mirrored into one local key
+  (`oc.sessions.projectCollapse`) per browser origin. After an instance switch
+  that key still names the previous instance's projects, so the first project
+  list the new instance sends replaces it. A fold, Collapse all or Expand all
+  made before that list arrives is replayed over it and only then saved, so a
+  stale list never reaches the instance's settings. Those pending choices are
+  kept per runtime (`oc.sessions.projectCollapse.pending:<runtime key>`), so a
+  reload before the list arrives still replays them. A fold goes into the
+  project store and to the settings writer at once (`updateDesktopSettings`),
+  which debounces it and flushes it with keepalive before the page unloads; a
+  project edit right after it (a reorder) writes the new flags. Zone and project
   headers are sticky. The projects sit under a "Projects"
   caption (a `caption` row, `projectsCaption`) styled as a zone's label, so
   every section has a caption and a project is an item of its list: its label
@@ -872,6 +916,13 @@ project draft switched to a new Chat takes its text along, and its row goes.
 Opening a row (`works/openSessionDraft.ts`) opens the draft at once with its
 text and server files through `pendingComposerRestore`; attachments stored on
 the server follow once downloaded, if the user is still on the draft. A draft
+started from a sidebar folder shows that folder in the composer and retains its
+folder target when saved and reopened. The label and the send take the folder
+from one scope (`sync/draft-folder-target.ts`): the directory the sidebar opened the
+draft on, never the project's start folder inside a worktree, or the Chats
+root. When the folder is gone or the draft moves to another project or
+worktree, the label hides and the session lands unfiled. Its saved row stays
+in the project or worktree list until the session is sent. A draft
 this device failed to store (offline, or a 413 for attachments over the
 server's limit, which the user is told once) keeps this device's newer copy
 when reopened here. The first draft opened in a folder takes over the text
@@ -1258,6 +1309,13 @@ rest it is as quiet as the button was.
   for subdirectory sessions, whose own directory rarely has a Git status entry.
 - Worktree prefix lookup runs for each session on sidebar rebuilds and avoids
   allocating entry pairs or concatenated path prefixes in that loop.
+- Any change to any session record rebuilds the whole structure, so a turn's
+  start and end rebuild it several times, each on every session. What a rebuild
+  asks of each session and depends on nothing else keeps its answer between
+  rebuilds: a session's linked changes and issues per record and URL matcher
+  (`lib/linkedIssues.ts`), a folder's chats root per set of roots
+  (`lib/chatDirectories.ts`). At 4x CPU throttle with 4,000 sessions this took
+  the longest task of a turn from 178 to 160 ms.
 - Root-branch resolution keys its cache by project path and input branch and
   coalesces initial status bursts. The same input stays cached for 5 minutes;
   another project's settled branch cannot trigger a quadratic resolution cascade.
@@ -1749,3 +1807,29 @@ anchored like a session doing so. A hidden list (the phone's while projects
 are reordered) keeps nothing. The sidebar never scrolled to a session the
 user opened or created, and still does not; the phone's drawer brings its
 row into view after the anchor (`scrollRequest`).
+
+### Why rows read the live record and the structure rebuilds on a structural key
+
+Every change to a session record replaced the global list, and the sidebar
+rebuilt its whole structure from about 4,000 sessions for it: several times at
+each turn's start and end, while the rows that changed were one to three. The
+structure now keeps its input list while every record in it has the same
+structural key (`list/sidebarStructureKey.ts`): the record minus the fields
+only a row shows (tokens, cost, outcome, model, agent, `time.idle` and the
+`openchamber.turn` metadata), plus the facts the structure derives from them
+(a done or review suggestion, which `time.idle` decides). `time.updated`
+counts only while the sidebar reads it: projects sorted by recent activity, a
+custom section filtered by activity, a search. A row reads its session's
+current record from the global store by id (`sessions/useLiveSessionNode.ts`),
+so what it shows follows the record even when the structure kept an older one.
+The live marks of a row (running, unread, the turn's length) already come from
+stores of their own. A new field read by the structure belongs in the key, and
+the key test (`sidebarStructureKey.test.ts`) names the fields left out.
+Rejected: patching one row inside the built structure, which every derived
+index (ownership, grouping, sections, row model) would have to support.
+Measured at 4x CPU throttle with 4,000 sessions and four sessions in a turn:
+structure builds per turn went from 5 to 7 down to 2 and the sidebar's time
+from about 420 to 285 ms; time in tasks over 50 ms fell by 37 percent. What
+still rebuilds the derived indexes at a turn's start and end is the ordering
+store: a session going active and settling again publishes new ranks, and
+group order reads those ranks too.

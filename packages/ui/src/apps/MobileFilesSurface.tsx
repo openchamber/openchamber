@@ -16,6 +16,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useFileTreeUpload } from '@/components/views/files/useFileTreeUpload';
 import { AUTO_RELIST_MAX_ENTRIES, useFileTreeChanges, type FileTreeChangeBatch } from '@/components/views/files/useFileTreeChanges';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
@@ -36,15 +37,12 @@ import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestActionsWhere, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestAction } from '@/lib/guests/run-action';
 import { MobileRowMenu } from './mobileSidebar/MobileRowMenu';
+import { mobileFilesList, type MobileFilesListedFor, type MobileFilesRoute } from './mobileFilesList';
 import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
 const LazyFilesEditor = React.lazy(() =>
   import('@/components/views/FilesView').then((module) => ({ default: module.FilesView })),
 );
-
-type MobileFilesRoute =
-  | { type: 'browser'; directory: string }
-  | { type: 'file'; path: string; returnDirectory: string };
 
 const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
@@ -101,10 +99,12 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const [route, setRoute] = React.useState<MobileFilesRoute>(() => ({ type: 'browser', directory: root }));
   const [entries, setEntries] = React.useState<FileListEntry[]>([]);
+  const [entriesDirectory, setEntriesDirectory] = React.useState<string | null>(null);
   const [isLoadingDirectory, setIsLoadingDirectory] = React.useState(false);
   const [directoryError, setDirectoryError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
   const [searchResults, setSearchResults] = React.useState<FileSearchResult[]>([]);
+  const [searchResultsFor, setSearchResultsFor] = React.useState<MobileFilesListedFor | null>(null);
   const [isSearching, setIsSearching] = React.useState(false);
   const directoryLoadRequestIdRef = React.useRef(0);
 
@@ -127,6 +127,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         return a.name.localeCompare(b.name);
       }));
+      setEntriesDirectory(directory);
     } catch (error) {
       if (directoryLoadRequestIdRef.current !== requestId) return;
       if (options?.background) {
@@ -134,6 +135,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
         return;
       }
       setEntries([]);
+      setEntriesDirectory(directory);
       setDirectoryError(error instanceof Error ? error.message : t('mobile.files.error.listFailed'));
     } finally {
       if (directoryLoadRequestIdRef.current === requestId) {
@@ -181,19 +183,27 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
     const normalizedQuery = query.trim();
     if (!normalizedQuery) {
       setSearchResults([]);
+      setSearchResultsFor(null);
       setIsSearching(false);
       return;
     }
 
     let cancelled = false;
+    const directory = route.directory;
     const timeoutId = window.setTimeout(() => {
       setIsSearching(true);
-      void files.search({ directory: route.directory, query: normalizedQuery, maxResults: 40 })
+      void files.search({ directory, query: normalizedQuery, maxResults: 40 })
         .then((results) => {
-          if (!cancelled) setSearchResults(results);
+          if (!cancelled) {
+            setSearchResults(results);
+            setSearchResultsFor({ directory, query: normalizedQuery });
+          }
         })
         .catch(() => {
-          if (!cancelled) setSearchResults([]);
+          if (!cancelled) {
+            setSearchResults([]);
+            setSearchResultsFor(null);
+          }
         })
         .finally(() => {
           if (!cancelled) setIsSearching(false);
@@ -226,6 +236,10 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
     if (pendingFileFocusPath) useUIStore.getState().setPendingFileFocusPath(null);
   }, [pendingFileFocusPath, pendingFileNavigation, root, setSelectedPath]);
 
+  const list = mobileFilesList({
+    runtimeKey: getRuntimeKey(), route, query, entriesDirectory, directoryError, searchResultsFor, isSearching,
+  });
+
   if (!root) {
     return <MobileFilesState message={t('mobile.files.empty.noDirectory')} />;
   }
@@ -250,7 +264,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
         <div className="min-h-0 flex-1 overflow-hidden">
           <ErrorBoundary>
             <React.Suspense fallback={<MobileFilesState loading message={t('filesView.state.loading')} />}>
-              <LazyFilesEditor mode="editor-only" />
+              <LazyFilesEditor visible={visible} />
             </React.Suspense>
           </ErrorBoundary>
         </div>
@@ -317,11 +331,11 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
         ) : null}
       </div>
 
-      <ScrollableOverlay outerClassName="min-h-0 flex-1" className="px-2 pb-3 pt-1" useScrollShadow disableHorizontal>
+      <ScrollableOverlay memoryKey={list.key} memoryReady={list.ready} outerClassName="min-h-0 flex-1" className="px-2 pb-3 pt-1" useScrollShadow disableHorizontal>
         {directoryError ? (
           <MobileFilesState message={directoryError} />
         ) : query.trim() ? (
-          <MobileSearchResults root={root} results={visibleSearchResults} isSearching={isSearching} actions={fileActions} onOpenFile={openFile} />
+          <MobileSearchResults root={root} results={visibleSearchResults} isSearching={list.searchLoading} actions={fileActions} onOpenFile={openFile} />
         ) : (
           <>
             {entries.length === 0 && !isLoadingDirectory ? (

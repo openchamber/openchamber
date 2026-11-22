@@ -123,7 +123,15 @@ export const useTurnMessageRenderer = ({
         };
     }, [turn.activityParts, turn.changedFiles, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.assistantMessages, turn.userMessage.info]);
 
-    return React.useCallback(
+    const snapshotTurnId = turn.userMessage.info.role === 'user' ? turn.turnId : undefined;
+
+    const streamPhaseOf = React.useCallback((messageId: string): StreamPhase => {
+        const message = turn.assistantMessages.find((assistant) => assistant.info.id === messageId);
+        if (message?.info.role === 'assistant' && (message.info.time.completed ?? 0) > 0) return 'completed';
+        return messageId === streamingAssistantMessageId ? activeStreamingPhase ?? 'streaming' : 'completed';
+    }, [activeStreamingPhase, streamingAssistantMessageId, turn.assistantMessages]);
+
+    const renderMessage = React.useCallback(
         (message: ChatMessageEntry) => {
             const assistantIndex = assistantIndexById.get(message.info.id) ?? -1;
             const isAssistantMessage = assistantIndex >= 0;
@@ -138,6 +146,7 @@ export const useTurnMessageRenderer = ({
             const turnGroupingContext = isAssistantMessage
                 ? {
                     turnId: turn.turnId,
+                    snapshotTurnId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
                     opensAnswerText: message.info.id === answerTextOpenerId,
@@ -183,6 +192,7 @@ export const useTurnMessageRenderer = ({
             turn.hasReasoning,
             turn.hasTools,
             turn.turnId,
+            snapshotTurnId,
             turnGroupingContextBase,
             streamingAssistantMessageId,
             activeStreamingPhase,
@@ -194,4 +204,6 @@ export const useTurnMessageRenderer = ({
             onUserAnimationConsumed,
         ]
     );
+
+    return { renderMessage, streamPhaseOf };
 };

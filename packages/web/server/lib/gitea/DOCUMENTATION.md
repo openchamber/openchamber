@@ -31,6 +31,8 @@ Target: Gitea 1.21 or newer, verified against live 1.21.11 and 1.27.3 (see *Veri
 - Whole collections (reviews, changed files, branches, labels, collaborators) are read page by page up to 2000 items; past that the read fails instead of answering a part. Issue and pull request comments are one request: Gitea answers them all and ignores `page` and `limit` there.
 - A list narrowed by labels sends Gitea's single comma-joined `labels` parameter on the issue list, and every named label must be carried in the order given: that list combines label names with AND. The pull list's own `labels` are label ids combined with OR, so a labelled pull list is read through the issue list (`type=pulls`, the same AND). The cross-repository search combines labels with OR too, so its page is then narrowed to the items carrying every named label. A label name containing a comma cannot be expressed in that form, so the whole read is refused as `400 INVALID_SOURCE_CONTROL_READ_CONTEXT` before any provider call rather than split into other labels.
 - The timeline reads the first page of `/pulls/{n}/commits` (Gitea lists them newest first) and reverses it, so it shows the newest 50 oldest first, in Gitea's order even within one second.
+- The timeline also carries `reviewerStates`: each review maps `APPROVED` → `approved`, `REQUEST_CHANGES` → `changes_requested`, `COMMENT` → `commented`, the latest review deciding when someone reviewed twice; a requested reviewer without a review reads `pending`. A `PENDING` review is an unpublished draft only its author and admins see, so it is skipped and the published verdict stands. `stale: true` keeps its author's state.
+- `references` comes from `/issues/{n}/timeline`: its first page and, when there are more, its last two (the timeline runs oldest first, so a recent mention sits at the end), keeping `issue_ref`, `pull_ref` and `comment_ref` entries with a readable `ref_issue` (number and `html_url`); a `comment_ref` takes its time and author from `ref_comment` and its kind from `ref_issue.pull_request` or a `/pulls/` URL, the others from the entry. A `commit_ref` names no item and is left out, as are comments and the rest of the timeline. One row per referenced item, `comment_ref` included; a failed read leaves the key off, and the timeline is read only when `includeReferences` (`references=1`, the Source Board's preview) asks for it.
 - Drafts are the title prefix Gitea recognizes by default (`WIP:`, `[WIP]`, case-insensitive) or the pull request's `draft` flag. Create as draft writes `WIP: `; ready strips the prefix and convert-to-draft adds `WIP: ` ahead of the title. An instance with custom `WORK_IN_PROGRESS_PREFIXES` is read by the `draft` flag, but ready only strips the default prefixes.
 - Mutation kinds are GitLab's names (`change-request-create`, `change-request-merge`, `issue-labels`, ...) and the digest is `digestMutationInput({ kind, actor, credential, target, ...fields })` as GitLab computes it. Both are persisted in `source-control-mutations.json`; changing either turns a stored record's replay into a conflict.
 The standard table's `/issues/update` edits an issue's title and body (`PATCH /issues/{n}` with `{ title, body }`, an empty body clearing it); the answered issue must restate both before it counts. Its kind is `issue-update`, and `reconcileIssueUpdate` succeeds only on an exact read match, staying `outcome-unknown` otherwise.
@@ -95,56 +97,26 @@ gt puts its configuration under `GITEA_CLI_CONFIG_DIR`, else the platform's conf
 
 The injected process runner can return text or bytes; only string output supplies a token or a configuration path. Thrown values need not be `Error` instances. The failure guard establishes only non-nullness, leaving `code`, `killed` and `stderr` unchecked until their existing comparisons or string checks run. The YAML schemas remain nullable and passthrough: an active account's `auth_method` is checked by the schema, while unrelated file fields remain unknown. An invalid instance origin is skipped without preventing other hosts from being listed.
 
-### Why some implementations remain JavaScript
+### Why the client leaves JSON unchecked
 
-`shared/guards.js` exports `isString` as a boolean check. It accepts boxed
-strings and objects with a String `Symbol.toStringTag`, including objects
-without string methods. A predicate promising `string` or `String` would be
-false. Converting that small helper while preserving its boolean return does
-not narrow its callers.
+JSON syntax and pagination-container checks do not establish a Gitea payload
+schema. JSON reads and writes return `JsonValue`, and pages and collections
+contain unchecked JSON entries. Text and byte reads also admit `null` for a
+204. Resource checks still validate the fields they consume: a mapped
+repository establishes a numeric id, but its parent and pull request branches
+remain unchecked. Verification narrows version and user payloads with the
+existing checks before publishing their fields. User ids still accept every
+nonnegative integer, including values outside the safe-integer range.
 
-The exact blocked uses, starting with the largest implementation, are:
+Failure shapes leave fields unchecked until the existing string and status
+comparisons run. Their non-nullness guards preserve property reads on thrown
+primitives. The optional request-error status uses an erased declaration, so
+constructing an error without a status leaves that own property absent.
 
-- `resources.js`: `labelFilter` calls `name.includes` after `isString(name)`.
-  A String-tagged object without `includes` throws `TypeError` before any
-  provider call. Declaring unchecked label entries as strings hides that case.
-- `provider.js`: `serviceFor` assigns `sourceControlIdentity` and
-  `sourceControlPersistedAccount` to an arbitrary caught value. A resource
-  rejection with `null` or a number becomes a `TypeError` at that assignment.
-  Guarding and rethrowing the original value would change the rejection.
-- `mappers.js`: `mapGiteaReviewBody` calls `text(value.body).trim()`.
-  `text` can return a String-tagged object without `trim`. A boxed body is
-  returned unchanged in the mapped comment, so the result cannot promise a
-  primitive string either.
-- `client.js`: `classifyGiteaFailure` calls `code.startsWith`. A boxed TLS
-  code is classified as unreachable; a String-tagged object without that
-  method throws `TypeError`.
-- `verify.js`: `parseGiteaVersion` calls `match` and `parseGiteaUser` calls
-  `trim` after the same boolean check. `isVersion` establishes no stronger
-  string contract.
-
-The compiler reports `TS18046` at `labelFilter`, `serviceFor`,
-`classifyGiteaFailure` and `parseGiteaVersion`, and `TS2571` at the review
-body's `trim` when the unchecked inputs are annotated honestly. The folder's
-tests pin the label, review-body, failure-code and resource-rejection cases.
-Changing declarations or exporting types outside this folder cannot establish
-the missing methods or make every thrown value assignable.
-
-Type-only corrections to neighbouring modules, converting the shared boolean
-helper, and dependency declaration augmentations cannot resolve these remaining
-boundaries. The missing string methods are operations on unchecked values inside
-this folder, and the caught resource rejection has no declared type that can
-exclude null or primitives. Adding a guard, coercing the value, or replacing the
-operation would change the existing failure behavior. All five implementations
-therefore remain JavaScript until that behavior may change.
-
-`source-control/pat-account-auth.ts` now provides `PatAccountAuthOptions`,
-including the edition, SSH and CLI callbacks that this provider supplies.
-Those options no longer block conversion. The remaining client's inferred
-`namespace: null | undefined` and the native fetch declaration's refusal of
-an explicitly undefined body can be corrected with types, but neither
-correction removes the unchecked failure-code boundary. No outside file is
-changed for those corrections while the implementation remains JavaScript.
+The injected fetch contract permits the explicitly undefined request body that
+the client sends. Manual redirects include both Node's 3xx response and the
+browser-like `opaqueredirect` response defined by the Fetch standard; neither
+response is followed.
 
 ### Why remote resolution can be typed separately
 

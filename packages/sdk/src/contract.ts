@@ -2,8 +2,10 @@
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSnapshotResultPayload } from './file-editor.ts';
 import type { GuestMicrophoneEndReason, MicrophoneOpenRequest, MicrophoneOpenResult } from './microphone.ts';
+import type { OpenCommitRequest, OpenWalkthroughRequest } from './navigation.ts';
 import type { GuestRunningShellsSnapshot, GuestShellOutputRequest, GuestShellOutputResult, GuestShellStopResult, GuestShellsSubscription } from './shells.ts';
-import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
+import type { SessionSnapshot, GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
+export type { SessionSnapshot } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import type { GuestPopoverClosedEvent, GuestPopoverContext, GuestPopoverRequest } from './popover.ts';
 
@@ -56,14 +58,6 @@ export type HostTheme = {
 export const START_SESSION_SENT = ['sent', 'no-model', 'skipped', 'failed'] as const;
 
 export type StartSessionSent = (typeof START_SESSION_SENT)[number];
-
-export type SessionSnapshot = {
-  id: string;
-  title: string;
-  busy: boolean;
-  model?: string;
-  agent?: string;
-};
 
 export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status' | 'file' | 'popover' | 'block';
 
@@ -319,14 +313,6 @@ export type ResolveResultPayload =
 export type BadgeRequest = {
   count: number | null;
 };
-
-export type OpenCommitRequest = {
-  sha: string;
-};
-
-export const GUEST_COMMIT_SHA = /^[0-9a-f]{7,64}$/i;
-
-export const isGuestCommitSha = (value: string): boolean => GUEST_COMMIT_SHA.test(value);
 
 export type ResizeRequest = {
   height: number;
@@ -642,6 +628,7 @@ export type GuestGenerateMessage = GuestCall<'generate', GenerateRequest>;
 export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
 export type GuestResizeMessage = GuestCall<'resize', ResizeRequest>;
 export type GuestOpenCommitMessage = GuestCall<'open-commit', OpenCommitRequest>;
+export type GuestOpenWalkthroughMessage = GuestCall<'open-walkthrough', OpenWalkthroughRequest>;
 export type GuestStatusControlsMessage = GuestCall<'status-controls', { controls: GuestStatusControl[] }>;
 export type GuestPopoverOpenMessage = GuestCall<'popover-open', GuestPopoverRequest>;
 export type GuestPopoverCloseMessage = GuestCall<'popover-close', { id: string; reason?: 'closed' | 'escape' }>;
@@ -698,6 +685,7 @@ export type GuestMessage =
   | GuestBadgeMessage
   | GuestResizeMessage
   | GuestOpenCommitMessage
+  | GuestOpenWalkthroughMessage
   | GuestStatusControlsMessage
   | GuestPopoverOpenMessage
   | GuestPopoverCloseMessage

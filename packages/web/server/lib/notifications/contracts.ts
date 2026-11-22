@@ -1,13 +1,15 @@
+export type { SessionMetadata as StoredSessionMetadata } from '../openchamber-sessions/session-metadata-store.js';
+
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue | undefined };
 
 export interface SessionRecords {
   [session: string]: JsonValue | undefined;
 }
 
-export interface PushSettings {
-  vapidKeys?: JsonValue;
+export type PushSettings = {
+  vapidKeys?: unknown;
   publicOrigin?: unknown;
-}
+};
 
 export interface NotificationPayload {
   title?: string;

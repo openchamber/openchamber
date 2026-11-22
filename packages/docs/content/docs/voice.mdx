@@ -23,7 +23,7 @@ Once on, you get a play button on messages to hear them read aloud.
 Pick how your speech is transcribed:
 
 - **Local** runs a speech model on the computer where OpenChamber runs. The model downloads the first time you dictate, and your audio stays on that computer.
-- **Server** sends your audio to an OpenAI-compatible transcription service. Enter its URL and, if it needs one, an API key. If its transcription endpoint is not `/audio/transcriptions`, set **Endpoint path**. Leaving it empty keeps the OpenAI default.
+- **Server** sends your audio to an OpenAI-compatible transcription service. Enter its URL and, if it needs one, an API key. If its transcription endpoint is not `/audio/transcriptions`, set **Endpoint path**. Leaving it empty keeps the OpenAI default. To help the model with names, terms or several spoken languages, describe them in **Transcription prompt**, for example "Spanish and English. Terms: OpenChamber". It goes with every request; only models that accept a prompt use it, and some services reject the request instead.
 
 Local models:
 

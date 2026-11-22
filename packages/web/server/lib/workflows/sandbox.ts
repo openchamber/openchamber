@@ -5,6 +5,7 @@ import type { WorkflowAgent } from './store.js';
 
 const WORKER_HEAP_MB = 256;
 const MAX_FAN_OUT = 4096;
+export const MAX_CALL_NAME_LENGTH = 120;
 
 export interface WorkflowAgentCall {
   prompt: string;
@@ -21,7 +22,7 @@ interface SandboxOptions {
   onLog?: (message: string) => void;
 }
 
-type SandboxOutcome = { ok: true; value: unknown } | { ok: false; error: Error };
+type SandboxOutcome = { ok: true; value: unknown } | { ok: false; error: unknown };
 
 type WorkerMessage =
   | { type: 'call'; id: number; op: 'agent'; payload: WorkflowAgentCall }
@@ -103,6 +104,18 @@ const toJson = (value) => {
 
 const describeError = (error) => (error && typeof error.message === 'string' ? error.message : String(error));
 
+const callNameError = (options) => {
+  if (options === null || typeof options !== 'object') return null;
+  for (const name of ['id', 'forkFrom']) {
+    const value = options[name];
+    if (value === undefined) continue;
+    if (typeof value !== 'string' || !value.trim() || value.trim().length > ${MAX_CALL_NAME_LENGTH}) {
+      return name + ' must be a non-empty string of at most ${MAX_CALL_NAME_LENGTH} characters';
+    }
+  }
+  return null;
+};
+
 const start = ({ prelude, body, args, filename }) => {
   let currentPhase = null;
   const host = {
@@ -110,8 +123,16 @@ const start = ({ prelude, body, args, filename }) => {
       if (typeof prompt !== 'string' || !prompt.trim()) {
         return Promise.reject(new TypeError('agent(prompt, options) needs a non-empty prompt string'));
       }
+      const serialized = toJson(options ?? {});
+      const named = options !== null && typeof options === 'object' && (options.id !== undefined || options.forkFrom !== undefined);
+      const nameError = callNameError(options)
+        ?? (named && (serialized === null || typeof serialized !== 'object') ? 'agent options with id or forkFrom must be JSON-serializable' : null);
+      if (nameError) {
+        parentPort.postMessage({ type: 'error', message: nameError });
+        return new Promise(() => {});
+      }
       const own = options && typeof options.phase === 'string' && options.phase.trim() ? options.phase.trim() : null;
-      return call('agent', { prompt, options: toJson(options ?? {}), phase: own ?? currentPhase });
+      return call('agent', { prompt, options: serialized, phase: own ?? currentPhase });
     },
     phase: (title) => {
       currentPhase = String(title);
@@ -171,15 +192,19 @@ export const runWorkflowSandbox = ({ body, args, filename, onAgent, onPhase = ()
     };
   });
 
+  const replyToAgentCall = async (message: Extract<WorkerMessage, { type: 'call' }>) => {
+    try {
+      const value = await Promise.resolve().then(() => onAgent(message.payload));
+      if (!settled) worker.postMessage({ type: 'reply', id: message.id, value: value ?? null });
+    } catch (error) {
+      settle({ ok: false, error });
+    }
+  };
+
   worker.on('message', (message: WorkerMessage) => {
     if (settled) return;
     if (message.type === 'call') {
-      Promise.resolve()
-        .then(() => onAgent(message.payload))
-        .then((value) => value, () => null)
-        .then((value) => {
-          if (!settled) worker.postMessage({ type: 'reply', id: message.id, value: value ?? null });
-        });
+      void replyToAgentCall(message);
     } else if (message.type === 'phase') {
       onPhase(message.title);
     } else if (message.type === 'log') {

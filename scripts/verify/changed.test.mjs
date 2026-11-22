@@ -152,7 +152,7 @@ test("exactly half is not more than half", () => {
 })
 
 test("app code no scenario reaches is reported as uncovered, tests and docs as not app code", () => {
-  const selector = createSelector(zones(), memoryFiles(repo()))
+  const selector = createSelector(zones(), memoryFiles({ ...repo(), "packages/web/server/lib/new.js": "" }))
   assert.deepEqual(pick(selector, [`${UI}lib/unplayed.ts`, `${UI}chat/Unplayed.tsx`, "packages/web/server/lib/new.js", `${UI}chat/Footer.test.tsx`, `${UI}chat/DOCUMENTATION.md`, "package.json"]), {
     [`${UI}lib/unplayed.ts`]: { reason: "uncovered", features: [] },
     [`${UI}chat/Unplayed.tsx`]: { reason: "uncovered", features: [] },

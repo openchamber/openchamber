@@ -21,9 +21,9 @@ editor mask. Mobile keyboard clearance and editor shortcuts are independent
 of pending line navigation.
 
 The toolbar composes mode actions, source tools, clipboard feedback, speech,
-open-in-app items and save status. The docked viewer composes rendered slots;
-Markdown, HTML, source editing, tabs and the discard dialog have their own
-render functions.
+open-in-app items and save status. The viewer composes rendered slots;
+Markdown, HTML, source editing and the discard dialog have their own render
+functions.
 
 ## Invariants
 
@@ -64,8 +64,8 @@ render functions.
   defaults before pending navigation.
 - State, refs, effect dependencies, editor keys and lazy preview lifetimes
   survive the split unchanged.
-- Docked and fullscreen render functions return the existing element trees.
-  Exactly one guest canvas mounts, with its existing handoff and remount keys.
+- The viewer's render functions return the existing element trees. Exactly one
+  guest canvas mounts, with its existing remount key.
 - The file position cache remains module-scoped and bounded to 100 entries.
 - Runtime and directory guards still belong to the operation performing the
   read or write. Moving an operation does not change its authority.
@@ -74,16 +74,16 @@ render functions.
 
 ### Why render functions preserve the element tree
 
-The docked viewer, fullscreen viewer and tree panel are render functions.
+The viewer and the phone's tree panel are render functions.
 Adding component boundaries would change the editor's position in React's
 tree and could remount it during a file or mode switch.
 
 ### Why state declarations precede the operations that use them
 
-Opening, saving and freshness share the loaded document and draft. Canvas
-handoff also calls saving through the existing ref. Their state declarations
-run before those operations, in the module that owns each state, so the split
-keeps that lifecycle without introducing a surface-wide state container.
+Opening, saving and freshness share the loaded document and draft. Their state
+declarations run before those operations, in the module that owns each state,
+so the split keeps that lifecycle without introducing a surface-wide state
+container.
 
 ### Why the keybind reads Markdown mode through a callback
 

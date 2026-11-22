@@ -8,6 +8,7 @@ import { readDispatchedSessionResult } from "./dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
 import { readShareAnswer } from "@/lib/share-pages/answer"
 import type { Message, Metadata, Part, ToolPart } from "./model"
+import { LEAD_ANSWER_METADATA_KEY, leadReplySchema } from "@/lib/sessionLead"
 import { isSubagentCancellationNote, readSubagentRun } from "./subagent-run"
 
 const pullRequestNoticeSchema = z.object({
@@ -46,6 +47,16 @@ const pageAnswerNoticeSchema = z.object({
 
 export type PageAnswerNotice = z.infer<typeof pageAnswerNoticeSchema>
 
+const leadAnswerNoticeSchema = z.object({
+  kind: z.literal("lead-answer"),
+  answers: z.array(z.object({ question: z.string(), answer: z.string() })),
+  suggestions: z.array(z.object({ item: z.string(), accepted: z.boolean() })),
+  text: z.string(),
+})
+const leadHandoverNoticeSchema = z.object({ kind: z.literal("lead-handover"), title: z.string(), text: z.string() })
+
+export type LeadNotice = z.infer<typeof leadAnswerNoticeSchema> | z.infer<typeof leadHandoverNoticeSchema>
+
 export type SessionNotice =
   | { kind: "plugin"; label: string; text: string }
   | { kind: "restart"; text: string }
@@ -54,6 +65,7 @@ export type SessionNotice =
   | PullRequestNotice
   | ExtensionWaitNotice
   | PageAnswerNotice
+  | LeadNotice
 
 const HIDDEN_DESCRIPTIONS = new Set(["ACP embedded context"])
 
@@ -139,9 +151,21 @@ const readPageAnswerWake = (text: string, metadata: Metadata): PageAnswerNotice 
   return { kind: "page-answer", title, outcome, summary, details, text }
 }
 
+const leadReplyMetadataSchema = z.object({ [LEAD_ANSWER_METADATA_KEY]: leadReplySchema })
+const leadHandoverMetadataSchema = z.object({ source: z.literal("openchamber-lead-handover"), title: z.string() })
+
+const readLeadNotice = (text: string, metadata: Metadata): LeadNotice | undefined => {
+  const reply = leadReplyMetadataSchema.safeParse(metadata).data?.[LEAD_ANSWER_METADATA_KEY]
+  if (reply) return { kind: "lead-answer", answers: reply.answers, suggestions: reply.suggestions, text }
+  const handover = leadHandoverMetadataSchema.safeParse(metadata).data
+  return handover ? { kind: "lead-handover", title: handover.title, text } : undefined
+}
+
 export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (message.role === "system") return readMove(message)
   if (message.role !== "synthetic") return undefined
+  const lead = readLeadNotice(message.text, message.metadata ?? {})
+  if (lead) return lead
   const description = message.description?.trim()
   if (!description) return undefined
   const metadata = message.metadata ?? {}
@@ -171,6 +195,8 @@ const noticeSchema = z.discriminatedUnion("kind", [
   pullRequestNoticeSchema,
   extensionWaitNoticeSchema,
   pageAnswerNoticeSchema,
+  leadAnswerNoticeSchema,
+  leadHandoverNoticeSchema,
 ])
 
 const noticePartMetadataSchema = z.object({ [NOTICE_METADATA_KEY]: noticeSchema })

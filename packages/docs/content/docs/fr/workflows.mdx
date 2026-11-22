@@ -13,7 +13,7 @@ Les workflows conviennent au travail fait de nombreux morceaux semblables et ind
 
 L'outil de workflows est désactivé par défaut. Ouvrez **Paramètres → Général → Outils OpenChamber** et activez **Outil de workflows**. Les sessions en cours le reçoivent à leur prochain tour ; le désactiver retire l'outil et les instructions qui le concernent de toutes les sessions, et masque le panneau Workflows. Les exécutions existantes reviennent quand vous le réactivez.
 
-Les workflows ont besoin du serveur OpenCode propre à OpenChamber. Ils ne sont pas disponibles quand OpenChamber se connecte à un serveur OpenCode externe via `OPENCODE_HOST` ou skip-start, ni dans l'extension VS Code.
+Les workflows fonctionnent automatiquement avec le serveur OpenCode géré par OpenChamber, et fonctionnent aussi sur un serveur OpenCode local externe ou partagé une fois que vous avez enregistré le plugin OpenChamber dans votre configuration globale OpenCode depuis **Paramètres → Général → Serveur OpenCode** (voir [Serveur OpenCode](/fr/opencode-server/#activer-les-outils-openchamber-sur-un-serveur-local-externe)). Ils ne sont pas disponibles sur un serveur OpenCode distant ni dans l'extension VS Code.
 
 ## Lancer un workflow
 
@@ -29,9 +29,15 @@ Les agents d'un workflow en cours ne peuvent pas lancer leur propre workflow.
 
 ## Lancer les exécutions sans accord
 
-Sous **Outil de workflows**, activez **Lancer les exécutions sans mon accord** pour qu'une exécution lancée par l'agent démarre aussitôt. Sa carte la montre en cours, sans bouton **Lancer le workflow**, et vous pouvez toujours l'arrêter avec **Arrêter**. C'est fait pour un travail convenu que vous laissez ensuite avancer seul : par exemple, vous demandez à l'agent d'essayer quelques modèles sur un petit pilote puis de lancer tout le travail avec le meilleur, et il peut lancer cette exécution pendant votre absence.
+Sous **Outil de workflows**, **Lancer les exécutions sans mon accord** décide si une exécution lancée par l'agent attend votre clic :
 
-L'agent propose toujours le plan et les modèles dans le chat avant de lancer une exécution. Le réglage ne fait que sauter le clic. Le serveur le lit à chaque exécution : case décochée, chaque exécution vous attend de nouveau. Les limites ci-dessous restent les mêmes.
+- **Non** : chaque exécution attend que vous choisissiez **Lancer le workflow**
+- **Pour les leads** : les exécutions lancées par un [lead](/fr/leads/) démarrent aussitôt, toutes les autres sessions attendent toujours
+- **Toujours** : chaque exécution démarre aussitôt
+
+Une exécution qui démarre aussitôt apparaît en cours sur sa carte, sans bouton **Lancer le workflow**, et vous pouvez toujours l'arrêter avec **Arrêter**. C'est fait pour un travail convenu que vous laissez ensuite avancer seul : par exemple, vous demandez à l'agent d'essayer quelques modèles sur un petit pilote puis de lancer tout le travail avec le meilleur, et il peut lancer cette exécution pendant votre absence.
+
+Une session ordinaire propose toujours le plan et les modèles dans le chat avant de lancer une exécution ; le réglage ne fait que sauter le clic. Un lead mène son travail seul, donc avec **Pour les leads** il peut lancer une exécution sans demander d'abord. Le serveur lit le réglage à chaque exécution : revenez à **Non**, et chaque exécution vous attend de nouveau. Les limites ci-dessous restent les mêmes.
 
 ## Modèles et coût
 

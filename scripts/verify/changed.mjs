@@ -7,6 +7,8 @@ import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join, posix } from "node:path"
 
+import { SERVER_ROOT, createServerSelector, routeTable } from "./server-routes.mjs"
+
 const CODE_FILE = /\.(ts|tsx|js|jsx|mjs|cjs)$/
 const TEST_FILE = /(\.(test|spec|vitest|bench)\.[cm]?[jt]sx?$|\/(__tests__|__mocks__)\/)/
 const RESOLVE_SUFFIXES = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", "/index.ts", "/index.tsx", "/index.js", "/index.mjs"]
@@ -33,6 +35,7 @@ const SHARED_LAYER = /^packages\/ui\/src\/(stores|sync|lib)\//
 const NET_ROOT = "scripts/verify/"
 const ZONE_FILE = /^scripts\/verify\/zones\/([^/]+)\.json$/
 const VOCABULARY_FILE = "scripts/verify/vocabulary.json"
+const REQUESTS_FILE = "scripts/verify/requests.json"
 
 /** Every vocabulary name a feature's steps point at. */
 const vocabularyNames = (feature) => new Set(feature.scenarios.flatMap((scenario) => scenario.steps.flatMap((step) => [step.on, step.to?.on].filter(Boolean))))
@@ -55,12 +58,14 @@ export const diffMap = (before, after) => {
 /**
  * Module specifiers a file loads at run time: static imports and re-exports,
  * side-effect imports, dynamic `import("…")` and `require("…")`. Type-only
- * imports and re-exports are left out, since they change no behavior.
+ * imports and re-exports are left out, since they change no behavior;
+ * `withTypes` keeps them, for code that receives its modules as arguments
+ * and names them only by type.
  */
-export const parseImports = (source) => {
+export const parseImports = (source, { withTypes = false } = {}) => {
   const specifiers = new Set()
   for (const match of source.matchAll(/^\s*(?:import|export)\s+([^;'"()=]*?)\s*from\s*["']([^"']+)["']/gm)) {
-    if (!/^type\s/.test(match[1])) specifiers.add(match[2])
+    if (withTypes || !/^type\s/.test(match[1])) specifiers.add(match[2])
   }
   for (const match of source.matchAll(/^\s*import\s*["']([^"']+)["']/gm)) specifiers.add(match[1])
   for (const match of source.matchAll(/\b(?:import|require)\(\s*["']([^"']+)["']\s*\)/g)) specifiers.add(match[1])
@@ -97,7 +102,7 @@ const matchesSource = (file, source) => source.endsWith("/") ? file.startsWith(s
  * Selection over the feature map. `files` gives repo access: `read(path)` the
  * text or null, `isFile(path)`, `list(dir)` every file under a directory.
  */
-export const createSelector = (zones, files) => {
+export const createSelector = (zones, files, recorded = {}) => {
   const features = zones.flatMap((zone) => zone.features.map((feature) => ({
     id: `${zone.zone}.${feature.id}`,
     names: vocabularyNames(feature),
@@ -156,13 +161,40 @@ export const createSelector = (zones, files) => {
   }
   const everyFeature = features.map((feature) => feature.id)
 
+  let serverSelector = null
+  const selectByRoutes = (file) => {
+    // A deleted server file: what it served is gone from the tree, so nothing narrows it.
+    if (files.read(file) === null) return { whole: true, routeFiles: [], features: [] }
+    if (!serverSelector) {
+      const sources = new Map(rootFiles([SERVER_ROOT]).map((serverFile) => [serverFile, files.read(serverFile) ?? ""]))
+      // A route file is handed the modules it calls and imports only their types.
+      const loads = new Map()
+      const serverImportsOf = (serverFile) => {
+        if (!loads.has(serverFile)) {
+          loads.set(serverFile, parseImports(sources.get(serverFile) ?? files.read(serverFile) ?? "", { withTypes: true })
+            .map((specifier) => resolveImport(specifier, serverFile, files.isFile))
+            .filter((target) => target !== null))
+        }
+        return loads.get(serverFile)
+      }
+      serverSelector = createServerSelector({
+        routes: routeTable(sources, serverImportsOf),
+        importsOf: serverImportsOf,
+        recorded: Object.fromEntries(Object.entries(recorded).filter(([id]) => id === "*" || everyFeature.includes(id))),
+      })
+    }
+    return serverSelector(file)
+  }
+
   /**
    * For each changed file, why it selects what it selects. `reason` is one of
    * `net` (the runner or a fixture: everything), `scenarios` (a zone file: the
    * features whose scenarios changed), `vocabulary` (the features using a
    * name whose selector changed), `listed` (in a feature's sources),
    * `imported` (loaded by those sources), `shared` (loaded by more than half
-   * the features: everything), `not-app` (tests, docs, files outside
+   * the features: everything), `routes` (a server file: the features whose
+   * scenarios requested the routes it serves), `server` (the server's own
+   * wiring: everything), `not-app` (tests, docs, files outside
    * packages/) or `uncovered` (app code no scenario plays). `mapChanges` is
    * what `diffMap` found between the map at the base and now.
    */
@@ -174,11 +206,21 @@ export const createSelector = (zones, files) => {
     if (file === VOCABULARY_FILE) {
       return { file, reason: "vocabulary", features: features.filter((feature) => [...feature.names].some((name) => mapChanges.names.has(name))).map((feature) => feature.id) }
     }
+    // Written by a full run from what its scenarios requested; it plays nothing itself.
+    if (file === REQUESTS_FILE) return { file, reason: "not-app", features: [] }
     if (file.startsWith(NET_ROOT) || netFiles.has(file)) return { file, reason: "net", features: everyFeature }
     if (!file.startsWith("packages/") || file.startsWith("packages/docs/")) return { file, reason: "not-app", features: [] }
     const listedBy = owners(file)
+    const importedBy = listedBy.length ? [] : features.filter((feature) => reached.get(feature.id).has(file))
+    // A server file is also played by whoever requests the routes it serves,
+    // whatever lists or imports it.
+    const served = file.startsWith(SERVER_ROOT) && CODE_FILE.test(file) ? selectByRoutes(file) : null
+    if (served?.whole) return { file, reason: "server", features: everyFeature }
+    if (served?.features.length) {
+      const also = new Set([...listedBy, ...importedBy].map((feature) => feature.id))
+      return { file, reason: "routes", features: everyFeature.filter((id) => also.has(id) || served.features.includes(id)), routeFiles: served.routeFiles }
+    }
     if (listedBy.length) return { file, reason: "listed", features: listedBy.map((feature) => feature.id) }
-    const importedBy = features.filter((feature) => reached.get(feature.id).has(file))
     if (importedBy.length * 2 > features.length) return { file, reason: "shared", features: everyFeature, importers: importedBy.length, total: features.length }
     if (importedBy.length) return { file, reason: "imported", features: importedBy.map((feature) => feature.id) }
     return { file, reason: "uncovered", features: [] }
@@ -195,6 +237,11 @@ export const createSelector = (zones, files) => {
 export const keepingChangedFiles = (files, changedFiles) => {
   const changed = new Set(changedFiles)
   return { ...files, isFile: (file) => files.isFile(file) || changed.has(file) }
+}
+
+/** The recorded requests per feature in the working tree; empty when none were recorded. */
+export const readRecordedRequests = (repoRoot) => {
+  try { return JSON.parse(readFileSync(join(repoRoot, REQUESTS_FILE), "utf8")) } catch { return {} }
 }
 
 /** Repo access over the working tree. */

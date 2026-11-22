@@ -119,6 +119,7 @@ const areRenderRelevantMessageInfoEqual = (left: Message, right: Message): boole
   return left.id === right.id
     && left.role === right.role
     && left.sessionID === right.sessionID
+    && (left.role !== 'assistant' || right.role !== 'assistant' || left.error === right.error)
     && (left as { finish?: unknown }).finish === (right as { finish?: unknown }).finish
     && (left as { status?: unknown }).status === (right as { status?: unknown }).status
     && (left.role !== 'compaction' || right.role !== 'compaction' || left.summary === right.summary)
@@ -231,6 +232,7 @@ export const areRelevantTurnGroupingContextsEqual = (
   }
 
   if (left.turnId !== right.turnId) return false;
+  if (left.snapshotTurnId !== right.snapshotTurnId) return false;
   if (left.isFirstAssistantInTurn !== right.isFirstAssistantInTurn) return false;
   if (!areStringListsEqual(left.earlierAssistantText, right.earlierAssistantText)) return false;
   if (left.isLastAssistantInTurn !== right.isLastAssistantInTurn) return false;

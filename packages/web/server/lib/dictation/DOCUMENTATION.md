@@ -33,17 +33,17 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
 
 ## Ownership
 
-- `runtime.js` — registers `GET /api/dictation/status`,
+- `runtime.ts` — registers `GET /api/dictation/status`,
   `POST /api/dictation/models/:modelId/download`, and the
   `/api/dictation/ws` WebSocket endpoint (auth-gated the same way as the
   terminal WS: UI session token or `oc_url_token`, plus origin check).
   Created from the startup pipeline (`startup-pipeline-runtime.js`) before
   the generic OpenCode proxy so routes are not shadowed.
-- `stream-manager.js` — `DictationStreamManager`, one per WS connection.
+- `stream-manager.ts` — `DictationStreamManager`, one per runtime.
   Chunk reordering by `seq` + ack, resampling to the provider rate, segment
   splitting inside pauses, silence suppression by PCM peak, partial-transcript
   concatenation, adaptive finalization timeout.
-- `service.js` — provider resolution and readiness. Providers:
+- `service.ts` — provider resolution and readiness. Providers:
   - `local` (default): a sherpa-onnx model from `local/model-catalog.js`
     (Parakeet TDT, Whisper, Qwen3-ASR) in a forked worker process. A saved
     model id the catalog no longer has counts as no pick (see Decisions).
@@ -78,17 +78,52 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 
 `options` in `start` carries the client-selected provider config:
 `{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey, endpointPath }, correct? }`. With
+openaiCompatible?: { baseUrl, model, apiKey, endpointPath, prompt }, correct? }`. With
 `correct: true` the final text goes through the correction pass first, and
 `finish_accepted.timeoutMs` includes its budget (`CORRECTION_TIMEOUT_MS`).
 An empty or
-absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path.
+absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path. A
+non-empty `prompt` goes out as the multipart `prompt` field on every committed
+segment; an empty or absent one sends no field. The local provider takes no
+prompt.
+
+### Resume after a dropped connection
+
+A dictation outlives its socket. The runtime keeps one manager for all
+connections, and a stream whose socket closed stays alive for
+`DICTATION_RESUME_GRACE_MS` (30 s). The client reconnects within that window and
+sends `start` again with the dictation id it already had and the same options;
+the server answers with `ack {ackSeq}` carrying its last acked seq and creates
+no new session. A `start` repeated while the first one is still creating its
+session (a local model can take seconds to load) waits for that session's ack
+instead of opening a second one; a cancel, a start with other options, the end
+of the grace period or shutdown closes a session that finishes loading after
+it. The client continues at `ackSeq + 1`, so only the audio sent
+during the interruption is uploaded and nothing already decoded is decoded
+again. A repeated `start` with changed options, a different `format`, or an id
+the server no longer holds starts a fresh stream and acks `-1`, which makes the
+client replay from the first segment.
+
+A stream that already sealed its `finish` is resumed too: it is not done until
+`final` went out, and resuming it keeps the finished audio instead of starting
+an empty stream. Sealing and the final timeout are idempotent, so the repeated
+`finish` the client sends after the reconnect only renews the wait.
+
+A dictation that was already finished while the socket was gone is answered
+from a small cache: the runtime keeps the last `final` texts for
+`DICTATION_FINAL_CACHE_TTL_MS` (30 s, dropped on access and by an unref'd
+timer). A `start` naming such an id gets `final` with the same text and no new
+stream, so the text is not lost to a reconnect that came too late.
 
 ## Segmentation
 
-A dictation is one segment unless it runs long. Past `segmentMinSeconds`
-(15 s) the manager cuts inside the first pause it finds, so cuts land between
-words; `segmentMaxSeconds` (25 s) is a hard cap for speech with no pause in it.
+A dictation is one segment unless it runs long. For local models the manager
+cuts at the first pause after 15 s, or at 25 s without a pause. For the
+OpenAI-compatible provider those bounds are 60 s and 120 s, so its transcription
+has more context. At 16 kHz PCM16, 120 s is under 4 MB of WAV audio, below
+OpenAI's 25 MB upload limit. Other compatible servers may have lower limits.
+The finalization deadline includes audio already committed but still awaiting a
+transcript, as well as the uncommitted tail.
 
 Pauses are found inside each ~1 s client chunk, not at chunk boundaries: the
 chunk is scored in 50 ms RMS frames; a frame is quiet when it is close to the
@@ -126,6 +161,26 @@ the user is still speaking, so only the tail is left to transcribe on stop.
   expected to retain unacked segments for retry/replay.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
+- A dictation outlives its socket. Audio stays on the device until the final
+  transcript arrives, and a reconnect resumes the stream the server still
+  holds: same dictation id, server answers `ack` with its last acked seq, the
+  client sends from the next one. A resumed stream never decodes the same
+  segment twice.
+- Three frames can die with the socket and must be repeated on the next
+  connection: `start`, `finish`, and `final`. A finished dictation is held for
+  30 s so a client that never saw `final` can ask again instead of opening a
+  stream with no audio left.
+- The stream manager lives per runtime, not per socket. One per socket made a
+  resume impossible, because the close dropped the stream it had to continue.
+- A dictation id belongs to this one local host. The endpoint is served by the
+  host's own process, ids are random per dictation
+  (`dic_<time in hex><random>`), and the UI has one user, so any socket that
+  reaches the endpoint may resume, finish or cancel any id it names; nothing
+  checks ownership. That is a conscious limit, not a defect. If the server ever
+  serves several users, a socket needs an identity and every stream has to be
+  bound to it: record the owner on `start`, compare it on `start` (resume),
+  `chunk`, `finish` and `cancel`, and answer a mismatch with a non-retryable
+  error instead of touching the stream.
 - Model files live under `~/.config/openchamber/speech-models`.
 - Model installation verifies required files in staging before promotion because the installed check only tests file presence. Extraction failures remove staging and the cached archive. Partial destination directories are removed before retry; recognized model-load or Protobuf failures remove the installed copy so the next attempt can download clean files.
 - Segment byte and peak counters reset when the manager issues a commit. A delayed `committed` event must preserve audio received since that commit, or the tail can be mistaken for silence and discarded.
@@ -157,55 +212,24 @@ rather than skipping audio. A session result without a session and a correction
 state without its callback still fail with TypeError. RMS indexing substitutes
 NaN only for missing numeric samples, preserving JavaScript's comparison result.
 
-### Why the service remains JavaScript
+### Why provider options stay unchecked until use
 
-`service.js` still supplies explicit `undefined` for language to
-`WorkerBackedTranscriptionSession` and for speaker/speed to
-`DictationWorkerClient.synthesizeSpeech`. Their parameter contracts in
-`local/worker-client.js` declare `language?: string`, `speakerId?: number` and
-`speed?: number`; preserving those calls requires the owner to admit explicit
-`undefined`.
+WebSocket start options carry unchecked fields. The service keeps the truthiness
+defaults for the compatible configuration, API key and remote language hint.
+The URL and path normalizers check their inputs. The local session forwards the
+language hint via IPC, where model-language resolution checks it. The worker
+client accepts explicitly absent speaker and speed values because it already
+forwards them in the speech request.
 
-Those optional contracts can admit explicit `undefined` without runtime changes.
-The local session also forwards an unchecked language hint, so its string-only
-declaration would need to describe that forwarding. Neither correction resolves
-the unchecked provider configuration below.
+The installed OpenAI SDK's constructor leaves a non-string, non-function API key
+unset for authentication. Its multipart encoder handles model and language fields
+with the same conversion and failure rules as other form fields. The local SDK
+declaration describes those inputs without promising that authentication or an
+upstream request will succeed.
 
-`getStatus` indexes the catalogs with entries from `LOCAL_STT_MODEL_IDS` and
-`LOCAL_TTS_MODEL_IDS`. `local/model-catalog.js` exposes string-indexed
-`LocalModelCatalog` values and `string[]` ids, so the types lose the guarantee
-that those ids have entries. A conversion must preserve a failed description
-lookup as a failure rather than inventing a missing-model fallback. An explicit
-TypeError for an absent catalog entry can preserve that failure; the catalog is
-not the boundary that prevents conversion.
-
-`DictationWorkerClient.createSession` forwards an unchecked `requiredSampleRate`
-from a worker response under its existing numeric return declaration. The stream
-manager consumes that owner contract; it does not add a stronger claim.
-
-`runtime.ts` forwards object-valued WebSocket start options without checking
-their fields. `service.js` passes their `baseUrl`, `model`, `apiKey`, `language`
-and `endpointPath` to the speech boundaries without validating their types.
-The external `normalizeCustomOpenAIBaseURL`, `normalizeEndpointPath` and
-`transcribeAudio` contracts accept strings rather than unchecked JSON values.
-Typing those options as already checked strings would overstate the existing
-checks. Widening the URL and endpoint normalizers alone does not resolve
-`transcribeAudio`: its unchecked model, key and language values reach OpenAI's
-typed constructor and transcription request. A declaration that those SDK
-boundaries accept arbitrary values would need a runtime acceptance guarantee.
-The exact blocking symbols are `TranscribeAudioOptions.model`,
-`TranscribeAudioOptions.apiKey` and `TranscribeAudioOptions.language`, consumed by
-`ClientOptions.apiKey` and `TranscriptionCreateParamsNonStreaming` in `tts/stt.ts`.
-The URL and endpoint normalizers already check their input types at runtime, so
-their declarations can accept unchecked input. The SDK-bound fields have no
-equivalent checks in the transcription helper. Widening its declared options
-would leave its assignments to the SDK invalid. A dependency augmentation would
-assert acceptance of unchecked values without an established runtime guarantee.
-The small `tts/openai-sdk.ts` loader is already typed and exposes the SDK's own
-constructor type, so converting an untyped helper cannot resolve this boundary.
-The service remains JavaScript
-because resolving this boundary requires runtime validation outside this folder
-or a stronger claim than the existing checks establish.
+Status still fails if an id from the catalog's enumerated keys has no entry.
+Download failures retain a truthy rejection message verbatim, and the corrupt
+model check coerces that message to a string only for the regex match.
 
 ### Why the runtime retains unchecked property values
 
@@ -292,6 +316,15 @@ failure, a missing Small Model or the 10 s cap returns the text as heard, so
 the pass never costs the user the dictation. The prompt names colloquial
 forms ("шо", "gonna") as speech to keep, because small models otherwise
 "correct" them into the literary form.
+
+### Why the transcription prompt is sent to any model and not gated by model name
+
+The server model is free text, and the same name can mean different engines on
+different servers, so OpenChamber cannot tell which models accept a prompt.
+The prompt goes out whenever the user filled it; a model without prompt
+support ignores it or the server rejects the request, and that error reaches
+the user like any other transcription error. A model catalog or an automatic
+retry without the prompt would guess and hide what the server answered.
 
 ### Why the language hint is part of the engine key
 

@@ -65,6 +65,7 @@ Electron owns native windows, privileged IPC, desktop host credentials, browser-
 - Panel driver scripts and annotation bindings run in isolated worlds, including cross-origin frames. Only the top overlay's own world holds the microphone binding, so page scripts cannot call it. Annotation cancellation can precede session creation; cleanup from the previous session can still be running when the next starts.
 - Dialog handling stays available while Page.enable is pending because a dialog can block that command's response. Actions return when they open a dialog, and agent tabs answer dialogs immediately with the action's chosen response to avoid blocking the whole app window. Recorded dialog history is bounded because a page can loop on alerts.
 - Pointer input uses the debugger session that owns the target frame and coordinates relative to that session. Sending cross-origin input to the top page makes hidden-panel hit testing depend on app layout. HTML-draggable elements use scripted drag events because native HTML drag starts a system session the guest cannot intercept.
+- Browser press maps Shift with US digit and punctuation keys to the shifted character. The unmodified text remains the base character, and Control, Meta, and Alt chords insert no text.
 - Focus emulation keeps agent pages' controls and clipboard usable without taking the user's keyboard focus. It is reapplied before focusing actions because navigation replaces page state. Colour-scheme emulation is per page; changing `nativeTheme.themeSource` would change the app too. A white base canvas prevents transparent pages from showing the app behind them or capturing black.
 - Only shell-staged upload files enter a page. Each file has its own folder and a single-segment filename so duplicate names survive and paths cannot escape staging. Files remain for a day because a form can read them later; age-based cleanup preserves files another app instance still uses.
 - Favicons are fetched with the page's own session and returned as bounded data URLs. This preserves login cookies and avoids third-party requests from the app origin. Space views receive no shell-fetched favicon because that request could reach the user's resources on the space's behalf.
@@ -92,6 +93,13 @@ Electron owns native windows, privileged IPC, desktop host credentials, browser-
 - Unpackaged Dock branch badges take precedence over unread counts so worktree copies remain distinguishable. The window's development tape ignores pointer input and is reapplied on document readiness because inserted CSS lasts only until reload.
 
 ## Decisions
+
+### When macOS updates use Squirrel's direct-Contents mode
+
+Squirrel.Mac asks for an administrator when the app bundle or its parent folder is not writable. Its `SquirrelMacEnableDirectContentsWrite` user default needs only the bundle: ShipIt renames `<App>.app/Contents` instead of the whole bundle ([pinned implementation for Electron 45](https://github.com/Squirrel/Squirrel.Mac/blob/fffea30e4a339a7f7d69a3391314b72548d209bd/Squirrel/SQRLUpdater.m#L413-L419), [installer](https://github.com/Squirrel/Squirrel.Mac/blob/fffea30e4a339a7f7d69a3391314b72548d209bd/Squirrel/SQRLInstaller.m#L590-L615)).
+
+- The packaged app sets it to `true` at startup only while the key is unset, the bundle and its `Contents` are writable with plain permissions (no ACL entry, file flag or sticky bit that could still refuse the `Contents` rename), and the parent folder is not: the one case where the mode removes a prompt. A fresh install, an install in a writable folder and a root-owned copy keep Squirrel's usual path; a root-owned copy still prompts until its permissions are repaired.
+- A stored boolean is never overwritten. `false` is the user's opt-out (`defaults write <bundle id> SquirrelMacEnableDirectContentsWrite -bool false`). Electron reads a missing key and a stored empty string alike, so a non-boolean empty string counts as unset; Squirrel documents only booleans for this key. An enabled value is kept when the install or its permissions change later, because ShipIt reads the same key when it resumes or rolls back an interrupted install; with an unwritable bundle Squirrel still takes the privileged path, and with a writable parent the Contents rename works as well as the whole-bundle move.
 
 ### Why manual proxy rules and not a PAC script
 

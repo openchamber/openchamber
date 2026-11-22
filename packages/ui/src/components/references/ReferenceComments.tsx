@@ -13,6 +13,7 @@ import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { cn } from '@/lib/utils';
 
 import { MarkdownSuggestionContext } from '@/components/chat/markdown/markdownSuggestion';
@@ -21,7 +22,7 @@ import { ReferenceMarkdownRewriteContext } from './projectUploads';
 import { ReferenceLinksContext } from './referenceLinks';
 import { commentDraft, commentDraftKey, forgetCommentDraft, rememberCommentDraft } from './referenceCommentDrafts';
 import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
-import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceTimelineEntry } from './referenceTimeline';
+import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceReferenceItem, ReferenceTimelineEntry } from './referenceTimeline';
 
 export type ReferenceThreadActions = {
     reply: (threadId: string, body: string) => Promise<boolean>;
@@ -473,6 +474,42 @@ const CommentEntry: React.FC<{
     );
 };
 
+const ReferenceEntry: React.FC<{ entry: ReferenceReferenceItem; now: number }> = ({ entry, now }) => {
+    const { t } = useI18n();
+    const { directory, repository, issuePrefix, changeRequestPrefix } = React.useContext(ReferenceLinksContext);
+    const ownRepo = repository ? joinProjectPath(repository.owner, repository.repo) : null;
+    const openLink = useOpenChatLink(directory ?? '');
+    const { reference } = entry;
+    const relative = relativeLabel(t, reference.createdAt, now);
+    const mark = reference.kind === 'pull' ? changeRequestPrefix : issuePrefix;
+    const label = reference.repo && reference.repo !== ownRepo ? `${reference.repo}${mark}${reference.number}` : `${mark}${reference.number}`;
+    const chip = (
+        <a
+            href={reference.url}
+            aria-label={t('sourceBoard.references.open', { reference: label })}
+            onClick={(event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                openLink(reference.url);
+            }}
+            className="inline-flex h-5 min-w-0 max-w-full items-center rounded-full border border-edge px-1.5 font-mono typography-meta text-muted-foreground outline-none transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+            <span className="truncate">{label}</span>
+        </a>
+    );
+    return (
+        <>
+            <Avatar author={reference.author?.login ?? null} avatarUrl={reference.author?.avatarUrl ?? null} className="absolute inset-s-0 top-0 size-6" />
+            <div className={cn('flex min-h-6 min-w-0 flex-wrap items-center gap-x-1.5 typography-meta', REFERENCE_META_TEXT)}>
+                <span className="font-medium text-muted-foreground">{reference.author?.login ?? '—'}</span>
+                {relative ? <span>{relative}</span> : null}
+                <span>{t('sourceBoard.references.mentionedIn')}</span>
+                {reference.title ? <HoverTooltip label={reference.title}>{chip}</HoverTooltip> : chip}
+            </div>
+        </>
+    );
+};
+
 const CommitAuthorAvatar: React.FC<{ name: string; avatarUrl: string }> = ({ name, avatarUrl }) => {
     const { broken, onError } = useAvatarImage(avatarUrl);
     return broken ? (
@@ -556,7 +593,9 @@ export const ReferenceComments: React.FC<{
                 return (
                     <div key={entry.key} className="group relative pb-4 ps-9 last:pb-0">
                         {!isLast ? <div className="absolute bottom-1 inset-s-3 top-8 w-px bg-edge" /> : null}
-                        {entry.kind === 'commits' ? <CommitGroup group={entry} now={now} /> : (
+                        {entry.kind === 'commits' ? <CommitGroup group={entry} now={now} /> : entry.kind === 'reference' ? (
+                            <ReferenceEntry entry={entry} now={now} />
+                        ) : (
                             <CommentEntry
                                 comment={entry}
                                 now={now}

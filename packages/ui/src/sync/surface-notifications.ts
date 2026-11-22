@@ -23,6 +23,17 @@ export const handleUiNotificationEvent = (notification: OpenchamberNotification,
 
   if (kind === "share-answer" && notification.toastOnly === true) return
 
+  if (kind === "opencode-claude-retired" || kind === "opencode-claude-retired-unconnected") {
+    const dictionary = useI18nStore.getState().dictionary
+    const connected = kind === "opencode-claude-retired"
+    toast.info(formatMessage(dictionary, connected ? "chat.toast.claudePluginRetired.title" : "chat.toast.claudePluginRetired.unconnectedTitle"), {
+      id: "opencode-claude-retired",
+      description: formatMessage(dictionary, connected ? "chat.toast.claudePluginRetired.description" : "chat.toast.claudePluginRetired.unconnectedDescription"),
+      duration: Infinity,
+    })
+    return
+  }
+
   if (kind === "opencode-restart-interrupted" || kind === "opencode-restart-resuming") {
     const dictionary = useI18nStore.getState().dictionary
     const title = formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.title")

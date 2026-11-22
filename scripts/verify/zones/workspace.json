@@ -173,6 +173,55 @@
       ]
     },
     {
+      "id": "reasoning-toggle",
+      "name": "Showing or hiding reasoning traces from the palette",
+      "sources": ["packages/ui/src/components/ui/CommandPalette.tsx", "packages/ui/src/components/ui/commandPaletteAppearance.tsx"],
+      "what": "The palette command Show or hide reasoning traces flips the same setting as Settings > Chat.",
+      "reach": "Cmd/Ctrl+P, type reasoning, Enter.",
+      "proof": "The command is hidden while the query is empty; the Thinking blocks disappear after it runs, come back after the second run; the saved setting follows each run, and both states survive a reload.",
+      "scenarios": [
+        {
+          "id": "palette",
+          "kind": "path",
+          "title": "The palette command hides and shows the Thinking blocks",
+          "steps": [
+            {"do": "settings", "values": {"showReasoningTraces": true}},
+            {"do": "session.create", "as": "s", "title": "Palette reasoning"},
+            {"do": "session.send", "session": "s", "prompt": "Так, виправ у retry.ts."},
+            {"do": "open", "session": "s"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 2},
+            {"do": "press", "key": "p", "mods": ["mod"]},
+            {"do": "see", "on": "dialog", "text": "New Session"},
+            {"do": "see", "on": "dialog", "text": "Show or hide reasoning traces", "count": 0, "timeout": 1},
+            {"do": "type", "text": "reasoning"},
+            {"do": "see", "on": "dialog", "text": "Show or hide reasoning traces"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "dialog"},
+            {"do": "see", "on": "chat.reasoning", "count": 0, "timeout": 2},
+            {"do": "settings", "expect": {"showReasoningTraces": false}},
+            {"do": "reload"},
+            {"do": "see", "on": "chat.answer", "text": "Змінені файли"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 0, "timeout": 2},
+            {"do": "press", "key": "p", "mods": ["mod"]},
+            {"do": "see", "on": "dialog", "text": "New Session"},
+            {"do": "type", "text": "reasoning"},
+            {"do": "see", "on": "dialog", "text": "Show or hide reasoning traces"},
+            {"do": "press", "key": "Enter"},
+            {"do": "gone", "on": "dialog"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 2},
+            {"do": "settings", "expect": {"showReasoningTraces": true}},
+            {"do": "reload"},
+            {"do": "wheel", "on": "chat.scroller", "dy": -3000, "times": 2},
+            {"do": "see", "on": "chat.reasoning", "count": 2}
+          ]
+        }
+      ]
+    },
+    {
       "id": "pages",
       "name": "Pages that cover the chat",
       "sources": ["packages/ui/src/components/session/sidebar/pages/useSidebarPages.ts", "packages/ui/src/components/layout/MainLayout.tsx", "packages/ui/src/components/layout/Header.tsx", "packages/ui/src/components/views/ArchiveView.tsx"],

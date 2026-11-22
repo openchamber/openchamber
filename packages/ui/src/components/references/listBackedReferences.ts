@@ -212,6 +212,11 @@ const pullDetail = (context: ChangeRequestContext): RepositoryReferenceDetail['p
         commitTotal: context.commitsComplete === false ? null : commits.length,
     };
     if (context.stack !== undefined) pull.stack = context.stack;
+    if (context.reviewerStates) {
+        pull.reviewerStates = context.reviewerStates.map((entry) => (entry.user.avatarUrl
+            ? { id: entry.user.id, login: entry.user.username, avatarUrl: entry.user.avatarUrl, state: entry.state }
+            : { id: entry.user.id, login: entry.user.username, state: entry.state }));
+    }
     if (context.voteLabels) pull.voteLabels = context.voteLabels;
     if (context.submitRequirements) pull.submitRequirements = context.submitRequirements;
     if (context.revisions) pull.revisions = context.revisions;
@@ -232,25 +237,36 @@ export const fetchListBackedReferenceDetail = async (
     reads: ListBackedReads,
     context: SourceControlReadContext,
     reference: RepositoryReference,
-    revision?: string,
+    { revision, crossReferences = false }: { revision?: string | undefined; crossReferences?: boolean } = {},
 ): Promise<RepositoryReferenceDetail> => {
     if (reference.kind === 'discussion') throw new Error(NO_LISTED_DISCUSSIONS);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind === 'issue') {
-        const comments = (await reads.issueComments(context, reference.number, project)).map(toComment).sort(byCreation);
-        return { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
+        const [issue, notes] = await Promise.all([
+            crossReferences
+                ? reads.issueGet(context, reference.number, project, { includeReferences: true }).catch(() => null)
+                : null,
+            reads.issueComments(context, reference.number, project),
+        ]);
+        const comments = notes.map(toComment).sort(byCreation);
+        const detail: RepositoryReferenceDetail = { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
+        if (issue?.references && issue.references.length > 0) detail.references = issue.references;
+        return detail;
     }
     const options: Parameters<ListBackedReads['changeRequestContext']>[2] = { project, includeDiff: true, includeTimeline: true, includeCIDetails: true };
+    if (crossReferences) options.includeReferences = true;
     if (revision) options.revision = revision;
     const changeRequestContext = await reads.changeRequestContext(context, reference.number, options);
     const comments = [
         ...threadedComments([...changeRequestContext.issueComments, ...changeRequestContext.reviewComments]),
         ...(changeRequestContext.verdicts ?? []).map(toVerdict),
     ].sort(byCreation);
-    return {
+    const detail: RepositoryReferenceDetail = {
         number: reference.number,
         comments: comments.slice(-50),
         commentTotal: changeRequestContext.issueComments.length,
         pull: pullDetail(changeRequestContext),
     };
+    if (crossReferences && changeRequestContext.references && changeRequestContext.references.length > 0) detail.references = changeRequestContext.references;
+    return detail;
 };

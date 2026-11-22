@@ -14,14 +14,14 @@ export interface ChangeRequestPatchInput {
   directory: string;
   remote: string;
   number: number;
-  sourceRepo?: Repository | null;
+  sourceRepo?: Repository | null | undefined;
   linked?: boolean;
 }
 export interface ChangeRequestFileInput extends ChangeRequestPatchInput {
   path: string;
-  previousPath?: string;
+  previousPath?: string | undefined;
   status?: string;
-  binary?: boolean;
+  binary?: boolean | undefined;
 }
 export interface ChangeRequestPatchDependencies {
   resolveGitHubRepoFromDirectory?: typeof resolveGitHubRepoFromDirectory;

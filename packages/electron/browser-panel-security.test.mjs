@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  applyBrowserPanelUserAgent,
   browserPanelPermissionAuditDetails,
   browserPanelWindowOpenTarget,
+  electronUserAgent,
   plainChromeUserAgent,
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
@@ -138,4 +140,27 @@ test('plainChromeUserAgent drops the app and Electron tokens', () => {
   );
   const chrome = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
   assert.equal(plainChromeUserAgent(chrome), chrome);
+});
+
+test('electronUserAgent names Electron once, where its default agent does', () => {
+  const plain = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.41 Safari/537.36';
+  const expected = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.41 Electron/38.1.0 Safari/537.36';
+  assert.equal(electronUserAgent(plain, '38.1.0'), expected);
+  assert.equal(electronUserAgent(expected, '38.1.0'), expected);
+});
+
+test('Google sign-in gets one user agent that names Electron, other hosts the plain one', () => {
+  const plain = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.41 Safari/537.36';
+  let sessionUserAgent = plain.replace(' Safari/', ' Electron/38.1.0 Safari/');
+  let listener = null;
+  applyBrowserPanelUserAgent({
+    getUserAgent: () => sessionUserAgent,
+    setUserAgent: (value) => { sessionUserAgent = value; },
+    webRequest: { onBeforeSendHeaders: (filter, handler) => { listener = { filter, handler }; } },
+  }, '38.1.0');
+  assert.equal(sessionUserAgent, plain);
+  assert.deepEqual(listener.filter.urls, ['https://accounts.google.com/*', 'https://accounts.youtube.com/*']);
+  let sent = null;
+  listener.handler({ requestHeaders: { Accept: '*/*', 'user-agent': plain } }, (answer) => { sent = answer.requestHeaders; });
+  assert.deepEqual(sent, { Accept: '*/*', 'User-Agent': electronUserAgent(plain, '38.1.0') });
 });

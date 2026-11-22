@@ -82,6 +82,7 @@ const descriptorSchema = z.object({
     })).max(16),
   }),
   urls: z.object({
+    resolve: z.string().max(256).optional(),
     changeRequest: urlPatternsSchema,
     issue: urlPatternsSchema,
     discussion: urlPatternsSchema.default([]).catch([]),
@@ -98,6 +99,7 @@ const descriptorSchema = z.object({
     reviewDraftFileComments: z.boolean().default(false),
     authorCanReview: z.boolean().default(false),
     projectUploads: z.boolean().default(false),
+    absoluteProjectUploads: z.boolean().default(false),
     issueCloseReason: z.boolean().default(false),
     issueEdit: z.boolean().default(false),
     changeRequestEdit: z.boolean().default(false),
@@ -161,7 +163,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     urls: { changeRequest: [], issue: [], discussion: [], commit: [], user: [] },
     features: {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
-      startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
+      startThread: false, reviewDrafts: false, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, absoluteProjectUploads: false, issueCloseReason: false,
       issueEdit: false, changeRequestEdit: false,
       changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
       submitRequirements: false, createByPush: false, branchHeads: true, discussions: false, advancedSearch: false, commentEdit: false,

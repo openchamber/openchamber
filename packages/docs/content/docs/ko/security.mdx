@@ -196,13 +196,19 @@ environment:
 }
 ```
 
-거부된 제공자는 누군가 키를 추가해도 사라집니다. 정책은 프로젝트가 해제할 수 없는 전역 `~/.config/opencode/opencode.jsonc`에 두거나, 최종 결정권을 가진 OpenCode Console 워크스페이스에서 배포하세요. 엔터프라이즈 모드는 그 위에 OpenChamber 자체가 보내는 것을 다룹니다.
+거부된 제공자는 누군가 키를 추가해도 사라집니다. 정책은 OpenCode의 시스템 설정(Linux는 `/etc/opencode/opencode.jsonc`, Windows는 `%ProgramData%\opencode\opencode.jsonc`, macOS는 `/Library/Application Support/opencode/opencode.jsonc`)에 두고, 위의 Windows 예시처럼 그 폴더에는 관리자만 쓸 수 있게 하거나, OpenCode Console 워크스페이스에서 배포하세요. 시스템 설정 경로는 OpenCode를 실행하는 머신 기준입니다. 위의 Docker 구성에서는 OpenCode가 컨테이너 안에서 실행되므로, `docker-compose.yml`의 `volumes`에서 파일을 컨테이너 안에 읽기 전용으로 마운트하세요: `- ./opencode-policy.jsonc:/etc/opencode/opencode.jsonc:ro`. 둘 다 사용자의 전역 `~/.config/opencode/opencode.jsonc`와 프로젝트의 파일보다 우선하며, 시스템 설정은 Console보다도 우선합니다. Console 정책은 워크스페이스가 연결되어 있는 동안에만 적용되고 연결이 끊기면 지워지므로, 연결이 끊긴 뒤에도 유지되어야 하는 제한은 시스템 설정에 두세요. 전역 파일은 프로젝트가 정책을 해제하지 못하게 하지만, 사용자는 그 파일을 편집할 수 있습니다. 엔터프라이즈 모드는 그 위에 OpenChamber 자체가 보내는 것을 다룹니다.
 
-에이전트의 웹 검색과 페이지 가져오기도 OpenCode를 거쳐 검색 서비스와 해당 페이지로 나갑니다. 이 요청이 네트워크 밖으로 나가면 안 된다면 같은 종류의 정책으로 거부하세요.
+에이전트의 웹 검색과 페이지 가져오기도 OpenCode를 거쳐 검색 서비스와 해당 페이지로 나갑니다. 이 요청이 네트워크 밖으로 나가면 안 된다면 같은 종류의 정책으로 거부하세요. 설정에 이미 정책이 있다면 그 목록 끝에 `tool.use` 항목 두 개를 추가하고, 제공자 항목과 다른 정책은 그대로 두세요. 파일에 최상위 `policies` 배열과 `experimental.policies`가 모두 있다면 최상위 배열에 추가하세요. OpenCode는 `experimental.policies`를 먼저 읽고, 마지막으로 일치하는 항목이 적용됩니다. 새 설정이라면 아래 예시만으로 동작합니다.
 
 ```jsonc
-{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
-{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+{
+  "experimental": {
+    "policies": [
+      { "action": "tool.use", "resource": "websearch:*", "effect": "deny" },
+      { "action": "tool.use", "resource": "webfetch:*", "effect": "deny" }
+    ]
+  }
+}
 ```
 
 ## 관련 항목

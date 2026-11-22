@@ -2,8 +2,17 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { asNonEmptyString } from '../shared/guards.js';
 
 export const CHATS_SCOPE_PUBLIC_ID = 'openchamber:chats';
+
+interface ChatsDefaultsSettings { chatsDefaultAgent?: unknown; chatsDefaultModel?: unknown; chatsDefaultVariant?: unknown }
+
+export const readChatsDefaults = (settings: ChatsDefaultsSettings | null | undefined) => ({
+  defaultAgent: asNonEmptyString(settings?.chatsDefaultAgent),
+  defaultModel: asNonEmptyString(settings?.chatsDefaultModel),
+  defaultVariant: asNonEmptyString(settings?.chatsDefaultVariant),
+});
 
 export const createChatsScope = (chatsRoot: string) => {
   const root = path.resolve(chatsRoot);

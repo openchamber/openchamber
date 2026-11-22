@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { SettingsControlGroup, SettingsNewBadge, SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { SettingsChipGroup, SettingsControlGroup, SettingsNewBadge, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -27,6 +27,8 @@ import { ModelVariantSelect } from './ModelVariantSelect';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { isDesktopShell } from '@/lib/desktop';
+
+type WorkflowAutoApproveMode = 'ask' | 'leads' | 'all';
 
 interface ToolRowProps {
   icon: IconName;
@@ -112,6 +114,8 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
   const setAgentWorkflowToolEnabled = useUIStore((state) => state.setAgentWorkflowToolEnabled);
   const agentWorkflowAutoApprove = useUIStore((state) => state.agentWorkflowAutoApprove);
+  const agentWorkflowAutoApproveLeads = useUIStore((state) => state.agentWorkflowAutoApproveLeads);
+  const workflowAutoApproveMode: WorkflowAutoApproveMode = agentWorkflowAutoApprove ? 'all' : agentWorkflowAutoApproveLeads ? 'leads' : 'ask';
 
   const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
     setAgentControlToolEnabled(enabled);
@@ -185,9 +189,10 @@ export const OpenChamberToolsSettings: React.FC = () => {
     void updateDesktopSettings({ agentWorkflowToolEnabled: enabled });
   }, [setAgentWorkflowToolEnabled]);
 
-  const handleWorkflowAutoApproveChange = React.useCallback((enabled: boolean) => {
-    useUIStore.setState({ agentWorkflowAutoApprove: enabled });
-    void updateDesktopSettings({ agentWorkflowAutoApprove: enabled });
+  const handleWorkflowAutoApproveChange = React.useCallback((mode: WorkflowAutoApproveMode) => {
+    const next = { agentWorkflowAutoApprove: mode === 'all', agentWorkflowAutoApproveLeads: mode === 'leads' };
+    useUIStore.setState(next);
+    void updateDesktopSettings(next);
   }, []);
 
   React.useEffect(() => {
@@ -262,18 +267,19 @@ export const OpenChamberToolsSettings: React.FC = () => {
           >
             {agentWorkflowToolEnabled ? (
               <div data-settings-item="sessions.agent-workflow-auto-approve" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
-                <Checkbox
-                  checked={agentWorkflowAutoApprove}
-                  onChange={handleWorkflowAutoApproveChange}
-                  ariaLabel={t('settings.openchamber.tools.workflowAutoApprove.label')}
-                />
-                <button
-                  type="button"
-                  className="truncate typography-meta text-muted-foreground"
-                  onClick={() => handleWorkflowAutoApproveChange(!agentWorkflowAutoApprove)}
-                >
+                <span className="truncate typography-meta text-muted-foreground">
                   {t('settings.openchamber.tools.workflowAutoApprove.label')}
-                </button>
+                </span>
+                <SettingsChipGroup
+                  value={workflowAutoApproveMode}
+                  onChange={handleWorkflowAutoApproveChange}
+                  aria-label={t('settings.openchamber.tools.workflowAutoApprove.label')}
+                  options={[
+                    { value: 'ask', label: t('settings.openchamber.tools.workflowAutoApprove.ask') },
+                    { value: 'leads', label: t('settings.openchamber.tools.workflowAutoApprove.leads') },
+                    { value: 'all', label: t('settings.openchamber.tools.workflowAutoApprove.all') },
+                  ]}
+                />
                 <SettingsNewBadge items={['sessions.agent-workflow-auto-approve']} />
                 <SettingsInfoHint>{t('settings.openchamber.tools.workflowAutoApprove.info')}</SettingsInfoHint>
               </div>

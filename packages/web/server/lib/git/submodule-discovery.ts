@@ -67,17 +67,19 @@ const validateModulePath = (value: string, limits: DiscoveryLimits) => {
   return value;
 };
 
-const validateModuleUrl = (value: string) => {
+const unsafeModuleUrl = (submodulePath: string) => Object.assign(manifestError('Submodule URL is unsafe'), { submodulePath });
+
+const validateModuleUrl = (value: string, modulePath: string) => {
   if (/^(?:\.\.?\/)/.test(value)) {
     if (CONTROL_PATTERN.test(value) || value.includes('\\') || /[?#]/.test(value)) {
-      throw manifestError('Submodule URL is unsafe');
+      throw unsafeModuleUrl(modulePath);
     }
     return value;
   }
   try {
-    return normalizeDiscoveryEndpoint(value).endpoint;
+    return normalizeDiscoveryEndpoint(value, { trailingSlash: true }).endpoint;
   } catch {
-    throw manifestError('Submodule URL is unsafe');
+    throw unsafeModuleUrl(modulePath);
   }
 };
 
@@ -101,7 +103,7 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
     const key = record.slice(0, separator);
     const value = record.slice(separator + 1);
     const match = key.match(CONFIG_KEY_PATTERN);
-    if (!match || match[1] === undefined || match[2] === undefined || !value || CONTROL_PATTERN.test(match[1])) throw manifestError('.gitmodules config record is malformed');
+    if (!match || match[1] === undefined || match[2] === undefined || CONTROL_PATTERN.test(match[1])) throw manifestError('.gitmodules config record is malformed');
     const name = match[1];
     const field = match[2].toLowerCase();
     const entry = entries.get(name) || { name };
@@ -134,12 +136,13 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
   const seenPaths = new Set<string>();
   const modules = [];
   for (const entry of entries.values()) {
-    if (entry.path === undefined || entry.url === undefined) throw manifestError(`Submodule ${entry.name} is incomplete`);
+    if (entry.path === undefined) continue;
+    const commit = gitlinksByPath.get(entry.path);
+    if (!commit) continue;
+    if (entry.url === undefined) throw manifestError(`Submodule ${entry.name} is incomplete`);
     const modulePath = validateModulePath(entry.path, limits);
     if (seenPaths.has(modulePath)) throw manifestError(`Submodule path ${modulePath} is duplicated`);
     seenPaths.add(modulePath);
-    const commit = gitlinksByPath.get(modulePath);
-    if (!commit) throw manifestError(`Submodule ${entry.name} has no matching gitlink`);
     const update = entry.update?.toLowerCase() ?? 'checkout';
     if (entry.update !== undefined) {
       if (entry.update.startsWith('!') || !UPDATE_MODES.has(update)) {
@@ -149,7 +152,7 @@ export function parseSubmoduleManifest({ gitmodulesConfig, gitlinks, recursionDe
     modules.push(Object.freeze({
       name: entry.name,
       path: modulePath,
-      url: validateModuleUrl(entry.url),
+      url: validateModuleUrl(entry.url, modulePath),
       update,
       gitlink: commit,
     }));

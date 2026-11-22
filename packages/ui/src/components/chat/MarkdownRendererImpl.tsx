@@ -7,6 +7,7 @@ import {
   type BlockProps,
   type Components,
   type HighlightResult,
+  type StreamdownProps,
 } from 'streamdown';
 import type { Pluggable } from 'unified';
 import type { Part } from '@/lib/opencode/model';
@@ -26,9 +27,11 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { ToolPopupContent } from './message/types';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath, remarkLiteralText } from './markdown/streamdownPlugins';
+import { parseMarkdownBlocksWithMath } from './markdown/mathBlocks';
 import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
 import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
 import { fenceUiBlocks } from './uiBlocks/taggedBlocks';
+import { useProgramCheck } from './uiBlocks/useUiBlockComponent';
 import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
 import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
 import { guestLinksVersion, type GuestLinkRule } from '@/lib/guests/links';
@@ -55,12 +58,11 @@ import { MarkdownSvg } from './markdown/MarkdownSvg';
 import { MarkdownUiBlock } from './markdown/MarkdownUiBlock';
 import { MarkdownBlockquote } from './markdown/MarkdownBlockquote';
 import { createMarkdownCodePlugin } from './markdown/streamdownCode';
-import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
+import { confirmCodePaths, confirmMarkdownFile, releaseFileReferenceTabStop, resolveMarkdownFile } from './markdown/markdownFileReferences';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
 import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow';
 import { WindowedMarkdownBlock } from './markdown/WindowedMarkdownBlock';
-import { createMarkdownMathPreparer } from './markdown/markdownMathBlocks';
 import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { isBareVideoUrl, markdownMediaCopySource, markdownMediaFilename } from './markdown/markdownVideo';
 
@@ -169,6 +171,7 @@ const renderers = [
   { language: 'svg', component: MarkdownSvg },
 ];
 const linkSafety = { enabled: false };
+const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 const wholeDocument = (markdown: string) => [markdown];
 type BlockArrival = { active: boolean; firstNewIndex: number };
 const BlockArrivalContext = React.createContext<React.RefObject<BlockArrival>>({ current: { active: false, firstNewIndex: 0 } });
@@ -271,6 +274,7 @@ export interface MarkdownContentProps {
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControls;
   purpose?: 'copy' | 'image';
+  chatTableExpansion?: boolean;
   theme?: Theme;
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
@@ -304,6 +308,7 @@ export function MarkdownContent({
   onShowPopup,
   mermaidControls = defaultMermaidControls,
   purpose,
+  chatTableExpansion = false,
   theme: exportTheme,
   preparedHighlights,
   onExportCode,
@@ -411,11 +416,6 @@ export function MarkdownContent({
   }, [isVSCode, purpose, preparedHighlights, fileReferences, directory, confirmFile]);
   const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: getMarkdownCjk(singleTilde), renderers }), [code, singleTilde]);
   const activeGuestLinks = guestLinks && guestLinks.length > 0 && !purpose ? guestLinks : null;
-  const prepareMath = React.useMemo(createMarkdownMathPreparer, []);
-  const preparedMath = React.useMemo(
-    () => prepareMath(content, isStreaming && (windowed || mode === 'streaming'), !activeGuestLinks && !repositoryLinks && !emojiShortcodes),
-    [activeGuestLinks, content, emojiShortcodes, isStreaming, mode, prepareMath, repositoryLinks, windowed],
-  );
   const processing = React.useMemo(() => {
     const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode, singleTilde);
     const extra: Pluggable[] = [];
@@ -439,6 +439,7 @@ export function MarkdownContent({
     disableLinkSafety,
     guestLinks: activeGuestLinks,
     tableWidthScope,
+    chatTableExpansion: chatTableExpansion && variant === 'assistant' && !purpose,
     theme,
     mermaidControls,
     onShowPopup,
@@ -447,7 +448,7 @@ export function MarkdownContent({
     confirmFile,
     code,
   }), [
-    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, svgFences, sessionId, messageId, disableLinkSafety, activeGuestLinks, tableWidthScope, theme,
+    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, svgFences, sessionId, messageId, disableLinkSafety, activeGuestLinks, tableWidthScope, chatTableExpansion, variant, theme,
     mermaidControls, onShowPopup, onExportCode, preparedHighlights, confirmFile, code,
   ]);
 
@@ -460,7 +461,7 @@ export function MarkdownContent({
       mode={windowed ? 'streaming' : mode}
       isAnimating={isStreaming}
       BlockComponent={windowed ? WindowedMarkdownBlock : MarkdownArrivalBlock}
-      parseMarkdownIntoBlocksFn={mode === 'static' && !windowed ? wholeDocument : undefined}
+      parseMarkdownIntoBlocksFn={mode === 'static' && !windowed ? wholeDocument : parseMarkdownBlocksWithMath}
       parseIncompleteMarkdown={isStreaming}
       normalizeHtmlIndentation={false}
       animated={false}
@@ -469,7 +470,7 @@ export function MarkdownContent({
       lineNumbers
       controls={false}
       linkSafety={linkSafety}
-      remend={preparedMath.remend}
+      remend={remend}
       data-oc-html-mode={allowRawHtml ? 'sanitize' : 'text'}
       data-oc-export-highlighted={preparedHighlights ? 'ready' : undefined}
       data-oc-directory={directory}
@@ -480,7 +481,7 @@ export function MarkdownContent({
       data-table-wrap={tableWrap ? 'true' : 'false'}
       className="min-w-0 space-y-0"
     >
-      {preparedMath.content}
+      {content}
     </Streamdown>
   );
 
@@ -518,6 +519,7 @@ export function MarkdownContent({
         className,
       )}
       style={syntaxVars}
+      onPointerDown={releaseFileReferenceTabStop}
     >
       <MarkdownPresentationContext.Provider value={presentation}>
         <BlockArrivalContext.Provider value={arrival}>
@@ -554,6 +556,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   if (renderMode.identity !== identity) {
     setRenderMode({ identity, mode: initialMode });
   }
+  useProgramCheck(variant === 'assistant' ? content : '');
   const body = (
     <MarkdownContent
       key={identity}
@@ -564,6 +567,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       isStreaming={isStreaming}
       variant={variant}
       className={className}
+      chatTableExpansion={variant === 'assistant'}
       directory={directory}
       settled={!isStreaming}
       sessionId={settledPart?.sessionID}

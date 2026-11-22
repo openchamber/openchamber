@@ -1,8 +1,8 @@
-import type { SourceControlMutationTarget } from '@openchamber/sdk';
+import type { SourceControlJson, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { BindingDraft } from './binding-contract.js';
 import type { createBindingStore } from './binding-storage.js';
 import type { SourceControlProviderBinding, SourceControlRepositoryContext, SourceControlRepositoryEndpoint } from './binding-types.js';
-import type { AccountIdentity, TransportCredential } from './provider-contract.js';
+import type { AccountIdentity, ReadContextRequest, TransportCredential } from './provider-contract.js';
 import type { AuthUser } from './auth-storage.js';
 import type { sshHostReaches } from '../git/ssh-host-alias.js';
 
@@ -35,17 +35,18 @@ export interface BindingServiceOptions {
   resolveRepository: RepositoryResolver;
   resolveTransportRepository?: RepositoryResolver | undefined;
   readTransportAccount?: (identity: AccountIdentity & { credentialRevision?: number }) => Promise<BindingTransportAccount | null>;
-  validateManagedSshCredential?: (credentialId: string) => Promise<void>;
-  readManagedSshCredentialPresentation?: (credentialId: string, deadline: number) => Promise<{ fingerprint: string } | null>;
-  resolveCheckoutAuxiliary?: (input: {
+  validateManagedSshCredential?: ((credentialId: string) => Promise<void>) | undefined;
+  readManagedSshCredentialPresentation?: ((credentialId: string, deadline: number) => Promise<{ fingerprint: string } | null>) | undefined;
+  resolveCheckoutAuxiliary?: ((input: {
     directory: string; parentEndpoint: string; parentRemoteName: string; kind: 'submodule' | 'lfs'; path: string;
-  }) => Promise<{ kind: 'submodule' | 'lfs'; path: string; endpoint: SourceControlRepositoryEndpoint } | null>;
+  }) => Promise<{ kind: 'submodule' | 'lfs'; path: string; endpoint: SourceControlRepositoryEndpoint } | null>) | undefined;
   sshHostReaches?: typeof sshHostReaches;
-  readProviderSshUrl?: (identity: { provider: string; instance: string }) => Promise<string | null>;
+  readProviderSshUrl?: (identity: { provider: unknown; instance: unknown }) => Promise<string | null>;
 }
 
-export type BindingTransportAccount = Omit<TransportCredential, 'user'> & {
+export type BindingTransportAccount = Omit<TransportCredential, 'user' | 'secret'> & {
   user: Omit<TransportCredential['user'], 'id'> & Pick<AuthUser, 'id'>;
+  secret: string | undefined;
 };
 
 export type ProviderBindingInput = SourceControlProviderBinding;
@@ -155,3 +156,36 @@ export type MutationContextInput = AccountIdentity & {
   idempotencyKey: string;
   target: BindingMutationTarget;
 };
+
+export interface BindingIntentRequest {
+  directory?: unknown;
+  expectedRepositoryId?: unknown;
+  expectedRevision?: unknown;
+  expectedConfigRevision?: unknown;
+  expectedFetchFingerprint?: unknown;
+  expectedPushFingerprint?: unknown;
+  expectedParentFingerprint?: unknown;
+  expectedEndpointFingerprint?: unknown;
+  remote?: unknown;
+  parentRemote?: unknown;
+  operation?: unknown;
+  transport?: unknown;
+  unverifiedConfirmed?: unknown;
+  credentialAccount?: unknown;
+  sshCredentialId?: unknown;
+  kind?: unknown;
+  path?: unknown;
+  target?: unknown;
+  provider?: unknown;
+  confirmed?: unknown;
+}
+export interface MutationContextRequest extends ReadContextRequest {
+  idempotencyKey?: unknown;
+  target?: unknown;
+}
+export interface AccountIdentityRequest {
+  provider?: unknown;
+  instance?: unknown;
+  accountId?: unknown;
+}
+export type MutationContextBody = MutationContextRequest | SourceControlJson;

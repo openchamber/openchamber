@@ -63,6 +63,19 @@ constructor retains its existing `Object.assign` behavior.
   empty or null on update to clear the stored branch. Anything else is a 400
   before upsert, because the CLI HTTP route forwards raw JSON and a wrong type
   would turn isolation off or erase the branch.
+  A `name` over 80 characters or a `prompt` over 20,000 characters after
+  trimming is a 400 from either action that names the limit. The CLI exits
+  non-zero with that message. The refused request applies none of its fields.
+  The preceding scheduler sync on `schedule.update` can still write task
+  state and reconcile changes made to loop files.
+- `session-listing.js` owns `session.list` and `session.archive`. `mine`
+  lists only the sessions the calling session created with `ownWork`
+  (`metadata.openchamber.kind === 'operator-child'` with its id as
+  `parentID`), across every project unless scoped, each with its status; a
+  call without a calling session is a `400`. `session.archive` archives only
+  such a session of the caller (`403` for any other), so an agent cleans up
+  its own finished work and never the user's sessions. `lead.brief` and
+  `lead.digest` go to `../session-lead/` (`leadActions`).
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against
@@ -250,6 +263,54 @@ constructor retains its existing `Object.assign` behavior.
   remembered. Remembered values live in memory only, per session and env
   name, for 10 minutes from submission; use does not extend them, a restart
   drops them, and `secret.forget` drops the session's.
+  A value can also be saved for the project the session's directory belongs
+  to, its worktrees included, or for all projects (`createSavedSecrets`,
+  kept as the project's `secrets` or the `user` layer's `secrets` in
+  `../environment/store.js`); the project's value wins over the one for all
+  projects. Each field on the card picks one: this run only, this chat for
+  10 minutes (`remember`), this project (`save`, offered only inside a
+  configured project: `canSave`) or all projects (`saveGlobally`, offered
+  whenever the store can be read: `canSaveGlobally`), and only for fields it
+  asked the user to type; a field in both save lists goes to the project. A
+  saved value never runs on its own: a call that
+  uses one waits on the card, which lists it as `saved` with no field (the
+  ones saved for all projects also in `savedGlobally`), and the user's Run
+  confirms it. The answer names the saved values the card
+  showed (`saved`) or gives a typed value for them, and one that does
+  neither for any of them is refused with 409, so a card that never showed a
+  saved value cannot run it. `fields` lists the saved names too, which a
+  current card skips: an app older than saved secrets draws only `fields`,
+  so it asks the user to type every value again instead of waiting on a card
+  it cannot draw, and a typed value runs in place of the saved one, which
+  stays saved. Nothing runs unconfirmed.
+  `POST /api/openchamber/secret/forget-saved` removes one from where it was
+  saved while the card waits and turns it into an asked field; the field leaves
+  `savedValues` before the store is written, so a Run in that window asks for
+  it, and forgetting a field already asked answers the current card. It
+  removes the value only while the store still holds the one the card
+  showed (`removeSecrets` checks inside the queued write): a replacement
+  saved from another chat or Settings meanwhile answers 409 and stays, and
+  the field stays asked, so the card never offers the stale value again. The
+  result lists the saved env names in `saved`, and a value the store could
+  not take in `notSaved`; the command runs either way.
+  `secret.forget` with `saved: true` waits on a card that lists the names
+  saved for the session's project and for all projects, each once (one in
+  both places in `savedInBoth`), in the same `pending` slot with no field to
+  type, marked `kind: 'forget'` so a row Forget on it is refused (400); the user's confirmation is an answer that names them all (the same
+  409 check), and only those names leave the store, from both places in one
+  write, and only while each still holds the value the card listed: a
+  replacement saved meanwhile fails the call with 409 and nothing is removed,
+  and a write that fails leaves both places as they were. Keep is a decline. With
+  nothing saved it answers at once, and without a session directory it fails
+  instead of reporting nothing saved. A saved value is read when the call
+  starts and again after the user's click: one forgotten or changed while the
+  card waited (another card, Settings) does not run, and the call reports
+  `not-started` with a note to call again. Inside an isolated space the
+  server runs without saved secrets (`savedSecrets: null` in `runtime.ts`):
+  its store is the container's, which the host's Settings never list, so
+  the card offers only this run and this chat, `secret.forget` with
+  `saved: true` has nothing to forget, and the space's environment store
+  refuses a `secrets` change from any route (`savesSecrets: false`).
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -313,14 +374,24 @@ constructor retains its existing `Object.assign` behavior.
   by session id. The Chats id is a creation destination, not a registered project.
   Chats creation and directory-scoped send/fork do not infer a project or its defaults from Git,
   including when the configured Chats root is inside a registered checkout.
-  Membership compares the canonical directory and root so symlink aliases keep
-  the same projectless behavior.
+  They take the Chats defaults from Settings > Sessions in the project's place,
+  then the global ones. Membership compares the canonical directory and root, so
+  symlink aliases keep the same projectless behavior and the same Chats defaults.
 - Chats creation belongs to the session service. It reuses the directory allocator
   in `../scheduled-tasks/chats-scope.js`, including the configured Chats root.
   Failed creation removes only an empty directory. Once OpenCode creates the
   session, a failed prompt keeps its directory. Chats cannot request a worktree.
 - Session status and messages come from official directory-scoped OpenCode
-  APIs. Message output includes only ordered `text` parts.
+  APIs. Message output includes only ordered `text` parts. What the user
+  attached to a message travels as a synthetic message before it (a quote, a
+  code comment, a lead digest reply, an answer to a reply block or a page:
+  `openchamberContext`, `openchamberLeadAnswer`, `openchamberUiBlockAnswer`
+  metadata or the `openchamber-page-answer` source), and the user's own words
+  to a quote live only there, so those come back as `user` messages marked
+  `attached: true`. A caller that wants what the user typed (an extension's
+  Retry) skips the marked ones. Messages of one millisecond keep OpenCode's id
+  order, so an attachment stays before its prompt. Other synthetic messages
+  (notices, subagent reports) stay out.
 - `session.status` and `session.messages` ask OpenCode's `session.get` first,
   because the active-session map names only running sessions: a session it
   does not name is idle or does not exist. An unknown id is a 404. A lookup
@@ -481,25 +552,29 @@ constructor retains its existing `Object.assign` behavior.
   directory the request names, the project's own folder, as before: a new worktree
   does not exist yet, and its start folder mirrors that one. Git work (carrying
   changes, removal) stays on the worktree root.
-- Default agents resolve from the owning project before global settings and
+- Default agents resolve from the owning project, or for a chat from the Chats
+  defaults, before global settings and
   OpenCode defaults. Directory-based requests identify the project before
   creating a worktree; existing linked worktrees resolve through Git's primary
   worktree root. Send/fork fallback uses that same owner. Configured model IDs
   and effort preferences survive missing catalog entries rather than silently
   dispatching with a different model.
 - A create with a prompt resolves its selection in the target directory before
-  creating an OpenCode session. It reads discovery with a 10-second request
-  deadline, once in an existing folder. In a worktree the same call just made,
-  it reads again every half second for up to 15 seconds while the agent list is
-  empty or the agent or config read fails, when the call has to pick an agent or
-  model (an explicit pair waits for nothing; its optional level is a single read)
-  (`../openchamber-sessions/selection-inputs.js`): that worktree's OpenCode
-  location answers its first agent read empty and fills the list about a second
-  later, so without the wait nearly every create in a new worktree came back
-  503 and the agent made a second, stray worktree before it retried in the
-  first. A list still missing after that, or after the one read elsewhere, an
-  empty agent list, or a configured agent absent from the list produce 503; no fallback model is dispatched from
-  those snapshots. A missing saved default agent is named in the error with a
+  creating an OpenCode session. Each discovery read takes two steps with a
+  10-second request deadline each: the model list first, then the agent list
+  and config in parallel (`../openchamber-sessions/selection-inputs.js`). The
+  agent list of a folder whose OpenCode location is not running yet (a new chat
+  or worktree, a project first used since start, one idle for an hour) is only
+  complete once that location's plugins have activated, and the model read is
+  what waits for them. When the plugins did not activate within OpenCode's
+  limit, a selection that still needs a default produces 503 with OpenCode's
+  reason, even if some agents and the config arrived: the list may be partial.
+  A failed agent or config read, an empty agent list, or a configured agent
+  absent from the list produce 503 too, and so does an explicitly requested
+  agent missing from a list read after activation failed. No fallback model is
+  dispatched from those snapshots. Validating an explicit model, agent or
+  level reads discovery too, so it also waits for the plugins of a cold
+  location, up to OpenCode's limit. A missing saved default agent is named in the error with a
   hint to update the default or pass an explicit agent; it never silently picks
   another agent. An explicit agent that needs only a model does not require the
   saved default agent to exist. Model precedence stays unchanged.
@@ -509,14 +584,21 @@ constructor retains its existing `Object.assign` behavior.
   setup, with the deadlines above, then check the final status once. Git-ready
   alone is insufficient. Creating in an existing checkout subdirectory checks
   bootstrap at the checkout root while retaining the session's requested folder.
-  If a create prerequisite fails after making a worktree (agents that never
-  warmed up, a missing default agent, setup still running), the error carries
+  If a create prerequisite fails after making a worktree (plugins that did not
+  activate, a missing default agent, setup still running), the error carries
   `partialAction: worktree-created` and `directory`, with no session ID. The
-  caller can retry that directory without a `worktree` parameter; after the
-  warm-up this is a real failure, no longer the normal first answer.
+  caller can retry that directory without a `worktree` parameter.
   The CLI prints the retained directory and a retry command preserving the
   prompt and selection options without creating another worktree.
-  An empty-session create without a prompt keeps its existing selection behavior.
+  An empty-session create stores any requested model and variant on the
+  OpenCode session, so a later send can reuse them. A variant without a model
+  resolves the model first; a create with no selection leaves defaults unset.
+  The stored model is the catalog id of the session directory's checkout, so a
+  model named by its upstream id, or one a new worktree does not offer, never
+  lands as an unusable selection; when the catalog cannot be read, the create
+  fails as not ready instead of pinning an unverified model. A malformed model reference is rejected, and
+  Auto needs a prompt to select a model; both are refused for an empty session
+  before any worktree is created.
 - Usage errors name the missing or conflicting input so CLI and agent-tool
   callers can correct an invalid request without an upfront usage manual.
 - Explicit `projectId` or `directory` scope takes precedence over the managed
@@ -920,6 +1002,49 @@ that for the user, and a one-time code would be kept on the agent's word. The
 card offers the choice per field instead, off by default; the agent only learns
 which env names are remembered from the result.
 
+### Why a saved value waits for a click and a remembered one does not
+
+A remembered value lives 10 minutes in one chat, the time to fix and rerun a
+script the user just watched. A saved value outlives the chat and reaches
+every session in the project, and OpenCode's shell permission alone can pass
+on an allow rule the user set long before. If a saved value ran on its own, a
+prompt-injected agent in any later session could send it out through
+`secret.run` without the user seeing a thing, so each run that uses one shows
+the card, and the user's click on Run is the approval. Saving it in the project's environment store reuses
+that file's guarantees (mode 0600, values never answered by a route) and its
+project lookup, so a worktree finds what the primary checkout saved. The store
+keeps it apart from the variables, which Git, the terminal and project actions
+receive. A value for all projects is one click away for an agent in any
+project, a cloned repository the user does not know among them, so the card
+says where each saved value comes from, and the user chooses that scope per
+field, never by default.
+
+### What the click does not protect
+
+The click guards the `secret.run` path only, and two others stay open to an
+agent whose shell runs as the user. The value sits in plaintext in
+`environment.json`, which the user's own processes can read, as they can the
+project's variables. And the agent's shell inherits
+`OPENCHAMBER_AGENT_TOOL_URL` and `OPENCHAMBER_AGENT_TOOL_TOKEN`: it can start
+its own `secret.run`, which draws no card in the chat, and on a server without
+a UI password answer that call over HTTP. Saved secrets accept both, as a
+known limit. An OS keychain was considered and closes neither on its own:
+DPAPI and Credential Manager on Windows, and an unlocked Secret Service
+collection on Linux, hand any process of the same user the value without a
+prompt; on macOS a keychain item prompts other apps, but "Always Allow" lifts
+that for good, and a prompt on every read needs native Security framework
+code (`SecAccessControl` with user presence) in the signed desktop app, which
+the web server, the VS Code extension and a headless server do not have.
+
+### Why secret.forget asks before it drops saved values
+
+The tool tells the agent to call `secret.forget` when the work is done. Had it
+also dropped the saved values, every finished task would erase what the user
+chose to keep. It touches them only with `saved: true`, and even then the user
+confirms on a card: the tool's description is a prompt, and an agent that
+misreads it, or a prompt-injected one, must not erase values the user cannot
+recover.
+
 ### Why the card reads its fields from the server and not from the call
 
 Which fields a run still needs depends on what the chat remembers, which only
@@ -954,6 +1079,21 @@ The target directory's agent snapshot determines its model bindings. Missing
 discovery cannot establish the default choice. Checking it once before creation
 lets the caller retry a known directory without polling, sending a prompt with
 an unintended model, or accumulating empty sessions.
+
+### Why selection reads the models before the agents, and does not poll
+
+OpenCode 2.3 builds the agent registry from plugins, the built-in agents
+included, and starts them when a location is first used. `agent.list` answers
+from the registry at once, so a parallel read on a new location got an empty
+list, while `model.list` waits up to 5 seconds for the plugins. Reading the
+models first makes that wait OpenCode's own activation barrier: one read gives
+the real agent list in every folder. It replaced a worktree-only loop that
+re-read every half second for up to 15 seconds, which guessed at readiness
+from an empty list, left new chats and evicted folders failing, and hid the
+real reason when activation failed. The order is a workaround for this server
+selection path only; it costs a second round trip before the agent read. When
+`agent.list` itself waits for activation upstream, read the three in parallel
+again.
 
 ### Why only ownWork nests a dispatched session, and by metadata
 
@@ -1041,3 +1181,16 @@ the raw PTY stream, and returns it as plain text: the replay keeps colours,
 titles and cursor controls for the panel to redraw, which a model would read as
 noise. It lives in memory, so the copy cannot block the PTY or move
 `lastActivity`.
+
+### Why a quoted image path may hold the other quote characters
+
+A page names a local image in a quoted string: an `src` attribute, a CSS
+`url("...")`, or a string in its script. The rule used to stop at every quote
+character, so a Windows folder named `chef's` made the whole path unreadable and
+the page showed no image, not even the "not shown" note. It now stops only at
+the quote that opened the string, which a character class cannot express: the
+body tests each character against `\1`. The chat's copy in
+`packages/ui/src/components/chat/message/parts/renderPageImages.ts` carries the
+same rule, because the grant route allows exactly the paths the chat reads
+(#6806).
+

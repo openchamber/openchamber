@@ -20,6 +20,7 @@ import type { useComposerDraftText } from './useComposerDraftText';
 import type { useComposerDraftHistory } from './useComposerDraftHistory';
 import type { useComposerColumn } from './useComposerColumn';
 import type { useComposerAttachmentWork } from './useComposerAttachmentWork';
+import type { useComposerLargePasteState } from './useComposerLargePasteState';
 import type { ComposerSendHandlers } from './composerSendHandlers';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { isServerOwnedMessageQueue, type QueuedMessage } from '@/stores/messageQueueStore';
@@ -31,7 +32,7 @@ import * as sessionActions from '@/sync/session-actions';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { loadMagicPrompts } from '@/lib/magicPrompts';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import { createChatDraftIdentity, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { useBtwStore } from '@/stores/useBtwStore';
 import { buildBtwSyntheticTexts, btwPendingComposerKey, preparePendingBtwSend, startBtwSession } from '@/lib/btw';
@@ -63,10 +64,12 @@ import { collectInlineSkillMentions } from './composerMentionTokens';
 import { recordLinkedReferences } from './recordLinkedReferences';
 import { handleComposerSendFailure } from './handleComposerSendFailure';
 import { createComposerSubmitErrorMessage } from './createComposerSubmitErrorMessage';
+import { saveAttachmentsHeldForSend } from './saveAttachmentsHeldForSend';
 
 type Dependencies = {
     i18n: Pick<ReturnType<typeof useI18n>, 't'>;
     attachmentWork: Pick<ReturnType<typeof useComposerAttachmentWork>, 'waitForPendingAttachments'>;
+    largePasteState: Pick<ReturnType<typeof useComposerLargePasteState>, 'largeTextPasteOffer'>;
     draftText: Pick<ReturnType<typeof useComposerDraftText>, 'confirmedMentionsRef' | 'setMessage' | 'currentChatDraftIdentityRef' | 'composerText'>;
     historySearchState: Pick<ReturnType<typeof useComposerHistorySearchState>, 'setPromptHistorySearch'>;
     editorState: Pick<ReturnType<typeof useComposerEditorState>, 'composerRef'>;
@@ -93,13 +96,14 @@ type Dependencies = {
 };
 
 export function useComposerSubmission({
-    i18n, attachmentWork, draftText, historySearchState, editorState, column, sending, inlineContext,
+    i18n, attachmentWork, largePasteState, draftText, historySearchState, editorState, column, sending, inlineContext,
     sendHandlers, sendAvailability, sessionScope, parallelRun, sessionLifecycle, queueState, selection,
     language, preferences, expansion, permissionSettings, runtime, draftHistory, queueActions, props,
     mentionAttachments, referenceDrafts,
 }: Dependencies) {
     const { t } = i18n;
     const { waitForPendingAttachments } = attachmentWork;
+    const { largeTextPasteOffer } = largePasteState;
     const { confirmedMentionsRef, setMessage, currentChatDraftIdentityRef, composerText } = draftText;
     const { setPromptHistorySearch } = historySearchState;
     const { composerRef } = editorState;
@@ -142,9 +146,19 @@ export function useComposerSubmission({
     const getSubmitErrorMessage = createComposerSubmitErrorMessage(t);
     const handleSubmit = async (options?: SubmitOptions) => {
         if (isMobileCommentOpen()) return;
+        if (largeTextPasteOffer && !options?.queuedOnly) return;
         if (await waitForPendingAttachments()) {
             void handleSubmitRef.current(options);
             return;
+        }
+        if (!options?.queuedOnly) {
+            const sent = attachmentsToSend(options?.presetText ?? getCurrentInputSnapshot().message);
+            const held = await saveAttachmentsHeldForSend(chatDraftIdentity, currentDirectory ?? undefined, sent, t);
+            if (held === 'stopped') return;
+            if (held === 'saved') {
+                void handleSubmitRef.current(options);
+                return;
+            }
         }
         if (isBtwActive && currentSessionId && (btwPanel.creating || useBtwStore.getState().byParent[currentSessionId]?.pendingSend)) return;
         if (pendingFirstSend) return;
@@ -153,6 +167,7 @@ export function useComposerSubmission({
             return;
         }
         const submitRuntimeKey = getRuntimeKey();
+        const isSubmitRuntime = captureRuntimeInstance();
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
@@ -346,7 +361,7 @@ export function useComposerSubmission({
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
-        sendMessageOptions = { ...sendMessageOptions, userInitiated: true, recordEffort: !isBtwActive && !queuedOnly, effortRevision };
+        sendMessageOptions = { ...sendMessageOptions, isCurrentRuntime: isSubmitRuntime, userInitiated: true, recordEffort: !isBtwActive && !queuedOnly, effortRevision };
         let sent: SentMessage | undefined;
         if (deferredQuestions.length > 0) sendMessageOptions.onSent = (route) => { sent = route; };
 

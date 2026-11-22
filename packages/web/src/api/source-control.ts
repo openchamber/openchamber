@@ -86,7 +86,10 @@ import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness
 import { isExtensionProviderId, isProviderUserId } from '../../server/lib/source-control/provider-id.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
+import { isHttpUrl, parseSourceReferenceLinks } from './source-reference-link';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
+import { parseReviewerStates } from './review-state';
+import { isBooleanValue, isNonEmptyString, isNumberValue, isPositiveSafeInteger, isStringValue, type BoundaryScalar } from './boundary-guards';
 
 interface ErrorResponse {
   error?: string;
@@ -892,6 +895,8 @@ const parseSourceIssue = (issue: Issue, identity: SourceControlIdentity): Issue 
   if (issue.labels !== undefined) result.labels = issue.labels.map((label) => ({ name: label.name, color: label.color }));
   if (issue.createdAt) result.createdAt = issue.createdAt;
   if (issue.updatedAt) result.updatedAt = issue.updatedAt;
+  const references = parseSourceReferenceLinks(issue.references);
+  if (references.length > 0) result.references = references;
   return result;
 };
 
@@ -1051,24 +1056,8 @@ const parseSourceComment = (comment: IssueComment, identity: SourceControlIdenti
   return result;
 };
 
-type BoundaryScalar = string | number | boolean | null | undefined;
-const isStringValue = (value: BoundaryScalar): value is string => Object.prototype.toString.call(value) === '[object String]';
-const isBooleanValue = (value: BoundaryScalar): value is boolean => Object.prototype.toString.call(value) === '[object Boolean]';
-const isNumberValue = (value: BoundaryScalar): value is number => Object.prototype.toString.call(value) === '[object Number]';
-const isNonEmptyString = (value: BoundaryScalar): value is string => isStringValue(value) && value.trim().length > 0;
-const isPositiveSafeInteger = (value: BoundaryScalar): value is number => isNumberValue(value) && Number.isSafeInteger(value) && value >= 1;
-
 const isNonNegativeSafeInteger = (value: BoundaryScalar): value is number => isNumberValue(value) && Number.isSafeInteger(value) && value >= 0;
 const isValidId = (value: string | number | undefined): boolean => isNonEmptyString(value) || Number.isFinite(value);
-const isHttpUrl = (value: BoundaryScalar): value is string => {
-  if (!isNonEmptyString(value)) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:';
-  } catch {
-    return false;
-  }
-};
 const hasMatchingIdentity = (
   value: { provider?: string; instance?: string } | null | undefined,
   identity: SourceControlIdentity,
@@ -1656,6 +1645,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (contextOptions?.includeDiff) query.set('diff', '1');
       if (contextOptions?.includeCIDetails) query.set('checkDetails', '1');
       if (contextOptions?.includeTimeline) query.set('timeline', '1');
+      if (contextOptions?.includeReferences) query.set('references', '1');
       if (contextOptions?.revision) query.set('revision', contextOptions.revision);
       if (contextOptions?.project) {
         query.set('owner', contextOptions.project.owner);
@@ -1680,12 +1670,15 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         result.verdicts = (payload.verdicts ?? []).map((verdict) => parseSourceVerdict(verdict, normalized));
         if (payload.reviewers) result.reviewers = payload.reviewers.map((user) => parseSourceUser(user, normalized));
       }
+      const references = parseSourceReferenceLinks(payload.references);
+      if (references.length > 0) result.references = references;
       if (payload.stack === null) result.stack = null;
       else if (payload.stack !== undefined) {
         const stack = parseOptionalStack(payload.stack);
         if (stack) result.stack = stack;
       }
-
+      const reviewerStates = payload.reviewerStates === undefined ? undefined : parseReviewerStates(payload.reviewerStates, normalized, parseSourceUser);
+      if (reviewerStates) result.reviewerStates = reviewerStates;
       if (payload.voteLabels !== undefined) {
         if (!Array.isArray(payload.voteLabels)) throw new Error('Source control response contained invalid vote labels');
         result.voteLabels = payload.voteLabels.map((label) => parseSourceVoteLabel(label, normalized));
@@ -1713,10 +1706,11 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid issues');
       return parsePage(payload, payload.items.map((item) => parseSourceIssue(item, normalized)));
     },
-    issueGet: async (context, number, projectSelector) => {
+    issueGet: async (context, number, projectSelector, readOptions): Promise<Issue | null> => {
       const normalized = normalizeIdentity(context);
       const query = boundReadQuery(context);
       query.set('number', String(number));
+      if (readOptions?.includeReferences) query.set('references', '1');
       if (projectSelector) {
         query.set('owner', projectSelector.owner);
         query.set('repo', projectSelector.name);
@@ -1758,7 +1752,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     references: (context, referenceOptions) => fetchRepositoryReferences(fetch, context, referenceOptions),
     referencesAcross: (contexts, referenceOptions) => fetchRepositoryReferencesAcross(fetch, contexts, referenceOptions),
-    referenceDetail: (context, item) => fetchRepositoryReferenceDetail(fetch, context, item),
+    referenceDetail: (context, item, readOptions) => fetchRepositoryReferenceDetail(fetch, context, item, readOptions),
     changeRequestListStatuses: (context, refs) => fetchChangeRequestListStatuses(fetch, context, refs),
   };
 };

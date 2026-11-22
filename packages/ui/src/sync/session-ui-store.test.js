@@ -1100,6 +1100,27 @@ describe('openNewSessionDraft project binding', () => {
     }
   });
 
+  test('paints the Chats default on a chat draft before discovery, and the project default on a project draft', () => {
+    const original = useConfigStore.getState();
+    useConfigStore.setState({
+      activateDirectory: () => new Promise(() => {}),
+      providers: [], agents: [], settingsDefaultsLoaded: false, isConnected: false,
+      settingsDefaultModel: 'global/model', settingsDefaultAgent: 'build',
+      chatsDefaultModel: 'chat/model', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan',
+    });
+    useProjectsStore.setState({ projects: [{ ...projectA, defaultModel: 'project/model' }, projectB] });
+    try {
+      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'model', currentVariant: 'high', currentAgentName: 'plan' });
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+      expect(useConfigStore.getState().currentProviderId).toBe('project');
+      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'model' });
+    } finally {
+      useConfigStore.setState(original);
+    }
+  });
+
   test('an old draft activation cannot replace a newer draft default', async () => {
     const original = useConfigStore.getState();
     let finishActivation;
@@ -2084,6 +2105,31 @@ describe('routeMessage skill invocation', () => {
       modelID: 'model-a',
     })).rejects.toThrow();
     expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('a send captured on another runtime instance writes no file and sends nothing', async () => {
+    const originalWrite = opencodeClient.writeOpenCodeTempFiles;
+    const writes = [];
+    opencodeClient.writeOpenCodeTempFiles = async (directory, files, options) => {
+      if (options?.isCurrentRuntime && !options.isCurrentRuntime()) throw new Error('The file was not saved because the runtime changed.');
+      writes.push(files);
+      return files.map(({ filename }) => ({ filename, path: `/tmp/${filename}` }));
+    };
+    try {
+      await expect(routeMessage({
+        isCurrentRuntime: () => false,
+        sessionId: 'session-skill',
+        directory: '/skills/project',
+        content: 'see the archive',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        files: [{ type: 'file', mime: 'application/zip', url: `data:application/zip;base64,${btoa('PK')}`, filename: 'bundle.zip' }],
+      })).rejects.toThrow('runtime changed');
+      expect(writes).toHaveLength(0);
+      expect(sendMessageCalls).toHaveLength(0);
+    } finally {
+      opencodeClient.writeOpenCodeTempFiles = originalWrite;
+    }
   });
 
   test('attaches a user-installed skill without caller-provided mentions', async () => {
