@@ -28,6 +28,14 @@ type PendingFetch = { context: ClaudeCredentialContext; promise: Promise<QuotaRe
 let pendingFetch: PendingFetch | null = null;
 let lastFingerprint: string | null = null;
 
+const defaultDiscovery = { findClaudeCredential, loadClaudeCredential, readClaudeCredentialContext };
+let discovery = defaultDiscovery;
+
+/** Replaces credential discovery (tests); `null` restores the real one in ./auth.js. */
+export const configureClaudeCredentialDiscovery = (next: Partial<typeof defaultDiscovery> | null) => {
+  discovery = next ? { ...defaultDiscovery, ...next } : defaultDiscovery;
+};
+
 const fingerprintOf = (credential: ClaudeCredential) =>
   createHash('sha256').update(`${credential.accessToken}\0${credential.refreshToken ?? ''}`).digest('hex');
 
@@ -60,15 +68,15 @@ const failure = (error: string, { configured = true } = {}) =>
   buildResult({ providerId, providerName, ok: false, configured, error });
 
 export const isConfigured = (auth: LegacyAuthFile) => {
-  const context = readClaudeCredentialContext();
-  return Boolean(context.configDir || context.error || findClaudeCredential(auth, context));
+  const context = discovery.readClaudeCredentialContext();
+  return Boolean(context.configDir || context.error || discovery.findClaudeCredential(auth, context));
 };
 
 const fetchQuotaUncoalesced = async (context: ClaudeCredentialContext, isCurrent: () => boolean) => {
   if (context.error) return failure(context.error);
   let credential;
   try {
-    credential = await loadClaudeCredential(context);
+    credential = await discovery.loadClaudeCredential(context);
   } catch (error) {
     return failure(error instanceof Error ? error.message : 'Request failed');
   }
@@ -160,16 +168,16 @@ const selectionOf = (context: ClaudeCredentialContext) =>
   createHash('sha256').update(JSON.stringify([context.configDir, context.error])).digest('hex').slice(0, 16);
 
 export const fetchQuota = () => {
-  const context = readClaudeCredentialContext();
+  const context = discovery.readClaudeCredentialContext();
   if (pendingFetch && sameSelection(pendingFetch.context, context)) return pendingFetch.promise;
 
   const selection = selectionOf(context);
-  const isCurrent = () => pendingFetch === pending && sameSelection(readClaudeCredentialContext(), context);
+  const isCurrent = () => pendingFetch === pending && sameSelection(discovery.readClaudeCredentialContext(), context);
   const pending: PendingFetch = {
     context,
     promise: fetchQuotaUncoalesced(context, isCurrent)
       .then((result): QuotaResult => {
-        const current = readClaudeCredentialContext();
+        const current = discovery.readClaudeCredentialContext();
         if (result.error === ACCOUNT_CHANGED_ERROR || !sameSelection(current, context)) {
           return { ...failure(ACCOUNT_CHANGED_ERROR), selection: selectionOf(current) };
         }

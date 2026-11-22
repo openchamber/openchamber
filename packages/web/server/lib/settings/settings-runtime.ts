@@ -73,10 +73,7 @@ export type SettingsRuntimeDependencies = Pick<Normalization,
   onLastDirectoryChanged?: (directory: SettingsDocument[string]) => void;
 };
 
-interface SettingsMigration {
-  settings: SettingsDocument;
-  changed: boolean;
-}
+interface SettingsMigration { settings: SettingsDocument; changed: boolean }
 
 export interface SettingsReadOptions {
   surface?: SettingsSurface | null;

@@ -165,20 +165,11 @@ const normalizeQueueBinding = (binding: JsonValue | undefined): SessionQueueBind
 /** The launch side's source of a session's queue binding: the task ledger row bound to the session id. */
 export type SessionQueueBindingSource = (sessionId: string) => JsonValue | undefined;
 
-interface SessionQueueBinding {
-  taskId: number | null;
-  issueNumber: number | null;
-  queue: string | null;
-  lane: string | null;
-}
+interface SessionQueueBinding { taskId: number | null; issueNumber: number | null; queue: string | null; lane: string | null }
 
 interface SessionActivityEntry {
-  type: ActivityPhase;
-  lastActivityAt: number;
-  status: SessionState['status'] | null;
-  model: { modelID: string | null; providerID: string | null } | null;
-  toolInFlight: null;
-  queue: SessionQueueBinding | null;
+  type: ActivityPhase; lastActivityAt: number; status: SessionState['status'] | null;
+  model: { modelID: string | null; providerID: string | null } | null; toolInFlight: null; queue: SessionQueueBinding | null;
 }
 
 const CONTEXT_READINGS_MAX = 2000;

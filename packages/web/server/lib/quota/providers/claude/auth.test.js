@@ -1,36 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import os from 'os';
 import path from 'path';
+import { configureClaudeCredentialEnvironment, configureClaudeCredentialSources, findClaudeCredential, loadClaudeCredential, readClaudeCredentialContext } from './auth.js';
 
 const execFileSync = vi.fn();
 const files = new Map();
 const openCodeAuth = vi.fn(() => ({}));
 
-vi.mock('child_process', () => ({ execFileSync: (...args) => execFileSync(...args) }));
-
-vi.mock('fs', () => {
-  const fs = {
-    existsSync: (filePath) => files.has(filePath),
-    readFileSync: (filePath) => {
-      if (!files.has(filePath)) throw new Error('ENOENT');
-      return files.get(filePath);
-    },
-  };
-  return { ...fs, default: fs };
-});
-
-vi.mock('../../../opencode/auth.js', () => ({ readOpenCodeCredentials: async () => openCodeAuth() }));
-
-// The credentials file is read through the bounded reader, which opens files
-// itself; serve it from the same in-memory map as the fs mock.
-vi.mock('../../../shared/bounded-file-read.js', async (importOriginal) => ({
-  ...(await importOriginal()),
-  readBoundedFileSync: (filePath) => (files.has(filePath)
-    ? { ok: true, buffer: Buffer.from(files.get(filePath)) }
-    : { ok: false, reason: 'missing' }),
-}));
-
-import { configureClaudeCredentialEnvironment, findClaudeCredential, loadClaudeCredential, readClaudeCredentialContext } from './auth.js';
+// The Keychain command, the credentials file and OpenCode's credential store
+// are injected through the module's source seam, served from these fakes.
+const sources = {
+  execFileSync: (...args) => execFileSync(...args),
+  readJsonFile: (filePath) => (files.has(filePath) ? JSON.parse(files.get(filePath)) : null),
+  readOpenCodeCredentials: async () => openCodeAuth(),
+};
 
 const claudeCodeBlob = (accessToken) => JSON.stringify({
   mcpOAuth: { 'linear|abc': { accessToken: 'unrelated-mcp-token' } },
@@ -57,6 +40,7 @@ beforeEach(() => {
   execFileSync.mockReset();
   execFileSync.mockImplementation(() => { throw new Error('no keychain entry'); });
   openCodeAuth.mockReturnValue({});
+  configureClaudeCredentialSources(sources);
   vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
   vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', undefined);
 });
@@ -64,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   configureClaudeCredentialEnvironment(() => process.env);
+  configureClaudeCredentialSources(null);
 });
 
 const findLocal = () => findClaudeCredential(openCodeAuth());

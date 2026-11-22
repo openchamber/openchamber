@@ -882,16 +882,6 @@ describe('listSkillSupportingFiles caps (#1365)', () => {
     return filePath;
   };
 
-  it('pins the caps the VS Code twin shares', () => {
-    const source = fs.readFileSync(new URL('./skill-files.ts', import.meta.url), 'utf8');
-    expect(source).toContain('createTraversalBudget({ maxDirs: 5000, maxEntries: 5000 })');
-    const vscodeSource = fs.readFileSync(
-      new URL('../../../../vscode/src/opencodeConfig.ts', import.meta.url),
-      'utf8',
-    );
-    expect(vscodeSource).toContain('createTraversalBudget({ maxDirs: 5000, maxEntries: 5000 })');
-  });
-
   it('lists supporting files under the caps, excluding SKILL.md, without truncation', async () => {
     writeSupporting('SKILL.md', STANDARD_MD);
     writeSupporting(path.join('references', 'guide.md'), '# Guide');

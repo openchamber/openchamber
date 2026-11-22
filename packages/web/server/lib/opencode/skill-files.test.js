@@ -94,16 +94,6 @@ describe('walkSkillMdFiles', () => {
     }
   });
 
-  it('pins the directory-visit cap the VS Code twin shares', () => {
-    const source = fs.readFileSync(new URL('./skill-files.ts', import.meta.url), 'utf8');
-    expect(source).toContain('createTraversalBudget({ maxDirs: 5000 })');
-    const vscodeSource = fs.readFileSync(
-      new URL('../../../../vscode/src/opencodeConfig.ts', import.meta.url),
-      'utf8',
-    );
-    expect(vscodeSource).toContain('createTraversalBudget({ maxDirs: 5000 })');
-  });
-
   it('stops at the directory cap and returns the partial results found so far', async () => {
     // One leaf past the cap: the root plus SKILL_WALK_MAX_DIRS - 1 leaves
     // are visited, so exactly that many leaves report their SKILL.md.

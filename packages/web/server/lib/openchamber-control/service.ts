@@ -135,11 +135,7 @@ interface ControlProject { id: string; path: string; label?: string; [setting: s
 /** A project's editable settings, as Project settings shows them. */
 type ProjectSettings = Partial<Record<string, JsonValue>>;
 
-interface UpdatedProject {
-  project: { id: string; path: string; settings: ProjectSettings };
-  note: string;
-  alsoCleared?: string[];
-}
+interface UpdatedProject { project: { id: string; path: string; settings: ProjectSettings }; note: string; alsoCleared?: string[] }
 
 // The tool input is JSON, so a projectSettings object holds only JSON values.
 const projectSettingsSchema = z.record(z.string(), z.json());
