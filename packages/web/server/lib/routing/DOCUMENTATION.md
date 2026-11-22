@@ -146,39 +146,45 @@ ordered pool keeps a session on the target answering it while that target is
 ready, so a preference shows on the next draw: a new session, or after the
 current target fails or is benched.
 
-## Picking a pool member directly
+## Pinning a pool member
 
 While a pool is selected, the current-model line above the composer
 (`packages/ui/src/components/chat/CurrentModelIndicator.tsx`) opens a menu of
 the pool's members, read from the catalog OpenCode compiles for the pool
 (`settings.opencodeRoute.targets`; a pool whose members come only from
-patterns lists none and offers no menu). The user picks a member and when it
-applies (`packages/ui/src/lib/routing/poolMemberPick.ts`):
+patterns lists none and offers no menu). Picking a member pins it for the
+session with OpenCode's `POST /api/session/:id/route-target` (fork #2671): the
+session stays on the pool, the pinned member serves while it is healthy, the
+pool fails over to its other members when it is not, and requests return to
+the member once it recovers. "Any model in the pool" clears the pin. The line
+names the pinned member, read with `GET /api/session/:id/route-target`. When
+the pin applies is the user's choice (`packages/ui/src/lib/routing/poolMemberPick.ts`):
 
-- with the next message: only the composer's selection changes;
-- at the next step: the session's model switches now. OpenCode reloads the
-  session context before each model request (`session/runner/llm.ts`), so a
-  running turn makes its next request on the pick;
-- now: a running turn is replayed on the pick, as the "Stop and restart this
-  reply" choice for model changes during a reply does; an idle session
-  switches now.
+- with the next message: set once the running turn finishes (an idle session
+  pins now);
+- at the next step: set now. OpenCode reads the pin on every model request,
+  so a running turn makes its next request on the member;
+- now: set now, and a running turn is replayed on the pool, as the "Stop and
+  restart this reply" choice for model changes during a reply does.
 
-The OpenCode call runs first; the composer follows only when it succeeded.
-After a pick the composer holds that member, and the menu offers "Return to
-pool" for each pool listing it, with the same timings. Everything goes
-through OpenCode's own `session.switchModel` and the existing retry. VS Code
-shows the full model-changed text and the pool-member menu, but not "Prefer
-previous", which needs the OpenChamber server's `/api/model-routes/interpret`
-route that VS Code does not run.
+A session switched to a single member directly (an older pick, or the model
+picker) is offered "Return to pool" for each pool listing that model, with the
+same timings; that goes through `session.switchModel`, and the composer
+follows only when the switch succeeded. VS Code shows the full model-changed
+text and the pool-member menu, but not "Prefer previous", which needs the
+OpenChamber server's `/api/model-routes/interpret` route that VS Code does not
+run.
 
-### Why a pick leaves the pool instead of pinning a member inside it
+### Why a pin and not a switch to the member
 
-OpenCode keeps a session's pool target in memory and has no route to set it,
-and route overrides apply to every session. So a pick makes the member the
-session's model: the session no longer fails over inside the pool until the
-user returns to it. Pool rotation (`pool-rotation.js`) moves sessions the same
-way for the same reason. A per-session target inside the pool needs an
-OpenCode route first.
+A switch makes the member the session's model, so the session leaves the pool
+and stops failing over until the user returns to it. A pin keeps the pool's
+failover. OpenCode holds pins in memory, so a restart clears them and the
+session then selects normally; the line reads the pin back from OpenCode
+instead of remembering it, so it never shows a pin OpenCode no longer has. The
+published `@opencode/client` predates the route, so `lib/opencode/client.ts`
+calls it through `runtimeFetch`, like its other SDK gaps. Pool rotation
+(`pool-rotation.js`) still moves sessions by switching their model.
 
 ## Invariants
 
