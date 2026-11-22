@@ -670,7 +670,8 @@ and the send path reading the same grammar.
   when the selected value is unchanged.
   Beside the branch select (and in the mobile branch sheet) sits the
   **Auto-create worktree** switch (`settingsAutoCreateWorktree`, the profile
-  setting `autoCreateWorktree`, also on Settings → Sessions) with an optional
+  setting `autoCreateWorktree`, also on Settings → Sessions; on until the user
+  turns it off, `DEFAULT_AUTO_CREATE_WORKTREE`) with an optional
   name kept on the draft (`autoWorktreeName`). It shows, and applies, only
   while a git project draft is aimed at its project root
   (`shouldAutoCreateDraftWorktree` in `lib/worktrees/autoDraftWorktree.ts`).
