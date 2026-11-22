@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { create } from 'zustand';
-import type { Message } from '@/lib/opencode/model';
+import type { Message, ModelSelection } from '@/lib/opencode/model';
 
 type CatalogProvider = { id: string; models: Array<{ id: string; settings?: { opencodeRoute: { targets: unknown[] } } }> };
 type ConfigState = {
@@ -60,6 +60,23 @@ for (const [name, descriptor] of beforeImport) {
 }
 const { I18nProvider } = await import('@/lib/i18n');
 
+// The real client singleton with its two route-target calls replaced: the
+// test records what a pick sends and answers with the pins OpenCode would.
+const { opencodeClient } = await import('@/lib/opencode/client');
+type Pins = Awaited<ReturnType<typeof opencodeClient.getSessionRouteTargets>>;
+const noPins: Pins = [];
+const pins = { current: noPins };
+const pinCalls: Array<{ sessionID: string; routeID: string; target: ModelSelection | null }> = [];
+opencodeClient.getSessionRouteTargets = async () => pins.current;
+opencodeClient.setSessionRouteTarget = async (sessionID, routeID, target) => {
+    pinCalls.push({ sessionID, routeID, target });
+    pins.current = [
+        ...pins.current.filter((entry) => entry.routeID !== routeID),
+        ...(target === null ? [] : [{ routeID, target }]),
+    ];
+    return pins.current;
+};
+
 const indicatorFor = (sessionId: string | null) => (
     <I18nProvider><CurrentModelIndicator sessionId={sessionId} /></I18nProvider>
 );
@@ -103,6 +120,8 @@ describe('CurrentModelIndicator', () => {
         restore();
         setMessages([]);
         useConfigStore.setState({ currentProviderId: 'anthropic', currentModelId: 'claude-sonnet-5.5', currentVariant: undefined, providers: [] });
+        pins.current = [];
+        pinCalls.length = 0;
     });
 
     test('shows the real model of the last assistant message', async () => {
@@ -162,20 +181,35 @@ describe('CurrentModelIndicator', () => {
         expect(indicator?.getAttribute('role')).toBe('status');
     });
 
-    test('with pool members, picking one for the next message moves the composer onto it and offers the way back', async () => {
-        useConfigStore.setState({
-            currentProviderId: 'opencode-route',
-            currentModelId: 'strong-pool',
-            providers: [{ id: 'github-copilot', models: [{ id: 'gemini-4-carbon' }, { id: 'claude-opus-5.5' }] }, {
-                id: 'opencode-route',
-                models: [{ id: 'strong-pool', settings: { opencodeRoute: { targets: [
-                    { providerID: 'github-copilot', id: 'gemini-4-carbon', variant: 'high' },
-                    { providerID: 'github-copilot', id: 'claude-opus-5.5', variant: 'max' },
-                ] } } }],
-            }],
-        });
+    const strongPool = () => useConfigStore.setState({
+        currentProviderId: 'opencode-route',
+        currentModelId: 'strong-pool',
+        providers: [{ id: 'github-copilot', models: [{ id: 'gemini-4-carbon' }, { id: 'claude-opus-5.5' }] }, {
+            id: 'opencode-route',
+            models: [{ id: 'strong-pool', settings: { opencodeRoute: { targets: [
+                { providerID: 'github-copilot', id: 'gemini-4-carbon', variant: 'high' },
+                { providerID: 'github-copilot', id: 'claude-opus-5.5', variant: 'max' },
+            ] } } }],
+        }],
+    });
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    test('names the pinned pool member on the line', async () => {
+        strongPool();
+        pins.current = [{ routeID: 'strong-pool', target: { providerID: 'github-copilot', id: 'gemini-4-carbon', variant: 'high' } }];
         setMessages([assistantMessage('a1', 'github-copilot', 'claude-opus-5.5', 'max')]);
         await act(async () => root.render(indicatorFor('s1')));
+        await settle();
+        expect(container.querySelector('[data-current-model-indicator]')?.textContent).toBe(
+            'Current model: github-copilot/claude-opus-5.5#max from pool strong-pool, preferring github-copilot/gemini-4-carbon#high',
+        );
+    });
+
+    test('picking a pool member pins it and keeps the session and the composer on the pool', async () => {
+        strongPool();
+        setMessages([assistantMessage('a1', 'github-copilot', 'claude-opus-5.5', 'max')]);
+        await act(async () => root.render(indicatorFor('s1')));
+        await settle();
         const trigger = container.querySelector<HTMLButtonElement>('[data-current-model-indicator]');
         expect(trigger?.tagName).toBe('BUTTON');
         expect(trigger?.textContent).toBe('Current model: github-copilot/claude-opus-5.5#max from pool strong-pool');
@@ -183,18 +217,37 @@ describe('CurrentModelIndicator', () => {
         if (!trigger) throw new Error('no trigger');
         await act(async () => { trigger.click(); });
         expect(document.querySelectorAll('[data-pool-pick-timing]')).toHaveLength(3);
-        expect(document.body.textContent).toContain('A direct pick stops pool failover until you return to the pool.');
+        expect(document.body.textContent).toContain('The pool uses the model you pick while it works');
+        expect(document.body.textContent).not.toContain('stops pool failover');
         const member = document.querySelector<HTMLElement>('[data-pool-pick-member="github-copilot/gemini-4-carbon#high"]');
         if (!member) throw new Error(`no member item in: ${document.body.textContent}`);
         await act(async () => { member.click(); });
-        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+        await settle();
 
-        expect(useConfigStore.getState()).toMatchObject({
-            currentProviderId: 'github-copilot',
-            currentModelId: 'gemini-4-carbon',
-            currentVariant: 'high',
-        });
-        expect(container.querySelector('[data-current-model-indicator]')?.tagName).toBe('BUTTON');
+        expect(pinCalls).toEqual([{ sessionID: 's1', routeID: 'strong-pool', target: { providerID: 'github-copilot', id: 'gemini-4-carbon', variant: 'high' } }]);
+        expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode-route', currentModelId: 'strong-pool' });
+        expect(container.querySelector('[data-current-model-indicator]')?.textContent).toBe(
+            'Current model: github-copilot/claude-opus-5.5#max from pool strong-pool, preferring github-copilot/gemini-4-carbon#high',
+        );
+    });
+
+    test('"Any model in the pool" clears the pin', async () => {
+        strongPool();
+        pins.current = [{ routeID: 'strong-pool', target: { providerID: 'github-copilot', id: 'gemini-4-carbon', variant: 'high' } }];
+        setMessages([assistantMessage('a1', 'github-copilot', 'claude-opus-5.5', 'max')]);
+        await act(async () => root.render(indicatorFor('s1')));
+        await settle();
+        const trigger = container.querySelector<HTMLButtonElement>('[data-current-model-indicator]');
+        if (!trigger) throw new Error('no trigger');
+        await act(async () => { trigger.click(); });
+        const anyMember = document.querySelector<HTMLElement>('[data-pool-pick-member=""]');
+        if (!anyMember) throw new Error(`no pool item in: ${document.body.textContent}`);
+        await act(async () => { anyMember.click(); });
+        await settle();
+        expect(pinCalls).toEqual([{ sessionID: 's1', routeID: 'strong-pool', target: null }]);
+        expect(container.querySelector('[data-current-model-indicator]')?.textContent).toBe(
+            'Current model: github-copilot/claude-opus-5.5#max from pool strong-pool',
+        );
     });
 
     test('renders nothing before any assistant message exists', async () => {

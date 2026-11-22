@@ -15,8 +15,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/lib/i18n';
 import type { ModelSelection } from '@/lib/opencode/model';
+import type { SessionRouteTarget } from '@/lib/opencode/client';
 import { formatModelRef } from '@/lib/opencode/modelRef';
-import { applyPoolPick, POOL_PICK_TIMINGS, poolPickMenuFor, type PoolPickTiming } from '@/lib/routing/poolMemberPick';
+import { applyPoolPick, isPinnedMember, POOL_PICK_TIMINGS, poolPickMenuFor, type PoolPick, type PoolPickTiming } from '@/lib/routing/poolMemberPick';
 import { MODEL_ROUTE_PROVIDER_ID } from '@/lib/sessionErrorRecovery';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
@@ -43,11 +44,14 @@ const TIMING_LABEL_KEYS = {
  * the same component without either threading messages through its parent.
  * Long references wrap instead of truncating, so the full id stays readable.
  *
- * While a pool is selected the line opens a menu to pick one of its members
- * directly, now, at the next step or with the next message
- * (`lib/routing/poolMemberPick.ts`); after such a pick it offers the way back
- * to the pool.
+ * While a pool is selected the line opens a menu to pin one of its members
+ * for this session, now, at the next step or with the next message
+ * (`lib/routing/poolMemberPick.ts`). The session stays on the pool, so it
+ * still fails over; the line names the pinned member. A session switched to a
+ * single member directly is offered the way back to the pool.
  */
+const POOL_CHOICE = '';
+
 const CurrentModelIndicator: React.FC<CurrentModelIndicatorProps> = ({ sessionId, directory, className }) => {
     const { t } = useI18n();
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
@@ -58,12 +62,20 @@ const CurrentModelIndicator: React.FC<CurrentModelIndicatorProps> = ({ sessionId
     const [timing, setTiming] = React.useState<PoolPickTiming>('next-input');
     const [pending, setPending] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
+    // The session's pins as OpenCode reported them; undefined while unknown
+    // (not read yet, or the read failed), which shows no pin rather than "none".
+    const [pins, setPins] = React.useState<SessionRouteTarget[] | undefined>(undefined);
     const scope = React.useRef({ sessionId, directory });
     scope.current = { sessionId, directory };
     const mounted = React.useRef(false);
+    const idleWaiters = React.useRef<Array<(idle: boolean) => void>>([]);
     React.useEffect(() => {
         mounted.current = true;
-        return () => { mounted.current = false; };
+        const waiters = idleWaiters.current;
+        return () => {
+            mounted.current = false;
+            for (const resolve of waiters.splice(0)) resolve(false);
+        };
     }, []);
 
     const lastAssistantModel = React.useMemo(() => {
@@ -79,25 +91,58 @@ const CurrentModelIndicator: React.FC<CurrentModelIndicatorProps> = ({ sessionId
         () => poolPickMenuFor(providers, currentProviderId, currentModelId),
         [currentModelId, currentProviderId, providers],
     );
+    const turnRunning = status !== undefined && status.type !== 'idle';
+    React.useEffect(() => {
+        if (turnRunning) return;
+        for (const resolve of idleWaiters.current.splice(0)) resolve(true);
+    }, [turnRunning]);
+    const isPool = currentProviderId === MODEL_ROUTE_PROVIDER_ID;
+    React.useEffect(() => {
+        setPins(undefined);
+        if (!sessionId || !isPool) return;
+        let cancelled = false;
+        void (async () => {
+            const { opencodeClient } = await import('@/lib/opencode/client');
+            try {
+                const next = await opencodeClient.getSessionRouteTargets(sessionId, directory);
+                if (!cancelled) setPins(next);
+            } catch (error) {
+                console.warn('[current-model] reading the pinned pool member failed:', error);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [directory, isPool, sessionId]);
 
     if (!sessionId || !lastAssistantModel) return null;
 
-    const isPool = currentProviderId === MODEL_ROUTE_PROVIDER_ID;
+    const pinned = isPool ? pins?.find((entry) => entry.routeID === currentModelId)?.target : undefined;
     const realModel = formatModelRef(lastAssistantModel);
-    const label = isPool
-        ? t('chat.currentModel.labelWithPool', { pool: currentModelId, model: realModel })
-        : t('chat.currentModel.label', { model: realModel });
-    const turnRunning = status !== undefined && status.type !== 'idle';
+    const label = !isPool
+        ? t('chat.currentModel.label', { model: realModel })
+        : pinned
+            ? t('chat.currentModel.labelWithPin', {
+                pool: currentModelId,
+                model: realModel,
+                pinned: formatModelRef({ providerID: pinned.providerID, modelID: pinned.id, variant: pinned.variant ?? undefined }),
+            })
+            : t('chat.currentModel.labelWithPool', { pool: currentModelId, model: realModel });
 
-    const pick = async (model: ModelSelection) => {
+    const pick = async (choice: PoolPick) => {
         if (pending) return;
         const runtimeKey = getRuntimeKey();
         const stillHere = () => mounted.current && getRuntimeKey() === runtimeKey
             && scope.current.sessionId === sessionId && scope.current.directory === directory;
         setPending(true);
         try {
-            await applyPoolPick(model, timing, turnRunning, {
+            await applyPoolPick(choice, timing, turnRunning, {
                 isCurrent: stillHere,
+                whenIdle: () => new Promise<boolean>((resolve) => { idleWaiters.current.push(resolve); }),
+                setPin: async (poolID, member) => {
+                    const { opencodeClient } = await import('@/lib/opencode/client');
+                    if (!stillHere()) return;
+                    const next = await opencodeClient.setSessionRouteTarget(sessionId, poolID, member, directory);
+                    if (stillHere()) setPins(next);
+                },
                 switchSessionModel: async (next) => {
                     const { opencodeClient } = await import('@/lib/opencode/client');
                     if (!stillHere()) return;
@@ -173,28 +218,39 @@ const CurrentModelIndicator: React.FC<CurrentModelIndicatorProps> = ({ sessionId
                 <DropdownMenuSeparator />
                 {menu.kind === 'members' ? (
                     <>
-                        <p className="max-w-80 px-2 py-1 text-xs text-muted-foreground">{t('chat.currentModel.menu.directPickHelp')}</p>
+                        <p className="max-w-80 px-2 py-1 text-xs text-muted-foreground">{t('chat.currentModel.menu.pinHelp')}</p>
                         <DropdownMenuLabel>{t('chat.currentModel.menu.members', { pool: menu.poolID })}</DropdownMenuLabel>
-                        {menu.members.map((member) => {
-                            const ref = formatModelRef({ providerID: member.providerID, modelID: member.id, variant: member.variant ?? undefined });
-                            return (
-                                <DropdownMenuItem
-                                    key={ref}
-                                    className="whitespace-normal font-mono [overflow-wrap:anywhere]"
-                                    data-pool-pick-member={ref}
-                                    onClick={() => void pick(member)}
-                                >
-                                    <span dir="ltr">{ref}</span>
-                                </DropdownMenuItem>
-                            );
-                        })}
+                        <DropdownMenuRadioGroup
+                            value={menu.members.find((member) => isPinnedMember(pinned, member)) ? memberRef(pinned) : POOL_CHOICE}
+                            onValueChange={(value) => {
+                                const member = menu.members.find((candidate) => memberRef(candidate) === value) ?? null;
+                                void pick({ kind: 'pin', poolID: menu.poolID, member });
+                            }}
+                        >
+                            <DropdownMenuRadioItem value={POOL_CHOICE} data-pool-pick-member="">
+                                {t('chat.currentModel.menu.anyMember')}
+                            </DropdownMenuRadioItem>
+                            {menu.members.map((member) => {
+                                const ref = memberRef(member);
+                                return (
+                                    <DropdownMenuRadioItem
+                                        key={ref}
+                                        value={ref}
+                                        className="whitespace-normal font-mono [overflow-wrap:anywhere]"
+                                        data-pool-pick-member={ref}
+                                    >
+                                        <span dir="ltr">{ref}</span>
+                                    </DropdownMenuRadioItem>
+                                );
+                            })}
+                        </DropdownMenuRadioGroup>
                     </>
                 ) : (
                     menu.pools.map((poolID) => (
                         <DropdownMenuItem
                             key={poolID}
                             data-pool-pick-return={poolID}
-                            onClick={() => void pick({ providerID: MODEL_ROUTE_PROVIDER_ID, id: poolID })}
+                            onClick={() => void pick({ kind: 'return', poolID })}
                         >
                             {t('chat.currentModel.menu.returnToPool', { pool: poolID })}
                         </DropdownMenuItem>
@@ -204,5 +260,8 @@ const CurrentModelIndicator: React.FC<CurrentModelIndicatorProps> = ({ sessionId
         </DropdownMenu>
     );
 };
+
+const memberRef = (member: ModelSelection | undefined): string =>
+    member ? formatModelRef({ providerID: member.providerID, modelID: member.id, variant: member.variant ?? undefined }) : POOL_CHOICE;
 
 export default React.memo(CurrentModelIndicator);

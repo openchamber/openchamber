@@ -162,12 +162,35 @@ export class OpencodeApiError extends Error {
 
 const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optional(), ref: z.string().optional() })
 
-/** Error body of a raw session request (see `sessionPolicyRequest`). */
+/** Error body of a raw session request (see `rawSessionRequest`). */
 const sessionPolicyErrorBodySchema = z.object({
   _tag: z.string().optional(),
   message: z.string().optional(),
   ref: z.string().optional(),
 })
+
+const routeTargetsEnvelopeSchema = z.object({
+  data: z.array(z.object({
+    routeID: z.string(),
+    target: z.object({ providerID: z.string(), id: z.string(), variant: z.string().optional() }),
+  })),
+})
+
+/** One pinned pool member: `target` is preferred inside pool `routeID`. */
+export type SessionRouteTarget = { routeID: string; target: ModelSelection }
+
+async function parseRouteTargets(
+  operation: "session.routeTarget.list" | "session.routeTarget.set",
+  response: Response,
+): Promise<SessionRouteTarget[]> {
+  const envelope = routeTargetsEnvelopeSchema.safeParse(await response.json().catch(() => null))
+  if (!envelope.success) {
+    throw new OpencodeApiError(operation, "OpenCode answered in a form this version does not read", {
+      status: response.status,
+    })
+  }
+  return envelope.data.data
+}
 
 /** Every session create/update answer wraps the record in `{ data }`. */
 const sessionInfoEnvelopeSchema = z.object({ data: z.unknown() })
@@ -740,11 +763,11 @@ class OpencodeService {
    * `./messaging`), with the same directory scoping the generated client
    * gets from its client-level header.
    */
-  private async sessionPolicyRequest<TBody>(
-    operation: "session.create" | "session.update",
-    method: "POST" | "PATCH",
+  private async rawSessionRequest<TBody>(
+    operation: "session.create" | "session.update" | "session.routeTarget.list" | "session.routeTarget.set",
+    method: "GET" | "POST" | "PATCH",
     path: string,
-    body: TBody,
+    body: TBody | undefined,
     directory?: string | null,
   ): Promise<Response> {
     const requestDirectory = this.resolveDirectory(directory)
@@ -759,7 +782,7 @@ class OpencodeService {
         await runtimeFetch(`${this.baseUrl}${path}`, {
           method,
           headers,
-          body: JSON.stringify(body),
+          body: body === undefined ? undefined : JSON.stringify(body),
         }),
       )
     } catch (error) {
@@ -1062,7 +1085,7 @@ class OpencodeService {
     // The generated client's create body is built from the fields it knows
     // and would drop `subagentPolicy` (see `SubagentPolicy` in `./model`),
     // so a create carrying one takes the raw path.
-    const response = await this.sessionPolicyRequest(
+    const response = await this.rawSessionRequest(
       "session.create",
       "POST",
       "/session",
@@ -1106,7 +1129,7 @@ class OpencodeService {
    * takes the raw path, like a create that carries a policy.
    */
   async updateSessionSubagentPolicy(id: string, subagentPolicy: SubagentPolicy, directory?: string | null): Promise<void> {
-    await this.sessionPolicyRequest(
+    await this.rawSessionRequest(
       "session.update",
       "PATCH",
       `/session/${encodeURIComponent(id)}`,
@@ -1120,6 +1143,40 @@ class OpencodeService {
     await call("session.move", () =>
       this.client.session.move({ sessionID: id, directory, delivery: options?.delivery }),
     )
+  }
+
+  /**
+   * The pool members this session has pinned, one per pool. A pinned member
+   * serves while it is healthy and the session stays on the pool, so it still
+   * fails over (`POST /api/session/:id/route-target`, OpenCode fork #2671).
+   * The published client predates the route, so it takes the raw path.
+   */
+  async getSessionRouteTargets(id: string, directory?: string | null): Promise<SessionRouteTarget[]> {
+    const response = await this.rawSessionRequest(
+      "session.routeTarget.list",
+      "GET",
+      `/session/${encodeURIComponent(id)}/route-target`,
+      undefined,
+      directory,
+    )
+    return parseRouteTargets("session.routeTarget.list", response)
+  }
+
+  /** Pins `target` as the session's preferred member of pool `routeID`, or clears the pin with `null`. Returns the session's pins. */
+  async setSessionRouteTarget(
+    id: string,
+    routeID: string,
+    target: ModelSelection | null,
+    directory?: string | null,
+  ): Promise<SessionRouteTarget[]> {
+    const response = await this.rawSessionRequest(
+      "session.routeTarget.set",
+      "POST",
+      `/session/${encodeURIComponent(id)}/route-target`,
+      { routeID, target: target === null ? null : toModelRef(target) },
+      directory,
+    )
+    return parseRouteTargets("session.routeTarget.set", response)
   }
 
   async switchSessionModel(id: string, model: ModelSelection, directory?: string | null): Promise<void> {
