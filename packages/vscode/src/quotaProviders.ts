@@ -2985,7 +2985,7 @@ export const normalizeTimestamp = (value: unknown) => {
   return value < 1_000_000_000_000 ? value * 1000 : value;
 };
 
-const resolveWindowSeconds = (limit: Record<string, unknown> | undefined) => {
+const resolveWindowSeconds = (limit: ZaiLimit | undefined) => {
   if (!limit || typeof limit.number !== 'number') return null;
   const unitSeconds = ZAI_TOKEN_WINDOW_SECONDS[Number(limit.unit)];
   if (!unitSeconds) return null;
@@ -3117,7 +3117,7 @@ export const fetchZaiQuota = async ({ readAuth = readOpenCodeCredentials }: ZaiQ
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows: Record<string, UsageWindow> = {};
     for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
-      const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
+      const windowSeconds = resolveWindowSeconds(limit);
       const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
       const usedPercent = typeof limit.percentage === 'number' ? clampPercent(limit.percentage) : null;
@@ -3275,7 +3275,7 @@ export const fetchZhipuaiCodingPlanQuota = async ({ readAuth = readOpenCodeCrede
     const windows: Record<string, UsageWindow> = {};
 
     for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
-      const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
+      const windowSeconds = resolveWindowSeconds(limit);
       const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
 
