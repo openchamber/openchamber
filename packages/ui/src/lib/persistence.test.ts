@@ -902,6 +902,7 @@ describe('updateDesktopSettings', () => {
         recentAgents: ['build'],
         favoriteAgents: ['plan'],
         recentEfforts: { 'openai/gpt-5': ['low'] },
+        modelDefaultVariants: {},
         customProviderIcons: {},
       });
     } finally {
@@ -930,6 +931,7 @@ describe('updateDesktopSettings', () => {
         recentAgents: [],
         favoriteAgents: [],
         recentEfforts: {},
+        modelDefaultVariants: {},
         customProviderIcons: {},
       }]);
     } finally {
@@ -1535,6 +1537,7 @@ describe('unload lifecycle flush (#2197)', () => {
         recentAgents: [],
         favoriteAgents: [],
         recentEfforts: {},
+        modelDefaultVariants: {},
         customProviderIcons: {},
       }]);
     } finally {

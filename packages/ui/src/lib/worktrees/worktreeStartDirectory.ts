@@ -113,9 +113,11 @@ const createdWorktreeStartDeps: CreatedWorktreeStartDeps = {
 
 /**
  * `resolveWorktreeStartDirectory` for a worktree the caller has just created.
- * It rejects only when the checkout failed to populate; that worktree and its
- * branch are of no use to anyone, so they are removed before the error is
- * rethrown. A failed removal is logged and the original error still wins.
+ * A checkout that never reports ready rejects and is kept: the failed check
+ * cannot prove it holds nothing worth recovering. A checkout that is ready but
+ * fails to resolve is of no use to anyone, so it and its branch are removed
+ * before the error is rethrown. A failed removal is logged and the original
+ * error still wins.
  */
 export const resolveCreatedWorktreeStartDirectory = async (
   project: ProjectRef,
