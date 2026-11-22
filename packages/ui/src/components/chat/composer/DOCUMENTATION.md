@@ -955,6 +955,30 @@ on-screen event timeline (removed in `debug(ui): remove the mobile swap
 timeline overlay`, restorable from git) settled in one screenshot what two
 rounds of plausible fixes could not.
 
+## Subsession models
+
+The footer's "Subsession models" button (`SubsessionModelsControl`) opens the
+same `ModelPickerList` the composer's model picker uses: search, arrows and
+Enter, favorites, recents, provider order and collapsed sections all behave
+the same. The difference is that several models can be chosen, so rows are
+marked through `isModelSelected` and choosing a row, by click or Enter, toggles
+it and keeps the menu open. Wildcard and `#variant` entries set through config
+or the API sit above the list as read-only lines and are kept on every save.
+
+On a session each toggle PATCHes the whole policy. Toggles made while a save
+is in flight queue behind it in `createSubagentPolicyWriter`
+(`lib/opencode/subagentPolicy.ts`), each built on the one before, and the
+pending policy shows at once; when the last save settles the re-read session
+record is the source of truth again. A failed save shows a toast and the
+writes behind it still run. In a new-session draft the selection lives in
+`useSubsessionDraftStore` and goes out with the create call.
+
+### Why queue toggles and not disable the list while saving
+
+The first version disabled every row until a save settled, so choosing three
+models meant three waits and clicks during a save were lost. Queueing keeps
+writes in order, so the last write always holds every change.
+
 ## Run in parallel
 
 The desktop model picker offers "Run on several models" right under Auto
