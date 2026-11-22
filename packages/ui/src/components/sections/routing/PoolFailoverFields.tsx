@@ -92,7 +92,9 @@ export const PoolFailoverFields: React.FC<{
             ? t('settings.pools.timeout.pending')
             : wait === false
               ? t('settings.pools.timeout.waitsNone')
-              : t('settings.pools.timeout.waits', { seconds: Math.round(wait / SECOND) })}
+              : choice === 'own'
+                ? t('settings.pools.timeout.waitsOwn', { seconds: Math.round(wait / SECOND) })
+                : t('settings.pools.timeout.waits', { seconds: Math.round(wait / SECOND) })}
         </p>
       </div>
       <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">

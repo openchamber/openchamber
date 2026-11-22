@@ -556,6 +556,24 @@ describe('ModelPoolsSection', () => {
     }
   });
 
+  // Oracle: the English labels. The select shows its raw value unless it is
+  // given the label, which once put `__unset__` and `round-robin` on screen.
+  test('selects show their labels, never internal values, and one target reads as singular', async () => {
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'], selection: 'round-robin' } });
+    const { dom, cleanup } = await renderSection();
+    try {
+      expect(dom.container.textContent).toContain('1 target');
+      expect(dom.container.textContent).not.toContain('1 targets');
+      await openAdvanced(dom.container);
+      const trigger = (label: string) => findByAriaLabel(dom.container, 'button', label).textContent?.trim();
+      expect(trigger('Autonomy')).toBe('Unset (full behavior)');
+      expect(trigger('Selection')).toBe('Round-robin');
+      expect(dom.container.textContent).not.toContain('__unset__');
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('a pool of pools can let each pool inside keep its own wait', async () => {
     Object.assign(serverRoutes, {
       slow: { targets: ['p/cheap'], health: { firstTokenTimeoutMs: 120_000 } },
@@ -568,8 +586,18 @@ describe('ModelPoolsSection', () => {
       await clickButton(dom.container, 'Each pool its own');
       // The server writes 30 seconds for the pool's own models on save.
       expect(lastSave().top).toEqual({ targets: ['opencode-route/slow'], nestedTimeout: 'own' });
+      Object.assign(serverRoutes, { top: { ...lastSave().top, health: { firstTokenTimeoutMs: 30_000 } } });
     } finally {
       await cleanup();
+    }
+    // Once saved, the helper says the pools inside keep their own wait, not that every model waits 30 seconds.
+    const reopened = await renderSection();
+    try {
+      await expandPool(reopened.dom.container, 'top');
+      expect(reopened.dom.container.textContent).toContain("This pool's own models wait up to 30 seconds");
+      expect(reopened.dom.container.textContent).not.toContain("OpenCode waits up to 30 seconds for a model's first output");
+    } finally {
+      await reopened.cleanup();
     }
   });
 

@@ -31,7 +31,8 @@ const PoolRow: React.FC<{
   const hidden = useUIStore((state) => state.hiddenModels.some((entry) => entry.providerID === MODEL_ROUTE_PROVIDER_ID && entry.modelID === id));
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const name = route.name || id;
-  const summary = [t('settings.pools.targetCount', { count: (route.targets ?? []).length }), route.description].filter(Boolean).join(' · ');
+  const count = (route.targets ?? []).length;
+  const summary = [count === 1 ? t('settings.pools.targetCount.one') : t('settings.pools.targetCount', { count }), route.description].filter(Boolean).join(' · ');
 
   return (
     <div

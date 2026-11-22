@@ -98,8 +98,7 @@ instead, a number of your own, no limit, or **Each pool its own**: the pool's
 own models then wait 30 seconds and the models of each pool inside wait as long
 as that pool would, which needs a recent OpenCode. If a reply fails, **Try the
 next pool model** retries with the next model in the pool that has not failed
-for that message; once every model has failed, the reply lists the models it
-tried.
+for that message; once no model is left to try, the reply says so.
 
 Open a pool in **Settings → Routing → Model pools** to set each model's effort
 in its own row: the provider's default (no effort is sent), a default the
