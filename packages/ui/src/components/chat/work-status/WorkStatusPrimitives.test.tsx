@@ -32,6 +32,7 @@ const withDom = async (run: (container: HTMLElement, render: (node: React.ReactN
     requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
     cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     ResizeObserver: dom.ResizeObserver,
+    MutationObserver: dom.MutationObserver,
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
