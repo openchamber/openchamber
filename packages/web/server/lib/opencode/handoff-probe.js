@@ -124,6 +124,10 @@ export const createHandoffProbeGate = ({
     process.on('message', handler);
     return () => process.off('message', handler);
   },
+  onDisconnect = (handler) => {
+    process.on('disconnect', handler);
+    return () => process.off('disconnect', handler);
+  },
   checkListener = checkInheritedListenerAddress,
   checkState = checkStateVersions,
   log = console,
@@ -164,20 +168,31 @@ export const createHandoffProbeGate = ({
   }
 
   const verdict = await new Promise((resolve) => {
-    const off = onMessage((message) => {
+    let offMessage = () => {};
+    let offDisconnect = () => {};
+    const settle = (result) => {
+      offMessage();
+      offDisconnect();
+      resolve(result);
+    };
+    offMessage = onMessage((message) => {
       if (message?.type === HANDOFF_GO_MESSAGE) {
-        off();
-        resolve({ go: true });
+        settle({ go: true });
       } else if (message?.type === HANDOFF_ABORT_MESSAGE) {
-        off();
-        resolve({ go: false, reason: message.reason === 'preflight-failed' ? 'preflight-failed' : 'incompatible', detail: message.detail == null ? undefined : String(message.detail) });
+        settle({ go: false, reason: message.reason === 'preflight-failed' ? 'preflight-failed' : 'incompatible', detail: message.detail == null ? undefined : String(message.detail) });
       }
+    });
+    // The budget for the exchange lives on the predecessor's side; a successor whose
+    // predecessor dies mid-exchange has nobody left to answer, and waiting would hold
+    // its copy of the listener open with the port wedged. The closed channel is its
+    // signal to give up the same way a refusal does.
+    offDisconnect = onDisconnect(() => {
+      settle({ go: false, reason: 'preflight-failed', detail: 'the predecessor closed the handoff channel before answering the hello' });
     });
     try {
       send(hello);
     } catch (error) {
-      off();
-      resolve({ go: false, reason: 'preflight-failed', detail: `the hello could not be sent: ${error?.message ?? error}` });
+      settle({ go: false, reason: 'preflight-failed', detail: `the hello could not be sent: ${error?.message ?? error}` });
     }
   });
   if (!verdict.go) throw new HandoffProbeAbort(verdict.reason, verdict.detail);

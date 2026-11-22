@@ -92,18 +92,26 @@ describe('createHandoffProbeGate', () => {
   const createGate = (overrides = {}) => {
     const sent = [];
     let handler = null;
+    let disconnectHandler = null;
     const gate = createHandoffProbeGate({
       version: '2.6.0',
       dataDir: '/tmp/unused',
       previewOpenCode: async () => ({ decision: { action: 'adopt', reason: 'matches-state' }, openCodeVersion: '2.0.26' }),
       send: (message) => { sent.push(message); },
       onMessage: (fn) => { handler = fn; return () => { handler = null; }; },
+      onDisconnect: (fn) => { disconnectHandler = fn; return () => { disconnectHandler = null; }; },
       checkListener: () => ({ ok: true, address: { address: '127.0.0.1', port: 3000 } }),
       checkState: () => ({ ok: true, stateVersion: 1 }),
       log: { log: vi.fn() },
       ...overrides,
     });
-    return { gate, sent, deliver: (message) => handler?.(message) };
+    return {
+      gate,
+      sent,
+      deliver: (message) => handler?.(message),
+      disconnect: () => disconnectHandler?.(),
+      handlersCleared: () => handler === null && disconnectHandler === null,
+    };
   };
 
   it('sends a hello with the version, protocol, state version and OpenCode decision, and resolves on go', async () => {
@@ -148,6 +156,18 @@ describe('createHandoffProbeGate', () => {
     });
     await expect(gate({ port: 3000, bindHost: '127.0.0.1' })).rejects.toMatchObject({ handoffOutcome: 'preflight-failed' });
     expect(sent[0].detail).toContain('binary missing');
+  });
+
+  it('gives up when the predecessor closes the channel before answering', async () => {
+    const { gate, sent, disconnect, handlersCleared } = createGate();
+    const pending = gate({ port: 3000, bindHost: '127.0.0.1' });
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    disconnect();
+    await expect(pending).rejects.toMatchObject({
+      handoffOutcome: 'preflight-failed',
+      detail: 'the predecessor closed the handoff channel before answering the hello',
+    });
+    expect(handlersCleared()).toBe(true);
   });
 
   it('throws the predecessor refusal with its reason and detail', async () => {
