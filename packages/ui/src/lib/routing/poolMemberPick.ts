@@ -1,24 +1,26 @@
 /**
- * Picking one member of a model pool directly, and going back to the pool.
+ * Pinning one member of a model pool for a session, and going back to a pool.
  *
- * OpenCode keeps a session's pool target in memory and has no route to pin
- * one member while staying in the pool, so a pick puts the session on that
- * member's model: the session leaves the pool and no longer fails over
- * inside it until the user returns to the pool. When the pick takes effect
- * is the user's choice:
+ * A pin keeps the session on the pool (OpenCode `POST /api/session/:id/route-target`,
+ * fork #2671): the pinned member serves while it is healthy, the pool fails
+ * over to its other members when it is not, and requests return to the member
+ * once it recovers. Clearing the pin (`member: null`) restores the pool's
+ * normal choice. When a pin takes effect is the user's choice:
  *
- * - `next-input`: only the composer's selection changes; the running turn
- *   finishes on whatever it runs on, and the next message sends with the pick.
- * - `next-step`: the session's model switches now. OpenCode reloads the
- *   session context before every model request, so a running turn makes its
- *   next request (after the current one or the current tool call) on the pick.
- * - `immediately`: a running turn is replayed on the pick (the latest prompt
- *   is staged out and sent again, as the "Stop and restart this reply" choice
- *   for model changes during a reply does); an idle session switches now,
- *   which is the same as `next-step`.
+ * - `next-input`: the pin is set once the running turn has finished, so the
+ *   next message is the first to use it; an idle session pins now.
+ * - `next-step`: the pin is set now. OpenCode reads it on every model
+ *   request, so a running turn makes its next request on the member.
+ * - `immediately`: the pin is set now and a running turn is replayed on the
+ *   pool (the latest prompt is staged out and sent again, as the "Stop and
+ *   restart this reply" choice for model changes during a reply does); an idle
+ *   session pins now, which is the same as `next-step`.
  *
- * The OpenCode call runs first and the composer follows only when it
- * succeeded, so a refused switch leaves the selection the user had.
+ * A session whose model was switched to a single pool member directly (an
+ * older pick, or the model picker) can go back to a pool: that switches the
+ * session's model, with the same three timings, and the composer follows only
+ * when the switch succeeded, so a refused switch leaves the selection the user
+ * had.
  */
 import type { ModelSelection } from '@/lib/opencode/model';
 import { getModelPoolTargets, MODEL_ROUTE_PROVIDER_ID } from '@/lib/sessionErrorRecovery';
@@ -27,35 +29,63 @@ export type PoolPickTiming = 'immediately' | 'next-step' | 'next-input';
 
 export const POOL_PICK_TIMINGS: readonly PoolPickTiming[] = ['immediately', 'next-step', 'next-input'];
 
-type RemoteAction = 'switch-session' | 'restart-turn' | null;
+/** Pin `member` inside pool `poolID` (null clears the pin), or switch the session back onto a pool. */
+export type PoolPick =
+  | { kind: 'pin'; poolID: string; member: ModelSelection | null }
+  | { kind: 'return'; poolID: string };
 
-/** What a pick does to the session before the composer follows. */
-export const remoteActionFor = (timing: PoolPickTiming, turnRunning: boolean): RemoteAction => {
+type ReturnAction = 'switch-session' | 'restart-turn' | null;
+type PinAction = 'pin' | 'pin-and-restart' | 'pin-when-idle';
+
+/** What going back to a pool does to the session before the composer follows. */
+export const returnActionFor = (timing: PoolPickTiming, turnRunning: boolean): ReturnAction => {
   if (timing === 'next-input') return null;
   if (timing === 'immediately' && turnRunning) return 'restart-turn';
   return 'switch-session';
 };
 
+/** When a pin is set, and whether the running turn is replayed. */
+export const pinActionFor = (timing: PoolPickTiming, turnRunning: boolean): PinAction => {
+  if (!turnRunning) return 'pin';
+  if (timing === 'immediately') return 'pin-and-restart';
+  if (timing === 'next-input') return 'pin-when-idle';
+  return 'pin';
+};
+
 interface PoolPickDeps {
+  setPin: (poolID: string, member: ModelSelection | null) => Promise<void>;
   switchSessionModel: (model: ModelSelection) => Promise<void>;
   restartTurn: (model: ModelSelection) => Promise<void>;
   selectComposerModel: (model: ModelSelection) => void;
+  /** Resolves true once the running turn is idle, false if the pick's scope is gone first. */
+  whenIdle: () => Promise<boolean>;
   /** False once the session, directory or runtime the pick was made for is gone. */
   isCurrent: () => boolean;
 }
 
-/** Applies a pick (a pool member, or the pool itself to return to it). Throws when the session could not be switched. */
+const poolModel = (poolID: string): ModelSelection => ({ providerID: MODEL_ROUTE_PROVIDER_ID, id: poolID });
+
+/** Applies a pick. Throws when OpenCode refused the pin, the switch or the restart. */
 export const applyPoolPick = async (
-  model: ModelSelection,
+  pick: PoolPick,
   timing: PoolPickTiming,
   turnRunning: boolean,
   deps: PoolPickDeps,
 ): Promise<void> => {
   if (!deps.isCurrent()) return;
-  const action = remoteActionFor(timing, turnRunning);
-  if (action === 'switch-session') await deps.switchSessionModel(model);
-  if (action === 'restart-turn') await deps.restartTurn(model);
-  if (deps.isCurrent()) deps.selectComposerModel(model);
+  if (pick.kind === 'return') {
+    const model = poolModel(pick.poolID);
+    const action = returnActionFor(timing, turnRunning);
+    if (action === 'switch-session') await deps.switchSessionModel(model);
+    if (action === 'restart-turn') await deps.restartTurn(model);
+    if (deps.isCurrent()) deps.selectComposerModel(model);
+    return;
+  }
+  const action = pinActionFor(timing, turnRunning);
+  if (action === 'pin-when-idle' && !(await deps.whenIdle())) return;
+  if (!deps.isCurrent()) return;
+  await deps.setPin(pick.poolID, pick.member);
+  if (action === 'pin-and-restart' && deps.isCurrent()) await deps.restartTurn(poolModel(pick.poolID));
 };
 
 type CatalogModel = NonNullable<Parameters<typeof getModelPoolTargets>[0][number]['models']>[number] & { enabled?: boolean };
@@ -71,10 +101,11 @@ type PoolPickMenu =
 
 /**
  * What the current-model menu offers for the composer's selection: the
- * members of the selected pool, or the pools a directly picked model belongs
- * to, so the user can go back. A pool whose members the catalog does not
- * list (a pattern-only pool, an older OpenCode) offers nothing to pick, and a
- * member missing from its provider's catalog or disabled there is left out.
+ * members of the selected pool to pin, or the pools a directly picked model
+ * belongs to, so the user can go back. A pool whose members the catalog does
+ * not list (a pattern-only pool, an older OpenCode) offers nothing to pick,
+ * and a member missing from its provider's catalog or disabled there is left
+ * out.
  */
 export const poolPickMenuFor = (
   providers: readonly CatalogProvider[],
@@ -95,3 +126,10 @@ export const poolPickMenuFor = (
       .some((target) => target.providerID === providerID && target.id === modelID));
   return pools.length > 0 ? { kind: 'return', pools } : { kind: 'none' };
 };
+
+/** Whether `pinned` names `member`: same provider and model, and the same variant when either has one. */
+export const isPinnedMember = (pinned: ModelSelection | undefined, member: ModelSelection): boolean =>
+  pinned !== undefined
+  && pinned.providerID === member.providerID
+  && pinned.id === member.id
+  && (pinned.variant ?? undefined) === (member.variant ?? undefined);

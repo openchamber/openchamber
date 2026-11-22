@@ -229,6 +229,28 @@ describe("request fidelity", () => {
     expect(requests[0].body).toEqual({ subagentPolicy })
   })
 
+  test("pinning a pool member POSTs the route target and reads back the session's pins", async () => {
+    const target = { providerID: "github-copilot", id: "gemini-4-carbon", variant: "high" }
+    responses.push(json({ data: [{ routeID: "strong-pool", target }] }))
+    const pins = await opencodeClient.setSessionRouteTarget("ses_1", "strong-pool", target, "/repo/app")
+    expect(requests[0].method).toBe("POST")
+    expect(requests[0].url.pathname).toBe("/api/session/ses_1/route-target")
+    expect(requests[0].body).toEqual({ routeID: "strong-pool", target })
+    expect(pins).toEqual([{ routeID: "strong-pool", target }])
+  })
+
+  test("clearing a pin sends target null, and listing reads the pins", async () => {
+    responses.push(json({ data: [] }))
+    expect(await opencodeClient.setSessionRouteTarget("ses_1", "strong-pool", null, "/repo/app")).toEqual([])
+    expect(requests[0].body).toEqual({ routeID: "strong-pool", target: null })
+    responses.push(json({ data: [{ routeID: "p", target: { providerID: "a", id: "m" } }] }))
+    expect(await opencodeClient.getSessionRouteTargets("ses_1", "/repo/app")).toEqual([
+      { routeID: "p", target: { providerID: "a", id: "m" } },
+    ])
+    expect(requests[1].method).toBe("GET")
+    expect(requests[1].url.pathname).toBe("/api/session/ses_1/route-target")
+  })
+
   test("releasing a location names its directory, never OpenCode's own", async () => {
     opencodeClient.setDirectory("/repo/current")
     responses.push(noContent())
