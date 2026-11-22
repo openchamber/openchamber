@@ -6,6 +6,7 @@ import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage } from './browser/hostCapability';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
+import { goalSpecJobEventSchema } from '@/lib/goalSpecJobs';
 import { sessionWarmingSnapshotSchema, type SessionWarmingSnapshot } from '@/stores/useSessionWarmingStore';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
@@ -192,6 +193,8 @@ type OpenChamberEvent =
   | RoutingPermissionHeldEvent
   | RoutingSafetySkippedEvent
   | MessageQueueUpdatedEvent
+  /** A goal writer job changed or left the server ("Send when ready"). */
+  | { type: 'goal-spec-job'; update: z.infer<typeof goalSpecJobEventSchema> }
   /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
   /** The host follows this space's queue again; what changed in a gap is read from the space. */
@@ -401,6 +404,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     if (parsed.success) {
       for (const listener of listeners) listener(parsed.data);
     }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:goal-spec-job.updated') {
+    const parsed = goalSpecJobEventSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'goal-spec-job', update: parsed.data });
     return;
   }
 

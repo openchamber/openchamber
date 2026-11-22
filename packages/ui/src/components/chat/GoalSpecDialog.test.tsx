@@ -3,8 +3,8 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { I18nProvider } from '@/lib/i18n';
-import type { BackgroundGoalSpec, GoalSpecResult, GoalSubmitChoice } from '@/lib/goalWriter';
-import type { GoalSpecDialogRequest } from './GoalSpecDialog';
+import type { GoalSpecResult, GoalSubmitChoice } from '@/lib/goalWriter';
+import type { GoalSpecDialogRequest, GoalWriterHandoff } from './GoalSpecDialog';
 import { useConfigStore } from '@/stores/useConfigStore';
 
 // React DOM and the Base UI dialog probe for a DOM when first imported; without
@@ -56,7 +56,7 @@ describe('GoalSpecDialog', () => {
   let dom: ReturnType<typeof installDom>;
   let choices: GoalSubmitChoice[];
   let cancels: number;
-  let backgrounds: BackgroundGoalSpec[];
+  let backgrounds: GoalWriterHandoff[];
 
   const render = (request: Omit<GoalSpecDialogRequest, 'id'> | null) => act(async () => root.render(
     <I18nProvider>
@@ -339,30 +339,28 @@ describe('GoalSpecDialog', () => {
     });
   });
 
-  test('send when ready hands the current run to the composer, which keeps it after the window closes', async () => {
+  // Oracle: the handoff names the options of the latest run, the one for the
+  // writer picked last, so the server writes the spec the window would have.
+  test('send when ready hands the latest run\'s options to the server and stops the run here', async () => {
     await withWriterModels(async () => {
       const writes = controlledWrites();
       await render({ ...base, sessionModel: { providerID: 'p', modelID: 'm' }, trigger: 'auto-create', review: true, defaultSendMode: 'goal-as-message', write: writes.write });
       await pickEffort('Low');
       await click('Send when ready');
 
-      expect(backgrounds).toHaveLength(1);
-      expect(backgrounds[0]).toMatchObject({ sendMode: 'goal-as-message', ignoreLimit: false });
-      // The composer closes the window once it takes the send.
+      expect(backgrounds).toEqual([{
+        sendMode: 'goal-as-message',
+        run: { writer: { providerID: 'p', modelID: 'm', variant: 'low' }, ignoreLimit: false, section: undefined, currentSpec: undefined },
+      }]);
+      // The composer closes the window once it takes the send; the run here stops.
       await render(null);
-      expect(backgrounds[0].controller.signal.aborted).toBe(false);
-      expect(writes.calls[1].signal.aborted).toBe(false);
-
-      // The replaced run finishing late does not become the handed-off result.
-      writes.calls[0].resolve(specFor('Stale'));
-      writes.calls[1].resolve(specFor('Current'));
-      expect(await backgrounds[0].result).toEqual(specFor('Current'));
+      expect(writes.calls[1].signal.aborted).toBe(true);
       expect(choices).toEqual([]);
       expect(cancels).toBe(0);
     });
   });
 
-  test('a window that sends when written keeps writing when closed; a review window is cancelled', async () => {
+  test('closing a window that sends when written hands it to the server; a review window is cancelled', async () => {
     const writes = controlledWrites();
     const pressEscape = () => act(async () => {
       (document.activeElement ?? document).dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -372,8 +370,8 @@ describe('GoalSpecDialog', () => {
     await pressEscape();
     expect(backgrounds).toHaveLength(1);
     expect(cancels).toBe(0);
+    expect(backgrounds[0]).toMatchObject({ sendMode: 'with-message', run: { writer: null, ignoreLimit: false } });
     await render(null);
-    expect(writes.calls[0].signal.aborted).toBe(false);
 
     await render({ ...base, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: writes.write });
     await pressEscape();

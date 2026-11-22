@@ -6,6 +6,7 @@ import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
+import { registerGoalSpecJobRoutes } from '../session-goal/spec-jobs.js';
 import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
 import { setWarmingDuration, setWarmingEnabled } from './websearch-config.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
@@ -286,6 +287,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       permissionAutoAcceptRuntime,
       worktreeBootstrapStore,
       messageQueueRuntime,
+      goalSpecJobRuntime,
       routingRuntime,
       globalEventHub,
       openchamberVersion,
@@ -301,6 +303,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
     registerMessageQueueRoutes(app, messageQueueRuntime);
+    if (goalSpecJobRuntime) registerGoalSpecJobRoutes(app, goalSpecJobRuntime);
     registerRoutingRoutes(app, routingRuntime);
     registerModelRouteRoutes(app, {
       readConfigLayers,

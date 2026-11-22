@@ -53,7 +53,7 @@ import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import { useUIStore } from "@/stores/useUIStore"
 import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useCommandsStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
-import { buildGoalIntroReminder, type BackgroundGoalOutcome } from "@/lib/goalWriter"
+import { buildGoalIntroReminder } from "@/lib/goalWriter"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { createInputHistoryIdentity, useInputHistoryStore, type InputHistorySubmission } from "@/stores/useInputHistoryStore"
 import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
@@ -2072,7 +2072,7 @@ export type CapturedSendTarget = {
 }
 
 export type SendMessageOptions = {
-  /** Runtime captured before a background wait or draft materialization. */
+  /** Runtime captured at submit; deferred sends (startup hold, worktree setup) check it again. */
   runtimeKey?: string
   /** Explicit composer intent; automated continuations must not restore archives. */
   userInitiated?: boolean
@@ -2090,14 +2090,6 @@ export type SendMessageOptions = {
    * replaces the composer's armed goal, which belongs to the composer text.
    */
   queuedGoal?: QueuedMessageGoal | null
-  /**
-   * A goal still being written ("Send when ready"). The message waits for it
-   * and goes out with it; a draft creates its session first. When it rejects,
-   * nothing is sent.
-   */
-  pendingGoal?: Promise<BackgroundGoalOutcome>
-  /** Called once a draft send has created its session. */
-  onSessionCreated?: (sessionId: string, directory: string | null) => void
 }
 
 function notifyMessageSent(sessionId: string): void {
@@ -2130,41 +2122,6 @@ export async function sendMessage(
     if (capturedRuntimeKey !== getRuntimeKey()) throw new Error("Message was not sent because the runtime changed.")
   }
   assertRuntimeUnchanged()
-  const capturedDraft = options?.draftSnapshot ?? useSessionUIStore.getState().newSessionDraft
-  const pendingGoal = options?.pendingGoal
-  if (pendingGoal) {
-    // Attach rejection handling before worktree creation can yield. Otherwise
-    // a writer failure during setup is temporarily an unhandled rejection.
-    const goalResult = pendingGoal.then(
-      (value) => ({ ok: true as const, value }),
-      (error: Error) => ({ ok: false as const, error }),
-    )
-    const isDraftSend = !capturedTarget && !options?.sessionId && capturedDraft?.open
-    const created = isDraftSend
-      ? await runAfterOpenCodeStartup(async () => {
-          assertRuntimeUnchanged()
-          return materializeOpenDraftSession({ providerID, modelID, agent, variant }, capturedDraft, { keepUserPlace: true })
-        })
-      : null
-    if (isDraftSend && !created) throw new Error("Failed to create session")
-    if (created) options?.onSessionCreated?.(created.sessionId, created.directory ?? null)
-    // Goal generation stays outside the startup send queue, so it never
-    // prevents a later task from being handed to OpenCode.
-    const settled = await goalResult
-    if (!settled.ok) throw settled.error
-    assertRuntimeUnchanged()
-    const ready = settled.value
-    return sendMessage(ready.content ?? content, providerID, modelID, created?.agent ?? agent, attachments, agentMentionName,
-      created ? [...(additionalParts ?? []), ...(created.syntheticParts ?? [])] : additionalParts,
-      variant, inputMode, {
-        ...options,
-        runtimeKey: capturedRuntimeKey,
-        sessionId: created?.sessionId ?? options?.sessionId,
-        directory: created?.directory ?? options?.directory,
-        pendingGoal: undefined,
-        queuedGoal: ready.goal,
-      })
-  }
   // A message sent while OpenCode is still starting waits for it here, ahead
   // of session creation, commands and shell, all of which need OpenCode.
   // Held sends go out one after another, in the order they were made.
@@ -2240,7 +2197,6 @@ export async function sendMessage(
         variant,
       }, options?.draftSnapshot)
       if (!createdDraftSession) throw new Error("Failed to create session")
-      options?.onSessionCreated?.(createdDraftSession.sessionId, createdDraftSession.directory ?? null)
 
       // The server writes the project knowledge into the new session while
       // the message is already on screen: only the prompt request waits.
@@ -2421,6 +2377,26 @@ export async function sendMessage(
     })
     // Keep restore failures outside the send promise and its retry path.
     void resumeAfterSend?.().catch(console.warn)
+  })
+}
+
+/**
+ * Creates the open draft's session for a message the server sends later (the
+ * goal writer's "Send when ready"). The session is created from the submitted
+ * draft snapshot; a user who moved to another chat or draft meanwhile stays
+ * there (`keepUserPlace`). Waits for OpenCode to start like any send.
+ */
+export async function createDraftSessionForServerSend(
+  selection: { providerID: string; modelID: string; agent?: string; variant?: string | null },
+  draftSnapshot: NewSessionDraftState,
+  runtimeKey: string,
+): Promise<NonNullable<Awaited<ReturnType<typeof materializeOpenDraftSession>>>> {
+  return runAfterOpenCodeStartup(async () => {
+    if (getRuntimeKey() !== runtimeKey) throw new Error("Message was not sent because the runtime changed.")
+    const created = await materializeOpenDraftSession(selection, draftSnapshot, { keepUserPlace: true })
+    if (!created) throw new Error("Failed to create session")
+    useSessionTabsStore.getState().pinTab(created.sessionId)
+    return created
   })
 }
 
