@@ -95,7 +95,7 @@ const storedEntrySchema = z.looseObject({
  * membership, checked once per entry, instead of a full list scan per
  * incoming entry.
  */
-const identityKeysOfStored = (stored: unknown) => {
+const identityKeysOfStored = <Entry>(stored: Entry) => {
   const parsed = storedEntrySchema.safeParse(stored);
   if (!parsed.success) return [];
   const item = parsed.data;
@@ -114,7 +114,7 @@ const incomingIdentitySchema = z.object({
   url: z.string().optional().catch(undefined),
 });
 
-const identityKeysOfIncoming = (raw: unknown) => {
+const identityKeysOfIncoming = (raw: LinkedEntryIdentity) => {
   const keys: string[] = [];
   const incoming = incomingIdentitySchema.safeParse(raw).data;
   if (!incoming) return keys;

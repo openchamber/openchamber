@@ -16,7 +16,8 @@ import {
   toProviderPackage,
 } from './config-v2.js';
 import { isBoolean, isRecord, isString } from '../shared/object-guards.js';
-import type { OpenCodeConfigLayers } from './config-files.js';
+import type { OpenCodeConfigLayer, OpenCodeConfigLayers } from './config-files.js';
+import type { JsonValue } from '../shared/json-values.js';
 import { canonicalSourceConnectionError, readInheritedProviderCanonical, type ProviderConfigLayers } from './inherited-canonical.js';
 import type { ProviderEntity, ProviderModelEntity } from './config-v2.js';
 import { isModelModality, toModelModalities } from './model-modalities.js';
@@ -450,7 +451,7 @@ function isPolicyStatement(value: unknown): value is PolicyStatement {
 // One config document's statements: `experimental.policies` first, then the
 // top-level `policies` OpenCode 2.0.29 serves (same order as the UI's
 // documentPolicies in lib/opencode/projection.ts).
-function documentPolicyStatements(config: unknown): PolicyStatement[] {
+function documentPolicyStatements(config: OpenCodeConfigLayer): PolicyStatement[] {
   if (!isPlainObject(config)) return [];
   const experimental = isPlainObject(config.experimental) && Array.isArray(config.experimental.policies)
     ? config.experimental.policies
@@ -483,7 +484,7 @@ function policyDeniesProvider(statements: PolicyStatement[], providerId: string)
   return false;
 }
 
-function stringList(value: unknown): string[] {
+function stringList(value: JsonValue | undefined): string[] {
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
     : [];
@@ -579,6 +580,7 @@ const storedModelSettingsSchema = z.object({
   defaultVariant: variantName.optional().catch(undefined),
   lockVariant: z.boolean().optional().catch(undefined),
 });
+type StoredModelSettings = Partial<Record<typeof MODEL_SETTING_KEYS[number], string | boolean>>;
 // A change from Settings: one model, only the three keys, each a value or `null` to clear.
 const modelSettingsRequestSchema = z.object({
   providerID: z.string().min(1),
@@ -591,16 +593,16 @@ const modelSettingsRequestSchema = z.object({
 });
 
 /** The three settings one model entry carries, as OpenCode would read them. */
-function pickModelSettings(entry: unknown) {
+function pickModelSettings(entry: OpenCodeConfigLayer): StoredModelSettings {
   const parsed = storedModelSettingsSchema.parse(entry);
   return Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined));
 }
 
 /** Model settings in one config file. A provider in both spellings counts once, as
  * `providers`: OpenCode lets that entry replace the legacy `provider` one whole. */
-type ModelSettingsMap = Record<string, Record<string, unknown>>;
+type ModelSettingsMap = Record<string, StoredModelSettings>;
 
-function modelSettingsIn(config: unknown, into: ModelSettingsMap) {
+function modelSettingsIn(config: OpenCodeConfigLayer, into: ModelSettingsMap) {
   const fields = isPlainObject(config) ? config : {};
   const native = isPlainObject(fields.providers) ? fields.providers : {};
   const legacy = isPlainObject(fields.provider) ? fields.provider : {};
@@ -672,18 +674,15 @@ function writeModelSettings(providerID: string, modelID: string, patch: z.infer<
   return readModelSettings(workingDirectory);
 }
 
-/** A change request from Settings, parsed, or the first reason it is refused. */
-function parseModelSettingsRequest(body: unknown):
-  | { success: true; data: z.infer<typeof modelSettingsRequestSchema> }
-  | { success: false; error: string } {
-  const parsed = modelSettingsRequestSchema.safeParse(body);
-  if (parsed.success) return { success: true, data: parsed.data };
-  const [issue] = parsed.error.issues;
-  return { success: false, error: issue ? `${issue.path.join('.') || 'body'}: ${issue.message}` : 'body: invalid' };
+/** The first reason a change request from Settings is refused. */
+function modelSettingsRequestError(error: z.ZodError) {
+  const [issue] = error.issues;
+  return issue ? `${issue.path.join('.') || 'body'}: ${issue.message}` : 'body: invalid';
 }
 
 export {
-  parseModelSettingsRequest,
+  modelSettingsRequestSchema,
+  modelSettingsRequestError,
   readModelSettings,
   writeModelSettings,
   getProviderSources,

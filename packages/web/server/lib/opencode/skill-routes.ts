@@ -124,7 +124,7 @@ const hasErrorFields = (value: unknown): value is ErrorFields => value != null;
 const hasScanFields = (value: unknown): value is CachedScan => value != null;
 const hasCachedSkillFields = (value: unknown): value is CachedSkill => value != null;
 const hasKind = (value: unknown): value is { kind?: unknown } => value != null;
-const hasErrorCode = (value: unknown, code: string) => value !== null && typeof value === 'object' && 'code' in value && value.code === code;
+const hasErrorCode = (value: unknown, code: string): value is { code: string } => value !== null && typeof value === 'object' && 'code' in value && value.code === code;
 const isList = (value: unknown): value is readonly unknown[] => Array.isArray(value);
 const readInstallSelections = (value: CatalogBody['selections']) => {
   if (!isList(value)) return undefined;
@@ -1014,10 +1014,10 @@ export const registerSkillRoutes = (app: Application, dependencies: SkillRouteOp
       // would otherwise widen an ambiguous request into an unscoped delete.
       const rawScope = req.query.scope;
       const rawSource = req.query.source;
-      if (rawScope !== undefined && typeof rawScope !== 'string') {
+      if (rawScope !== undefined && !isString(rawScope)) {
         return res.status(400).json({ error: 'scope must be user or project and source opencode, claude or agents' });
       }
-      if (rawSource !== undefined && typeof rawSource !== 'string') {
+      if (rawSource !== undefined && !isString(rawSource)) {
         return res.status(400).json({ error: 'scope must be user or project and source opencode, claude or agents' });
       }
       const scope = asNonEmptyString(rawScope);

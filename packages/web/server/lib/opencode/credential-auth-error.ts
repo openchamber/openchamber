@@ -27,12 +27,15 @@ export class OpenCodeUpstreamAuthError extends Error {
   }
 }
 
+// Every non-null object passes, so a false result says only that the value is not an object.
+const isErrorObject = (value: unknown): value is { origin?: unknown; cause?: unknown } => Boolean(value) && typeof value === 'object';
+
 /**
  * True when the failure came from the shared OpenCode credential read. Walks
  * `cause` because a consumer may re-wrap the error while keeping its origin.
  */
-export const isOpenCodeUpstreamAuthRejection = (error: unknown): boolean => {
-  if (!error || typeof error !== 'object') return false;
-  if ('origin' in error && error.origin === OPENCODE_UPSTREAM_AUTH_ORIGIN) return true;
+export const isOpenCodeUpstreamAuthRejection = <Failure>(error: Failure): boolean => {
+  if (!isErrorObject(error)) return false;
+  if (error.origin === OPENCODE_UPSTREAM_AUTH_ORIGIN) return true;
   return 'cause' in error && isOpenCodeUpstreamAuthRejection(error.cause);
 };

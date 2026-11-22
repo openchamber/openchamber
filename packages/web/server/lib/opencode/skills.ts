@@ -75,6 +75,7 @@ const hasSkillPaths = (value: unknown): value is { paths?: unknown } => value !=
 const isMutableFrontmatter = (value: unknown): value is Record<string, unknown> =>
   value !== null && (typeof value === 'object' || typeof value === 'function');
 const isUnknownList = (value: unknown): value is readonly unknown[] => Array.isArray(value);
+const hasRequestedFiles = (value: unknown): value is { supportingFiles?: unknown } => value !== null && typeof value === 'object';
 
 function ensureProjectSkillDir(workingDirectory: string) {
   const projectSkillDir = path.join(workingDirectory, '.opencode', 'skills');
@@ -646,7 +647,7 @@ async function updateSkillNow<Updates>(skillName: string, updates: Updates, work
 
   // Refuse an over-cap supporting file before any field is applied, so a
   // failed update leaves the skill exactly as it was (#1444).
-  const requestedFiles = updates !== null && typeof updates === 'object' && 'supportingFiles' in updates ? updates.supportingFiles : undefined;
+  const requestedFiles = hasRequestedFiles(updates) ? updates.supportingFiles : undefined;
   if (isUnknownList(requestedFiles)) {
     for (const file of requestedFiles) {
       if (hasSupportingFields(file) && !file.delete && isString(file.path) && file.path && file.content !== undefined) {

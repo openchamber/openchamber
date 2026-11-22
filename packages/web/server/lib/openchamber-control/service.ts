@@ -20,6 +20,8 @@ import { createWorkMembership } from '../session-work/membership.js';
 import { createSessionListing, positiveInteger } from './session-listing.js';
 import { isPinnedMetadata, userStatePatch } from '../session-work/state.js';
 import { z } from 'zod';
+import type { JsonValue } from '../shared/json-values.js';
+import type { SettingsDocument } from '../settings/settings-helpers.js';
 import { resolveUploadFiles, UploadRefusedError } from '../browser-control/uploads.js';
 import type { SessionInfo, ModelInfo, PermissionReplyInput, SessionFormCancelInput, FormInfo } from '@opencode/client';
 import type { ControlClient } from './opencode-client.js';
@@ -117,20 +119,32 @@ export interface ControlDependencies {
   isHiddenSession?: (id: string | null, record?: ListedSessionRecord) => boolean;
   // Action modules (session-actions.js, config-actions.js, ...), dispatched by name ahead of the built-in actions.
   actionModules?: ControlActionModule[];
-  fsPromises?: { mkdir: (directory: string, options: { recursive: true }) => Promise<unknown> } | null;
+  fsPromises?: { mkdir: (directory: string, options: { recursive: true }) => Promise<string | undefined> } | null;
   validateDirectoryPath?: ((directory: string) => Promise<{ ok: true; directory: string } | { ok: false; error: string }>) | null;
-  persistSettings?: ((changes: Record<string, unknown>) => Promise<unknown>) | null;
+  persistSettings?: ((changes: SettingsDocument) => Promise<SettingsDocument>) | null;
   createProjectIdFromPath?: ((directory: string) => string) | null;
-  updateSettings?: ((compute: SettingsCompute) => Promise<unknown>) | null;
+  updateSettings?: ((compute: SettingsCompute) => Promise<SettingsDocument | null>) | null;
   isGitRepository?: (directory: string) => Promise<boolean>;
   generateWorktreeName?: (options: { prompt: string; model?: string | undefined; directory: string }) => Promise<string>;
   randomWorktreeName?: () => Promise<string>;
 }
 
 /** A configured project as `sanitizeProjects` keeps it: identity plus the per-project settings. */
-type ControlProject = { id: string; path: string; label?: string; [setting: string]: unknown };
+interface ControlProject { id: string; path: string; label?: string; [setting: string]: JsonValue | undefined }
 
-type SettingsCompute = (settings: ControlSettings | null) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>;
+/** A project's editable settings, as Project settings shows them. */
+type ProjectSettings = Partial<Record<string, JsonValue>>;
+
+interface UpdatedProject {
+  project: { id: string; path: string; settings: ProjectSettings };
+  note: string;
+  alsoCleared?: string[];
+}
+
+// The tool input is JSON, so a projectSettings object holds only JSON values.
+const projectSettingsSchema = z.record(z.string(), z.json());
+
+type SettingsCompute = (settings: ControlSettings | null) => SettingsDocument | null | Promise<SettingsDocument | null>;
 
 interface ActionModuleScope { directory?: unknown; projectId?: unknown; sessionId?: unknown }
 
@@ -144,7 +158,7 @@ export interface ControlActionModuleContext {
 
 export interface ControlActionModule {
   actions: readonly string[];
-  execute: (action: string, input: ControlInput, context: ControlActionModuleContext) => Promise<unknown>;
+  execute: (action: string, input: ControlInput, context: ControlActionModuleContext) => Promise<JsonValue>;
 }
 
 type AutoWorktreeResolution =
@@ -200,7 +214,7 @@ interface SessionPayload {
   messageId?: string;
   pullRequest?: unknown;
   promptedBySessionId?: string;
-  subagentPolicy?: Record<string, unknown>;
+  subagentPolicy?: object;
   branchOff?: unknown;
 }
 export interface SessionActionResult {
@@ -628,8 +642,13 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     if (unknownKeys.length > 0) {
       throw new OpenChamberControlError(`Nothing was saved. Not a project setting: ${unknownKeys.join(', ')}. Editable: ${EDITABLE_PROJECT_SETTINGS.join(', ')}`, 400);
     }
+    const parsedChanges = projectSettingsSchema.safeParse(changes);
+    if (!parsedChanges.success) {
+      throw new OpenChamberControlError(`Nothing was saved. OpenChamber does not accept the value given for ${parsedChanges.error.issues.map((issue) => issue.path.join('.')).join(', ')}`, 400);
+    }
+    const settingChanges = parsedChanges.data;
     // The sanitizer trims text and lowercases a hex colour; either is the value kept, not a refusal.
-    const kept = (key: string, value: unknown) => {
+    const kept = (key: string, value: JsonValue) => {
       if (!isString(value)) return value;
       return key === 'iconBackground' ? value.trim().toLowerCase() : value.trim();
     };
@@ -641,13 +660,13 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       if (!target) throw new OpenChamberControlError(`Unknown project: ${projectID}`, 404);
 
       const next: ControlProject = { ...target };
-      for (const [key, value] of Object.entries(changes)) {
+      for (const [key, value] of Object.entries(settingChanges)) {
         if (value === null) delete next[key];
         else next[key] = value;
       }
       const nextProjects = existingProjects.map((project) => (project.id === projectID ? next : project));
       accepted = sanitizedProjects(nextProjects).find((project) => project.id === projectID) ?? null;
-      const rejected = Object.entries(changes)
+      const rejected = Object.entries(settingChanges)
         .filter(([key, value]) => value !== null && JSON.stringify(accepted?.[key]) !== JSON.stringify(kept(key, value)))
         .map(([key]) => key);
       if (rejected.length > 0) {
@@ -662,7 +681,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     const alsoCleared = EDITABLE_PROJECT_SETTINGS.filter((key) => (
       saved[key] !== undefined && savedSettings?.[key] === undefined && !Object.hasOwn(changes, key)
     ));
-    const result: { project: { id: string; path: string; settings: Record<string, unknown> }; note: string; alsoCleared?: string[] } = {
+    const result: UpdatedProject = {
       project: { id: saved.id, path: path.resolve(saved.path), settings: projectSettingsOf(savedSettings) },
       note: 'Saved. Open OpenChamber windows may need a reload to show the change',
     };
@@ -723,6 +742,8 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
       };
     });
 
+    // SAFETY: modifySettings ran the compute above, which assigned entry or threw. TypeScript's
+    // narrowing does not follow the assignment inside the callback and still reads the initial null.
     const added = entry as ControlProject | null;
     return {
       project: {
@@ -815,7 +836,7 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
   // (#14 slice 3): the cards' production callers — catalog pricing
   // assembled and the cards built here; the agent shows each through
   // render.page's wait and applies the answer.
-  const listCatalogModels = async (directory: unknown) => {
+  const listCatalogModels = async (directory: ControlInput['directory']) => {
     const client = await getClient(asNonEmptyString(directory) || '');
     const catalog = await client.model.list();
     return catalog.data;
@@ -992,13 +1013,10 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
     let cursor;
     let truncated = false;
     for (let page = 0; page < MAX_PAGES_PER_WALK; page += 1) {
-      const request: Mutable<Parameters<ControlClient['message']['list']>[0]> = {
-        sessionID,
-        limit: fetchLimit ?? MESSAGE_PAGE_LIMIT,
-      };
-      if (cursor) request.cursor = cursor;
-      else if (fetchLimit) request.order = 'desc';
-      const response = await client.message.list(request);
+      const pageLimit = fetchLimit ?? MESSAGE_PAGE_LIMIT;
+      const response = await client.message.list(cursor
+        ? { sessionID, limit: pageLimit, cursor }
+        : (fetchLimit ? { sessionID, limit: pageLimit, order: 'desc' } : { sessionID, limit: pageLimit }));
       const raw = Array.isArray(response?.data) ? response.data : [];
       collected.push(...raw);
       const next = asNonEmptyString(response?.cursor?.next);
@@ -1854,8 +1872,8 @@ export const createOpenChamberControlService = (dependencies: ControlDependencie
             : await sessionStatus(client, sessionID);
           const limit = input.all === true ? undefined : (last ? 1 : positiveInteger(input.limit, 10, 'limit'));
           const history = await sessionMessages(client, sessionID, role, limit);
-          const messageResult: { sessionId: string; directory: string; role: string; sessionStatus: typeof currentStatus; messages: typeof history.messages; truncated?: true } = { sessionId: sessionID, directory, role, sessionStatus: currentStatus, messages: history.messages };
-          if (history.truncated) messageResult.truncated = true;
+          const messageResult = { sessionId: sessionID, directory, role, sessionStatus: currentStatus, messages: history.messages };
+          if (history.truncated) return { ...messageResult, truncated: true as const };
           return messageResult;
         }
         if (action === 'session.archive' || action === 'session.unarchive') {

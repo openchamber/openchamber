@@ -25,7 +25,8 @@ import {
 } from '../enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery.js';
 import {
-  parseModelSettingsRequest,
+  modelSettingsRequestSchema,
+  modelSettingsRequestError,
   readDisabledProviders,
   readModelSettings,
   readProviderOffState,
@@ -490,8 +491,8 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
   });
 
   app.put('/api/config/opencode-model-settings', refuseInEnterpriseMode, async (req, res) => {
-    const request = parseModelSettingsRequest(req.body);
-    if (!request.success) return res.status(400).json({ error: request.error });
+    const request = modelSettingsRequestSchema.safeParse(req.body);
+    if (!request.success) return res.status(400).json({ error: modelSettingsRequestError(request.error) });
     const { providerID, modelID, settings } = request.data;
     try {
       const resolved = await resolveProjectDirectory(req);

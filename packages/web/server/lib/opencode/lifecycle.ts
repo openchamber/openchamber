@@ -243,7 +243,6 @@ interface ManagedOpenCodeRecord {
   startedAt?: string | null;
   agentToolToken?: string | null;
   instanceDir?: string | null;
-  [field: string]: unknown;
 }
 
 interface ManagedStoreGeneration {
@@ -256,7 +255,23 @@ interface ManagedStoreGeneration {
 
 interface ManagedStore {
   generations: ManagedStoreGeneration[];
-  handoffs: Array<{ handoff_id: string; predecessor: unknown; successor: unknown; step: unknown; [field: string]: unknown }>;
+  handoffs: ManagedStoreHandoff[];
+}
+
+/** One handoff as managed-opencode-state.js validates it (isValidHandoff). */
+interface ManagedStoreHandoff {
+  handoff_id: string;
+  predecessor: ManagedStoreGeneration['generation_id'];
+  successor: ManagedStoreGeneration['generation_id'];
+  busy_set: string[];
+  step: string;
+  outcome: string | null;
+  at: string;
+}
+
+interface EnsuredGeneration {
+  store: ManagedStore;
+  generation: ManagedStoreGeneration | null;
 }
 
 export interface HandoffContext {
@@ -749,7 +764,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
   };
   const generationForPid = (store: ManagedStore, pid: number): ManagedStoreGeneration | null => [...store.generations].reverse()
     .find((generation) => generation.pid === pid && generation.state !== 'closed') ?? null;
-  const ensureGeneration = (store: ManagedStore, record: ManagedOpenCodeRecord, state: string): { store: ManagedStore; generation: ManagedStoreGeneration | null } => {
+  const ensureGeneration = (store: ManagedStore, record: ManagedOpenCodeRecord, state: string): EnsuredGeneration => {
     const existing = generationForPid(store, record.pid);
     if (existing) return { store, generation: existing };
     const next = appendGeneration(store, {
@@ -786,14 +801,12 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     const predecessorGeneration = generationForPid(store, predecessor.pid);
     const successorGeneration = generationForPid(store, successorPid);
     if (!predecessorGeneration || !successorGeneration) return;
-    const busy: unknown = Array.isArray(context?.busySessionIds)
-      ? context.busySessionIds
-      : (typeof listBusySessionIds === 'function' ? listBusySessionIds() : []);
+    const busy = Array.isArray(context?.busySessionIds) ? context.busySessionIds : listBusySessionIds();
     store = recordHandoffStep(store, {
       handoff_id: handoffIdFor(predecessor.pid, successorPid),
       predecessor: predecessorGeneration.generation_id,
       successor: successorGeneration.generation_id,
-      busy_set: (Array.isArray(busy) ? busy : []).map((id: unknown) => String(id)),
+      busy_set: (Array.isArray(busy) ? busy : []).map((id) => String(id)),
       step: 'prepared',
       outcome: null,
       at: new Date().toISOString(),
@@ -937,7 +950,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     syncStore(() => {
       let store = loadManagedStore();
       for (const record of [...records, ...theirs]) {
-        if (!Number.isInteger(record.port) || record.port <= 0 || typeof record.binary !== 'string') continue;
+        if (!Number.isInteger(record.port) || record.port <= 0 || !isString(record.binary)) continue;
         const generation = generationForPid(store, record.pid);
         if (!generation) {
           ({ store } = ensureGeneration(store, record, 'draining'));

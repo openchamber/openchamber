@@ -1,4 +1,5 @@
 import { constants as fsConstants } from 'node:fs';
+import { isString } from '../shared/object-guards.js';
 export interface InstanceDirDependencies {
   fsPromises: Pick<typeof import('node:fs/promises'), 'readdir' | 'rm' | 'mkdir' | 'writeFile' | 'open'>;
   path: Pick<typeof import('node:path'), 'join' | 'dirname' | 'basename'>;
@@ -28,7 +29,7 @@ export const prepareInstanceDir = async ({
   const owners = new Map<string, number>(await Promise.all(folders.map(async (name): Promise<[string, number]> => [name, await readOwner(fsPromises, path.join(instancesDir, name, OWNER_FILE), Number(name))])));
 
   // Only a folder directly under instancesDir is claimed, never a path the state file names elsewhere.
-  const claimName = typeof claimDir === 'string' && path.dirname(claimDir) === instancesDir ? path.basename(claimDir) : null;
+  const claimName = isString(claimDir) && path.dirname(claimDir) === instancesDir ? path.basename(claimDir) : null;
   const claimOwner = claimName === null ? null : owners.get(claimName);
   const claimed = claimOwner !== undefined && claimOwner !== null
     && (claimOwner === pid || claimOwner === handoffFrom || !isPidAlive(claimOwner));

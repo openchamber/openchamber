@@ -687,7 +687,7 @@ const tokenCount = z.number().int().min(0).max(10_000_000);
 const compactionTokens = tokenCount.nullable().optional();
 const compactionPercent = z.string().regex(/^([1-9]\d?(\.\d+)?)%$/u);
 
-const hasConfigKey = <Config>(config: Config, key: string) => config != null && typeof config === 'object' && Object.hasOwn(config, key);
+const hasConfigKey = <Config>(config: Config, key: string) => isObject(config) && Object.hasOwn(config, key);
 export const compactionUpdateSchema = z.object({
   auto: z.boolean().optional(),
   buffer: z.union([compactionPercent, tokenCount]).nullable().optional(),

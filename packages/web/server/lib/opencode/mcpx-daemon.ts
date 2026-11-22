@@ -2,9 +2,11 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { z } from 'zod';
 
 import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { readBoundedResponseText } from '../shared/response-body.js';
+import type { JsonValue } from '../shared/json-values.js';
 
 export const MCPX_DAEMON_TIMEOUT_MS = 10_000;
 export const MCPX_DAEMON_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
@@ -27,6 +29,9 @@ const defaultSocketPath = () => {
   return path.join(stateDir, 'daemon.sock');
 };
 
+// A discovery record names the daemon's socket; any other content is skipped.
+const daemonRecordSchema = z.object({ socket: z.string() });
+
 const findDaemonSocket = (): string | undefined => {
   const direct = defaultSocketPath();
   if (fs.existsSync(direct)) return direct;
@@ -47,9 +52,8 @@ const findDaemonSocket = (): string | undefined => {
           // whole.
           const result = readBoundedFileSync(path.join(stateDir, file), MCPX_DAEMON_DISCOVERY_MAX_BYTES);
           if (!result.ok) continue;
-          const info: unknown = JSON.parse(result.buffer.toString('utf-8'));
-          const socket = info !== null && typeof info === 'object' && 'socket' in info ? info.socket : undefined;
-          if (typeof socket === 'string' && socket && fs.existsSync(socket)) return socket;
+          const socket = daemonRecordSchema.safeParse(JSON.parse(result.buffer.toString('utf-8'))).data?.socket;
+          if (socket && fs.existsSync(socket)) return socket;
         } catch {
           // An unreadable or unparsable record is skipped.
         }
@@ -61,15 +65,15 @@ const findDaemonSocket = (): string | undefined => {
   return undefined;
 };
 
-const isAbort = (error: unknown) => error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+const isAbort = (error: unknown): error is Error => error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 
 export const callDaemon = async (
   reqPath: string,
   method = 'GET',
-  body: unknown = null,
+  body: JsonValue = null,
   headers: Record<string, string> = {},
   options: { timeoutMs?: number; maxResponseBytes?: number } = {},
-): Promise<unknown> => {
+): Promise<JsonValue> => {
   const timeoutMs = options.timeoutMs ?? MCPX_DAEMON_TIMEOUT_MS;
   const maxResponseBytes = options.maxResponseBytes ?? MCPX_DAEMON_MAX_RESPONSE_BYTES;
   const endpoint = process.env.MCPX_DAEMON_ENDPOINT || process.env.MCPX_ENDPOINT;

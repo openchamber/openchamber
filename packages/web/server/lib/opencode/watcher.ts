@@ -54,7 +54,7 @@ export const createOpenCodeWatcherRuntime = (deps: OpenCodeWatcherDependencies) 
     console.log('[PushWatcher] connected');
   };
   // `diagnostics/local-files.js` classifies these lines by their text; keep it unchanged.
-  const logDisconnected = (detail: unknown) => {
+  const logDisconnected = <Detail>(detail: Detail) => {
     connectLogged = false;
     console.warn('[PushWatcher] disconnected', detail);
   };

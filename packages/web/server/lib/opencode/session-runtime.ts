@@ -151,9 +151,9 @@ const readRequestId = <Value>(value: Value) => (isString(value) && value.trim() 
 // contract v1, #1473): only the four binding components can reach the
 // snapshot, each an explicit null when the source cannot verify it, and
 // a non-object source value means no known binding at all.
-const normalizeQueueBinding = (binding: unknown) => {
+const normalizeQueueBinding = (binding: JsonValue | undefined): SessionQueueBinding | null => {
   if (!isRecord(binding)) return null;
-  const numberOrNull = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+  const numberOrNull = <Value>(value: Value) => (isNumber(value) && Number.isFinite(value) ? value : null);
   return {
     taskId: numberOrNull(binding.taskId),
     issueNumber: numberOrNull(binding.issueNumber),
@@ -161,6 +161,25 @@ const normalizeQueueBinding = (binding: unknown) => {
     lane: asNonEmptyString(binding.lane),
   };
 };
+
+/** The launch side's source of a session's queue binding: the task ledger row bound to the session id. */
+export type SessionQueueBindingSource = (sessionId: string) => JsonValue | undefined;
+
+interface SessionQueueBinding {
+  taskId: number | null;
+  issueNumber: number | null;
+  queue: string | null;
+  lane: string | null;
+}
+
+interface SessionActivityEntry {
+  type: ActivityPhase;
+  lastActivityAt: number;
+  status: SessionState['status'] | null;
+  model: { modelID: string | null; providerID: string | null } | null;
+  toolInFlight: null;
+  queue: SessionQueueBinding | null;
+}
 
 const CONTEXT_READINGS_MAX = 2000;
 
@@ -185,7 +204,7 @@ export const createSessionRuntime = <Client>({
   fetchImpl = fetch,
   getSessionModelProvider,
   getSessionQueueBinding,
-}: SessionRuntimeDependencies<Client> & { getSessionModelProvider?: (sessionId: string) => { modelID?: string | null; providerID?: string | null } | null | undefined; getSessionQueueBinding?: (sessionId: string) => unknown }) => {
+}: SessionRuntimeDependencies<Client> & { getSessionModelProvider?: (sessionId: string) => { modelID?: string | null; providerID?: string | null } | null | undefined; getSessionQueueBinding?: SessionQueueBindingSource }) => {
   const sessionActivityPhases = new Map<string, { phase: ActivityPhase; updatedAt: number; spaceId?: string | null }>();
   const sessionActivityCooldowns = new Map<string, ReturnType<typeof setTimeout>>();
   const sessionStates = new Map<string, SessionState>();
@@ -493,7 +512,7 @@ export const createSessionRuntime = <Client>({
   // (the task ledger row bound to the session id, code#1656 step 3), or
   // null when no binding is known for the session (#1473).
   const getSessionActivitySnapshot = () => {
-    const sessions: Record<string, unknown> = {};
+    const sessions: Record<string, SessionActivityEntry> = {};
     for (const [sessionId, data] of sessionActivityPhases) {
       const modelProvider = getSessionModelProvider ? getSessionModelProvider(sessionId) : null;
       sessions[sessionId] = {

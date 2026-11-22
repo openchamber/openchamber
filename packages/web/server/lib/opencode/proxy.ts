@@ -563,7 +563,7 @@ export const registerOpenCodeProxy = (app: Application, deps: OpenCodeProxyDepen
     if (isAbortError(error)) return null;
     return isProxyTimeoutError(error) ? 504 : 503;
   };
-  const isResponseTooLargeError = (error: unknown) => optionalErrorFields(error)?.code === 'response_too_large';
+  const isResponseTooLargeError = <Failure>(error: Failure) => optionalErrorFields(error)?.code === 'response_too_large';
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
   const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
     realpath: fs?.promises?.realpath?.bind(fs.promises),

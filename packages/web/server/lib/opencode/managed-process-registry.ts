@@ -61,7 +61,7 @@ const readBoundedTextSync = (filePath: string, maxBytes: number) => {
  * The OpenChamber process that registered OpenCode `pid`, or null when the
  * registry has no readable entry for it. Synchronous, for the launch decision.
  */
-export const readManagedProcessOwner = (pid: unknown): number | null => {
+export const readManagedProcessOwner = (pid: number): number | null => {
   if (!Number.isInteger(pid)) return null;
   try {
     const raw = readBoundedTextSync(entryFilePath(Number(pid)), MANAGED_PROCESS_ENTRY_MAX_BYTES);

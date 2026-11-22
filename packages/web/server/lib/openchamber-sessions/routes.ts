@@ -98,7 +98,9 @@ interface WorktreeFields {
   existingBranch?: unknown;
 }
 
-interface SessionSettings {
+// A type alias, so the fork readers (git/worktree-start-ref.js, git/branch-name-template.js) that
+// take the whole settings object as a string-keyed record accept it.
+type SessionSettings = {
   projects?: unknown;
   defaultAgent?: unknown;
   defaultModel?: unknown;
@@ -108,10 +110,7 @@ interface SessionSettings {
   hiddenModels?: unknown;
   lastSelectedModel?: unknown;
   modelDefaultVariants?: unknown;
-  // The worktree, branch-name and pull-request settings the fork readers (git/worktree-start-ref.js,
-  // git/branch-name-template.js) take from the same settings object.
-  [setting: string]: unknown;
-}
+};
 
 interface SessionProject { id: string; path: string }
 type MetadataStore = ReturnType<typeof createSessionMetadataStore>;
@@ -158,7 +157,7 @@ export interface SessionServiceDependencies {
   isAutoReady?: (() => Promise<boolean>) | null;
   readProjectSetup?: ((projectID: string) => Promise<WorktreeSetupInput>) | null;
   idleSessionReaper?: ReturnType<typeof createIdleSessionReaper> | null;
-  listScheduledTaskTargetIds?: (() => Promise<Set<string> | null | unknown>) | null;
+  listScheduledTaskTargetIds?: (() => Promise<ReadonlySet<unknown> | null>) | null;
   enableIdleSessionReaper?: boolean;
   resolvePrimaryWorktreeRoot?: typeof resolvePrimaryWorktreeRootDefault;
 }
@@ -268,7 +267,7 @@ const hasProjectFields = (value: unknown): value is ProjectFields => value !== n
 const hasModelFields = (value: unknown): value is ModelFields => value !== null && value !== undefined;
 const hasEffortEntries = (value: unknown): value is Record<string, unknown> => value !== null && value !== undefined;
 const hasText = (value: unknown): value is string => Boolean(asNonEmptyString(value));
-const sessionIdOf = (session: unknown) => (session !== null && typeof session === 'object' && 'id' in session && typeof session.id === 'string' ? session.id : null);
+const sessionIdOf = (session: { id?: unknown } | null) => (session !== null && isString(session.id) ? session.id : null);
 
 const requiredDataDir = (value: string | null) => {
   if (value === null) throw new Error('openchamber session routes need either both stores or a dataDir');
@@ -324,9 +323,9 @@ const lockedVariantFor = (
   const key = `${model.providerID}/${model.modelID}`;
   const locks = Array.isArray(settings?.modelDefaultVariantLocks) ? settings.modelDefaultVariantLocks : [];
   const defaults = settings?.modelDefaultVariants;
-  if (!locks.includes(key) || !defaults || typeof defaults !== 'object' || !Object.hasOwn(defaults, key)) return undefined;
-  const value = (defaults as Record<string, unknown>)[key];
-  return typeof value === 'string' && value ? value : undefined;
+  if (!locks.includes(key) || !isRecord(defaults) || !Object.hasOwn(defaults, key)) return undefined;
+  const value = defaults[key];
+  return isString(value) && value ? value : undefined;
 };
 
 const resolveVariant = (models: readonly ModelInfo[], providerID: string, modelID: string, variant: string | null | undefined) => {
