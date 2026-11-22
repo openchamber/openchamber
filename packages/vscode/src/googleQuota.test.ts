@@ -52,8 +52,8 @@ const stubGoogle = (
 const assertUsage = (result: Awaited<ReturnType<typeof fetchQuotaForProvider>>) => {
   assert.equal(result.ok, true);
   assert.equal(result.configured, true);
-  assert.equal(result.usage?.models?.['gemini/gemini-test'].windows.daily.usedPercent, 25);
-  assert.equal(result.usage?.models?.['gemini/gemini-test'].windows.daily.windowSeconds, 86400);
+  assert.equal(result.usage?.models?.['gemini/gemini-test'].windows['per-model'].usedPercent, 25);
+  assert.equal(result.usage?.models?.['gemini/gemini-test'].windows['per-model'].windowSeconds, null);
   const serialized = JSON.stringify(result);
   assert.ok(!serialized.includes('test-refresh'));
   assert.ok(!serialized.includes('new-access'));
@@ -142,5 +142,26 @@ describe('VS Code Google quota OAuth client compatibility', () => {
     assertUsage(await fetchQuotaForProvider('google'));
     assert.deepEqual(requests.clients, []);
     assert.equal(requests.quotaRequests.length, 2);
+  });
+
+  it('maps an unparseable models resetTime to a null resetAt and a valid one to epoch ms', async () => {
+    configureLogin('test-refresh|test-project', Date.now() + 3600000);
+    globalThis.fetch = async (url, options) => {
+      assert.equal(new Headers(options?.headers).get('Authorization'), 'Bearer old-access');
+      if (String(url).endsWith(':retrieveUserQuota')) {
+        return Response.json({ buckets: [] });
+      }
+      assert.ok(String(url).endsWith(':fetchAvailableModels'));
+      return Response.json({
+        models: {
+          'gemini-bad': { quotaInfo: { remainingFraction: 0.5, resetTime: 'not-a-date' } },
+          'gemini-good': { quotaInfo: { remainingFraction: 0.5, resetTime: '2026-10-25T10:00:00Z' } },
+        },
+      });
+    };
+    const result = await fetchQuotaForProvider('google');
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.models?.['gemini/gemini-bad'].windows['per-model'].resetAt, null);
+    assert.equal(result.usage?.models?.['gemini/gemini-good'].windows['per-model'].resetAt, Date.parse('2026-10-25T10:00:00Z'));
   });
 });

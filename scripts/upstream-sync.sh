@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deterministic upstream sync and validation helper for developing-today/openchamber.
+# Deterministic upstream sync and validation helper for developing-today-forks/openchamber.
 # Tracks upstream/main into devtoday/main.
 set -euo pipefail
 

@@ -1,3 +1,25 @@
+import { constants as nodeFsConstants } from 'node:fs';
+
+// Flags for opening a stored icon for serving: O_NONBLOCK (POSIX only)
+// keeps open() itself from blocking on a FIFO with no writer before the
+// handle stat can judge it non-regular (#1537) - the same pattern as
+// shared/bounded-file-read.js's openFlags.
+const storedIconOpenFlags = (platform) =>
+  platform === 'win32' || nodeFsConstants.O_NONBLOCK === undefined
+    ? 'r'
+    : nodeFsConstants.O_RDONLY | nodeFsConstants.O_NONBLOCK;
+
+// Discovery reads project-controlled files, so its open must not follow
+// a final-component symlink either (#2294): O_NOFOLLOW binds the read to
+// the file the pathname validation judged — a symlink swapped in after
+// validation fails the open with ELOOP instead of being followed. (A
+// directory-component swap mid-request has no portable Node primitive;
+// the lstat + realpath containment check above remains the guard there.)
+const discoveredIconOpenFlags = (platform) =>
+  platform === 'win32' || nodeFsConstants.O_NOFOLLOW === undefined
+    ? storedIconOpenFlags(platform)
+    : storedIconOpenFlags(platform) | nodeFsConstants.O_NOFOLLOW;
+
 export const registerProjectIconRoutes = (app, dependencies) => {
   const {
     fsPromises,
@@ -25,11 +47,133 @@ export const registerProjectIconRoutes = (app, dependencies) => {
   );
   const projectIconSupportedMimes = new Set(Object.keys(projectIconMimeToExtension));
   const projectIconMaxBytes = 5 * 1024 * 1024;
+  const projectIconReadChunkBytes = 64 * 1024;
   const projectIconThemeColors = {
     light: '#111111',
     dark: '#f5f5f5',
   };
   const projectIconHexColorPattern = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{4}|[\da-fA-F]{6}|[\da-fA-F]{8})$/;
+
+  // Open with the stored-icon flags (#1788): a project-controlled
+  // favicon can be a FIFO, and a plain 'r' open blocks on it forever
+  // before the handle stat can judge it non-regular - the same
+  // open-before-guard shape #1537 fixed for the stored-icon reader.
+  // A discovered favicon is project-controlled input (#2294): a symlink
+  // named like a favicon would make readDiscoveredIcon read its target,
+  // which can live anywhere the server process can reach. A candidate is
+  // discoverable only when it is not a symlink itself and its resolved
+  // path stays inside the resolved project directory.
+  const resolveDiscoverableIconPath = async (candidatePath, projectPath) => {
+    try {
+      const linkStats = await fsPromises.lstat(candidatePath);
+      if (linkStats.isSymbolicLink()) {
+        return null;
+      }
+      const [realProjectPath, realCandidatePath] = await Promise.all([
+        fsPromises.realpath(projectPath),
+        fsPromises.realpath(candidatePath),
+      ]);
+      const normalize = (value) => value.replace(/\\/g, '/');
+      const root = normalize(realProjectPath);
+      const resolved = normalize(realCandidatePath);
+      if (resolved !== root && !resolved.startsWith(`${root}/`)) {
+        return null;
+      }
+      return candidatePath;
+    } catch {
+      return null;
+    }
+  };
+
+  const readDiscoveredIcon = async (filePath) => {
+    let handle;
+    try {
+      handle = await fsPromises.open(filePath, discoveredIconOpenFlags(process.platform));
+    } catch (error) {
+      if (error?.code === 'ELOOP') {
+        return { ok: false, reason: 'symlink' };
+      }
+      throw error;
+    }
+    try {
+      const stats = await handle.stat();
+      if (stats.isFile?.() === false) {
+        return { ok: false, reason: 'not-regular' };
+      }
+      if (stats.size === 0) {
+        return { ok: false, reason: 'empty' };
+      }
+      if (stats.size > projectIconMaxBytes) {
+        return { ok: false, reason: 'too-large' };
+      }
+
+      const chunks = [];
+      let total = 0;
+      while (total <= projectIconMaxBytes) {
+        const chunk = Buffer.alloc(Math.min(
+          projectIconReadChunkBytes,
+          projectIconMaxBytes + 1 - total,
+        ));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+        if (bytesRead === 0) {
+          break;
+        }
+        chunks.push(chunk.subarray(0, bytesRead));
+        total += bytesRead;
+      }
+
+      if (total === 0) {
+        return { ok: false, reason: 'empty' };
+      }
+      if (total > projectIconMaxBytes) {
+        return { ok: false, reason: 'too-large' };
+      }
+      return { ok: true, bytes: Buffer.concat(chunks, total) };
+    } finally {
+      await handle.close();
+    }
+  };
+
+  // Bounded serve read for a stored icon (#1537): the GET handler used to
+  // readFile() the candidate whole, with no stat, no size gate, and no
+  // regular-file check, so an over-cap file was buffered whole and a FIFO
+  // blocked the handler indefinitely. Open non-blocking, judge the handle
+  // stat, and read in chunks under the same 5 MiB cap readDiscoveredIcon
+  // enforces for discovered icons.
+  const readStoredIcon = async (filePath) => {
+    const handle = await fsPromises.open(filePath, storedIconOpenFlags(process.platform));
+    try {
+      const stats = await handle.stat();
+      if (stats.isFile?.() === false) {
+        return { ok: false, reason: 'not-regular' };
+      }
+      if (stats.size > projectIconMaxBytes) {
+        return { ok: false, reason: 'too-large' };
+      }
+
+      const chunks = [];
+      let total = 0;
+      while (total <= projectIconMaxBytes) {
+        const chunk = Buffer.alloc(Math.min(
+          projectIconReadChunkBytes,
+          projectIconMaxBytes + 1 - total,
+        ));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+        if (bytesRead === 0) {
+          break;
+        }
+        chunks.push(chunk.subarray(0, bytesRead));
+        total += bytesRead;
+      }
+
+      if (total > projectIconMaxBytes) {
+        return { ok: false, reason: 'too-large' };
+      }
+      return { ok: true, bytes: Buffer.concat(chunks, total) };
+    } finally {
+      await handle.close();
+    }
+  };
 
   const normalizeProjectIconMime = (value) => {
     if (typeof value !== 'string') {
@@ -246,7 +390,15 @@ export const registerProjectIconRoutes = (app, dependencies) => {
 
       for (const iconPath of candidates) {
         try {
-          const data = await fsPromises.readFile(iconPath);
+          const stored = await readStoredIcon(iconPath);
+          if (!stored.ok) {
+            if (stored.reason === 'too-large') {
+              return res.status(413).json({ error: 'Project icon is too large' });
+            }
+            console.warn('Failed to read project icon:', new Error(`stored project icon is not a regular file: ${iconPath}`));
+            return res.status(500).json({ error: 'Failed to read project icon' });
+          }
+          const data = stored.bytes;
           const ext = path.extname(iconPath).slice(1).toLowerCase();
           const resolvedMime = iconPath === preferredPath && metadataMime
             ? metadataMime
@@ -401,7 +553,13 @@ export const registerProjectIconRoutes = (app, dependencies) => {
         })
         .sort((a, b) => scoreFaviconCandidate(b) - scoreFaviconCandidate(a));
 
-      const selected = filtered[0];
+      let selected = null;
+      for (const candidate of filtered) {
+        if (await resolveDiscoverableIconPath(candidate.path, project.path)) {
+          selected = candidate;
+          break;
+        }
+      }
       if (!selected) {
         return res.status(404).json({ error: 'No favicon found in project' });
       }
@@ -412,13 +570,20 @@ export const registerProjectIconRoutes = (app, dependencies) => {
         return res.status(415).json({ error: 'Unsupported favicon format' });
       }
 
-      const bytes = await fsPromises.readFile(selected.path);
-      if (bytes.length === 0) {
+      const discovered = await readDiscoveredIcon(selected.path);
+      if (!discovered.ok && discovered.reason === 'empty') {
         return res.status(400).json({ error: 'Discovered icon is empty' });
       }
-      if (bytes.length > projectIconMaxBytes) {
+      if (!discovered.ok && discovered.reason === 'too-large') {
         return res.status(400).json({ error: 'Discovered icon exceeds size limit (5 MB)' });
       }
+      if (!discovered.ok && discovered.reason === 'not-regular') {
+        return res.status(400).json({ error: 'Discovered icon is not a regular file' });
+      }
+      if (!discovered.ok && discovered.reason === 'symlink') {
+        return res.status(400).json({ error: 'Discovered icon is a symbolic link' });
+      }
+      const { bytes } = discovered;
 
       const iconPath = projectIconPathForMime(projectId, mime);
       if (!iconPath) {

@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -10,6 +10,14 @@ import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroupSectionProps } from './SessionGroupSection';
 import { installHookTestDom } from '../test-utils/testDom';
+import { restoreModuleMock } from '../test-utils/moduleMocks';
+import * as buttonModule from '@/components/ui/button';
+import * as syncContextModule from '@/sync/sync-context';
+import * as sessionFolderItemModule from '../../SessionFolderItem';
+import * as sessionFolderDndModule from '../folders/sessionFolderDnd';
+import * as collapsedActivityIndicatorModule from '../sessions/collapsedActivityIndicator';
+import * as collapsedActivityStateModule from '../sessions/collapsedActivityState';
+import * as sessionTreeItemModule from '../sessions/SessionTreeItem';
 
 type FolderCallbacks = {
   onRename: (name: string) => void;
@@ -27,6 +35,14 @@ let folderCallbacks: FolderCallbacks | null = null;
 let rowPropsCapture: RowPropsCapture | null = null;
 let emptyGroupAction: (() => void) | null = null;
 const childStores = new ChildStoreManager();
+
+const realButton = { ...buttonModule };
+const realSyncContext = { ...syncContextModule };
+const realSessionFolderItem = { ...sessionFolderItemModule };
+const realSessionFolderDnd = { ...sessionFolderDndModule };
+const realCollapsedActivityIndicator = { ...collapsedActivityIndicatorModule };
+const realCollapsedActivityState = { ...collapsedActivityStateModule };
+const realSessionTreeItem = { ...sessionTreeItemModule };
 
 mock.module('@/components/ui/button', () => ({
   Button: ({ onClick, children }: { onClick?: () => void; children?: React.ReactNode }) => {
@@ -76,6 +92,16 @@ mock.module('../sessions/SessionTreeItem', () => ({
 }));
 
 const { SessionGroupSection } = await import('./SessionGroupSection');
+
+afterAll(async () => {
+  await restoreModuleMock('@/components/ui/button', realButton, () => import('@/components/ui/button'));
+  await restoreModuleMock('@/sync/sync-context', realSyncContext, () => import('@/sync/sync-context'));
+  await restoreModuleMock('@/components/session/SessionFolderItem', realSessionFolderItem, () => import('../../SessionFolderItem'));
+  await restoreModuleMock('@/components/session/sidebar/folders/sessionFolderDnd', realSessionFolderDnd, () => import('../folders/sessionFolderDnd'));
+  await restoreModuleMock('@/components/session/sidebar/sessions/collapsedActivityIndicator', realCollapsedActivityIndicator, () => import('../sessions/collapsedActivityIndicator'));
+  await restoreModuleMock('@/components/session/sidebar/sessions/collapsedActivityState', realCollapsedActivityState, () => import('../sessions/collapsedActivityState'));
+  await restoreModuleMock('@/components/session/sidebar/sessions/SessionTreeItem', realSessionTreeItem, () => import('../sessions/SessionTreeItem'));
+});
 
 const folder: SessionFolder = {
   id: 'folder-a',

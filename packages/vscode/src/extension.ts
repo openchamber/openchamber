@@ -12,6 +12,8 @@ import { applyConnectAttemptTimeout } from './networkDefaults';
 import { stopGitProcesses } from './bridge-git-process-runtime';
 import { registerGenerateCommitMessageCommand } from './scmCommitMessage';
 import { createSessionNotifier } from './sessionNotifications';
+import { fetchOpenCodeDiagnosticsProbe } from './opencode-diagnostics-runtime';
+import { isVSCodeSelectionWithinLimit, MAX_VSCODE_SELECTION_BYTES } from './selection-size';
 
 let chatViewProvider: ChatViewProvider | undefined;
 
@@ -405,6 +407,13 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      if (!isVSCodeSelectionWithinLimit(selectedText)) {
+        vscode.window.showWarningMessage(
+          t('OpenChamber [Add to Context]: Selection exceeds the {0} MiB limit', MAX_VSCODE_SELECTION_BYTES / (1024 * 1024))
+        );
+        return;
+      }
+
       // Get file info for context
       // false matches the relativePath broadcast for the active editor, so this attachment dedupes against the pin-selection suggestion.
       const filePath = vscode.workspace.asRelativePath(editor.document.uri, false);
@@ -705,50 +714,8 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       const safeFetch = async (input: string, timeoutMs = 6000) => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
-        const startedAt = Date.now();
         const openCodeAuthHeaders = openCodeManager?.getOpenCodeAuthHeaders() || {};
-        try {
-          const resp = await fetch(input, {
-            method: 'GET',
-            headers: { Accept: 'application/json', ...openCodeAuthHeaders },
-            signal: controller.signal,
-          });
-          const elapsedMs = Date.now() - startedAt;
-          const contentType = resp.headers.get('content-type') || '';
-          const isJson = contentType.toLowerCase().includes('json') && !contentType.toLowerCase().includes('text/html');
-
-          let summary = '';
-          if (isJson) {
-            const json = await resp.json().catch(() => null);
-            if (Array.isArray(json)) {
-              summary = `json[array] len=${json.length}`;
-            } else if (json && typeof json === 'object') {
-              const keys = Object.keys(json).slice(0, 8);
-              summary = `json[object] keys=${keys.join(',')}${Object.keys(json).length > keys.length ? ',…' : ''}`;
-            } else {
-              summary = `json[${typeof json}]`;
-            }
-          } else {
-            summary = contentType ? `content-type=${contentType}` : 'no content-type';
-          }
-
-          return { ok: resp.ok && isJson, status: resp.status, elapsedMs, summary };
-        } catch (error) {
-          const elapsedMs = Date.now() - startedAt;
-          const isAbort =
-            controller.signal.aborted ||
-            (error instanceof Error && (error.name === 'AbortError' || error.message.toLowerCase().includes('aborted')));
-          const message = isAbort
-            ? `timeout after ${timeoutMs}ms`
-            : error instanceof Error
-              ? error.message
-              : String(error);
-          return { ok: false, status: 0, elapsedMs, summary: `error=${message}` };
-        } finally {
-          clearTimeout(timeout);
-        }
+        return fetchOpenCodeDiagnosticsProbe(input, timeoutMs, openCodeAuthHeaders);
       };
 
       const buildProbeUrl = (pathname: string, includeDirectory = true) => {

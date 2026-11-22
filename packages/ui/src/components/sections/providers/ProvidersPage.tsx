@@ -21,7 +21,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
 import { loadIntegrationCatalog, peekIntegrationCatalog, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
-import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
+import { loadDisabledProviders, peekDisabledProviders, peekProviderOffState, setProviderDisabled as setProviderDisabledRequest, subscribeProviderOffState, type ProviderOffState } from '@/lib/disabledProviders';
 import { requiresProviderAuth } from './providerAvailability';
 import { listConnectableProviders } from './connectableProviders';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
@@ -110,10 +110,12 @@ export const ProvidersPage: React.FC = () => {
   const setConnectRequested = useUIStore((state) => state.setSettingsProvidersConnectRequested);
   const classificationRequested = useUIStore((state) => state.settingsProvidersClassificationRequested);
   const setClassificationRequested = useUIStore((state) => state.setSettingsProvidersClassificationRequested);
+  const customRequested = useUIStore((state) => state.settingsProvidersCustomRequested);
+  const setCustomRequested = useUIStore((state) => state.setSettingsProvidersCustomRequested);
   const openRequested = useUIStore((state) => state.settingsProvidersOpenRequested);
   const setOpenRequested = useUIStore((state) => state.setSettingsProvidersOpenRequested);
   const [selectedProviderId, setSelectedProvider] = React.useState(() => (
-    connectRequested ? ADD_PROVIDER_ID : classificationRequested ? CLASSIFICATION_PAGE_ID : openRequested ?? ''
+    connectRequested || customRequested ? ADD_PROVIDER_ID : classificationRequested ? CLASSIFICATION_PAGE_ID : openRequested ?? ''
   ));
   React.useEffect(() => {
     if (!connectRequested) return;
@@ -151,17 +153,39 @@ export const ProvidersPage: React.FC = () => {
   const [integrationsLoadFailed, setIntegrationsLoadFailed] = React.useState(false);
   const integrations = catalog?.integrations ?? null;
   // Null until read, and where the runtime has no OpenChamber server (VS Code).
-  const [disabledProviders, setDisabledProviders] = React.useState<string[] | null>(null);
+  const [disabledProviders, setDisabledProviders] = React.useState<string[] | null>(() => peekDisabledProviders());
+  // The effective off reasons (#218): providers off by policy or by omission
+  // from enabled_providers render read-only-off; the toggle cannot change them.
+  const [offReasons, setOffReasons] = React.useState<Readonly<ProviderOffState['offReasons']> | null>(() => peekProviderOffState()?.offReasons ?? null);
   React.useEffect(() => {
     let active = true;
-    fetchDisabledProviders()
-      .then((list) => { if (active) setDisabledProviders(list); })
+    loadDisabledProviders()
+      .then((list) => { if (active) { setDisabledProviders(list); setOffReasons(peekProviderOffState()?.offReasons ?? null); } })
       .catch((error) => { console.warn('[providers] could not read disabled providers:', error); });
-    return () => { active = false; };
+    // A first read taken while the server catalog is cold is refreshed in
+    // the background (#218); follow the refreshed read when it lands.
+    const unsubscribe = subscribeProviderOffState(() => {
+      if (!active) return;
+      setDisabledProviders(peekDisabledProviders());
+      setOffReasons(peekProviderOffState()?.offReasons ?? null);
+    });
+    return () => { active = false; unsubscribe(); };
   }, []);
   const handleProviderDisabled = React.useCallback(async (providerId: string, disabled: boolean) => {
     try {
       setDisabledProviders(await setProviderDisabledRequest(providerId, disabled));
+      // The toggle answer carries only the toggleable list, and the local
+      // recompute cannot know a provider was also allowlist/policy-off
+      // behind a 'disabled' reason. Re-read the effective off state so such
+      // a provider stays visibly off after being enabled here; a failed
+      // re-read keeps the recomputed state and never fails the toggle.
+      try {
+        const reloaded = await loadDisabledProviders();
+        if (reloaded) setDisabledProviders(reloaded);
+      } catch (error) {
+        console.warn('[providers] could not re-read disabled providers after toggle:', error);
+      }
+      setOffReasons(peekProviderOffState()?.offReasons ?? null);
       if (disabled) setSelectedProvider('');
       toast.success(disabled
         ? t('settings.providers.disabled.toast.disabled', { provider: providerId })
@@ -198,6 +222,17 @@ export const ProvidersPage: React.FC = () => {
   const [editingCustomScope, setEditingCustomScope] = React.useState<ProviderConfigScope | null>(null);
   const [customAuthFailureHint, setCustomAuthFailureHint] = React.useState<string | null>(null);
   const [lastCustomPersistId, setLastCustomPersistId] = React.useState<string | null>(null);
+  // Settings search asked for the custom-provider create form (#1765):
+  // enter add mode with the custom candidate preselected, which is
+  // exactly custom-create mode, then clear the one-shot request. The
+  // form's own cancel (setCandidateProviderId('')) returns to the
+  // candidate picker, matching the manual Connect -> Custom path.
+  React.useEffect(() => {
+    if (!customRequested) return;
+    setSelectedProvider(ADD_PROVIDER_ID);
+    setCandidateProviderId(CUSTOM_PROVIDER_ID);
+    setCustomRequested(false);
+  }, [customRequested, setCustomRequested]);
   const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
   const isCustomCreateMode = isAddMode && candidateProviderId === CUSTOM_PROVIDER_ID;
   const isCustomEditMode = Boolean(
@@ -698,6 +733,7 @@ export const ProvidersPage: React.FC = () => {
         onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
         onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
         disabledProviders={disabledProviders}
+        offReasons={offReasons}
         onEnableProvider={(providerId) => void handleProviderDisabled(providerId, false)}
       />
     );
@@ -826,17 +862,27 @@ export const ProvidersPage: React.FC = () => {
                 {t('settings.providers.page.actions.edit')}
               </Button>
             ) : null}
-            {disabledProviders !== null ? (
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                title={t('settings.providers.disabled.disableHint')}
-                onClick={() => void handleProviderDisabled(selectedProvider.id, true)}
-              >
-                {t('settings.providers.disabled.disable')}
-              </Button>
-            ) : null}
+            {(() => {
+              const selectedOffReason = offReasons?.[selectedProvider.id];
+              if (selectedOffReason === 'policy' || selectedOffReason === 'allowlist') {
+                return (
+                  <span className="typography-meta text-muted-foreground" title={t(selectedOffReason === 'policy' ? 'settings.providers.disabled.offByPolicy' : 'settings.providers.disabled.offByAllowlist')}>
+                    {t(selectedOffReason === 'policy' ? 'settings.providers.disabled.offByPolicyShort' : 'settings.providers.disabled.offByAllowlistShort')}
+                  </span>
+                );
+              }
+              return disabledProviders !== null ? (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="!font-normal"
+                  title={t('settings.providers.disabled.disableHint')}
+                  onClick={() => void handleProviderDisabled(selectedProvider.id, true)}
+                >
+                  {t('settings.providers.disabled.disable')}
+                </Button>
+              ) : null;
+            })()}
             {enterpriseLocked ? null : (
             <Button
               variant="outline"

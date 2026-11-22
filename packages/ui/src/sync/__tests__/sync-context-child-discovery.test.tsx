@@ -11,6 +11,8 @@ const DIRECTORY = '/repo/discovery'
 const cursorsSeenOnDiscoveryCalls: Array<string | undefined> = []
 const parentMessageFetches: string[] = []
 let activeStatusReads = 0
+// What the OpenChamber host says about a replaced OpenCode still draining.
+let hostSnapshotDraining = false
 
 const rootSession = (id: string, title: string, updated: number): Session => ({
   id,
@@ -28,7 +30,18 @@ const hang = <T,>(): Promise<T> => new Promise<T>(() => undefined)
 
 // The provider reads every session list through the client wrapper, so the
 // pagination under test is driven here rather than through a fake transport.
+// Bootstrap and child discovery both page at OpenCode's 200-session ceiling,
+// so the page size no longer tells them apart: bootstrap lists the directory
+// first, on mount, and that first list is the one held open.
+let bootstrapListStarted = false
 const listSessionsPage = async (options: SessionListOptions = {}): Promise<SessionPage> => {
+  if (!bootstrapListStarted && options.cursor === undefined) {
+    bootstrapListStarted = true
+    // Bootstrap's own list: hang. Resolving it would replace the store's
+    // sessions after discovery merged them; in production the two race and the
+    // next watchdog tick re-discovers merged children.
+    return hang()
+  }
   if (options.limit === 200) {
     cursorsSeenOnDiscoveryCalls.push(options.cursor)
     if (options.cursor === undefined) {
@@ -40,12 +53,6 @@ const listSessionsPage = async (options: SessionListOptions = {}): Promise<Sessi
       }
     }
     return { sessions: [childSession], cursor: {} }
-  }
-  if (options.limit === 500) {
-    // Bootstrap's own list: hang. Resolving it would replace the store's
-    // sessions after discovery merged them; in production the two race and the
-    // next watchdog tick re-discovers merged children.
-    return hang()
   }
   return { sessions: [], cursor: {} }
 }
@@ -80,6 +87,7 @@ mock.module('@/lib/opencode/client', () => ({
       activeStatusReads += 1
       return {}
     },
+    getHostSessionStatusSnapshot: async () => ({ sessions: {}, serverTime: 0, openCodeDraining: hostSnapshotDraining }),
     listCommands: async () => [],
     listAgents: async () => [],
     listMcpServers: async () => [],
@@ -196,6 +204,7 @@ describe('SyncProvider child-session discovery pagination', () => {
     jest.useFakeTimers()
     const dom = installHookTestDomWithStorage()
     cursorsSeenOnDiscoveryCalls.length = 0
+    bootstrapListStarted = false
     parentMessageFetches.length = 0
     const sdk = OpenCode.make({ baseUrl: 'http://discovery.test', fetch: () => hang<Response>() })
 
@@ -289,5 +298,55 @@ describe('SyncProvider active-session watchdog status poll', () => {
       dom.restore()
       jest.useRealTimers()
     }
+  })
+})
+
+describe('SyncProvider active-session watchdog, cross-directory status', () => {
+  // The finished-subagent case: the cross-directory index still holds a
+  // session as running (its end was never reported, e.g. an interrupt
+  // reported as `shutdown`), while no directory store shows it running, so no
+  // directory poll looks at it. OpenCode's running list (mocked empty here)
+  // is the oracle: the watchdog settles the session after two reads miss it,
+  // and never while the host reports a replaced OpenCode still draining.
+  const runWatchdog = async (draining: boolean): Promise<boolean> => {
+    jest.useFakeTimers()
+    hostSnapshotDraining = draining
+    const dom = installHookTestDomWithStorage()
+    const sdk = OpenCode.make({ baseUrl: 'http://global-status.test', fetch: () => hang<Response>() })
+    const { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById, useGlobalSessionStatusStore } = await import('../global-session-status')
+    replaceGlobalSessionStatusById(new Map())
+    try {
+      const root = createRoot(dom.container)
+      await act(async () => root.render(
+        <SyncProvider sdk={sdk} directory={DIRECTORY}>
+          <div />
+        </SyncProvider>,
+      ))
+      applyGlobalSessionStatusEvent('/elsewhere', {
+        type: 'session.status',
+        properties: { sessionID: 'ses_finished_subagent', status: { type: 'busy' } },
+      })
+      expect(useGlobalSessionStatusStore.getState().activeSessionIds.has('ses_finished_subagent')).toBe(true)
+
+      const settled = await waitFor(
+        () => !useGlobalSessionStatusStore.getState().activeSessionIds.has('ses_finished_subagent'),
+        45_000,
+      )
+      await act(async () => root.unmount())
+      return settled
+    } finally {
+      hostSnapshotDraining = false
+      replaceGlobalSessionStatusById(new Map())
+      dom.restore()
+      jest.useRealTimers()
+    }
+  }
+
+  test('settles a session only the cross-directory index holds as running', async () => {
+    expect(await runWatchdog(false)).toBe(true)
+  })
+
+  test('keeps it while a replaced OpenCode drains: that OpenCode may still run it', async () => {
+    expect(await runWatchdog(true)).toBe(false)
   })
 })

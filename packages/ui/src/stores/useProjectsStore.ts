@@ -70,6 +70,8 @@ interface ProjectsStore {
     defaultAgent?: string | null;
     defaultModel?: string | null;
     defaultVariant?: string | null;
+    hiddenFromWork?: boolean;
+    hiddenFromAllSessions?: boolean;
   }) => void;
   uploadProjectIcon: (id: string, file: File) => Promise<{ ok: boolean; error?: string }>;
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
@@ -134,7 +136,23 @@ const resolveTildePath = (value: string, homeDir?: string | null): string => {
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
 
-const normalizeDefaultModel = (value: unknown): string | undefined => {
+/**
+ * One field of a persisted project entry: entries are JSON-shaped values read
+ * back from storage or a settings document, and each sanitizer below narrows
+ * the field it owns. ProjectEntry values also satisfy this contract.
+ */
+type ProjectFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ProjectFieldValue[]
+  | { [key: string]: ProjectFieldValue };
+
+type PersistedProjectCandidate = Record<string, ProjectFieldValue>;
+
+const normalizeDefaultModel = (value: ProjectFieldValue): string | undefined => {
   if (typeof value !== 'string') {
     return undefined;
   }
@@ -149,7 +167,7 @@ const normalizeDefaultModel = (value: unknown): string | undefined => {
   return trimmed;
 };
 
-const normalizeIconBackground = (value: unknown): string | null => {
+const normalizeIconBackground = (value: ProjectFieldValue): string | null => {
   if (typeof value !== 'string') {
     return null;
   }
@@ -190,12 +208,12 @@ const legacyAutoProjectLabel = (path: string): string => {
   return derived.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
-const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
-  if (!value || typeof value !== 'object') {
+const sanitizeProjectIconImage = (value: ProjectFieldValue): ProjectEntry['iconImage'] | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
 
-  const candidate = value as Record<string, unknown>;
+  const candidate = value;
   const mime = typeof candidate.mime === 'string' ? candidate.mime.trim() : '';
   const updatedAt = typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt)
     ? Math.max(0, Math.round(candidate.updatedAt))
@@ -243,7 +261,7 @@ const readFileAsDataUrl = async (file: File): Promise<string> => {
   });
 };
 
-const sanitizeProjects = (value: unknown): ProjectEntry[] => {
+const sanitizeProjects = (value: readonly (ProjectEntry | PersistedProjectCandidate)[]): ProjectEntry[] => {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -254,7 +272,7 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
-    const candidate = entry as Record<string, unknown>;
+    const candidate = entry;
 
     const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
     if (!rawPath) continue;
@@ -322,6 +340,12 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       project.sidebarCollapsed = candidate.sidebarCollapsed;
+    }
+    if (candidate.hiddenFromWork === true) {
+      project.hiddenFromWork = true;
+    }
+    if (candidate.hiddenFromAllSessions === true) {
+      project.hiddenFromAllSessions = true;
     }
     result.push(project);
   }
@@ -838,6 +862,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       defaultAgent?: string | null;
       defaultModel?: string | null;
       defaultVariant?: string | null;
+      hiddenFromWork?: boolean;
+      hiddenFromAllSessions?: boolean;
     }) => {
       if (isVSCodeProjectsRuntime) {
         return;
@@ -854,6 +880,15 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (meta.color !== undefined) updated.color = meta.color;
         if (meta.iconBackground !== undefined) {
           updated.iconBackground = normalizeIconBackground(meta.iconBackground);
+        }
+        // Only a hidden project carries a flag; a shown one stores none.
+        if (meta.hiddenFromWork !== undefined) {
+          if (meta.hiddenFromWork) updated.hiddenFromWork = true;
+          else delete updated.hiddenFromWork;
+        }
+        if (meta.hiddenFromAllSessions !== undefined) {
+          if (meta.hiddenFromAllSessions) updated.hiddenFromAllSessions = true;
+          else delete updated.hiddenFromAllSessions;
         }
         if (meta.defaultAgent !== undefined) {
           const normalized = parseNonEmptyTrimmedString(meta.defaultAgent, {});

@@ -16,6 +16,7 @@ export const toNumber = (value) => {
 export const toTimestamp = (value) => {
   if (!value) return null;
   if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
     return value < 1_000_000_000_000 ? value * 1000 : value;
   }
   if (typeof value === 'string') {
@@ -26,7 +27,7 @@ export const toTimestamp = (value) => {
 };
 
 export const normalizeTimestamp = (value) => {
-  if (typeof value !== 'number') return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return value < 1_000_000_000_000 ? value * 1000 : value;
 };
 

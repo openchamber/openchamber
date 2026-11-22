@@ -33,6 +33,7 @@ async function createSurface(userAgent: string) {
     value: { load: async () => [], add() {}, addEventListener() {}, removeEventListener() {} },
   });
   Object.assign(globalThis, {
+    Event: happyWindow.Event, CustomEvent: happyWindow.CustomEvent, MutationObserver: happyWindow.MutationObserver,
     window: happyWindow,
     document: happyWindow.document,
     navigator: happyWindow.navigator,

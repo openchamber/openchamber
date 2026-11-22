@@ -71,3 +71,17 @@ describe('what an unresolvable action reports', () => {
     expect(error).toContain('browser.open');
   });
 });
+
+describe('a prototype-named caller', () => {
+  test('is treated exactly like any other unknown tool, never throws', () => {
+    for (const toolName of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      // A bare name that means one thing everywhere still resolves via the full list.
+      expect(resolveAgentToolAction('read', toolName)).toEqual({ action: 'memory.read' });
+      const { error, action } = resolveAgentToolAction('nonsense', toolName);
+      expect(action).toBeUndefined();
+      expect(error).toContain('Unsupported OpenChamber action: nonsense. Use one of:');
+      expect(error).toContain('memory.read');
+      expect(error).toContain('browser.open');
+    }
+  });
+});

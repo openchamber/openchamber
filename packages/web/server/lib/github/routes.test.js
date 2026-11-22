@@ -79,7 +79,7 @@ describe('POST /api/source-control/github/references/across', () => {
       const names = [...body.variables.q.matchAll(/repo:acme\/([^ ]+)/g)].map((match) => match[1]);
       return response({ data: { search: { issueCount: names.length, pageInfo: { hasNextPage: false, endCursor: null }, nodes: names.map((name, index) => ({
         __typename: 'Issue', number: index + 1, title: name, url: `https://github.com/acme/${name}/issues/1`,
-        createdAt: null, updatedAt: '2026-10-01', body: '', author: null, labels: { nodes: [] }, comments: { totalCount: 0 },
+        createdAt: null, updatedAt: '2026-10-01', body: '', author: null, labels: { totalCount: 0, nodes: [] }, comments: { totalCount: 0 },
         repository: { name, owner: { login: 'acme' } }, state: 'OPEN', stateReason: null,
       })) } } });
     }));
@@ -257,6 +257,123 @@ describe('GET /api/source-control/github/pulls/list free-text search', () => {
   });
 });
 
+describe('GET /api/source-control/github/pulls/context diff cap (#1457)', () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-context-diff-'));
+  const directory = path.join(dataDir, 'project');
+  let app;
+  let diffRequests;
+
+  const DIFF_MAX_BYTES = 50 * 1024 * 1024;
+  const diffOfBytes = (totalBytes) => {
+    const header = 'diff --git a/big b/big\n';
+    return header + 'x'.repeat(totalBytes - header.length);
+  };
+
+  const serveGitHub = (diffBody) => {
+    const fetch = vi.fn(async (urlString, init) => {
+      const url = new URL(urlString);
+      const accept = new Headers(init?.headers).get('accept') ?? '';
+      const pullMatch = url.pathname.match(/^\/repos\/team\/project\/pulls\/(\d+)$/);
+      if (pullMatch) {
+        if (accept.includes('vnd.github.v3.diff')) {
+          diffRequests += 1;
+          return new Response(diffBody, { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+        }
+        return response({
+          number: Number(pullMatch[1]),
+          title: 'Change',
+          html_url: `https://github.com/team/project/pull/${pullMatch[1]}`,
+          state: 'open',
+          head: { ref: 'feature', sha: 'abc123', repo: null },
+          base: { ref: 'main' },
+          user: { id: 7, login: 'tester' },
+          changed_files: 1,
+          merged: false,
+        });
+      }
+      if (url.pathname.endsWith('/check-runs')) return response({ total_count: 0, check_runs: [] });
+      if (url.pathname.endsWith('/status')) return response({ statuses: [] });
+      return response([]);
+    });
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  };
+
+  const contextRequest = (number) => request(app).get('/api/source-control/github/pulls/context')
+    .query({ ...readContext(directory), number, diff: '1' });
+
+  beforeAll(async () => {
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    fs.mkdirSync(directory, { recursive: true });
+    const { setGitHubAuth, setGhCliDisabled } = await import('./auth.js');
+    setGhCliDisabled(true);
+    ({ accountId } = await setGitHubAuth({ accessToken: 'fake-test-token', user: { id: 7, login: 'tester' } }));
+    app = express();
+    app.use(express.json());
+    registerGitHubRoutes(app, {
+      validateReadContext: vi.fn(async (context) => ({ ...context, bindingRevision: Number(context.bindingRevision) })),
+      resolveGitHubRepoFromDirectory: vi.fn(async () => ({ repo: { owner: 'team', repo: 'project' } })),
+      resolveRepoNetwork: vi.fn(async () => null),
+    });
+  });
+
+  beforeEach(() => { diffRequests = 0; });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  afterAll(() => {
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('refuses an over-cap diff with 413 and neither serves nor caches it whole', async () => {
+    serveGitHub(diffOfBytes(DIFF_MAX_BYTES + 1));
+    const first = await contextRequest(5).expect(413);
+    expect(first.body).toEqual({ error: 'Pull request diff is too large to serve' });
+    expect(first.body).not.toHaveProperty('diff');
+    expect(first.text).not.toContain('xxxxxxxxxx');
+    // A repeat request re-fetches and re-refuses: the over-cap diff was
+    // never retained in the response cache.
+    const second = await contextRequest(5).expect(413);
+    expect(second.body).toEqual({ error: 'Pull request diff is too large to serve' });
+    expect(diffRequests).toBe(2);
+  }, 60_000);
+
+  it('stops reading the diff at the cap instead of consuming the whole body (#1664)', async () => {
+    const CHUNK_BYTES = 1024 * 1024;
+    const TOTAL_CHUNKS = 400;
+    let pulled = 0;
+    const header = new TextEncoder().encode('diff --git a/big b/big\n');
+    const body = new ReadableStream({
+      pull(controller) {
+        if (pulled >= TOTAL_CHUNKS) { controller.close(); return; }
+        pulled += 1;
+        controller.enqueue(pulled === 1 ? header : new Uint8Array(CHUNK_BYTES).fill(120));
+      },
+    });
+    serveGitHub(body);
+    const result = await contextRequest(8).expect(413);
+    expect(result.body).toEqual({ error: 'Pull request diff is too large to serve' });
+    expect(result.body).not.toHaveProperty('diff');
+    // The cap is 50 chunks; the read aborts right after crossing it, not after 400.
+    expect(pulled).toBeLessThan(DIFF_MAX_BYTES / CHUNK_BYTES + 5);
+  }, 60_000);
+
+  it('serves a diff at exactly the cap byte-identically', async () => {
+    const atCap = diffOfBytes(DIFF_MAX_BYTES);
+    serveGitHub(atCap);
+    const result = await contextRequest(6).expect(200);
+    expect(result.body.diff).toBe(atCap);
+    expect(Buffer.byteLength(result.body.diff, 'utf8')).toBe(DIFF_MAX_BYTES);
+  }, 60_000);
+
+  it('serves an under-cap diff byte-identically', async () => {
+    const small = 'diff --git a/a b/a\n+hello\n';
+    serveGitHub(small);
+    const result = await contextRequest(7).expect(200);
+    expect(result.body.diff).toBe(small);
+  });
+});
+
 describe('GET /api/source-control/github/references', () => {
   let app;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-references-'));
@@ -294,7 +411,7 @@ describe('GET /api/source-control/github/references', () => {
     updatedAt: null,
     body: '',
     author: null,
-    labels: { nodes: [] },
+    labels: { totalCount: 0, nodes: [] },
     comments: { totalCount: 0 },
     repository: { name: 'project', owner: { login: 'example' } },
     state: 'OPEN',
@@ -354,13 +471,14 @@ describe('GET /api/source-control/github/references', () => {
       state: 'OPEN',
       reviewDecision: 'APPROVED',
       headCommit: { nodes: [] },
-      reviewRequests: { nodes: [] },
+      labels: { totalCount: 0, nodes: [] },
+      reviewRequests: { totalCount: 0, nodes: [] },
       additions: 1,
       deletions: 2,
       changedFiles: 1,
       comments: { totalCount: 0, nodes: [] },
-      reviews: { nodes: [] },
-      reviewThreads: { nodes: [] },
+      reviews: { totalCount: 0, nodes: [] },
+      reviewThreads: { totalCount: 0, nodes: [] },
       commits: { totalCount: 0, nodes: [] },
     } } } }));
 
@@ -406,6 +524,78 @@ describe('GET /api/source-control/github/references', () => {
     expect(fetch.mock.calls.slice(calls).some(([url]) => String(url).includes('/labels'))).toBe(false);
   });
 
+  it('pages the board picker lists past the first 100', async () => {
+    const labelPages = [100, 100, 50].map((count, page) =>
+      Array.from({ length: count }, (_, index) => ({ name: `label-${page + 1}-${index}`, color: 'd73a4a' })));
+    const reviewerPages = [100, 30].map((count, page) =>
+      Array.from({ length: count }, (_, index) => ({ login: `user-${page + 1}-${index}` })));
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      const page = Number(endpoint.searchParams.get('page'));
+      if (endpoint.pathname === '/repos/example/project/labels') return response(labelPages[page - 1] ?? []);
+      if (endpoint.pathname === '/repos/example/project/assignees') return response(reviewerPages[page - 1] ?? []);
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+
+    const labels = await request(app).get('/api/source-control/github/references/labels')
+      .query({ ...readContext(project), owner: 'example', repo: 'project' }).expect(200);
+    const reviewers = await request(app).get('/api/source-control/github/references/reviewers')
+      .query({ ...readContext(project), owner: 'example', repo: 'project' }).expect(200);
+
+    expect(labels.body.items).toHaveLength(250);
+    expect(labels.body.items[249]).toEqual({ name: 'label-3-49', color: 'd73a4a' });
+    expect(reviewers.body.items).toHaveLength(130);
+    expect(reviewers.body.items[129]).toEqual({ id: 'user-2-29', login: 'user-2-29' });
+    const pickerCalls = (suffix) => fetch.mock.calls.filter(([called]) => new URL(called).pathname.endsWith(suffix)).length;
+    expect(pickerCalls('/labels')).toBe(3);
+    expect(pickerCalls('/assignees')).toBe(2);
+  });
+
+  it('returns the complete board picker list at exactly the pagination cap', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname !== '/repos/example/project/labels') throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+      if (Number(endpoint.searchParams.get('page')) > 20) return response([]);
+      return response(Array.from({ length: 100 }, (_, index) => ({ name: `label-${index}` })));
+    });
+    vi.stubGlobal('fetch', fetch);
+
+    const labels = await request(app).get('/api/source-control/github/references/labels')
+      .query({ ...readContext(project), owner: 'example', repo: 'project' }).expect(200);
+
+    expect(labels.body.items).toHaveLength(2000);
+    expect(fetch.mock.calls.filter(([called]) => new URL(called).pathname.endsWith('/labels'))).toHaveLength(21);
+  });
+
+  it('fails explicitly when a board picker list passes the pagination cap', async () => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/repos/example/project/labels') {
+        return response(Array.from({ length: 100 }, (_, index) => ({ name: `label-${index}` })));
+      }
+      if (endpoint.pathname === '/repos/example/project/assignees') {
+        return response(Array.from({ length: 100 }, (_, index) => ({ login: `user-${index}` })));
+      }
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+
+    const labels = await request(app).get('/api/source-control/github/references/labels')
+      .query({ ...readContext(project), owner: 'example', repo: 'project' }).expect(500);
+    const reviewers = await request(app).get('/api/source-control/github/references/reviewers')
+      .query({ ...readContext(project), owner: 'example', repo: 'project' }).expect(500);
+
+    expect(labels.body.error).toBe('GitHub label list reached the 2000-label safety limit and may be incomplete');
+    expect(reviewers.body.error).toBe('GitHub reviewer list reached the 2000-reviewer safety limit and may be incomplete');
+    const pickerCalls = (suffix) => fetch.mock.calls.filter(([called]) => new URL(called).pathname.endsWith(suffix)).length;
+    expect(pickerCalls('/labels')).toBe(21);
+    expect(pickerCalls('/assignees')).toBe(21);
+  });
+
   it('reads the statuses of listed PRs with the sidebar summaries, only from the project repo network', async () => {
     const fetch = serveGitHub((body) => {
       expect(body.variables).toMatchObject({ o0: 'example', n0: 'project', p0: 4, o1: 'example', n1: 'project', p1: 9 });
@@ -418,7 +608,7 @@ describe('GET /api/source-control/github/references', () => {
           mergeable: 'CONFLICTING',
           mergeStateStatus: 'DIRTY',
           headRefOid: 'sha-4',
-          commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
+          commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { totalCount: 1, nodes: [
             { __typename: 'CheckRun', databaseId: 1, name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: null, checkSuite: { app: { databaseId: 1 } } },
           ] } } } }] },
         } },
@@ -566,5 +756,34 @@ describe('pull request head for a worktree made by number', () => {
     serveGitHub(() => response({ message: 'Not Found' }, 404));
     await expect(github.readChangeRequestHead({ context: readContext(project), number: 42 }))
       .rejects.toMatchObject({ status: 404, message: 'Pull request #42 was not found in example/project' });
+  });
+});
+
+describe('GET /api/source-control/github/references bindingRevision parsing', () => {
+  it('hands the binding authority a strict non-negative integer or null', async () => {
+    const seen = [];
+    const app = express();
+    registerGitHubRoutes(app, {
+      validateReadContext: vi.fn(async (context) => {
+        seen.push(context.bindingRevision);
+        throw Object.assign(new Error('Stale binding'), { code: 'SOURCE_CONTROL_BINDING_STALE', status: 409 });
+      }),
+    });
+    const read = (bindingRevision) => request(app).get('/api/source-control/github/references')
+      .query({ directory: '/repo', kind: 'issue', repositoryId: 'repo-1', bindingRevision })
+      .expect(409);
+
+    // Each of these reinterprets to a plain revision under Number(...), so a
+    // loose parse would pass the authority check when that revision is current.
+    for (const spelling of ['1e3', '0x10', '2.0', ' 2 ', '+2', '', '01', '-1', '9007199254740993']) {
+      await read(spelling);
+    }
+    expect(seen).toEqual([null, null, null, null, null, null, null, null, null]);
+
+    seen.length = 0;
+    for (const spelling of ['0', '2', '1000']) {
+      await read(spelling);
+    }
+    expect(seen).toEqual([0, 2, 1000]);
   });
 });

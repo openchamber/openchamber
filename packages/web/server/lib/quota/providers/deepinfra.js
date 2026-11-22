@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -5,23 +6,24 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  formatMoney
+  formatMoney,
+  asNonEmptyString
 } from '../utils/index.js';
 
 export const providerId = 'deepinfra';
 export const providerName = 'DeepInfra';
-const aliases = ['deepinfra', 'deep-infra', 'deep_infra'];
+export const aliases = ['deepinfra', 'deep-infra', 'deep_infra'];
 const DEEPINFRA_ME_URL = 'https://api.deepinfra.com/v1/me?checklist=true';
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
+
 export const fetchQuota = async ({ readCredentials = readOpenCodeCredentials } = {}) => {
-  const auth = await readCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+  const apiKey = getApiKey(await readCredentials());
 
   if (!apiKey) {
     return buildResult({
@@ -57,7 +59,7 @@ export const fetchQuota = async ({ readCredentials = readOpenCodeCredentials } =
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     // Documented at https://docs.deepinfra.com/api-reference/account/me:
     // checklist.stripe_balance is negative when funds are ready to spend and
     // positive when money is owed, so the spendable credit is its negation.

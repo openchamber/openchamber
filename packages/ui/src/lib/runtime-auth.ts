@@ -22,6 +22,7 @@ let localRuntimeUrlAuthGeneration = 0;
 let runtimeAuthGeneration = 0;
 
 const URL_AUTH_REFRESH_SKEW_MS = 10_000;
+const URL_AUTH_MINT_TIMEOUT_MS = 10_000;
 
 const isReservedRuntimeExtraHeaderName = (name: string): boolean => name.toLowerCase() === 'authorization';
 
@@ -238,12 +239,16 @@ const postUrlAuthTokenMint = async (apiBaseUrl: string | null | undefined, scope
   }
   const route = scope ? `/auth/url-token?scope=${encodeURIComponent(scope)}` : '/auth/url-token';
   const relay = getActiveRelayTunnel();
+  // Bounded deadline: a stalled mint must reject, not wedge the coalesced
+  // refresh promise (and the proactive refresh loop) for the whole session.
+  const signal = AbortSignal.timeout(URL_AUTH_MINT_TIMEOUT_MS);
   const response = relay
-    ? await relay.fetch(route, { method: 'POST', headers })
+    ? await relay.fetch(route, { method: 'POST', headers, signal })
     : await fetch(buildAuthUrl(apiBaseUrl, route), {
         method: 'POST',
         headers,
         credentials: 'include',
+        signal,
       });
   if (!response.ok) {
     throw new Error(`Failed to mint runtime URL auth token (${response.status})`);
@@ -309,6 +314,7 @@ const mintLocalRuntimeUrlAuthToken = (localOrigin: string): Promise<string> => {
     const response = await fetch(buildAuthUrl(origin, '/auth/url-token'), {
       method: 'POST',
       credentials: 'include',
+      signal: AbortSignal.timeout(URL_AUTH_MINT_TIMEOUT_MS),
     });
     if (!response.ok) {
       if (generation === localRuntimeUrlAuthGeneration && origin === localRuntimeUrlAuthRefreshOrigin) {

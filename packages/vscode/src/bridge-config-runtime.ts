@@ -33,6 +33,8 @@ import {
   renameSkill,
   isManagedSkillPath,
   readSkillSupportingFile,
+  isUnsafeSkillRelativePath,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   writeSkillSupportingFile,
   deleteSkillSupportingFile,
   type SkillScope,
@@ -194,9 +196,38 @@ export async function handleConfigBridgeMessage(
     }
 
     case 'api:behavior/agents-md:get': {
+      // Open once and judge from the handle (design #1254, phase 3): a
+      // stat-by-path-then-read-by-path gate lets a file grown after the stat
+      // buffer whole past the cap. Growth past the cap answers the same
+      // over-limit refusal; a missing file still answers exists: false.
+      const overLimit = () => ({ id, type, success: false, error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` });
       try {
-        const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
-        return { id, type, success: true, data: { content, exists: true, path: AGENTS_MD_PATH } };
+        // O_NONBLOCK (POSIX only): open() must not block on a FIFO with no
+        // writer before the handle stat can reject it as non-regular.
+        const openFlags = process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+        const handle = await fs.promises.open(AGENTS_MD_PATH, openFlags);
+        try {
+          const stat = await handle.stat();
+          if (!stat.isFile()) {
+            throw new Error(`AGENTS.md is not a regular file: ${AGENTS_MD_PATH}`);
+          }
+          if (stat.size > MAX_BEHAVIOR_PROMPT_SIZE) {
+            return overLimit();
+          }
+          const buffer = Buffer.alloc(MAX_BEHAVIOR_PROMPT_SIZE + 1);
+          let total = 0;
+          while (total < buffer.length) {
+            const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+            if (bytesRead === 0) break;
+            total += bytesRead;
+          }
+          if (total > MAX_BEHAVIOR_PROMPT_SIZE) {
+            return overLimit();
+          }
+          return { id, type, success: true, data: { content: buffer.toString('utf8', 0, total), exists: true, path: AGENTS_MD_PATH } };
+        } finally {
+          await handle.close();
+        }
       } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
           return { id, type, success: true, data: { content: '', exists: false, path: AGENTS_MD_PATH } };
@@ -208,7 +239,10 @@ export async function handleConfigBridgeMessage(
     case 'api:behavior/agents-md:save': {
       const request = (payload || {}) as { content?: unknown };
       const content = typeof request.content === 'string' ? request.content : '';
-      if (content.length > MAX_BEHAVIOR_PROMPT_SIZE) {
+      // Measure UTF-8 bytes, not UTF-16 code units: the get handler gates on
+      // the on-disk byte size, so a length-based save check would accept
+      // multibyte content that every later get then refuses.
+      if (Buffer.byteLength(content, 'utf8') > MAX_BEHAVIOR_PROMPT_SIZE) {
         return { id, type, success: false, error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` };
       }
       await fs.promises.mkdir(path.dirname(AGENTS_MD_PATH), { recursive: true });
@@ -558,17 +592,47 @@ export async function handleConfigBridgeMessage(
       if (target === 'file') {
         if (normalizedMethod === 'GET') {
           if (!pluginId) return { id, type, success: false, error: 'Plugin file id is required' };
-          const file = readPluginDirFile(pluginId, workingDirectory);
+          let file: ReturnType<typeof readPluginDirFile>;
+          try {
+            file = readPluginDirFile(pluginId, workingDirectory);
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'PLUGIN_FILE_TOO_LARGE') {
+              return { id, type, success: false, error: error.message, code: 'PLUGIN_FILE_TOO_LARGE' };
+            }
+            throw error;
+          }
           if (!file) return { id, type, success: false, error: 'Plugin file not found' };
           return { id, type, success: true, data: file };
         }
         if (normalizedMethod === 'POST') {
-          writePluginDirFile(body || {}, workingDirectory);
+          try {
+            writePluginDirFile(body || {}, workingDirectory);
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'PLUGIN_FILE_TOO_LARGE') {
+              return { id, type, success: false, error: error.message, code: 'PLUGIN_FILE_TOO_LARGE' };
+            }
+            throw error;
+          }
         } else if (normalizedMethod === 'PUT') {
           if (!pluginId) return { id, type, success: false, error: 'Plugin file id is required' };
-          const existing = readPluginDirFile(pluginId, workingDirectory);
+          let existing: ReturnType<typeof readPluginDirFile>;
+          try {
+            existing = readPluginDirFile(pluginId, workingDirectory);
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'PLUGIN_FILE_TOO_LARGE') {
+              return { id, type, success: false, error: error.message, code: 'PLUGIN_FILE_TOO_LARGE' };
+            }
+            throw error;
+          }
           if (!existing) return { id, type, success: false, error: 'Plugin file not found' };
-          writePluginDirFile({ fileName: existing.fileName, scope: existing.scope, content: body?.content }, workingDirectory, { overwrite: true });
+          try {
+            writePluginDirFile({ fileName: existing.fileName, scope: existing.scope, content: body?.content }, workingDirectory, { overwrite: true });
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'PLUGIN_FILE_TOO_LARGE') {
+              return { id, type, success: false, error: error.message, code: 'PLUGIN_FILE_TOO_LARGE' };
+            }
+            throw error;
+          }
         } else if (normalizedMethod === 'DELETE') {
           if (!pluginId) return { id, type, success: false, error: 'Plugin file id is required' };
           deletePluginDirFile(pluginId, workingDirectory);
@@ -838,6 +902,13 @@ export async function handleConfigBridgeMessage(
         return { id, type, success: false, error: 'File path is required' };
       }
 
+      // Reject traversal before any fs access, mirroring the web route's
+      // isUnsafeSkillRelativePath gate (#2304); the sinks additionally
+      // enforce containment against the real skill root.
+      if (isUnsafeSkillRelativePath(relativePath)) {
+        return { id, type, success: false, error: 'Invalid file path' };
+      }
+
       const discoveredSkill = (await resolveDiscoveredSkills(deps, ctx, workingDirectory))
         .find((skill) => skill.name === skillName);
       const sources = getSkillSources(skillName, workingDirectory, discoveredSkill || null);
@@ -849,7 +920,19 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (normalizedMethod === 'GET') {
-        const fileContent = readSkillSupportingFile(skillDir, relativePath);
+        let fileContent: string | null;
+        try {
+          fileContent = readSkillSupportingFile(skillDir, relativePath);
+        } catch (error) {
+          // SAFETY: codedError attaches a string `code` to the Error it
+          // throws; anything without the too-large code is an unexpected
+          // failure and is rethrown untouched below.
+          const errorCode = (error as NodeJS.ErrnoException | null)?.code;
+          if (errorCode === SKILL_SUPPORTING_FILE_TOO_LARGE_CODE || errorCode === 'EACCES') {
+            return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+          }
+          throw error;
+        }
         if (fileContent === null) {
           return { id, type, success: false, error: `File "${relativePath}" not found in skill "${skillName}"` };
         }
@@ -857,12 +940,34 @@ export async function handleConfigBridgeMessage(
       }
 
       if (normalizedMethod === 'PUT') {
-        writeSkillSupportingFile(skillDir, relativePath, content || '');
+        try {
+          writeSkillSupportingFile(skillDir, relativePath, content || '');
+        } catch (error) {
+          // SAFETY: writeSkillSupportingFile throws codedError values,
+          // which carry a string `code`; anything without the too-large
+          // code is an unexpected failure and is rethrown untouched below.
+          const errorCode = (error as NodeJS.ErrnoException | null)?.code;
+          if (errorCode === SKILL_SUPPORTING_FILE_TOO_LARGE_CODE || errorCode === 'EACCES') {
+            return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+          }
+          throw error;
+        }
         return { id, type, success: true, data: { success: true } };
       }
 
       if (normalizedMethod === 'DELETE') {
-        deleteSkillSupportingFile(skillDir, relativePath);
+        try {
+          deleteSkillSupportingFile(skillDir, relativePath);
+        } catch (error) {
+          // SAFETY: the sink throws codedError values; an EACCES code is
+          // the containment refusal and becomes a failure response,
+          // anything else is unexpected and is rethrown untouched.
+          const errorCode = (error as NodeJS.ErrnoException | null)?.code;
+          if (errorCode === 'EACCES') {
+            return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+          }
+          throw error;
+        }
         return { id, type, success: true, data: { success: true } };
       }
 

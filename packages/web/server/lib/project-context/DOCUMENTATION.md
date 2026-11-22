@@ -84,13 +84,43 @@ section with a `warning`, so the agent adds it in the same turn.
 Agents tick steps with their own file tools, which announce nothing, so the
 Plans tab re-reads the list while it is on screen. Listing therefore costs one
 `stat` per plan: a file is read and parsed again only when its modification
-time or size changed. Clients receive the counts, never the text.
+time or size changed. Clients receive the counts, never the text. The read
+itself follows the server's bound-and-judge contract: the file is opened
+with `O_NONBLOCK` on POSIX and judged a regular file from the opened
+handle, so a FIFO or other non-regular entry at a plan path reads as an
+unreadable plan instead of blocking the list at open.
+
+The summary cache is one server-lifetime instance shared by every project, so
+it is bounded: at most 500 entries (`PLAN_SUMMARY_CACHE_MAX_ENTRIES`), with a
+cache hit refreshing recency and insertion evicting the least recently used
+entry. The list flow only ever queries paths a listing just returned, so
+without the bound an entry for a deleted or renamed plan would never be
+queried again and could never leave; with it, those untouched entries are
+exactly the ones that age out first.
 
 `planSessions` records the session a plan was last sent to with Implement or
 Improve (`PUT .../plans/:planId/session`), so its card leads there. It is a map
 beside the manifest because a plan that only lives in the team's folder has no
 link to carry it. Deleting a plan drops its entry; a `shared:` plan made
 personal takes its entry to the new id.
+
+## Plan metrics
+
+A listed plan whose `planSessions` entry names a session also carries
+`metrics` when the server can read that session from OpenCode
+(`plan-metrics.js`, wired in `server/index.js` as the runtime's
+`readPlanMetrics` dep): the session's token totals and its USD cost. The
+session's own cost figure is authoritative (`costSource: 'opencode'`); the
+models.dev catalog prices the tokens only for a session whose record has no
+cost figure (`costSource: 'catalog'`, reasoning billed at the output rate),
+and a session the catalog cannot price reports `costUsd: null`. The server
+reader caches successful metrics per session for 30 seconds and shares
+concurrent reads. Each reader holds at most 500 results; session-read and
+catalog failures are not cached. The cache belongs to one server reader and
+clears when that process stops. A badge can lag a session update by up to 30
+seconds while the response shape stays unchanged. A session that cannot be read
+gives the plan no metrics, never an error and never a fabricated zero. The
+client validates the field in `toPlanLink` and drops a malformed one.
 
 ## Shared plans
 
@@ -196,6 +226,13 @@ Clients re-read authoritative context for the visible owner. This is a commit no
   instead of silently evicting the oldest entry.
 - **Per-entry sanitization never fails the whole read.** A malformed todo or
   plan link is dropped; the rest of the context still loads.
+- **Plan reads are size-gated on stat, before any read.** App writes clamp
+  plan bodies to 200,000 characters, but shared plan files are written by
+  other tools with no clamp, so `summaryOf` and `readPlan` compare
+  `stat.size` against `PLAN_FILE_READ_MAX_BYTES` (1 MiB) first: an over-cap
+  plan's list entry degrades to `tooLarge` with no progress (the rest of the
+  list still loads), `readPlan` answers 413, and a missing file still reads
+  as gone rather than as too large.
 
 ## Legacy migration
 

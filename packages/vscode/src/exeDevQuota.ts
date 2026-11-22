@@ -1,3 +1,5 @@
+import { QUOTA_RESPONSE_MAX_BYTES, readBoundedResponseJson } from './bounded-response-body';
+
 type ExeDevUsageWindow = {
   usedPercent: number | null;
   remainingPercent: number | null;
@@ -60,7 +62,7 @@ export const fetchExeDevUsage = async (usageToken: string, fetchImpl: typeof fet
   });
   if (response.status === 401 || response.status === 403) throw new Error('exe.dev authentication failed');
   if (!response.ok) throw new Error(`exe.dev usage API returned HTTP ${response.status}`);
-  const payload: ExeDevUsagePayload | null = await response.text().then((text) => JSON.parse(text)).catch(() => null);
+  const payload = (await readBoundedResponseJson(response, QUOTA_RESPONSE_MAX_BYTES)) as ExeDevUsagePayload | null;
   const windows = parseExeDevUsage(payload);
   if (!windows) throw new Error('exe.dev usage data could not be parsed');
   return windows;

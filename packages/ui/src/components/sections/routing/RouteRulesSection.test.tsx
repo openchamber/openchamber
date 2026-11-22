@@ -17,8 +17,7 @@ const DOM_GLOBAL_NAMES = [
   'localStorage',
   'requestAnimationFrame',
   'cancelAnimationFrame',
-  'IS_REACT_ACT_ENVIRONMENT',
-] as const;
+  'IS_REACT_ACT_ENVIRONMENT', 'CustomEvent', 'MutationObserver'] as const;
 
 const installDom = () => {
   const happyWindow = new Window({ url: 'http://localhost' });
@@ -38,7 +37,9 @@ const installDom = () => {
     requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
     cancelAnimationFrame: happyWindow.cancelAnimationFrame.bind(happyWindow),
     IS_REACT_ACT_ENVIRONMENT: true,
-  };
+  
+    CustomEvent: happyWindow.CustomEvent,
+    MutationObserver: happyWindow.MutationObserver,};
   for (const name of DOM_GLOBAL_NAMES) {
     Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
   }

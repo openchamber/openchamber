@@ -19,7 +19,7 @@ export const isOpaqueOriginRequest = (req) => {
  * API with the user's cookie.
  */
 export const allowsLocalDevOrigins = (env) => env.OPENCHAMBER_ELECTRON_DEV === '1' || env.OPENCHAMBER_ALLOW_DEV_ORIGINS === '1';
-export const isLocalDevClientOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+export const isLocalDevClientOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+$/.test(origin);
 
 const PACKAGED_FRAME_ANCESTORS = ['openchamber-ui://app', 'capacitor://localhost', 'https://localhost'];
 const FRAME_ANCESTOR_SOURCE = /^(?:\*|https?:\/\/[a-z0-9.-]+(?::(?:\d{1,5}|\*))?)$/i;
@@ -34,7 +34,7 @@ const FRAME_ANCESTOR_SOURCE = /^(?:\*|https?:\/\/[a-z0-9.-]+(?::(?:\d{1,5}|\*))?
  */
 export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra = '' } = {}) => {
   const sources = ["'self'", ...PACKAGED_FRAME_ANCESTORS];
-  if (allowLocalDevOrigins) sources.push('http://127.0.0.1:*', 'http://localhost:*');
+  if (allowLocalDevOrigins) sources.push('http://127.0.0.1:*', 'http://localhost:*', 'http://[::1]:*');
   for (const source of String(extra).split(/[\s,]+/)) {
     if (source && FRAME_ANCESTOR_SOURCE.test(source)) sources.push(source);
   }
@@ -139,14 +139,28 @@ export const createRequestSecurityRuntime = (deps) => {
     if (host) {
       hosts.add(host.toLowerCase());
       origins.add(`${protocol}://${host}`);
-      const [hostname, port] = host.split(':');
+      let hostname = host;
+      let port = '';
+      if (host.startsWith('[')) {
+        const end = host.indexOf(']');
+        if (end !== -1) {
+          hostname = host.slice(0, end + 1);
+          const rest = host.slice(end + 1);
+          if (rest.startsWith(':') && /^\d+$/.test(rest.slice(1))) {
+            port = rest.slice(1);
+          }
+        }
+      } else {
+        const split = host.split(':');
+        hostname = split[0];
+        port = split[1] ?? '';
+      }
       const normalizedHost = typeof hostname === 'string' ? hostname.toLowerCase() : '';
       const portSuffix = typeof port === 'string' && port.length > 0 ? `:${port}` : '';
-      if (normalizedHost === 'localhost') {
+      if (normalizedHost === 'localhost' || normalizedHost === '127.0.0.1' || normalizedHost === '[::1]') {
+        origins.add(`${protocol}://localhost${portSuffix}`);
         origins.add(`${protocol}://127.0.0.1${portSuffix}`);
         origins.add(`${protocol}://[::1]${portSuffix}`);
-      } else if (normalizedHost === '127.0.0.1' || normalizedHost === '[::1]') {
-        origins.add(`${protocol}://localhost${portSuffix}`);
       }
     }
 

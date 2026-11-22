@@ -15,6 +15,9 @@ import {
 import { readSectionEntry, readMcpEntry } from './config-v2.js';
 import { resolveWorktreeDirectory } from './worktree-directory.js';
 import { writeFileAtomic } from './atomic-write.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
+import { isString } from '../shared/guards.js';
+import { createTraversalBudget } from '../shared/traversal-budget.js';
 
 // ============== PATH CONSTANTS ==============
 
@@ -87,12 +90,86 @@ function sanitizeFrontmatter(frontmatter) {
     .join('\n');
 }
 
+// Agent/command/skill/loop markdown is project/clone-controlled content;
+// nothing bounds its on-disk size, so never buffer one whole past this cap
+// (same 4 MiB precedent as SKILL_MD_MAX_BYTES in skills-catalog/scan.js).
+const MD_FILE_MAX_BYTES = 4 * 1024 * 1024;
+
+const mdFileTooLargeError = (filePath) => {
+  const error = new Error(
+    `Markdown file exceeds the ${MD_FILE_MAX_BYTES}-byte size limit: ${filePath}`,
+  );
+  error.code = 'ERR_MD_FILE_TOO_LARGE';
+  return error;
+};
+
+// Read at most MD_FILE_MAX_BYTES from an already-open handle: stat-then-read
+// by path would follow a symlink to a device/FIFO and a file swapped or grown
+// between the two calls would escape the gate. O_NONBLOCK (POSIX only) keeps
+// open() itself from blocking on a FIFO before the regular-file check runs.
+const mdFileOpenFlags = () =>
+  process.platform === 'win32'
+    ? fs.constants.O_RDONLY
+    : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+
+function readMdFileSync(filePath) {
+  const fd = fs.openSync(filePath, mdFileOpenFlags());
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error(`Markdown file is not a regular file: ${filePath}`);
+    }
+    if (stat.size > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    const buffer = Buffer.alloc(MD_FILE_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const bytesRead = fs.readSync(fd, buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+async function readMdFileAsync(filePath) {
+  const handle = await fs.promises.open(filePath, mdFileOpenFlags());
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new Error(`Markdown file is not a regular file: ${filePath}`);
+    }
+    if (stat.size > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    const buffer = Buffer.alloc(MD_FILE_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > MD_FILE_MAX_BYTES) {
+      throw mdFileTooLargeError(filePath);
+    }
+    return buffer.toString('utf8', 0, total);
+  } finally {
+    await handle.close();
+  }
+}
+
 function parseMdFile(filePath) {
-  return parseMdContent(fs.readFileSync(filePath, 'utf8'), filePath);
+  return parseMdContent(readMdFileSync(filePath), filePath);
 }
 
 async function parseMdFileAsync(filePath) {
-  return parseMdContent(await fs.promises.readFile(filePath, 'utf8'), filePath);
+  return parseMdContent(await readMdFileAsync(filePath), filePath);
 }
 
 function parseMdContent(rawContent, filePath) {
@@ -129,13 +206,29 @@ function parseMdContent(rawContent, filePath) {
 
 // `flag: 'wx'` creates the file and fails with EEXIST when it is already
 // there; that error is passed on as is so a caller can tell it apart.
+const serializeMdContent = (frontmatter, body) => {
+  const cleanedFrontmatter = Object.fromEntries(
+    Object.entries(frontmatter).filter(([, value]) => value != null)
+  );
+  const yamlStr = yaml.stringify(cleanedFrontmatter);
+  return `---\n${yamlStr}---\n\n${body}`;
+};
+
+// The write side of the parse cap (#1444): refuse a serialized result
+// parseMdFile would refuse, so a save cannot strand the file. Callers
+// that must not change anything else first (skill update applies
+// supporting-file changes in the same request) assert through this
+// before touching the disk at all.
+function assertMdFileWithinCap(filePath, frontmatter, body) {
+  if (Buffer.byteLength(serializeMdContent(frontmatter, body), 'utf8') > MD_FILE_MAX_BYTES) {
+    throw mdFileTooLargeError(filePath);
+  }
+}
+
 function writeMdFile(filePath, frontmatter, body, { flag = 'w' } = {}) {
   try {
-    const cleanedFrontmatter = Object.fromEntries(
-      Object.entries(frontmatter).filter(([, value]) => value != null)
-    );
-    const yamlStr = yaml.stringify(cleanedFrontmatter);
-    const content = `---\n${yamlStr}---\n\n${body}`;
+    const content = serializeMdContent(frontmatter, body);
+    assertMdFileWithinCap(filePath, frontmatter, body);
     if (flag === 'wx') {
       fs.writeFileSync(filePath, content, { encoding: 'utf8', flag });
     } else {
@@ -146,6 +239,7 @@ function writeMdFile(filePath, frontmatter, body, { flag = 'w' } = {}) {
     console.log(`Successfully wrote markdown file: ${filePath}`);
   } catch (error) {
     if (error?.code === 'EEXIST') throw error;
+    if (error?.code === 'ERR_MD_FILE_TOO_LARGE') throw error;
     console.error(`Failed to write markdown file ${filePath}:`, error);
     throw new Error('Failed to write agent markdown file');
   }
@@ -197,6 +291,13 @@ function getConfigPaths(workingDirectory) {
     customPath: process.env.OPENCODE_CONFIG
       ? path.resolve(process.env.OPENCODE_CONFIG)
       : null,
+    // The legacy global config files under ~/.opencode. readConfigSources
+    // merges them as a global source; a project walk that ascends into the
+    // home directory must not reclassify them as project files (#2309).
+    legacyGlobalPaths: [
+      path.join(os.homedir(), '.opencode', 'opencode.json'),
+      path.join(os.homedir(), '.opencode', 'opencode.jsonc'),
+    ],
   };
 }
 
@@ -261,6 +362,49 @@ function isInvalidJsoncError(error) {
   return Boolean(error && typeof error === 'object' && error.code === INVALID_JSONC);
 }
 
+const CONFIG_FILE_TOO_LARGE = 'CONFIG_FILE_TOO_LARGE';
+
+// Config files are hand-written JSONC; the precedent caps in this server run
+// 1-4 MiB (AGENTS.md 1 MiB, SKILL.md 4 MiB). 4 MiB is generous for a config
+// while keeping a cloned project's oversized opencode.json(c) from being
+// buffered whole, synchronously, on every settings/plugin/MCP read.
+const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
+
+function isConfigFileTooLargeError(error) {
+  return Boolean(error && error.code === CONFIG_FILE_TOO_LARGE);
+}
+
+// Open once and judge from the handle (design #1254): a
+// stat-by-path-then-readFile-by-path gate lets a config grown or swapped
+// after the stat buffer whole past the cap. The shared bounded read fixes
+// the file identity at open, judges the size from the handle, and reads at
+// most one byte over the cap, so growth is refused, never buffered. Its
+// missing and non-regular answers are mapped back onto this module's
+// existing contract: a file that vanishes after the exists check throws the
+// ENOENT a stat would have thrown, and a non-regular file throws the EISDIR
+// a read would have thrown.
+function readCappedConfigFileSync(filePath) {
+  const result = readBoundedFileSync(filePath, MAX_CONFIG_FILE_BYTES);
+  if (result.ok) {
+    return result.buffer.toString('utf8');
+  }
+  if (result.reason === 'too-large') {
+    const error = new Error(
+      `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be loaded safely`,
+    );
+    error.code = CONFIG_FILE_TOO_LARGE;
+    throw error;
+  }
+  if (result.reason === 'missing') {
+    const error = new Error(`ENOENT: no such file or directory, open '${filePath}'`);
+    error.code = 'ENOENT';
+    throw error;
+  }
+  const error = new Error(`EISDIR: illegal operation on a directory, read '${filePath}'`);
+  error.code = 'EISDIR';
+  throw error;
+}
+
 function formatJsoncParseError(filePath, errors) {
   const first = Array.isArray(errors) && errors.length > 0 ? errors[0] : null;
   const location = first && Number.isFinite(first.offset)
@@ -300,7 +444,7 @@ function readConfigFile(filePath) {
     return {};
   }
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
+    const content = readCappedConfigFileSync(filePath);
     const normalized = content.trim();
     if (!normalized) {
       return {};
@@ -309,7 +453,7 @@ function readConfigFile(filePath) {
     // rewrite a truncated object (often only `$schema`) over the full config.
     return parseConfigObject(normalized, filePath);
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       throw error;
     }
     console.error(`Failed to read config file: ${filePath}`, error);
@@ -345,7 +489,7 @@ function readConfigLayer(filePath) {
   try {
     return { config: readConfigFile(filePath), error: null };
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       console.error(error.message);
       return { config: {}, error };
     }
@@ -354,7 +498,7 @@ function readConfigLayer(filePath) {
 }
 
 function readConfigLayers(workingDirectory) {
-  const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
+  const { userPaths, projectPath, customPath, legacyGlobalPaths } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
   // OpenCode loads every global config file in order, so an `opencode.jsonc`
   // next to `opencode.json` overrides it. New entries still go to the primary
@@ -391,7 +535,7 @@ function readConfigLayers(workingDirectory) {
     projectConfig: projectLayer.config,
     customConfig: customLayer.config,
     mergedConfig,
-    paths: { userPath, userOverridePath, projectPath, customPath },
+    paths: { userPath, userOverridePath, projectPath, customPath, legacyGlobalPaths },
     layerErrors,
   };
 }
@@ -581,31 +725,72 @@ function writeConfig(config, filePath = CONFIG_FILE) {
   try {
     let existingRaw = '';
     let existingParse = null;
-    if (fs.existsSync(filePath)) {
+    const hadExistingFile = fs.existsSync(filePath);
+    if (hadExistingFile) {
       // Defense in depth: never overwrite a file we cannot fully parse.
-      existingRaw = fs.readFileSync(filePath, 'utf8');
+      existingRaw = readCappedConfigFileSync(filePath);
       if (existingRaw.trim()) {
         existingParse = parseConfigResult(existingRaw.trim(), filePath);
       }
-
-      const backupFile = `${filePath}.openchamber.backup`;
-      fs.copyFileSync(filePath, backupFile);
-      console.log(`Created config backup: ${backupFile}`);
     }
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     // A JSON round-trip normalizes the config at the write boundary: it drops
     // `undefined` values exactly like the serialized write would.
     const desired = JSON.parse(JSON.stringify(config));
-    writeFileAtomic(filePath, buildConfigFileContent(desired, existingRaw, existingParse));
+    const content = buildConfigFileContent(desired, existingRaw, existingParse);
+    // Enforce the cap on the serialized result too: writing a config that
+    // crosses the read cap would strand the layer — later reads omit it as
+    // CONFIG_FILE_TOO_LARGE and later writes refuse it, so the user could
+    // not undo the change through OpenChamber. Reject before replacing the
+    // file, preserving the readable original.
+    if (Buffer.byteLength(content, 'utf8') > MAX_CONFIG_FILE_BYTES) {
+      const error = new Error(
+        `Serialized OpenCode configuration for ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be written safely`,
+      );
+      error.code = CONFIG_FILE_TOO_LARGE;
+      throw error;
+    }
+    // The backup is part of the write, so it is created only once the
+    // write is known acceptable: a refused write (unparseable, over-cap,
+    // or a serialized result over the cap) leaves the previous backup —
+    // the restore point from the last successful write — untouched.
+    if (hadExistingFile) {
+      const backupFile = `${filePath}.openchamber.backup`;
+      fs.copyFileSync(filePath, backupFile);
+      console.log(`Created config backup: ${backupFile}`);
+    }
+    writeFileAtomic(filePath, content);
     console.log(`Successfully wrote config file: ${filePath}`);
   } catch (error) {
-    if (isInvalidJsoncError(error)) {
+    if (isInvalidJsoncError(error) || isConfigFileTooLargeError(error)) {
       throw error;
     }
     console.error(`Failed to write config file: ${filePath}`, error);
     throw new Error('Failed to write OpenCode configuration');
   }
+}
+
+/**
+ * Every config file OpenCode 2 reads, lowest priority first, each with its
+ * parsed content: the global files, `OPENCODE_CONFIG`, then the files found
+ * walking up from the project folder (`getFolderConfigPaths`). Readers that
+ * take an entry from the last file defining it, as OpenCode's MCP and model
+ * route plugins do, use this list in place of `readConfigLayers`' single
+ * project file and deep merge. `required` marks the global and
+ * `OPENCODE_CONFIG` files, whose parse error a reader may surface; a broken
+ * folder file carries its `error` and an empty config.
+ */
+function readConfigSources(workingDirectory) {
+  const layers = readConfigLayers(workingDirectory);
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const required = (filePath, config) => ({ path: filePath, config, error: getLayerError(layers, filePath), required: true });
+  return [
+    required(userPath, layers.userConfig),
+    ...(userOverridePath ? [required(userOverridePath, layers.userOverrideConfig)] : []),
+    ...(customPath ? [required(customPath, layers.customConfig)] : []),
+    ...getFolderConfigPaths(workingDirectory).map((filePath) => ({ path: filePath, ...readConfigLayer(filePath), required: false })),
+  ];
 }
 
 function getLayerError(layers, filePath) {
@@ -767,6 +952,14 @@ function writePromptFile(filePath, content) {
 
 // ============== SKILL FILE OPERATIONS ==============
 
+// Skill supporting files are hand-maintained docs and scripts shipped with
+// third-party skills; nothing OpenChamber writes bounds their size, so the
+// GET route must never buffer an arbitrary one whole. Judged from stat
+// before any read (the house stat-gate pattern): a file over this cap is
+// refused, never read. 1 MiB matches the AGENTS.md behavior-prompt cap.
+const SKILL_SUPPORTING_FILE_MAX_BYTES = 1024 * 1024;
+const SKILL_SUPPORTING_FILE_TOO_LARGE_CODE = 'skill_supporting_file_too_large';
+
 async function pathExists(target) {
   try {
     await fs.promises.access(target);
@@ -779,11 +972,13 @@ async function pathExists(target) {
 // At most this many file-system calls of one walk are in flight at once.
 const SKILL_WALK_CONCURRENCY = 8;
 
+
 // Async so a skills tree with tens of thousands of entries (a bundled `.venv`
 // or `node_modules`) does not hold the server's event loop for seconds.
-// Sibling directories are read in parallel, a few calls at a time, and their
-// results are joined in readdir order, so the order matches the old
-// synchronous depth-first walk exactly.
+// Directories are visited one at a time in depth-first readdir order, so the
+// order matches the old synchronous walk exactly and the directory cap below
+// is allocated deterministically: an over-cap tree always yields the same
+// partial result, never whichever subtree's readdir finished first.
 async function walkSkillMdFiles(rootDir) {
   if (!rootDir || !(await pathExists(rootDir))) return [];
 
@@ -800,12 +995,25 @@ async function walkSkillMdFiles(rootDir) {
     }
   };
 
+  // The shared traversal budget (design #1391) owns this walk's counting:
+  // at most 5,000 directories per root, the root itself included, consulted
+  // on entry in the walk's deterministic depth-first order, so the total
+  // never passes the cap and the same tree always allocates the cap to the
+  // same directories. A skills root is project-controlled, and a link
+  // inside it can point at a tree with tens of thousands of directories;
+  // past the cap the walk stops opening new directories and returns the
+  // SKILL.md paths found so far (enumerate disposition). The VS Code twin
+  // in opencodeConfig.ts states the same budget.
+  const budget = createTraversalBudget({ maxDirs: 5000 });
+
   // `ancestors` holds the real paths of the directories on the path to `dir`.
   // Links (symlinks and Windows junctions) are followed at any depth; a link
   // back to one of its own ancestors is skipped instead of recursing forever.
   // Two links to the same target elsewhere in the tree are both walked, as the
   // top level always did.
   const walk = async (dir, ancestors) => {
+    if (!budget.visitDir()) return [];
+
     let realDir;
     try {
       realDir = await limited(() => fs.promises.realpath(dir));
@@ -822,7 +1030,13 @@ async function walkSkillMdFiles(rootDir) {
     }
 
     const childAncestors = new Set(ancestors).add(realDir);
-    const found = await Promise.all(entries.map(async (entry) => {
+    // Entries are processed one at a time, in readdir order: recursing into
+    // sibling subtrees in parallel would let their readdir completions race
+    // for the shared directory cap, so an unchanged over-cap tree could
+    // return different partial results (and different duplicate-name
+    // winners) from one scan to the next.
+    const found = [];
+    for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       // Junctions report as links, not directories. A link whose target cannot be
       // stat'ed is skipped, the way an unreadable directory is, instead of failing
@@ -835,13 +1049,16 @@ async function walkSkillMdFiles(rootDir) {
           isDirectoryEntry = target.isDirectory();
           isFileEntry = target.isFile();
         } catch {
-          return [];
+          continue;
         }
       }
-      if (isDirectoryEntry) return walk(fullPath, childAncestors);
-      return isFileEntry && entry.name === 'SKILL.md' ? [fullPath] : [];
-    }));
-    return found.flat();
+      if (isDirectoryEntry) {
+        found.push(...(await walk(fullPath, childAncestors)));
+      } else if (isFileEntry && entry.name === 'SKILL.md') {
+        found.push(fullPath);
+      }
+    }
+    return found;
   };
 
   return walk(rootDir, new Set());
@@ -905,20 +1122,40 @@ function resolveSkillSearchDirectories(workingDirectory) {
 
 async function listSkillSupportingFiles(skillDir) {
   if (!(await pathExists(skillDir))) {
-    return [];
+    return { files: [], truncated: false };
   }
 
+  // A skill folder can bundle an arbitrarily large tree (a vendored .venv,
+  // node_modules, generated docs); one detail request must not walk all of
+  // it. The shared traversal budget (design #1391) owns this walk's
+  // counting: at most 5,000 directories and 5,000 files. The VS Code twin
+  // in opencodeConfig.ts states the same budget.
+  const budget = createTraversalBudget({ maxDirs: 5000, maxEntries: 5000 });
   const files = [];
 
+  // Returns false once the budget is spent, so every caller unwinds and
+  // the walk stops instead of merely stopping collection. Files and
+  // directories seen before the bound are kept, in the original traversal
+  // order; a tree that ends exactly at a bound is complete, not truncated
+  // (the budget flags truncation only when a consultation is refused).
   async function walkDir(dir, relativePath = '') {
+    if (!budget.visitDir()) {
+      return false;
+    }
+
     const entries = await fs.promises.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       const relPath = relativePath ? path.join(relativePath, entry.name) : entry.name;
 
       if (entry.isDirectory()) {
-        await walkDir(fullPath, relPath);
+        if (!(await walkDir(fullPath, relPath))) {
+          return false;
+        }
       } else if (entry.name !== 'SKILL.md') {
+        if (!budget.visitEntry()) {
+          return false;
+        }
         files.push({
           name: entry.name,
           path: relPath,
@@ -926,10 +1163,11 @@ async function listSkillSupportingFiles(skillDir) {
         });
       }
     }
+    return true;
   }
 
   await walkDir(skillDir);
-  return files;
+  return { files, truncated: budget.truncated };
 }
 
 function assertPathWithinSkillDir(skillDir, relativePath) {
@@ -949,14 +1187,80 @@ function assertPathWithinSkillDir(skillDir, relativePath) {
 
 function readSkillSupportingFile(skillDir, relativePath) {
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
-  if (!fs.existsSync(fullPath)) {
-    return null;
+  const createTooLargeError = () => Object.assign(
+    new Error(`Skill file is too large to read: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`),
+    { code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE },
+  );
+  const rejectNonRegularFile = () => {
+    throw Object.assign(new Error('Access to file denied'), { code: 'EACCES' });
+  };
+
+  let pathStats;
+  try {
+    pathStats = fs.statSync(fullPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
   }
-  return fs.readFileSync(fullPath, 'utf8');
+  if (!pathStats.isFile()) rejectNonRegularFile();
+  if (pathStats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+
+  let fileDescriptor;
+  try {
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0);
+    fileDescriptor = fs.openSync(fullPath, flags);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+
+  try {
+    const openedFileStats = fs.fstatSync(fileDescriptor);
+    if (!openedFileStats.isFile()) rejectNonRegularFile();
+    if (openedFileStats.size > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+
+    let buffer = Buffer.allocUnsafe(Math.max(1, openedFileStats.size + 1));
+    let bytesRead = 0;
+    while (true) {
+      if (bytesRead === buffer.length) {
+        if (bytesRead > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+        const nextBuffer = Buffer.allocUnsafe(Math.min(buffer.length * 2, SKILL_SUPPORTING_FILE_MAX_BYTES + 1));
+        buffer.copy(nextBuffer, 0, 0, bytesRead);
+        buffer = nextBuffer;
+      }
+      const count = fs.readSync(
+        fileDescriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        bytesRead,
+      );
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    if (bytesRead > SKILL_SUPPORTING_FILE_MAX_BYTES) throw createTooLargeError();
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    fs.closeSync(fileDescriptor);
+  }
+}
+
+// The write side of the read gate above (#1444): refuse content the
+// capped reader would refuse, so a save cannot strand the file. Callers
+// that write several files as one operation (skill create/update)
+// assert every file up front, so a refusal cannot leave a partial set.
+function assertSkillSupportingFileWithinCap(relativePath, content) {
+  if (isString(content) && Buffer.byteLength(content, 'utf8') > SKILL_SUPPORTING_FILE_MAX_BYTES) {
+    throw Object.assign(
+      new Error(`Skill file is too large to write: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`),
+      { code: SKILL_SUPPORTING_FILE_TOO_LARGE_CODE },
+    );
+  }
 }
 
 function writeSkillSupportingFile(skillDir, relativePath, content) {
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
+  assertSkillSupportingFileWithinCap(relativePath, content);
   const dir = path.dirname(fullPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(fullPath, content, 'utf8');
@@ -996,20 +1300,22 @@ export {
   ensureDirs,
   parseMdFile,
   parseMdFileAsync,
+  MD_FILE_MAX_BYTES,
   writeMdFile,
+  assertMdFileWithinCap,
+  MAX_CONFIG_FILE_BYTES,
   readConfigFile,
   readConfigLayer,
   isPlainObject,
   readConfigLayers,
+  readConfigSources,
   readConfig,
   readWorktreeDirectorySetting,
   getConfigForPath,
   writeConfig,
   getJsonEntrySource,
   getJsonWriteTarget,
-  getLayerError,
   getProjectConfigCandidates,
-  getFolderConfigPaths,
   getAncestors,
   findWorktreeRoot,
   isPromptFileReference,
@@ -1019,6 +1325,9 @@ export {
   addSkillFromMdFile,
   resolveSkillSearchDirectories,
   listSkillSupportingFiles,
+  SKILL_SUPPORTING_FILE_MAX_BYTES,
+  assertSkillSupportingFileWithinCap,
+  SKILL_SUPPORTING_FILE_TOO_LARGE_CODE,
   readSkillSupportingFile,
   writeSkillSupportingFile,
   deleteSkillSupportingFile

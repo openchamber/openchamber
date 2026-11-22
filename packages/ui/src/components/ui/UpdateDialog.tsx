@@ -34,7 +34,7 @@ interface UpdateDialogProps {
   runtimeType?: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
 }
 
-const GITHUB_RELEASES_URL = 'https://github.com/developing-today/openchamber/releases';
+const GITHUB_RELEASES_URL = 'https://github.com/developing-today-forks/openchamber/releases';
 
 type ChangelogSection = {
   version: string;

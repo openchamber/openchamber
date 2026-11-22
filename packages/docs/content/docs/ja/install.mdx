@@ -36,3 +36,16 @@ CLI が表示した URL（通常は `http://localhost:3000`）を開きます。
 ## モバイル
 
 iPhone アプリは TestFlight から、Android アプリは最新リリースからインストールし、コンピューターとペアリングします。手順は [モバイルアプリと PWA](/ja/mobile/) にあります。
+
+## Nix
+
+NixOS、または Nix のある Linux では、OpenChamber リポジトリの flake が同じアプリをビルドします：
+
+```bash
+nix run github:openchamber/openchamber        # http://localhost:3000 の Web サーバー
+nix run github:openchamber/openchamber#gui    # デスクトップアプリ
+```
+
+flake は `packages.openchamber` と `packages.openchamber-desktop`、そして `host`、`port`、`openFirewall`、`uiPasswordFile` を持つ `nixosModules.openchamber` systemd モジュールも公開します。パスワードファイルは systemd の `LoadCredential` 経由で読み込まれるため、root 所有で 0400 のシークレットがデフォルトの動的ユーザーで機能します。
+
+更新は flake 経由で行います。同梱の OpenCode CLI はアプリ内アップデーターが無効になっています。Nix ストアのパスは自分自身を更新できないため、更新するには flake を取得し直して再ビルドしてください。

@@ -22,6 +22,48 @@ Dowolne zadanie możesz uruchomić natychmiast za pomocą **run now**, aby spraw
 
 Zaznacz **Uruchom jako cel**, aby uruchomienie doprowadziło prompt do końca zamiast zatrzymywać się po jednej odpowiedzi — zobacz [Cele sesji](/session-goals/).
 
+## Pętle: zaplanowane zadania jako pliki markdown
+
+**Pętla** to zaplanowane zadanie zdefiniowane jako przenośny plik markdown, który możesz zatwierdzić w swoim repozytorium. Wrzuć plik do `.agents/loops/` i otwórz listę zaplanowanych zadań, aby go zsynchronizować — bez restartu serwera:
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Gdzie mieszkają pliki
+
+- **Zakres projektu** — `.agents/loops/*.md` w katalogu projektu lub dowolnym katalogu nadrzędnym aż do korzenia worktree gita.
+- **Zakres użytkownika** — `~/.agents/loops/*.md` dotyczy każdego projektu, który otworzysz.
+
+Jeśli pętla projektu i pętla użytkownika mają tę samą nazwę, wygrywa pętla projektu.
+
+### Pola
+
+| Pole | Znaczenie |
+|---|---|
+| `name` | Nazwa zadania (wymagana, maks. 80 znaków). |
+| `schedule` | Wyrażenie cron (wymagane) — pliki pętli to tylko cron. |
+| `enabled` | Ustaw na `true`, aby uruchamiać. Pętle są **domyślnie wyłączone**, więc zatwierdzenie pliku nigdy samo nie rozpoczyna zadania. Pętla, która przyszła z repozytorium, czeka też, aż włączysz ją w Zaplanowanych zadaniach na swoim komputerze, i ponownie po zmianie jej harmonogramu, modelu lub promptu. Pętle w `~/.agents/loops` działają na samym `true`. |
+| `model` | `provider/model` (wymagany), np. `anthropic/claude-sonnet-4-5`. |
+| `agent` | Agent do użycia (opcjonalny). |
+| `timezone` | Strefa czasowa IANA (opcjonalna, domyślnie strefa serwera). |
+| treść | Prompt wykonawczy (wymagany). Może być poleceniem slash, jak `/review src/`. |
+
+### Jak zachowują się pętle
+
+- **Plik jest rozstrzygający**, dopóki istnieje. **Edycja** otwiera go w wbudowanym edytorze plików, przełącznik włączenia aktualizuje jego frontmatter, a usunięcie zadania usuwa plik markdown po potwierdzeniu. **Uruchom teraz** pozostaje dostępne.
+- Stan uruchomienia (ostatnie uruchomienie, następne uruchomienie, status) mieszka w konfiguracji projektu i nigdy nie jest zapisywany z powrotem do pliku markdown.
+- Zmiana nazwy pola `name` zmienia nazwę zadania w miejscu. Jeśli plik pętli chwilowo nie daje się sparsować (w trakcie edycji, konflikt merge), jego zadanie jest zachowane z ostatnią dobrą definicją, aż plik zostanie naprawiony.
+- Harmonogramy `daily`/`weekly`/`once` i ustawienia celów pozostają tylko w UI; pliki pętli to zawsze cron.
+
 ## Jak wygląda sukces
 
 Po uruchomieniu zadanie pokazuje, kiedy ostatnio się wykonało, czy się powiodło, oraz link do utworzonej sesji. Jeśli uruchomienie się nie powiedzie, błąd również jest tam pokazany.

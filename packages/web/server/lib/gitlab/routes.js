@@ -136,15 +136,20 @@ function readUploadParams(params) {
   return UPLOAD_SECRET_RE.test(secret) && plainName ? { secret, filename } : null;
 }
 
-function requestNumber(value) {
-  const number = Number.parseInt(String(value ?? ''), 10);
-  return Number.isInteger(number) && number > 0 ? number : null;
-}
-
 function requestIssueNumber(value) {
   const text = requestText(value);
   if (!/^[1-9]\d*$/.test(text)) return null;
   const number = Number(text);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+// A binding revision is an exact count, so its query spelling is judged as
+// written: no trim, sign, fraction, exponent, radix prefix or leading zeros.
+// A loose Number(...) would reinterpret "1e3" as 1000 and pass the binding
+// authority check whenever that happened to be the current revision.
+function requestNonNegativeInteger(value) {
+  if (!isString(value) || !/^(0|[1-9]\d*)$/.test(value)) return null;
+  const number = Number(value);
   return Number.isSafeInteger(number) ? number : null;
 }
 
@@ -379,7 +384,7 @@ export function registerGitLabRoutes(app, options = {}) {
     provider: 'gitlab',
     instance: origin,
     accountId: req.query?.accountId,
-    bindingRevision: Number(req.query?.bindingRevision),
+    bindingRevision: requestNonNegativeInteger(req.query?.bindingRevision),
     primaryRemote: req.query?.primaryRemote,
   });
   const isReadContextError = (error) => error?.code?.startsWith('SOURCE_CONTROL_BINDING_')
@@ -1154,7 +1159,7 @@ export function registerGitLabRoutes(app, options = {}) {
       if (!trustedContext) return res.status(501).json({ error: 'Bound source control status is unavailable' });
       const service = await getResourceService(origin, trustedContext.accountId, true);
       return res.json(await service.listChangeRequests(directory, {
-        page: requestNumber(req.query?.page) ?? 1,
+        page: requestIssueNumber(req.query?.page) ?? 1,
         query: requestText(req.query?.query) || undefined,
         ...readListFilter(req.query),
         remote: trustedContext.primaryRemote,
@@ -1169,15 +1174,15 @@ export function registerGitLabRoutes(app, options = {}) {
 
   app.get('/api/source-control/gitlab/pulls/context', async (req, res) => {
     try {
-      const number = requestNumber(req.query?.number);
+      const number = requestIssueNumber(req.query?.number);
       const owner = requestText(req.query?.owner);
       const repo = requestText(req.query?.repo);
       if (Boolean(owner) !== Boolean(repo)) return res.status(400).json({ error: 'complete project selector is required' });
+      if (!number) return res.status(400).json({ error: 'number is required' });
       const origin = requestOrigin(req);
       const directory = requestText(req.query?.directory);
       const trustedContext = await validateReadContext(req, origin, directory);
       if (!trustedContext) return res.status(501).json({ error: 'Bound source control status is unavailable' });
-      if (!number) return res.status(400).json({ error: 'number is required' });
       const service = await getResourceService(origin, trustedContext.accountId, true);
       return res.json(await service.changeRequestContext(directory, number, {
         includeDiff: req.query?.diff === '1', includeCIDetails: req.query?.checkDetails === '1', includeTimeline: req.query?.timeline === '1',
@@ -1201,7 +1206,7 @@ export function registerGitLabRoutes(app, options = {}) {
       if (!trustedContext) return res.status(501).json({ error: 'Bound source control status is unavailable' });
       const service = await getResourceService(origin, trustedContext.accountId, true);
       return res.json(await service.listIssues(directory, {
-        page: requestNumber(req.query?.page) ?? 1, query: requestText(req.query?.query) || undefined,
+        page: requestIssueNumber(req.query?.page) ?? 1, query: requestText(req.query?.query) || undefined,
         ...readListFilter(req.query),
         remote: trustedContext.primaryRemote,
       }));

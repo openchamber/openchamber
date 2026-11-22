@@ -142,6 +142,18 @@ describe("useProjectsStore default model and thinking level", () => {
     expect(project?.defaultVariant).toBe("high")
   })
 
+  test('hides a project from work and from all sessions independently, and shows it again', () => {
+    seed({ id: 'project-a', path: '/repo' })
+
+    useProjectsStore.getState().updateProjectMeta("project-a", { hiddenFromWork: true })
+    expect(useProjectsStore.getState().projects[0]).toMatchObject({ hiddenFromWork: true })
+    expect(useProjectsStore.getState().projects[0]?.hiddenFromAllSessions).toBeUndefined()
+
+    useProjectsStore.getState().updateProjectMeta("project-a", { hiddenFromAllSessions: true, hiddenFromWork: false })
+    expect(useProjectsStore.getState().projects[0]).toMatchObject({ hiddenFromAllSessions: true })
+    expect(useProjectsStore.getState().projects[0]).not.toHaveProperty("hiddenFromWork")
+  })
+
   test("drops the thinking level when the model is cleared", () => {
     seed({
       id: "project-a",

@@ -10,7 +10,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const APK_PATH = join(mobileRoot, 'android', 'app', 'build', 'outputs', 'apk', 'standard', 'debug', 'app-standard-debug.apk');
+// No product flavors are defined in the Gradle build, so `assembleDebug`
+// produces the flavorless output below (the path HANDOFF.md documents).
+const APK_PATH = join(mobileRoot, 'android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
 const APP_ID = 'today.developing.openchamber';
 // MainActivity lives in the native namespace (build.gradle `namespace`), not the
 // application id — the two diverged when the application id was unified, and

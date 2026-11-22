@@ -1,4 +1,4 @@
-import { inflateRaw } from 'node:zlib';
+import { crc32, inflateRaw } from 'node:zlib';
 import { promisify } from 'node:util';
 
 const inflate = promisify(inflateRaw);
@@ -22,6 +22,7 @@ export function openThemeArchive(bytes) {
     if (cursor + 46 > end || bytes.readUInt32LE(cursor) !== 0x02014b50) throw new Error('Invalid VSIX entry');
     const flags = bytes.readUInt16LE(cursor + 8);
     const method = bytes.readUInt16LE(cursor + 10);
+    const crc = bytes.readUInt32LE(cursor + 16);
     const compressed = bytes.readUInt32LE(cursor + 20);
     const size = bytes.readUInt32LE(cursor + 24);
     const nameLength = bytes.readUInt16LE(cursor + 28);
@@ -33,14 +34,14 @@ export function openThemeArchive(bytes) {
     if (parts.some((part) => !part || part === '.' || part === '..') || /[\\\0:]/.test(name) || entries.has(name)) throw new Error('Unsafe VSIX path');
     totalSize += size;
     if (totalSize > 100 * 1024 * 1024) throw new Error('VSIX contents too large');
-    entries.set(name, { offset, compressed, size, method });
+    entries.set(name, { offset, compressed, size, method, crc });
     cursor = next;
   }
   if (cursor !== end) throw new Error('Invalid VSIX directory size');
   return async (name) => {
     const entry = entries.get(name);
     if (!entry || entry.size > MAX_FILE_BYTES) throw new Error('Theme file missing or too large');
-    const { offset, compressed, size, method } = entry;
+    const { offset, compressed, size, method, crc } = entry;
     if (offset + 30 > bytes.length || bytes.readUInt32LE(offset) !== 0x04034b50 || bytes.readUInt16LE(offset + 8) !== method) throw new Error('Invalid VSIX file');
     const nameLength = bytes.readUInt16LE(offset + 26);
     const start = offset + 30 + nameLength + bytes.readUInt16LE(offset + 28);
@@ -48,6 +49,10 @@ export function openThemeArchive(bytes) {
     const data = bytes.subarray(start, start + compressed);
     const result = method === 0 ? data : await inflate(data, { maxOutputLength: MAX_FILE_BYTES });
     if (result.length !== size) throw new Error('Invalid VSIX file size');
+    // A length-preserving corruption passes the size check; the central
+    // directory's CRC-32 is the archive's integrity field, so verify it
+    // before the entry is handed back as theme JSON.
+    if (crc32(result) !== crc) throw new Error('Invalid VSIX file checksum');
     return result.toString('utf8');
   };
 }

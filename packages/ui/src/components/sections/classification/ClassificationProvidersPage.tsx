@@ -259,6 +259,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
               <SettingsFieldRow
                 label={t('settings.routing.token.label')}
                 info={t('settings.routing.token.info')}
+                settingsItem="routing.token"
               >
                 <div className="flex w-full min-w-0 items-center gap-2">
                   <Input

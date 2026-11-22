@@ -150,6 +150,8 @@ function liveIssueSummary(ref, raw) {
 
 /** Above this the full-context view is no longer a readable diff, and the round trip is wasted. */
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
+/** A whole merge request patch is far larger than one file: ten times the per-file cap, matching the walkthrough GitHub cap. */
+const MAX_PATCH_BYTES = 50 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 export function createGitLabResourceService({ origin, client, download, resolveProjects = resolveGitLabProjectsFromDirectory, canonicalReads = false }) {
@@ -232,7 +234,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     projectId,
     scope: options.scope ?? 'all',
     reviewerUsername: options.reviewerUsername,
-    maxPages: 1,
+    maxPages: options.maxPages ?? 1,
     perPage: options.perPage ?? 100,
     page: options.page ?? 1,
     state: options.state,
@@ -305,6 +307,28 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     return items;
   };
 
+  // MergeRequests.all answers either a bare array (no expansion) or the
+  // expanded page; only the expanded shape can say whether the page is a
+  // prefix of the collection.
+  const readMergeRequestPage = (payload) => (Array.isArray(payload)
+    ? { items: payload, hasMore: false }
+    : readPage(payload));
+
+  // Reads a merge-request list as the whole set, the way readCollection
+  // reads a collection: every page within the collection bound, and a
+  // failure past it instead of a capped list passed off as complete
+  // (#1597). The branch-status scans search the list for the branch's
+  // request, so a prefix must never read as "no such request".
+  const readProjectMRsExhausted = async (projectId, options) => {
+    const perPage = options.perPage ?? COLLECTION_PER_PAGE;
+    const maxPages = Math.ceil((COLLECTION_MAX_PAGES * COLLECTION_PER_PAGE) / perPage);
+    const page = readMergeRequestPage(await listProjectMRs(projectId, {
+      ...options, perPage, maxPages, showExpanded: true,
+    }));
+    if (page.hasMore) throw new Error('GitLab merge request list has more pages than OpenChamber reads');
+    return page.items;
+  };
+
   const loadCI = async (targetProjectId, rawMR, details = false) => {
     const pipeline = rawMR?.head_pipeline ?? rawMR?.pipeline;
     if (!isPlainObject(pipeline) || !Number.isInteger(pipeline.id)
@@ -312,9 +336,15 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     try {
       const jobs = details
         // A fork merge request runs its pipeline in the source project.
-        ? await client.Jobs.all(Number.isInteger(pipeline.project_id) ? pipeline.project_id : targetProjectId, {
-          pipelineId: pipeline.id, maxPages: 1, perPage: 100,
-        })
+        // Every page under the collection cap, and an explicit error past
+        // it (readCollection): a page-1-only read silently dropped the
+        // jobs of pipelines with more than 100 of them (#1405).
+        ? await readCollection(
+          (pageOptions) => client.Jobs.all(Number.isInteger(pipeline.project_id) ? pipeline.project_id : targetProjectId, {
+            pipelineId: pipeline.id, ...pageOptions,
+          }),
+          'GitLab pipeline has more jobs than OpenChamber reads',
+        )
         : [];
       if (details && (!Array.isArray(jobs) || jobs.some((job) => !isPlainObject(job)
         || !Number.isInteger(job.id) || !isString(job.name) || !job.name.trim()
@@ -622,10 +652,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { state: issue.state };
     },
 
-    /** One page of the project's labels, for the board's picker. */
+    /** The project's labels, for the board's picker: every page up to the collection bound. */
     async listLabels(directory, selector, remote) {
       const target = await constrainedProject(directory, selector, remote);
-      const raw = await client.ProjectLabels.all(target.project.id, { perPage: 100, maxPages: 1 });
+      const raw = await readCollection(
+        (page) => client.ProjectLabels.all(target.project.id, page),
+        'GitLab project has more labels than OpenChamber reads',
+      );
       if (!Array.isArray(raw)) throw new Error('GitLab returned an invalid label list');
       return raw.flatMap((label) => {
         if (!isPlainObject(label) || !isString(label.name) || !label.name) return [];
@@ -644,10 +677,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return download(`projects/${target.project.id}/uploads/${secret}/${encodeURIComponent(filename)}`, { range, signal });
     },
 
-    /** One page of the project's active members, inherited ones too: who can be asked to review. */
+    /** The project's active members, inherited ones too: who can be asked to review, every page up to the collection bound. */
     async listReviewerCandidates(directory, selector, remote) {
       const target = await constrainedProject(directory, selector, remote);
-      const raw = await client.ProjectMembers.all(target.project.id, { includeInherited: true, perPage: 100, maxPages: 1 });
+      const raw = await readCollection(
+        (page) => client.ProjectMembers.all(target.project.id, { includeInherited: true, ...page }),
+        'GitLab project has more members than OpenChamber reads',
+      );
       if (!Array.isArray(raw)) throw new Error('GitLab returned an invalid member list');
       return raw.flatMap((member) => {
         const user = member?.state === 'active' ? mapGitLabUser(member, identity) : null;
@@ -779,9 +815,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     },
 
     async reconcileCreateMutation(providerTarget, target) {
-      const payload = readMergeRequestList(await listProjectMRs(providerTarget.targetProjectId, {
-        state: 'all', sourceBranch: target.head, perPage: 100,
-      }), target.project);
+      const page = readMergeRequestPage(await listProjectMRs(providerTarget.targetProjectId, {
+        state: 'all', sourceBranch: target.head, perPage: 100, showExpanded: true,
+      }));
+      // A prefix cannot prove exactly one match - a second match may sit
+      // on a later page - so a paged answer reconciles as unknown (#1597).
+      if (page.hasMore) return { state: 'outcome-unknown' };
+      const payload = readMergeRequestList(page.items, target.project);
       const matches = payload.filter((raw) => raw?.source_project_id === Number(providerTarget.sourceProjectId)
         && raw?.target_project_id === Number(providerTarget.targetProjectId)
         && raw?.target_branch === target.base)
@@ -814,7 +854,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       let selected = null;
       for (const target of targets) {
         const requests = readMergeRequestList(
-          await listProjectMRs(target.project.id, { state: 'opened', sourceBranch: branch }),
+          await readProjectMRsExhausted(target.project.id, { state: 'opened', sourceBranch: branch }),
           target.project,
         );
         const raw = requests.find((request) => sourceIds.has(request?.source_project_id)
@@ -829,7 +869,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         const historyTargetId = firstSource.raw?.forked_from_project?.id ?? firstSource.raw.id;
         const historyTarget = targets.find((item) => item.raw.id === historyTargetId) ?? firstSource;
         const history = readMergeRequestList(
-          await listProjectMRs(historyTarget.project.id, { state: 'all', sourceBranch: branch }),
+          await readProjectMRsExhausted(historyTarget.project.id, { state: 'all', sourceBranch: branch }),
           historyTarget.project,
         );
         const raw = history.find((request) => request?.state === 'merged' || request?.state === 'closed');
@@ -1083,8 +1123,22 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       if (!Array.isArray(diffs)) throw new Error('GitLab returned an invalid merge request diff list');
       const files = diffs.filter((diff) => isPlainObject(diff) && (text(diff.new_path) || text(diff.old_path)));
       if (files.length !== diffs.length) throw new Error('GitLab returned an invalid merge request diff');
+      // Count while converting: the rejection fires as soon as the running
+      // total crosses the cap, so the pieces past that point are never built.
+      // Mapping every file to its piece first would materialize the whole
+      // patch before the cap could judge it.
+      const pieces = [];
+      let patchBytes = 0;
+      for (const file of files) {
+        const piece = gitPatchForDiff(file);
+        patchBytes += Buffer.byteLength(piece);
+        if (patchBytes > MAX_PATCH_BYTES) {
+          throw Object.assign(new Error('This merge request diff is too large to show'), { status: 413, code: 'patch-too-large' });
+        }
+        pieces.push(piece);
+      }
       return {
-        patch: files.map(gitPatchForDiff).join(''),
+        patch: pieces.join(''),
         meta: { owner: target.project.owner, repo: target.project.name, number },
       };
     },

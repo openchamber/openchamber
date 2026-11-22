@@ -658,6 +658,10 @@ const boundExtractedText = (text: string, imageFilenames: Set<string>): string =
     const candidate = nextCloseBracket === -1 ? "" : text.slice(lastOpenBracket + 1, nextCloseBracket)
     if (imageFilenames.has(candidate)) end = lastOpenBracket
   }
+  // Do not split a surrogate pair (emoji, rare CJK) in half: a kept text
+  // ending on a high surrogate re-encodes as U+FFFD in the prompt.
+  const lastCode = text.charCodeAt(end - 1)
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) end -= 1
   return `${text.slice(0, end)}${TEXT_TRUNCATION_NOTICE}`
 }
 

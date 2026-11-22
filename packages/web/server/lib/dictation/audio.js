@@ -159,11 +159,6 @@ export class Pcm16MonoResampler {
     this.carrySample = null;
   }
 
-  reset() {
-    this.pos = 0;
-    this.carrySample = null;
-  }
-
   /**
    * @param {Buffer} pcm16le
    * @returns {Buffer}

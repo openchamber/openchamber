@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -112,13 +113,11 @@ describe('session image assets', () => {
       path: path.join(fixture.directory, 'workspace.png'),
     });
     for (const [index, source] of [[1, outsideSource], [2, outsidePath]]) {
-      expect(response.body.results[index]).toEqual(expect.objectContaining({
+      expect(response.body.results[index]).toEqual({
         source,
         status: 'ready',
         path: canonicalOutsidePath,
-        outsideFileGrant: expect.any(String),
-        expiresAt: expect.any(Number),
-      }));
+      });
     }
   });
 
@@ -131,6 +130,21 @@ describe('session image assets', () => {
     expect(response.body.results).toEqual([
       expect.objectContaining({ source: 'present.png', status: 'ready' }),
       { source: 'deleted.png', status: 'missing' },
+    ]);
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a FIFO referenced as an image promptly and still prepares later sources (#1785)', async () => {
+    const fixture = await createFixture({ sources: ['fifo.png', 'present.png'] });
+    execFileSync('mkfifo', [path.join(fixture.directory, 'fifo.png')]);
+    await fs.writeFile(path.join(fixture.directory, 'present.png'), PNG);
+
+    // Without O_NONBLOCK the open of the FIFO never settles, so this
+    // request would hang instead of answering.
+    const response = await prepare(fixture.app, fixture.directory, fixture.sources);
+
+    expect(response.body.results).toEqual([
+      { source: 'fifo.png', status: 'error' },
+      expect.objectContaining({ source: 'present.png', status: 'ready' }),
     ]);
   });
 
@@ -254,6 +268,206 @@ describe('session image assets', () => {
     const response = await prepare(fixture.app, fixture.directory, sources);
 
     expect(response.body.results).toEqual(sources.map((source) => ({ source, status: 'error' })));
+  });
+
+  it('does not authorize image syntax inside a multiline inline code span', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `\`example\n![hidden](${source})\nend\`` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'error' }]);
+  });
+
+  it('authorizes an image referenced after a multiline inline code span closes', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `\`example\n![hidden](ignored)\nend\` then ![real](${source})` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'ready', path: expect.any(String) }]);
+  });
+
+  it('does not authorize image syntax inside HTML comments', async () => {
+    const fixture = await createFixture();
+    const single = fixture.sources[0];
+    const multiPath = path.join(fixture.outsideRoot, 'multi.png');
+    await fs.writeFile(multiPath, PNG);
+    const multi = new URL(`file://${multiPath}`).toString();
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `<!-- ![hidden](${single}) -->\n<!--\n![multi](${multi})\n-->` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [single, multi]);
+
+    expect(response.body.results).toEqual([
+      { source: single, status: 'error' },
+      { source: multi, status: 'error' },
+    ]);
+  });
+
+  it('authorizes image references outside HTML comments on the same line', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `<!-- hidden --> ![visible](${source})` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([
+      { source, status: 'ready', path: decodeURIComponent(new URL(source).pathname) },
+    ]);
+  });
+
+  it('does not authorize image syntax inside indented code blocks', async () => {
+    const fixture = await createFixture();
+    const shown = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: 'Example:\n\n    ![hidden](INDENTED)\n\nSome text.\n\n\t![tabbed](TABBED)\n\n![shown](' + shown + ')' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, ['INDENTED', 'TABBED', shown]);
+
+    expect(response.body.results).toEqual([
+      { source: 'INDENTED', status: 'error' },
+      { source: 'TABBED', status: 'error' },
+      { source: shown, status: 'ready', path: decodeURIComponent(new URL(shown).pathname) },
+    ]);
+  });
+
+  it('does not authorize image syntax inside raw HTML blocks', async () => {
+    const fixture = await createFixture();
+    const pre = fixture.sources[0];
+    const divPath = path.join(fixture.outsideRoot, 'div.png');
+    await fs.writeFile(divPath, PNG);
+    const div = new URL(`file://${divPath}`).toString();
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `<pre>\n![hidden](${pre})\n</pre>\n<div>\n![also-hidden](${div})\n</div>` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [pre, div]);
+
+    expect(response.body.results).toEqual([
+      { source: pre, status: 'error' },
+      { source: div, status: 'error' },
+    ]);
+  });
+
+  it('authorizes image references after a raw HTML block ends', async () => {
+    const fixture = await createFixture();
+    const afterPre = fixture.sources[0];
+    const afterDivPath = path.join(fixture.outsideRoot, 'after-div.png');
+    await fs.writeFile(afterDivPath, PNG);
+    const afterDiv = new URL(`file://${afterDivPath}`).toString();
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `<pre>\nno images here\n</pre>\n![visible](${afterPre})\n\n<div>\nno images here either\n</div>\n\n![also-visible](${afterDiv})` }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [afterPre, afterDiv]);
+
+    expect(response.body.results).toEqual([
+      { source: afterPre, status: 'ready', path: decodeURIComponent(new URL(afterPre).pathname) },
+      { source: afterDiv, status: 'ready', path: decodeURIComponent(new URL(afterDiv).pathname) },
+    ]);
+  });
+
+  it('does not close a backtick fence on a longer run followed by text (#2150)', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: '```md\n```` not-a-closer\n![hidden](' + source + ')\n```' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'error' }]);
+  });
+
+  it('does not close a tilde fence on a longer run followed by text (#2150)', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: '~~~md\n~~~~ not-a-closer\n![hidden](' + source + ')\n~~~' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'error' }]);
+  });
+
+  it('recognizes an image after a longer closing run followed only by spaces/tabs (#2150)', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: '```md\n![fenced](ignored)\n````  \t\n![outside](' + source + ')' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'ready', path: decodeURIComponent(new URL(source).pathname) }]);
+  });
+
+  it('keeps fenced-code state across assistant text parts', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        { type: 'text', text: '```md' },
+        { type: 'tool', name: 'ignored', state: { input: { text: `![tool](${source})` } } },
+        { type: 'text', text: `![fenced](${source})` },
+        { type: 'text', text: '```' },
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'error' }]);
+  });
+
+  it('recognizes images after a fence closes in a later text part', async () => {
+    const fixture = await createFixture();
+    const source = fixture.sources[0];
+    fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'assistant',
+      content: [
+        { type: 'text', text: '```md\n![fenced](ignored)' },
+        { type: 'text', text: `\n\`\`\`\n![outside](${source})` },
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    const response = await prepare(fixture.app, fixture.directory, [source]);
+
+    expect(response.body.results).toEqual([{ source, status: 'ready', path: decodeURIComponent(new URL(source).pathname) }]);
   });
 
   it('rejects non-image bytes outside the workspace', async () => {

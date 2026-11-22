@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createManagedProcessRegistry } from './managed-process-registry.js';
+import { commandIdentifiesOurServer, createManagedProcessRegistry } from './managed-process-registry.js';
 
 // The registry takes its filesystem and child-process helpers as dependencies,
 // so these tests inject fakes instead of mocking node builtins.
@@ -16,6 +16,20 @@ const renameMock = vi.fn();
 // `execFileAsync` adapts it to the `{ stdout, stderr }` promise the module awaits.
 const execFileImpl = vi.fn();
 
+// The async registry reads go through the shared bounded reader (#1736);
+// tests keep driving them through readFileMock by adapting it to the
+// bounded reader's result shape (contents here are always small regular
+// files, so the adaptation only needs the ok path; a readFileMock
+// rejection propagates exactly as a bounded-read I/O error would).
+const boundedReadMock = async (filePath, maxBytes) => {
+  const content = await readFileMock(filePath, 'utf8');
+  const buffer = Buffer.from(String(content), 'utf8');
+  if (buffer.length > maxBytes) {
+    return { ok: false, reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', path: filePath, size: buffer.length, limit: maxBytes };
+  }
+  return { ok: true, buffer, size: buffer.length };
+};
+
 const { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } = createManagedProcessRegistry({
   fs: {
     readdir: readdirMock,
@@ -30,7 +44,10 @@ const { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses 
       execFileImpl(cmd, args, opts, (err, stdout, stderr) =>
         err ? reject(err) : resolve({ stdout: stdout ?? '', stderr: stderr ?? '' }));
     }),
+  boundedRead: boundedReadMock,
 });
+
+
 
 const ORIGINAL_PLATFORM = Object.getOwnPropertyDescriptor(process, 'platform');
 const ORIGINAL_KILL = process.kill;
@@ -271,6 +288,7 @@ describe('registerManagedProcess', () => {
 describe('unregisterManagedProcess', () => {
   it('removes the entry file', async () => {
     rmMock.mockResolvedValue();
+    readdirMock.mockResolvedValue([]);
 
     await unregisterManagedProcess(4242);
 
@@ -281,5 +299,68 @@ describe('unregisterManagedProcess', () => {
     await unregisterManagedProcess(undefined);
 
     expect(rmMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('readAllEntries (read-only consumer reader)', () => {
+  const makeRegistry = () =>
+    createManagedProcessRegistry({
+      fs: {
+        readdir: readdirMock,
+        readFile: readFileMock,
+        rm: rmMock,
+        mkdir: mkdirMock,
+        writeFile: writeFileMock,
+        rename: renameMock,
+      },
+      execFileAsync: async () => ({ stdout: '', stderr: '' }),
+      boundedRead: boundedReadMock,
+    });
+
+  it('returns entries without ever deleting a corrupt or invalid file', async () => {
+    readdirMock.mockResolvedValue(['111.json', '222.json', '333.json']);
+    readFileMock.mockImplementation(async (filePath) => {
+      if (filePath.endsWith('111.json')) return JSON.stringify({ pid: 111, port: 4001 });
+      if (filePath.endsWith('222.json')) return 'not json';
+      return JSON.stringify({ noPid: true });
+    });
+
+    const entries = await makeRegistry().readAllEntries();
+
+    expect(entries).toEqual([{ pid: 111, port: 4001 }]);
+    expect(rmMock).not.toHaveBeenCalled();
+  });
+
+  it('propagates a failed registry directory read instead of posing as empty', async () => {
+    readdirMock.mockRejectedValue(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+
+    await expect(makeRegistry().readAllEntries()).rejects.toThrow('EACCES');
+  });
+
+  it('reads a missing registry directory as empty', async () => {
+    readdirMock.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+    await expect(makeRegistry().readAllEntries()).resolves.toEqual([]);
+  });
+});
+
+describe('commandIdentifiesOurServer', () => {
+  it('matches an opencode serve command on the recorded port', () => {
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve --port 4096', { port: 4096 })).toBe(true);
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve --port=4096', { port: 4096 })).toBe(true);
+  });
+
+  it('rejects a port that merely contains the recorded port as a substring', () => {
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve --port 50010', { port: 5001 })).toBe(false);
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve --port 15001', { port: 5001 })).toBe(false);
+  });
+
+  it('rejects a command with no --port argument when a port is recorded', () => {
+    expect(commandIdentifiesOurServer('/usr/bin/opencode serve', { port: 4096 })).toBe(false);
+  });
+
+  it('rejects commands that are not an opencode server', () => {
+    expect(commandIdentifiesOurServer('sleep 30', { port: 4096 })).toBe(false);
+    expect(commandIdentifiesOurServer('/usr/bin/opencode --port 4096', { port: 4096 })).toBe(false);
   });
 });

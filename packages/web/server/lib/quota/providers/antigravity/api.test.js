@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchAntigravityModels, fetchAntigravityQuotaSummary } from './api.js';
+import { fetchAntigravityModels, fetchAntigravityQuotaSummary, isWrongClientRejection } from './api.js';
 import { antigravityUserAgent } from './client.js';
 import { transformModels, transformSummary } from './transforms.js';
 
@@ -74,5 +74,16 @@ describe('Antigravity quota requests', () => {
     expect(rows['gemini-3.8-flash'].windows.weekly.remainingPercent).toBe(60);
     expect(rows['claude-sonnet-5-5'].windows['5h'].remainingPercent).toBe(80);
     expect(rows['claude-sonnet-5-5'].windows.weekly.remainingPercent).toBe(50);
+  });
+});
+
+describe('isWrongClientRejection', () => {
+  it('matches only the confirmed wrong-client shape', () => {
+    expect(isWrongClientRejection({ ok: false, status: 400, error: 'unauthorized_client' })).toBe(true);
+    expect(isWrongClientRejection({ ok: false, status: 401, error: 'unauthorized_client' })).toBe(true);
+    expect(isWrongClientRejection({ ok: false, status: 400, error: 'invalid_grant' })).toBe(false);
+    expect(isWrongClientRejection({ ok: false, status: 403, error: 'unauthorized_client' })).toBe(false);
+    expect(isWrongClientRejection({ ok: false, status: null, error: 'network' })).toBe(false);
+    expect(isWrongClientRejection({ ok: true, status: 200, error: null })).toBe(false);
   });
 });

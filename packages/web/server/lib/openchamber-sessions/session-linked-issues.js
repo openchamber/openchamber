@@ -20,15 +20,46 @@ import { z } from 'zod';
 
 const LINKED_ISSUE_KINDS = ['issue', 'pull', 'linear', 'guest', 'external'];
 
+/**
+ * Bounds (#2138). A link operation is a small UI gesture, not a bulk import,
+ * so the incoming batch and the identity fields are capped here, at the
+ * schema: an over-limit operation is rejected before any metadata is read
+ * or written. The title cap matches the one `session-link.js` already
+ * applies to stored titles.
+ *
+ * The stored list is capped as well — in entries and in serialized size —
+ * so repeated valid requests cannot grow `openchamber.linked_issues`
+ * without limit. A link whose result would cross a stored cap is rejected
+ * whole with `LinkedIssuesLimitError` (a 400 at the route), never applied
+ * partially. Unlinks are never rejected by the stored caps, so a legacy
+ * list that is already oversized can always shrink back under them, and
+ * links resume once it does.
+ */
+export const MAX_LINK_OPERATION_ENTRIES = 50;
+export const MAX_LINKED_ISSUE_ID_LENGTH = 256;
+export const MAX_LINKED_ISSUE_TITLE_LENGTH = 300;
+export const MAX_LINKED_ISSUE_URL_LENGTH = 2048;
+export const MAX_LINKED_ISSUES = 100;
+export const MAX_LINKED_ISSUES_SERIALIZED_LENGTH = 65536;
+
+/** A stored-list bound was crossed; carries the 400 the route answers. */
+export class LinkedIssuesLimitError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'LinkedIssuesLimitError';
+    this.statusCode = 400;
+  }
+}
+
 const linkedEntrySchema = z.looseObject({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  url: z.string().min(1),
+  id: z.string().min(1).max(MAX_LINKED_ISSUE_ID_LENGTH),
+  title: z.string().min(1).max(MAX_LINKED_ISSUE_TITLE_LENGTH),
+  url: z.string().min(1).max(MAX_LINKED_ISSUE_URL_LENGTH),
   kind: z.enum(LINKED_ISSUE_KINDS),
 });
 
 const linkOperationSchema = z.object({
-  entries: z.array(linkedEntrySchema),
+  entries: z.array(linkedEntrySchema).max(MAX_LINK_OPERATION_ENTRIES),
   linked: z.boolean(),
 });
 
@@ -63,21 +94,33 @@ const storedEntrySchema = z.looseObject({
 });
 
 /**
- * Whether a stored entry and an incoming one name the same thread: the same
- * id, or — for a repository entry stored before ids carried the host — the
- * same kind, number and address however it was written.
+ * The identity keys under which an entry can name a thread: its id, and —
+ * for a repository entry stored before ids carried the host — its kind,
+ * number and address however it was written. Two entries name the same
+ * thread exactly when they share a key, so matching a whole batch is set
+ * membership, checked once per entry, instead of a full list scan per
+ * incoming entry.
  */
-const isSameLinkedEntry = (stored, incoming) => {
+const identityKeysOfStored = (stored) => {
   const parsed = storedEntrySchema.safeParse(stored);
-  if (!parsed.success) return false;
+  if (!parsed.success) return [];
   const item = parsed.data;
-  if (item.id === incoming.id) return true;
-  return (item.kind === 'issue' || item.kind === 'pull')
-    && item.kind === incoming.kind
-    && item.number !== undefined
-    && Number.isFinite(item.number) && Number.isFinite(incoming.number)
-    && item.number === incoming.number
-    && normalizedThreadUrl(item.url) === normalizedThreadUrl(incoming.url);
+  const keys = [`id:${item.id}`];
+  if ((item.kind === 'issue' || item.kind === 'pull')
+    && item.number !== undefined && Number.isFinite(item.number)) {
+    keys.push(`legacy:${item.kind}:${item.number}:${normalizedThreadUrl(item.url)}`);
+  }
+  return keys;
+};
+
+const identityKeysOfIncoming = (incoming) => {
+  const keys = [];
+  if (z.string().safeParse(incoming?.id).success) keys.push(`id:${incoming.id}`);
+  if ((incoming?.kind === 'issue' || incoming?.kind === 'pull')
+    && Number.isFinite(incoming?.number) && z.string().safeParse(incoming?.url).success) {
+    keys.push(`legacy:${incoming.kind}:${incoming.number}:${normalizedThreadUrl(incoming.url)}`);
+  }
+  return keys;
 };
 
 /**
@@ -90,11 +133,46 @@ const isSameLinkedEntry = (stored, incoming) => {
 export const buildLinkedIssuesPatch = (metadata, entries, linked) => {
   const current = linkedIssuesSchema.parse(metadata ?? {}).openchamber.linked_issues;
 
-  let next = current;
+  // One bounded pass over the stored list: an entry survives only when no
+  // incoming entry shares one of its identity keys.
+  const incomingKeys = new Set();
   for (const entry of entries) {
-    next = next.filter((item) => !isSameLinkedEntry(item, entry));
-    if (linked) next = [...next, entry];
+    for (const key of identityKeysOfIncoming(entry)) incomingKeys.add(key);
   }
-  if (next === current || JSON.stringify(next) === JSON.stringify(current)) return null;
+  const kept = current.filter(
+    (item) => !identityKeysOfStored(item).some((key) => incomingKeys.has(key)),
+  );
+
+  let next = kept;
+  if (linked) {
+    // Within the batch, the last entry holding an identity key wins — the
+    // remove-then-append loop this replaces dropped the earlier holders —
+    // and the survivors append in batch order.
+    const lastHolder = new Map();
+    entries.forEach((entry, index) => {
+      for (const key of identityKeysOfStored(entry)) lastHolder.set(key, index);
+    });
+    const appended = entries.filter((entry, index) => identityKeysOfStored(entry)
+      .every((key) => lastHolder.get(key) === index));
+    next = [...kept, ...appended];
+  }
+
+  const serializedNext = JSON.stringify(next);
+  if (serializedNext === JSON.stringify(current)) return null;
+  if (linked) {
+    // The throw happens inside the metadata decide step, before any write:
+    // a rejected link changes nothing. Unlinks skip these checks entirely,
+    // so an oversized legacy list can always shrink (see Bounds, above).
+    if (next.length > MAX_LINKED_ISSUES) {
+      throw new LinkedIssuesLimitError(
+        `too many linked issues: a session can link at most ${MAX_LINKED_ISSUES} entries`,
+      );
+    }
+    if (serializedNext.length > MAX_LINKED_ISSUES_SERIALIZED_LENGTH) {
+      throw new LinkedIssuesLimitError(
+        `linked issues are too large: the stored list can serialize to at most ${MAX_LINKED_ISSUES_SERIALIZED_LENGTH} characters`,
+      );
+    }
+  }
   return { openchamber: { linked_issues: next } };
 };

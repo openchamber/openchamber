@@ -206,6 +206,26 @@ describe('Git credential resolver', () => {
     await expect(fs.stat(snapshot.key.privateKeyPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it.skipIf(process.platform === 'win32')('rejects a FIFO SSH private key without blocking', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-git-key-fifo-'));
+    temporaryDirectories.push(directory);
+    const keyPath = path.join(directory, 'id_ed25519');
+    await execFileAsync('mkfifo', [keyPath]);
+    const resolver = createGitCredentialResolver({
+      lookupManagedSshKey: async () => ({
+        id: 'fifo-key', privateKeyPath: keyPath, fingerprint: `SHA256:${'s'.repeat(43)}`,
+      }),
+      snapshotRoot: path.join(directory, 'snapshots'),
+    });
+
+    await expect(resolver.resolve({
+      mode: 'managed',
+      credentialId: createSshCredentialReference('fifo-key'),
+      endpoint: { protocol: 'ssh', host: 'git.example.com', path: 'owner/repo.git' },
+      operationId: 'git_fifo',
+    })).rejects.toMatchObject({ code: 'SSH_KEY_NOT_PRIVATE' });
+  });
+
   it('rejects mismatched and encrypted SSH keys without trying another key', async () => {
     const executeFile = vi.fn(async () => ({ stdout: 'ssh-ed25519 public' }));
     executeFile.mockResolvedValueOnce({ stdout: 'ssh-ed25519 public' });

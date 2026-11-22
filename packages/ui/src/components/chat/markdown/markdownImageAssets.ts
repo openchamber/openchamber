@@ -5,6 +5,7 @@ import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils'
 const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_PREPARE_CACHE_ENTRIES = 1024;
 const NON_READY_CACHE_MS = 30_000;
+const READY_CACHE_MS = 10 * 60 * 1000;
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   'image/png',
   'image/jpeg',
@@ -13,7 +14,7 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 ]);
 
 export type PreparedMarkdownImage =
-  | { status: 'ready'; path: string; outsideFileGrant?: string; expiresAt?: number }
+  | { status: 'ready'; path: string; outsideWorkspace?: boolean }
   | { status: 'missing' | 'error' };
 
 type PrepareCacheEntry = {
@@ -153,8 +154,6 @@ export const prepareLocalMarkdownImages = async ({
       source?: string;
       status?: string;
       path?: string;
-      outsideFileGrant?: string;
-      expiresAt?: number;
     }>;
   };
   const prepared = new Map<string, PreparedMarkdownImage>();
@@ -164,8 +163,7 @@ export const prepareLocalMarkdownImages = async ({
       prepared.set(result.source, {
         status: 'ready',
         path: result.path,
-        outsideFileGrant: result.outsideFileGrant,
-        expiresAt: result.expiresAt,
+        outsideWorkspace: !isFilePathWithinDirectory(result.path, directory),
       });
     } else if (result.status === 'missing') {
       prepared.set(result.source, { status: 'missing' });
@@ -178,12 +176,9 @@ export const prepareLocalMarkdownImages = async ({
   }
   while (cache.size >= MAX_PREPARE_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
   const allReady = [...prepared.values()].every((value) => value.status === 'ready');
-  const grantExpiry = Math.min(...[...prepared.values()]
-    .filter((value): value is Extract<PreparedMarkdownImage, { status: 'ready' }> => value.status === 'ready')
-    .map((value) => value.expiresAt ?? Number.POSITIVE_INFINITY));
   cache.set(key, {
     result: prepared,
-    expiresAt: allReady ? grantExpiry : Date.now() + NON_READY_CACHE_MS,
+    expiresAt: Date.now() + (allReady ? READY_CACHE_MS : NON_READY_CACHE_MS),
   });
   return prepared;
 };
@@ -209,7 +204,7 @@ export const resolveMarkdownImageSource = async (
  * origin, and the asset URL would hand its script the URL auth token.
  */
 const loadRawImageAsDataUrl = async (
-  query: { path: string; directory: string; allowOutsideWorkspace?: string; outsideFileGrant?: string },
+  query: { path: string; directory: string; allowOutsideWorkspace?: string },
   signal: AbortSignal,
 ): Promise<string> => {
   const response = await runtimeFetch('/api/fs/raw', { query, signal });
@@ -266,8 +261,7 @@ export const getPreparedMarkdownImageUrl = (
   {
     path: image.path,
     directory,
-    allowOutsideWorkspace: image.outsideFileGrant ? 'true' : undefined,
-    outsideFileGrant: image.outsideFileGrant,
+    allowOutsideWorkspace: image.outsideWorkspace ? 'true' : undefined,
   },
   );
 
@@ -279,6 +273,5 @@ export const loadPreparedImageAsDataUrl = (
 ): Promise<string> => loadRawImageAsDataUrl({
   path: image.path,
   directory,
-  allowOutsideWorkspace: image.outsideFileGrant ? 'true' : undefined,
-  outsideFileGrant: image.outsideFileGrant,
+  allowOutsideWorkspace: image.outsideWorkspace ? 'true' : undefined,
 }, signal);

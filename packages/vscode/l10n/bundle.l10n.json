@@ -6,6 +6,7 @@
   "OpenChamber: Failed to restart API - {0}": "OpenChamber: Failed to restart API - {0}",
   "OpenChamber [Add to Context]: No active editor": "OpenChamber [Add to Context]: No active editor",
   "OpenChamber [Add to Context]: No text selected": "OpenChamber [Add to Context]: No text selected",
+  "OpenChamber [Add to Context]: Selection exceeds the {0} MiB limit": "OpenChamber [Add to Context]: Selection exceeds the {0} MiB limit",
   "OpenChamber: No file selected to mention": "OpenChamber: No file selected to mention",
   "OpenChamber: Some selected entries were skipped (folders or unsupported resources)": "OpenChamber: Some selected entries were skipped (folders or unsupported resources)",
   "OpenChamber [Explain]: No active editor": "OpenChamber [Explain]: No active editor",

@@ -9,6 +9,20 @@ type ParsedMultiRunTitle = {
 
 const GROUP_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/;
 const RUN_GROUP_PATTERN = /^g[1-9]\d*$/;
+const MULTI_RUN_TITLE_LIMIT = 200;
+
+/**
+ * Trims a run title and cuts it at the 200 code unit cap without leaving a
+ * lone high surrogate. A cut that lands inside a surrogate pair drops the
+ * partial character, so the saved title ends on a pair boundary; the lone
+ * half would encode as U+FFFD. Same guard as the PWA and settings clips
+ * (#2029/#2028).
+ */
+export const clampMultiRunTitle = (title: string): string => {
+  const clipped = title.trim().slice(0, MULTI_RUN_TITLE_LIMIT);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
 
 const parseSuffix = (
   groupSlug: string,

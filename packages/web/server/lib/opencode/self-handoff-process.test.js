@@ -13,6 +13,9 @@ import { fileURLToPath } from 'node:url';
 // and the OpenCode child is a fake that answers the 2.x endpoints the lifecycle probes.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliPath = path.resolve(here, '../../../bin/cli.js');
+// Socket activation requires Node's fd-passing support. The project test command runs under Bun,
+// but the foreground server exercised here must use the supported Node runtime.
+const cliRuntime = process.versions.bun ? 'node' : process.execPath;
 
 const fakeOpenCodeSource = `
   const http = require('node:http');
@@ -20,6 +23,8 @@ const fakeOpenCodeSource = `
   if (args.includes('--version')) { console.log('2.0.26'); process.exit(0); }
   const host = args[args.indexOf('--hostname') + 1];
   const port = Number(args[args.indexOf('--port') + 1]);
+  // Every fake records its pid, so teardown can stop the ones a failing handoff left behind.
+  require('node:fs').appendFileSync(require('node:path').join(__dirname, 'opencode-pids'), process.pid + '\\n');
   const server = http.createServer((req, res) => {
     if (req.url === '/api/info' || req.url === '/global/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -54,6 +59,11 @@ const isAlive = (pid) => {
   }
 };
 
+// Probe-and-release, the same shape gatekeeper-program.test.js raced on (#666). Two of this
+// file's call sites never bind the port at all: it only names a pid file in readiness-timeout
+// tests whose child has already exited or never listens, so those cannot collide, and they
+// keep using this helper directly. The server starts below go through startReadyServer,
+// which retries a start whose child dies on EADDRINUSE with a fresh port (#676).
 const freePort = () => new Promise((resolve, reject) => {
   const probe = net.createServer();
   probe.once('error', reject);
@@ -112,6 +122,13 @@ const readJson = (file) => {
     return null;
   }
 };
+
+// Handoff diagnostics must never print credentials from managed state.
+const summarizeState = (state) => state && Object.fromEntries(
+  ['version', 'pid', 'port', 'binary', 'args', 'instanceDir', 'startedAt']
+    .filter((key) => Object.hasOwn(state, key))
+    .map((key) => [key, state[key]]),
+);
 
 const readPid = (file) => {
   try {
@@ -215,7 +232,7 @@ const waitForPidChange = async (file, fromPid, timeoutMs) => {
 const startServer = (sandbox, { port, name, env = {} }) => {
   const logPath = sandbox.logPath(name);
   const logFd = fs.openSync(logPath, 'a');
-  const child = spawn(process.execPath, [cliPath, 'serve', '--foreground', '--port', String(port), '--host', '127.0.0.1'], {
+  const child = spawn(cliRuntime, [cliPath, 'serve', '--foreground', '--port', String(port), '--host', '127.0.0.1'], {
     env: { ...sandbox.env, ...env },
     stdio: ['ignore', logFd, logFd],
   });
@@ -224,12 +241,12 @@ const startServer = (sandbox, { port, name, env = {} }) => {
 };
 
 const runCli = (sandbox, args, env = {}) => new Promise((resolve) => {
-  const child = spawn(process.execPath, [cliPath, ...args], { env: { ...sandbox.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(cliRuntime, [cliPath, ...args], { env: { ...sandbox.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
-  child.once('exit', (code) => resolve({ code, stdout, stderr }));
+  child.once('close', (code) => resolve({ code, stdout, stderr }));
 });
 
 // Keeps one keep-alive client polling /health every ~10 ms. A refused connection is the listener being
@@ -280,11 +297,24 @@ const startClient = (port) => {
   };
 };
 
+// Every fake OpenCode the sandbox started, not only the one state.json names last: when a handoff fails,
+// the OpenCode it should have kept is no longer recorded and was left running after the test (12 orphans
+// from one failing run, dezren39/nix#667). Only pids still running this sandbox's fake script are signalled.
 const killRecordedOpenCode = (sandbox) => {
   const state = readJson(sandbox.statePath);
-  if (state?.pid && isAlive(state.pid)) {
+  const listed = (() => {
     try {
-      process.kill(state.pid, 'SIGKILL');
+      return fs.readFileSync(path.join(sandbox.root, 'opencode-pids'), 'utf8').split('\n').map(Number);
+    } catch {
+      return [];
+    }
+  })();
+  for (const pid of new Set([state?.pid, ...listed])) {
+    if (!Number.isInteger(pid) || pid <= 0 || !isAlive(pid)) continue;
+    const command = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' }).stdout ?? '';
+    if (pid !== state?.pid && !command.includes(sandbox.root)) continue;
+    try {
+      process.kill(pid, 'SIGKILL');
     } catch {
       // Already gone.
     }
@@ -293,7 +323,7 @@ const killRecordedOpenCode = (sandbox) => {
 
 // Full stop through the CLI (SIGINT), then SIGKILL for anything the test left behind. Only pids the
 // test recorded inside its own sandbox are signalled.
-const teardown = async (sandbox, port, children) => {
+const stopServers = async (sandbox, port, children) => {
   await runCli(sandbox, ['stop', '--port', String(port)]);
   for (const child of children) {
     if (child.exitCode === null && child.signalCode === null) {
@@ -305,7 +335,65 @@ const teardown = async (sandbox, port, children) => {
     }
   }
   killRecordedOpenCode(sandbox);
+};
+
+const teardown = async (sandbox, port, children) => {
+  await stopServers(sandbox, port, children);
   await fsp.rm(sandbox.root, { recursive: true, force: true });
+};
+
+// Readiness for one server start, with an early exit the plain waitForReady cannot make: when
+// the child has already exited and its log says the bind failed, the port was taken between
+// freePort releasing it and the child binding it, and waiting out the full readiness budget
+// would only report that loss as a slow start. Any other dead child goes through the same
+// diagnostics a readiness timeout reports, just without the wait.
+const waitForReadyOrBindFailure = async (port, { timeoutMs = 60_000, child, logPath, pidFilePath }) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const health = await fetchHealth(port);
+    if (health?.body?.isOpenCodeReady === true) return health.body;
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      const tail = logPath ? readLogTail(logPath) : null;
+      if (tail && /EADDRINUSE|already in use/.test(tail)) {
+        const error = new Error(`server on ${port} died because its port was already in use before it became ready, last lines of server log ${logPath}:\n${tail}`);
+        error.bindFailure = true;
+        throw error;
+      }
+      break;
+    }
+    await sleep(200);
+  }
+  const diagnostics = readinessDiagnostics({ child, logPath, pidFilePath });
+  throw new Error([`server on ${port} did not become ready within ${timeoutMs}ms`, ...diagnostics].join('\n'));
+};
+
+// Starts a server in the sandbox and waits for readiness, retrying the whole start on a fresh
+// port when the child dies on EADDRINUSE (#676). The port keys the CLI's pid file, state file
+// and handoff arguments, so a retry cannot respawn one process the way #683 respawns the
+// gatekeeper child: the failed attempt is stopped and the start sequence runs again. Bounded
+// at five attempts; a fifth collision, and any non-collision failure, throws.
+const startReadyServer = async (sandbox, { name, env = {} }) => {
+  let lastBindError = null;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const port = await freePort();
+    const server = startServer(sandbox, { port, name, env });
+    try {
+      await waitForReadyOrBindFailure(port, { child: server.child, logPath: server.logPath, pidFilePath: sandbox.pidFilePath(port) });
+      return { ...server, port };
+    } catch (error) {
+      if (!error.bindFailure) {
+        await teardown(sandbox, port, [server.child]);
+        throw error;
+      }
+      lastBindError = error;
+      if (attempt === 5) {
+        await teardown(sandbox, port, [server.child]);
+        throw error;
+      }
+      await stopServers(sandbox, port, [server.child]);
+    }
+  }
+  throw lastBindError;
 };
 
 const describeUnlessWindows = process.platform === 'win32' ? describe.skip : describe;
@@ -345,12 +433,11 @@ describeUnlessWindows('self-handoff across real processes', () => {
   // (a) one run: a 10 ms client through `openchamber handoff`. Returns the counts and the pids.
   const runHandoffUnderLoad = async () => {
     const sandbox = await createSandbox();
-    const port = await freePort();
-    const predecessor = startServer(sandbox, { port, name: 'predecessor' });
+    const predecessor = await startReadyServer(sandbox, { name: 'predecessor' });
+    const port = predecessor.port;
     const children = [predecessor.child];
     track(sandbox, port, children);
     const pidFile = sandbox.pidFilePath(port);
-    await waitForReady(port, { child: predecessor.child, logPath: predecessor.logPath, pidFilePath: pidFile });
     const oldPid = readPid(pidFile);
     const openCodeBefore = readJson(sandbox.statePath);
 
@@ -374,7 +461,15 @@ describeUnlessWindows('self-handoff across real processes', () => {
     const run = await runHandoffUnderLoad();
     report({ run: 'handoff', handoffMs: run.handoffMs, ...run.counts, oldPid: run.oldPid, successorPid: run.successorPid });
 
-    expect(run.cli.code).toBe(0);
+    expect(run.cli.code, [
+      `handoff CLI exit code: ${run.cli.code}`,
+      `handoff CLI stdout:\n${run.cli.stdout || '(empty)'}`,
+      `handoff CLI stderr:\n${run.cli.stderr || '(empty)'}`,
+      `predecessor log:\n${run.log || '(empty)'}`,
+      `state before: ${JSON.stringify(summarizeState(run.openCodeBefore))}`,
+      `state after: ${JSON.stringify(summarizeState(run.openCodeAfter))}`,
+      `old pid: ${run.oldPid}; successor pid: ${run.successorPid}`,
+    ].join('\n\n')).toBe(0);
     expect(run.successorPid).not.toBeNull();
     expect(run.successorPid).not.toBe(run.oldPid);
     expect(run.predecessorExited).toBe(true);
@@ -459,13 +554,12 @@ describeUnlessWindows('self-handoff across real processes', () => {
   // pid files stay the predecessor's.
   it('keeps the old process serving when the successor is not ready in time', async () => {
     const sandbox = await createSandbox();
-    const port = await freePort();
     const env = { OPENCHAMBER_HANDOFF_TIMEOUT_MS: '1' };
-    const predecessor = startServer(sandbox, { port, name: 'predecessor', env });
+    const predecessor = await startReadyServer(sandbox, { name: 'predecessor', env });
+    const port = predecessor.port;
     const children = [predecessor.child];
     track(sandbox, port, children);
     const pidFile = sandbox.pidFilePath(port);
-    await waitForReady(port, { child: predecessor.child, logPath: predecessor.logPath, pidFilePath: pidFile });
     const oldPid = readPid(pidFile);
     const openCodeBefore = readJson(sandbox.statePath);
 
@@ -496,13 +590,12 @@ describeUnlessWindows('self-handoff across real processes', () => {
   // `systemctl restart` does without socket activation. The same client must see refused connections.
   it('shows refused connections when the restart stops the old process before the new one listens', async () => {
     const sandbox = await createSandbox();
-    const port = await freePort();
     const env = { OPENCHAMBER_SELF_HANDOFF: '0' };
-    const predecessor = startServer(sandbox, { port, name: 'predecessor', env });
+    const predecessor = await startReadyServer(sandbox, { name: 'predecessor', env });
+    const port = predecessor.port;
     const children = [predecessor.child];
     track(sandbox, port, children);
     const pidFile = sandbox.pidFilePath(port);
-    await waitForReady(port, { child: predecessor.child, logPath: predecessor.logPath, pidFilePath: pidFile });
 
     const refused = await runCli(sandbox, ['handoff', '--port', String(port)], env);
     expect(refused.code).toBe(2);
@@ -526,7 +619,6 @@ describeUnlessWindows('self-handoff across real processes', () => {
   // which is what lets the unit keep running when the old process exits.
   it.skipIf(!hasPython || !hasSystemdNotify)('tells systemd the successor is ready and is the main pid', async () => {
     const sandbox = await createSandbox();
-    const port = await freePort();
     const notifySocket = path.join(sandbox.root, 'notify.sock');
     const receiver = spawn('python3', ['-u', '-c', notifyReceiverSource, notifySocket], { stdio: ['ignore', 'pipe', 'inherit'] });
     cleanups.push(async () => receiver.kill('SIGKILL'));
@@ -534,10 +626,10 @@ describeUnlessWindows('self-handoff across real processes', () => {
     readline.createInterface({ input: receiver.stdout }).on('line', (line) => datagrams.push(line));
     await waitUntil(() => fs.existsSync(notifySocket));
 
-    const predecessor = startServer(sandbox, { port, name: 'predecessor', env: { NOTIFY_SOCKET: notifySocket } });
+    const predecessor = await startReadyServer(sandbox, { name: 'predecessor', env: { NOTIFY_SOCKET: notifySocket } });
+    const port = predecessor.port;
     track(sandbox, port, [predecessor.child]);
     const pidFile = sandbox.pidFilePath(port);
-    await waitForReady(port, { child: predecessor.child, logPath: predecessor.logPath, pidFilePath: pidFile });
     const oldPid = readPid(pidFile);
 
     const cli = await runCli(sandbox, ['handoff', '--port', String(port)]);

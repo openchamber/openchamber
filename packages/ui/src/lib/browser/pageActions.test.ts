@@ -121,6 +121,75 @@ describe('page action scripts', () => {
     expect(win.document.querySelector('input')?.value).toBe('');
   });
 
+  test('a password field mismatch error never contains the held or typed secret', () => {
+    // Issue #1073 (Codex P1 on PR #70): the mismatch error embedded the
+    // field's held value verbatim, so a controlled password field whose
+    // handler restores its value handed the secret to the calling agent.
+    const win = new Window({ url: 'https://example.test/' });
+    win.document.body.innerHTML = '<input type="password" id="field">';
+    const input = win.document.querySelector('input');
+    if (!input) throw new Error('password input missing');
+    const heldSecret = 'held-secret-value';
+    input.value = heldSecret;
+    input.addEventListener('input', () => { input.value = heldSecret; });
+    input.addEventListener('change', () => { input.value = heldSecret; });
+    const runType = new Function(
+      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
+      `return ${buildTypeScript({ selector: '#field', value: 'typed-secret-attempt', submit: false })}`,
+    );
+    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
+    const rendered = JSON.stringify(result);
+    expect(rendered).toContain('"ok":false');
+    expect(rendered).toContain('did not keep the typed value');
+    expect(rendered).not.toContain(heldSecret);
+    expect(rendered).not.toContain('typed-secret-attempt');
+    expect(rendered).not.toContain('character');
+    expect(input.value).toBe(heldSecret);
+  });
+
+  test('a revealed password field mismatch error carries no character count', () => {
+    // CodeRabbit on PR #1087: a visibility toggle flips type to text while
+    // autocomplete="current-password" still names the secret — the count is
+    // a diagnostic derived from the secret's content and must be suppressed.
+    const win = new Window({ url: 'https://example.test/' });
+    win.document.body.innerHTML = '<input type="text" autocomplete="current-password" id="field">';
+    const input = win.document.querySelector('input');
+    if (!input) throw new Error('revealed password input missing');
+    const heldSecret = 'revealed-secret';
+    input.value = heldSecret;
+    input.addEventListener('input', () => { input.value = heldSecret; });
+    input.addEventListener('change', () => { input.value = heldSecret; });
+    const runType = new Function(
+      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
+      `return ${buildTypeScript({ selector: '#field', value: 'another-attempt', submit: false })}`,
+    );
+    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
+    const rendered = JSON.stringify(result);
+    expect(rendered).toContain('"ok":false');
+    expect(rendered).toContain('did not keep the typed value');
+    expect(rendered).not.toContain(heldSecret);
+    expect(rendered).not.toContain('character');
+  });
+
+  test('a contenteditable field turned non-editable by its handler still reports the mismatch', () => {
+    // CodeRabbit on PR #1087: the readback must use the editing kind captured
+    // before dispatch — reading .value off a div whose editability flipped
+    // mid-event is undefined and must not throw instead of reporting.
+    const win = new Window({ url: 'https://example.test/' });
+    win.document.body.innerHTML = '<div contenteditable="true" id="field">old text</div>';
+    const div = win.document.querySelector('div');
+    if (!div) throw new Error('contenteditable div missing');
+    div.addEventListener('input', () => { div.textContent = 'old text'; div.contentEditable = 'false'; });
+    div.addEventListener('change', () => { div.textContent = 'old text'; });
+    const runType = new Function(
+      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
+      `return ${buildTypeScript({ selector: '#field', value: 'typed replacement', submit: false })}`,
+    );
+    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('did not keep the typed value');
+  });
+
   test('whitespace regexes survive interpolation', () => {
     // A doubled backslash here would produce a literal backslash-s and match
     // nothing, silently collapsing no whitespace at all.

@@ -4,7 +4,17 @@ import path from 'path';
 
 import { assertGitAvailable, looksLikeAuthError, runGit } from './git.js';
 import { parseSkillRepoSource } from './source.js';
-import { OPENCODE_CONFIG_DIR } from '../opencode/shared.js';
+import { OPENCODE_CONFIG_DIR, SKILL_SUPPORTING_FILE_MAX_BYTES } from '../opencode/shared.js';
+import { SKILL_MD_MAX_BYTES } from './scan.js';
+
+// A skill is a SKILL.md plus small supporting text and assets, so an install
+// never needs a large tree. These caps keep a cloned repository from turning
+// one install into an unbounded copy: entries counts files and directories
+// (a tree of empty directories is the same denial of service as a tree of
+// files), and the per-file limit is the one the skill loader already enforces
+// when it reads a supporting file.
+export const SKILL_COPY_MAX_ENTRIES = 1_000;
+export const SKILL_COPY_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
@@ -33,7 +43,32 @@ async function safeRm(dir) {
   }
 }
 
+/**
+ * A selection is unsafe when it is absolute or names a parent directory, under
+ * either separator, so its filesystem path could leave the clone. The install
+ * endpoint accepts selections that did not come from a scan, so this runs here
+ * rather than relying on git's sparse-checkout normalisation.
+ */
+function isUnsafeSelectionPath(repoRelPosixPath) {
+  const raw = String(repoRelPosixPath || '');
+  if (path.posix.isAbsolute(raw) || path.win32.isAbsolute(raw)) return true;
+  return raw.split(/[\\/]+/).some((segment) => {
+    const trimmed = segment.trim();
+    return trimmed === '..' || trimmed === '.';
+  });
+}
+
+/** Whether `candidateReal` is `rootReal` or below it, on a separator boundary. */
+function isPathWithin(rootReal, candidateReal) {
+  if (candidateReal === rootReal) return true;
+  const prefix = rootReal.endsWith(path.sep) ? rootReal : `${rootReal}${path.sep}`;
+  return candidateReal.startsWith(prefix);
+}
+
 function toFsPath(repoDir, repoRelPosixPath) {
+  if (isUnsafeSelectionPath(repoRelPosixPath)) {
+    throw new Error('Invalid skill directory path');
+  }
   const parts = String(repoRelPosixPath || '')
     .split('/')
     .map((p) => p.trim())
@@ -45,9 +80,51 @@ async function ensureDir(dirPath) {
   await fs.promises.mkdir(dirPath, { recursive: true });
 }
 
-async function copyDirectoryNoSymlinks(srcDir, dstDir) {
+export async function copyDirectoryNoSymlinks(srcDir, dstDir, cloneRoot) {
+  // Containment is anchored at the clone, not at the selected directory: a
+  // selected directory that is itself a symlink resolves outside the clone, and
+  // anchoring at it would make every below-root check pass vacuously.
+  const cloneReal = await fs.promises.realpath(cloneRoot);
+
+  const relative = path.relative(cloneRoot, srcDir);
+  const segments = relative.split(path.sep).filter(Boolean);
+  if (path.isAbsolute(relative) || segments.includes('..')) {
+    throw new Error('Invalid source path traversal detected');
+  }
+
+  // Reject a selected directory that is a symlink, or that sits behind one.
+  let current = cloneRoot;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    const stat = await fs.promises.lstat(current);
+    if (stat.isSymbolicLink()) {
+      throw new Error('Symlinks are not supported in skills');
+    }
+  }
+
   const srcReal = await fs.promises.realpath(srcDir);
+  if (!isPathWithin(cloneReal, srcReal)) {
+    throw new Error('Invalid source path traversal detected');
+  }
+
   await ensureDir(dstDir);
+
+  const copyState = { entries: 0, bytes: 0 };
+  const countEntry = (stat, name) => {
+    copyState.entries += 1;
+    if (copyState.entries > SKILL_COPY_MAX_ENTRIES) {
+      throw new Error(`Skill directory is too large to install: more than ${SKILL_COPY_MAX_ENTRIES} entries`);
+    }
+    if (!stat.isFile()) return;
+    const perFileLimit = name === 'SKILL.md' ? SKILL_MD_MAX_BYTES : SKILL_SUPPORTING_FILE_MAX_BYTES;
+    if (stat.size > perFileLimit) {
+      throw new Error(`Skill file is too large to install: ${stat.size} bytes exceeds the ${perFileLimit} byte limit`);
+    }
+    copyState.bytes += stat.size;
+    if (copyState.bytes > SKILL_COPY_MAX_TOTAL_BYTES) {
+      throw new Error(`Skill directory is too large to install: more than ${SKILL_COPY_MAX_TOTAL_BYTES} bytes`);
+    }
+  };
 
   const walk = async (currentSrc, currentDst) => {
     const entries = await fs.promises.readdir(currentSrc, { withFileTypes: true });
@@ -60,19 +137,21 @@ async function copyDirectoryNoSymlinks(srcDir, dstDir) {
         throw new Error('Symlinks are not supported in skills');
       }
 
-      // Guard against traversal: ensure source is still under srcReal
+      // Guard against traversal: the resolved parent must stay inside the clone.
       const nextRealParent = await fs.promises.realpath(path.dirname(nextSrc));
-      if (!nextRealParent.startsWith(srcReal)) {
+      if (!isPathWithin(cloneReal, nextRealParent)) {
         throw new Error('Invalid source path traversal detected');
       }
 
       if (stat.isDirectory()) {
+        countEntry(stat, entry.name);
         await ensureDir(nextDst);
         await walk(nextSrc, nextDst);
         continue;
       }
 
       if (stat.isFile()) {
+        countEntry(stat, entry.name);
         await ensureDir(path.dirname(nextDst));
         await fs.promises.copyFile(nextSrc, nextDst);
         try {
@@ -188,15 +267,27 @@ export async function installSkillsFromRepository({
     return { ok: false, error: { kind: 'invalidSource', message: 'No skills selected for installation' } };
   }
 
-  // Validate names early and compute conflicts without mutating.
+  // Validate names and paths early and compute conflicts without mutating.
   const skillPlans = requestedDirs.map((skillDirPosix) => {
     const skillName = path.posix.basename(skillDirPosix);
-    return { skillDirPosix, skillName, installable: validateSkillName(skillName) };
+    const pathError = isUnsafeSelectionPath(skillDirPosix) ? 'Invalid skill directory path' : null;
+    return { skillDirPosix, skillName, pathError, installable: validateSkillName(skillName) };
   });
+
+  // Only safe selections are worth checking out; an unsafe one would make git
+  // reject the whole sparse-checkout set, so it is skipped rather than cloned.
+  const checkoutDirs = skillPlans.filter((plan) => !plan.pathError).map((plan) => plan.skillDirPosix);
+  if (checkoutDirs.length === 0) {
+    return {
+      ok: true,
+      installed: [],
+      skipped: skillPlans.map((plan) => ({ skillName: plan.skillName, reason: plan.pathError })),
+    };
+  }
 
   const conflicts = [];
   for (const plan of skillPlans) {
-    if (!plan.installable) {
+    if (plan.pathError || !plan.installable) {
       continue;
     }
 
@@ -235,7 +326,7 @@ export async function installSkillsFromRepository({
 
     // Selective checkout for only requested skill dirs.
     await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { timeoutMs: 15_000 });
-    const setResult = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { timeoutMs: 30_000 });
+    const setResult = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...checkoutDirs], { timeoutMs: 30_000 });
     if (!setResult.ok) {
       return { ok: false, error: { kind: 'unknown', message: setResult.stderr || setResult.message || 'Failed to configure sparse checkout' } };
     }
@@ -251,6 +342,11 @@ export async function installSkillsFromRepository({
     const skipped = [];
 
     for (const plan of skillPlans) {
+      if (plan.pathError) {
+        skipped.push({ skillName: plan.skillName, reason: plan.pathError });
+        continue;
+      }
+
       if (!plan.installable) {
         skipped.push({ skillName: plan.skillName, reason: 'Invalid skill name (directory basename)' });
         continue;
@@ -286,7 +382,7 @@ export async function installSkillsFromRepository({
       await ensureDir(path.dirname(targetDir));
 
       try {
-        await copyDirectoryNoSymlinks(srcDir, targetDir);
+        await copyDirectoryNoSymlinks(srcDir, targetDir, tempBase);
         installed.push({ skillName: plan.skillName, skillDir: plan.skillDirPosix, scope, source: targetSource === 'agents' ? 'agents' : 'opencode' });
       } catch (error) {
         await safeRm(targetDir);

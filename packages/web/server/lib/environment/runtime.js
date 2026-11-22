@@ -1,5 +1,6 @@
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
 import { isUserAction } from './refresh-scope.js';
@@ -64,6 +65,8 @@ const isInside = (directory, root) => directory === root || directory.startsWith
 
 const runCommand = ({ spawn, command, cwd, env, timeoutMs }) => new Promise((resolve) => {
   let stdout = '';
+  let stdoutBytes = 0;
+  const decoder = new StringDecoder('utf8');
   let settled = false;
   let timer = null;
   const finish = (outcome) => {
@@ -87,14 +90,18 @@ const runCommand = ({ spawn, command, cwd, env, timeoutMs }) => new Promise((res
   }, timeoutMs);
 
   child.stdout?.on('data', (chunk) => {
-    stdout += chunk.toString();
-    if (stdout.length > MAX_COMMAND_OUTPUT_BYTES) {
+    if (settled) return;
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    stdoutBytes += buffer.length;
+    if (stdoutBytes > MAX_COMMAND_OUTPUT_BYTES) {
       try { child.kill('SIGKILL'); } catch { /* already gone */ }
       finish({ ok: false, reason: 'output-too-large' });
+      return;
     }
+    stdout += decoder.write(buffer);
   });
   child.on('error', () => finish({ ok: false, reason: 'spawn' }));
-  child.on('close', (code) => finish(code === 0 ? { ok: true, stdout } : { ok: false, reason: 'exit', exitCode: code }));
+  child.on('close', (code) => finish(code === 0 ? { ok: true, stdout: stdout + decoder.end() } : { ok: false, reason: 'exit', exitCode: code }));
 });
 
 export const createEnvironmentRuntime = ({

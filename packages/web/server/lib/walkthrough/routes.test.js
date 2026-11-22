@@ -212,6 +212,29 @@ describe('walkthrough routes', () => {
     expect(await huge.json()).toMatchObject({ code: 'file-too-large' });
   });
 
+  it('rejects repeated query parameters on the comparison routes (#2312)', async () => {
+    const source = { kind: 'pr', number: 42 };
+    const context = new URLSearchParams(Object.fromEntries(Object.entries(PR_CONTEXT).map(([key, value]) => [key, String(value)]))).toString();
+    const encodedSource = encodeURIComponent(JSON.stringify(source));
+
+    const repeatedDirectory = await fetch(`${base}/api/walkthrough/pr-diff?directory=/repo/a&directory=/repo/b&source=${encodedSource}&${context}`);
+    expect(repeatedDirectory.status).toBe(400);
+    expect(validateReadContext).not.toHaveBeenCalled();
+    expect(lastArgs).toBeUndefined();
+
+    const repeatedBinding = await fetch(`${base}/api/walkthrough/pr-diff?directory=/repo&source=${encodedSource}&${context}&bindingRevision=1&bindingRevision=2`);
+    expect(repeatedBinding.status).toBe(400);
+    expect(validateReadContext).not.toHaveBeenCalled();
+    expect(lastArgs).toBeUndefined();
+
+    for (const extra of ['path=a.ts&path=b.ts&status=M', 'path=a.ts&status=M&status=R', 'directory=/repo/b&path=a.ts&status=M']) {
+      const response = await fetch(`${base}/api/walkthrough/pr-file?directory=/repo&source=${encodedSource}&${context}&${extra}`);
+      expect(response.status).toBe(400);
+      expect(lastArgs).toBeUndefined();
+    }
+    expect(validateReadContext).not.toHaveBeenCalled();
+  });
+
   it('reads no pull request file without a validated binding context', async () => {
     validateReadContext.mockRejectedValue(Object.assign(new Error('Binding changed'), { code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT' }));
     const response = await fetch(`${base}/api/walkthrough/pr-file?${new URLSearchParams({

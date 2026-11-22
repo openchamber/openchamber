@@ -8,6 +8,7 @@ import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { prepareAttachmentFiles } from "./attachment-files"
+import { MAX_VSCODE_SELECTION_BYTES } from "./vscode-selection-size"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 
 const FILE_URI_PREFIX = "file://"
@@ -167,6 +168,16 @@ export type InputState = {
    * finds a different draft open drops it.
    */
   pendingDraftSubmit: { draftId: number; text: string } | null
+  /**
+   * Texts to send in one chat's session, asked for from its transcript (a
+   * question answered again from its tool row), queued in request order: a
+   * second answer never replaces one still waiting to be sent. `target`
+   * names the composer like `pendingInputTarget`: null for the main chat,
+   * the session id for a chat pinned in the side panel. That composer sends
+   * each queued text only while it shows `sessionId`, and drops it
+   * otherwise; other composers leave it alone.
+   */
+  pendingSessionSubmits: { target: string | null; sessionId: string; text: string }[]
   /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
@@ -186,6 +197,9 @@ export type InputState = {
   requestDraftSubmit: (draftId: number, text: string) => void
   /** Takes the pending text when it belongs to this draft; any other pending request is dropped. */
   consumePendingDraftSubmit: (draftId: number | null) => string | null
+  requestSessionSubmit: (request: { target: string | null; sessionId: string; text: string }) => void
+  /** Takes the earliest queued text for this composer; a queued request for this composer and another session is dropped. */
+  consumePendingSessionSubmit: (target: string | null, sessionId: string | null) => string | null
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
   requestBtwComposer: (request: PendingBtwComposerRequest) => void
@@ -219,6 +233,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pinnedSyntheticParts: new Map(),
   pendingPresetSubmit: null,
   pendingDraftSubmit: null,
+  pendingSessionSubmits: [],
   pendingGuestIssue: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
@@ -285,6 +300,18 @@ export const useInputStore = create<InputState>()((set, get) => ({
     if (pendingDraftSubmit === null) return null
     set({ pendingDraftSubmit: null })
     return pendingDraftSubmit.draftId === draftId ? pendingDraftSubmit.text : null
+  },
+
+  requestSessionSubmit: (request) =>
+    set({ pendingSessionSubmits: [...get().pendingSessionSubmits, request] }),
+
+  consumePendingSessionSubmit: (target, sessionId) => {
+    const { pendingSessionSubmits } = get()
+    const index = pendingSessionSubmits.findIndex((pending) => pending.target === target)
+    if (index === -1) return null
+    const pending = pendingSessionSubmits[index]
+    set({ pendingSessionSubmits: pendingSessionSubmits.filter((_, i) => i !== index) })
+    return pending.sessionId === sessionId ? pending.text : null
   },
 
   setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),
@@ -398,6 +425,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   },
 
   addVSCodeSelectionAttachment: async (path: string, file: File) => {
+    if (file.size > MAX_VSCODE_SELECTION_BYTES) return
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
     const selectionKey = `${generation}\u0000${getVSCodeSelectionKey(path, file.name)}`

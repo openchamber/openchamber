@@ -200,6 +200,7 @@ const STATUS_META = {
   skipped: { tone: 'muted', Icon: 'pulse' },
   failed: { tone: 'error', Icon: 'error-warning' },
   cancelled: { tone: 'muted', Icon: 'pulse' },
+  timeout: { tone: 'warning', Icon: 'error-warning' },
 } satisfies Record<ScheduledTaskStatus, TaskStatusMeta>;
 
 const TaskTargetLine: React.FC<{ sessionId: string }> = ({ sessionId }) => {
@@ -598,6 +599,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
               : status === 'skipped' ? t('sessions.scheduledTasks.dialog.status.skipped')
               : status === 'failed' ? t('sessions.scheduledTasks.dialog.status.error')
               : status === 'cancelled' ? t('sessions.scheduledTasks.dialog.status.cancelled')
+              : status === 'timeout' ? t('sessions.scheduledTasks.dialog.status.timeout')
               : status === 'success'
               ? t('sessions.scheduledTasks.dialog.status.success')
               : status === 'error'

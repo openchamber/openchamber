@@ -47,6 +47,19 @@ let
       runHook preInstall
       mkdir -p $out
       find . -type d -name node_modules -prune -exec cp -R --parents {} $out \;
+      # Determinism: bun's isolated installer links each store package's
+      # dependencies' bins into .bun/<entry>/node_modules/.bin, and whether
+      # a given link is created is environment-sensitive — the
+      # browserslist <-> update-browserslist-db cyclic peer pair flips
+      # between local and CI builds, which kept breaking this
+      # fixed-output hash (#449). Nothing in the build or at runtime
+      # resolves through these store-internal .bin dirs (the workspace
+      # node_modules/.bin dirs are separate and kept), so drop them all:
+      # the output tree is then identical no matter which links the
+      # local bun happened to create.
+      if [ -d $out/node_modules/.bun ]; then
+        find $out/node_modules/.bun -mindepth 3 -maxdepth 3 -type d -name .bin -exec rm -rf {} +
+      fi
       runHook postInstall
     '';
 

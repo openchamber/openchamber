@@ -7,26 +7,22 @@
 name: nix-hashes
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - bun.lock
-      - packages/electron/package.json
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
   group: nix-hashes
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   rehash:
     # This fork keeps its own flake (aarch64-darwin app, dev shells, the
-    # developing-today/opencode input), which has none of the outputs this job
+    # developing-today-forks/opencode input), which has none of the outputs this job
     # evaluates or re-bakes. Runs only upstream until the flakes are reconciled.
     if: github.repository == 'openchamber/openchamber'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       # No persisted GITHUB_TOKEN: the only push here goes through the app
       # token below, and a token left in git config would win and get a 403.

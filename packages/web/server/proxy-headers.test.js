@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   applyForwardProxyResponseHeaders,
@@ -75,5 +76,26 @@ describe('OpenCode proxy header handling', () => {
       ['content-type', 'application/json'],
       ['etag', 'W/"abc"'],
     ]);
+  });
+
+  it('preserves repeated set-cookie headers on a Node response', () => {
+    const responseHeaders = new Headers();
+    responseHeaders.append('set-cookie', 'a=1; Path=/');
+    responseHeaders.append('set-cookie', 'b=2; Path=/');
+    responseHeaders.set('content-type', 'application/json');
+    responseHeaders.set('etag', 'W/"abc"');
+    responseHeaders.set('content-encoding', 'gzip');
+    responseHeaders.set('transfer-encoding', 'chunked');
+    responseHeaders.set('www-authenticate', 'Basic realm="test"');
+
+    const response = new ServerResponse(new IncomingMessage(null));
+    applyForwardProxyResponseHeaders(responseHeaders, response);
+
+    expect(response.getHeader('set-cookie')).toEqual(['a=1; Path=/', 'b=2; Path=/']);
+    expect(response.getHeader('content-type')).toBe('application/json');
+    expect(response.getHeader('etag')).toBe('W/"abc"');
+    expect(response.getHeader('content-encoding')).toBeUndefined();
+    expect(response.getHeader('transfer-encoding')).toBeUndefined();
+    expect(response.getHeader('www-authenticate')).toBeUndefined();
   });
 });

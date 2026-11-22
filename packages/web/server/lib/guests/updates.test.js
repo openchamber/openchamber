@@ -190,6 +190,26 @@ describe('checkGuestUpdate', () => {
   });
 });
 
+describe('checkGuestUpdate oversized manifest', () => {
+  test('treats a remote package.json over the captured-stdout cap as invalid-manifest', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));
+    const persistPath = path.join(dir, 'data', 'extensions.json');
+    const { work, bare } = await setupRemote(dir, 'upd-big');
+    await installFrom(bare, persistPath);
+    const guest = await loadGuest('upd-big', persistPath);
+
+    const parsed = JSON.parse(manifest('upd-big', '1.1.0'));
+    parsed.pad = 'x'.repeat(5 * 1024 * 1024);
+    await fs.writeFile(path.join(work, 'package.json'), JSON.stringify(parsed));
+    commit(work, 'oversized manifest');
+    git(work, ['push', '-q', 'origin', 'HEAD']);
+
+    expect(await checkGuestUpdate({ guest, origin: guest.gitOrigin })).toEqual({ available: false, error: 'invalid-manifest' });
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
 describe('checkAllGuestUpdates', () => {
   test('caches per guest for an hour unless forced and feeds the catalog row', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-upd-'));

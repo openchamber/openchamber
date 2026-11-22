@@ -22,6 +22,48 @@ Você pode executar qualquer tarefa imediatamente com **run now** para verificar
 
 Marque **Executar como objetivo** para que a execução persiga o prompt até concluir em vez de parar após uma resposta — veja [Objetivos de sessão](/session-goals/).
 
+## Loops: tarefas agendadas como arquivos markdown
+
+Um **loop** é uma tarefa agendada definida como um arquivo markdown portátil que você pode commitar no seu repositório. Coloque um arquivo em `.agents/loops/` e abra a lista de tarefas agendadas para sincronizá-lo — sem reiniciar o servidor:
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Onde os arquivos vivem
+
+- **Escopo do projeto** — `.agents/loops/*.md` no diretório do projeto ou em qualquer diretório ancestral até a raiz do worktree do git.
+- **Escopo do usuário** — `~/.agents/loops/*.md` se aplica a cada projeto que você abrir.
+
+Se um loop de projeto e um loop de usuário tiverem o mesmo nome, o loop de projeto vence.
+
+### Campos
+
+| Campo | Significado |
+|---|---|
+| `name` | Nome da tarefa (obrigatório, máx. 80 caracteres). |
+| `schedule` | Expressão cron (obrigatória) — arquivos de loop são só cron. |
+| `enabled` | Defina como `true` para executar. Os loops ficam **desativados por padrão**, então commitar um arquivo nunca começa a executar uma tarefa sozinho. Um loop que veio com um repositório também espera até você ativá-lo em Tarefas agendadas na sua máquina, e de novo após uma mudança no agendamento, modelo ou prompt. Loops em `~/.agents/loops` executam só com `true`. |
+| `model` | `provider/model` (obrigatório), p. ex. `anthropic/claude-sonnet-4-5`. |
+| `agent` | Agente a usar (opcional). |
+| `timezone` | Fuso horário IANA (opcional, padrão é o fuso do servidor). |
+| corpo | O prompt de execução (obrigatório). Pode ser um comando slash, como `/review src/`. |
+
+### Como os loops se comportam
+
+- O **arquivo é a autoridade** enquanto existir. **Editar** o abre no editor de arquivos integrado, o interruptor de ativação atualiza seu frontmatter, e excluir a tarefa exclui o arquivo markdown após confirmação. **Executar agora** continua disponível.
+- O estado de execução (última execução, próxima execução, status) vive na configuração do projeto e nunca é escrito de volta no arquivo markdown.
+- Renomear o campo `name` renomeia a tarefa no lugar. Se um arquivo de loop falhar temporariamente ao ser analisado (no meio de uma edição, conflito de merge), sua tarefa é mantida com a última definição válida até o arquivo ser corrigido.
+- Agendamentos `daily`/`weekly`/`once` e configurações de objetivos continuam só na interface; arquivos de loop são sempre cron.
+
 ## Como é o sucesso
 
 Após uma execução, a tarefa mostra quando rodou pela última vez, se teve êxito e um link para a sessão que ela criou. Se uma execução falha, o erro também é mostrado ali.

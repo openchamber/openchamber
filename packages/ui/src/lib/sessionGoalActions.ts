@@ -5,7 +5,7 @@ import { distillGoalObjective } from '@/lib/smallModel';
 import { requestGoalSpec, type GoalWriterChoice } from '@/lib/goalWriter';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { toast } from '@/components/ui';
-import { deleteGoalObjectiveFile, writeGoalObjectiveFile } from '@/lib/goalObjectiveFiles';
+import { deleteGoalObjectiveFile, deleteGoalObjectiveVersion, fetchGoalObjectiveContent, fetchGoalObjectiveSnapshot, writeGoalObjectiveFile } from '@/lib/goalObjectiveFiles';
 import { SESSION_GOAL_CHAR_LIMIT_MAX } from '@/lib/sessionGoalLimits';
 import {
   getSessionGoal,
@@ -74,20 +74,34 @@ export type SetSessionGoalResult =
 // acceptance criteria (bottom), sacrificing the middle.
 const TRIM_MARKER = '\n\n[… objective trimmed for the auditor — the full text was delivered in the chat message …]\n\n';
 
+// A fixed-offset cut can land between the halves of a surrogate pair,
+// leaving a lone surrogate that bakes into the stored objective as U+FFFD;
+// move a boundary that lands inside a pair back to the pair boundary.
+// Mirrors the excerpt twin in messages/messageMarkdown.ts.
+const dropSplitHead = (text: string): string => {
+  const last = text.charCodeAt(text.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+};
+
+const dropSplitTail = (text: string): string => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
 const fitObjective = async (raw: string, ignoreLimit: boolean): Promise<string> => {
   const limit = ignoreLimit ? SESSION_GOAL_CHAR_LIMIT_MAX : useUIStore.getState().sessionGoalObjectiveCharLimit;
   if (raw.length <= limit) {
     return raw;
   }
-  if (ignoreLimit) return raw.slice(0, limit);
+  if (ignoreLimit) return dropSplitHead(raw.slice(0, limit));
   const distilled = await distillGoalObjective(raw, limit);
   if (distilled) {
-    return distilled.slice(0, limit);
+    return dropSplitHead(distilled.slice(0, limit));
   }
   const half = Math.max(0, Math.floor((limit - TRIM_MARKER.length) / 2));
   const dictionary = useI18nStore.getState().dictionary;
   toast.error(formatMessage(dictionary, 'chat.goal.toast.distillFallback'));
-  return `${raw.slice(0, half)}${TRIM_MARKER}${raw.slice(-half)}`;
+  return `${dropSplitHead(raw.slice(0, half))}${TRIM_MARKER}${dropSplitTail(raw.slice(-half))}`;
 };
 
 const rewriteObjective = async (
@@ -115,13 +129,47 @@ const rewriteObjective = async (
   return null;
 };
 
+/** A short content hash identifying one saved objective text (FNV-1a). */
+export const goalObjectiveRevision = (text: string): string => {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+};
+
 /** Whether the stored goal is still the one an edit started from. */
-const isSameGoal = (current: { id?: unknown; status?: unknown; updatedAt?: unknown } | null, existing: SessionGoalPayload): boolean => (
-  current !== null
-  && current.id === existing.id
-  && current.status === existing.status
-  && current.updatedAt === existing.updatedAt
-);
+const isSameGoal = (current: { id?: unknown; status?: unknown; objective?: unknown; objectiveFile?: unknown; objectiveRevision?: unknown; tokenBudget?: unknown; ignoreObjectiveLimit?: unknown } | null, existing: SessionGoalPayload): boolean => {
+  if (current === null) return false;
+  if (current.id !== existing.id || current.status !== existing.status) return false;
+  // The budget and the limit flag are editable settings accounting cannot
+  // change, so a difference there is another save, not a settlement bump:
+  // accepting it would silently overwrite the newer setting with the
+  // editor's stale value. Normalized exactly as getSessionGoal reads them.
+  const currentTokenBudget = typeof current.tokenBudget === 'number' && Number.isFinite(current.tokenBudget) && current.tokenBudget > 0
+    ? Math.floor(current.tokenBudget)
+    : null;
+  if (currentTokenBudget !== existing.tokenBudget) return false;
+  if ((current.ignoreObjectiveLimit === true) !== existing.ignoreObjectiveLimit) return false;
+  // updatedAt is deliberately not compared: the server runtime stamps a
+  // fresh one on every accounting merge-write (token/turn settlement), so
+  // routine accounting between opening the editor and saving used to read
+  // as a conflicting edit. What accounting cannot change is the objective.
+  if (existing.objectiveFile) {
+    // The objective text lives in the file, not in this record, so the
+    // record compares by revision: every save stamps the hash of the
+    // objective it wrote, and accounting merge-writes preserve it. A
+    // different revision means another save changed the objective while
+    // this edit was open. Goals saved before revisions existed carry
+    // none on one or both sides; those keep the id/status-only check.
+    const currentRevision = typeof current.objectiveRevision === 'string' ? current.objectiveRevision : '';
+    if (!currentRevision || !existing.objectiveRevision) return true;
+    return currentRevision === existing.objectiveRevision;
+  }
+  const currentObjective = typeof current.objective === 'string' ? current.objective.trim() : '';
+  return currentObjective === existing.objective;
+};
 
 /**
  * The goal record a save writes: the edited goal in place (id and usage kept,
@@ -134,6 +182,8 @@ export const nextGoalRecord = (input: {
   existing: SessionGoalPayload | null;
   objective: string;
   objectiveFile: boolean;
+  /** Revision of the full objective text being saved (see goalObjectiveRevision). */
+  objectiveRevision: string;
   ignoreLimit: boolean;
   tokenBudget: number | null;
   /** `resumed` starts an idle session's next turn at once. */
@@ -150,6 +200,7 @@ export const nextGoalRecord = (input: {
         ...currentGoal,
         objective: input.objective,
         objectiveFile: input.objectiveFile,
+        objectiveRevision: input.objectiveRevision,
         ignoreObjectiveLimit: input.ignoreLimit,
         tokenBudget: input.tokenBudget,
         status: 'active',
@@ -165,6 +216,7 @@ export const nextGoalRecord = (input: {
       id: input.newId,
       objective: input.objective,
       objectiveFile: input.objectiveFile,
+      objectiveRevision: input.objectiveRevision,
       // Stated outright: a field left out would carry over from the goal this one replaces.
       ignoreObjectiveLimit: input.ignoreLimit,
       status: 'active',
@@ -189,9 +241,11 @@ export const nextGoalRecord = (input: {
  * minutes, and in that time the check may complete the goal, the user may
  * pause it, or another window may replace it. Then nothing is written and the
  * result says so. The stored goal is read before the objective file is
- * written and again inside the metadata write; between those two a change
- * made elsewhere can still lose its objective file to this one, a window of
- * one request.
+ * written and again inside the metadata write. To keep an aborted save from
+ * clobbering a change made elsewhere in between, the objective file is
+ * snapshotted just before it is overwritten and restored when the metadata
+ * write aborts, so the surviving goal keeps the objective text its stored
+ * objectiveRevision describes (#1372).
  */
 export async function setSessionGoal(
   sessionId: string,
@@ -217,15 +271,30 @@ export async function setSessionGoal(
     return { outcome: 'changed' };
   }
   signal?.throwIfAborted();
+  // Snapshot the current objective file before overwriting it: if the
+  // guarded metadata write below aborts as changed, the snapshot is restored
+  // so the surviving goal record keeps pointing at its own objective text.
+  // A snapshot that could not be read is not a missing file: writing anyway
+  // would leave nothing truthful to restore, and the rollback below could
+  // delete a file that was there all along — so the save does not start.
+  const snapshot = editing ? await fetchGoalObjectiveSnapshot(sessionId) : null;
+  if (snapshot?.kind === 'unavailable') {
+    throw new Error('Could not read the current goal objective, so the save was not attempted. Try again.');
+  }
+  const priorObjective = snapshot?.kind === 'content' ? snapshot.content : null;
+  // The snapshot read is asynchronous: a cancel that landed while it was in
+  // flight must still stop the save before its first write.
+  signal?.throwIfAborted();
   const fileWrite = await writeGoalObjectiveFile(sessionId, objective);
   if (fileWrite.saved && fileWrite.truncated) {
     const dictionary = useI18nStore.getState().dictionary;
     toast.error(formatMessage(dictionary, 'chat.goal.toast.serverTruncated'));
   }
   const objectiveFile = fileWrite.saved;
+  const recordedVersionId = fileWrite.saved ? fileWrite.versionId : null;
   // Inline (the objective file failed) the text rides every session event,
   // so it stays within the limit even when the goal ignores it.
-  const inline = objectiveFile ? '' : objective.slice(0, useUIStore.getState().sessionGoalObjectiveCharLimit);
+  const inline = objectiveFile ? '' : dropSplitHead(objective.slice(0, useUIStore.getState().sessionGoalObjectiveCharLimit));
   const now = Date.now();
   const newId = createGoalId();
   let changed = false;
@@ -235,6 +304,7 @@ export async function setSessionGoal(
       existing,
       objective: inline,
       objectiveFile,
+      objectiveRevision: goalObjectiveRevision(objective),
       ignoreLimit,
       tokenBudget,
       kickoff: input.kickoff !== false,
@@ -247,6 +317,29 @@ export async function setSessionGoal(
     }
     return next.record;
   });
+  if (changed && fileWrite.saved) {
+    // The metadata write aborted: put the snapshotted objective file back —
+    // but only while this save still owns the file. A save that committed
+    // after this one wrote the file owns it now; restoring over it would
+    // strand the winning save's metadata pointing at text it does not
+    // describe. Ownership is read back and compared against what this save
+    // wrote (a server-side truncation keeps a prefix of it). Best-effort: an
+    // unreadable or no-longer-owned file is left exactly as it lies.
+    const currentObjective = await fetchGoalObjectiveContent(sessionId);
+    const stillOwnsFile = currentObjective !== null
+      && (currentObjective === objective || objective.startsWith(currentObjective));
+    if (stillOwnsFile) {
+      if (priorObjective === null) {
+        deleteGoalObjectiveFile(sessionId);
+      } else {
+        // Restoring is not a save: it puts the file back without recording a
+        // version, and the version the aborted write recorded is dropped —
+        // the goal never held that text, so it is not a prior version.
+        await writeGoalObjectiveFile(sessionId, priorObjective, { record: false });
+      }
+      if (recordedVersionId) deleteGoalObjectiveVersion(sessionId, recordedVersionId);
+    }
+  }
   return changed ? { outcome: 'changed' } : { outcome: 'saved', rewrittenSpec };
 }
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -7,6 +8,7 @@ import {
   buildLinearSessionOpenUrl,
   buildLinearSessionStatusComment,
   isPublicSessionOrigin,
+  LinearSessionStatusError,
   postLinearSessionStatus,
   pruneSessionStatusRecords,
   readSessionOrigin,
@@ -267,5 +269,42 @@ describe('Linear session status comments', () => {
     expect(commentCalls).toHaveLength(1);
     const body = JSON.parse(commentCalls[0][1].body).variables.input.body;
     expect(body).toBe('[OpenChamber session completed](https://app.example.com/?session=ses_1)');
+  });
+
+  it('refuses an oversized session-status file as MALFORMED', async () => {
+    const statusPath = path.join(dataDir, 'linear-session-status.json');
+    const oversized = JSON.stringify({ ses_1: { issueIdentifier: 'ENG-12', pad: 'x'.repeat(1024 * 1024) } });
+    fs.writeFileSync(statusPath, oversized, 'utf8');
+    expect(fs.statSync(statusPath).size).toBeGreaterThan(1024 * 1024);
+    const graphql = vi.fn();
+    vi.stubGlobal('fetch', graphql);
+    await expect(postLinearSessionStatus({
+      kind: 'started',
+      sessionId: 'ses_1',
+      issueIdentifier: 'ENG-12',
+      sessionOrigin: 'https://app.example.com',
+    })).rejects.toThrow(expect.objectContaining({ code: 'MALFORMED' }));
+    await expect(postLinearSessionStatus({
+      kind: 'started',
+      sessionId: 'ses_9',
+      issueIdentifier: 'ENG-12',
+      sessionOrigin: 'https://app.example.com',
+    })).rejects.toBeInstanceOf(LinearSessionStatusError);
+    expect(graphql).not.toHaveBeenCalled();
+    expect(fs.readFileSync(statusPath, 'utf8')).toBe(oversized);
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a FIFO at the session-status path as MALFORMED without blocking', async () => {
+    const statusPath = path.join(dataDir, 'linear-session-status.json');
+    execFileSync('mkfifo', [statusPath]);
+    const graphql = vi.fn();
+    vi.stubGlobal('fetch', graphql);
+    await expect(postLinearSessionStatus({
+      kind: 'started',
+      sessionId: 'ses_1',
+      issueIdentifier: 'ENG-12',
+      sessionOrigin: 'https://app.example.com',
+    })).rejects.toThrow(expect.objectContaining({ code: 'MALFORMED' }));
+    expect(graphql).not.toHaveBeenCalled();
   });
 });

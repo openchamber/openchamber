@@ -1,10 +1,23 @@
 name: Publish VS Code Extension
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'GitHub Release tag to attach the VSIX to (e.g., v0.1.0). Leave empty to skip the release attach; the VSIX is still uploaded as a workflow artifact and published to the marketplaces.'
+        required: false
+        type: string
+
+# CI policy: .github/ci-policy.md (fleet design developing-today/code#1779;
+# Phase 1 code#1780, Phase 2 code#1781, Phase 3 code#1782).
+# Concurrency (design sec.4): releases are never cancelled. Every run is
+# a manual dispatch and gets a per-run group (run_id), so no run can cancel
+# another. Triggers are workflow_dispatch only (#1584, Drew's 2026-11-04
+# no-push-trigger ruling): no push, issues or pull_request_target event and
+# no queue: max, so the #84 validation trap cannot occur here.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -52,9 +65,10 @@ jobs:
           path: packages/vscode/*.vsix
 
       - name: Attach VSIX to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: ${{ inputs.release_tag != '' }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          tag_name: ${{ inputs.release_tag }}
           files: packages/vscode/*.vsix
           generate_release_notes: false
           # The release workflow publishes the release once every platform is

@@ -1,4 +1,6 @@
 export {
+  LinearAuthError,
+  getLinearStorageState,
   getLinearAuth,
   getLinearAuthByWorkspaceId,
   getLinearAuthWorkspaces,
@@ -15,6 +17,8 @@ export {
   getLinearAuthFilePath,
   getLinearSessionCommentsEnabled,
   setLinearSessionCommentsEnabled,
+  configureLinearVaultReader,
+  readLinearVaultToken,
   DEFAULT_LINEAR_CLIENT_ID_VALUE,
 } from './auth.js';
 
@@ -31,6 +35,7 @@ export {
 export {
   fetchLinearIdentity,
   getValidLinearAccessToken,
+  getValidLinearAuthorization,
   LinearApiError,
 } from './client.js';
 

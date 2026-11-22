@@ -119,6 +119,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   const [customThemes, setCustomThemes] = useState<Theme[]>([]);
   const [developmentThemes, setDevelopmentThemes] = useState<Theme[]>([]);
   const [customThemesLoading, setCustomThemesLoading] = useState(false);
+  const [customThemesLoadError, setCustomThemesLoadError] = useState(false);
   const [vscodeTheme, setVSCodeTheme] = useState<Theme | null>(() => {
     if (typeof window === 'undefined' || !isVSCodeRuntime()) {
       return null;
@@ -236,19 +237,29 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
       if (res.status === 401) {
         // UI auth gate will handle prompting; avoid noisy retries here.
+        if (request === customThemesRequestRef.current && runtimeKey === getRuntimeKey()) {
+          setCustomThemesLoadError(false);
+        }
         return;
       }
 
       if (!res.ok) {
+        if (request === customThemesRequestRef.current && runtimeKey === getRuntimeKey()) {
+          setCustomThemesLoadError(true);
+        }
         return;
       }
 
       const payload = await res.json();
       if (request !== customThemesRequestRef.current || runtimeKey !== getRuntimeKey()) return;
-      const normalized = themeListSchema.parse(payload?.themes);
+      const rawThemes = payload?.themes;
+      const normalized = themeListSchema.parse(rawThemes);
       setCustomThemes(normalized);
+      setCustomThemesLoadError(Array.isArray(rawThemes) && normalized.length !== rawThemes.length);
     } catch {
-      // ignore
+      if (request === customThemesRequestRef.current && runtimeKey === getRuntimeKey()) {
+        setCustomThemesLoadError(true);
+      }
     } finally {
       if (request === customThemesRequestRef.current && runtimeKey === getRuntimeKey()) {
         setCustomThemesLoading(false);
@@ -282,6 +293,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     customThemesRequestRef.current += 1;
     themeRuntimeGenerationRef.current += 1;
     setCustomThemes([]);
+    setCustomThemesLoadError(false);
     setCustomThemesLoading(false);
     // Adopt the new instance's last-known theme immediately; the incoming
     // settings sync refines it with the server's authoritative value.
@@ -688,6 +700,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     customThemeIds: customThemes.map((theme) => theme.metadata.id),
     setTheme,
     customThemesLoading,
+    customThemesLoadError,
     reloadCustomThemes,
     importTheme,
     deleteImportedTheme,

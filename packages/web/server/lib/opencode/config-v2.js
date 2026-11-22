@@ -37,12 +37,19 @@ function sectionKeys(kind) {
  * Returns the section key the entry was found under so writers can rewrite the
  * same file in place.
  */
+// Presence means an OWN property with a defined value: an inherited lookup
+// would resolve Object.prototype members (constructor, __proto__, toString)
+// as configured entries in a section that defines nothing (#2299). Mirrors
+// hasConfigKey below.
+const hasSectionEntry = (section, name) =>
+  isRecord(section) && Object.hasOwn(section, name) && section[name] !== undefined;
+
 function readSectionEntry(config, kind, name) {
   const { v2, v1 } = sectionKeys(kind);
-  if (isRecord(config?.[v2]) && config[v2][name] !== undefined) {
+  if (hasSectionEntry(config?.[v2], name)) {
     return { value: config[v2][name], key: v2, legacy: false };
   }
-  if (isRecord(config?.[v1]) && config[v1][name] !== undefined) {
+  if (hasSectionEntry(config?.[v1], name)) {
     return { value: config[v1][name], key: v1, legacy: true };
   }
   return { value: undefined, key: null, legacy: false };
@@ -57,7 +64,7 @@ function writeSectionEntry(config, kind, name, value) {
   const { v2, v1 } = sectionKeys(kind);
   if (!isRecord(config[v2])) config[v2] = {};
   config[v2][name] = value;
-  if (isRecord(config[v1]) && config[v1][name] !== undefined) {
+  if (hasSectionEntry(config[v1], name)) {
     delete config[v1][name];
     if (Object.keys(config[v1]).length === 0) delete config[v1];
   }
@@ -69,7 +76,7 @@ function deleteSectionEntry(config, kind, name) {
   const { v2, v1 } = sectionKeys(kind);
   let removed = false;
   for (const key of [v2, v1]) {
-    if (!isRecord(config?.[key]) || config[key][name] === undefined) continue;
+    if (!hasSectionEntry(config?.[key], name)) continue;
     delete config[key][name];
     removed = true;
     if (Object.keys(config[key]).length === 0) delete config[key];
@@ -803,14 +810,20 @@ const hasConfigKey = (config, key) => config != null && Object.hasOwn(config, ke
  * writes to, or `null`. OpenCode loads user config and `OPENCODE_CONFIG`
  * before discovered project files. For whole-section keys such as `websearch`
  * and `messaging`, the highest-priority project file with the key decides.
- * Global JSON and JSONC files cannot re-enter through the project walk.
+ * Global JSON and JSONC files cannot re-enter through the project walk:
+ * the files this function excludes are the user files (`userPath` /
+ * `userOverridePath`) and the legacy global files under `~/.opencode`
+ * (`legacyGlobalPaths`, populated by `readConfigLayers` in shared.js —
+ * this module stays pure and only reads the list it is handed).
  * `projectFiles` lists files in descending precedence. When the winning
  * file is itself the Settings write target, a Settings write still applies.
  */
 function findProjectConfigOverride(key, layers, projectFiles) {
+  const legacyGlobalPaths = layers.paths.legacyGlobalPaths ?? [];
   const file = projectFiles.find((file) =>
     file.path !== layers.paths.userPath
     && file.path !== layers.paths.userOverridePath
+    && !legacyGlobalPaths.includes(file.path)
     && hasConfigKey(file.config, key),
   );
   return file && file.path !== layers.paths.customPath ? file.path : null;

@@ -8,8 +8,9 @@ import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { rearmQueuedGoal, useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
-import { planGoalWriter, requestGoalSpec, type GoalSubmitChoice } from '@/lib/goalWriter';
+import { applyGoalChoice, rearmQueuedGoal, useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { backgroundSendJournal } from '@/lib/backgroundGoalSends';
+import { BackgroundGoalError, planGoalWriter, requestGoalSpec, settleBackgroundGoal, type BackgroundGoalOutcome, type BackgroundGoalSpec, type GoalSubmitChoice } from '@/lib/goalWriter';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { isGoalCheckAvailableNow } from '@/hooks/useSessionGoal';
@@ -34,6 +35,7 @@ import {
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
+import { openSessionFromToast } from '@/sync/session-navigation';
 // Guest surfaces load on demand: VS Code and mobile never mount them, and the
 // composer must not pay for the guest bridge before an extension is installed.
 const GuestAttachDialog = React.lazy(() => import('@/components/layout/GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
@@ -333,6 +335,9 @@ const sameDraftIdentity = (a: ChatDraftIdentity | null, b: ChatDraftIdentity | n
     a === null || b === null ? a === b : getChatDraftIdentityKey(a) === getChatDraftIdentityKey(b)
 );
 
+/** Background goals a send took over; any other is stopped when its handoff ends. */
+const takenBackgroundGoals = new WeakSet<BackgroundGoalSpec>();
+
 const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
     if (!projectLabel) return title;
     const projectIndex = title.indexOf(projectLabel);
@@ -498,11 +503,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const largeTextPasteOfferIdRef = React.useRef(0);
     const [largeTextPasteGesture] = React.useState(() => new LargeTextPasteGesture());
 
-    // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
-    // oxlint-disable-next-line typescript/no-explicit-any
-    const sendMessage = React.useRef((...args: any[]) =>
-        Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
-    ).current;
     // Inside the chat column the composer follows the session the timeline is
     // showing (see chatColumnSession.ts); elsewhere it follows the live one.
     const liveSessionId = useSessionUIStore((s) => (chatColumnSession ? null : s.currentSessionId));
@@ -587,6 +587,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const pendingBtwComposerRequest = useInputStore((s) => s.pendingBtwComposerRequest);
     const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
     const pendingDraftSubmit = useInputStore((s) => s.pendingDraftSubmit);
+    const pendingSessionSubmits = useInputStore((s) => s.pendingSessionSubmits);
     const setPendingInputText = useInputStore((s) => s.setPendingInputText);
     const pendingGuestIssue = useInputStore((s) => s.pendingGuestIssue);
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
@@ -1178,6 +1179,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         },
     });
 
+    // Messages that waited on a background goal when an earlier page went
+    // away (reload) go back to the composer they came from. The
+    // pinned column composers leave it to the main one, so one composer
+    // restores each message. Session storage isolates recovery to this tab.
+    const recoverRef = React.useRef({ restoreDraft, t });
+    recoverRef.current = { restoreDraft, t };
+    React.useEffect(() => {
+        if (columnPinned) return;
+        const recover = () => {
+            const orphans = backgroundSendJournal.takeOrphans();
+            for (const entry of orphans) recoverRef.current.restoreDraft(entry.identity, entry.text, new Set(entry.mentions));
+            if (orphans.length > 0) toast.info(recoverRef.current.t('chat.goal.writer.toast.recoveredUnsent'));
+        };
+        recover();
+    }, [columnPinned]);
+
     const handleExitBtw = React.useCallback(() => {
         if (!currentSessionId) return;
         immediateBtwSubmitRef.current = null;
@@ -1341,19 +1358,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         presetText?: string;
         /** The goal writer's outcome for this send; set when the writer dialog sends again. */
         goal?: GoalSubmitChoice;
+        /** A goal still being written: the send goes out with it once it is ready. */
+        backgroundGoal?: BackgroundGoalSpec;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
-
-    // The goal writer's choice for this send, as the composer arm. Applied
-    // right before the message leaves, sent or queued, so an early return
-    // that sends nothing never leaves a stale arm behind.
-    const applyGoalChoice = (choice: GoalSubmitChoice | undefined) => {
-        if (!choice) return;
-        const goalArm = useSessionGoalArmStore.getState();
-        if (choice.kind === 'none') goalArm.setArmed(false);
-        else if (choice.kind === 'unchanged') goalArm.setArmed(true, null, { settled: true });
-        else goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message', ignoreLimit: choice.ignoreLimit });
-    };
 
     // A send waiting on the goal writer: the dialog's request and the
     // message it was written from, which the chosen send uses. Both belong to
@@ -1382,6 +1390,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             presetText: choice.kind === 'spec' && choice.sendMode === 'goal-as-message' ? choice.spec : pending.message,
             delivery: pending.delivery,
             goal: choice,
+        });
+    }, []);
+    // "Send when ready": the message leaves the composer now and waits for its
+    // spec on its own, so the user can go to another chat. The send keeps the
+    // session or draft it was made from (captured by this submit).
+    const handleGoalWriterBackground = React.useCallback((pendingGoal: BackgroundGoalSpec) => {
+        const pending = goalWriterPendingRef.current;
+        goalWriterPendingRef.current = null;
+        setGoalWriterRequest(null);
+        if (!pending || !sameDraftIdentity(pending.identity, currentChatDraftIdentityRef.current)) {
+            pendingGoal.controller.abort();
+            return;
+        }
+        void handleSubmitRef.current({
+            presetText: pending.message,
+            delivery: pending.delivery,
+            backgroundGoal: pendingGoal,
+        }).finally(() => {
+            // The submit stopped before sending (a refusal it reported): the
+            // run has nothing left to send with.
+            if (!takenBackgroundGoals.has(pendingGoal)) pendingGoal.controller.abort();
         });
     }, []);
 
@@ -1649,6 +1678,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             : message || fallback;
     };
 
+    // A send waiting on a background goal shows a progress toast until the
+    // goal is written, with a way to stop it; the toast follows the user
+    // across chats. Marking the goal taken tells the handoff the send owns it.
+    const watchBackgroundGoal = (outcome: Promise<BackgroundGoalOutcome>, pendingGoal: BackgroundGoalSpec): Promise<BackgroundGoalOutcome> => {
+        takenBackgroundGoals.add(pendingGoal);
+        const toastId = toast.loading(t('chat.goal.writer.toast.writingInBackground'), {
+            action: { label: t('chat.goal.action.cancel'), onClick: () => pendingGoal.controller.abort() },
+        });
+        void outcome.finally(() => toast.dismiss(toastId)).catch(() => undefined);
+        return outcome;
+    };
+
     const handleSubmit = async (options?: SubmitOptions) => {
         // Comment mode's only submit is attach; every other send path must be
         // inert while it is open.
@@ -1832,7 +1873,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // is taken from the composer. The dialog's choice submits again with
         // `goal`, so cancelling leaves the composer, the queue and any pending
         // prompts exactly as they were.
-        if (!options?.goal) {
+        if (!options?.goal && !options?.backgroundGoal) {
             const uiState = useUIStore.getState();
             const goalTargetDirectory = currentSessionId
                 ? currentSessionDirectoryForSync ?? currentDirectory ?? null
@@ -1875,7 +1916,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     defaultSendMode: uiState.sessionGoalWriterSendMode,
                     sessionModel: providerIdToSend && modelIdToSend ? { providerID: providerIdToSend, modelID: modelIdToSend } : null,
                     directory: goalTargetDirectory,
-                    write: async (signal, { writer, ignoreLimit }) => {
+                    inputLength: request.length,
+                    write: async (signal, { writer, ignoreLimit, section, currentSpec }) => {
                         const context = goalWriterPlan.trigger === 'auto-create'
                             ? await collectGoalWriterContext({
                                 sessionId: sessionIdForContext,
@@ -1893,6 +1935,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             modelID: modelIdToSend,
                             writer,
                             ignoreLimit,
+                            section,
+                            currentSpec,
                             signal,
                         });
                     },
@@ -1902,7 +1946,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         // Auto-review owns the active workflow; follow-ups wait in its queue.
-        if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan) {
+        // A send waiting on a background goal is not queued: the queue would
+        // take it without the goal, and it is sent only once the goal is
+        // written, by when the dismissed prompts below are long settled.
+        const backgroundGoal = options?.backgroundGoal;
+        if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive && !commandPlan && !backgroundGoal) {
             applyGoalChoice(options?.goal);
             void handleQueueMessage(options?.presetText);
             return;
@@ -1924,7 +1972,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // takes it while the turn is still active. Any other send would
             // race with that run, so it is queued; the queued-message auto-send
             // hook delivers it once the session returns to idle (#1740, #3369).
-            if ((deniedPermissions || dismissedForms) && delivery !== 'steer') {
+            if ((deniedPermissions || dismissedForms) && delivery !== 'steer' && !backgroundGoal) {
                 applyGoalChoice(options?.goal);
                 void handleQueueMessage(options?.presetText);
                 return;
@@ -1993,7 +2041,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     }, {
                         fork: sessionActions.forkFromLastCompletedTurn,
                         directoryFor: (session) => useSessionUIStore.getState().getDirectoryForSession(session.id) || session.directory || null,
-                        send: (text, selection, target) => useSessionUIStore.getState().sendMessage(
+                        send: (text, selection, target) => sessionActions.sendMessage(
                             text,
                             selection.providerID,
                             selection.modelID,
@@ -2038,6 +2086,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             delivery?: 'steer';
             skills?: SkillMentions;
             queuedGoal?: QueuedMessageGoal | null;
+            runtimeKey?: string;
+            pendingGoal?: Promise<BackgroundGoalOutcome>;
+            onSessionCreated?: (sessionId: string, directory: string | null) => void;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -2227,7 +2278,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     const instructionsText = await renderMagicPrompt(command.instructionsPrompt, variables.instructions);
                     // Before the sent row commits, as for a plain send below.
                     scrollToBottom?.();
-                    await sendMessage(
+                    await sessionActions.sendMessage(
                         visibleText,
                         providerIdToSend,
                         modelIdToSend,
@@ -2385,10 +2436,50 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         // The goal writer's choice decides this send's goal; set last, so no
-        // early return above can leave a stale arm behind.
-        applyGoalChoice(options?.goal);
+        // early return above can leave a stale arm behind. A background goal
+        // travels with the send instead: the composer's arm is for whatever
+        // the composer holds next.
+        if (backgroundGoal) useSessionGoalArmStore.getState().setArmed(false);
+        else applyGoalChoice(options?.goal);
+        // The session a draft send creates. The send may finish after the user
+        // moved on, so the view's current session is not this one.
+        let createdSession: { sessionId: string; directory: string | null } | null = null;
+        sendMessageOptions = {
+            ...sendMessageOptions,
+            runtimeKey: submitRuntimeKey,
+            onSessionCreated: (sessionId, directory) => { createdSession = { sessionId, directory }; },
+        };
+        if (backgroundGoal) {
+            const goalSettings = useUIStore.getState();
+            sendMessageOptions = {
+                ...sendMessageOptions,
+                pendingGoal: watchBackgroundGoal(settleBackgroundGoal(
+                    backgroundGoal,
+                    goalSettings.sessionGoalDefaultBudgetEnabled ? goalSettings.sessionGoalDefaultBudget : null,
+                ), backgroundGoal),
+            };
+        }
+        // Until a background send settles its text lives only in this page, so
+        // a journal keeps it for the next page should this one go away.
+        const journalId = backgroundGoal && chatDraftIdentity && inputSnapshot.message
+            ? backgroundSendJournal.record({ identity: chatDraftIdentity, text: inputSnapshot.message, mentions: confirmedMentionsSnapshot })
+            : null;
+        const createdSessionIdentity = () => {
+            const created = createdSession;
+            return created ? createChatDraftIdentity(submitRuntimeKey, created.directory ?? capturedDraftSnapshot?.directoryOverride ?? currentDirectory, created.sessionId) : null;
+        };
+        if (journalId) {
+            sendMessageOptions = {
+                ...sendMessageOptions,
+                onSessionCreated: (sessionId, directory) => {
+                    createdSession = { sessionId, directory };
+                    const identity = createdSessionIdentity();
+                    if (identity) backgroundSendJournal.retarget(journalId, identity);
+                },
+            };
+        }
 
-        const sendPromise = sendMessage(
+        const sendPromise = sessionActions.sendMessage(
             primaryText,
             providerIdToSend,
             modelIdToSend,
@@ -2401,19 +2492,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             sendMessageOptions,
         );
         void sendPromise.then(() => {
+            if (journalId) backgroundSendJournal.remove(journalId);
             if (isBtwActive) return;
             // On a draft there is no session yet in this closure: the send path
-            // creates one and makes it current before resolving, so the id is
-            // read from the store. The fallback is used only when the closure
-            // had no session at all, so a mid-send session switch cannot
-            // redirect the write to an unrelated session.
+            // reports the one it created. The store's current session is the
+            // last fallback, used only when the closure had no session at all,
+            // so a mid-send session switch cannot redirect the write to an
+            // unrelated session.
             const sessionState = useSessionUIStore.getState();
-            const linkTargetSessionId = currentSessionId ?? sessionState.currentSessionId;
+            const created = createdSession;
+            const linkTargetSessionId = currentSessionId ?? created?.sessionId ?? sessionState.currentSessionId;
             const linkTargetDirectory = currentSessionId
                 ? currentSessionDirectoryForSync ?? currentDirectory
-                : sessionState.currentSessionDirectory
-                    ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
-                    ?? currentDirectory;
+                : created
+                    ? created.directory ?? sessionState.getDirectoryForSession(created.sessionId) ?? currentDirectory
+                    : sessionState.currentSessionDirectory
+                        ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
+                        ?? currentDirectory;
             if (linkTargetSessionId) {
                 recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferences);
             }
@@ -2432,6 +2527,38 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const sentKeys = new Set(linkedReferences.map(composerReferenceKey));
             setLinkedReferences((current) => current.filter((reference) => !sentKeys.has(composerReferenceKey(reference))));
         }).catch((error: unknown) => {
+            // The goal was not written (or the user cancelled it), so nothing
+            // was sent: everything the send took goes back. A draft already
+            // created its session, so the message waits in that session's
+            // composer, apart from any new draft the user started meanwhile.
+            // restoreDraft appends to text already there, so a message typed
+            // since is kept too.
+            if (error instanceof BackgroundGoalError) {
+                if (journalId) backgroundSendJournal.remove(journalId);
+                restoreConsumedDrafts();
+                const createdIdentity = createdSessionIdentity();
+                const restoreIdentity = createdIdentity ?? chatDraftIdentity;
+                if (createdIdentity) {
+                    if (inputSnapshot.message) restoreDraft(createdIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
+                } else {
+                    restoreComposerText();
+                }
+                if (allAttachments.length > 0) {
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreIdentity);
+                }
+                const created = createdSession;
+                const openCreated = createdIdentity
+                    ? { label: t('chat.goal.writer.toast.openSession'), onClick: () => {
+                        if (getRuntimeKey() === submitRuntimeKey && createdIdentity.sessionId) openSessionFromToast(createdIdentity.sessionId, createdIdentity.directory);
+                    } }
+                    : undefined;
+                if (error.cancelled) toast.info(t(created ? 'chat.goal.writer.toast.backgroundCancelledInSession' : 'chat.goal.writer.toast.backgroundCancelled'), openCreated ? { action: openCreated } : undefined);
+                else toast.error(t(created ? 'chat.goal.writer.toast.backgroundFailedInSession' : 'chat.goal.writer.toast.backgroundFailed', { reason: error.message }), openCreated ? { action: openCreated } : undefined);
+                return;
+            }
+            if (journalId) backgroundSendJournal.remove(journalId);
+            // A send that failed for another reason no longer needs its goal.
+            backgroundGoal?.controller.abort();
             const rawMessage =
                 error instanceof Error
                     ? error.message
@@ -2442,7 +2569,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             console.error('Message send failed:', rawMessage || error);
             restoreConsumedDrafts();
-            restoreComposerText();
+            // A background draft send that created its session gives the text
+            // back to that session, apart from any draft started since.
+            const backgroundSessionIdentity = backgroundGoal ? createdSessionIdentity() : null;
+            const attachmentIdentity = backgroundSessionIdentity ?? chatDraftIdentity;
+            if (backgroundSessionIdentity) {
+                if (inputSnapshot.message) restoreDraft(backgroundSessionIdentity, inputSnapshot.message, confirmedMentionsSnapshot);
+            } else {
+                restoreComposerText();
+            }
 
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
@@ -2458,14 +2593,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, attachmentIdentity);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, attachmentIdentity);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
@@ -2473,14 +2608,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             if (normalized.includes('runtime changed')) {
                 if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                    useInputStore.getState().restoreAttachedFiles(allAttachments, attachmentIdentity);
                 }
                 toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
+                useInputStore.getState().restoreAttachedFiles(allAttachments, attachmentIdentity);
             }
 
             if (normalized.includes('returned a web page instead of an api response') || normalized.includes('runtime_unavailable')) {
@@ -2537,6 +2672,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         },
     });
 
+    // Each capture path marks and keeps against its OWN dictation origin, so
+    // an overlapping streaming and facade capture cannot consume each other's
+    // origin and land a transcript in the wrong draft (CodeRabbit on PR #2280).
+    const markStreamingDictationStart = React.useCallback(() => { markDictationStart('streaming'); }, [markDictationStart]);
+    const markFacadeDictationStart = React.useCallback(() => { markDictationStart('facade'); }, [markDictationStart]);
+
     // Dictation: insert the transcript inline; optionally submit immediately.
     // getCurrentInputSnapshot reads composerRef.current.getValue() first, so setting
     // it synchronously lets handleSubmit pick up the text in the same tick.
@@ -2549,6 +2690,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setMessage((prev) => {
             // The editor is controlled by this state; getCurrentInputSnapshot
             // reads it back, so no imperative write is needed.
+            return appendInlineText(prev, text);
+        });
+        setTimeout(() => {
+            composerRef.current?.focus();
+        }, 0);
+    }, [keepTranscriptForOrigin]);
+
+    const handleFacadeDictationInsert = React.useCallback((text: string) => {
+        if (keepTranscriptForOrigin(text, 'facade')) return;
+        dictationSendEndRef.current?.();
+        setMessage((prev) => {
             return appendInlineText(prev, text);
         });
         setTimeout(() => {
@@ -2620,6 +2772,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         messageRef.current = text;
         void handleSubmitRef.current({ presetText: text });
     }, [columnPinned, configCatalogLoaded, currentModelId, currentProviderId, draftSubmitDraftId, getCurrentInputSnapshot, mailboxTarget, pendingDraftSubmit]);
+
+    // Text this chat's transcript asked to send (answers to an agent's
+    // question, given from its tool row) goes out like a typed message, so a
+    // busy session queues or steers it as usual. It waits while a BTW holds
+    // the composer, which would send it to the side question instead. A
+    // composer that already holds something gets the text appended and sends
+    // nothing. Shell mode never sends the answers as a shell command: with
+    // text in the box the request waits, and with an empty box the mode is
+    // switched back to normal first and the effect runs again to send.
+    React.useEffect(() => {
+        if (pendingSessionSubmits.length === 0 || isBtwActive) return;
+        if (inputMode === 'shell') {
+            if (message.trim().length > 0) return;
+            setInputMode('normal');
+            return;
+        }
+        const text = useInputStore.getState().consumePendingSessionSubmit(mailboxTarget, currentSessionId);
+        if (!text) return;
+        const composerHolds = getCurrentInputSnapshot().hasContent
+            || (useInputStore.getState().getPendingSyntheticParts(mailboxTarget)?.length ?? 0) > 0;
+        if (composerHolds) {
+            setMessage((prev) => appendWithLineBreaks(prev, text));
+            toast.info(t('chat.questionAnswers.addedToDraft'));
+            return;
+        }
+        setMessage(text);
+        messageRef.current = text;
+        void handleSubmitRef.current({ presetText: text });
+    }, [currentSessionId, getCurrentInputSnapshot, inputMode, isBtwActive, mailboxTarget, message, pendingSessionSubmits, t]);
 
     const handleKeyDown = (e: KeyboardEvent) => {
         // Early return during IME composition to prevent interference with autocomplete.
@@ -4809,7 +4990,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onDictationInsert={handleDictationInsert}
                         onDictationInsertAndSend={handleDictationInsertAndSend}
                         onDictationSendStart={handleDictationSendStart}
-                        onDictationStart={markDictationStart}
+                        onDictationStart={markStreamingDictationStart}
+                        onFacadeDictationInsert={handleFacadeDictationInsert}
+                        onFacadeDictationStart={markFacadeDictationStart}
                         onDictationContentHeightChange={handleDictationContentHeightChange}
                         onDictationActiveChange={setDesktopDictating}
                         isBtw={isBtwActive}
@@ -4847,7 +5030,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onInsert={handleDictationInsert}
                         onInsertAndSend={handleDictationInsertAndSend}
                         onSendStart={handleDictationSendStart}
-                        onStart={markDictationStart}
+                        onStart={markStreamingDictationStart}
                         onActiveChange={handleDictationActiveChange}
                         onContentHeightChange={handleDictationContentHeightChange}
                         renderTrigger={false}
@@ -4921,7 +5104,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             submitting={reviewFlowSubmitting}
             onConfirm={handleStartReviewFlow}
         /> : null}
-        <GoalSpecDialog request={goalWriterRequest} onCancel={cancelGoalWriter} onSubmit={handleGoalWriterChoice} />
+        <GoalSpecDialog request={goalWriterRequest} onCancel={cancelGoalWriter} onSubmit={handleGoalWriterChoice} onBackground={handleGoalWriterBackground} />
         {attachmentPreviewMounted ? (
             <React.Suspense fallback={null}>
                 <ToolOutputDialog

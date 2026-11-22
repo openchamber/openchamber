@@ -4,11 +4,21 @@ import {
   setLinearAuth,
   clearLinearAuth,
   isLinearAccessTokenStale,
+  readLinearVaultToken,
 } from './auth.js';
 import { refreshAccessToken } from './oauth.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 
 const LINEAR_GRAPHQL_URL = 'https://api.linear.app/graphql';
+// GraphQL calls run inside request handlers and background tracked-item
+// refreshes. Without a deadline a stalled connection holds those open forever.
+const LINEAR_GRAPHQL_TIMEOUT_MS = 10_000;
+// List/search pages request 50 issue summaries with labels, parent data, and 20
+// child states each. Get/update also include a description, 50 comments, and up
+// to 100 subissues. Give these data responses more room than OAuth JSON while
+// keeping each in-flight response bounded, matching the repo's 16 MiB catalog cap.
+const LINEAR_GRAPHQL_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 const VIEWER_QUERY = '{ viewer { id name displayName email avatarUrl } organization { id name urlKey } }';
 // Linear file URLs in GraphQL need this header or the browser cannot load
 // uploads.linear.app images (comment screenshots, description images).
@@ -21,6 +31,16 @@ export class LinearApiError extends Error {
     this.status = status;
     this.userError = options.userError === true;
   }
+}
+
+// AbortSignal.timeout aborts with a TimeoutError DOMException; a body read cut
+// off by the same deadline may surface as an AbortError instead.
+function isTimeoutAbort(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError';
+}
+
+function graphqlTimeoutError() {
+  return new LinearApiError('Linear GraphQL request timed out', 504);
 }
 
 function readGraphqlError(payload) {
@@ -87,33 +107,74 @@ function readIdentity(payload) {
   };
 }
 
-export async function fetchLinearGraphql(accessToken, query, variables) {
-  const token = readTrimmedString(accessToken);
-  if (!token) {
+// Callers pass either a bare token string (OAuth, sent as Bearer) or an
+// authorization object from getValidLinearAuthorization: vault (apiKey)
+// credentials send the resolved personal key bare, without Bearer (#304).
+function normalizeAuthorization(input) {
+  if (isPlainObject(input)) {
+    const token = readTrimmedString(input.token);
+    if (!token) {
+      return null;
+    }
+    return { token, source: (input.source === 'vault' || input.kind === 'apiKey') ? 'vault' : 'oauth' };
+  }
+  const token = readTrimmedString(input);
+  return token ? { token, source: 'oauth' } : null;
+}
+
+export async function fetchLinearGraphql(authorization, query, variables) {
+  const authz = normalizeAuthorization(authorization);
+  if (!authz) {
     throw new LinearApiError('Linear is not connected', 401);
   }
+  const token = authz.token;
 
   const body = { query };
   if (isPlainObject(variables)) {
     body.variables = variables;
   }
 
-  const response = await fetch(LINEAR_GRAPHQL_URL, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'public-file-urls-expire-in': LINEAR_PUBLIC_FILE_URL_TTL_SECONDS,
-    },
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => null);
+  const signal = AbortSignal.timeout(LINEAR_GRAPHQL_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(LINEAR_GRAPHQL_URL, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: authz.source === 'vault' ? token : `Bearer ${token}`,
+        'public-file-urls-expire-in': LINEAR_PUBLIC_FILE_URL_TTL_SECONDS,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (isTimeoutAbort(error)) throw graphqlTimeoutError();
+    throw error;
+  }
+  let payload;
+  let bodyTooLarge = false;
+  try {
+    const bounded = await readBoundedResponseText(response, LINEAR_GRAPHQL_RESPONSE_MAX_BYTES);
+    bodyTooLarge = bounded.tooLarge;
+    if (!bodyTooLarge) {
+      const text = bounded.text.charCodeAt(0) === 0xfeff
+        ? bounded.text.slice(1)
+        : bounded.text;
+      payload = JSON.parse(text);
+    }
+  } catch (error) {
+    if (isTimeoutAbort(error) || signal.aborted) throw graphqlTimeoutError();
+    payload = null;
+  }
   if (response.status === 401) {
     throw new LinearApiError('Linear token expired or revoked', 401);
   }
   if (!response.ok) {
     throw new LinearApiError(`Linear GraphQL request failed (${response.status})`, response.status);
+  }
+  if (bodyTooLarge) {
+    throw new LinearApiError('Linear GraphQL response exceeded the size limit', 502);
   }
   if (!isPlainObject(payload)) {
     throw new LinearApiError('Linear GraphQL response was not JSON', 502);
@@ -130,8 +191,8 @@ export async function fetchLinearGraphql(accessToken, query, variables) {
   return data;
 }
 
-export async function fetchLinearIdentity(accessToken) {
-  const data = await fetchLinearGraphql(accessToken, VIEWER_QUERY);
+export async function fetchLinearIdentity(authorization) {
+  const data = await fetchLinearGraphql(authorization, VIEWER_QUERY);
   const identity = readIdentity({ data });
   if (!identity) {
     throw new LinearApiError('Linear GraphQL response did not include a viewer', 502);
@@ -160,7 +221,22 @@ export async function getValidLinearAccessToken(workspaceId) {
   const auth = workspaceId
     ? getLinearAuthByWorkspaceId(workspaceId)
     : getLinearAuth();
-  if (!auth?.accessToken) {
+  if (!auth) {
+    return null;
+  }
+  if (auth.tokenReference) {
+    // Vault credential: resolve at call time; the key lives in memory only.
+    // An unresolvable reference is a connect error, not a silent 401 loop.
+    const outcome = await readLinearVaultToken(auth.tokenReference);
+    if (!outcome?.ok) {
+      throw new LinearApiError(
+        `Linear vault credential could not be read (${outcome?.reason || 'vault-unavailable'})`,
+        502,
+      );
+    }
+    return outcome.value;
+  }
+  if (!auth.accessToken) {
     return null;
   }
   if (!isLinearAccessTokenStale(auth.expiresAt)) {
@@ -188,4 +264,27 @@ export async function getValidLinearAccessToken(workspaceId) {
     });
   inFlightRefreshByWorkspace.set(key, promise);
   return promise;
+}
+
+/**
+ * The authorization for the current (or named) workspace: `{ token, source }`
+ * where source is 'vault' for a 1Password API-key credential (token sent
+ * bare) or 'oauth' (token sent as Bearer). Null when not connected.
+ */
+export async function getValidLinearAuthorization(workspaceId) {
+  const auth = workspaceId
+    ? getLinearAuthByWorkspaceId(workspaceId)
+    : getLinearAuth();
+  if (!auth) {
+    return null;
+  }
+  const token = await getValidLinearAccessToken(workspaceId);
+  if (!token) {
+    return null;
+  }
+  return {
+    token,
+    source: auth.tokenReference ? 'vault' : 'oauth',
+    workspaceId: auth.workspaceId,
+  };
 }

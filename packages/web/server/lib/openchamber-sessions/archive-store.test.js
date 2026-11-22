@@ -184,4 +184,34 @@ describe('createArchiveStore', () => {
     await expect(store.archivedAt('ses_1')).resolves.toBe(20);
     expect(JSON.parse(readFile(dataDir))).toEqual({ ses_1: 20 });
   });
+
+  it('treats an empty file as missing: empty store, no preservation copy', async () => {
+    const dataDir = makeDataDir();
+    fs.writeFileSync(path.join(dataDir, 'sessions-archive.json'), '', 'utf8');
+    const store = createArchiveStore({ dataDir, now: () => 5 });
+    await expect(store.getAll()).resolves.toEqual({});
+    await expect(store.archive(['ses_1'])).resolves.toMatchObject({ failedIds: [] });
+    expect(JSON.parse(readFile(dataDir))).toEqual({ ses_1: 5 });
+    expect(fs.readdirSync(dataDir)).toEqual(['sessions-archive.json']);
+  });
+
+  it('refuses to write when a malformed file cannot be preserved', async () => {
+    const dataDir = makeDataDir();
+    fs.writeFileSync(path.join(dataDir, 'sessions-archive.json'), '{ not json', 'utf8');
+    const archivePath = path.join(dataDir, 'sessions-archive.json');
+    const fsPromises = {
+      ...fs.promises,
+      readFile: async (target, encoding) => {
+        if (target === archivePath) return '{ not json';
+        return fs.promises.readFile(target, encoding);
+      },
+      rename: async () => { throw new Error('rename blocked'); },
+    };
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const store = createArchiveStore({ dataDir, fsPromises });
+    await expect(store.archive(['ses_1'])).resolves.toEqual({ archived: [], failedIds: ['ses_1'] });
+    // The malformed bytes are still live at the path, byte-identical.
+    expect(readFile(dataDir)).toBe('{ not json');
+  });
 });

@@ -64,13 +64,27 @@ before touching the filesystem). Rationale: metadata rides every
   (`GOAL_OBJECTIVE_HARD_CAP`): the goal limit is applied before the write, by
   the UI or `create.js`, so a goal whose limit was raised or switched off is
   kept whole. Before 2026-10 the file clamped at 5000.
+- `objectives.js` also owns the objective VERSION history (#1830): each write
+  that changes the text records a version (`<data-dir>/goals/<sessionId>.versions.json`,
+  `{ id, content, savedAt }`, newest first), capped at
+  `GOAL_OBJECTIVE_VERSION_CAP` (20) with the oldest pruned. The file is judged
+  by schema per entry, so a corrupt entry drops alone instead of erasing its
+  healthy neighbours. `appendObjectiveVersion` returns the recorded version id
+  (null when the text equals the newest version), `listObjectiveVersions` and
+  `readObjectiveVersion` read, and `deleteObjectiveVersion`/`deleteObjectiveVersions`
+  remove one or all. A restore is an ordinary write of the older text, so it
+  records the restored text as a new version; the UI's internal rollback
+  restores with `record: false` and drops the version the aborted write left.
 - `routes.js` — `PUT/GET/DELETE /api/goals/objective/:sessionId`; the PUT
-  answers `{ ok, length }`, the length kept, so a client can tell an older
-  server cut the text (an older server answers `{ ok }` alone)
-  (OpenChamber-owned, registered before the generic proxy; JSON parsing via
-  the `/api/goals` family in core-routes). The UI writes the file BEFORE
-  patching the goal metadata and falls back to an inline objective when the
-  write fails; `clearSessionGoal` deletes the file best-effort.
+  answers `{ ok, length, versionId }` (versionId null when unchanged or when
+  the body's `record: false` suppresses recording), the length kept, so a
+  client can tell an older server cut the text (an older server answers
+  `{ ok }` alone) (OpenChamber-owned, registered before the generic proxy; JSON
+  parsing via the `/api/goals` family in core-routes). The UI writes the file
+  BEFORE patching the goal metadata and falls back to an inline objective when
+  the write fails; `clearSessionGoal` deletes the file and its history
+  best-effort. `GET .../versions` lists id and savedAt (no text);
+  `GET/DELETE .../versions/:versionId` read and drop one version.
 - The tick resolves the effective objective fresh on every cycle (the file
   is live-editable mid-goal) and falls back to the inline `objective` when
   the file is unreadable — a goal never dies because a file went away.
@@ -313,7 +327,13 @@ sees only that final turn, so the report is its evidence.
   (edit/pause/resume/complete/clear, an optional message, the writer model
   and effort when the objective will be rewritten, and "No length limit for
   this goal" under its more-options menu). On desktop it resizes from its
-  corner; the mobile sheet does not.
+  corner; the mobile sheet does not. Its "Versions" button swaps the
+  objective field for `components/chat/GoalVersionHistory.tsx`: the retained
+  prior versions (#1830), a read-only view of one, and Restore, which puts
+  the older text in the objective field as an unsaved edit so the normal Save
+  records it as a new version. `lib/goalObjectiveFiles.ts` backs it with
+  `fetchGoalObjectiveVersions`/`fetchGoalObjectiveVersionContent` and
+  `deleteGoalObjectiveVersion`.
 - `components/chat/GoalWriterPicker.tsx` — the writer model and effort in a
   goal window. A pick applies to that window; Remember, or
   `sessionGoalWriterRememberChoice`, saves it as the Settings default.
@@ -356,9 +376,28 @@ sees only that final turn, so the report is its evidence.
   as the message (`sessionGoalWriterSendMode` picks the primary one and the
   one used without review), write again, or skip: an armed goal keeps the
   message as typed, an automatic one sends without a goal. A failed write
-  always waits for the user, review or not. Closing the dialog leaves the
-  composer, queue and pending prompts untouched: the choice submits again with
-  a `goal` option, and only then is the arm set, right before `sendMessage`.
+  always waits for the user, review or not. Cancelling leaves the composer,
+  queue and pending prompts untouched: the choice submits again with a `goal`
+  option, and only then is the arm set, right before `sendMessage`. Picking
+  another writer model or effort starts a new run for it at once; the run it
+  replaces is aborted and its result is never shown or sent.
+- Send when ready: while the spec is being written, the dialog can hand the
+  run in progress to the composer (`BackgroundGoalSpec` in `lib/goalWriter.ts`).
+  Closing a dialog that already sends when written (no review) does the same;
+  closing a review dialog cancels. The composer submits at once with
+  `backgroundGoal`: the message leaves the composer, a draft creates its
+  session, and `sendMessage` gets `pendingGoal` (`settleBackgroundGoal`), so
+  the prompt waits for the spec and carries it as a settled `queuedGoal`
+  exactly as a click on the written spec would. The target session is captured
+  at submit, so switching chats does not move the send. A failed or cancelled
+  write sends nothing, and the text is never dropped: a reply's text goes
+  back to its session's composer, below anything typed there since; a new
+  task's text goes to the composer of the session it already created (with
+  an Open session action on the toast), so a draft the user started meanwhile
+  keeps its own text. Attachments follow the text; inline comments go back to
+  where they were taken from. A loading toast with Cancel follows the user until the spec is written. Such a
+  send is never diverted to the queue (auto-review, dismissed prompts): the
+  queue would take it without its goal.
 - `stores/useSessionGoalArmStore.ts` — `settled` marks an objective the writer
   produced or the user kept over it, so rewrite-all leaves it alone;
   `briefAgent` puts the spec into the reminder when the message itself is not
@@ -371,7 +410,8 @@ sees only that final turn, so the report is its evidence.
   saved, so a rewritten spec reaches the agent in the same message.
 - A writer request belongs to the composer it came from: switching the
   composer to another session or draft closes the dialog, and a late choice is
-  dropped.
+  dropped. A send handed off with Send when ready already left the composer,
+  so switching afterwards does not affect it.
 - `components/sections/openchamber/SessionGoalWriterFields.tsx` — Settings →
   Chat → Goal: the switch, the writer model (`sessionGoalWriterModel`, read by
   the server only, so it lives in the settings file like the walkthrough
@@ -417,3 +457,31 @@ ordering used by create and scheduled goals.
 - `tokensUsed` only counts completed assistant messages seen within the
   40-message fetch window per tick; extremely long busy stretches between
   idles undercount (acceptable: budget is a guardrail, not billing).
+- A background goal lives in the browser tab that started it: the writing
+  request and the held send are client-side, so closing or reloading the tab
+  before the spec is written drops the send. Reloading the same tab recovers
+  its text from `lib/backgroundGoalSends.ts`, which journals it in session
+  storage until the send settles. The main composer of the next page puts
+  it back in its owning composer. Other tabs cannot claim a live send, even
+  when its page is suspended. Attachments are not journaled; closing the tab
+  permanently is outside this recovery guarantee.
+
+## Decisions
+
+### Why a draft creates its session before its background goal is written, and not after
+
+Creating a session from a draft reads the live draft: its directory checks,
+the prepared chat directory and closing the draft all assume the user is still
+on it. Deferring creation until the spec arrives would race whatever draft or
+chat the user opened meanwhile. The session is created while the draft is
+still open, and only its first prompt waits for the goal, so the agent never
+starts without it. Creation that waits on worktree setup uses the submitted
+draft snapshot and preserves a different chat or draft the user opened while
+waiting. The new session never changes that later selection or clears its text.
+
+### Why reload recovery uses session storage
+
+Each tab owns its pending sends. A new page in that tab can recover its
+predecessor's unsent text without guessing whether another page is alive.
+Local storage with a heartbeat timeout would allow a suspended tab's send
+to be reclaimed while its goal was still being generated.

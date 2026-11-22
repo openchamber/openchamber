@@ -1,9 +1,19 @@
-import { fetchWithTimeout, GitLabRequestError } from './network.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
+import { AUTH_BODY_MAX_BYTES, fetchWithTimeout, GitLabRequestError } from './network.js';
 import { isString } from './validation.js';
 
 async function readJson(response) {
+  const read = await readBoundedResponseText(response, AUTH_BODY_MAX_BYTES);
+  if (read.tooLarge) {
+    // An over-cap answer must not fall through to the null return below:
+    // callers read null as not-gitlab / invalid payload, which would
+    // misclassify an oversized answer from the instance.
+    throw new GitLabRequestError('provider-error', `GitLab auth response exceeded ${AUTH_BODY_MAX_BYTES} bytes`, response.status);
+  }
   try {
-    return await response.json();
+    // Response.json() strips a leading UTF-8 BOM; the bounded reader
+    // does not, so strip it here like client.js parseBody does.
+    return JSON.parse(read.text.replace(/^\uFEFF/, ''));
   } catch {
     return null;
   }

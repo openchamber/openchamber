@@ -4,6 +4,7 @@ import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile, readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { PROMPT_VERSION, WALKTHROUGH_VERSION } from './schema.js';
 
 // Two artifacts with two different jobs.
@@ -73,9 +74,9 @@ const writeJsonAtomic = (filePath, value) => {
 
 const readJson = (filePath) => {
   try {
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile() || stat.size > MAX_FILE_BYTES) return null;
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const result = readBoundedFileSync(filePath, MAX_FILE_BYTES);
+    if (!result.ok) return null;
+    return JSON.parse(result.buffer.toString('utf8'));
   } catch {
     // Missing, unreadable, or corrupt all mean the same thing to callers: no
     // usable cached walkthrough. Never throw — a bad cache file must not break
@@ -219,7 +220,12 @@ export async function pruneMissingRepositories() {
     const full = path.join(POINTERS_DIR, name);
     let repoRoot = null;
     try {
-      const value = JSON.parse(await fsp.readFile(full, 'utf8'));
+      // Honour the store's own size bound, as readJson does (#1482): an
+      // oversized pointer is skipped, never buffered whole or parsed, and
+      // never deleted on the basis of a file we refused to read.
+      const result = await readBoundedFile(full, MAX_FILE_BYTES);
+      if (!result.ok) continue;
+      const value = JSON.parse(result.buffer.toString('utf8'));
       repoRoot = value && typeof value.repoRoot === 'string' ? value.repoRoot : null;
     } catch {
       continue;

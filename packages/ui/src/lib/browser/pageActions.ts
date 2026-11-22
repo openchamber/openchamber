@@ -312,6 +312,10 @@ export const buildTypeScript = ({ selector, value, submit }: { selector: string;
 
   target.scrollIntoView({ block: 'center' });
   target.focus();
+  // Capture the editing kind before dispatching events: a handler can flip
+  // a contenteditable element to non-editable during input/change, and the
+  // readback below must still read the field the way it was edited.
+  var wasContentEditable = target.isContentEditable;
   if (target.isContentEditable) {
     target.textContent = value;
   } else {
@@ -330,9 +334,18 @@ export const buildTypeScript = ({ selector, value, submit }: { selector: string;
   // anyway would have the agent act on a value that never landed, so read
   // back what the field actually holds — after input/change, when a handler
   // that reformats the value has had its say — and fail in the open instead.
-  var held = target.isContentEditable ? (target.textContent || '') : target.value;
+  var held = wasContentEditable ? (target.textContent || '') : (target.value || '');
   if (held !== value) {
-    return { ok: false, error: selector + ' did not keep the typed value; it now holds ' + JSON.stringify(held) };
+    // Never report what the field now holds: for a password field that is
+    // the secret itself, and this error travels to the calling agent and
+    // any log that records it. An ordinary field gets a character count as
+    // the diagnostic; a password field gets not even that. A revealed
+    // password field (type flipped to text by a visibility toggle) still
+    // counts as a password field: its autocomplete token names the secret
+    // independently of the current type.
+    var autocomplete = String(target.autocomplete || '').toLowerCase();
+    var isPassword = target.tagName === 'INPUT' && (String(target.type || '').toLowerCase() === 'password' || autocomplete.indexOf('password') !== -1);
+    return { ok: false, error: selector + ' did not keep the typed value' + (isPassword ? '' : '; it now holds ' + held.length + ' character' + (held.length === 1 ? '' : 's')) };
   }
 
   if (${submit ? 'true' : 'false'}) {

@@ -23,7 +23,7 @@ export const parseFormNumber = (value: string): number | undefined => {
 };
 
 /** Sets or removes one key; an undefined value removes it so OpenCode's default applies again. */
-export const withOptional = (record: object | undefined, key: string, value: unknown): Record<string, unknown> => {
+export const withOptional = <T extends object>(record: T | undefined, key: string, value: unknown): Record<string, unknown> => {
   const next: Record<string, unknown> = { ...(record ?? {}) };
   if (value === undefined) delete next[key];
   else next[key] = value;

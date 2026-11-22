@@ -150,6 +150,14 @@
         "mobile"
       ]
     },
+    "modelChoiceRecordingEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },
@@ -194,6 +202,10 @@
       "scope": "instance",
       "computed": true
     },
+    "managedToolsApplyLive": {
+      "scope": "instance",
+      "computed": true
+    },
     "openCodeUpdateToastDismissedVersion": {
       "scope": "instance"
     },
@@ -219,6 +231,9 @@
       "scope": "instance"
     },
     "openInAppId": {
+      "scope": "instance"
+    },
+    "scheduledTasksMaxRunDurationMs": {
       "scope": "instance"
     },
     "dictationEnabled": {
@@ -304,7 +319,11 @@
       "scope": "profile",
       "perSurface": true
     },
-    "sidebarDetailedZoneRows": {
+    "sidebarHeaderless": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "sidebarSessionRowDisplay": {
       "scope": "profile",
       "perSurface": true
     },
@@ -466,6 +485,12 @@
         "desktop",
         "mobile"
       ]
+    },
+    "questionTimeoutMinutes": {
+      "scope": "profile"
+    },
+    "questionsInBackground": {
+      "scope": "profile"
     },
     "autoCreateWorktree": {
       "scope": "profile"
@@ -651,6 +676,9 @@
         "desktop",
         "mobile"
       ]
+    },
+    "activeRunModelChangeBehavior": {
+      "scope": "profile"
     },
     "sessionGoalEnabled": {
       "scope": "profile"

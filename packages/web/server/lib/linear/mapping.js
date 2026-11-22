@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { getLinearAuth, getLinearAuthFilePath } from './auth.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
 
@@ -17,6 +18,13 @@ function mappingFile() {
 }
 
 const UNSCOPED_MAPPING_KEY = '__unscoped__';
+
+// Mapping values are filesystem paths keyed by workspace/team, so a
+// legitimate linear-mapping.json is a few KiB. 1 MiB is generous headroom
+// while refusing an oversized or non-regular file (e.g. a FIFO, which
+// would otherwise block the synchronous read and freeze the server)
+// instead of buffering it whole.
+const MAX_LINEAR_MAPPING_BYTES = 1 * 1024 * 1024;
 
 function mappingOrgKey() {
   const auth = getLinearAuth();
@@ -99,24 +107,40 @@ export function getLinearMappingFilePath() {
   return mappingFile();
 }
 
-export function readStoredLinearMapping() {
-  const filePath = mappingFile();
-  if (!fs.existsSync(filePath)) {
-    return emptyMapping();
+// Bounded read of the mapping file: missing and empty files answer null
+// (the empty-mapping case), malformed JSON, an over-cap file, and a
+// non-regular file all throw the existing MALFORMED error, and unexpected
+// I/O errors from the bounded reader propagate. Never answer null for a
+// refused read: a write built on an empty base would silently discard
+// the stored mapping.
+function readMappingFile(filePath) {
+  const result = readBoundedFileSync(filePath, MAX_LINEAR_MAPPING_BYTES);
+  if (!result.ok) {
+    if (result.reason === 'missing') {
+      return null;
+    }
+    throw new LinearMappingError('Linear mapping file is malformed', 'MALFORMED');
+  }
+  const trimmed = result.buffer.toString('utf8').trim();
+  if (!trimmed) {
+    return null;
   }
   let parsed;
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      return emptyMapping();
-    }
     parsed = JSON.parse(trimmed);
   } catch {
     throw new LinearMappingError('Linear mapping file is malformed', 'MALFORMED');
   }
   if (!isPlainObject(parsed)) {
     throw new LinearMappingError('Linear mapping file is malformed', 'MALFORMED');
+  }
+  return parsed;
+}
+
+export function readStoredLinearMapping() {
+  const parsed = readMappingFile(mappingFile());
+  if (!parsed) {
+    return emptyMapping();
   }
   const document = readMappingDocument(parsed);
   return document.workspaces[mappingOrgKey()] || emptyMapping();
@@ -128,23 +152,9 @@ export function setStoredLinearMapping(input) {
   }
   const filePath = mappingFile();
   let document = { workspaces: {} };
-  if (fs.existsSync(filePath)) {
-    try {
-      const raw = fs.readFileSync(filePath, 'utf8');
-      const trimmed = raw.trim();
-      if (trimmed) {
-        const parsed = JSON.parse(trimmed);
-        if (!isPlainObject(parsed)) {
-          throw new LinearMappingError('Linear mapping file is malformed', 'MALFORMED');
-        }
-        document = readMappingDocument(parsed);
-      }
-    } catch (error) {
-      if (error instanceof LinearMappingError) {
-        throw error;
-      }
-      throw new LinearMappingError('Linear mapping file is malformed', 'MALFORMED');
-    }
+  const parsed = readMappingFile(filePath);
+  if (parsed) {
+    document = readMappingDocument(parsed);
   }
   const next = {
     defaultProjectPath: readTrimmedString(input.defaultProjectPath) || null,

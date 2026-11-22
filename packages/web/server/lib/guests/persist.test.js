@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,7 @@ import {
   writeExtensionStore,
   ensureGuestStorageIds,
   updateExtensionStore,
+  EXTENSIONS_STORE_READ_MAX_BYTES,
 } from './persist.js';
 
 describe('extensionsPersistPath', () => {
@@ -186,6 +188,42 @@ describe('extension persist', () => {
       const store = await readExtensionStore(persistPath);
       expect(store.paths).toEqual(['/tmp/old-echo', '/tmp/tasks']);
       expect(store.capabilityGrants).toEqual({ 'old-echo': [], tasks: ['prompt', 'sessions'] });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses an oversized store through the Invalid path without parsing it whole', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      // Schema-valid shape padded past the read cap: the bounded read
+      // refuses it before any parse, so it must land on the Invalid
+      // throw and never read as the empty store.
+      await fs.writeFile(file, `{"paths":[],"pad":"${'x'.repeat(EXTENSIONS_STORE_READ_MAX_BYTES)}"}`, 'utf8');
+      await expect(readExtensionStore(file)).rejects.toThrow('Invalid extensions store');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === 'win32')('refuses a FIFO at the store path promptly without blocking', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      execFileSync('mkfifo', [file]);
+      await expect(readExtensionStore(file)).rejects.toThrow('Invalid extensions store');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an empty file still throws Invalid as before', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      await fs.writeFile(file, '', 'utf8');
+      await expect(readExtensionStore(file)).rejects.toThrow('Invalid extensions store');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

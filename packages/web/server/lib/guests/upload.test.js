@@ -75,6 +75,14 @@ describe('readGuestUploadBody', () => {
       expect(guestUploadMaxBytes()).toBe(1234);
       process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = 'nope';
       expect(guestUploadMaxBytes()).toBe(50 * 1024 * 1024);
+      process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = ' 1234 ';
+      expect(guestUploadMaxBytes()).toBe(1234);
+      for (const invalid of ['1e3', '0x10', '5.9', '+5000', '5000.0', '', ' ', '5000junk']) {
+        process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = invalid;
+        expect(guestUploadMaxBytes()).toBe(50 * 1024 * 1024);
+      }
+      process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = '0';
+      expect(guestUploadMaxBytes()).toBe(50 * 1024 * 1024);
     } finally {
       if (previous === undefined) delete process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES;
       else process.env.OPENCHAMBER_GUEST_UPLOAD_MAX_BYTES = previous;

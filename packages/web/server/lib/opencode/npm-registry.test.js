@@ -112,6 +112,39 @@ describe('npm registry client', () => {
     expect(result.error).toContain('aborted');
   });
 
+  test('requests the abbreviated install-v1 packument', async () => {
+    fetchMock.mockImplementation(() => jsonResponse({
+      'dist-tags': { latest: '1.2.0' },
+      versions: { '1.0.0': {}, '1.2.0': {} },
+    }));
+
+    await npm.lookupNpmPackage('foo');
+
+    expect(fetchMock.mock.calls[0][1].headers.Accept).toBe('application/vnd.npm.install-v1+json');
+  });
+
+  test('over-cap packument returns network status and caches nothing', async () => {
+    const overCap = () => Promise.resolve(new Response(JSON.stringify({
+      'dist-tags': { latest: '1.2.0' },
+      versions: { '1.2.0': {} },
+    }), {
+      status: 200,
+      headers: { 'content-length': String(npm.NPM_PACKUMENT_MAX_BYTES + 1) },
+    }));
+    fetchMock.mockImplementation(overCap);
+
+    const result = await npm.lookupNpmPackage('foo');
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('network');
+    expect(result.error).toMatch(/size limit/);
+
+    fetchMock.mockImplementation(() => jsonResponse({ 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': {} } }));
+    const second = await npm.getNpmInfo('foo');
+    expect(second.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   test('cache hit reuses definitive success', async () => {
     fetchMock.mockImplementation(() => jsonResponse({ 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': {} } }));
 
@@ -205,5 +238,35 @@ describe('npm registry client', () => {
     await npm.getNpmInfo('foo');
 
     expect(fetchMock.mock.calls[0][1].headers['User-Agent']).toMatch(/^openchamber-server\//);
+  });
+
+  test('expired entries for other names are swept on access', async () => {
+    let now = 1_000;
+    Date.now = mock(() => now);
+    fetchMock.mockImplementation(() => jsonResponse({ versions: {} }));
+
+    await npm.getNpmInfo('stale-foo');
+    now += 3_600_001;
+    await npm.getNpmInfo('fresh-bar');
+    now = 2_000;
+
+    await npm.getNpmInfo('stale-foo');
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  test('cache is capped, evicting the oldest entries', async () => {
+    fetchMock.mockImplementation(() => jsonResponse({ versions: {} }));
+
+    for (let i = 0; i <= 500; i += 1) {
+      await npm.getNpmInfo(`cap-${i}`);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(501);
+
+    await npm.getNpmInfo('cap-500');
+    expect(fetchMock).toHaveBeenCalledTimes(501);
+
+    await npm.getNpmInfo('cap-0');
+    expect(fetchMock).toHaveBeenCalledTimes(502);
   });
 });

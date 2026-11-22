@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -102,6 +103,27 @@ describe('contributor provenance storage', () => {
     });
   });
 
+  it('fails closed for an oversized persisted state file', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-contributor-oversized-'));
+    roots.push(root);
+    const gitDirectory = path.join(root, 'git');
+    await fs.mkdir(gitDirectory);
+    const filePath = path.join(root, 'provenance.json');
+    // maxRecords: 1 bounds the derived cap at 80 KiB; a larger file is
+    // refused on the handle stat before any of it is parsed.
+    const store = createContributorProvenanceStore({
+      filePath,
+      maxRecords: 1,
+      resolveRepositoryIdentity: async () => ({ supported: true, repositoryId: 'repo_one' }),
+      resolveGitPaths: async () => ({ supported: true, bare: false, gitDirectory }),
+    });
+    await fs.writeFile(filePath, ' '.repeat(80 * 1024 + 1), { mode: 0o600 });
+    await expect(store.read('/checkout')).rejects.toMatchObject({
+      code: 'CONTRIBUTOR_PROVENANCE_STORE_INVALID',
+    });
+    expect((await fs.stat(filePath)).size).toBe(80 * 1024 + 1);
+  });
+
   it('reads a bounded worktree batch from one authoritative store snapshot', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-contributor-batch-'));
     roots.push(root);
@@ -158,5 +180,47 @@ describe('contributor provenance storage', () => {
     await expect(store.readMany(['/one', '/gone'])).rejects.toMatchObject({
       code: 'CONTRIBUTOR_PROVENANCE_STORE_INVALID',
     });
+  });
+});
+
+describe('bounded state read (#1766)', () => {
+  const grownStateFs = (filePath) => ({
+    ...fs,
+    open: async (target, flags, mode) => {
+      const handle = await fs.open(target, flags, mode);
+      if (target !== filePath) return handle;
+      return {
+        stat: async () => {
+          const stats = await handle.stat();
+          return { isFile: () => stats.isFile(), size: 0, mode: stats.mode };
+        },
+        read: (buffer, offset, length, position) => handle.read(buffer, offset, length, position),
+        close: () => handle.close(),
+      };
+    },
+  });
+
+  it('refuses a state file grown after its handle stat, instead of buffering it whole', async () => {
+    const { root, filePath } = await setup();
+    await fs.writeFile(filePath, JSON.stringify({ version: 1, records: [] }) + String.fromCharCode(32).repeat(90 * 1024), { mode: 0o600 });
+    const gitDirectory = path.join(root, 'git');
+    const store = createContributorProvenanceStore({
+      filePath, maxRecords: 1, fsImpl: grownStateFs(filePath),
+      resolveRepositoryIdentity: async () => ({ supported: true, repositoryId: 'repo_one' }),
+      resolveGitPaths: async () => ({ supported: true, bare: false, gitDirectory }),
+    });
+    await expect(store.read('/checkout')).rejects.toMatchObject({ code: 'CONTRIBUTOR_PROVENANCE_STORE_INVALID' });
+  });
+
+  it('refuses a FIFO promptly and the serialized operation behind it settles too', async () => {
+    if (process.platform === 'win32') return;
+    const { filePath, store } = await setup();
+    execFileSync('mkfifo', [filePath]);
+    const first = store.read('/checkout');
+    const second = store.read('/checkout');
+    await expect(first).rejects.toMatchObject({ code: 'CONTRIBUTOR_PROVENANCE_STORE_INVALID' });
+    await expect(second).rejects.toMatchObject({ code: 'CONTRIBUTOR_PROVENANCE_STORE_INVALID' });
+    await fs.rm(filePath);
+    await expect(store.read('/checkout')).resolves.toMatchObject({ revision: 0, provenance: null });
   });
 });

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 const SETTING_KEY = /^[a-z][a-z0-9-]*$/;
@@ -57,24 +58,41 @@ const parseStore = (raw) => {
   }
 };
 
+/**
+ * Read cap for guest-auth.json. A legitimate file holds small bounded
+ * records keyed by guest: OAuth client ids/secrets and tokens,
+ * settings values of at most 2,000 chars, accounts of at most 200
+ * chars. The guest count is not hard-clamped, but even a pathological
+ * 1,000 guests at a few KB of records each stays in the low
+ * single-digit MB. 8 MiB gives headroom over that while keeping one
+ * oversized file from being buffered whole - and a FIFO from wedging
+ * the store's serialized write lock, whose reads go through this
+ * helper.
+ */
+export const GUEST_AUTH_STORE_READ_MAX_BYTES = 8 * 1024 * 1024;
+
 export const readGuestAuthStore = async (persistPath) => {
-  try {
-    const raw = await fs.readFile(persistPath, 'utf8');
-    const text = raw.replace(/^\uFEFF/, '').trim();
-    if (text === '') {
+  const result = await readBoundedFile(persistPath, GUEST_AUTH_STORE_READ_MAX_BYTES);
+  if (!result.ok) {
+    // Missing stays the empty store. An over-cap or non-regular
+    // target follows the malformed path (the Invalid throw below):
+    // it must never silently read as empty, or the next locked patch
+    // would overwrite real OAuth tokens with a fresh store.
+    if (result.reason === 'missing') {
       return { guests: {} };
     }
-    const parsed = parseStore(text);
-    if (!parsed) {
-      throw new Error('Invalid guest auth store');
-    }
-    return parsed;
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return { guests: {} };
-    }
-    throw error;
+    throw new Error('Invalid guest auth store');
   }
+  const raw = result.buffer.toString('utf8');
+  const text = raw.replace(/^\uFEFF/, '').trim();
+  if (text === '') {
+    return { guests: {} };
+  }
+  const parsed = parseStore(text);
+  if (!parsed) {
+    throw new Error('Invalid guest auth store');
+  }
+  return parsed;
 };
 
 /** @type {Map<string, Promise<unknown>>} */

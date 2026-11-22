@@ -18,6 +18,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { computeContextUsage } from './contextUsage';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
+import { getWorkStatusChecksPresentation } from '../../checksSummaryPresentation';
 import {
   WorkStatusCallout,
   WorkStatusMeter,
@@ -167,6 +168,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // here would multiply GitHub requests per open session, which is exactly the
   // fan-out the PR-status concurrency gate exists to prevent.
   const prSummary = useFreshestSourceControlVisualSummaryForBranch(gitDirectory, branch);
+  const checksPresentation = prSummary?.checks
+    ? getWorkStatusChecksPresentation(prSummary.checks)
+    : null;
 
   const sessionMessages = useSessionMessages(sessionId ?? '', directory ?? undefined);
   const { context: contextLimit } = useContextWindowLimits(sessionId, directory ?? undefined);
@@ -384,7 +388,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   </WorkStatusPill>
                 )}
               />
-              {prSummary.checks && prSummary.checks.total > 0 ? (
+              {prSummary.checks && prSummary.checks.total > 0 && checksPresentation ? (
                 <WorkStatusRow
                   icon="checkbox-circle"
                   onClick={directory ? () => openSurface('pr') : undefined}
@@ -393,19 +397,19 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   muted
                   value={(
                     <>
-                      {prSummary.checks.failure > 0 ? (
+                      {checksPresentation.failure !== null ? (
                         <WorkStatusValue tone="error">
-                          {t('chat.workStatus.pr.checksFailed', { count: prSummary.checks.failure })}
+                          {t('chat.workStatus.pr.checksFailed', { count: checksPresentation.failure })}
                         </WorkStatusValue>
                       ) : null}
-                      {prSummary.checks.pending > 0 ? (
+                      {checksPresentation.pending !== null ? (
                         <WorkStatusValue tone="warning">
-                          {t('chat.workStatus.pr.checksPending', { count: prSummary.checks.pending })}
+                          {t('chat.workStatus.pr.checksPending', { count: checksPresentation.pending })}
                         </WorkStatusValue>
                       ) : null}
-                      {prSummary.checks.failure === 0 && prSummary.checks.pending === 0 ? (
+                      {checksPresentation.passed !== null ? (
                         <WorkStatusValue tone="success">
-                          {t('chat.workStatus.pr.checksPassed', { count: prSummary.checks.success })}
+                          {t('chat.workStatus.pr.checksPassed', { count: checksPresentation.passed })}
                         </WorkStatusValue>
                       ) : null}
                     </>

@@ -434,6 +434,26 @@ describe('oversized input', () => {
     expect(sent.endsWith('…')).toBe(true);
   });
 
+  it('never splits a surrogate pair at the clamp boundary (#1931)', async () => {
+    const EMOJI = '\u{1F600}';
+    // Pair straddles the last kept position: the cut backs off the pair.
+    await generateSmallModelText({ prompt: `${'a'.repeat(15_998)}${EMOJI}${'b'.repeat(5_000)}`, directory: '/proj' });
+    let sent = lastGenerate().body.prompt;
+    expect(sent).toBe(`${'a'.repeat(15_998)}…`);
+    expect(sent.length).toBeLessThanOrEqual(16_000);
+    expect(Buffer.from(sent, 'utf8').toString('utf8')).toBe(sent);
+    // Pair starting exactly at the budget edge: dropped whole.
+    await generateSmallModelText({ prompt: `${'a'.repeat(15_999)}${EMOJI}${'b'.repeat(5_000)}`, directory: '/proj' });
+    sent = lastGenerate().body.prompt;
+    expect(sent).toBe(`${'a'.repeat(15_999)}…`);
+    expect(sent.length).toBe(16_000);
+    // Pair fitting whole inside the kept text: survives intact.
+    await generateSmallModelText({ prompt: `${'a'.repeat(15_997)}${EMOJI}${'b'.repeat(5_000)}`, directory: '/proj' });
+    sent = lastGenerate().body.prompt;
+    expect(sent).toBe(`${'a'.repeat(15_997)}${EMOJI}…`);
+    expect(Buffer.from(sent, 'utf8').toString('utf8')).toBe(sent);
+  });
+
   it('refuses without calling the model when the caller cannot survive truncation', async () => {
     await expect(generateSmallModelText(huge({ onOverflow: 'error' }))).rejects.toMatchObject({
       statusCode: 413,

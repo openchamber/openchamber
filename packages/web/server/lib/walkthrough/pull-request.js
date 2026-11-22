@@ -3,6 +3,7 @@ import { markGitHubAuthAccountInvalid } from '../github/auth.js';
 import { getOctokitForAccountId } from '../github/octokit.js';
 import { resolveGitHubRepoFromDirectory } from '../github/repo/index.js';
 import { resolveRepoNetwork } from '../github/repo/fork-detection.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 
 const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner.toLowerCase()
   && left.repo.toLowerCase() === right.repo.toLowerCase();
@@ -105,18 +106,36 @@ async function readGitLab(reader, input) {
   return reader(input);
 }
 
+/** A whole pull request patch is far larger than one file: ten times the per-file cap, matching the local-diff cap in git/service.js. */
+const MAX_PATCH_BYTES = 50 * 1024 * 1024;
+
 async function readGitHubPullRequestDiff(directory, number, readContext, options) {
   const { octokit, repo: target } = await resolvePullRequestRepo(directory, number, readContext, options);
 
+  // parseSuccessResponseBody: false hands back the raw body stream instead
+  // of a buffered string, so the patch cap is judged while the body arrives:
+  // readBoundedResponseText refuses an over-cap Content-Length up front and
+  // cancels the stream as soon as the accumulated bytes cross the cap. An
+  // over-cap diff is never held whole in memory.
   const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
     owner: target.owner,
     repo: target.repo,
     pull_number: number,
     headers: { accept: 'application/vnd.github.v3.diff' },
+    request: { parseSuccessResponseBody: false },
   });
 
-  assert.match(response.data, /^(?:diff --git |\s*$)/, 'GitHub returned an invalid pull request diff');
-  return { patch: response.data, meta: { owner: target.owner, repo: target.repo, number } };
+  // Octokit hands back the body stream plus the headers as a plain object;
+  // the bounded reader needs only headers.get + body.getReader.
+  const read = await readBoundedResponseText({
+    headers: { get: (name) => response.headers?.[name] ?? null },
+    body: response.data,
+  }, MAX_PATCH_BYTES);
+  if (read.tooLarge) {
+    throw Object.assign(new Error('This pull request diff is too large to show'), { statusCode: 413, code: 'patch-too-large' });
+  }
+  assert.match(read.text, /^(?:diff --git |\s*$)/, 'GitHub returned an invalid pull request diff');
+  return { patch: read.text, meta: { owner: target.owner, repo: target.repo, number } };
 }
 
 /** Above this the full-context view is no longer a readable diff, and the round trip is wasted. */

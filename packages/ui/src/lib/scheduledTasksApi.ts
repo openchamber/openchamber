@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { runtimeFetch } from './runtime-fetch';
 
-export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error' | 'queued' | 'sent' | 'skipped' | 'failed' | 'cancelled';
+export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error' | 'queued' | 'sent' | 'skipped' | 'failed' | 'cancelled' | 'timeout';
 
 export type ScheduledTask = {
   id: string;
@@ -11,6 +11,9 @@ export type ScheduledTask = {
   /** Absolute path of the `.agents/loops/*.md` file driving this task, when
    *  any. Present only for loop-sourced tasks; unknown to older clients. */
   loopFile?: string;
+  /** Per-task run limit in milliseconds (#765). Absent = inherit the
+   *  server-wide `scheduledTasksMaxRunDurationMs` setting / shipped default. */
+  maxRunDurationMs?: number;
   /** Why a repository loop whose file says `enabled: true` is paused here:
    *  never enabled on this machine (`required`), or changed since it was
    *  (`outdated`). Absent when nothing holds the loop back. */

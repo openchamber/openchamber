@@ -209,10 +209,66 @@ describe('installGuestFromPath', () => {
     expect(await fs.stat(copy).then((stat) => stat.isDirectory())).toBe(true);
 
     const removed = await uninstallGuest('zip-hello', persistPath);
+
     expect(removed).toEqual({ ok: true });
     expect(await fs.stat(copy).then(() => true).catch(() => false)).toBe(false);
     expect(await fs.stat(zipPath).then((stat) => stat.isFile())).toBe(true);
 
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('refuses a zip over the 20 MiB cap at read time and installs nothing', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const zipPath = path.join(dir, 'panel.zip');
+    // A small file at first stat, grown past the cap before the install
+    // reads it: the bounded handle read must refuse, where a stat-only
+    // gate taken earlier would have let the grown file through.
+    await fs.writeFile(zipPath, buildStoreZip([
+      { name: 'package.json', data: '{}' },
+    ]));
+    const small = await fs.stat(zipPath);
+    expect(small.size).toBeLessThan(20 * 1024 * 1024);
+    await fs.appendFile(zipPath, Buffer.alloc(20 * 1024 * 1024));
+    expect((await fs.stat(zipPath)).size).toBeGreaterThan(20 * 1024 * 1024);
+
+    expect(await installGuestFromPath(zipPath, persistPath)).toEqual({ ok: false, code: 'not-found' });
+    expect(await listInstalledGuests({ persistPath })).toEqual([]);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('refuses an honest over-cap zip as not-found (control)', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const zipPath = path.join(dir, 'panel.zip');
+    await fs.writeFile(zipPath, Buffer.alloc(20 * 1024 * 1024 + 1));
+    expect(await installGuestFromPath(zipPath, persistPath)).toEqual({ ok: false, code: 'not-found' });
+    expect(await listInstalledGuests({ persistPath })).toEqual([]);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test.skipIf(process.platform === 'win32')('a FIFO at the zip path settles promptly with not-found', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const zipPath = path.join(dir, 'panel.zip');
+    expect(spawnSync('mkfifo', [zipPath]).status).toBe(0);
+    const settled = await Promise.race([
+      installGuestFromPath(zipPath, persistPath),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 4000)),
+    ]);
+    expect(settled).toEqual({ ok: false, code: 'not-found' });
+    expect(await listInstalledGuests({ persistPath })).toEqual([]);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('a missing zip path is not-found (control)', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-ext-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    expect(await installGuestFromPath(path.join(dir, 'nope.zip'), persistPath)).toEqual({
+      ok: false,
+      code: 'not-found',
+    });
     await fs.rm(dir, { recursive: true, force: true });
   });
 });

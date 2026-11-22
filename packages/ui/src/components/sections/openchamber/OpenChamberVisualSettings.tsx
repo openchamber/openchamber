@@ -1,6 +1,8 @@
 import React from 'react';
+import { clipPwaInstallName } from '@/lib/pwa-clamps';
 import { ThemeImportButton } from './ThemeImportButton';
 import { ThemePicker } from './ThemePicker';
+import { SessionRowDisplaySettings } from './SessionRowDisplaySettings';
 
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
@@ -82,6 +84,7 @@ const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptio
 ];
 
 const DEFAULT_PWA_INSTALL_NAME = 'OpenChamber - AI Coding Assistant';
+
 const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
     {
         id: 'system',
@@ -157,7 +160,10 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
     },
 ];
 
-type VisibleSetting = 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'animatedActivityIndicators';
+// The union is derived from the runtime list in appearanceVisibleSettings
+// so the two cannot drift; re-exported here for existing importers.
+;
+import type { VisibleSetting } from './appearanceVisibleSettings';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -213,6 +219,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setThemeMode,
         availableThemes,
         customThemesLoading,
+        customThemesLoadError,
         reloadCustomThemes,
         lightThemeId,
         darkThemeId,
@@ -350,7 +357,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         }
 
         const win = window as PwaInstallNameWindow;
-        const normalized = value.trim().replace(/\s+/g, ' ').slice(0, 64);
+        const normalized = clipPwaInstallName(value.trim().replace(/\s+/g, ' '));
         const persistedValue = normalized;
 
         await updateDesktopSettings({ pwaAppName: persistedValue });
@@ -404,7 +411,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 }
 
                 const raw = settings.pwaAppName ?? '';
-                const normalized = raw.trim().replace(/\s+/g, ' ').slice(0, 64);
+                const normalized = clipPwaInstallName(raw.trim().replace(/\s+/g, ' '));
                 const orientation = normalizePwaOrientation(settings.pwaOrientation);
                 const nextMobileKeyboardMode = normalizeMobileKeyboardMode(settings.mobileKeyboardMode);
 
@@ -528,6 +535,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
                                             </SettingsInfoHint>
                                         </div>
+                                        {customThemesLoadError && (
+                                            <p role="alert" className="typography-settings-caption text-destructive">
+                                                {t('settings.openchamber.visual.state.customThemesLoadFailed')}
+                                            </p>
+                                        )}
                                         <ThemeImportButton />
                                     </div>
                                 </SettingsTwoColumn>
@@ -1067,6 +1079,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             settingsItem="appearance.animated-activity-indicators"
                         />
                     </SettingsSection>
+                )}
+
+                {shouldShow('sidebarRows') && (
+                    <SessionRowDisplaySettings />
                 )}
 
             </div>

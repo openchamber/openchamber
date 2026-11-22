@@ -5,6 +5,7 @@ import { Window } from 'happy-dom';
 // stage does and compare the HTML the same pipeline produces either way.
 const win = new Window({ url: 'https://openchamber.test/' });
 Object.assign(globalThis, {
+  Event: win.Event, CustomEvent: win.CustomEvent, MutationObserver: win.MutationObserver,
   window: win,
   document: win.document,
   Element: win.Element,

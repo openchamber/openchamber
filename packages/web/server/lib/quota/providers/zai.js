@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { envelopeError } from './zhipuai-coding-plan.js';
 import {
@@ -8,7 +9,8 @@ import {
   toNumber,
   resolveWindowSeconds,
   resolveWindowLabel,
-  normalizeTimestamp
+  normalizeTimestamp,
+  asNonEmptyString
 } from '../utils/index.js';
 
 export const providerId = 'zai-coding-plan';
@@ -28,6 +30,12 @@ const formatCreditValueLabel = (limit) => {
   if (used === null || total === null) return null;
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
 };
+
+// The monitor API can report percentages outside [0, 100]; clamp at the
+// read site. Non-finite or non-number input stays null. (No clamp inside
+// toUsageWindow: wafer's overage branch deliberately exceeds 100.)
+const clampUsedPercent = (value) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
 
 // Gift reset timestamps come as 'YYYY-MM-DD HH:mm:ss' in UTC+8.
 const ZAI_RESET_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -72,10 +80,11 @@ const attachZaiGiftResets = async (windows, apiKey) => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: AbortSignal.timeout(15_000)
     });
     if (!response.ok) return;
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     const data = payload?.data;
     if (!data) return;
 
@@ -94,18 +103,18 @@ const attachZaiGiftResets = async (windows, apiKey) => {
   }
 };
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
+
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
 const ZAI_GIFT_RESET_USE_URL = 'https://api.z.ai/api/biz/customer-package-reset/use';
 export const giftResetTypes = ['FIVE_HOUR', 'WEEK'];
 
-export const useZaiGiftReset = async ({ recordId, resetType }) => {
-  const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+export const useZaiGiftReset = async ({ recordId, resetType, readAuth = readOpenCodeCredentials }) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     throw new Error('Not configured');
@@ -125,20 +134,19 @@ export const useZaiGiftReset = async ({ recordId, resetType }) => {
       resetType,
       recordId,
       requestId: crypto.randomUUID()
-    })
+    }),
+    signal: AbortSignal.timeout(15_000)
   });
 
-  const payload = await response.json().catch(() => null);
+  const payload = await readQuotaJson(response).catch(() => null);
   if (!response.ok || payload?.success !== true) {
     throw new Error(payload?.msg || `API error: ${response.status}`);
   }
   return true;
 };
 
-export const fetchQuota = async () => {
-  const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -150,13 +158,16 @@ export const fetchQuota = async () => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const response = await fetch('https://api.z.ai/api/monitor/usage/quota/limit', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -169,7 +180,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     // Like bigmodel.cn, z.ai reports an expired key or a missing plan as
     // `{code, msg, success: false}` with HTTP 200; without this the card is
     // just empty.
@@ -192,7 +203,7 @@ export const fetchQuota = async () => {
       const windowSeconds = resolveWindowSeconds(limit);
       const windowLabel = resolveWindowLabel(windowSeconds);
       const resetAt = limit?.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
-      const usedPercent = typeof limit?.percentage === 'number' ? limit.percentage : null;
+      const usedPercent = clampUsedPercent(limit?.percentage);
       const creditValueLabel = formatCreditValueLabel(limit);
 
       windows[windowLabel] = toUsageWindow({
@@ -206,7 +217,7 @@ export const fetchQuota = async () => {
     const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
     if (mcpToolsTimeLimit) {
       windows['MCP Tools'] = toUsageWindow({
-        usedPercent: typeof mcpToolsTimeLimit.percentage === 'number' ? mcpToolsTimeLimit.percentage : null,
+        usedPercent: clampUsedPercent(mcpToolsTimeLimit.percentage),
         windowSeconds: 30 * 24 * 60 * 60,
         resetAt: mcpToolsTimeLimit.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null
       });
@@ -223,12 +234,17 @@ export const fetchQuota = async () => {
       planLabel: typeof payload?.data?.level === 'string' && payload.data.level ? payload.data.level : null
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };

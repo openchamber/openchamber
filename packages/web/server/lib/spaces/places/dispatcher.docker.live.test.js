@@ -209,44 +209,60 @@ const freePort = () => new Promise((resolve) => {
   });
 });
 
-const startServer = async ({ dataDir, dockerHost, port }) => {
-  const child = spawn(process.execPath, [SERVER_ENTRY, '--port', String(port), '--api-only'], {
-    env: { ...process.env, OPENCHAMBER_DATA_DIR: dataDir, DOCKER_HOST: dockerHost, OPENCHAMBER_RELAY_HOST: 'off' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let output = '';
-  child.stdout.on('data', (chunk) => { output += chunk; });
-  child.stderr.on('data', (chunk) => { output += chunk; });
-  const base = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 60_000;
-  let healthy = false;
-  while (!healthy && Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`the server left early:\n${output.slice(-2000)}`);
+// The server takes its port as an argument, so the port has to be chosen before it starts.
+// A probed port is released before the server binds it, and another process can take it in
+// between (#685, the race #666 fixed for the gatekeeper suite): the server then dies with
+// EADDRINUSE, or the health loop below answers from a stranger's listener. The start retries
+// with a fresh port when the child dies on EADDRINUSE, and only on that, up to five attempts.
+// Any other start failure, and a fifth collision in a row, throws with the server's own
+// output, the way a single attempt did before.
+const startServer = async ({ dataDir, dockerHost }) => {
+  for (let attempt = 1; ; attempt += 1) {
+    const port = await freePort();
+    const child = spawn(process.execPath, [SERVER_ENTRY, '--port', String(port), '--api-only'], {
+      env: { ...process.env, OPENCHAMBER_DATA_DIR: dataDir, DOCKER_HOST: dockerHost, OPENCHAMBER_RELAY_HOST: 'off' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
+    const base = `http://127.0.0.1:${port}`;
+    const deadline = Date.now() + 60_000;
+    let healthy = false;
     try {
-      healthy = (await fetch(`${base}/health`, { signal: AbortSignal.timeout(5_000) })).status === 200;
-    } catch {
-      // Not up yet.
-    }
-    if (!healthy) await new Promise((resolve) => { setTimeout(resolve, 250); });
-  }
-  if (!healthy) throw new Error(`the server did not become healthy:\n${output.slice(-2000)}`);
-  return {
-    base,
-    /** One request with a bound, so a hang names itself and the server's output instead of a timeout. */
-    get: async (suffix) => {
-      try {
-        return await fetch(`${base}${suffix}`, { signal: AbortSignal.timeout(30_000) });
-      } catch (error) {
-        throw new Error(`${suffix}: ${error.message}\n${output.slice(-2000)}`);
+      while (!healthy && Date.now() < deadline) {
+        if (child.exitCode !== null) throw new Error(`the server left early:\n${output.slice(-2000)}`);
+        try {
+          healthy = child.exitCode === null
+            && (await fetch(`${base}/health`, { signal: AbortSignal.timeout(5_000) })).status === 200;
+        } catch {
+          // Not up yet.
+        }
+        if (!healthy) await new Promise((resolve) => { setTimeout(resolve, 250); });
       }
-    },
-    output: () => output,
-    stop: () => new Promise((resolve) => {
-      child.once('exit', resolve);
-      child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 10_000).unref();
-    }),
-  };
+      if (!healthy) throw new Error(`the server did not become healthy:\n${output.slice(-2000)}`);
+    } catch (error) {
+      if (!output.includes('EADDRINUSE') || attempt >= 5) throw error;
+      continue;
+    }
+    return {
+      base,
+      /** One request with a bound, so a hang names itself and the server's output instead of a timeout. */
+      get: async (suffix) => {
+        try {
+          return await fetch(`${base}${suffix}`, { signal: AbortSignal.timeout(30_000) });
+        } catch (error) {
+          throw new Error(`${suffix}: ${error.message}\n${output.slice(-2000)}`);
+        }
+      },
+      output: () => output,
+      stop: () => new Promise((resolve) => {
+        child.once('exit', resolve);
+        child.kill('SIGTERM');
+        setTimeout(() => child.kill('SIGKILL'), 10_000).unref();
+      }),
+    };
+  }
 };
 
 describe.skipIf(!LIVE_DOCKER_ENABLED)('the switch, on the real server (live)', () => {
@@ -265,7 +281,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('the switch, on the real server (live)', (
     for (const entry of ['projects', 'themes', 'speech-models']) fs.mkdirSync(path.join(dataDir, entry));
     fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ isolatedSpacesEnabled: enabled }));
     const daemon = await startFakeDaemon(folder);
-    const server = await startServer({ dataDir, dockerHost: daemon.host, port: await freePort() });
+    const server = await startServer({ dataDir, dockerHost: daemon.host });
     return { dataDir, daemon, server, stop: async () => { await server.stop(); await daemon.stop(); } };
   };
 

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildSystemdUserService, enableStartupService, stablePnpmEntrypoint } from './cli-startup.js';
+import { buildSystemdUserService, enableStartupService, runStartupCommand, stablePnpmEntrypoint } from './cli-startup.js';
 import { INJECTED_ENV_KEY, assignInjectedEnv } from '../../server/lib/injected-env.js';
 
 const join = (...parts) => path.join(...parts);
@@ -24,6 +24,32 @@ describe('stablePnpmEntrypoint', () => {
   it('leaves npm installs alone', () => {
     const npmEntry = join('/usr/local/lib', 'node_modules', '@openchamber', 'web', 'bin', 'cli.js');
     expect(stablePnpmEntrypoint(npmEntry, () => true)).toBeNull();
+  });
+});
+
+describe('runStartupCommand', () => {
+  it('returns a promptly answering command unchanged', () => {
+    const result = runStartupCommand(process.execPath, ['-e', 'process.stdout.write("ok")'], { timeout: 5_000 });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('ok');
+    expect(result.error).toBeUndefined();
+  });
+
+  it('throws the timeout error for a command that never exits', () => {
+    let thrown;
+    try {
+      runStartupCommand(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { timeout: 200 });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown?.code).toBe('ETIMEDOUT');
+  });
+
+  it('surfaces the timeout for an allowFailure command through the same throw its callers catch', () => {
+    // The wrapper throws result.error for every caller (the shape the
+    // allowFailure call sites already catch); a timeout is that error.
+    expect(() => runStartupCommand(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { timeout: 200, allowFailure: true }))
+      .toThrow(expect.objectContaining({ code: 'ETIMEDOUT' }));
   });
 });
 

@@ -542,3 +542,19 @@ describe('openchamber.restart', () => {
     }
   });
 });
+
+describe('settings.devices', () => {
+  it('returns what the windows reported, and says when none has', async () => {
+    const devices = [{ deviceId: 'device-aaaa', surface: 'web', values: { sidebarWidth: 280 }, updatedAt: 1 }];
+    const { actions } = createActions({ listDeviceSettings: () => devices });
+    await expect(actions.execute('settings.devices', {})).resolves.toMatchObject({ devices });
+
+    const empty = createActions({ listDeviceSettings: () => [] }).actions;
+    await expect(empty.execute('settings.devices', {})).resolves.toMatchObject({ devices: [], note: expect.stringMatching(/No window has reported/) });
+  });
+
+  it('answers 503 on a server without the store', async () => {
+    const { actions } = createActions();
+    await expectError(actions.execute('settings.devices', {}), 503, /not available/);
+  });
+});

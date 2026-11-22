@@ -4,6 +4,11 @@ const DEFAULT_MAX_CHARS = 8_192;
 const REDACTED = '[redacted]';
 const SENSITIVE_QUERY_KEYS = /^(?:access_token|auth|authorization|credential|key|oauth_token|password|private_token|secret|token)$/i;
 const URL_PATTERN = /[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi;
+// Converged with the source-control redactor's sensitive key set
+// (lib/source-control/url-redaction.js, #1920/#2074): the same key/value
+// and header shapes must not survive on one surface while the other
+// strips them.
+const SENSITIVE_TEXT_KEY_PATTERN = 'x-api-key|access[-_]token|api[-_]key|client[-_]secret|oauth[-_]token|private[-_]token|authorization|password|secret|token';
 
 const stringValue = (value) => {
   if (value instanceof Error) {
@@ -52,8 +57,14 @@ export function redactGitText(value, { secrets = [], maxChars = DEFAULT_MAX_CHAR
   let text = stringValue(value)
     .replace(URL_PATTERN, redactUrl)
     .replace(/\b(authorization\s*:\s*bearer)\s+[^\s,;]+/gi, `$1 ${REDACTED}`)
+    // #2074/#2128: quoted JSON/Python values and scheme-headed assignment values leak
+    // the credential after the scheme word here just as they did in
+    // redactSensitiveText — redact inside the quotes / after the scheme,
+    // preserving structure and the scheme word.
+    .replace(new RegExp(`\\b(${SENSITIVE_TEXT_KEY_PATTERN})(["']?\\s*[:=]\\s*["'])((?:bearer|basic)\\s+)?[^\\s"',;]+`, 'gi'), `$1$2$3${REDACTED}`)
+    .replace(new RegExp(`\\b(${SENSITIVE_TEXT_KEY_PATTERN})(\\s*[:=]\\s*(?:bearer|basic))\\s+[^\\s,;]+`, 'gi'), `$1$2 ${REDACTED}`)
     .replace(/^(\s*(?:password|oauth_token|access_token|private_token|token)\s*=).*$/gim, `$1${REDACTED}`)
-    .replace(/\b(authorization|private-token|oauth-token)\s*[:=]\s*[^\s,;]+/gi, `$1=${REDACTED}`);
+    .replace(/\b(authorization|private-token|oauth-token)\s*[:=]\s*[^\s"',;]+/gi, `$1=${REDACTED}`);
 
   for (const secret of secrets.flatMap(secretVariants)) {
     text = text.split(secret).join(REDACTED);

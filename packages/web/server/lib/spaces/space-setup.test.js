@@ -169,6 +169,31 @@ describe('what the user reads of a command', () => {
     expect(keptOutputOf('file\u202egnp.exe \u2066z\u2069')).toBe('filegnp.exe z');
   });
 
+  it('never keeps a tail that starts inside a surrogate pair (#2041)', () => {
+    // One char + an astral character + filler sized so the 32,768-char tail
+    // cut lands between the pair's halves: the kept tail must drop the
+    // partial character instead of starting with a lone low surrogate.
+    const straddling = `x\u{1F600}${'y'.repeat(MAX_KEPT_OUTPUT_CHARACTERS - 1)}`;
+    const kept = keptOutputOf(straddling);
+    expect(kept).toBe('y'.repeat(MAX_KEPT_OUTPUT_CHARACTERS - 1));
+    expect(new TextDecoder().decode(new TextEncoder().encode(kept))).not.toContain('\uFFFD');
+    // ASCII over-limit controls keep their exact length, and an
+    // under-limit input with an intact pair is returned unchanged.
+    expect(keptOutputOf('y'.repeat(100_000))).toHaveLength(MAX_KEPT_OUTPUT_CHARACTERS);
+    expect(keptOutputOf('hello \u{1F600}')).toBe('hello \u{1F600}');
+  });
+
+  it('persists a failed run whose kept output starts on a character boundary (#2041)', async () => {
+    const printed = `x\u{1F600}${'y'.repeat(MAX_KEPT_OUTPUT_CHARACTERS - 1)}`;
+    const { setup, records } = setupWith({ 'npm ci': { code: 1, stdout: printed, stderr: '' } });
+    setup.start(ID, { projectPath: PROJECT_PATH, commands: ['npm ci'] });
+    expect(await until(() => !setup.isRunning(ID))).toBe(true);
+    const { record } = records.read(ID);
+    expect(record.setup.state).toBe('failed');
+    expect(setup.outputOf(record)).toBe('y'.repeat(MAX_KEPT_OUTPUT_CHARACTERS - 1));
+    expect(JSON.stringify(record)).not.toContain('\uFFFD');
+  });
+
   it('takes the list of commands as the host keeps it, without blank ones', () => {
     expect(setupCommandsSchema.parse(['npm ci', '  ', ''])).toEqual(['npm ci']);
     // 50 shared and 50 personal, as the host keeps them.

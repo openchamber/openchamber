@@ -1,9 +1,10 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readManagedCredential } from '../credentials/providers.js';
 import { asObject, buildResult, formatMoney, toNumber, toTimestamp, toUsageWindow } from '../utils/index.js';
 
 export const providerId = 'exe-dev';
 export const providerName = 'exe.dev';
-const aliases = ['exe-dev'];
+export const aliases = ['exe-dev'];
 const EXEC_URL = 'https://exe.dev/exec';
 const USAGE_COMMAND = 'billing credits usage --group=day --json';
 
@@ -47,7 +48,7 @@ export const fetchExeDevUsage = async (credential, fetchImpl = fetch) => {
   });
   if (response.status === 401 || response.status === 403) throw new Error('exe.dev authentication failed');
   if (!response.ok) throw new Error(`exe.dev usage API returned HTTP ${response.status}`);
-  const windows = parseExeDevUsage(await response.json().catch(() => null));
+  const windows = parseExeDevUsage(await readQuotaJson(response).catch(() => null));
   if (!windows) throw new Error('exe.dev usage data could not be parsed');
   return windows;
 };

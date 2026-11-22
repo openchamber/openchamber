@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { deflateRawSync } from 'node:zlib';
+import { crc32, deflateRawSync } from 'node:zlib';
 import { createThemeCatalog, registerThemeCatalogRoutes } from './theme-catalog.js';
 import { registerCommonRequestMiddleware } from './core-routes.js';
 import express from 'express';
@@ -18,6 +18,7 @@ function archive(files) {
     const header = Buffer.alloc(30);
     header.writeUInt32LE(0x04034b50);
     header.writeUInt16LE(8, 8);
+    header.writeUInt32LE(crc32(data), 14);
     header.writeUInt32LE(compressed.length, 18);
     header.writeUInt32LE(data.length, 22);
     header.writeUInt16LE(name.length, 26);
@@ -25,6 +26,7 @@ function archive(files) {
     const central = Buffer.alloc(46);
     central.writeUInt32LE(0x02014b50);
     central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(crc32(data), 16);
     central.writeUInt32LE(compressed.length, 20);
     central.writeUInt32LE(data.length, 24);
     central.writeUInt16LE(name.length, 28);
@@ -98,6 +100,56 @@ describe('Open VSX theme catalog', () => {
     await expect(createThemeCatalog({ fetchImpl: transport(bytes, { 'https://open-vsx.org/package.sha256': '0'.repeat(64) }) }).readPackage(identity)).rejects.toThrow('checksum');
     const wrong = archive({ ...packageFiles, 'extension/package.json': JSON.stringify({ ...manifest, publisher: 'Impostor' }) });
     await expect(createThemeCatalog({ fetchImpl: transport(wrong) }).readPackage(identity)).rejects.toThrow('identity');
+  });
+
+  test('rejects entries whose bytes no longer match the central-directory CRC', async () => {
+    // A dedicated builder so an entry's payload byte can be flipped in
+    // place: STORE keeps the byte visible, and a level-0 DEFLATE keeps
+    // it inside a stored block, so neither flip changes a length or
+    // breaks the inflate structure — only the CRC can catch them.
+    const buildEntry = (method, payload, crc) => {
+      const name = Buffer.from('extension/theme.json');
+      const header = Buffer.alloc(30);
+      header.writeUInt32LE(0x04034b50);
+      header.writeUInt16LE(method, 8);
+      header.writeUInt32LE(crc, 14);
+      header.writeUInt32LE(payload.length, 18);
+      header.writeUInt32LE(ORIGINAL_THEME.length, 22);
+      header.writeUInt16LE(name.length, 26);
+      const central = Buffer.alloc(46);
+      central.writeUInt32LE(0x02014b50);
+      central.writeUInt16LE(method, 10);
+      central.writeUInt32LE(crc, 16);
+      central.writeUInt32LE(payload.length, 20);
+      central.writeUInt32LE(ORIGINAL_THEME.length, 24);
+      central.writeUInt16LE(name.length, 28);
+      central.writeUInt32LE(0, 42);
+      const directory = Buffer.concat([central, name]);
+      const end = Buffer.alloc(22);
+      end.writeUInt32LE(0x06054b50);
+      end.writeUInt16LE(1, 8);
+      end.writeUInt16LE(1, 10);
+      end.writeUInt32LE(directory.length, 12);
+      end.writeUInt32LE(30 + name.length + payload.length, 16);
+      return Buffer.concat([header, name, payload, directory, end]);
+    };
+    const ORIGINAL_THEME = Buffer.from('{\"name\":\"original\"}');
+    const themeCrc = crc32(ORIGINAL_THEME);
+
+    const stored = Buffer.from(ORIGINAL_THEME);
+    stored[9] = 'O'.charCodeAt(0);
+    const readStored = openThemeArchive(buildEntry(0, stored, themeCrc));
+    await expect(readStored('extension/theme.json')).rejects.toThrow('checksum');
+
+    const deflated = deflateRawSync(ORIGINAL_THEME, { level: 0 });
+    // Stored-block header is 5 bytes; flip the first payload byte after it.
+    deflated[5] = deflated[5] ^ 0x01;
+    const readDeflated = openThemeArchive(buildEntry(8, deflated, themeCrc));
+    await expect(readDeflated('extension/theme.json')).rejects.toThrow('checksum');
+
+    // The uncorrupted entry still reads back.
+    const readValid = openThemeArchive(buildEntry(0, Buffer.from(ORIGINAL_THEME), themeCrc));
+    await expect(readValid('extension/theme.json')).resolves.toBe('{\"name\":\"original\"}');
   });
 
   test('limits decompression and rejects traversal and cyclic includes', async () => {

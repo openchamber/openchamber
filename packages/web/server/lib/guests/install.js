@@ -16,6 +16,7 @@ import { cloneGitRepository, isHttpsZipUrl, isPublicHostname, parseGitInstallUrl
 import { isReservedBuiltInId } from './builtins.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { extractZipBuffer, unwrapGuestRoot } from './extract-zip.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import {
   guestCopiesDir,
   isCopiedGuestRoot,
@@ -168,13 +169,16 @@ const isHttpsRedirectUrl = (value) => {
   }
 };
 
+// The cap is judged by readBoundedFile from the opened handle, not by a
+// stat of the path: a file swapped or grown after a stat, or a FIFO in
+// place of a regular file, must not slip the 20 MiB gate or block the
+// read. Every refusal (missing, too-large, not-regular) and any read
+// error maps to null, which the caller reports as not-found — the same
+// mapping the stat-then-read spelling had.
 const readLocalZip = async (filePath) => {
   try {
-    const stat = await fs.stat(filePath);
-    if (!stat.isFile() || stat.size > MAX_ZIP_BYTES) {
-      return null;
-    }
-    return await fs.readFile(filePath);
+    const result = await readBoundedFile(filePath, MAX_ZIP_BYTES);
+    return result.ok ? result.buffer : null;
   } catch {
     return null;
   }
@@ -299,6 +303,11 @@ export const installGuestFromPath = async (rawPath, persistPath, { openchamberVe
     return { ok: false, code: 'invalid-path' };
   }
   try {
+    // This stat only routes: a regular *.zip file goes to the zip path,
+    // anything else falls through to package-directory resolution (a
+    // directory may itself be named *.zip). It judges nothing about the
+    // archive — size and regularity are re-judged from the handle inside
+    // readLocalZip, so a swap between this stat and the read is safe.
     const stat = await fs.stat(rawPath);
     if (stat.isFile() && rawPath.toLowerCase().endsWith('.zip')) {
       const buffer = await readLocalZip(rawPath);

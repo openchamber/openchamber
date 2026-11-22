@@ -5,13 +5,14 @@
  * @module quota/providers/ollama-cloud
  */
 
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { deleteLegacyOllamaCloudCredential } from '../credentials/store.js';
 import { asNonEmptyString, asObject, buildResult, formatMoney, getAuthEntry, normalizeAuthEntry, toNumber, toTimestamp, toUsageWindow } from '../utils/index.js';
 
 export const providerId = 'ollama-cloud';
 export const providerName = 'Ollama Cloud';
-const aliases = ['ollama-cloud', 'ollamacloud'];
+export const aliases = ['ollama-cloud', 'ollamacloud'];
 
 const BALANCE_URL = 'https://ollama.com/api/balance';
 const ME_URL = 'https://ollama.com/api/me';
@@ -87,7 +88,7 @@ export const fetchOllamaCloudUsage = async (apiKey, fetchImpl = fetch) => {
   }
   if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
 
-  const windows = toUsageWindows(await response.json());
+  const windows = toUsageWindows(await readQuotaJson(response));
   if (Object.keys(windows).length === 0) throw new Error('Ollama Cloud usage data could not be parsed');
   return windows;
 };
@@ -100,7 +101,7 @@ export const fetchOllamaCloudPlan = async (apiKey, fetchImpl = fetch) => {
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) return null;
-  return asNonEmptyString(asObject(await response.json())?.Plan);
+  return asNonEmptyString(asObject(await readQuotaJson(response))?.Plan);
 };
 
 export const fetchQuota = async () => {

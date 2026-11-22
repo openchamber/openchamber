@@ -342,6 +342,8 @@ const projectEntrySchema = z.object({
   addedAt: nonNegativeFinite.optional().catch(undefined),
   lastOpenedAt: nonNegativeFinite.optional().catch(undefined),
   sidebarCollapsed: z.boolean().optional().catch(undefined),
+  hiddenFromWork: z.boolean().optional().catch(undefined),
+  hiddenFromAllSessions: z.boolean().optional().catch(undefined),
   // Per-project model defaults. Leaving them out of the schema stripped them
   // from every settings response, so the store saw a different project list
   // after each save and replaced it, which reset the rename form mid-typing
@@ -378,6 +380,8 @@ export const parseProjects = fromSchema(
       if (parsed.data.defaultAgent) project.defaultAgent = parsed.data.defaultAgent;
       if (parsed.data.defaultVariant) project.defaultVariant = parsed.data.defaultVariant;
       if (parsed.data.sidebarCollapsed !== undefined) project.sidebarCollapsed = parsed.data.sidebarCollapsed;
+      if (parsed.data.hiddenFromWork !== undefined) project.hiddenFromWork = parsed.data.hiddenFromWork;
+      if (parsed.data.hiddenFromAllSessions !== undefined) project.hiddenFromAllSessions = parsed.data.hiddenFromAllSessions;
       result.push(project);
     }
     return result;

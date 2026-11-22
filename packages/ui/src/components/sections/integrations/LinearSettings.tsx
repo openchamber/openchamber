@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
@@ -55,6 +56,7 @@ export const LinearSettings: React.FC = () => {
   const setStatus = useLinearAuthStore((state) => state.setStatus);
 
   const [isBusy, setIsBusy] = React.useState(false);
+  const [vaultReference, setVaultReference] = React.useState('');
   const [isWaiting, setIsWaiting] = React.useState(false);
   const [open, setOpen] = React.useState(false);
   const pollTimerRef = React.useRef<number | null>(null);
@@ -114,6 +116,30 @@ export const LinearSettings: React.FC = () => {
       setIsBusy(false);
     }
   }, [refreshStatus, runtimeLinear, stopWaiting, t]);
+
+  // A Linear personal API key kept in 1Password: the server reads the key
+  // once to identify the workspace and stores only the reference (#304).
+  const addFromVault = React.useCallback(async () => {
+    const reference = vaultReference.trim();
+    if (!reference || !runtimeLinear?.authVault) return;
+    setIsBusy(true);
+    try {
+      const payload = await runtimeLinear.authVault(reference);
+      setStatus(payload);
+      setVaultReference('');
+      toast.success(t('settings.vault.added'));
+    } catch (error) {
+      console.error('Failed to add a Linear account from 1Password:', error);
+      // SAFETY: authVault attaches the server's stable error code to the Error it throws; the probe is optional, so any other failure falls through to the generic message.
+      const code = (error as { code?: string })?.code;
+      toast.error(code === 'VAULT_READ_FAILED' ? t('settings.vault.error.readFailed')
+        : code === 'INVALID_TOKEN' ? t('settings.vault.error.invalidToken')
+          : code === 'INVALID_REFERENCE' ? t('settings.vault.error.invalidReference')
+            : t('settings.vault.error.failed'));
+    } finally {
+      setIsBusy(false);
+    }
+  }, [runtimeLinear, setStatus, t, vaultReference]);
 
   const activateWorkspace = React.useCallback(async (organizationId: string) => {
     if (!runtimeLinear || !organizationId) return;
@@ -298,6 +324,32 @@ export const LinearSettings: React.FC = () => {
                   {t('settings.integrations.linear.actions.connect')}
                 </Button>
               )}
+
+              {runtimeLinear.authVault ? (
+                <div className="space-y-2 border-t border-[var(--interactive-border)] pt-3">
+                  <p className="text-sm font-medium text-foreground">{t('settings.integrations.linear.vault.label')}</p>
+                  <p className="text-xs text-muted-foreground">{t('settings.integrations.linear.vault.info')}</p>
+                  <form
+                    className="flex flex-wrap items-center gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void addFromVault();
+                    }}
+                  >
+                    <Input
+                      className="h-8 w-[18rem] max-w-full font-mono text-xs"
+                      value={vaultReference}
+                      onChange={(event) => setVaultReference(event.target.value)}
+                      placeholder="op://Vault/item/field"
+                      aria-label={t('settings.integrations.linear.vault.label')}
+                      disabled={isBusy}
+                    />
+                    <Button type="submit" size="sm" variant="outline" disabled={isBusy || !vaultReference.trim()}>
+                      {t('settings.vault.add')}
+                    </Button>
+                  </form>
+                </div>
+              ) : null}
             </div>
       </IntegrationCatalogCard>
   );

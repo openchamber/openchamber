@@ -1,28 +1,101 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const writeObjectiveMock = vi.fn(async () => undefined);
+const appendObjectiveVersionMock = vi.fn(async () => ({ versions: [], versionId: null }));
 const generateSmallModelTextMock = vi.fn(async () => ({ text: '' }));
 
-vi.mock('./objectives.js', () => ({
-  GOAL_OBJECTIVE_CHAR_LIMIT: 5_000,
-  GOAL_OBJECTIVE_HARD_CAP: 1_000_000,
-  goalObjectiveLimits: () => ({ objective: 5_000, check: 20_000 }),
-  writeObjective: writeObjectiveMock,
-}));
-
-vi.mock('../small-model/index.js', () => ({
-  generateSmallModelText: generateSmallModelTextMock,
-}));
-
 // Every call names its writer settings, so the user's own never reach these tests.
-const WRITER_OFF = { model: undefined, rewriteAll: false };
+const WRITER_OFF = { model: undefined, rewriteAll: false, charLimit: 5_000 };
 
-const { buildGoalIntroText, createSessionGoal } = await import('./create.js');
+const { buildGoalIntroText, createSessionGoal: createSessionGoalImpl } = await import('./create.js');
+const createSessionGoal = (options) => createSessionGoalImpl({
+  ...options,
+  writeObjectiveFile: writeObjectiveMock,
+  appendObjectiveVersionFile: appendObjectiveVersionMock,
+  generateSmallModelText: generateSmallModelTextMock,
+});
+
+describe('session goal objective cuts are surrogate-pair safe (#1909)', () => {
+  const EMOJI = '\u{1F600}';
+  const hasLoneSurrogate = (text) => Buffer.from(text, 'utf8').toString('utf8') !== text;
+
+  it('keeps the head/tail trim off a split pair at both cuts', async () => {
+    // Learn the fitted shape from a plain objective first: head + marker +
+    // tail, each half of the limit minus the marker.
+    await createSessionGoal({
+      sessionID: 'ses_probe',
+      directory: '/repo',
+      objective: 'x'.repeat(6000),
+      persistSessionGoal: vi.fn(async () => undefined),
+      goalWriterSettings: WRITER_OFF,
+    });
+    const probe = writeObjectiveMock.mock.calls.at(-1)?.[1];
+    const markerStart = probe.indexOf('\n\n[');
+    const half = markerStart;
+    expect(half).toBeGreaterThan(0);
+
+    // An emoji whose high surrogate is the head cut's last code unit, and
+    // one whose low surrogate is the tail cut's first code unit.
+    const objective = `${'a'.repeat(half - 1)}${EMOJI}${'b'.repeat(200)}${EMOJI}${'d'.repeat(half - 1)}`;
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo',
+      objective,
+      persistSessionGoal: vi.fn(async () => undefined),
+      goalWriterSettings: WRITER_OFF,
+    });
+    const fitted = writeObjectiveMock.mock.calls.at(-1)?.[1];
+    expect(hasLoneSurrogate(fitted)).toBe(false);
+    expect(fitted.length).toBeLessThanOrEqual(5_000);
+    expect(fitted.startsWith('a'.repeat(half - 1))).toBe(true);
+    expect(fitted.endsWith('d'.repeat(half - 1))).toBe(true);
+    expect(fitted).toContain('objective trimmed for the auditor');
+  });
+
+  it('keeps the distilled cut off a split pair', async () => {
+    generateSmallModelTextMock.mockResolvedValue({ text: `${'a'.repeat(4999)}${EMOJI}${'b'.repeat(100)}` });
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo',
+      objective: 'z'.repeat(6000),
+      persistSessionGoal: vi.fn(async () => undefined),
+      goalWriterSettings: WRITER_OFF,
+    });
+    const fitted = writeObjectiveMock.mock.calls.at(-1)?.[1];
+    expect(fitted).toBe('a'.repeat(4999));
+  });
+
+  it('keeps the inline fallback cut off a split pair when the objective file cannot be written', async () => {
+    writeObjectiveMock.mockRejectedValue(new Error('read-only data dir'));
+    const { goal } = await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo',
+      objective: `${'a'.repeat(4999)}${EMOJI}${'b'.repeat(100)}`,
+      ignoreLimit: true,
+      persistSessionGoal: vi.fn(async () => undefined),
+      goalWriterSettings: WRITER_OFF,
+    });
+    expect(goal.objective).toBe('a'.repeat(4999));
+    expect(hasLoneSurrogate(goal.objective)).toBe(false);
+  });
+});
 
 describe('session goal creation', () => {
   beforeEach(() => {
     writeObjectiveMock.mockReset().mockResolvedValue(undefined);
+    appendObjectiveVersionMock.mockReset().mockResolvedValue({ versions: [], versionId: null });
     generateSmallModelTextMock.mockReset().mockResolvedValue({ text: '' });
+  });
+
+  it('records the initial objective as the goal\'s first version (#1830)', async () => {
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo',
+      objective: 'Finish and verify the migration',
+      persistSessionGoal: vi.fn(async () => undefined),
+      goalWriterSettings: WRITER_OFF,
+    });
+    expect(appendObjectiveVersionMock).toHaveBeenCalledWith('ses_123', 'Finish and verify the migration');
   });
 
   it('saves the goal in OpenChamber\'s own store, never through OpenCode', async () => {

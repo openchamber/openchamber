@@ -4,7 +4,7 @@ import React from 'react';
 import type { UsageWindow } from '@/types';
 
 const dom = new Window();
-Object.assign(globalThis, { window: dom, document: dom.document, localStorage: dom.localStorage, HTMLElement: dom.HTMLElement, Event: dom.Event });
+Object.assign(globalThis, { CustomEvent: dom.CustomEvent, MutationObserver: dom.MutationObserver, window: dom, document: dom.document, localStorage: dom.localStorage, HTMLElement: dom.HTMLElement, Event: dom.Event });
 const { createRoot } = await import('react-dom/client');
 const { flushSync } = await import('react-dom');
 const { UsageCard } = await import('./UsageCard');

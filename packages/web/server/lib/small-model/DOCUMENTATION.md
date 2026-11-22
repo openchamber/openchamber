@@ -22,7 +22,13 @@ credentials, the provider dispatch and the token refresh. Routes live under
   context and output limits, and a round trip per session title is the wrong
   trade. An unreachable OpenCode keeps the previous answer rather than
   retracting it. An empty list is never cached: OpenCode 2 answers with one
-  while it starts, and caching it hid every provider from the pickers.
+  while it starts, and caching it hid every provider from the pickers. Every
+  catalog read (model/provider lists, the default model, the `title` agent)
+  carries a 15-second deadline: the SDK composes none of its own, and a
+  stalled OpenCode otherwise hangs model resolution before the generation
+  budget starts; a blown deadline lands in the same fallbacks as a failed
+  read. Generation requests keep their own per-call budget and are not
+  bounded by the catalog deadline.
 - `index.js` — `generateSmallModelText()`, `describeSmallModel()`,
   `listAuthenticatedProviders(directory?)`. `generateSmallModelText` takes an
   optional `variant` (effort level), sent to OpenCode as `model.variant` only

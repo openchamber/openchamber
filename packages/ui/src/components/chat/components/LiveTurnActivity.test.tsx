@@ -142,6 +142,7 @@ describe('live Activity with the real message body', () => {
             customElements: win.customElements,
             Node: win.Node, NodeList: win.NodeList, Element: win.Element, HTMLElement: win.HTMLElement, SVGElement: win.SVGElement,
             HTMLAnchorElement: win.HTMLAnchorElement,
+            Event: win.Event, CustomEvent: win.CustomEvent,
             MutationObserver: win.MutationObserver, ResizeObserver: win.ResizeObserver,
             requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win),
             getComputedStyle: win.getComputedStyle.bind(win), IS_REACT_ACT_ENVIRONMENT: true,

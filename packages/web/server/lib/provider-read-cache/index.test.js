@@ -3,9 +3,9 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { createProviderReadCache } from './index.js';
 
-function setup({ answer = (req) => ({ items: [req.query.page ?? '1'] }), status = 200 } = {}) {
+function setup({ answer = (req) => ({ items: [req.query.page ?? '1'] }), status = 200, cacheOptions = {} } = {}) {
   let clock = 1_000;
-  const cache = createProviderReadCache({ now: () => clock });
+  const cache = createProviderReadCache({ now: () => clock, ...cacheOptions });
   const app = express();
   app.use(cache.middleware);
   const calls = { list: 0 };
@@ -96,5 +96,59 @@ describe('provider read cache', () => {
     await request(app).post('/api/source-control/github/read-cache/refresh').expect(200, { ok: true });
     await request(app).get('/api/source-control/github/pulls/list').expect(200);
     expect(calls.list).toBe(2);
+  });
+
+  // #1770: the total-bytes bound. Bodies are sized so exactly two answers
+  // fit under the cap; the byte size is the JSON the cache counts.
+  const sizedAnswer = (req) => ({ page: req.query.page ?? '1', data: 'x'.repeat(200) });
+  const sizedBytes = (page) => Buffer.byteLength(JSON.stringify(sizedAnswer({ query: { page } })));
+  const twoFit = () => sizedBytes('1') + sizedBytes('2');
+
+  it('evicts the oldest answers while the total-bytes bound is exceeded, keeping recent ones', async () => {
+    const { app, calls } = setup({ answer: sizedAnswer, cacheOptions: { maxTotalBytes: twoFit() } });
+    const get = (page) => request(app).get(`/api/source-control/github/pulls/list?accountId=a&page=${page}`).expect(200);
+    await get('1');
+    await get('2');
+    await get('3');
+    expect(calls.list).toBe(3);
+    // Recent answers still hit; the oldest was evicted and is re-fetched.
+    await get('3');
+    await get('2');
+    expect(calls.list).toBe(3);
+    await get('1');
+    expect(calls.list).toBe(4);
+  });
+
+  it('does not double-count bytes when an answer is remembered again after expiry', async () => {
+    const { app, calls, tick } = setup({ answer: sizedAnswer, cacheOptions: { maxTotalBytes: twoFit() } });
+    const get = (page) => request(app).get(`/api/source-control/github/pulls/list?accountId=a&page=${page}`).expect(200);
+    await get('1');
+    tick(31_000);
+    await get('1');
+    expect(calls.list).toBe(2);
+    await get('2');
+    expect(calls.list).toBe(3);
+    // Both fit exactly under the cap; a double-counted page 1 would have
+    // evicted one of them.
+    await get('1');
+    await get('2');
+    expect(calls.list).toBe(3);
+  });
+
+  it('leaves the byte accounting at the true retained total after a clear', async () => {
+    const { app, cache, calls } = setup({ answer: sizedAnswer, cacheOptions: { maxTotalBytes: twoFit() } });
+    const get = (page) => request(app).get(`/api/source-control/github/pulls/list?accountId=a&page=${page}`).expect(200);
+    await get('1');
+    await get('2');
+    expect(calls.list).toBe(2);
+    cache.clear('github');
+    await get('1');
+    await get('2');
+    expect(calls.list).toBe(4);
+    // Refills retained exactly two answers: both still hit. Leaked bytes
+    // from before the clear would have evicted one during the refill.
+    await get('1');
+    await get('2');
+    expect(calls.list).toBe(4);
   });
 });

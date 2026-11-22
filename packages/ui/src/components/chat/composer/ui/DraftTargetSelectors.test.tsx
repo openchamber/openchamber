@@ -20,6 +20,7 @@ const renderBranchSheet = async (onCreateCustomWorktree?: () => void) => {
         localStorage: win.localStorage,
         requestAnimationFrame: win.requestAnimationFrame.bind(win),
         cancelAnimationFrame: win.cancelAnimationFrame.bind(win),
+        Event: win.Event, CustomEvent: win.CustomEvent, MutationObserver: win.MutationObserver,
         IS_REACT_ACT_ENVIRONMENT: true,
     };
     for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { configurable: true, value });

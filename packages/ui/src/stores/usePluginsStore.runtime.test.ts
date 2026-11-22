@@ -5,6 +5,7 @@ const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
   window: browser, document: browser.document, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage,
+  Event: browser.Event, CustomEvent: browser.CustomEvent, MutationObserver: browser.MutationObserver,
 });
 
 type Handler = (request: Request) => Promise<Response>;

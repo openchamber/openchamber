@@ -190,6 +190,22 @@ describe('session assist context', () => {
     expect(buildAssistPrompt(context.turns, { recap: true }, 500)).toBeNull();
   });
 
+  it('never splits a surrogate pair at the excerpt cuts (#1911)', () => {
+    const EMOJI = '\u{1F600}';
+    const marker = '\n[Content omitted]\n';
+    // limit 100: head is 41, tail is 40 (marker is 19 code units).
+    const headSplit = excerpt(`${'a'.repeat(40)}${EMOJI}${'b'.repeat(200)}`, 100);
+    expect(headSplit).toBe(`${'a'.repeat(40)}${marker}${'b'.repeat(40)}`);
+    const tailSplit = excerpt(`${'a'.repeat(200)}${EMOJI}${'b'.repeat(39)}`, 100);
+    expect(tailSplit).toBe(`${'a'.repeat(41)}${marker}${'b'.repeat(39)}`);
+    // The small-limit branch cuts plainly; it is pair-safe too.
+    expect(excerpt(`${'a'.repeat(10)}${EMOJI}${'b'.repeat(10)}`, 11)).toBe('a'.repeat(10));
+    for (const cut of [headSplit, tailSplit]) {
+      expect(Buffer.from(cut, 'utf8').toString('utf8')).toBe(cut);
+      expect(cut.length).toBeLessThanOrEqual(100);
+    }
+  });
+
   it('excerpts from both ends so the start and the end both survive', () => {
     expect(excerpt('abcdef', 10)).toBe('abcdef');
     const trimmed = excerpt(`START${'x'.repeat(500)}END`, 100);

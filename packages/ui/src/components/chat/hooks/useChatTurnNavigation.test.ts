@@ -35,17 +35,27 @@ const mountNavigation = async (initialTurnIds: string[]) => {
     let turnIds = initialTurnIds;
     let navigation: ReturnType<typeof useChatTurnNavigation> | null = null;
     const Harness = () => {
+        // Mirror the production caller: useChatTimelineController hands the
+        // hook useCallback-stable scroll functions, so keep these identities
+        // stable across renders too. Fresh inline arrows change identity on
+        // every render and re-run the hook's hash effect, replaying a
+        // not-yet-reached hash scroll. The closures read the harness's
+        // mutable turnIds binding, so a stable identity still sees the
+        // latest turns.
+        const scrollToTurn = React.useCallback(async (turnId: string) => {
+            scrolledTo.push(turnId);
+            return turnIds.includes(turnId);
+        }, []);
+        const scrollToMessage = React.useCallback(async () => false, []);
+        const resumeToBottom = React.useCallback(() => undefined, []);
         navigation = useChatTurnNavigation({
             sessionId,
             turnIds,
             activeTurnId: null,
             // Like the timeline controller: a turn that has not loaded yet cannot be reached.
-            scrollToTurn: async (turnId) => {
-                scrolledTo.push(turnId);
-                return turnIds.includes(turnId);
-            },
-            scrollToMessage: async () => false,
-            resumeToBottom: () => undefined,
+            scrollToTurn,
+            scrollToMessage,
+            resumeToBottom,
         });
         return null;
     };
@@ -87,9 +97,17 @@ test('a link to a turn jumps once the turn loads, and only once', () => withDom(
     await harness.unmount();
 }));
 
-test('coming back to a session with its hash still in the address jumps there again', () => withDom('http://localhost/', async () => {
+test('coming back to a session with its hash still in the address jumps there again', () => withDom('http://localhost/', async (dom) => {
     const harness = await mountNavigation(['turn_a', 'turn_b']);
     await harness.jumpTo('turn_a');
+    // happy-dom delivers an asynchronous hashchange for the jump's own
+    // replaceState hash write (real browsers never fire one for
+    // replaceState). Drain the DOM task queue before switching sessions:
+    // while still in session_1 the hook's already-reached guard absorbs
+    // that stale event, but if it lands after the switch -- when the
+    // reached record has been reset and the hash is unreached in the new
+    // session -- it replays the scroll and adds an extra attempt.
+    await dom.happyDOM.waitUntilComplete();
     await harness.openSession('session_2', ['turn_x']);
     await harness.openSession('session_1', ['turn_a', 'turn_b']);
 

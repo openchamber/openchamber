@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,6 +39,18 @@ describe('managed SSH credential storage', () => {
 
     await expect(store.lookup('deploy-one')).resolves.toEqual(record);
     await expect(store.lookup('missing')).resolves.toBeNull();
+  });
+
+  it('fails closed for an oversized store file', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-ssh-store-oversized-'));
+    directories.push(directory);
+    const filePath = path.join(directory, 'git-ssh-credentials.json');
+    // The named cap is 4 MiB; a larger file is refused on the handle stat
+    // before any of it is parsed, and is left in place.
+    await fs.writeFile(filePath, ' '.repeat(4 * 1024 * 1024 + 1), { mode: 0o600 });
+    const store = createManagedSshCredentialStore({ filePath });
+    await expect(store.read()).rejects.toMatchObject({ code: 'INVALID_MANAGED_SSH_CREDENTIAL_STORE' });
+    expect((await fs.stat(filePath)).size).toBe(4 * 1024 * 1024 + 1);
   });
 
   it('atomically replaces records with mode 0600', async () => {
@@ -95,5 +108,48 @@ describe('managed SSH credential storage', () => {
 
     await fs.writeFile(filePath, JSON.stringify({ version: 1, keys: [], token: 'nope' }), { mode: 0o600 });
     await expect(store.read()).rejects.toMatchObject({ code: 'INVALID_MANAGED_SSH_CREDENTIAL_STORE' });
+  });
+});
+
+describe('bounded state read (#1766)', () => {
+  const grownStateFs = (filePath) => ({
+    ...fs,
+    open: async (target, flags, mode) => {
+      const handle = await fs.open(target, flags, mode);
+      if (target !== filePath) return handle;
+      return {
+        stat: async () => {
+          const stats = await handle.stat();
+          return { isFile: () => stats.isFile(), size: 0, mode: stats.mode };
+        },
+        read: (buffer, offset, length, position) => handle.read(buffer, offset, length, position),
+        close: () => handle.close(),
+      };
+    },
+  });
+  const setupDir = async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-ssh-store-bounded-'));
+    directories.push(directory);
+    return { directory, filePath: path.join(directory, 'git-ssh-credentials.json') };
+  };
+
+  it('refuses a store file grown after its handle stat, instead of buffering it whole', async () => {
+    const { filePath } = await setupDir();
+    await fs.writeFile(filePath, ' '.repeat(4 * 1024 * 1024 + 1), { mode: 0o600 });
+    const store = createManagedSshCredentialStore({ filePath, fsImpl: grownStateFs(filePath) });
+    await expect(store.read()).rejects.toMatchObject({ code: 'INVALID_MANAGED_SSH_CREDENTIAL_STORE' });
+  });
+
+  it('refuses a FIFO promptly and the serialized operation behind it settles too', async () => {
+    if (process.platform === 'win32') return;
+    const { filePath } = await setupDir();
+    execFileSync('mkfifo', [filePath]);
+    const store = createManagedSshCredentialStore({ filePath });
+    const first = store.read();
+    const second = store.read();
+    await expect(first).rejects.toMatchObject({ code: 'INVALID_MANAGED_SSH_CREDENTIAL_STORE' });
+    await expect(second).rejects.toMatchObject({ code: 'INVALID_MANAGED_SSH_CREDENTIAL_STORE' });
+    await fs.rm(filePath);
+    await expect(store.read()).resolves.toEqual({ version: 1, keys: [] });
   });
 });

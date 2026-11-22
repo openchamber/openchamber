@@ -36,3 +36,16 @@ openchamber --ui-password be-creative-here
 ## 移动应用
 
 通过 TestFlight 安装 iPhone 应用，或从最新版本下载 Android 应用，然后将它与你的电脑配对。[移动应用与 PWA](/zh-cn/mobile/) 介绍了这两个步骤。
+
+## Nix
+
+在 NixOS 上，或任何装有 Nix 的 Linux 上，OpenChamber 仓库中的 flake 会构建相同的应用：
+
+```bash
+nix run github:openchamber/openchamber        # http://localhost:3000 上的 Web 服务器
+nix run github:openchamber/openchamber#gui    # 桌面应用
+```
+
+该 flake 还提供 `packages.openchamber` 和 `packages.openchamber-desktop`，以及带有 `host`、`port`、`openFirewall` 和 `uiPasswordFile` 的 `nixosModules.openchamber` systemd 模块。密码文件通过 systemd 的 `LoadCredential` 读取，因此 root 拥有、权限为 0400 的密钥可与默认动态用户配合使用。
+
+更新通过 flake 进行。打包的 OpenCode CLI 已关闭应用内更新程序，因为 Nix store 路径无法自我更新；要更新，请拉取 flake 并重新构建。

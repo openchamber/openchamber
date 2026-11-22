@@ -2693,11 +2693,19 @@ process.exit(safe ? 0 : 1);
   });
 
   it('reports a confirmed fetch timeout as cancelled with TIMEOUT', async () => {
-    const setupValue = setup({ spawnResults: [{ manual: true }], timeoutMs: 1 });
-    const plan = await setupValue.service.plan(request('fetch'));
-    await expect(setupValue.service.execute(plan.operationId)).resolves.toMatchObject({
-      state: 'cancelled', error: { code: 'TIMEOUT' },
-    });
+    vi.useFakeTimers();
+    try {
+      const setupValue = setup({ spawnResults: [{ manual: true }], timeoutMs: 1_000 });
+      const plan = await setupValue.service.plan(request('fetch'));
+      const running = setupValue.service.execute(plan.operationId);
+      await vi.waitFor(() => expect(setupValue.calls.some((call) => call.args.includes('fetch'))).toBe(true));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(running).resolves.toMatchObject({
+        state: 'cancelled', error: { code: 'TIMEOUT' },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('applies the operation deadline while authority validation is pending', async () => {
@@ -3113,6 +3121,80 @@ process.exit(safe ? 0 : 1);
     });
     await expect(fs.readFile(path.join(destination, 'cloned'), 'utf8')).resolves.toBe('yes');
     expect(applyGitIdentity).toHaveBeenCalledWith(temporary, 'identity_one');
+  });
+
+  it('clones a large checkout file without reading it whole to digest it', async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-network-clone-large-digest-'));
+    temporaryDirectories.push(parent);
+    const destination = path.join(parent, 'repository');
+    const temporary = path.join(parent, '.repository.openchamber-git_operation_one.tmp');
+    // Deterministic multi-chunk content: 2 MiB spans many 64 KiB digest chunks.
+    const big = Buffer.alloc(2 * 1024 * 1024);
+    for (let index = 0; index < big.length; index += 1) big[index] = index % 251;
+    const fsImpl = {
+      ...fs,
+      readFile: vi.fn(async (target, ...args) => {
+        if (path.basename(String(target)) === 'big.bin') {
+          throw new Error('whole-file read of a large checkout file');
+        }
+        return fs.readFile(target, ...args);
+      }),
+    };
+    const setupValue = setup({
+      fsImpl,
+      spawnResults: [{ code: 0, onSpawn: async () => {
+        await fs.writeFile(path.join(temporary, 'big.bin'), big);
+        await fs.writeFile(path.join(temporary, 'small.txt'), 'small');
+      } }],
+    });
+    const plan = await setupValue.service.plan({
+      operation: 'clone', remoteUrl: ENDPOINT, destinationPath: destination,
+      transportMode: 'managed', credentialAccount: CLONE_ACCOUNT,
+    });
+    await expect(setupValue.service.execute(plan.operationId)).resolves.toMatchObject({ state: 'succeeded' });
+    const copied = await fs.readFile(path.join(destination, 'big.bin'));
+    expect(copied).toEqual(big);
+    expect(crypto.createHash('sha256').update(copied).digest('base64url'))
+      .toBe(crypto.createHash('sha256').update(big).digest('base64url'));
+    expect(fsImpl.readFile.mock.calls.some(([target]) => path.basename(String(target)) === 'big.bin')).toBe(false);
+  });
+
+  it('verifies a copied large file during failed-clone cleanup without reading it whole', async () => {
+    const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-network-clone-large-verify-'));
+    temporaryDirectories.push(parent);
+    const destination = path.join(parent, 'repository');
+    const temporary = path.join(parent, '.repository.openchamber-git_operation_one.tmp');
+    const big = Buffer.alloc(1024 * 1024, 0x5a);
+    const fsImpl = {
+      ...fs,
+      readFile: vi.fn(async (target, ...args) => {
+        if (path.basename(String(target)) === 'a-big.bin') {
+          throw new Error('whole-file read of a large checkout file');
+        }
+        return fs.readFile(target, ...args);
+      }),
+      copyFile: vi.fn(async (source, target, mode) => {
+        if (path.basename(target) === 'b-fail') throw new Error('copy failed');
+        return fs.copyFile(source, target, mode);
+      }),
+    };
+    const setupValue = setup({
+      fsImpl,
+      spawnResults: [{ code: 0, onSpawn: async () => {
+        await fs.writeFile(path.join(temporary, 'a-big.bin'), big);
+        await fs.writeFile(path.join(temporary, 'b-fail'), 'clone data');
+      } }],
+    });
+    const plan = await setupValue.service.plan({
+      operation: 'clone', remoteUrl: ENDPOINT, destinationPath: destination,
+      transportMode: 'managed', credentialAccount: CLONE_ACCOUNT,
+    });
+    await expect(setupValue.service.execute(plan.operationId)).resolves.toMatchObject({ state: 'failed' });
+    // Cleanup only removes the destination when checkoutMatches verifies the
+    // copied large file against its recorded digest, so removal proves the
+    // streamed verify matched without a whole-file read.
+    await expect(fs.stat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(fsImpl.readFile.mock.calls.some(([target]) => path.basename(String(target)) === 'a-big.bin')).toBe(false);
   });
 
   it.each(['system', 'managed', 'anonymous'])('persists the exact %s clone transport at revision one without a provider binding', async (mode) => {

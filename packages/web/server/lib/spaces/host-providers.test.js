@@ -97,4 +97,18 @@ describe('the host\'s custom providers', () => {
     expect(isLoopbackUrl('http://192.168.1.23:11434/v1')).toBe(false);
     expect(isLoopbackUrl('ftp://localhost/')).toBe(false);
   });
+
+  it('judges loopback by the shared range test, not by name prefix (#1657)', () => {
+    // DNS names that merely start with 127. are remote hosts, not this machine:
+    // never rewritten, and the provider key must not ride to them as loopback.
+    expect(windowUpstreamOf('http://127.evil.example:11434/v1')).toBe('http://127.evil.example:11434/v1');
+    expect(windowUpstreamOf('http://127.0.0.1.evil.example:11434/v1')).toBe('http://127.0.0.1.evil.example:11434/v1');
+    expect(isLoopbackUrl('http://127.evil.example:11434/v1')).toBe(false);
+    expect(isLoopbackUrl('http://127.0.0.1.evil.example:11434/v1')).toBe(false);
+    // Names and mapped forms the old set + prefix regex missed are this machine.
+    expect(windowUpstreamOf('http://myapp.localhost:11434/v1')).toBe('http://host.docker.internal:11434/v1');
+    expect(windowUpstreamOf('http://[::ffff:127.0.0.1]:11434/v1')).toBe('http://host.docker.internal:11434/v1');
+    expect(isLoopbackUrl('http://myapp.localhost:11434/v1')).toBe(true);
+    expect(isLoopbackUrl('http://[::ffff:127.0.0.1]:11434/v1')).toBe(true);
+  });
 });

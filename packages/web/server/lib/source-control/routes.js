@@ -20,8 +20,12 @@ const defaultConfigRoot = () => process.env.OPENCHAMBER_DATA_DIR
   : path.join(os.homedir(), '.config', 'openchamber');
 
 const resolveDirectoryQuery = (value) => {
-  const directory = Array.isArray(value) ? value[0] : value;
-  return Object.prototype.toString.call(directory) === '[object String]' ? directory : '';
+  // A repeated query parameter arrives as an array and is ambiguous:
+  // never silently select its first value (#2292, matching the git
+  // routes' contract from #2121). Returning the empty sentinel routes it
+  // through the binding service's existing invalid-directory 400.
+  if (Array.isArray(value)) return '';
+  return Object.prototype.toString.call(value) === '[object String]' ? value : '';
 };
 
 const sendBindingError = (res, error) => {

@@ -2,13 +2,27 @@ import type { Metadata, Part } from '@/lib/opencode/model';
 import { readContextPart, type ContextPartPayload } from './contextParts';
 import { extractTerminalContexts } from './terminalContext';
 
+// A fixed-offset cut can land between the halves of a surrogate pair,
+// leaving a lone surrogate that encodes as U+FFFD when the excerpt is
+// encoded for the model; move a boundary that lands inside a pair back to
+// the pair boundary. Mirrors the server twin in session-assist/context.js.
+const dropSplitHead = (text: string): string => {
+  const last = text.charCodeAt(text.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+};
+
+const dropSplitTail = (text: string): string => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
 /** Preserve both the source and the reply when a model context needs a limit. */
 export function excerptMarkdown(text: string, limit: number): string {
   if (text.length <= limit) return text;
   const marker = '\n\n[Content omitted]\n\n';
   const head = Math.ceil((limit - marker.length) / 2);
   const tail = Math.floor((limit - marker.length) / 2);
-  return text.slice(0, head) + marker + text.slice(-tail);
+  return dropSplitHead(text.slice(0, head)) + marker + (tail > 0 ? dropSplitTail(text.slice(-tail)) : '');
 }
 
 function quoteContext(source: string, body: string, comment: string, fieldLimit?: number, codeLanguage?: string): string {

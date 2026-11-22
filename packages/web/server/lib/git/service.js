@@ -1,5 +1,6 @@
 import simpleGit from 'simple-git';
 import { createSerialRefresh } from './serial-refresh.js';
+import { trackLiveTree } from '../spaces/run-command.js';
 import { stripAppImageLauncherEnv } from '../inherited-env.js';
 import fs from 'fs';
 import path from 'path';
@@ -8,10 +9,13 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import crypto from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/shared.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import { readProjectStartCommand } from '../opencode/project-start-command.js';
 import { normalizeGitOutputPath } from './output-path.js';
+import { MAX_GIT_LOG_COUNT } from './log-limits.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { randomUUID } from 'crypto';
@@ -20,6 +24,11 @@ const fsp = fs.promises;
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
+// A gpgconf that never answers (a locked gpg-agent, a smartcard prompt)
+// must not wedge every Git command: buildGitEnv resolves the SSH socket
+// per command, before Git's own probe timeouts can apply (#862).
+const GPGCONF_TIMEOUT_MS = 5_000;
+const GPGCONF_MAX_BUFFER = 1024 * 1024;
 let resolvedGitBinary = null;
 const worktreeBootstrapState = new Map();
 const activeWorktreeBootstrapTasks = new Map();
@@ -27,11 +36,38 @@ const remoteExistenceCache = new Map();
 const SIMPLE_GIT_SAFE_BINARY_PATTERN = /^([a-z]:)?([a-z0-9/.\\_~-]+)$/i;
 const SIMPLE_GIT_UNSAFE_BINARY_WARNING = 'Invalid value supplied for custom binary, restricted characters must be removed';
 const REMOTE_EXISTENCE_CACHE_TTL_MS = 30_000;
+// Both remote caches below are bounded at this many entries, the
+// fs/routes gitReadCache precedent: keys embed directory paths, so
+// without a bound every worktree directory ever listed leaves a
+// permanent entry in a long-lived process (#979).
+export const GIT_REMOTE_CACHE_MAX_ENTRIES = 500;
+
+const boundRemoteCacheSize = (cache) => {
+  while (cache.size > GIT_REMOTE_CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+};
+
+const pruneExpiredRemoteExistenceCache = (now) => {
+  for (const [key, entry] of remoteExistenceCache) {
+    if (now - entry.checkedAt >= REMOTE_EXISTENCE_CACHE_TTL_MS) {
+      remoteExistenceCache.delete(key);
+    }
+  }
+};
 // Patches this service reads, compares and applies use the a/ and b/ prefixes.
 // The user's diff.mnemonicPrefix (i/, w/, c/, 1/, 2/), diff.noprefix or
 // diff.srcPrefix/dstPrefix would otherwise change them, and a hunk would no
 // longer match its file. Explicit prefixes win over all of those settings.
 const DIFF_PREFIX_ARGS = ['--src-prefix=a/', '--dst-prefix=b/'];
+// Only a non-negative integer is a valid unified-context count. Anything
+// else takes the default of 3: a fractional value reaching git as -U2.9
+// (or NaN as -UNaN) is rejected with exit 129 (#578). Normalizing here, in
+// the service, mirrors the getLog maxCount guard below (#463).
+const normalizeContextLines = (contextLines) =>
+  Number.isInteger(contextLines) && contextLines >= 0 ? contextLines : 3;
 const gitIndexMutationQueues = new Map();
 const remoteProvisioningQueues = new Map();
 
@@ -355,7 +391,7 @@ const resolveSshAuthSock = async () => {
   const runGpgconf = async (args) => {
     for (const candidate of gpgconfCandidates) {
       try {
-        const { stdout } = await execFileAsync(candidate, args);
+        const { stdout } = await execFileAsync(candidate, args, { timeout: GPGCONF_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: GPGCONF_MAX_BUFFER });
         return String(stdout || '');
       } catch {
         continue;
@@ -1088,9 +1124,20 @@ const hasRemote = async (git, directory, remoteName) => {
     .then((value) => String(value || '').trim().length > 0)
     .catch(() => false);
 
-  remoteExistenceCache.set(key, { exists, checkedAt: Date.now() });
+  // Inserting sweeps the expired entries first: the TTL was only ever
+  // evaluated for the key being read, so a directory that is never
+  // listed again kept its entry forever (#979).
+  const now = Date.now();
+  pruneExpiredRemoteExistenceCache(now);
+  remoteExistenceCache.delete(key);
+  remoteExistenceCache.set(key, { exists, checkedAt: now });
+  boundRemoteCacheSize(remoteExistenceCache);
   return exists;
 };
+
+// Exported for tests: the cache is module-private, and its eviction is
+// observable only through this reader and getGitRemoteCacheSizes.
+export const hasRemoteForTests = hasRemote;
 
 const buildRawGitOptions = (raw) => {
   if (Array.isArray(raw)) {
@@ -1189,6 +1236,43 @@ const runGitCommand = async (cwd, args, { env: envOverride, timeoutMs = 0 } = {}
       stderr: String(error?.stderr || ''),
       message: parseGitErrorText(error),
     };
+  }
+};
+
+// Local diff output (whole-tree, range, and commit diffs) is capped at
+// 50 MiB, the same limit getFileDiff's working-tree reads and the
+// walkthrough PR source (MAX_PATCH_BYTES) already carry. The cap is
+// enforced at the Git process, not on the returned string: simple-git has
+// no maxBuffer option, and a length check after `git.raw` returns cannot
+// undo memory the read already accumulated. Diff-producing reads therefore
+// run through execFile with maxBuffer — the runGitCommand pattern above —
+// and its overflow becomes the typed diff_too_large error the diff routes
+// answer with 413 (mirroring file_too_large in getFileDiff).
+export const MAX_DIFF_OUTPUT_BYTES = 50 * 1024 * 1024;
+const DIFF_TOO_LARGE_CODE = 'diff_too_large';
+
+const formatDiffLimit = (maxBytes) =>
+  maxBytes % (1024 * 1024) === 0 ? `${maxBytes / (1024 * 1024)} MiB` : `${maxBytes} bytes`;
+
+const createDiffTooLargeError = (maxBytes = MAX_DIFF_OUTPUT_BYTES) => Object.assign(
+  new Error(`Git diff output exceeds the ${formatDiffLimit(maxBytes)} limit for local diffs`),
+  { code: DIFF_TOO_LARGE_CODE },
+);
+
+const runBoundedGitDiff = async (repoRoot, args, { env, maxBytes = MAX_DIFF_OUTPUT_BYTES } = {}) => {
+  try {
+    const { stdout } = await execFileAsync(getGitBinary(), args, {
+      cwd: repoRoot,
+      env: env ?? (await buildGitEnv(repoRoot)),
+      windowsHide: true,
+      maxBuffer: maxBytes,
+    });
+    return String(stdout || '');
+  } catch (error) {
+    if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || /maxBuffer/i.test(error?.message || '')) {
+      throw createDiffTooLargeError(maxBytes);
+    }
+    throw new Error(parseGitErrorText(error) || 'Failed to get Git diff');
   }
 };
 
@@ -1380,6 +1464,8 @@ export const populateWorktreeWithLockRecovery = async (directory) => {
   }
 };
 
+const MAX_POST_CHECKOUT_HOOK_SIZE = 1024 * 1024;
+
 const inspectPostCheckoutHook = async (directory) => {
   const result = await runGitCommand(directory, ['rev-parse', '--git-path', 'hooks']);
   if (!result.success) return null;
@@ -1388,10 +1474,28 @@ const inspectPostCheckoutHook = async (directory) => {
   const hookPath = path.join(path.isAbsolute(hooksPath) ? hooksPath : path.resolve(directory, hooksPath), 'post-checkout');
   let handle;
   try {
-    handle = await fsp.open(hookPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    // Open per the shared bounded reader's flags (lib/shared/bounded-file-read.js):
+    // O_NONBLOCK keeps open() from blocking on a FIFO with no writer before the
+    // handle stat can reject it as non-regular, and O_NOFOLLOW refuses a symlink
+    // hook on the same open. The cap is then enforced during the read itself,
+    // not only on the pre-read stat: at most MAX + 1 bytes are read, so a hook
+    // grown past the cap after the stat is refused, not buffered whole.
+    handle = await fsp.open(hookPath, process.platform === 'win32'
+      ? 'r'
+      : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
     const stat = await handle.stat();
-    if (!stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) return null;
-    const content = await handle.readFile();
+    if (!stat.isFile() || stat.size > MAX_POST_CHECKOUT_HOOK_SIZE || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) return null;
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const chunk = Buffer.alloc(Math.min(64 * 1024, MAX_POST_CHECKOUT_HOOK_SIZE + 1 - total));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+      if (total > MAX_POST_CHECKOUT_HOOK_SIZE) return null;
+    }
+    const content = Buffer.concat(chunks, total);
     const gitDirResult = await runGitCommand(directory, ['rev-parse', '--absolute-git-dir']);
     const gitDir = normalizeGitOutputPath(String(gitDirResult.stdout || '').trim());
     if (!gitDirResult.success || !gitDir) return null;
@@ -1522,7 +1626,14 @@ export async function getRepositoryRemoteUrls(directory) {
     runGitCommand(directory, ['remote']),
     runGitCommand(directory, ['remote', '-v']),
   ]);
-  if (!namesResult.success) return [];
+  if (!namesResult.success) {
+    // Only a directory that is not a repository authoritatively has no
+    // remotes. Any other failure (corrupt config, unreadable .git) must
+    // surface, or callers mint an authoritative identity with remotes: []
+    // from a read that never happened.
+    if (isNotGitRepositoryError(namesResult)) return [];
+    throw new Error(namesResult.message || 'Failed to list git remotes');
+  }
   const names = String(namesResult.stdout || '').split(/\r?\n/).map((name) => name.trim()).filter(Boolean).sort();
   if (listResult.success) return parseRemoteListing(names, listResult.stdout);
   return Promise.all(names.map(async (name) => {
@@ -1907,9 +2018,15 @@ export async function continueIntegrate(stateInput = {}) {
   return { kind: 'success', moved: state.remainingCommits.length };
 }
 
-const ensureOpenCodeProjectId = async (primaryWorktree) => {
-  const gitDir = path.join(primaryWorktree, '.git');
-  const idFile = path.join(gitDir, 'opencode');
+export const ensureOpenCodeProjectId = async (primaryWorktree, commonDir) => {
+  // The ID file lives in the repository's real git common dir, which the
+  // caller has already resolved with git rev-parse --git-common-dir: for
+  // a plain checkout that is the .git directory under the root, for a bare
+  // repository it is the bare directory itself, and for a separate-git-dir
+  // layout it is that directory. Assuming the worktree's .git entry
+  // instead would create a stray .git inside a bare repository and never
+  // cache through a .git pointer file in the other layouts.
+  const idFile = path.join(commonDir, 'opencode');
   const existing = await fsp.readFile(idFile, 'utf8').then((value) => value.trim()).catch(() => '');
   if (existing) {
     return existing;
@@ -1932,8 +2049,14 @@ const ensureOpenCodeProjectId = async (primaryWorktree) => {
     throw new Error('Failed to derive OpenCode project ID');
   }
 
-  await fsp.mkdir(gitDir, { recursive: true }).catch(() => undefined);
-  await fsp.writeFile(idFile, projectId, 'utf8').catch(() => undefined);
+  try {
+    await fsp.writeFile(idFile, projectId, 'utf8');
+  } catch (error) {
+    // Caching the ID is an optimisation, so a failed write must not fail
+    // the call — but it must not be silent either: until a write lands,
+    // the ID is re-derived on every call.
+    console.warn(`Failed to persist OpenCode project ID to ${idFile}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   return projectId;
 };
@@ -1963,7 +2086,7 @@ const resolveWorktreeProjectContext = async (directory, options = {}) => {
   // repository, a separate git dir) has no primary worktree, and the sandbox
   // directory is the closest thing to one.
   const primaryWorktree = derivePrimaryWorktreeRootFromGitDir(commonDir) || sandbox;
-  const projectID = await ensureOpenCodeProjectId(primaryWorktree);
+  const projectID = await ensureOpenCodeProjectId(primaryWorktree, commonDir);
   // OpenCode's `worktree.directory` is read from the canonical checkout so a
   // linked worktree still sees the project's saved configuration. When unset,
   // worktrees keep landing in the data-dir folder keyed by project ID.
@@ -2116,38 +2239,167 @@ const findBranchInUse = async (primaryWorktree, localBranchName) => {
   }) || null;
 };
 
+// Start commands legitimately run installs for minutes, so the bound is
+// generous; without one a hanging command wedges the worktree bootstrap at
+// git-ready forever (#861). The env override exists so tests can run the
+// hang case in seconds.
+const WORKTREE_START_COMMAND_TIMEOUT_MS = 600_000;
+const worktreeStartCommandTimeoutMs = () => {
+  const raw = String(process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS || '').trim();
+  if (!/^\d+$/.test(raw)) {
+    return WORKTREE_START_COMMAND_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  // The value feeds the execFile timeout, which cannot honour more than
+  // 2^31-1 ms: a larger delay overflows Node's timer to ~1 ms and kills
+  // every start command instantly, so fall back to the default instead
+  // (the bound resolveHandoffTimeoutMs and the quota reader also use).
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : WORKTREE_START_COMMAND_TIMEOUT_MS;
+};
+
+const START_COMMAND_MAX_BUFFER = 20 * 1024 * 1024;
+
+// Runs one start command in its own process group (POSIX) so a timeout can
+// end the whole tree: killing only the shell left the command's descendants
+// running after the bootstrap moved on (#868). Resolves on the child's
+// 'close', which on the timeout path happens only after the tree kill has
+// been issued and the shell is gone — or, if a pipe-holding descendant
+// keeps 'close' pending past the escalation, on the bounded cleanup below.
+const execWorktreeStartCommand = (binary, args, { cwd, env, timeoutMs }) => new Promise((resolve) => {
+  const child = spawn(binary, args, {
+    cwd,
+    env,
+    windowsHide: true,
+    detached: process.platform !== 'win32',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  // Register the tree with the server's live-tree cleanup (#1084): the
+  // child leads a detached process group, so without this a start command
+  // still running at server shutdown/exit survived the server. The
+  // timeout/escalation behaviour below is unchanged.
+  trackLiveTree(child);
+  const stdoutChunks = [];
+  const stderrChunks = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  child.stdout?.on('data', (chunk) => {
+    if (stdoutBytes < START_COMMAND_MAX_BUFFER) {
+      stdoutChunks.push(chunk);
+      stdoutBytes += chunk.length;
+    }
+  });
+  child.stderr?.on('data', (chunk) => {
+    if (stderrBytes < START_COMMAND_MAX_BUFFER) {
+      stderrChunks.push(chunk);
+      stderrBytes += chunk.length;
+    }
+  });
+
+  let timedOut = false;
+  let spawnError = null;
+  let escalationTimer = null;
+  let escalationDone = null;
+  const killTree = () => {
+    if (!child.pid) return;
+    if (process.platform === 'win32') {
+      try {
+        spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+      } catch {
+        try { child.kill('SIGKILL'); } catch {}
+      }
+      return;
+    }
+    try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+    // The escalation must run to completion even if the shell dies on
+    // SIGTERM first: a descendant that ignores SIGTERM and holds no pipes
+    // lets the shell's 'close' fire immediately, and cancelling the timer
+    // there would leave that descendant running (#868, Codex on PR #880).
+    escalationDone = new Promise((resolveEscalation) => {
+      escalationTimer = setTimeout(() => {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+        resolveEscalation();
+      }, 1000);
+      escalationTimer.unref?.();
+    });
+  };
+  let settled = false;
+  let exitResult = null;
+  let cleanupTimer = null;
+  const finish = (code, signal) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeoutTimer);
+    if (escalationTimer) clearTimeout(escalationTimer);
+    if (cleanupTimer) clearTimeout(cleanupTimer);
+    resolve({
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf8'),
+      code,
+      signal,
+      timedOut,
+      error: spawnError,
+    });
+  };
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    killTree();
+    // Bounded cleanup: a detached descendant that inherited the output
+    // pipes escapes the process group and keeps the shell's 'close'
+    // pending even after the escalation has finished (#868, Codex on
+    // PR #880). Once escalation is done, give 'close' a short grace,
+    // then destroy the streams and return the timeout result regardless
+    // — as the VS Code twin does — so bootstrap never wedges at
+    // git-ready waiting on a descendant it cannot kill.
+    void (escalationDone ?? Promise.resolve()).then(() => {
+      if (settled) return;
+      cleanupTimer = setTimeout(() => {
+        try { child.stdout?.destroy(); } catch {}
+        try { child.stderr?.destroy(); } catch {}
+        finish(exitResult?.code ?? null, exitResult?.signal ?? null);
+      }, 1000);
+      cleanupTimer.unref?.();
+    });
+  }, timeoutMs);
+  timeoutTimer.unref?.();
+
+  child.once('error', (error) => { spawnError = error; });
+  child.once('exit', (code, signal) => { exitResult = { code, signal }; });
+  child.once('close', (code, signal) => {
+    if (timedOut && escalationDone) {
+      // Timed out: resolve only once the group SIGKILL above has been
+      // issued, so bootstrap never advances while a SIGTERM-ignoring
+      // descendant may still write into the worktree or hold its ports.
+      void escalationDone.then(() => finish(code, signal));
+      return;
+    }
+    finish(code, signal);
+  });
+});
+
 const runWorktreeStartCommand = async (directory, command) => {
   const text = String(command || '').trim();
   if (!text) {
     return { success: true };
   }
+  const timeoutMs = worktreeStartCommandTimeoutMs();
+  const env = await buildGitEnv(directory);
+  const { stdout, stderr, code, timedOut, error } = process.platform === 'win32'
+    ? await execWorktreeStartCommand('cmd', ['/c', text], { cwd: directory, env, timeoutMs })
+    : await execWorktreeStartCommand('bash', ['-lc', text], { cwd: directory, env, timeoutMs });
 
-  if (process.platform === 'win32') {
-    const result = await execFileAsync('cmd', ['/c', text], {
-      cwd: directory,
-      env: await buildGitEnv(directory),
-      windowsHide: true,
-      maxBuffer: 20 * 1024 * 1024,
-    }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
-      success: false,
-      stdout: error?.stdout,
-      stderr: error?.stderr,
-      message: parseGitErrorText(error),
-    }));
-    return result;
+  if (!timedOut && !error && code === 0) {
+    return { success: true, stdout, stderr };
   }
-
-  const result = await execFileAsync('bash', ['-lc', text], {
-    cwd: directory,
-    env: await buildGitEnv(directory),
-    maxBuffer: 20 * 1024 * 1024,
-  }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
+  return {
     success: false,
-    stdout: error?.stdout,
-    stderr: error?.stderr,
-    message: parseGitErrorText(error),
-  }));
-  return result;
+    stdout,
+    stderr,
+    message: timedOut
+      ? `Worktree start command timed out after ${timeoutMs}ms and was killed: ${text}`
+      : parseGitErrorText({ stdout, stderr, message: error?.message || `Command failed: ${text}` }),
+  };
 };
 
 // OpenCode owns its own project/sandbox registry. It records a worktree as a
@@ -2807,6 +3059,7 @@ const listUntrackedFilesBounded = async (repoRoot, dirPath, limit) => {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     const paths = [];
+    const decoder = new StringDecoder('utf8');
     let pending = '';
     let truncated = false;
     let settled = false;
@@ -2834,7 +3087,7 @@ const listUntrackedFilesBounded = async (repoRoot, dirPath, limit) => {
     child.stdout.on('data', (chunk) => {
       armStallTimer();
       if (truncated) return;
-      pending += chunk.toString('utf8');
+      pending += decoder.write(chunk);
       const records = pending.split('\0');
       pending = records.pop() ?? '';
       for (const record of records) {
@@ -2858,6 +3111,7 @@ const listUntrackedFilesBounded = async (repoRoot, dirPath, limit) => {
         finish(new Error(`git ls-files exited with code ${code} for ${dirPath}`));
         return;
       }
+      pending += decoder.end();
       if (pending) paths.push(pending);
       finish();
     });
@@ -3114,12 +3368,17 @@ async function readStatus(normalizedDirectory, lightMode) {
         const absolutePath = path.join(repoRoot, file.path);
 
         try {
-          const stat = await fsp.stat(absolutePath);
-          if (!stat.isFile() || stat.size > MAX_NEW_FILE_STAT_SIZE) {
+          // Bounded handle-based read (design #1254): the cap is enforced
+          // during the read, not only on a pre-read stat - a file grown
+          // past the cap after a stat is refused, not counted whole, and
+          // a FIFO swapped in after a stat is rejected as non-regular
+          // instead of wedging the serialized status queue on the read.
+          const bounded = await readBoundedFile(absolutePath, MAX_NEW_FILE_STAT_SIZE);
+          if (!bounded.ok) {
             continue;
           }
 
-          const buffer = await fsp.readFile(absolutePath);
+          const buffer = bounded.buffer;
           if (buffer.indexOf(0) !== -1) {
             newFileStats.push({
               target,
@@ -3324,11 +3583,15 @@ async function readStatus(normalizedDirectory, lightMode) {
 
 const getNoIndexDiff = async (repoRoot, repoPath, contextLines) => {
   const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
-  if (Number.isFinite(contextLines)) {
-    args.push(`-U${Math.max(0, contextLines)}`);
-  }
+  args.push(`-U${normalizeContextLines(contextLines)}`);
   args.push('--no-index', '--', '/dev/null', repoPath);
   const result = await runGitCommand(repoRoot, args);
+  if (!result.success && /maxBuffer/i.test(result.message || '')) {
+    // runGitCommand's buffer (20 MiB) overflowed: surface the same typed
+    // diff_too_large error as the bounded diff reads instead of Node's raw
+    // maxBuffer message. The 20 MiB bound itself is unchanged.
+    throw createDiffTooLargeError(20 * 1024 * 1024);
+  }
   // Exit 1 means differences, even when Git also writes warnings to stderr.
   // Spawn and buffer errors have no numeric exit code and must still fail.
   if (result.exitCode === 0 || result.exitCode === 1) {
@@ -3337,12 +3600,12 @@ const getNoIndexDiff = async (repoRoot, repoPath, contextLines) => {
   throw new Error(result.stderr || result.message || 'Failed to get untracked Git diff');
 };
 
-export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
+export async function getDiff(directory, { path: filePath, staged = false, contextLines = 3, maxBytes = MAX_DIFF_OUTPUT_BYTES } = {}) {
   const context = await createRepositoryGitContext(directory);
   const fileContext = filePath
     ? await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot)
     : null;
-  return readDiff(context, fileContext, { staged, contextLines });
+  return readDiff(context, fileContext, { staged, contextLines, maxBytes });
 }
 
 /**
@@ -3350,15 +3613,15 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
  * empty when only untracked files changed inside it, so callers need the state
  * to show anything truthful.
  */
-export async function getPathDiff(directory, { path: filePath, staged = false, contextLines = 3 } = {}) {
+export async function getPathDiff(directory, { path: filePath, staged = false, contextLines = 3, maxBytes = MAX_DIFF_OUTPUT_BYTES } = {}) {
   const context = await createRepositoryGitContext(directory);
   const fileContext = await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot);
-  const diff = await readDiff(context, fileContext, { staged, contextLines });
+  const diff = await readDiff(context, fileContext, { staged, contextLines, maxBytes });
   if (!fileContext.isSubmodule) return { diff, submodule: null };
   return { diff, submodule: await readSubmoduleState(context.repoRoot, fileContext) };
 }
 
-const GIT_PATH_ERROR_CODES = new Set(['path_not_found', 'nested_repository', 'untracked_directory']);
+const GIT_PATH_ERROR_CODES = new Set(['path_not_found', 'nested_repository', 'untracked_directory', 'diff_too_large']);
 
 /**
  * `getPathDiff` for many paths of one side, resolving the repository once and
@@ -3367,7 +3630,7 @@ const GIT_PATH_ERROR_CODES = new Set(['path_not_found', 'nested_repository', 'un
  * `code` is a path error code when the path no longer resolves. One failed
  * path never fails the others.
  */
-export async function getPathDiffs(directory, { paths: filePaths = [], staged = false, contextLines = 3, concurrency = 8 } = {}) {
+export async function getPathDiffs(directory, { paths: filePaths = [], staged = false, contextLines = 3, concurrency = 8, maxBytes = MAX_DIFF_OUTPUT_BYTES } = {}) {
   const paths = Array.isArray(filePaths) ? filePaths : [];
   if (paths.length === 0) return [];
 
@@ -3381,7 +3644,7 @@ export async function getPathDiffs(directory, { paths: filePaths = [], staged = 
       const filePath = paths[index];
       try {
         const fileContext = await resolveGitFileContext(context.directoryPath, context.directoryGit, filePath, context.repoRoot);
-        const diff = await readDiff(context, fileContext, { staged, contextLines });
+        const diff = await readDiff(context, fileContext, { staged, contextLines, maxBytes });
         const submodule = fileContext.isSubmodule ? await readSubmoduleState(context.repoRoot, fileContext) : null;
         results[index] = { path: filePath, diff, submodule };
       } catch (error) {
@@ -3395,13 +3658,11 @@ export async function getPathDiffs(directory, { paths: filePaths = [], staged = 
   return results;
 }
 
-async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }) {
+async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines, maxBytes = MAX_DIFF_OUTPUT_BYTES }) {
   try {
     const args = ['diff', '--no-color', '--full-index', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
 
-    if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
-      args.push(`-U${Math.max(0, contextLines)}`);
-    }
+    args.push(`-U${normalizeContextLines(contextLines)}`);
 
     if (staged) {
       args.push('--cached');
@@ -3411,7 +3672,7 @@ async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }
       args.push('--', fileContext.repoPath);
     }
 
-    const diff = await git.raw(args);
+    const diff = await runBoundedGitDiff(repoRoot, args, { maxBytes });
     if (diff && diff.trim().length > 0) {
       return diff;
     }
@@ -3461,15 +3722,18 @@ async function readDiff({ repoRoot, git }, fileContext, { staged, contextLines }
  * Callers that only need this list should not pay for `getStatus`, which also
  * computes ahead/behind, diff stats, and merge state — an order of magnitude
  * more work for an answer they throw away.
+ *
+ * A failed `ls-files` throws instead of returning []: the repository context
+ * above has already proven this is a repository, so a failure here is a real
+ * failure, and [] would present a tracked-only listing as complete.
  */
 export async function listUntrackedPaths(directory) {
   const { repoRoot } = await createRepositoryGitContext(directory);
-  const result = await runGitCommand(repoRoot, [
-    'ls-files',
-    '--others',
-    '--exclude-standard',
-  ]);
-  if (!result.success) return [];
+  const result = await runGitCommandOrThrow(
+    repoRoot,
+    ['ls-files', '--others', '--exclude-standard'],
+    'Failed to list untracked files'
+  );
   return String(result.stdout || '')
     .split('\n')
     .map((line) => line.trim())
@@ -3534,7 +3798,7 @@ async function assertRangeRefsResolve(git, refs) {
 // as tracked files, including a staged deletion recreated at the same path.
 // Intent-to-add records only their existence; diff reads current file contents.
 // Resolves to the diff output and the merge base it was taken against.
-async function runWorkingTreeRangeDiff(context, baseRef, headRef, args, paths = []) {
+async function runWorkingTreeRangeDiff(context, baseRef, headRef, args, paths = [], maxBytes = MAX_DIFF_OUTPUT_BYTES) {
   const { git, repoRoot } = context;
   const readHead = async () => {
     const commit = (await git.raw(['rev-parse', '--verify', 'HEAD'])).trim();
@@ -3548,15 +3812,15 @@ async function runWorkingTreeRangeDiff(context, baseRef, headRef, args, paths = 
     throw new Error('Working-tree comparisons require the checked-out branch. Refresh and try again.');
   }
   const mergeBase = (await git.raw(['merge-base', baseRef, headCommit])).trim();
-  const readDiff = async (comparisonGit) => {
-    const output = await comparisonGit.raw([...args, mergeBase, '--', ...paths]);
+  const readDiff = async (env) => {
+    const output = await runBoundedGitDiff(repoRoot, [...args, mergeBase, '--', ...paths], { env, maxBytes });
     if (await readHead() !== startingHead) {
       throw new Error('The checked-out branch changed during comparison. Refresh and try again.');
     }
     return { output, mergeBase };
   };
   const untracked = await git.raw(['ls-files', '--others', '--exclude-standard', '-z', '--', ...paths]);
-  if (!untracked) return readDiff(git);
+  if (!untracked) return readDiff(undefined);
 
   const temporaryDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-branch-diff-'));
   try {
@@ -3569,13 +3833,14 @@ async function runWorkingTreeRangeDiff(context, baseRef, headRef, args, paths = 
     comparisonGit.env('GIT_INDEX_FILE', temporaryIndex);
     comparisonGit.env('GIT_LITERAL_PATHSPECS', '1');
     await comparisonGit.raw(['add', '--intent-to-add', '--pathspec-from-file=' + pathspecFile, '--pathspec-file-nul']);
-    return await readDiff(comparisonGit);
+    const env = { ...(await buildGitEnv(repoRoot)), GIT_INDEX_FILE: temporaryIndex, GIT_LITERAL_PATHSPECS: '1' };
+    return await readDiff(env);
   } finally {
     await fsp.rm(temporaryDirectory, { recursive: true, force: true });
   }
 }
 
-export async function getRangeDiff(directory, { base, head, path: filePath, contextLines = 3, includeWorkingTree = false } = {}) {
+export async function getRangeDiff(directory, { base, head, path: filePath, contextLines = 3, includeWorkingTree = false, maxBytes = MAX_DIFF_OUTPUT_BYTES } = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const baseRef = typeof base === 'string' ? base.trim() : '';
   const headRef = typeof head === 'string' ? head.trim() : '';
@@ -3586,9 +3851,7 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
   await assertRangeRefsResolve(git, [baseRef, headRef]);
 
   const args = ['diff', '--no-color', '--no-ext-diff', ...DIFF_PREFIX_ARGS];
-  if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
-    args.push(`-U${Math.max(0, contextLines)}`);
-  }
+  args.push(`-U${normalizeContextLines(contextLines)}`);
   const paths = [];
   if (filePath) {
     try {
@@ -3613,10 +3876,10 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
     }
   }
   if (includeWorkingTree) {
-    return (await runWorkingTreeRangeDiff({ git, repoRoot }, baseRef, headRef, args, paths)).output;
+    return (await runWorkingTreeRangeDiff({ git, repoRoot }, baseRef, headRef, args, paths, maxBytes)).output;
   }
   args.push(`${baseRef}...${headRef}`, '--', ...paths);
-  const diff = await git.raw(args);
+  const diff = await runBoundedGitDiff(repoRoot, args, { maxBytes });
   return diff;
 }
 
@@ -3773,6 +4036,68 @@ const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bm
 
 const BINARY_SNIFF_BYTES = 8192;
 
+// Working-tree reads for a file diff are capped at 50 MiB, the same limit
+// the image `git show` reads in getFileDiff already carry. The route maps
+// this code to HTTP 413 and the client shows the message as the diff error.
+export const MAX_FILE_DIFF_WORKING_TREE_BYTES = 50 * 1024 * 1024;
+const FILE_DIFF_TOO_LARGE_CODE = 'file_too_large';
+
+const createFileDiffTooLargeError = (filePath) => Object.assign(
+  new Error(`File is too large to diff: ${filePath} exceeds the 50 MiB working-tree limit for file diffs`),
+  { code: FILE_DIFF_TOO_LARGE_CODE },
+);
+
+// Bounded read for the working-tree side of a file diff. The caller stats
+// first, but a file can grow between that stat and the read, so this read
+// itself stops at maxBytes and rejects instead of buffering past the cap.
+export async function readFileDiffWorkingTreeFile(absolutePath, filePath, maxBytes = MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+  // The shared bounded read (design #1254): the caller stats first, but a
+  // file can grow between that stat and the read, so the read itself
+  // enforces the cap. Outcomes map back onto this module's contract:
+  // over-cap throws the route's file_too_large error, a missing file
+  // throws the ENOENT the open would have thrown, and a non-regular file
+  // throws the EISDIR a read would have thrown.
+  const result = await readBoundedFile(absolutePath, maxBytes);
+  if (result.ok) {
+    return result.buffer;
+  }
+  if (result.reason === 'too-large') {
+    throw createFileDiffTooLargeError(filePath);
+  }
+  if (result.reason === 'missing') {
+    const error = new Error(`ENOENT: no such file or directory, open '${absolutePath}'`);
+    error.code = 'ENOENT';
+    throw error;
+  }
+  const error = new Error('EISDIR: illegal operation on a directory, read');
+  error.code = 'EISDIR';
+  throw error;
+}
+
+// Size of a git object (HEAD or index blob) without reading its content,
+// or null when the object cannot be sized (missing path, not a blob): the
+// caller's existing git.show flow decides what a missing object means.
+const gitBlobSize = async (git, spec) => {
+  try {
+    const raw = await git.raw(['cat-file', '-s', spec]);
+    const size = Number.parseInt(String(raw).trim(), 10);
+    return Number.isFinite(size) ? size : null;
+  } catch {
+    return null;
+  }
+};
+
+// The non-image git.show reads in getFileDiff buffer the whole blob, so an
+// over-cap committed or staged blob is rejected from its cat-file size
+// before any content is read, with the same coded error as the
+// working-tree cap (the route maps it to HTTP 413).
+const assertGitBlobWithinFileDiffCap = async (git, spec, filePath) => {
+  const size = await gitBlobSize(git, spec);
+  if (size !== null && size > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+    throw createFileDiffTooLargeError(filePath);
+  }
+};
+
 function isImageFile(filePath) {
   const ext = filePath.split('.').pop()?.toLowerCase();
   return IMAGE_EXTENSIONS.includes(ext || '');
@@ -3880,6 +4205,22 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     };
   }
 
+  // Cap check before the HEAD read and before any working-tree read, so an
+  // over-cap file costs one stat. A missing file keeps the deleted-file
+  // flow below (original from HEAD, empty modified).
+  let workingTreeStat = null;
+  if (!staged && !isSymbolicLink) {
+    workingTreeStat = await fsp.stat(absolutePath).catch((error) => {
+      if (error?.code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    });
+    if (workingTreeStat && workingTreeStat.isFile() && workingTreeStat.size > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+      throw createFileDiffTooLargeError(filePath);
+    }
+  }
+
   if (!isImage && !isSymbolicLink) {
     const isBinaryBySniff = await looksBinaryBySniff(absolutePath);
     const isBinary = isBinaryBySniff || (await isBinaryDiff(repoRoot, repoPath, staged));
@@ -3911,9 +4252,13 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         original = '';
       }
     } else {
+      await assertGitBlobWithinFileDiffCap(git, `HEAD:${repoPath}`, filePath);
       original = await git.show([`HEAD:${repoPath}`]);
     }
-  } catch {
+  } catch (error) {
+    if (error?.code === FILE_DIFF_TOO_LARGE_CODE) {
+      throw error;
+    }
     original = '';
   }
 
@@ -3931,13 +4276,14 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
           modified = `data:${mimeType};base64,${stdout.toString('base64')}`;
         }
       } else {
+        await assertGitBlobWithinFileDiffCap(git, `:${repoPath}`, filePath);
         modified = await git.show([`:${repoPath}`]);
       }
     } else {
       if (isSymbolicLink) {
         modified = await fsp.readlink(absolutePath);
       } else {
-        const stat = await fsp.stat(absolutePath);
+        const stat = workingTreeStat ?? await fsp.stat(absolutePath);
         if (!stat.isFile()) {
           return {
             original: typeof original === 'string' ? original.replace(/\r\n/g, '\n') : original,
@@ -3946,16 +4292,19 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
             isBinary: false,
           };
         }
+        const buffer = await readFileDiffWorkingTreeFile(absolutePath, filePath);
         if (isImage) {
           // For images, read as binary and convert to data URL
-          const buffer = await fsp.readFile(absolutePath);
           modified = `data:${mimeType};base64,${buffer.toString('base64')}`;
         } else {
-          modified = await fsp.readFile(absolutePath, 'utf8');
+          modified = buffer.toString('utf8');
         }
       }
     }
   } catch (error) {
+    if (error?.code === FILE_DIFF_TOO_LARGE_CODE) {
+      throw error;
+    }
     if (error && typeof error === 'object' && error.code === 'ENOENT') {
       modified = '';
     } else {
@@ -4559,6 +4908,34 @@ async function getRemoteDefaultBranches(git) {
 const REMOTE_HEADS_TTL_MS = 30_000;
 const remoteHeadsCache = new Map();
 
+const pruneExpiredRemoteHeadsCache = (now) => {
+  for (const [key, entry] of remoteHeadsCache) {
+    if (now - entry.at >= REMOTE_HEADS_TTL_MS) {
+      remoteHeadsCache.delete(key);
+    }
+  }
+};
+
+/** Entry counts of the two git remote caches, for tests and diagnostics. */
+export const getGitRemoteCacheSizes = () => ({
+  remoteExistence: remoteExistenceCache.size,
+  remoteHeads: remoteHeadsCache.size,
+});
+
+/**
+ * Remove every expired entry from both remote caches and enforce the
+ * entry bound on each; returns the resulting sizes. Inserting into
+ * either cache already prunes that cache, so this is the explicit
+ * form for tests and any future periodic caller.
+ */
+export const pruneExpiredGitRemoteCaches = (now = Date.now()) => {
+  pruneExpiredRemoteExistenceCache(now);
+  boundRemoteCacheSize(remoteExistenceCache);
+  pruneExpiredRemoteHeadsCache(now);
+  boundRemoteCacheSize(remoteHeadsCache);
+  return getGitRemoteCacheSizes();
+};
+
 const readRemoteHeads = (git, directory, remote, localRefs) => {
   const key = `${directory}\0${remote.name}\0${remote.refs?.fetch ?? ''}`;
   const localKey = localRefs.join('\n');
@@ -4571,12 +4948,19 @@ const readRemoteHeads = (git, directory, remote, localRefs) => {
     }
     return names;
   });
-  const entry = { at: Date.now(), localKey, heads };
+  const now = Date.now();
+  pruneExpiredRemoteHeadsCache(now);
+  const entry = { at: now, localKey, heads };
+  remoteHeadsCache.delete(key);
   remoteHeadsCache.set(key, entry);
+  boundRemoteCacheSize(remoteHeadsCache);
   // A remote that did not answer is asked again next time.
   heads.catch(() => { if (remoteHeadsCache.get(key) === entry) remoteHeadsCache.delete(key); });
   return heads;
 };
+
+// Exported for tests, like hasRemoteForTests above.
+export const readRemoteHeadsForTests = readRemoteHeads;
 
 async function filterActiveRemoteBranches(git, directory, remoteBranches) {
   try {
@@ -6359,7 +6743,11 @@ export async function getLog(directory, options = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
 
   try {
-    const maxCount = options.maxCount || 50;
+    // Keep direct callers under the same cap as the route. A negative reaching
+    // git as --max-count=-5 means unlimited, and unsafe integers lose precision.
+    const maxCount = Number.isSafeInteger(options.maxCount) && options.maxCount > 0
+      ? Math.min(options.maxCount, MAX_GIT_LOG_COUNT)
+      : 50;
 
     if (options.all) {
       const logArgs = [
@@ -6702,14 +7090,14 @@ async function resolveCommitHash(git, hash) {
 
 const commitShowArgs = (hash) => ['show', '--format=', '--root', '--diff-merges=first-parent', '--find-renames', ...DIFF_PREFIX_ARGS, hash];
 
-export async function getCommitDiff(directory, { hash, path: filePath, previousPath, contextLines = 3 } = {}) {
-  const { git } = await createRepositoryGitContext(directory);
+export async function getCommitDiff(directory, { hash, path: filePath, previousPath, contextLines = 3, maxBytes = MAX_DIFF_OUTPUT_BYTES } = {}) {
+  const { git, repoRoot } = await createRepositoryGitContext(directory);
   const commit = await resolveCommitHash(git, hash);
   const paths = [filePath, previousPath].filter(Boolean).map((value) => `:(literal)${value}`);
-  return git.raw([
-    ...commitShowArgs(commit), '--no-color', '--no-ext-diff', `-U${Math.max(0, contextLines)}`,
+  return runBoundedGitDiff(repoRoot, [
+    ...commitShowArgs(commit), '--no-color', '--no-ext-diff', `-U${normalizeContextLines(contextLines)}`,
     '--', ...paths,
-  ]);
+  ], { maxBytes });
 }
 
 export async function getCommitFiles(directory, commitHash) {

@@ -365,7 +365,7 @@ describe('cli args', () => {
 
   it('builds session create payloads from CLI options', () => {
     expect(buildSessionCreatePayload({
-      directory: '.',
+      directory: path.resolve('.'),
       name: 'Side task',
       prompt: 'Investigate cache invalidation',
       model: 'openai/gpt-5.5',
@@ -375,7 +375,7 @@ describe('cli args', () => {
       startRef: 'main',
       setUpstream: true,
     })).toEqual({
-      directory: '.',
+      directory: path.resolve('.'),
       title: 'Side task',
       worktree: {
         name: 'side-task',
@@ -390,12 +390,28 @@ describe('cli args', () => {
   });
 
   it('allows session create prompts without an explicit model', () => {
+    const directory = path.resolve('.');
     expect(buildSessionCreatePayload({
       directory: '.',
       prompt: 'Investigate cache invalidation',
     })).toEqual({
-      directory: '.',
+      directory,
+      newWorktree: false,
       prompt: 'Investigate cache invalidation',
+    });
+  });
+
+  it('keeps a session create with an explicit directory in that directory', () => {
+    expect(buildSessionCreatePayload({ directory: '/prepared-worktree' })).toEqual({
+      directory: '/prepared-worktree',
+      newWorktree: false,
+    });
+  });
+
+  it('resolves relative session create directories against the CLI working directory', () => {
+    expect(buildSessionCreatePayload({ directory: 'prepared-worktree' })).toEqual({
+      directory: path.resolve('prepared-worktree'),
+      newWorktree: false,
     });
   });
 
@@ -414,6 +430,7 @@ describe('cli args', () => {
 
     expect(buildSessionCreatePayload(parsed.options)).toEqual({
       directory: '/repo',
+      newWorktree: false,
       prompt: 'Finish and verify the migration',
       goal: true,
       goalTokenBudget: 200000,
@@ -435,6 +452,34 @@ describe('cli args', () => {
         goalTokenBudget: value,
       })).toThrow('--goal-token-budget must be an integer from 1000 to 100000000.');
     }
+  });
+
+  it('builds a subsession model policy from --subagent-models', () => {
+    const parsed = parseArgs([
+      'session',
+      'create',
+      '--dir',
+      '/repo',
+      '--subagent-models',
+      'openai/gpt-5.5, anthropic/claude-sonnet-5',
+    ]);
+
+    expect(parsed.options.subagentModels).toBe('openai/gpt-5.5, anthropic/claude-sonnet-5');
+    expect(buildSessionCreatePayload(parsed.options)).toEqual({
+      directory: '/repo',
+      newWorktree: false,
+      subagentPolicy: { models: ['openai/gpt-5.5', 'anthropic/claude-sonnet-5'] },
+    });
+  });
+
+  it('rejects malformed --subagent-models entries and other commands using the flag', () => {
+    expect(() => buildSessionCreatePayload({
+      directory: '/repo',
+      subagentModels: 'gpt-5.5',
+    })).toThrow('--model must be in provider/model format.');
+    expect(parseArgs(['status', '--subagent-models', 'openai/gpt-5.5']).removedFlagErrors).toEqual([
+      'Unknown option for status: --subagent-models (used by: session)',
+    ]);
   });
 
   it('parses session list filters', () => {
@@ -572,6 +617,28 @@ describe('cli args', () => {
 
     expect(parsed.command).toBe('projects');
     expect(parsed.options.json).toBe(true);
+  });
+
+  it('parses quota command with and without a provider', () => {
+    const withProvider = parseArgs(['quota', 'codex', '--json']);
+
+    expect(withProvider.command).toBe('quota');
+    expect(withProvider.quotaProvider).toBe('codex');
+    expect(withProvider.options.json).toBe(true);
+
+    const withoutProvider = parseArgs(['quota']);
+
+    expect(withoutProvider.command).toBe('quota');
+    expect(withoutProvider.quotaProvider).toBeNull();
+    expect(withoutProvider.quotaProviders).toEqual([]);
+  });
+
+  it('parses several quota providers in order', () => {
+    const parsed = parseArgs(['quota', 'claude', 'chatgpt', 'git*']);
+
+    expect(parsed.command).toBe('quota');
+    expect(parsed.quotaProvider).toBe('claude');
+    expect(parsed.quotaProviders).toEqual(['claude', 'chatgpt', 'git*']);
   });
 
   it('formats projects compactly', () => {
@@ -1523,6 +1590,37 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
           ['serve', server.port, host],
         ]);
         expect(payload.restartedCount).toBe(1);
+        expect(payload.results).toEqual([
+          expect.objectContaining({ fromPort: server.port, toPort: server.port, ok: true }),
+        ]);
+      } finally {
+        await server.close();
+      }
+    });
+  });
+
+  it('rotate-credentials --port stops then serves with the rotation flag set', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const server = await startMockOpenChamberServer();
+      const calls = [];
+      const host = '127.0.0.1';
+      try {
+        const output = await captureStdout(() => commands['rotate-credentials'].call({
+          stop: async (options) => {
+            calls.push(['stop', options.port, options.host]);
+          },
+          serve: async (options) => {
+            calls.push(['serve', options.port, options.host, options.rotateCredentials]);
+            return options.port;
+          },
+        }, { explicitPort: true, port: server.port, host, json: true }));
+
+        const payload = JSON.parse(output);
+        expect(calls).toEqual([
+          ['stop', server.port, host],
+          ['serve', server.port, host, true],
+        ]);
+        expect(payload.rotatedCount).toBe(1);
         expect(payload.results).toEqual([
           expect.objectContaining({ fromPort: server.port, toPort: server.port, ok: true }),
         ]);

@@ -233,6 +233,111 @@ describe('createOpenCodeWatcherRuntime', () => {
     ]);
   });
 
+  it('logs connected once per outage, not on every reconnect of a stalled stream (dezren39/nix#668)', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let attempt = 0;
+    let hubConnects = 0;
+
+    const globalEventHub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      // A tiny stall window makes every silent connection reconnect, as a 10 s window did against
+      // OpenCode's 15 s idle heartbeat.
+      upstreamStallTimeoutMs: 5,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        attempt += 1;
+        if (attempt === 4) {
+          throw new Error('fetch failed');
+        }
+        return createSseResponse({ signal: options.signal, holdOpen: true });
+      },
+    });
+    const unsubscribe = globalEventHub.subscribeStatus((status) => {
+      if (status.type === 'connect') hubConnects += 1;
+    });
+
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      globalEventHub,
+      onPayload() {},
+    });
+
+    await watcher.start();
+    await vi.waitFor(() => expect(attempt).toBeGreaterThanOrEqual(8), { timeout: 2_000, interval: 5 });
+    watcher.stop();
+    unsubscribe();
+    globalEventHub.stop();
+
+    const lines = (spy, prefix) => spy.mock.calls.filter((call) => call[0] === prefix);
+    // Positive control: the stream really was torn down and reopened several times, on both sides
+    // of the failed fetch.
+    expect(hubConnects).toBeGreaterThanOrEqual(6);
+    expect(lines(log, '[PushWatcher] connected')).toHaveLength(2);
+    expect(lines(warn, '[PushWatcher] disconnected')).toEqual([['[PushWatcher] disconnected', 'fetch failed']]);
+  });
+
+  it('logs connected once per outage on its own upstream reader too', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let attempt = 0;
+
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      onPayload() {},
+      upstreamStallTimeoutMs: 5,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        attempt += 1;
+        if (attempt === 4) {
+          throw new Error('fetch failed');
+        }
+        return createSseResponse({ signal: options.signal, holdOpen: true });
+      },
+    });
+
+    await watcher.start();
+    await vi.waitFor(() => expect(attempt).toBeGreaterThanOrEqual(8), { timeout: 2_000, interval: 5 });
+    watcher.stop();
+
+    const lines = (spy, prefix) => spy.mock.calls.filter((call) => call[0] === prefix);
+    // Positive control: seven successful connections, one failed fetch between them.
+    expect(attempt).toBeGreaterThanOrEqual(8);
+    expect(lines(log, '[PushWatcher] connected')).toHaveLength(2);
+    expect(lines(warn, '[PushWatcher] disconnected')).toEqual([['[PushWatcher] disconnected', 'fetch failed']]);
+  });
+
+  it('logs connected again after the watcher is stopped and started', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    let attempt = 0;
+
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      onPayload() {},
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        attempt += 1;
+        return createSseResponse({ signal: options.signal, holdOpen: true });
+      },
+    });
+    const connectedLines = () => log.mock.calls.filter((call) => call[0] === '[PushWatcher] connected').length;
+
+    await watcher.start();
+    await vi.waitFor(() => expect(connectedLines()).toBe(1), { timeout: 2_000, interval: 5 });
+    watcher.stop();
+    await watcher.start();
+    await vi.waitFor(() => expect(attempt).toBe(2), { timeout: 2_000, interval: 5 });
+    await vi.waitFor(() => expect(connectedLines()).toBe(2), { timeout: 2_000, interval: 5 });
+    watcher.stop();
+  });
+
   it('does not stop a shared global event hub when the watcher stops', async () => {
     const events = new Set();
     const statuses = new Set();

@@ -7,6 +7,18 @@ import { withSourceControlFileLockSync } from '../source-control/file-lock.js';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 
 const FILE_NAME = 'git-identities.json';
+
+// The store file's byte cap, enforced on the open handle in readFile below
+// (#1635): at most 256 profiles, and parseState caps every stored text field
+// at 512 chars (id at 200), so one profile's fields total at most
+// 200 + 8 x 512 = 4,296 chars; at up to 3 UTF-8 bytes per char plus JSON
+// structure and pretty-print indent that is under 16 KiB per profile, and
+// 256 x 16 KiB = 4 MiB is the legitimate maximum a store this version could
+// have written. Anything larger is not a store: it is refused as invalid
+// before reading, and the chunked read below never buffers more than
+// cap + 1 bytes even if the file grows after its fstat.
+const MAX_STORE_BYTES = 4 * 1024 * 1024;
+const READ_CHUNK_BYTES = 64 * 1024;
 const legacyDataDir = () => path.join(os.homedir(), '.config', 'openchamber');
 const invalidStore = (cause) => Object.assign(new Error('Git identity profile store is invalid', { cause }), {
   code: 'GIT_IDENTITY_STORE_INVALID',
@@ -126,6 +138,21 @@ const parseState = (value) => {
     if (!isPlainObject(profile) || !isString(profile.id) || !profile.id
       || !isString(profile.userName) || !profile.userName
       || !isString(profile.userEmail) || !profile.userEmail || ids.has(profile.id)) throw invalidStore();
+    // Stored text fields carry the same length caps the public profile
+    // parser enforces (validProfileText: id 200, the rest 512): a record
+    // past them was not written through the public path at its caps, and an
+    // uncapped field is how an over-cap payload would otherwise hide under
+    // the byte cap one field at a time (#1635).
+    if (!validProfileText(profile.id, { required: true, max: 200 })
+      || !validProfileText(profile.userName, { required: true })
+      || !validProfileText(profile.userEmail, { required: true })) throw invalidStore();
+    for (const key of ['name', 'signingKey', 'color', 'icon', 'sshCredentialId']) {
+      if (profile[key] !== undefined && profile[key] !== null && !validProfileText(profile[key])) throw invalidStore();
+    }
+    if (profile.account !== undefined && profile.account !== null) {
+      if (!isPlainObject(profile.account)
+        || !ACCOUNT_KEYS.every((key) => validProfileText(profile.account[key], { required: true }))) throw invalidStore();
+    }
     ids.add(profile.id);
   }
   return value;
@@ -162,8 +189,26 @@ export function createGitIdentityStore({
       // user-private groups), so it is read and made private, not refused.
       const extraMode = process.platform !== 'win32' ? stats.mode & 0o077 : 0;
       if (extraMode !== 0 && !allowShippedMode) throw invalidStore();
+      // Size gate on the handle (#1635): the fstat size refuses over-cap
+      // files before a byte is read, and the chunked read enforces the same
+      // cap in flight (at most cap + 1 bytes buffered), so a file that
+      // grows after its fstat still cannot be buffered whole. The gate
+      // stays in place on this handle — O_NOFOLLOW, the fsImpl seam and
+      // the mode-migration check above are all load-bearing, which is why
+      // this module does not adopt the shared bounded reader.
+      if (stats.size > MAX_STORE_BYTES) throw invalidStore();
+      const chunks = [];
+      let total = 0;
+      while (total <= MAX_STORE_BYTES) {
+        const chunk = Buffer.alloc(Math.min(READ_CHUNK_BYTES, MAX_STORE_BYTES + 1 - total));
+        const bytesRead = fsImpl.readSync(handle, chunk, 0, chunk.length, total);
+        if (bytesRead === 0) break;
+        chunks.push(chunk.subarray(0, bytesRead));
+        total += bytesRead;
+      }
+      if (total > MAX_STORE_BYTES) throw invalidStore();
       let state;
-      try { state = parseState(JSON.parse(fsImpl.readFileSync(handle, 'utf8'))); }
+      try { state = parseState(JSON.parse(Buffer.concat(chunks, total).toString('utf8'))); }
       catch (error) {
         if (error?.code === 'GIT_IDENTITY_STORE_INVALID') throw error;
         throw invalidStore(error);

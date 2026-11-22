@@ -11,7 +11,7 @@ import * as path from 'path';
 
 type GitRunner = (args: string[], cwd: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
-export type GitPathUnavailableReason = 'path_not_found' | 'nested_repository';
+export type GitPathUnavailableReason = 'path_not_found' | 'nested_repository' | 'file_too_large';
 
 export interface GitSubmoduleState {
   headCommit: string | null;

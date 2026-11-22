@@ -224,7 +224,20 @@ mock.module('@/sync/sync-refs', () => ({
   getDirectoryState: (directory: string) => directoryStates.get(directory),
 }));
 
+// What the server answers for a folder; a folder not listed exists.
+const directoryAvailability = new Map<string, 'available' | 'missing' | 'unknown'>();
+const availabilityProbes: string[] = [];
+mock.module('@/lib/opencode/client', () => ({
+  opencodeClient: {
+    getDirectoryAvailability: (directory: string) => {
+      availabilityProbes.push(directory);
+      return Promise.resolve(directoryAvailability.get(directory) ?? 'available');
+    },
+  },
+}));
+
 const {
+  moveSessionTreeToDirectory,
   moveSessionTreeToExistingWorktree,
   requestSessionTreeMove,
 } = await import('./sessionWorktreeMove');
@@ -956,5 +969,143 @@ describe('moveSessionTreeToExistingWorktree', () => {
     expect(toastErrors).toEqual([{ title: 'move failed', description: 'Unable to find the project for this session' }]);
     expect(removeWorktreeCalls).toEqual([]);
     expect(moveCalls).toEqual([]);
+  });
+});
+
+// "Change location": the way out for a session whose folder was deleted. Such
+// a session has no directory store to report its status and no project or
+// worktree that holds its folder, so every other move path refuses it.
+describe('moveSessionTreeToDirectory', () => {
+  beforeEach(() => {
+    moveCalls.length = 0;
+    refreshCalls.length = 0;
+    toastSuccesses.length = 0;
+    toastErrors.length = 0;
+    directoryStates.clear();
+    directoryAvailability.clear();
+    availabilityProbes.length = 0;
+    storedMetadata.clear();
+    moveSessionImplementation = async () => {};
+    refreshImplementation = async () => {};
+    // No project resolves the deleted folder; the directory move must not ask.
+    resolveProjectRefImplementation = () => null;
+    console.warn = () => {};
+  });
+
+  afterEach(() => {
+    console.warn = originalConsoleWarn;
+  });
+
+  test('moves a session whose folder no longer exists, with no status report for it', async () => {
+    directoryAvailability.set('/gone', 'missing');
+    const root = makeSession('root', '/gone');
+
+    const destination = await moveSessionTreeToDirectory({
+      root,
+      descendants: [],
+      sourceDirectory: '/gone',
+      directory: '/repo',
+    });
+
+    expect(destination).toBe('/repo');
+    expect(moveCalls).toEqual([{ sessionId: 'root', sourceDirectory: '/gone', destinationDirectory: '/repo' }]);
+    expect(availabilityProbes).toEqual(['/gone']);
+    expect(metadataWrites.at(-1)).toEqual({ sessionId: 'root', metadata: null });
+  });
+
+  test('moves the subsessions with their root out of the deleted folder', async () => {
+    directoryAvailability.set('/gone', 'missing');
+
+    await moveSessionTreeToDirectory({
+      root: makeSession('root', '/gone'),
+      descendants: [makeSession('child', '/gone')],
+      sourceDirectory: '/gone',
+      directory: '/repo/worktrees/feature',
+    });
+
+    expect(moveCalls.map((call) => call.sessionId)).toEqual(['child', 'root']);
+    // The availability answer is read once per move, not once per session.
+    expect(availabilityProbes).toEqual(['/gone']);
+  });
+
+  test('still refuses a session with no status report while its folder exists', async () => {
+    // Positive control for the test above: only a confirmed missing folder
+    // turns "status unknown" into "safe to move".
+    await expect(moveSessionTreeToDirectory({
+      root: makeSession('root', '/source'),
+      descendants: [],
+      sourceDirectory: '/source',
+      directory: '/repo',
+    })).rejects.toThrow('Session status is unavailable');
+    expect(moveCalls).toEqual([]);
+  });
+
+  test('does not treat an unanswered availability check as missing', async () => {
+    directoryAvailability.set('/source', 'unknown');
+
+    await expect(moveSessionTreeToDirectory({
+      root: makeSession('root', '/source'),
+      descendants: [],
+      sourceDirectory: '/source',
+      directory: '/repo',
+    })).rejects.toThrow('Session status is unavailable');
+    expect(moveCalls).toEqual([]);
+  });
+
+  test('refuses a running session even when its folder is missing', async () => {
+    directoryAvailability.set('/gone', 'missing');
+    setStatuses('/other', { root: 'busy' });
+
+    await expect(moveSessionTreeToDirectory({
+      root: makeSession('root', '/gone'),
+      descendants: [],
+      sourceDirectory: '/gone',
+      directory: '/repo',
+    })).rejects.toThrow('Session is not idle');
+    expect(moveCalls).toEqual([]);
+  });
+
+  test('moves a known-idle session without probing its folder', async () => {
+    setStatuses('/source', { root: 'idle' });
+
+    await moveSessionTreeToDirectory({
+      root: makeSession('root'),
+      descendants: [],
+      sourceDirectory: '/source',
+      directory: '/elsewhere/',
+    });
+
+    expect(moveCalls).toEqual([{ sessionId: 'root', sourceDirectory: '/source', destinationDirectory: '/elsewhere' }]);
+    expect(availabilityProbes).toEqual([]);
+  });
+
+  test('rejects the folder the session is already in', async () => {
+    setStatuses('/source', { root: 'idle' });
+    await expect(moveSessionTreeToDirectory({
+      root: makeSession('root'),
+      descendants: [],
+      sourceDirectory: '/source',
+      directory: '/source/',
+    })).rejects.toThrow('Source and destination are the same');
+    expect(moveCalls).toEqual([]);
+  });
+
+  test('reports a server rejection of the destination through the intent toast', async () => {
+    directoryAvailability.set('/gone', 'missing');
+    moveSessionImplementation = async () => {
+      throw new Error('Directory does not exist: /nope');
+    };
+
+    requestSessionTreeMove({
+      kind: 'directory',
+      root: makeSession('root', '/gone'),
+      descendants: [],
+      sourceDirectory: '/gone',
+      directory: '/nope',
+      messages: makeMoveMessages(),
+    });
+
+    await waitFor(() => toastErrors.length === 1);
+    expect(toastErrors).toEqual([{ title: 'move failed', description: 'Directory does not exist: /nope' }]);
   });
 });

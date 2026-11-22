@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -411,5 +412,21 @@ describe('atomic write rename retry', () => {
     await expect(failing.compareAndSwap('repo_one', 0, bindingFor('github', 'github.com', 'one')))
       .rejects.toMatchObject({ code: 'EPERM' });
     expect((await fs.readdir(path.dirname(filePath))).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+});
+
+describe('bounded state read (#1663)', () => {
+  it('refuses an over-cap state file with the typed error, without parsing it', async () => {
+    const { filePath, store } = await makeStore();
+    await fs.writeFile(filePath, 'x'.repeat(4 * 1024 * 1024 + 1));
+    await expect(store.read('repo-one')).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_BINDINGS' });
+  });
+
+  it('refuses a FIFO promptly and the chain stays live for the next operation', async () => {
+    const { filePath, store } = await makeStore();
+    execFileSync('mkfifo', [filePath]);
+    await expect(store.read('repo-one')).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_BINDINGS' });
+    await fs.rm(filePath);
+    await expect(store.read('repo-one')).resolves.toEqual({ revision: 0, binding: null });
   });
 });

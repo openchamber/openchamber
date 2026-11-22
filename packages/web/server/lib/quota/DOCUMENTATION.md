@@ -10,6 +10,7 @@ extension applies the same policy in its own process at activation.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/quota/index.js`: public entrypoint imported by `packages/web/server/index.js`.
+- The CLI (`packages/web/bin/lib/commands-quota.js`) imports the same entrypoint for `openchamber quota`. No server is running in that process, so the command wires the credential source itself: the direct local credential-store read (`openCodeLocalCredentialSource`), the single source the aggregator gatherer also uses (code#2490, #2282) — there is no server round-trip and no server-first/store-fallback split, so the CLI cannot diverge from the gatherer about which credentials exist. Every result is stamped `credentialSource: 'local'`; its fetches run with bounded concurrency under a per-provider timeout, and each result carries `elapsedMs` (a timed-out provider answers a `status: 'timeout'` row). Those fields are attached by the CLI, not by the providers. The server endpoint resolves its providers from this same module directly (`routes.js` imports `./index.js`); the `getQuotaProviders` registration option remains only as a test pass-through.
 - `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.
@@ -31,7 +32,7 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
-| `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent) |
+| `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent), or the active `google` OAuth login in OpenCode's credential store |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry, Claude Code credentials file, OpenCode `auth.json` (`anthropic`, `claude`), `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cline-pass` | ClinePass | `providers/cline-pass.js` | `cline-pass` (API key under `key` or `token`) |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
@@ -43,10 +44,12 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 | `google` | Google | `providers/google/index.js` | `google`, `google.oauth` |
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
-| `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (first match wins) |
+| `meta` | Meta Model API | `providers/meta.js` | `meta` (OpenCode credential; plan usage also reads the Muse CLI OAuth store, see below) |
+| `mistral` | Mistral AI | `providers/mistral.js` | `mistral` (API key under `key` or `token`) — key-validity class: usage/balance are not API-readable on a standard key (#1619) |
 | `nano-gpt` | NanoGPT | `providers/nanogpt.js` | `nano-gpt`, `nanogpt`, `nano_gpt` |
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
+| `opendesign` | Open Design | `providers/opendesign.js` | OpenChamber-managed credential stored under `~/.config/openchamber/quota/opendesign.json` (`{ cookie, workspaceId }`) |
 | `zai-coding-plan` | z.ai | `providers/zai.js` | `zai-coding-plan`, `zai`, `z.ai` |
 | `zhipuai-coding-plan` | Zhipu AI Coding Plan | `providers/zhipuai-coding-plan.js` | `zhipuai-coding-plan`, `zhipuai`, `zhipu`; falls back to `provider.<alias>.options.apiKey` in opencode.json, resolving `{file:...}` (including `~/`) and `{env:...}` with `resolveConfigApiKey` (`utils/auth.js`) |
 | `minimax-coding-plan` | MiniMax Coding Plan (minimax.io) | `providers/minimax-coding-plan.js` / `providers/minimax-shared.js` | `minimax-coding-plan` |
@@ -59,6 +62,37 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 | `zenmux` | ZenMux | `providers/zenmux.js` | Optional Platform API key stored under `~/.config/openchamber/quota/zenmux.json` (`platformApiKey`). The OpenCode chat key is not used. |
 | `xai` | xAI | `providers/xai.js` | `xai` OAuth entry in OpenCode `auth.json` |
 
+## Provider registry contract (design #1808)
+
+The manifest at `provider-manifest.json` (beside this document) is the one
+checked-in statement of the quota provider set: every provider id that appears
+in any surface list, its display name, and its presence on each surface (web
+registry, VS Code dispatch, VS Code configured set, UI catalog, UI type union,
+and the dispatcher table above). One conformance test per package (web, VS
+Code, UI) asserts that package's lists equal the manifest; a provider that
+appears in a list but not the manifest fails, and so does a manifest provider
+silently absent from a list. The contract the manifest encodes:
+
+1. **One logical provider set.** Exactly one set of quota provider ids; each
+   surface's list is a view of it, stated in the manifest.
+2. **Landed only when landed everywhere.** A new provider lands web fetcher +
+   registration, VS Code fetcher + dispatch + configured entry, UI catalog +
+   type, and the docs row in the same change. A surface that legitimately
+   cannot serve a provider records a **named exception with a reason** in the
+   manifest - never a silent absence.
+3. **Aliases are not providers.** A credential alias (for example `openai` for
+   `codex`, per the web registry's `credentialAliases`) is recorded in the
+   manifest as an alias and appears in no surface's provider list - including
+   the type union, where `openai` currently sits as if it were a provider
+   (recorded as the alias row's open note; fixing the union is not phase 1).
+4. **Configured and fetch select through one function.** Per provider per
+   backend, exactly one credential-selection function serves both the
+   configured predicate and the fetch path; two selection expressions for one
+   provider in one backend is a defect.
+5. **No distinct id for a duplicate fetcher.** A behaviour-identical fetcher's
+   id is folded into its provider (alias / folded instance) or registered with
+   the distinct data it adds stated.
+
 ## Internal-only provider module
 - `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
 
@@ -66,14 +100,39 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 All providers should return results via shared helpers to preserve API shape:
 - Required fields: `providerId`, `providerName`, `ok`, `configured`, `usage`, `fetchedAt`
 - Optional field: `error`
+- Optional per-credential fields: `credentialId`, `credentialLabel`, `credentialActive`, and `accountLabel` (see the per-credential section below)
 - Unsupported provider requests should return `ok: false`, `configured: false`, `error: Unsupported provider`
 
 Provider modules must export `providerId`, `providerName`, `aliases`, `isConfigured(auth?)`, and `fetchQuota()`.
+Every provider fetch carries a 15-second `AbortSignal.timeout` deadline. Every provider response body is also read through the bounded reader in `utils/response-body.js` under the named cap `QUOTA_RESPONSE_MAX_BYTES = 1 MiB` (1 * 1024 * 1024), exported from that module: a deadline bounds time, not memory, and quota payloads are small per-account usage/balance/credits JSON documents (xAI's is a small protobuf body), so 1 MiB — the changelog-index precedent — costs nothing while a fast hostile or misconfigured (sometimes user-configured) endpoint cannot grow server memory arbitrarily inside the deadline window (#1282). An over-cap body fails the provider's result through its normal failure path instead of being buffered and parsed. The VS Code twin (`packages/vscode/src/quotaProviders.ts`) applies the same named cap with its own local helper; the surfaces share no code. A stalled endpoint returns the provider's `ok: false` result (`Request timed out` where the provider names its errors) and releases the dispatcher's `pendingFetches` entry, so the next request fetches fresh.
 `fetchQuota()` should return a quota result with `usage.windows` keyed by window name (for example `5h`, `7d`, `daily`) and optional provider-specific `usage.models` data.
+A module may also export `fetchQuotaForCredential(credentialRow)` to opt into per-credential quota (below); its row in `providers/index.js` then carries `credentialAliases` (the integration ids its credentials live under) and the dispatcher handles enumeration.
 
-exe.dev, Cursor, and ZenMux credentials are explicitly managed through Settings. exe.dev usage uses a separately generated HTTPS API token restricted to `billing credits usage` and aggregates every `exe-*` model provider into one monthly credit window. Generate the token with `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`. ZenMux usage uses an optional Platform API key pasted on the Usage page; the OpenCode chat key is never used, and a missing Platform API key means ZenMux quota is not fetched. The server validates managed credentials before atomic `0600` writes and never returns secrets through its API. OpenChamber never scans browser cookie stores or automatically reads Cursor storage; Cursor import is an explicit one-time user action and never modifies Cursor's database.
+exe.dev, Cursor, and ZenMux credentials are explicitly managed through Settings. exe.dev usage uses a separately generated HTTPS API token restricted to `billing credits usage` and aggregates every `exe-*` model provider into one monthly credit window. Generate the token with `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`. ZenMux usage uses an optional Platform API key pasted on the Usage page; the OpenCode chat key is never used, and a missing Platform API key means ZenMux quota is not fetched. The server validates managed credentials before atomic `0600` writes and never returns secrets through its API. OpenChamber never scans browser cookie stores or automatically reads Cursor storage; Cursor import is an explicit one-time user action and never modifies Cursor's database. The import reads the database through the `sqlite3` CLI with a five-second timeout in both the web provider and the VS Code extension (`quotaCredentials.ts`), so a hung `sqlite3` fails the import with the existing unavailable error instead of blocking the server or the extension host.
 
 Command Code usage resolves account scope through `GET /alpha/whoami`, then reads server-backed credit balances and five-hour/weekly limits from `GET /alpha/billing/credits?orgId=...`. Personal accounts return `org: null` and use `/alpha/billing/credits` without an `orgId`; organization accounts include their organization id. Web/Electron and VS Code read the standard `command-code` OpenCode auth entry (including OAuth `access`) or `COMMAND_CODE_API_KEY`; credentials remain in the owning runtime and are never returned to shared UI.
+
+## Open Design (AMR) quota
+
+Open Design usage lives behind the AMR console session, not the inference API key: the `sk-amr` key authenticates model calls only and the console API rejects it. The `opendesign` provider is a managed credential (`opendesign.json` holding `{ cookie, workspaceId }`): the value of the Better Auth session cookie from a signed-in browser (a bare session token is stored under its `better-auth.session_token` name) plus the workspace id, sent as the `x-vela-workspace-id` header. Sign-in itself is Turnstile-gated and is never scripted; the cookie is captured once from the user's browser and re-imported when it expires.
+
+A fetch checks the session first (`GET /api/auth/get-session`): a missing session, a non-OK answer, or a 401/403 from the usage endpoint returns the re-import error, never zero usage. The windows come from `GET /api/v1/workspaces/{id}/billing/coding-plan-usage`: each `windows[]` entry maps by `durationSeconds` (18000 to `5h`, 604800 to `7d`), with `usedPercent` computed from `remainingCredits / limitCredits` and `resetsAt` carried through. A second, best-effort read of `GET /api/v1/workspaces/{id}/billing/usage` over the trailing 7 days builds the per-model breakdown in `usage.models`: per model, summed input/output/total tokens, the credit multiplier, credits consumed, and `sharePercent`, the model's share of the credits in that span. The CLI prints the breakdown as indented lines under the windows; `--quiet` leaves it out and `--json` carries it as structured fields. The billing/usage field names have not been verified against a live account yet, so the parser accepts the plausible spellings and sums what it recognizes; an unrecognized payload omits the breakdown and the windows still stand. Verify the field names on the first live read after a cookie is imported and tighten the parser then.
+
+## Disabled providers, per-credential quota, and provider instances
+
+**Disabled providers.** `listConfiguredQuotaProviders()` leaves out providers the merged OpenCode config turns off (`disabled_providers`, read through `readConfigLayers()` in `server/lib/opencode/shared.js`, the same merged-config read the OpenRouter provider uses for its base URL). The filter keys on the OpenCode provider ids a quota row answers to: by default the row's own quota id, with one explicit exception, both Copilot rows follow `github-copilot` because they read the same credential. Quota ids and OpenCode provider ids are different namespaces, so alias matching is not used: the Codex row must not disappear because an unrelated `openai-codex` entry is disabled, and OpenCode Go must not disappear because `opencode` is. Passing `{ includeDisabled: true }` (the CLI's `--all`) lists them anyway. The filter governs the listing only: `fetchQuotaForProvider(id)` and `fetchQuotaForProviderInstances(id)` always fetch a provider named explicitly. If the config cannot be read, or a layer fails to parse, the failure is logged (`console.error` / `console.warn`) and the listing proceeds unfiltered; a silent filter would hide providers with no trace. The VS Code twin applies the same listing filter; per-credential and per-instance quota below are web and CLI only for now.
+
+**Per-credential quota.** OpenCode can hold several credentials for one integration (two ChatGPT sign-ins, for example), while the projected credential read keeps only the active one. `listStoredCredentials(integrationID?)` in `server/lib/opencode/auth.js` returns every stored row (id, label, active flag, projected value); the projected read and its consumers are unchanged. `fetchQuotaForProviderInstances(providerId)` in `providers/index.js` returns one result per usable stored credential for providers that export `fetchQuotaForCredential`: Codex and OpenCode Go natively, and ClinePass, DeepInfra, Charm Hyper, and Kilo through an adapter that re-enters their existing fetch with a credential read limited to that row, because those fetchers already accept an injected read. Every other provider, and any provider whose store holds no usable row, answers the single active-credential result, so callers see one shape either way. Results carry `credentialId`, `credentialLabel`, and `credentialActive` from the store row; a provider may add `accountLabel` for the account the credential metered (Codex takes the usage response's `email`, falling back to its `account_id`). Providers are added to per-credential quota by giving their fetcher an injectable credential read, not by special-casing the dispatcher.
+
+**Injected credential reads (tests).** The Codex, Copilot (both rows), DeepSeek, NeuralWatt, OpenRouter, Z.ai, ZhipuAI, and Claude fetchers accept an optional injected credential read (`readAuth`, defaulting to `readOpenCodeCredentials`); Claude credential discovery also accepts injected Keychain-exec and credentials-file readers, and the registry dispatch functions accept `readAuth`/`listCredentials` and thread them to provider fetchers. Tests pass fakes through these seams instead of mocking the `opencode/auth.js` module. On the web, `GET /api/quota/:providerId` returns the dispatcher's results directly: an array when several credentials answered, and the single result object when only one did, so one-credential consumers keep the shape they already parse. The shared UI accepts both shapes, stores one result per credential, and the Usage page renders a labeled block per credential; other surfaces that look a provider up by id read the active credential's result.
+
+**Provider instances.** A provider instance in the merged config (a `providers` or `provider` entry with `instanceOf`, such as `openai.alternate` for a second ChatGPT account) is quota-readable as its own row when a credential is stored under the instance id: its credentials live under the literal instance id in the credential store, and its quota type is the base provider the instance points at, matched through the base provider's `credentialAliases`. The instance lists only when at least one of its stored credentials is usable, and its results carry the config `name` as `providerName` when one is set. An instance whose base provider has no per-credential fetch is not listed and fetches as unsupported. `fetchQuotaForProvider(instanceId)` keeps its one-result contract and answers with the instance's active credential.
+
+**Folded instance credentials (Codex).** A registry entry may set `foldInstanceCredentials` (Codex does, #1555): the base provider's per-credential answer then also folds in its configured instances' rows, labeled as the base provider's own rows, and the base provider lists as configured when one of its instances does. After the provider re-seat the ChatGPT accounts live only under instance integrations, so without the fold the base Codex row read as unconfigured while every account was healthy. The base provider's single-credential fetch — and the VS Code twin's, which keeps its single-result contract — falls back to the first usable instance credential when the bare integration holds none.
+
+**Shared upstream-auth failures (#894).** Every provider that reads credentials through `../opencode/auth.js` fails the same way when the running OpenCode rejects OpenChamber's own credentials (for example after an OpenCode restart rotates its server password): the upstream 401 body is the bare string `Authentication required`, and each provider would otherwise surface that identical string as its own error, inviting per-provider fixes for one shared credential-path failure. The credential read in `opencode/auth.js` is the one place the peer is known to be the running OpenCode, so that is where the failure's origin is recorded: a 401 from the credential source (or its bare 401 body) is rethrown as an `OpenCodeUpstreamAuthError` carrying `origin: 'opencode-credential-source'` (see `opencode/credential-auth-error.js`). The dispatcher in `providers/index.js` classifies by that marker — never by the error text — on every result it returns (single fetch, per-credential rows, provider instances, and the configured-provider listing): the result keeps `ok: false` / `configured: true`, its `error` names the shared OpenCode upstream-auth failure and the check to run, and it carries `errorKind: 'opencode_upstream_auth'` so consumers can group or alert on the one failure. Provider-specific auth errors (a provider's own 401 from its own API, including a z.ai `payload.msg` of `Authentication required`) are not rewritten, however they are worded. One exception in mechanism, not in scope: a provider whose credential wrapper replaces the store-read error with its own text (xAI, #1131) marks its result with a credentialReadFailure flag instead of surfacing the upstream string, and the dispatcher classifies from that marker and drops it, so the marker never reaches consumers.
+
+**Provider catalogue.** `listQuotaProviderCatalogue()` returns every dispatchable provider and configured provider instance as `{ id, name, aliases, disabled }` (instances add `instanceOf`), where `aliases` merges the module's exported aliases with the registry row's `credentialAliases`. Callers that take provider names from a user (the CLI) resolve ids, display names, aliases, and wildcard patterns against this catalogue; the dispatcher itself still takes exact provider ids only, so resolution policy stays with the caller.
 
 ## OpenCode Go credential and quota semantics
 
@@ -86,7 +145,8 @@ OpenCode Go has two credential shapes and they are not interchangeable. An API k
 - **Credits balance**: the Go status response carries no credit balance. Alongside the Console read (never with a locally expired sign-in), the provider also reads the billing status, so a slow billing endpoint adds no time beyond the slower of the two requests. When the Go read succeeds, it surfaces its `availableMicroCents` (integer micro-cents as a decimal string; the Console counts `1_000_000` micro-cents per cent, so `100_000_000` is one USD) as a `credits_balance` window with a money `valueLabel` and no percent or reset. This read is best-effort: any failure (network, HTTP, malformed, or an absent amount) drops the row rather than failing the refresh or reporting a `$0.00` balance, and it never runs on the API-key path.
 - **Trusted origin**: requests go only to the fixed Console status URL with `redirect: 'error'`, so the bearer token is never forwarded to another origin.
 - **Failure classes stay distinct**: not configured (no credential), expired sign-in (expired local token or 401/403), absent subscription (unexpected `product`, or a 403 for an `opencode` API key), malformed response, and temporary request failure each return their own configured flag and message.
-- Keep `packages/web/server/lib/quota/providers/opencode-go.js` and `packages/vscode/src/opencodeGoQuota.ts` in sync — the VS Code extension duplicates this logic rather than importing the web provider.
+- **Per-workspace rows (web and CLI only)**: OpenCode Go exports `fetchQuotaForCredential`, registered with `credentialAliases` `opencode-go` + the shared `opencode`. Each usable stored row — one Console sign-in per workspace, or a stored API key — answers its own result through `fetchQuotaForProviderInstances`, replacing the combined row on that path; the combined single fetch remains only as the no-usable-row fallback. A Console row carries its `orgID` as `accountLabel`, so a workspace row is attributable even when the stored credential has no label; the plan label is per row, from that row's own Console read. A failing workspace returns its own error row and does not affect the others. The generic credential-read adapter is not used here: this provider reads two integrations, and the per-row fetch must preserve the within-row Console-first / API-key-fallback order and the `opencode`-key 403 meaning.
+- Keep `packages/web/server/lib/quota/providers/opencode-go.js` and `packages/vscode/src/opencodeGoQuota.ts` in sync — the VS Code extension duplicates this logic rather than importing the web provider. The per-workspace dispatch above is the documented web/CLI-only exception: the VS Code twin keeps the single active-credential row, as with the other per-credential providers.
 
 On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the obsolete `quota/opencode-go.json` credential file without reading its cookie value.
 
@@ -118,6 +178,18 @@ xAI quota reports the SuperGrok billing cycle from `POST https://grok.com/grok_a
 - **Credentials are read-only.** OpenChamber never refreshes the xAI OAuth token. xAI rotates (and rejects the previous) refresh token on every exchange, and OpenCode 2.x owns the credential store without exposing a refresh route, so a quota-side refresh would consume the token OpenCode still holds and force the user to re-authorize ("Grok expired every morning"). The provider uses the stored access token while it is valid and returns an explicit expired error (no `auth.x.ai` call) once it is stale, matching the Claude provider's "sign in again" handling; OpenCode's own refresh persists the rotated pair.
 - **Skipping the standalone refresh also required OpenCode 2.x**: the pre-2.x `auth.json` write path no longer exists (`packages/web/server/lib/opencode/auth.js` is read-only), so there is nowhere correct to persist a rotated pair.
 - Keep `packages/web/server/lib/quota/providers/xai.js` and `packages/vscode/src/quotaProviders.ts` (`fetchXaiQuota`) in sync — the VS Code extension duplicates this logic rather than importing the web provider.
+
+## Meta (Muse Code High Usage) quota semantics
+
+`POST https://api.meta.ai/muse-code/key` (`x-api-version: 1.0.0`, body `{ "onboard": false }`) is the endpoint Meta's own Muse Code CLI reads for `/usage`; Meta publishes no separate usage REST route. The response carries the plan's own view: `subs_usage.window` (a rolling window: `used_percent`, `window_duration_mins`, `resets_at`), `subs_usage.weekly` (`used_percent`, `resets_at`), and `subs_tier_name` (for example "Muse Code High Usage"). The rolling window becomes a duration-labelled window (`window_duration_mins` × 60 → `5h`, …), `weekly` becomes the `weekly` window, and `subs_tier_name` becomes `planLabel`.
+
+**Credential sourcing.** The read authenticates with the Meta *account* OAuth token (the Muse Code device-login token, `dca:…`), not with the subscription's minted inference API key: the key endpoint refuses a minted key with 401, while `/v1/models` and `/v1/chat/completions` accept the minted key and carry no usage signal. The OpenCode `meta` credential is tried first, so an install that stores the account token there works directly. When OpenCode holds the minted inference key (the fleet's case: `META_API_KEY` is the `LLM|…` key the key endpoint mints), that read is rejected and the provider falls back to the account token in the Muse CLI's own OAuth store (`~/.config/muse/auth.json`, `providers.meta.access_token`) — the same login the fleet's muse-proxy uses for this pool. The token is read at fetch time and never logged or returned.
+
+**Post-roll empty state.** After a window rolls unspent, the endpoint answers 200 with `is_subs_active: true` and no `subs_usage` at all (captured live 2026-10-28). That state is a window open with no usage yet: the provider returns `ok: true` with the rolling and weekly windows present and unknown percentages, the same shape an empty window object maps to. A body with no usage windows and no active flag stays a `No quota data in response` failure.
+
+**Failure classes stay distinct.** Not configured (no credential), unauthorized (the credential the read used is not an account token), subscription inactive (`is_subs_active === false`), a 402-class wall or a 429 (an exhausted plan, `require_payment`, or a rate-limited usage read), malformed response, and transport failure each return their own result. The wall is surfaced as `ok: false, configured: true, quotaExhausted: true` with `quotaResetAt` when the body carries one — a consumer that parks work on walls must not read it as a read failure.
+
+Keep `packages/web/server/lib/quota/providers/meta.js` and `packages/vscode/src/quotaProviders.ts` (`fetchMetaQuota`) in sync — the VS Code extension duplicates this logic rather than importing the web provider.
 
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:
@@ -156,6 +228,14 @@ return configured failure without querying quota with expired access.
 Refreshes are read-only with respect to OpenCode credentials. Neither a guessed
 client nor refreshed tokens are written back. Refresh-token rotation and changes
 to quota endpoint semantics are outside this compatibility fix.
+
+### Why a wrong-client store login reads as not configured
+
+The store's `google` entry is shared: a Gemini CLI OAuth sign-in lives in the same entry shape as the Antigravity plugin's login, and the credential carries no reliable marker of its issuing client, so resolution cannot tell them apart. The first distinguishing evidence is the token exchange itself: a foreign login's refresh is rejected with HTTP 400/401 and the OAuth code `unauthorized_client`, permanently. When every candidate came from the store and every refresh ends in that confirmed wrong-client rejection, `fetchQuota` reports the provider as not configured - there is no Antigravity source, so there is no broken Antigravity account to show. An accounts-file candidate is Antigravity-issued by construction and keeps the refresh-failure state, as does any other store failure (`invalid_grant`, transport, malformed responses).
+
+### Why the Antigravity provider reads the credential store, not only the accounts file
+
+The plugin's current versions sign in through OpenCode's credential store (the `google` integration's OAuth credential, written by its `antigravity` auth method) and never write the legacy accounts file. The file also lives in the OpenCode config directory, where a config redeploy can remove it without touching the live login. Reading only the file therefore reports a working login as "not configured" — silently, with no error row. The provider resolves both sources (accounts file first, then the credential store, deduplicated by refresh token) and tries each candidate's refresh in order. Regenerating the accounts file from the store was rejected: a copied refresh token rots when the stored login rotates, and two writers for one login invite divergence.
 
 ## Antigravity quota and limit semantics
 

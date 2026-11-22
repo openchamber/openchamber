@@ -31,6 +31,7 @@ type UserModelChoice = {
 
 const PROVIDER_ID = 'openai';
 const MODEL_ID = 'gpt-5.5';
+const SECOND_MODEL_ID = 'gpt-5.5-picked';
 const AGENT = 'build';
 const SESSION_ID = 'ses_restore';
 
@@ -40,7 +41,8 @@ const model = {
   providerID: PROVIDER_ID,
   variants: { low: {}, high: {} },
 };
-const provider = { id: PROVIDER_ID, name: PROVIDER_ID, models: [model] };
+const secondModel = { ...model, id: SECOND_MODEL_ID, name: SECOND_MODEL_ID };
+const provider = { id: PROVIDER_ID, name: PROVIDER_ID, models: [model, secondModel] };
 const agent = { id: AGENT, name: AGENT, displayName: 'Build', mode: 'primary' as const, hidden: false, request: { settings: {}, headers: {}, body: {} }, permissions: [] };
 /** v2 pins an agent's model, and its effort, in one model reference. */
 type TestAgent = typeof agent & { model?: { providerID: string; id: string; variant?: string } };
@@ -60,6 +62,11 @@ const variantWrites: VariantChoice[] = [];
 const overrideWrites: Array<{ override: VariantChoice; inherited: string | undefined }> = [];
 /** Every model remembered as the last chat pick. */
 const lastSelectedWrites: string[] = [];
+const retryMessageCalls: Array<[string, string | null, { providerID: string; id: string; variant?: string | null }]> = [];
+let modelPickerChoice = { providerID: PROVIDER_ID, modelID: MODEL_ID, model };
+let activeRunStatus: { type: 'busy' | 'retry' | 'idle' } | undefined;
+let activeRunPermissions: unknown[] = [];
+let activeRunForms: unknown[] = [];
 
 type ConfigState = {
   providers: typeof provider[];
@@ -210,15 +217,22 @@ const useSelectionStore = create<SelectionState>((set, get) => ({
   },
 }));
 
-type SessionUIState = { currentSessionId: string | null; getDirectoryForSession: () => string };
+type SessionUIState = {
+  currentSessionId: string | null;
+  getDirectoryForSession: () => string;
+  retryMessage: (sessionId: string, messageId: string | null, model: { providerID: string; id: string; variant?: string | null }) => Promise<void>;
+};
 const useSessionUIStore = create<SessionUIState>(() => ({
   currentSessionId: SESSION_ID,
   getDirectoryForSession: () => '/workspace/project',
+  retryMessage: async (sessionId, messageId, selection) => { retryMessageCalls.push([sessionId, messageId, selection]); },
 }));
 
 const useUIStore = create(() => ({
   isMobile: false,
   isModelSelectorOpen: false,
+  activeRunModelChangeBehavior: 'next-message' as 'next-message' | 'restart',
+  modelChoiceRecordingEnabled: true,
   hiddenModels: [],
   favoriteAgents: [],
   toggleFavoriteAgent: () => undefined,
@@ -283,14 +297,17 @@ type SessionRecord = { id: string; agent?: string; model?: { providerID: string;
 const useSessionRecordStore = create<{ record: SessionRecord | undefined }>(() => ({ record: undefined }));
 const setSessionRecord = (record: SessionRecord | undefined) => useSessionRecordStore.setState({ record });
 mock.module('@/sync/sync-context', () => ({
+  useSessionForms: () => activeRunForms,
   useSessionMessagesSelector: <T,>(_sessionID: string, _directory: string | undefined, select: (messages: [], state: { part: Record<string, never> }) => T): T => (
     select([], { part: {} })
   ),
+  useSessionPermissions: () => activeRunPermissions,
   useSessionRenderable: () => true,
   useSessionSelector: <T,>(_sessionID: string | undefined, _directory: string | undefined, select: (session: SessionRecord | undefined) => T): T => {
     const record = useSessionRecordStore((state) => state.record);
     return React.useMemo(() => select(record), [record, select]);
   },
+  useSessionStatus: () => activeRunStatus,
 }));
 mock.module('@/sync/use-sync', () => ({ useSync: () => ({ sessions: [] }) }));
 
@@ -320,7 +337,7 @@ mock.module('@/components/ui/tooltip', () => ({
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 mock.module('@/components/model-picker/ModelPickerList', () => ({
   ModelPickerList: ({ onSelect }: React.ComponentProps<typeof import('@/components/model-picker/ModelPickerList').ModelPickerList>) => (
-    <button onClick={() => onSelect({ providerID: PROVIDER_ID, modelID: MODEL_ID, model })}>{MODEL_ID}</button>
+    <button onClick={() => onSelect(modelPickerChoice)}>{modelPickerChoice.modelID}</button>
   ),
 }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useIsVSCodeRuntime: () => false }));
@@ -430,12 +447,17 @@ describe('ModelControls effort restore', () => {
     variantWrites.length = 0;
     overrideWrites.length = 0;
     lastSelectedWrites.length = 0;
+    retryMessageCalls.length = 0;
+    modelPickerChoice = { providerID: PROVIDER_ID, modelID: MODEL_ID, model };
+    activeRunStatus = undefined;
+    activeRunPermissions = [];
+    activeRunForms = [];
     latestUserChoice = null;
     knownElsewhere = nothingKnownElsewhere();
     setSessionRecord(undefined);
     forcePreserveManualOverride = null;
     useSessionUIStore.setState({ currentSessionId: SESSION_ID });
-    useUIStore.setState({ isMobile: false, isModelSelectorOpen: false });
+    useUIStore.setState({ isMobile: false, isModelSelectorOpen: false, activeRunModelChangeBehavior: 'next-message' });
     useSelectionStore.setState({
       savedVariant: undefined,
       sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
@@ -869,6 +891,121 @@ describe('ModelControls effort restore', () => {
     }
   });
 
+  describe('active-run model changes', () => {
+    const selectPickerModel = async (container: HTMLElement) => {
+      const item = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.trim() === modelPickerChoice.modelID);
+      if (!item) throw new Error(`Expected model picker entry ${modelPickerChoice.modelID}`);
+      await act(async () => item.click());
+    };
+
+    beforeEach(() => {
+      modelPickerChoice = { providerID: PROVIDER_ID, modelID: SECOND_MODEL_ID, model: secondModel };
+    });
+
+    test('the default next-message behavior changes selection without restarting the active prompt', async () => {
+      activeRunStatus = { type: 'busy' };
+      expect(useUIStore.getState().activeRunModelChangeBehavior).toBe('next-message');
+
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        await selectPickerModel(dom.container);
+
+        expect(useConfigStore.getState().currentModelId).toBe(SECOND_MODEL_ID);
+        expect(retryMessageCalls).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    for (const status of ['busy', 'retry'] as const) {
+      test(`restart preference replays the latest prompt when the run is ${status}`, async () => {
+        activeRunStatus = { type: status };
+        useUIStore.setState({ activeRunModelChangeBehavior: 'restart' });
+
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          await selectPickerModel(dom.container);
+
+          expect(retryMessageCalls).toEqual([[
+            SESSION_ID,
+            null,
+            { providerID: PROVIDER_ID, id: SECOND_MODEL_ID, variant: undefined },
+          ]]);
+        } finally {
+          await cleanup();
+        }
+      });
+    }
+
+    const blockedRuns = [
+      { label: 'idle', status: { type: 'idle' as const }, permissions: [], forms: [] },
+      { label: 'waiting for permission', status: { type: 'busy' as const }, permissions: [{}], forms: [] },
+      { label: 'waiting for a form', status: { type: 'retry' as const }, permissions: [], forms: [{}] },
+      { label: 'without a loaded status', status: undefined, permissions: [], forms: [] },
+    ];
+    for (const run of blockedRuns) {
+      test(`does not restart while ${run.label}`, async () => {
+        activeRunStatus = run.status;
+        activeRunPermissions = run.permissions;
+        activeRunForms = run.forms;
+        useUIStore.setState({ activeRunModelChangeBehavior: 'restart' });
+
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          await selectPickerModel(dom.container);
+          expect(retryMessageCalls).toEqual([]);
+        } finally {
+          await cleanup();
+        }
+      });
+    }
+
+    test('does not restart when the picker selects the already-active model', async () => {
+      activeRunStatus = { type: 'busy' };
+      useUIStore.setState({ activeRunModelChangeBehavior: 'restart' });
+      modelPickerChoice = { providerID: PROVIDER_ID, modelID: MODEL_ID, model };
+
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        await selectPickerModel(dom.container);
+        expect(retryMessageCalls).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('does not restart the main session from a controlled model picker', async () => {
+      activeRunStatus = { type: 'busy' };
+      useUIStore.setState({ activeRunModelChangeBehavior: 'restart' });
+
+      const { dom, cleanup } = await renderModelControls({
+        sessionId: 'btw-pending:session',
+        selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: AGENT, variant: undefined },
+      });
+      try {
+        await selectPickerModel(dom.container);
+        expect(retryMessageCalls).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('does not restart when the model is picked on a draft without a session', async () => {
+      activeRunStatus = { type: 'busy' };
+      useSessionUIStore.setState({ currentSessionId: null });
+      useUIStore.setState({ activeRunModelChangeBehavior: 'restart' });
+
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        await selectPickerModel(dom.container);
+        expect(retryMessageCalls).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+  });
+
   for (const [isMobile, variant] of [
     [false, 'low'], [true, null],
   ] as const) {
@@ -919,6 +1056,91 @@ describe('ModelControls effort restore', () => {
       }
     });
   }
+
+  describe('recording manual choices', () => {
+    const recordedChoices = async (run: () => Promise<void>) => {
+      const originalFetch = globalThis.fetch;
+      const bodies: unknown[] = [];
+      globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/api/openchamber/model-choices')) bodies.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { status: 200 });
+      }, { preconnect: async () => {} });
+      try {
+        await run();
+        await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+      return bodies;
+    };
+    const pickEffort = async (container: HTMLElement, label: string) => {
+      await act(async () => container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
+      const button = Array.from(container.querySelectorAll('button')).find((entry) => entry.textContent?.trim() === label);
+      if (!button) throw new Error(`No effort button "${label}"`);
+      await act(async () => button.click());
+    };
+
+    beforeEach(() => {
+      useUIStore.setState({ isModelSelectorOpen: true, modelChoiceRecordingEnabled: true });
+    });
+
+    test('an effort picked in the main composer is recorded with what it replaced', async () => {
+      const bodies = await recordedChoices(async () => {
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          await pickEffort(dom.container, 'Low');
+        } finally {
+          await cleanup();
+        }
+      });
+      expect(bodies).toEqual([{
+        surface: 'composer',
+        kind: 'effort',
+        chosen: { model: `${PROVIDER_ID}/${MODEL_ID}`, variant: 'low' },
+        replaced: { model: `${PROVIDER_ID}/${MODEL_ID}`, variant: null },
+        sessionModel: `${PROVIDER_ID}/${MODEL_ID}`,
+        inputSize: 'unknown',
+      }]);
+    });
+
+    test('a model picked in the main composer is recorded as a model choice', async () => {
+      modelPickerChoice = { providerID: PROVIDER_ID, modelID: SECOND_MODEL_ID, model: secondModel };
+      const bodies = await recordedChoices(async () => {
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          const item = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+            .find((entry) => entry.textContent?.trim() === SECOND_MODEL_ID);
+          if (!item) throw new Error(`Expected model picker entry ${SECOND_MODEL_ID}`);
+          await act(async () => item.click());
+        } finally {
+          await cleanup();
+        }
+      });
+      expect(bodies).toEqual([{
+        surface: 'composer',
+        kind: 'model',
+        chosen: { model: `${PROVIDER_ID}/${SECOND_MODEL_ID}`, variant: null },
+        replaced: { model: `${PROVIDER_ID}/${MODEL_ID}`, variant: null },
+        sessionModel: `${PROVIDER_ID}/${MODEL_ID}`,
+        inputSize: 'unknown',
+      }]);
+    });
+
+    test('a pick in a side-chat picker is not recorded', async () => {
+      const bodies = await recordedChoices(async () => {
+        const { dom, cleanup } = await renderModelControls({
+          sessionId: 'btw-pending:ses_restore',
+          selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: AGENT, variant: null },
+        });
+        try {
+          await pickEffort(dom.container, 'Low');
+        } finally {
+          await cleanup();
+        }
+      });
+      expect(bodies).toEqual([]);
+    });
+  });
 
   describe('following the session agent', () => {
     const OTHER_MODEL_ID = 'gpt-other';

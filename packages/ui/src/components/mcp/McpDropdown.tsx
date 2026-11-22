@@ -67,12 +67,13 @@ interface McpDropdownContentProps {
   active: boolean;
   className?: string;
   headerAction?: React.ReactNode;
-  listClassName?: string;
+  /** Fill a host that bounds the height: the list takes the room left and scrolls, in place of the dropdown's fixed cap. */
+  fillHeight?: boolean;
   hideHeader?: boolean;
   mobileListDensity?: boolean;
 }
 
-export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, className, headerAction, listClassName, hideHeader = false, mobileListDensity = false }) => {
+export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, className, headerAction, fillHeight = false, hideHeader = false, mobileListDensity = false }) => {
   const { t } = useI18n();
   const directory = useMcpDirectory(active);
   const status = useMcpStore((state) => directory ? state.getStatusForDirectory(directory) : null);
@@ -114,8 +115,10 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
   }, [isSpinning, refresh, directory]);
 
   return (
-    <div className={cn('w-full', className)}>
-      {!hideHeader ? <div className="border-b border-[var(--interactive-border)]">
+    // A column so a host that bounds the height (the mobile workspace pane) scrolls
+    // the server list and keeps the note under it in view.
+    <div data-mcp-content className={cn('flex w-full min-h-0 flex-col', fillHeight && 'h-full', className)}>
+      {!hideHeader ? <div className="shrink-0 border-b border-[var(--interactive-border)]">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5">
           <div className="min-w-0 flex items-baseline gap-2">
             <div className="typography-ui-header font-semibold text-foreground">{t('mcpDropdown.title')}</div>
@@ -141,7 +144,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
       </div> : null}
 
       {/* Desktop and mobile share the list, with different row density. */}
-      <div className={cn('max-h-64 overflow-y-auto', mobileListDensity ? 'space-y-1 py-3' : 'px-3 py-2.5', listClassName)}>
+      <div data-mcp-server-list className={cn('min-h-0 flex-1 overflow-y-auto', !fillHeight && 'max-h-64', mobileListDensity ? 'space-y-1 py-3' : 'px-3 py-2.5')}>
         <div className={cn(!mobileListDensity && sortedNames.length > 0 && 'p-1.5')}>
         {sortedNames.map((serverName) => {
           const serverStatus = status?.[serverName];
@@ -215,6 +218,15 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
         )}
         </div>
       </div>
+
+      {/* A server in code mode only changes a catalog that OpenCode appends as a
+          message. With code mode off its tools are in the request's tool list,
+          which providers cache as the start of the prompt. */}
+      {sortedNames.length > 0 && (
+        <p data-mcp-cache-note className={cn('shrink-0 px-4 typography-meta text-muted-foreground', mobileListDensity ? 'pb-3' : 'pb-2.5')}>
+          {t('mcpDropdown.cacheNote')}
+        </p>
+      )}
     </div>
   );
 };
@@ -426,6 +438,9 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
           <div className="py-1">
             {renderServerList()}
           </div>
+          {sortedNames.length > 0 && (
+            <p className="px-2 pb-2 typography-meta text-muted-foreground">{t('mcpDropdown.cacheNote')}</p>
+          )}
           {directory && (
             <div className="px-2 py-1 border-t border-border/40 mt-1">
               <span className="typography-meta text-muted-foreground truncate block">

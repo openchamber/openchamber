@@ -4,6 +4,13 @@ import type { RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 
 import { SurfaceClient, type SurfaceConnectionState, type SurfaceControlState, type SurfaceFrame } from './surface-client';
 
+type SurfaceInboundMessage =
+  | { type: 'hello'; viewerId: string }
+  | { type: 'frame'; seq: number; width: number; height: number; mime: string; bytes: number; agentActive: boolean; title: string }
+  | { type: 'control'; controller: string; mine: boolean }
+  | { type: 'clipboard'; id: string; text: string }
+  | { type: 'ended'; reason: string };
+
 class FakeSocket implements RelayTunnelWebSocket {
   readyState = 0;
   binaryType: 'blob' | 'arraybuffer' = 'arraybuffer';
@@ -14,7 +21,7 @@ class FakeSocket implements RelayTunnelWebSocket {
   sent: string[] = [];
 
   open(): void { this.readyState = 1; this.onopen?.(); }
-  text(message: object): void { this.onmessage?.({ data: JSON.stringify(message) }); }
+  text(message: SurfaceInboundMessage): void { this.onmessage?.({ data: JSON.stringify(message) }); }
   binary(bytes: Uint8Array): void { this.onmessage?.({ data: bytes.slice().buffer }); }
   send(data: string | ArrayBuffer | ArrayBufferView): void { this.sent.push(String(data)); }
   close(): void { this.readyState = 3; this.onclose?.({ code: 1000, reason: '' }); }

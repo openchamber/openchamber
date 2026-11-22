@@ -3,6 +3,7 @@ import { ThemeImportStorageError } from './theme-runtime.js';
 import { registerThemeCatalogRoutes } from './theme-catalog.js';
 import { collectLocalFileDiagnostics } from '../diagnostics/local-files.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
+import { isLoopbackUrl } from '../security/bind-host.js';
 
 // Install before any routes or body parsers so early 4xx responses are covered too.
 export const registerHttpResponseDiagnostics = (app, journal = serverDiagnosticJournal) => {
@@ -590,11 +591,11 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
 
   const isLoopbackCandidateUrl = (url) => {
     try {
-      const hostname = new URL(url).hostname.toLowerCase();
-      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+      new URL(url);
     } catch {
       return true;
     }
+    return isLoopbackUrl(url);
   };
 
   // `preferredServerUrl` is the caller-supplied externally reachable URL (the

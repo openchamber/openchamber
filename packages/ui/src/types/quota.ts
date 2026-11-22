@@ -1,11 +1,11 @@
 export type QuotaProviderId =
   | 'openai'
   | 'codex'
+  | 'command-code'
   | 'cursor'
   | 'claude'
   | 'cline-pass'
   | 'github-copilot'
-  | 'github-copilot-addon'
   | 'google'
   | 'antigravity'
   | 'kimi-for-coding'
@@ -22,9 +22,12 @@ export type QuotaProviderId =
   | 'deepseek'
   | 'exe-dev'
   | 'hyper'
+  | 'meta'
+  | 'mistral'
   | 'neuralwatt'
   | 'kilo'
   | 'zenmux'
+  | 'opendesign'
   | 'xai';
 
 export interface UsageWindowGiftReset {
@@ -51,6 +54,7 @@ export interface UsageWindows {
 
 interface ProviderUsage extends UsageWindows {
   models?: Record<string, UsageWindows>;
+  usageAvailability?: 'console-only';
 }
 
 export interface ProviderResult {
@@ -61,6 +65,19 @@ export interface ProviderResult {
   error?: string;
   /** Subscription tier reported by the provider, when it exposes one. */
   planLabel?: string | null;
+  /** Per-credential identity, present when the provider holds several stored credentials. */
+  credentialId?: string;
+  credentialLabel?: string;
+  credentialActive?: boolean;
+  accountLabel?: string;
+  /**
+   * The provider's plan is walled (a 402-class quota-exhausted state), which is
+   * distinct from a read failure (`ok: false` without this flag). A consumer
+   * that parks work on walls reads this, never the bare `ok`.
+   */
+  quotaExhausted?: boolean;
+  /** When the walled window resets, in epoch milliseconds, when the provider says. */
+  quotaResetAt?: number | null;
   usage: ProviderUsage | null;
   fetchedAt: number;
 }

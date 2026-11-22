@@ -1,4 +1,5 @@
-import { isRecord } from '../shared/guards.js';
+import { isRecord, isString } from '../shared/guards.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -17,6 +18,7 @@ import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
 // reads both and always writes `plugins` with v2 entries.
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
+const MAX_PLUGIN_FILE_BYTES = 1024 * 1024;
 
 /**
  * @typedef {'user' | 'project'} PluginScope
@@ -419,10 +421,29 @@ function readPluginDirFile(id, workingDirectory) {
   if (!fs.existsSync(target.absolutePath)) {
     return null;
   }
+  // The shared bounded read (design #1254) judges the file from its
+  // handle and enforces the cap during the read. Over-cap keeps this
+  // module's coded error; a file that vanishes after the existence check
+  // throws the ENOENT a stat would have thrown, and a non-regular file
+  // throws the EISDIR a read would have thrown.
+  const result = readBoundedFileSync(target.absolutePath, MAX_PLUGIN_FILE_BYTES);
+  if (!result.ok) {
+    if (result.reason === 'too-large') {
+      throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
+    }
+    if (result.reason === 'missing') {
+      const error = new Error(`ENOENT: no such file or directory, stat '${target.absolutePath}'`);
+      error.code = 'ENOENT';
+      throw error;
+    }
+    const error = new Error('EISDIR: illegal operation on a directory, read');
+    error.code = 'EISDIR';
+    throw error;
+  }
   return {
     fileName: target.fileName,
     scope: target.scope,
-    content: fs.readFileSync(target.absolutePath, 'utf8'),
+    content: result.buffer.toString('utf8'),
   };
 }
 
@@ -435,8 +456,14 @@ function writePluginDirFile(file, workingDirectory, opts = {}) {
   if (!opts.overwrite && fs.existsSync(absolutePath)) {
     throw codedError(`Plugin file "${fileName}" already exists`, 'FILE_EXISTS');
   }
+  // The write side of the read gate above (#1444): refuse content the
+  // capped reader would refuse, so a save cannot strand the file.
+  const content = file?.content ?? '';
+  if (isString(content) && Buffer.byteLength(content, 'utf8') > MAX_PLUGIN_FILE_BYTES) {
+    throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
+  }
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(absolutePath, file?.content ?? '', 'utf8');
+  fs.writeFileSync(absolutePath, content, 'utf8');
 }
 
 function deletePluginDirFile(id, workingDirectory) {

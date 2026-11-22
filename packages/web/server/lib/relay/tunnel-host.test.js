@@ -229,6 +229,24 @@ describe('tunnel-host response compression', () => {
   });
 });
 
+describe('tunnel-host fragment assembly guards (#1024)', () => {
+  test('does not assemble fragments for never-opened streams', async () => {
+    const { host, loopback, sentFrames } = await createHarness();
+    try {
+      // 300 fragmented frames on 300 distinct never-opened streams, ~18 MiB
+      // total: if the host fed them to the assembler, the per-key/aggregate
+      // bounds would throw and the partials would be retained.
+      const chunk = new Uint8Array(60 * 1024);
+      for (let streamId = 1; streamId <= 600; streamId += 2) {
+        await host.handleFrame(encodeTunnelFrame(TunnelFrameType.WsText, streamId, chunk, true));
+      }
+      expect(sentFrames).toEqual([]);
+    } finally {
+      await loopback.stop();
+    }
+  });
+});
+
 describe('relay host WebSocket allowlist', () => {
   test('allows only the exact dev-server tunnel path', () => {
     expect(isAllowedRelayWebSocketPath('/api/dev-tunnel')).toBe(true);

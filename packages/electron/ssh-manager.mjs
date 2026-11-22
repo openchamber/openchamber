@@ -4,8 +4,11 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
+
+const asBuffer = (chunk) => (Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
@@ -47,6 +50,16 @@ const MONITOR_STABILIZE_TICKS = 5;
 const SSH_STATUS_EVENT = 'openchamber:ssh-instance-status';
 const MAX_PROCESS_ERROR_CHARS = 2000;
 const MAX_PROCESS_ERROR_CAPTURE_CHARS = MAX_PROCESS_ERROR_CHARS * 2;
+// Captured stdout from an SSH command is bounded and timed. The remote host
+// controls both how much a command prints and whether it exits, so an
+// unbounded, timeless read lets a verbose or wedged remote grow or hang the
+// desktop app. The 4 MiB cap matches the web run-command cap; stderr in
+// this file was already tail-capped.
+export const MAX_SSH_OUTPUT_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_SSH_OUTPUT_TIMEOUT_MS = 120 * 1000;
+// A remote install (bun add / npm install -g) legitimately runs for
+// minutes, so its call site passes this generous deadline explicitly.
+const REMOTE_INSTALL_TIMEOUT_MS = 600 * 1000;
 const childProcessDiagnostics = new WeakMap();
 
 const nowMillis = () => Date.now();
@@ -403,10 +416,21 @@ const parseVersionToken = (raw) => {
   return null;
 };
 
+// The probe script only ever prints a curl `%{http_code}` (three digits, 000
+// when the connection failed) or the literal 0/200 fallbacks, so the value is
+// judged whole and in its canonical shape: parseInt alone would accept
+// '200junk' or '200.9' as 200, and a digit string of any other length is a
+// leading-zero spelling ('0200', '000200') the script never emits. Padding
+// counts too: the script prints no spaces or tabs around the value, so a
+// padded spelling (' 200', '200 ') is judged as written, with no trim. A
+// login-shell banner line carrying such a value must not fake a healthy
+// server or an accepted password.
 const parseProbeStatusLine = (line, prefix) => {
   if (!line || !line.startsWith(prefix)) return null;
-  const value = Number.parseInt(line.slice(prefix.length).trim(), 10);
-  return Number.isFinite(value) ? value : null;
+  const raw = line.slice(prefix.length);
+  if (raw !== '0' && !/^\d{3}$/.test(raw)) return null;
+  const value = Number.parseInt(raw, 10);
+  return value === 0 || (value >= 100 && value <= 599) ? value : null;
 };
 
 // `serve --quiet` reports its bound port as a line containing only the port
@@ -414,10 +438,13 @@ const parseProbeStatusLine = (line, prefix) => {
 // remote command runs through a login shell, whose banner/profile output can
 // precede that line and contain arbitrary numbers, so the port must be read
 // from an anchored whole-line match — never the first number in the output —
-// and range-checked like any other port.
+// and range-checked like any other port. The match also requires the
+// canonical spelling: serve prints the port with no leading zeros, so a
+// leading-zero line ('080', '04096') can only be banner output, the same
+// canonical-shape rule parseProbeStatusLine applies to probe statuses.
 const parseServedPortLine = (output) => {
   for (const line of String(output ?? '').split('\n')) {
-    const match = line.trim().match(/^(\d{1,5})(?:\s+pass:\S+)?$/);
+    const match = line.trim().match(/^([1-9]\d{0,4})(?:\s+pass:\S+)?$/);
     if (!match) continue;
     const value = Number.parseInt(match[1], 10);
     if (value >= 1 && value <= 65535) return value;
@@ -445,6 +472,12 @@ const parseRemoteOs = (output) => {
 // its own: a banner sentence can start with '/' and read as a path with
 // spaces, so resolveRemoteTool adds position and ending checks there.
 const isRemotePathLine = (value) => value.startsWith('/');
+
+// A stored port is only a port when it is an integer in 1-65535: a finite
+// number alone lets 99999, -1 or 8080.9 through the sanitizers and into an
+// ssh -L/-R spec or a remote `serve --port`, where it fails opaquely. The
+// same range check guards discovered servers in listRemoteServers.
+const validPort = (value) => (Number.isInteger(value) && value >= 1 && value <= 65535 ? value : null);
 
 const isAuthHttpStatus = (status) => status === 401 || status === 403;
 const isLivenessHttpStatus = (status) => (status >= 200 && status <= 299) || isAuthHttpStatus(status);
@@ -499,13 +532,17 @@ export class ElectronSshManager {
     childProcessDiagnostics.set(child, diagnostics);
     const auth = this.sshAuth.get(parsed);
     auth?.children.add(child);
+    // stderr is diagnostic text, but a multi-byte character split across
+    // pipe chunks would still garble it; decode incrementally like stdout.
+    const stderrDecoder = new StringDecoder('utf8');
     child.stderr?.on('data', (chunk) => {
-      diagnostics.stderr = `${diagnostics.stderr}${chunk.toString()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
+      diagnostics.stderr = `${diagnostics.stderr}${stderrDecoder.write(asBuffer(chunk))}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
     });
     child.on('error', (error) => {
       diagnostics.error = error;
     });
     child.on('close', () => {
+      diagnostics.stderr = `${diagnostics.stderr}${stderrDecoder.end()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
       auth?.children.delete(child);
     });
     return child;
@@ -530,7 +567,7 @@ export class ElectronSshManager {
     return this.trackSshProcess(child, parsed);
   }
 
-  async runSshOutput(parsed, preDestinationArgs, remoteCommand = null) {
+  async runSshOutput(parsed, preDestinationArgs, remoteCommand = null, { timeoutMs = DEFAULT_SSH_OUTPUT_TIMEOUT_MS, maxStdoutBytes = MAX_SSH_OUTPUT_BYTES } = {}) {
     return await new Promise((resolve, reject) => {
       const child = this.trackSshProcess(this.spawnProcess('ssh', buildSshArgs(parsed, preDestinationArgs, remoteCommand), {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -540,18 +577,54 @@ export class ElectronSshManager {
 
       let stdout = '';
       let stderr = '';
+      // Decode incrementally: a multi-byte character split across pipe
+      // chunks must round-trip exactly, because callers parse this output
+      // as data (ssh -G config, status --json, probe bodies) (#1577).
+      const stdoutDecoder = new StringDecoder('utf8');
+      const stderrDecoder = new StringDecoder('utf8');
+      let stdoutBytes = 0;
+      let settled = false;
+      const settle = (action, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        action(value);
+      };
+      const killChild = () => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // The process already exited.
+        }
+      };
+      const timer = timeoutMs > 0
+        ? setTimeout(() => {
+          killChild();
+          settle(reject, new Error(`SSH command timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+        : null;
       child.stdout?.on('data', (chunk) => {
-        stdout += chunk.toString();
+        if (settled) return;
+        const buffer = asBuffer(chunk);
+        stdoutBytes += buffer.length;
+        if (stdoutBytes > maxStdoutBytes) {
+          killChild();
+          settle(reject, new Error(`SSH command output exceeded the ${maxStdoutBytes} byte limit (output-too-large)`));
+          return;
+        }
+        stdout += stdoutDecoder.write(buffer);
       });
       child.stderr?.on('data', (chunk) => {
-        stderr = `${stderr}${chunk.toString()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
+        stderr = `${stderr}${stderrDecoder.write(asBuffer(chunk))}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
       });
       child.on('error', () => {
-        reject(new Error(this.processErrorDetail(child, 'Failed to start SSH process')));
+        settle(reject, new Error(this.processErrorDetail(child, 'Failed to start SSH process')));
       });
       child.on('close', (code) => {
+        stdout += stdoutDecoder.end();
+        stderr = `${stderr}${stderrDecoder.end()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
         const auth = this.sshAuth.get(parsed);
-        resolve({
+        settle(resolve, {
           code: typeof code === 'number' ? code : -1,
           stdout,
           stderr: sanitizeProcessDiagnostic(stderr, auth?.sshPassword),
@@ -560,15 +633,18 @@ export class ElectronSshManager {
     });
   }
 
-  async runRemoteCommand(parsed, controlPath, script, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC) {
+  async runRemoteCommand(parsed, controlPath, script, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC, { executionTimeoutMs = DEFAULT_SSH_OUTPUT_TIMEOUT_MS, maxStdoutBytes = MAX_SSH_OUTPUT_BYTES } = {}) {
     const connectionArgs = this.usesControlMaster()
       ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`]
       : this.independentConnectionArgs();
+    // ConnectTimeout bounds connection establishment only. The execution
+    // deadline bounds the remote command itself and is enforced locally by
+    // runSshOutput, which kills the ssh child when it passes.
     const { code, stdout, stderr } = await this.runSshOutput(parsed, [
       ...connectionArgs,
       '-o', `ConnectTimeout=${timeoutSec}`,
       '-T',
-    ], `sh -lc ${shellQuote(script)}`);
+    ], `sh -lc ${shellQuote(script)}`, { timeoutMs: executionTimeoutMs, maxStdoutBytes });
     if (code !== 0) {
       const auth = this.sshAuth.get(parsed);
       throw new Error(sanitizeProcessDiagnostic(stderr || stdout, auth?.sshPassword) || 'Remote command failed');
@@ -862,9 +938,9 @@ export class ElectronSshManager {
       enabled: forward?.enabled !== false,
       type,
       ...(forward?.localHost ? { localHost: sanitizeBindHost(forward.localHost) } : {}),
-      ...(Number.isFinite(forward?.localPort) ? { localPort: Number(forward.localPort) } : {}),
+      ...(validPort(forward?.localPort) !== null ? { localPort: Number(forward.localPort) } : {}),
       ...(forward?.remoteHost ? { remoteHost: String(forward.remoteHost).trim() || '127.0.0.1' } : {}),
-      ...(Number.isFinite(forward?.remotePort) ? { remotePort: Number(forward.remotePort) } : {}),
+      ...(validPort(forward?.remotePort) !== null ? { remotePort: Number(forward.remotePort) } : {}),
     };
 
     if (type === 'local' || type === 'remote') {
@@ -907,7 +983,7 @@ export class ElectronSshManager {
       remoteOpenchamber: {
         mode: instance?.remoteOpenchamber?.mode === 'external' ? 'external' : 'managed',
         keepRunning: instance?.remoteOpenchamber?.keepRunning !== false,
-        ...(Number.isFinite(instance?.remoteOpenchamber?.preferredPort) ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
+        ...(validPort(instance?.remoteOpenchamber?.preferredPort) !== null ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
         installMethod: ['auto', 'npm', 'bun'].includes(instance?.remoteOpenchamber?.installMethod)
           ? instance.remoteOpenchamber.installMethod
           : 'auto',
@@ -916,7 +992,7 @@ export class ElectronSshManager {
       },
       localForward: {
         bindHost: sanitizeBindHost(instance?.localForward?.bindHost),
-        ...(Number.isFinite(instance?.localForward?.preferredLocalPort) ? { preferredLocalPort: Number(instance.localForward.preferredLocalPort) } : {}),
+        ...(validPort(instance?.localForward?.preferredLocalPort) !== null ? { preferredLocalPort: Number(instance.localForward.preferredLocalPort) } : {}),
       },
       auth: {
         ...(this.sanitizeStoredSecret(instance?.auth?.sshPassword) ? { sshPassword: this.sanitizeStoredSecret(instance.auth.sshPassword) } : {}),
@@ -1186,7 +1262,7 @@ export class ElectronSshManager {
     let lastError = null;
     for (const command of commands) {
       try {
-        await this.runRemoteCommand(parsed, controlPath, command);
+        await this.runRemoteCommand(parsed, controlPath, command, DEFAULT_CONNECTION_TIMEOUT_SEC, { executionTimeoutMs: REMOTE_INSTALL_TIMEOUT_MS });
         return;
       } catch (error) {
         lastError = error;
@@ -1357,7 +1433,7 @@ export class ElectronSshManager {
     }
     if (!payload) throw firstError ?? new Error('Remote OpenChamber status output held no server registry');
     return payload.instances
-      .filter((entry) => entry.runtime === 'cli' && Number.isInteger(entry.port))
+      .filter((entry) => entry.runtime === 'cli' && validPort(entry.port) !== null)
       .map((entry) => ({
         port: entry.port,
         launchMode: entry.launchMode,

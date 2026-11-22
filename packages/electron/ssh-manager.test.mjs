@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { execFileSync } from 'node:child_process';
 
-import { ElectronSshManager } from './ssh-manager.mjs';
+import { DEFAULT_SSH_OUTPUT_TIMEOUT_MS, ElectronSshManager, MAX_SSH_OUTPUT_BYTES } from './ssh-manager.mjs';
 
 // The remote probes call coreutils, which some hosts (NixOS) keep outside /usr/bin and /bin.
 const coreutilsDir = (home) => {
@@ -159,6 +159,120 @@ printf '4321\\n'`);
     expect(calls[0].args).toContain('ControlPath=none');
     expect(calls[0].args).toContain('StrictHostKeyChecking=accept-new');
     expect(calls[0].args).not.toContain('ControlPath=C:\\Temp\\unused.sock');
+  });
+
+  test('caps runRemoteCommand stdout and kills the child over the cap', async () => {
+    const calls = [];
+    let killed = false;
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      spawn: (command, args) => {
+        calls.push({ command, args });
+        const child = createChild();
+        child.kill = () => {
+          killed = true;
+          return true;
+        };
+        queueMicrotask(() => {
+          child.stdout.end('x'.repeat(5000));
+        });
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'uname -s', 60, { maxStdoutBytes: 1024 }))
+      .rejects.toThrow('output-too-large');
+    expect(killed).toBe(true);
+    expect(calls[0].args).toContain('ConnectTimeout=60');
+  });
+
+  test('decodes runSshOutput stdout split inside multi-byte characters exactly (#1577)', async () => {
+    const text = 'café 🔑 done\n';
+    const bytes = Buffer.from(text, 'utf8');
+    // Byte 4 ends inside the 2-byte é (bytes 3-4); byte 8 ends inside the
+    // 4-byte 🔑 (bytes 6-9). Per-chunk decoding turned both into U+FFFD.
+    const chunks = [bytes.subarray(0, 4), bytes.subarray(4, 8), bytes.subarray(8)];
+    const runWithChunks = async (writeChunks) => {
+      const manager = new ElectronSshManager({
+        settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+        appVersion: '0.0.0-test',
+        emit: () => undefined,
+        spawn: () => {
+          const child = createChild();
+          queueMicrotask(() => {
+            writeChunks(child);
+            child.stdout.end();
+            child.exitCode = 0;
+            child.emit('close', 0);
+          });
+          return child;
+        },
+      });
+      const parsed = { destination: 'user@example.test', args: [] };
+      return manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'probe');
+    };
+
+    const control = await runWithChunks((child) => { child.stdout.write(bytes); });
+    expect(control).toBe(text);
+
+    const split = await runWithChunks((child) => { for (const chunk of chunks) child.stdout.write(chunk); });
+    expect(split).toBe(text);
+    expect(split).not.toContain('\uFFFD');
+  });
+
+  test('charges the runSshOutput cap on bytes received, not decoded text (#1577)', async () => {
+    const bytes = Buffer.from('é', 'utf8'); // 2 bytes received
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      spawn: () => {
+        const child = createChild();
+        queueMicrotask(() => {
+          // Split inside the character: per-chunk decoding produced two
+          // U+FFFD (6 bytes of decoded text) for these same 2 bytes.
+          child.stdout.write(bytes.subarray(0, 1));
+          child.stdout.write(bytes.subarray(1));
+          child.stdout.end();
+          child.exitCode = 0;
+          child.emit('close', 0);
+        });
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'probe', 60, { maxStdoutBytes: 3 })).resolves.toBe('é');
+  });
+
+  test('rejects a silent runRemoteCommand child at the execution deadline', async () => {
+    let killed = false;
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+      spawn: () => {
+        const child = createChild();
+        child.kill = () => {
+          killed = true;
+          return true;
+        };
+        return child;
+      },
+    });
+    const parsed = { destination: 'user@example.test', args: [] };
+
+    await expect(manager.runRemoteCommand(parsed, '/tmp/unused.sock', 'uname -s', 60, { executionTimeoutMs: 50 }))
+      .rejects.toThrow('timed out after 50ms');
+    expect(killed).toBe(true);
+  });
+
+  test('documents the ssh output defaults', () => {
+    expect(MAX_SSH_OUTPUT_BYTES).toBe(4 * 1024 * 1024);
+    expect(DEFAULT_SSH_OUTPUT_TIMEOUT_MS).toBe(120 * 1000);
   });
 
   test('creates a PowerShell-backed askpass helper on Windows', async () => {
@@ -727,6 +841,68 @@ printf '4321\\n'`);
     expect(servers).toEqual([{ port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1', passwordProtected: null }]);
   });
 
+  test('drops out-of-range ports from stored instances instead of forwarding them to ssh', () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+    });
+
+    const instance = manager.sanitizeInstance({
+      id: 'ssh-1',
+      sshCommand: 'ssh user@example.com',
+      remoteOpenchamber: { preferredPort: 99999 },
+      localForward: { preferredLocalPort: -5 },
+      portForwards: [
+        { id: 'bad-remote', type: 'local', localPort: 8080, remotePort: 70000 },
+        { id: 'bad-local', type: 'remote', localPort: -1, remotePort: 80 },
+        { id: 'fractional', type: 'local', localPort: 8080.9, remotePort: 80 },
+        { id: 'too-big-dynamic', type: 'dynamic', localPort: 123456 },
+        { id: 'good', type: 'local', localPort: 1, remotePort: 65535 },
+      ],
+    });
+
+    expect(instance.remoteOpenchamber).not.toHaveProperty('preferredPort');
+    expect(instance.localForward).not.toHaveProperty('preferredLocalPort');
+    expect(instance.portForwards).toEqual([
+      { id: 'good', enabled: true, type: 'local', localPort: 1, remoteHost: '127.0.0.1', remotePort: 65535, localHost: '127.0.0.1' },
+    ]);
+
+    const valid = manager.sanitizeInstance({
+      id: 'ssh-2',
+      sshCommand: 'ssh user@example.com',
+      remoteOpenchamber: { preferredPort: 4096 },
+      localForward: { preferredLocalPort: 65535 },
+    });
+    expect(valid.remoteOpenchamber.preferredPort).toBe(4096);
+    expect(valid.localForward.preferredLocalPort).toBe(65535);
+  });
+
+  test('drops registry entries whose port is outside 1-65535', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => JSON.stringify({
+      instances: [
+        { runtime: 'cli', port: 0, launchMode: 'daemon' },
+        { runtime: 'cli', port: -1, launchMode: 'daemon' },
+        { runtime: 'cli', port: 65536, launchMode: 'daemon' },
+        { runtime: 'cli', port: 99999, launchMode: 'daemon' },
+        { runtime: 'cli', port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1' },
+      ],
+    });
+
+    const servers = await manager.listRemoteServers(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      '/home/pi/.openchamber/npm-global/bin/openchamber',
+    );
+
+    expect(servers).toEqual([{ port: 4096, launchMode: 'daemon', bindHost: '127.0.0.1', passwordProtected: null }]);
+  });
+
   test('starts the resolved OpenChamber binary rather than whatever PATH exposes', async () => {
     let started = '';
     const manager = new ElectronSshManager({
@@ -797,6 +973,48 @@ printf '4321\\n'`);
     expect(port).toBe(4321);
   });
 
+  test('does not let a leading-zero banner line fake the served port', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => '/home/pi/.opencode/bin/opencode';
+    // serve prints the bound port canonically, so a leading-zero line can
+    // only be login-shell banner output; the real port line follows it.
+    manager.runRemoteCommand = async () => '080\n4321\n';
+
+    const port = await manager.startRemoteServerManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      4321,
+      '/home/pi/.bun/bin/openchamber',
+    );
+
+    expect(port).toBe(4321);
+  });
+
+  test('falls back to the desired port when the only port-like line has a leading zero', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => '/home/pi/.opencode/bin/opencode';
+    manager.runRemoteCommand = async () => '080 pass:secret\n';
+
+    const port = await manager.startRemoteServerManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      4321,
+      '/home/pi/.bun/bin/openchamber',
+    );
+
+    expect(port).toBe(4321);
+  });
+
   test('reads probe statuses by prefix when login-shell banner output precedes them', async () => {
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
@@ -825,6 +1043,160 @@ printf '4321\\n'`);
       passwordAccepted: false,
       authStatus: 0,
     });
+  });
+
+  test('does not let probe statuses with trailing junk fake a healthy server', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'INFO_STATUS=200junk',
+      'AUTH_STATUS=0',
+      'HEALTH_STATUS=200.9',
+      JSON.stringify({ openchamberVersion: '1.2.3', runtime: 'web' }),
+    ].join('\n');
+
+    await expect(manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      null,
+    )).rejects.toThrow(/Remote OpenChamber probe failed \(info status 0, health status 0\)/);
+  });
+
+  test('does not let leading-zero probe statuses fake a healthy server', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'INFO_STATUS=0200',
+      'AUTH_STATUS=0',
+      'HEALTH_STATUS=000200',
+      JSON.stringify({ openchamberVersion: '1.2.3', runtime: 'web' }),
+    ].join('\n');
+
+    await expect(manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      null,
+    )).rejects.toThrow(/Remote OpenChamber probe failed \(info status 0, health status 0\)/);
+  });
+
+  test('does not let whitespace-padded probe statuses fake a healthy server', async () => {
+    // The probe script prints each status with no padding, so a padded
+    // spelling can only be login-shell banner output. HEALTH stays 000 so
+    // success could only come through the padded info status.
+    for (const padded of [' 200', '200 ', '\t200', '200\t']) {
+      const manager = new ElectronSshManager({
+        settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+        appVersion: '1.2.3',
+        emit: () => undefined,
+      });
+      manager.runRemoteCommand = async () => [
+        `INFO_STATUS=${padded}`,
+        'AUTH_STATUS=0',
+        'HEALTH_STATUS=000',
+        JSON.stringify({ openchamberVersion: '1.2.3', runtime: 'web' }),
+      ].join('\n');
+
+      await expect(manager.probeRemoteServer(
+        { destination: 'user@example.test', args: [] },
+        '/tmp/control.sock',
+        4096,
+        null,
+      )).rejects.toThrow(/Remote OpenChamber probe failed \(info status 0, health status 0\)/);
+    }
+
+    // A padded health status is judged the same way, with an info status
+    // that is not itself a liveness answer.
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'INFO_STATUS=000',
+      'AUTH_STATUS=0',
+      'HEALTH_STATUS= 200',
+      '{}',
+    ].join('\n');
+
+    await expect(manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      null,
+    )).rejects.toThrow(/Remote OpenChamber probe failed \(info status 0, health status 0\)/);
+  });
+
+  test('does not report a password accepted on a whitespace-padded auth status', async () => {
+    for (const padded of ['200 ', '\t200']) {
+      const manager = new ElectronSshManager({
+        settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+        appVersion: '1.2.3',
+        emit: () => undefined,
+      });
+      manager.runRemoteCommand = async () => [
+        'INFO_STATUS=401',
+        `AUTH_STATUS=${padded}`,
+        'HEALTH_STATUS=200',
+        '{}',
+      ].join('\n');
+
+      await expect(manager.probeRemoteServer(
+        { destination: 'user@example.test', args: [] },
+        '/tmp/control.sock',
+        4096,
+        'secret',
+      )).rejects.toThrow(/configured password was rejected \(auth status 0\)/);
+    }
+  });
+
+  test('does not report a password accepted on a leading-zero auth status', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'INFO_STATUS=401',
+      'AUTH_STATUS=0200',
+      'HEALTH_STATUS=200',
+      '{}',
+    ].join('\n');
+
+    await expect(manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      'secret',
+    )).rejects.toThrow(/configured password was rejected \(auth status 0\)/);
+  });
+
+  test('does not report a password accepted on a junk-suffixed auth status', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      'INFO_STATUS=401',
+      'AUTH_STATUS=200junk',
+      'HEALTH_STATUS=200',
+      '{}',
+    ].join('\n');
+
+    await expect(manager.probeRemoteServer(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4096,
+      'secret',
+    )).rejects.toThrow(/configured password was rejected \(auth status 0\)/);
   });
 
   test('refuses to start when the remote machine has no opencode CLI', async () => {

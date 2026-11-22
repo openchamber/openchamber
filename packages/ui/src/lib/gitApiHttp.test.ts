@@ -569,6 +569,19 @@ describe('gitApiHttp branch comparisons', () => {
     }
   });
 
+  test('shows the server message from a 413 file-diff response', async () => {
+    installWindowMock();
+    try {
+      globalThis.fetch = Object.assign(async () => Response.json({ error: 'File is too large to diff: big.txt exceeds the 50 MiB working-tree limit for file diffs', code: 'file_too_large' }, { status: 413 }), previousFetch);
+      await expect(getGitFileDiff('/repo', { path: 'big.txt' })).rejects.toThrow('File is too large to diff: big.txt');
+      // A 413 without the route's body keeps the generic fallback.
+      globalThis.fetch = Object.assign(async () => new Response('Payload Too Large', { status: 413, statusText: 'Payload Too Large' }), previousFetch);
+      await expect(getGitFileDiff('/repo', { path: 'big.txt' })).rejects.toThrow('Failed to get git file diff: Payload Too Large');
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('reads many paths in requests of at most 1000 and keeps each entry in order', async () => {
     installWindowMock();
     const bodies: Array<z.infer<typeof diffsRequestSchema>> = [];

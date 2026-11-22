@@ -13,9 +13,10 @@
  */
 
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
-import { createPlanSummaryCache } from './plan-progress.js';
+import { createPlanSummaryCache, readBoundedUtf8, PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
 import { z } from 'zod';
 
 const optionalTextInput = z.string().optional();
@@ -28,14 +29,49 @@ const PROJECT_TODO_TEXT_MAX_LENGTH = 1000;
 const PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 const PROJECT_PLAN_BODY_MAX_LENGTH = 200_000;
 const PROJECT_TODO_MAX_ITEMS = 500;
+/**
+ * Todo ids are client-named (the panel names the id it already shows), so
+ * they were the one stored field a caller could grow without limit: text
+ * is clamped and the count is capped, but an unbounded id let ~10 create
+ * requests push context.json past CONTEXT_FILE_READ_MAX_BYTES, after
+ * which every read judged the file malformed (#2113). Generated ids are
+ * UUIDs (36 chars); 128 leaves generous headroom for client-chosen ids
+ * while keeping 500 ids at ~64k chars, inside the read-cap budget
+ * computed at CONTEXT_FILE_READ_MAX_BYTES below.
+ */
+export const PROJECT_TODO_ID_MAX_LENGTH = 128;
 const PROJECT_PLAN_MAX_ITEMS = 500;
+
+/**
+ * Read cap for context.json (and the legacy <stem>.json read through
+ * the same helper). A legitimate file is bounded by the write-side
+ * clamps above: notes at most 200 x 3,000 chars, todos at most
+ * 500 x 1,000 chars, plan links at most 500 x ~300 chars, plus
+ * planSessions entries - roughly 1.3M chars in total. At UTF-8's
+ * widest (4 bytes per char) that is a worst-case legitimate file of
+ * ~5.2 MB. 8 MiB gives headroom over that worst case (the previous
+ * 4 MiB cap sat below it, so a legitimate all-multibyte store could
+ * have been refused as malformed) while keeping one oversized file
+ * from being buffered whole.
+ */
+export const CONTEXT_FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
 
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
 const PLAN_FILE_PATTERN = /^[a-zA-Z0-9._-]+\.md$/;
 
+// The clamp must not split a surrogate pair: a value cut right after a high
+// surrogate drops that half, because the clamped value is persisted and
+// rendered, where a lone surrogate becomes U+FFFD permanently (#2010).
 const clampLength = (value, maxLength) => {
-  if (typeof value !== 'string') return '';
-  return value.length > maxLength ? value.slice(0, maxLength) : value;
+  if (typeof value !== 'string') {
+    return '';
+  }
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const cut = value.slice(0, maxLength);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
 };
 
 const NOTE_SOURCES = new Set(['manual', 'selection', 'agent']);
@@ -106,7 +142,7 @@ const sanitizeTodos = (value, now) => {
     if (!isObjectRecord(entry)) continue;
     const id = asNonEmptyString(entry.id);
     const text = clampLength(asNonEmptyString(entry.text) || '', PROJECT_TODO_TEXT_MAX_LENGTH);
-    if (!id || !text || seen.has(id)) continue;
+    if (!id || id.length > PROJECT_TODO_ID_MAX_LENGTH || !text || seen.has(id)) continue;
     seen.add(id);
     result.push({
       id,
@@ -244,7 +280,7 @@ const todoText = (value) => {
 };
 
 export const createProjectContextRuntime = (deps) => {
-  const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, onChanged } = deps;
+  const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, onChanged, readPlanMetrics } = deps;
   // The team's shared plans folder for a project (absolute path) or null; the
   // project config runtime owns that answer (`plansDir` in the shared file).
   const sharedPlansDirFor = typeof resolveSharedPlansDir === 'function'
@@ -282,15 +318,17 @@ export const createProjectContextRuntime = (deps) => {
   const legacyConfigPathFor = (projectId) => path.join(projectsDirPath, `${storageStemFor(projectId)}.json`);
 
   const readJson = async (filePath) => {
-    let raw;
-    try {
-      raw = await fsPromises.readFile(filePath, 'utf8');
-    } catch (error) {
-      if (error && error.code === 'ENOENT') return { missing: true, value: null };
-      throw error;
+    const result = await readBoundedFile(filePath, CONTEXT_FILE_READ_MAX_BYTES);
+    if (!result.ok) {
+      // Missing stays authoritative empty. An over-cap or non-regular
+      // target follows the malformed path (value null, not missing):
+      // it must never silently read as empty.
+      return result.reason === 'missing'
+        ? { missing: true, value: null }
+        : { missing: false, value: null };
     }
     try {
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(result.buffer.toString('utf8'));
       return { missing: false, value: isObjectRecord(parsed) ? parsed : null };
     } catch {
       return { missing: false, value: null };
@@ -298,10 +336,18 @@ export const createProjectContextRuntime = (deps) => {
   };
 
   const writeJsonAtomic = async (filePath, value) => {
+    const serialized = JSON.stringify(value, null, 2);
+    // Fail closed before replacing the last valid file: a store the
+    // bounded read would refuse as malformed must never be written in
+    // the first place (#2113). The field clamps bound every legitimate
+    // store well under this cap; this is the aggregate backstop.
+    if (Buffer.byteLength(serialized, 'utf8') > CONTEXT_FILE_READ_MAX_BYTES) {
+      throw mutationError(`Stored project context would exceed the ${CONTEXT_FILE_READ_MAX_BYTES}-byte read cap; refusing to write`, 413);
+    }
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
     try {
-      await fsPromises.writeFile(temporaryPath, JSON.stringify(value, null, 2), 'utf8');
+      await fsPromises.writeFile(temporaryPath, serialized, 'utf8');
       await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
     } catch (error) {
       await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
@@ -371,16 +417,23 @@ export const createProjectContextRuntime = (deps) => {
 
       let raw = null;
       try {
-        raw = await fsPromises.readFile(targetPath, 'utf8');
+        raw = await readPlanFile(targetPath);
       } catch (error) {
-        if (!error || error.code !== 'ENOENT') throw error;
+        // An over-cap legacy plan is skipped, never buffered whole: the
+        // cap is a property of the module, and the migration still
+        // completes for the remaining items.
+        if (!error || error.status !== 413) throw error;
+        continue;
+      }
+      if (raw === null) {
         // Not in the plans directory yet — recover it from the recorded path.
         try {
-          raw = await fsPromises.readFile(absolutePath, 'utf8');
+          raw = await readPlanFile(absolutePath);
         } catch (recoverError) {
-          if (!recoverError || recoverError.code !== 'ENOENT') throw recoverError;
+          if (!recoverError || recoverError.status !== 413) throw recoverError;
           continue;
         }
+        if (raw === null) continue;
         await fsPromises.mkdir(plansDir, { recursive: true });
         await fsPromises.writeFile(targetPath, raw, 'utf8');
       }
@@ -486,14 +539,16 @@ export const createProjectContextRuntime = (deps) => {
       const summary = await planSummaries.summaryOf(path.join(dir, entry.name));
       // Removed between the directory read and this one.
       if (!summary) continue;
-      plans.push(withProgress({
+      const listed = {
         id: `${SHARED_PLAN_ID_PREFIX}${entry.name}`,
         file: entry.name,
         title: summary.title,
         createdAt: Math.round(summary.mtimeMs),
         pinned: false,
         source: 'shared',
-      }, summary.progress));
+      };
+      if (summary.tooLarge) listed.tooLarge = true;
+      plans.push(withProgress(listed, summary.progress));
     }
     plans.sort((left, right) => right.createdAt - left.createdAt);
     return { dir, plans };
@@ -508,7 +563,9 @@ export const createProjectContextRuntime = (deps) => {
     const folder = link.shared ? sharedDir : plansDirFor(projectId);
     if (!folder) return null;
     try {
-      return (await planSummaries.summaryOf(path.join(folder, link.file)))?.progress ?? null;
+      const summary = await planSummaries.summaryOf(path.join(folder, link.file));
+      if (!summary) return null;
+      return { progress: summary.progress ?? null, tooLarge: summary.tooLarge === true };
     } catch {
       return null;
     }
@@ -527,13 +584,31 @@ export const createProjectContextRuntime = (deps) => {
       // A moved plan is only reachable while the project still has a shared folder.
       .filter((plan) => !plan.shared || shared.dir)
       .map(async ({ shared: isShared, ...plan }) => {
-        const progress = await progressOfLink(projectId, { ...plan, shared: isShared }, shared.dir);
-        return withProgress({ ...plan, source: isShared ? 'shared' : 'personal' }, progress);
+        const info = await progressOfLink(projectId, { ...plan, shared: isShared }, shared.dir);
+        const listed = withProgress({ ...plan, source: isShared ? 'shared' : 'personal' }, info?.progress ?? null);
+        return info?.tooLarge ? { ...listed, tooLarge: true } : listed;
       }));
     const withSession = (plan) => (planSessions[plan.id] ? { ...plan, session: planSessions[plan.id] } : plan);
+    const plans = [...own, ...shared.plans].map(withSession);
+    // Metrics are a display enrichment on the linked session, read live and
+    // never stored: a plan whose session cannot be read shows no metrics,
+    // the same tolerance progress has. Without a reader (tests, embedding)
+    // plans carry no metrics at all.
+    const withMetrics = readPlanMetrics
+      ? await Promise.all(plans.map(async (plan) => {
+          if (!plan.session?.sessionId) return plan;
+          let metrics = null;
+          try {
+            metrics = await readPlanMetrics(plan.session.sessionId);
+          } catch {
+            metrics = null;
+          }
+          return metrics ? { ...plan, metrics } : plan;
+        }))
+      : plans;
     return {
       ...stored,
-      plans: [...own, ...shared.plans].map(withSession),
+      plans: withMetrics,
       sharedPlansDir: shared.dir,
     };
   };
@@ -577,6 +652,9 @@ export const createProjectContextRuntime = (deps) => {
   const createTodo = async (projectId, value) => {
     const text = todoText(value?.text);
     const requestedId = asNonEmptyString(value?.id);
+    if (requestedId && requestedId.length > PROJECT_TODO_ID_MAX_LENGTH) {
+      throw mutationError(`Todo id must be at most ${PROJECT_TODO_ID_MAX_LENGTH} characters`, 400);
+    }
     return withWriteLock(projectId, async () => {
       const current = await readStoredContext(projectId);
       if (current.todos.length >= PROJECT_TODO_MAX_ITEMS) {
@@ -732,6 +810,38 @@ export const createProjectContextRuntime = (deps) => {
     });
   };
 
+  /**
+   * Read a plan file whole, gated on its size: a plan over
+   * PLAN_FILE_READ_MAX_BYTES is refused (413) from its stat alone, so an
+   * oversized file other tools wrote is never buffered whole. A missing
+   * file returns null, the answer readPlan has always given for a plan
+   * that is gone.
+   */
+  const readPlanFile = async (planPath) => {
+    let stat;
+    try {
+      stat = await fsPromises.stat(planPath);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+    if (stat.size > PLAN_FILE_READ_MAX_BYTES) {
+      throw mutationError(`Plan file is too large to read (${stat.size} bytes; limit is ${PLAN_FILE_READ_MAX_BYTES} bytes)`, 413);
+    }
+    let raw;
+    try {
+      raw = await readBoundedUtf8(fsPromises, planPath, PLAN_FILE_READ_MAX_BYTES);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return null;
+      throw error;
+    }
+    if (raw === null) {
+      // Grew past the cap between the stat above and this read.
+      throw mutationError(`Plan file is too large to read (limit is ${PLAN_FILE_READ_MAX_BYTES} bytes)`, 413);
+    }
+    return raw;
+  };
+
   const readPlan = async (projectId, planId) => {
     const id = asNonEmptyString(planId);
     if (!id) {
@@ -742,13 +852,8 @@ export const createProjectContextRuntime = (deps) => {
       const dir = await sharedPlansDirFor(projectId);
       if (!dir) return null;
       const planPath = path.join(dir, sharedFile);
-      let raw;
-      try {
-        raw = await fsPromises.readFile(planPath, 'utf8');
-      } catch (error) {
-        if (error && error.code === 'ENOENT') return null;
-        throw error;
-      }
+      const raw = await readPlanFile(planPath);
+      if (raw === null) return null;
       const parsed = parsePlanMarkdown(raw);
       return { id, file: sharedFile, path: planPath, createdAt: 0, title: parsed.title, body: parsed.body, raw, source: 'shared' };
     }
@@ -761,13 +866,8 @@ export const createProjectContextRuntime = (deps) => {
     const folder = await folderOfLink(projectId, link);
     if (!folder) return null;
     const planPath = path.join(folder, link.file);
-    let raw;
-    try {
-      raw = await fsPromises.readFile(planPath, 'utf8');
-    } catch (error) {
-      if (error && error.code === 'ENOENT') return null;
-      throw error;
-    }
+    const raw = await readPlanFile(planPath);
+    if (raw === null) return null;
 
     const parsed = parsePlanMarkdown(raw);
     return { id: link.id, file: link.file, path: planPath, createdAt: link.createdAt, title: parsed.title, body: parsed.body, raw, source: link.shared ? 'shared' : 'personal' };
@@ -799,8 +899,11 @@ export const createProjectContextRuntime = (deps) => {
     }
     const raw = clampLength(value.raw, PROJECT_PLAN_BODY_MAX_LENGTH);
     const checkExpectedRaw = async (filePath) => {
-      if (expectedRaw.data !== undefined
-        && await fsPromises.readFile(filePath, 'utf8') !== expectedRaw.data) {
+      if (expectedRaw.data === undefined) return;
+      // Compare through the capped read: an over-cap current file is
+      // refused (413) instead of being buffered whole for the compare.
+      const currentRaw = await readPlanFile(filePath);
+      if (currentRaw !== expectedRaw.data) {
         throw mutationError('Plan changed; reload before saving', 409);
       }
     };
@@ -1045,13 +1148,11 @@ export const createProjectContextRuntime = (deps) => {
       const sharedFile = ownLink ? ownLink.file : sharedPlanFileOf(id);
       if (!sharedFile) return null;
       const from = path.join(dir, sharedFile);
-      let raw;
-      try {
-        raw = await fsPromises.readFile(from, 'utf8');
-      } catch (error) {
-        if (error && error.code === 'ENOENT') return null;
-        throw error;
-      }
+      // The title is all that is read here, and it goes through the
+      // capped read: an over-cap shared plan is refused (413), never
+      // buffered whole just to parse its first line.
+      const raw = await readPlanFile(from);
+      if (raw === null) return null;
       const plansDir = plansDirFor(projectId);
       await fsPromises.mkdir(plansDir, { recursive: true });
       const taken = new Set(current.plans.filter((entry) => !entry.shared).map((entry) => entry.file));

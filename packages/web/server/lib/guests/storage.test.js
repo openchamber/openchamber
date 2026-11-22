@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { runGuestStorage, removeGuestStorage } from './storage.js';
 
 const roots = [];
@@ -55,5 +56,28 @@ describe('extension storage', () => {
     const results = await Promise.allSettled(Array.from({ length: 35 }, (_, index) => run({ op: 'set', key: `key-${index}`, value: 'x'.repeat(60_000) })));
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
     expect((await run({ op: 'keys' })).keys).toHaveLength(34);
+  });
+});
+
+describe('extension storage bounded read (issue #1784)', () => {
+  test('an over-cap storage file is refused with the size-limit error', async () => {
+    const { run, root } = await fixture();
+    const dir = path.join(root, 'guest-storage');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'board.json'), 'x'.repeat(2_097_152 + 1));
+    await expect(run({ op: 'keys' })).rejects.toThrow('Storage exceeds its size limit');
+  });
+  test.skipIf(process.platform === 'win32')('a FIFO at the storage path is refused promptly and does not wedge the storage lock', async () => {
+    const { run, root } = await fixture();
+    const dir = path.join(root, 'guest-storage');
+    await fs.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'board.json');
+    execFileSync('mkfifo', [file]);
+    // Both the first operation and the one queued behind it in
+    // withStorageLock settle with the refusal; before the fix the
+    // stream open blocked forever and neither settled.
+    await expect(run({ op: 'keys' })).rejects.toThrow('not a regular file');
+    await expect(run({ op: 'keys' })).rejects.toThrow('not a regular file');
+    expect((await fs.stat(file)).isFIFO()).toBe(true);
   });
 });

@@ -11,6 +11,7 @@ import { createOutboundFrameBatcher, decodeFrameBatch, decodeTunnelFrame, decode
 import { createTunnelHost } from './tunnel-host.js';
 import { createDownstreamScheduler, DOWNSTREAM_CHUNK_BYTES } from './downstream-scheduler.js';
 import { redactSensitiveText } from '../source-control/url-redaction.js';
+import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
 import { z } from 'zod';
 
 // The relay asks a peer to close its own socket with this plaintext frame
@@ -67,11 +68,15 @@ const DEFAULT_BATCH_WINDOW_MS = 150;
 
 // Resolve the frame-batching flush window: explicit option wins, then env, then
 // the 150 ms default. Only applies on directions where batching was negotiated.
-const resolveBatchWindowMs = (option) => {
+export const resolveBatchWindowMs = (option, rawEnvValue = process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS) => {
   if (Number.isFinite(option) && option >= 0) return option;
-  const envValue = Number.parseInt(process.env.OPENCHAMBER_RELAY_BATCH_WINDOW_MS ?? '', 10);
-  if (Number.isFinite(envValue) && envValue >= 0) return envValue;
-  return DEFAULT_BATCH_WINDOW_MS;
+  // The strict plain-decimal judgement for the env spelling lives in
+  // shared/parse-int.js (design #802 phase 2, #804): a bare parseInt would
+  // silently honour '150junk' as 150, truncate '2.9' to 2, read '1e3' as a
+  // 1 ms window, and read '0x10' as 0. Zero stays a valid window here.
+  // The upper bound is Node's timer maximum (2^31 - 1 ms): the value feeds
+  // the flush timer, and a larger delay fires after ~1 ms instead.
+  return parseBoundedIntWithDefault(rawEnvValue, DEFAULT_BATCH_WINDOW_MS, 0, 2_147_483_647);
 };
 
 // Bun's WebSocket puts the full dial URL into its error messages, and that URL

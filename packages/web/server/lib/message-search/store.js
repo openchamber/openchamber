@@ -96,9 +96,27 @@ const SNIPPET_RADIUS = 90;
  * lowercasing changes a string's length (rare scripts), offsets would drift,
  * so that text is returned unmarked.
  */
+/**
+ * A cut index splits a surrogate pair when it lands between a high
+ * surrogate and its low half. Snippet windows are computed in UTF-16
+ * code units, so astral text (emoji, CJK ext) at a window edge would
+ * otherwise leave a lone surrogate in the returned snippet (#1866).
+ */
+const splitsSurrogatePair = (value, at) =>
+  at > 0 &&
+  at < value.length &&
+  value.charCodeAt(at - 1) >= 0xd800 && value.charCodeAt(at - 1) <= 0xdbff &&
+  value.charCodeAt(at) >= 0xdc00 && value.charCodeAt(at) <= 0xdfff;
+
+/** End-of-window cut: include the whole pair rather than half of it. */
+const pairSafeEnd = (value, at) => (splitsSurrogatePair(value, at) ? at + 1 : at);
+
+/** Start-of-window cut: include the whole pair rather than half of it. */
+const pairSafeStart = (value, at) => (splitsSurrogatePair(value, at) ? at - 1 : at);
+
 export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
   const lower = text.toLowerCase();
-  if (lower.length !== text.length) return text.slice(0, radius * 2);
+  if (lower.length !== text.length) return text.slice(0, pairSafeEnd(text, radius * 2));
   const ranges = [];
   for (const term of terms) {
     const needle = term.toLowerCase();
@@ -106,7 +124,7 @@ export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
       ranges.push([at, at + needle.length]);
     }
   }
-  if (ranges.length === 0) return text.slice(0, radius * 2);
+  if (ranges.length === 0) return text.slice(0, pairSafeEnd(text, radius * 2));
   ranges.sort((left, right) => left[0] - right[0]);
   const merged = [];
   for (const range of ranges) {
@@ -130,6 +148,10 @@ export const buildSnippet = (text, terms, radius = SNIPPET_RADIUS) => {
     const space = text.indexOf(' ', end);
     if (space >= 0 && space - end < 20) end = space;
   }
+  // The window edges (and the word snaps above) are code-unit cuts:
+  // move any that split a surrogate pair to the pair boundary (#1866).
+  start = pairSafeStart(text, start);
+  end = pairSafeEnd(text, end);
   let out = start > 0 ? '…' : '';
   let cursor = start;
   for (const [from, to] of merged) {

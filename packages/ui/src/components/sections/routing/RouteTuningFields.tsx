@@ -1,7 +1,7 @@
 import React from 'react';
 import { Switch } from '@/components/ui/switch';
 import { SETTINGS_HELPER_CLASS, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
-import { RangedNumberField } from '@/components/sections/routing/PoolAdvancedFields';
+import { RangedNumberField } from '@/components/sections/routing/RangedNumberField';
 import { useI18n } from '@/lib/i18n';
 import type { ModelRouteTuning } from '@/lib/routing/modelRoutesApi';
 import { tuningToSave, withOptional } from '@/lib/routing/poolAdvanced';
@@ -19,7 +19,7 @@ export const RouteTuningFields: React.FC<{
 
   return (
     <div className="space-y-3">
-      <SettingsFieldRow label={t('settings.pools.tuning.enabled')} description={t('settings.pools.tuning.info')} settingsItem="pools.tuning-enabled">
+      <SettingsFieldRow label={t('settings.pools.tuning.enabled')} description={t('settings.pools.tuning.info')} settingsItem="routing.pools-tuning">
         <Switch checked={current.enabled === true} onCheckedChange={(checked) => update('enabled', checked)} aria-label={t('settings.pools.tuning.enabled')} />
       </SettingsFieldRow>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

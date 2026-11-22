@@ -52,6 +52,12 @@ export type SessionPageLister = (options: SessionListOptions) => Promise<Session
  * archived filter, so callers take the whole list and split it with
  * `splitGlobalSessionsByArchived`.
  */
+// Pathology guard, not a product limit: callers page at most 200 sessions at a
+// time (OpenCode's session.list ceiling), so 1,000 pages is 200,000 sessions -
+// far above any real list (one long-lived database here holds ~28,000) -
+// while an ever-new cursor stream still terminates instead of looping.
+const GLOBAL_SESSION_MAX_PAGES = 1_000;
+
 export async function listGlobalSessionPages(
     listPage: SessionPageLister,
     options: {
@@ -65,6 +71,7 @@ export async function listGlobalSessionPages(
     const all: GlobalSessionRecord[] = [];
     const seenIds = new Set<string>();
     let cursor: string | undefined;
+    let pagesFetched = 0;
     const operation = options.directory ? "bootstrap.sessions.all" : "global-sessions.all";
 
     while (true) {
@@ -88,6 +95,7 @@ export async function listGlobalSessionPages(
             throw error;
         });
 
+        pagesFetched += 1;
         if (cursor === undefined) options.onSpaces?.(page.spaces ?? null);
         const payload = page.sessions.map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
         finishPerformanceEvent("complete", {
@@ -109,6 +117,12 @@ export async function listGlobalSessionPages(
         const next = page.cursor.next;
         // No next cursor, or a page that added nothing new: stop rather than spin.
         if (!next || next === cursor || accepted.length === 0) break;
+        // A server handing out ever-new cursors must not loop this walk
+        // forever: past the cap, fail loudly instead of returning a partial
+        // list dressed up as complete.
+        if (pagesFetched >= GLOBAL_SESSION_MAX_PAGES) {
+            throw new Error(`Global session pagination exceeded ${GLOBAL_SESSION_MAX_PAGES} pages`);
+        }
         cursor = next;
     }
 

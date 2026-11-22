@@ -65,6 +65,33 @@ describe('recording visits', () => {
   });
 });
 
+describe('title clamping', () => {
+  test('never splits a surrogate pair at the length limit', () => {
+    // 199 ASCII chars + one astral character (a surrogate pair) straddling
+    // the 200 cut: the pair must be dropped whole, not halved (#2050).
+    const title = `${'a'.repeat(199)}\u{1F600}`;
+    const entries = recordVisit([], { url: 'http://localhost:3000/', title, at: 1 });
+    const stored = entries[0]?.title ?? '';
+    expect(stored.length).toBe(199);
+    expect(stored).toBe('a'.repeat(199));
+    const lastUnit = stored.charCodeAt(stored.length - 1);
+    expect(lastUnit >= 0xd800 && lastUnit <= 0xdbff).toBe(false);
+    // No U+FFFD (EF BF BD) appears when the stored title is UTF-8 encoded.
+    const encoded = new TextEncoder().encode(stored);
+    const hasReplacement = encoded.some((byte, i) => byte === 0xef && encoded[i + 1] === 0xbf && encoded[i + 2] === 0xbd);
+    expect(hasReplacement).toBe(false);
+    expect(new TextDecoder().decode(encoded)).toBe(stored);
+  });
+
+  test('keeps an astral character that fits whole, and plain ASCII at the limit', () => {
+    const fits = recordVisit([], { url: 'http://localhost:3000/', title: `${'a'.repeat(198)}\u{1F600}`, at: 1 });
+    expect(fits[0]?.title).toBe(`${'a'.repeat(198)}\u{1F600}`);
+    expect(fits[0]?.title.length).toBe(200);
+    const ascii = recordVisit([], { url: 'http://localhost:3000/', title: 'b'.repeat(250), at: 1 });
+    expect(ascii[0]?.title).toBe('b'.repeat(200));
+  });
+});
+
 describe('suggestions', () => {
   const entries = [
     entry('http://localhost:3000/', 'Storefront', 1),

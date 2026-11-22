@@ -205,17 +205,161 @@ describe('PoolAdvancedFields', () => {
     expect(changes.at(-1)).toEqual({ targets: ['p/cheap'] });
   });
 
-  test('shows a weight per model target only when the selection is weighted, and saves it by reference', async () => {
-    const plain = await renderFields({ targets: ['p/cheap'] }, onChange);
-    expect(plain.querySelector('input[aria-label="Weight: p/cheap"]')).toBeNull();
-    await act(async () => {
-      mounted?.root.unmount();
-    });
+  test('shows a weight per model target only when the selection draws by weight, and saves it by reference', async () => {
+    const container = await renderFields({ targets: ['p/cheap'] }, onChange);
+    expect(container.querySelector('input[aria-label="Weight: p/cheap"]')).toBeNull();
+
+    await rerenderFields({ targets: ['p/cheap'], selection: 'ordered' }, onChange);
+    expect(container.querySelector('input[aria-label="Weight: p/cheap"]')).toBeNull();
+
+    await rerenderFields({ targets: ['p/cheap#high'], selection: 'weighted' }, onChange);
+    await typeInto(inputNamed(container, 'Weight: p/cheap'), '3');
+    expect(changes.at(-1)).toMatchObject({ weights: { 'p/cheap': 3 } });
+
+    await rerenderFields({ targets: ['p/cheap#high'], selection: 'round-robin' }, onChange);
+    expect(container.querySelector('input[aria-label="Weight: p/cheap"]')).not.toBeNull();
+    await typeInto(inputNamed(container, 'Weight: p/cheap'), '2');
+    expect(changes.at(-1)).toMatchObject({ weights: { 'p/cheap': 2 } });
+  });
+});
+
+const buttonNamed = (container: HTMLElement, text: string): HTMLButtonElement => {
+  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.trim() === text);
+  if (!button) throw new Error(`no button "${text}"`);
+  return button;
+};
+
+// Renders new props into the mounted root, as the parent does after a save.
+const rerenderFields = async (route: ModelRoute, onChange: (next: ModelRoute) => void) => {
+  const { PoolAdvancedFields } = await import('./PoolAdvancedFields');
+  const { I18nProvider } = await import('@/lib/i18n');
+  await act(async () => {
+    mounted?.root.render(
+      <I18nProvider>
+        <PoolAdvancedFields route={route} onChange={onChange} />
+      </I18nProvider>,
+    );
+  });
+};
+
+describe('PoolAdvancedFields schedules', () => {
+  let changes: ModelRoute[] = [];
+  const onChange = (next: ModelRoute) => {
+    changes.push(next);
+  };
+  const scheduled: ModelRoute = { targets: ['p/cheap'], schedules: [{ when: {}, factor: 1 }] };
+
+  beforeEach(() => {
+    changes = [];
+  });
+
+  afterEach(async () => {
+    if (!mounted) return;
+    const current = mounted;
+    mounted = null;
+    await act(async () => current.root.unmount());
+    current.restore();
+  });
+
+  test('a new schedule changes nothing until edited, and removing the last one drops the key', async () => {
+    const empty = await renderFields({ targets: ['p/cheap'] }, onChange);
+    await act(async () => buttonNamed(empty, 'Add schedule').click());
+    expect(changes.at(-1)).toEqual({ targets: ['p/cheap'], schedules: [{ when: {}, factor: 1 }] });
+    await act(async () => mounted?.root.unmount());
     mounted?.restore();
     mounted = null;
 
-    const weighted = await renderFields({ targets: ['p/cheap#high'], selection: 'weighted' }, onChange);
-    await typeInto(inputNamed(weighted, 'Weight: p/cheap'), '3');
-    expect(changes.at(-1)).toMatchObject({ weights: { 'p/cheap': 3 } });
+    const container = await renderFields(scheduled, onChange);
+    await act(async () => buttonNamed(container, 'Remove schedule').click());
+    expect(changes.at(-1)).toEqual({ targets: ['p/cheap'] });
+  });
+
+  test('weekday chips save short day names in week order, and the last one off means every day', async () => {
+    const container = await renderFields(
+      { targets: ['p/cheap'], schedules: [{ when: { daysOfWeek: ['friday'] }, factor: 0.5 }] },
+      onChange,
+    );
+    expect(buttonNamed(container, 'Fri').getAttribute('aria-pressed')).toBe('true');
+    await act(async () => buttonNamed(container, 'Mon').click());
+    expect(changes.at(-1)?.schedules).toEqual([{ when: { daysOfWeek: ['mon', 'fri'] }, factor: 0.5 }]);
+    await act(async () => buttonNamed(container, 'Fri').click());
+    expect(changes.at(-1)?.schedules).toEqual([{ when: {}, factor: 0.5 }]);
+  });
+
+  test('saves the targets, hours and days of the month as typed', async () => {
+    const container = await renderFields(scheduled, onChange);
+    await typeInto(inputNamed(container, 'Targets'), 'deepseek/*, , openai/gpt-6-luna');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: {}, factor: 1, targets: ['deepseek/*', 'openai/gpt-6-luna'] }]);
+    await typeInto(inputNamed(container, 'Start'), '09:00');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: { start: '09:00' }, factor: 1 }]);
+    await typeInto(inputNamed(container, 'Days of the month'), '1, 15, -1');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: { daysOfMonth: [1, 15, -1] }, factor: 1 }]);
+  });
+
+  // A time input holds only HH:mm[:ss]. Given "9:30" raw, a browser shows an
+  // empty field and the next blur used to save the window without its start.
+  test('shows a stored 9:30 as 09:30 with seconds kept, and a blur that changed nothing saves nothing', async () => {
+    const container = await renderFields(
+      { targets: ['p/cheap'], schedules: [{ when: { start: '9:30', end: '17:5:15' }, factor: 1 }] },
+      onChange,
+    );
+    const start = inputNamed(container, 'Start');
+    expect(start.type).toBe('time');
+    expect(start.value).toBe('09:30');
+    expect(inputNamed(container, 'End').value).toBe('17:05:15');
+    await typeInto(start, '09:30');
+    expect(changes).toEqual([]);
+    await typeInto(start, '10:00:30');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: { start: '10:00:30', end: '17:5:15' }, factor: 1 }]);
+  });
+
+  test('a stored time no time input can hold shows as text with the error, and is kept on blur', async () => {
+    const container = await renderFields({ targets: ['p/cheap'], schedules: [{ when: { start: '25:00' }, factor: 1 }] }, onChange);
+    const start = inputNamed(container, 'Start');
+    expect(start.type).toBe('text');
+    expect(start.value).toBe('25:00');
+    expect(container.textContent).toContain('Enter a time such as 09:00.');
+    await typeInto(start, '25:00');
+    expect(changes).toEqual([]);
+  });
+
+  test('refuses a day of the month or a timezone OpenCode cannot read, and saves nothing', async () => {
+    const container = await renderFields(scheduled, onChange);
+    await typeInto(inputNamed(container, 'Days of the month'), '0, 32');
+    await typeInto(inputNamed(container, 'Timezone'), 'Mars/Olympus');
+    expect(changes).toEqual([]);
+    expect(container.textContent).toContain('Enter days from 1 to 31, or -1 for the last day of the month.');
+    expect(container.textContent).toContain('Enter an IANA timezone such as America/Chicago.');
+    await typeInto(inputNamed(container, 'Timezone'), 'America/Chicago');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: { timezone: 'America/Chicago' }, factor: 1 }]);
+  });
+
+  test('switching to an outright weight replaces the factor, and the amount then saves as the weight', async () => {
+    const container = await renderFields({ targets: ['p/cheap'], schedules: [{ when: {}, factor: 0.5 }] }, onChange);
+    await pickOption(container, 'Change', 'Set weight');
+    const switched = changes.at(-1);
+    expect(switched?.schedules).toEqual([{ when: {}, weight: 0.5 }]);
+    if (!switched) throw new Error('no change after switching');
+    await rerenderFields(switched, onChange);
+    await typeInto(inputNamed(container, 'Weight while active'), '2');
+    expect(changes.at(-1)?.schedules).toEqual([{ when: {}, weight: 2 }]);
+  });
+
+  test('shows an entry it cannot read as stored, keeps it through edits to the others, and can remove it', async () => {
+    const unreadable = { when: { start: 900 }, factor: 2 };
+    const container = await renderFields({ targets: ['p/cheap'], schedules: [unreadable, { when: {}, factor: 1 }] }, onChange);
+    expect(container.textContent).toContain("OpenChamber can't read this schedule");
+    expect(container.textContent).toContain('"start": 900');
+    // The only editable entry is the second one, so its fields are the only ones rendered.
+    await typeInto(inputNamed(container, 'Note'), 'peak');
+    expect(changes.at(-1)?.schedules).toEqual([unreadable, { when: {}, factor: 1, note: 'peak' }]);
+    await act(async () => buttonNamed(container, 'Remove schedule').click());
+    expect(changes.at(-1)?.schedules).toEqual([{ when: {}, factor: 1 }]);
+  });
+
+  test('a stored value that is not a list shows read-only, without editing controls', async () => {
+    const container = await renderFields({ targets: ['p/cheap'], schedules: { start: '09:00' } }, onChange);
+    expect(container.textContent).toContain("OpenChamber can't read these schedules because they are not a list.");
+    expect([...container.querySelectorAll('button')].some((el) => el.textContent?.trim() === 'Add schedule')).toBe(false);
   });
 });

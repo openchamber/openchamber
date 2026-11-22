@@ -14,6 +14,31 @@ import {
   seedPreferencesFrom,
   serializePreferencesDocument,
 } from './settings-files.js';
+// Settings and preferences are single documents a user edits by hand; 8 MiB
+// is the cap the other settings readers use (#1631), applied here to both
+// files and to the JSON files readJsonFile loads (#1653). The gate sits on
+// the factory's injected fsPromises seam — the seam is load-bearing (tests
+// and embedders simulate I/O failure through it), so the shared bounded
+// reader, which opens real node:fs handles, cannot be used here; this is
+// its equivalent on the seam. The path's stat judges regularity and size
+// first (a FIFO is refused from its stat, promptly, without opening it),
+// but a stat alone cannot hold the path to its answer (#2268): the file is
+// then opened — non-blocking, so opening a FIFO cannot hang — and the
+// opened handle is judged again and read to the cap, so a path swapped
+// for a FIFO (or a larger file) after the stat is refused from the handle,
+// and a file grown past the cap during the read is refused, never used.
+// A refusal is a thrown non-ENOENT error, so every reader's existing
+// failure mapping applies unchanged: lenient -> {}, preferences ->
+// { status: 'failed' }, strict throws (never {}, which
+// identity-regenerating callers would misread as a first run),
+// readJsonFile -> throw (missing alone still answers null).
+const SETTINGS_FILE_MAX_BYTES = 8 * 1024 * 1024;
+const boundedReadError = (filePath, result) => Object.assign(
+  new Error(result.reason === 'too-large'
+    ? `${filePath} exceeds the ${result.limit}-byte read limit (size ${result.size}); refusing to read it whole`
+    : `${filePath} is not a regular file; refusing to read it`),
+  { code: result.code },
+);
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
@@ -103,9 +128,58 @@ export const createSettingsRuntime = (deps) => {
   const projectIconBaseName = (projectId) => `project-${sha1Hex(projectId)}`;
   const PROJECT_ICON_EXTENSIONS = ['png', 'jpg', 'svg', 'webp', 'ico'];
 
+  // fsPromises.readFile with the #1653 gate in front of it (see the cap
+  // comment at the top of this module): behaves exactly like readFile —
+  // ENOENT and I/O errors propagate with their codes — plus the two bounded
+  // refusals above. Defined inside the factory so it closes over the
+  // injected fsPromises every other reader here uses.
+  const readGatedFile = async (filePath) => {
+    const stat = await fsPromises.stat(filePath);
+    if (!stat.isFile()) {
+      throw boundedReadError(filePath, { reason: 'not-regular', code: 'BOUNDED_FILE_NOT_REGULAR' });
+    }
+    if (stat.size > SETTINGS_FILE_MAX_BYTES) {
+      throw boundedReadError(filePath, { reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', size: stat.size, limit: SETTINGS_FILE_MAX_BYTES });
+    }
+    // The stat above cannot hold the path to its answer (#2268): between
+    // the stat and a read by path, the file can be swapped for a FIFO,
+    // whose read would hang indefinitely. Open the file instead — with
+    // O_NONBLOCK where the platform has it, so opening a FIFO returns at
+    // once (same pattern as project-config's bounded reader) — judge the
+    // opened handle, and read through it to the cap: the handle names the
+    // file that was judged, whatever the path names by then.
+    const constants = fsPromises.constants ?? {};
+    const openFlags = process.platform === 'win32' || constants.O_NONBLOCK === undefined
+      ? 'r'
+      : constants.O_RDONLY | constants.O_NONBLOCK;
+    const handle = await fsPromises.open(filePath, openFlags);
+    try {
+      const openedStat = await handle.stat();
+      if (!openedStat.isFile()) {
+        throw boundedReadError(filePath, { reason: 'not-regular', code: 'BOUNDED_FILE_NOT_REGULAR' });
+      }
+      if (openedStat.size > SETTINGS_FILE_MAX_BYTES) {
+        throw boundedReadError(filePath, { reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', size: openedStat.size, limit: SETTINGS_FILE_MAX_BYTES });
+      }
+      const buffer = Buffer.alloc(SETTINGS_FILE_MAX_BYTES + 1);
+      let total = 0;
+      while (total < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+      }
+      if (total > SETTINGS_FILE_MAX_BYTES) {
+        throw boundedReadError(filePath, { reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', size: total, limit: SETTINGS_FILE_MAX_BYTES });
+      }
+      return buffer.toString('utf8', 0, total);
+    } finally {
+      await handle.close();
+    }
+  };
+
   const readJsonFile = async (filePath) => {
     try {
-      const raw = await fsPromises.readFile(filePath, 'utf8');
+      const raw = await readGatedFile(filePath);
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === 'object' ? parsed : null;
     } catch (error) {
@@ -116,9 +190,59 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  // Atomic like writeJsonFileAtomic below: the migration callers write the
+  // only merged copy of a project's config and then delete the source, so a
+  // torn write here would destroy both copies at once.
   const writeJsonFile = async (filePath, value) => {
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
-    await fsPromises.writeFile(filePath, JSON.stringify(value, null, 2), 'utf8');
+    const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      await fsPromises.writeFile(tmp, JSON.stringify(value, null, 2), 'utf8');
+      await replaceFile(tmp, filePath);
+    } catch (error) {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
+      throw error;
+    }
+  };
+
+  // Read a migration destination: a torn destination must not abort the
+  // migration forever or, worse, be treated as empty while the source is
+  // deleted. Preserve its bytes to a .corrupt- sibling and continue with no
+  // destination; if preservation itself fails, surface the read error so
+  // the caller aborts and the source stays put for a later retry.
+  const readDestinationJsonFile = async (filePath) => {
+    try {
+      return await readJsonFile(filePath);
+    } catch (error) {
+      // Only a JSON parse failure means the destination's bytes are
+      // corrupt. A filesystem read error (EIO, EACCES, ...) says nothing
+      // about the bytes — the destination may be perfectly valid — so
+      // propagate it: the migration aborts and both files stay put for a
+      // later retry instead of the valid destination being quarantined
+      // and replaced from the legacy source alone.
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
+      let preservedPath = null;
+      for (let attempt = 0; attempt < 10 && preservedPath === null; attempt += 1) {
+        const candidate = `${filePath}.corrupt-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+        try {
+          await fsPromises.stat(candidate);
+        } catch {
+          preservedPath = candidate;
+        }
+      }
+      if (preservedPath === null) {
+        throw error;
+      }
+      try {
+        await fsPromises.rename(filePath, preservedPath);
+      } catch {
+        throw error;
+      }
+      console.warn(`Preserved the unreadable project config file at ${preservedPath}:`, error);
+      return null;
+    }
   };
 
   const uniqueStrings = (values) => Array.from(new Set(values.filter((value) => typeof value === 'string' && value.trim().length > 0)));
@@ -314,7 +438,7 @@ export const createSettingsRuntime = (deps) => {
 
     const [oldConfig, newConfig] = await Promise.all([
       readJsonFile(oldConfigPath),
-      readJsonFile(newConfigPath),
+      readDestinationJsonFile(newConfigPath),
     ]);
 
     if (oldConfig || newConfig) {
@@ -515,7 +639,7 @@ export const createSettingsRuntime = (deps) => {
       const targetStorageDir = path.join(PROJECTS_ROOT_DIR, targetStem);
 
       for (const orphan of orphansForProject) {
-        const targetExisting = (await readJsonFile(targetPath)) || {};
+        const targetExisting = (await readDestinationJsonFile(targetPath)) || {};
         // An orphan is named by the file found on disk, so its folder is the raw name.
         const orphanStorageDir = path.join(PROJECTS_ROOT_DIR, orphan.orphanId);
         const merged = mergeProjectConfigData({
@@ -541,7 +665,7 @@ export const createSettingsRuntime = (deps) => {
 
   const readInstanceSettingsFromDisk = async () => {
     try {
-      const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
+      const raw = await readGatedFile(SETTINGS_FILE_PATH);
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
         return parsed;
@@ -564,7 +688,7 @@ export const createSettingsRuntime = (deps) => {
   const readPreferenceFields = async () => {
     let raw;
     try {
-      raw = await fsPromises.readFile(PREFERENCES_FILE_PATH, 'utf8');
+      raw = await readGatedFile(PREFERENCES_FILE_PATH);
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
         return { status: 'missing' };
@@ -627,7 +751,7 @@ export const createSettingsRuntime = (deps) => {
   const readSettingsFromDiskStrict = async () => {
     let raw;
     try {
-      raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
+      raw = await readGatedFile(SETTINGS_FILE_PATH);
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
         return {};

@@ -14,13 +14,27 @@ const QUOTE_FIELDS = new Map([
 ]);
 const LINK_KINDS = new Set(['github-issue', 'github-pr', 'linear-issue']);
 
+// A fixed-offset cut can land between the halves of a surrogate pair,
+// leaving a lone surrogate that encodes as U+FFFD when the assembled
+// context is encoded for the model; move a boundary that lands inside a
+// pair back to the pair boundary.
+const dropSplitHead = (text) => {
+  const last = text.charCodeAt(text.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+};
+
+const dropSplitTail = (text) => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
 export function excerpt(text, limit) {
   if (text.length <= limit) return text;
   const marker = '\n[Content omitted]\n';
-  if (limit <= marker.length) return text.slice(0, Math.max(0, limit));
+  if (limit <= marker.length) return dropSplitHead(text.slice(0, Math.max(0, limit)));
   const head = Math.ceil((limit - marker.length) / 2);
   const tail = limit - marker.length - head;
-  return text.slice(0, head) + marker + (tail > 0 ? text.slice(-tail) : '');
+  return dropSplitHead(text.slice(0, head)) + marker + (tail > 0 ? dropSplitTail(text.slice(-tail)) : '');
 }
 
 function attachedText(message) {

@@ -29,7 +29,7 @@ function setup(overrides = {}, options = {}) {
       allDiffs: list([{ old_path: 'a.ts', new_path: 'a.ts', diff: '@@' }]),
     },
     MergeRequestNotes: { all: list([{ id: 4, body: 'Looks good', author: { id: 3, username: 'sam' } }]) },
-    Jobs: { all: vi.fn(async () => [{ id: 8, name: 'test', status: 'running' }]) },
+    Jobs: { all: list([{ id: 8, name: 'test', status: 'running' }]) },
     Issues: {
       all: list([{ iid: 3, title: 'Bug', web_url: `${origin}/me/repo/-/issues/3`, state: 'opened' }]),
       show: vi.fn(async () => ({ iid: 3, title: 'Bug', web_url: `${origin}/me/repo/-/issues/3`, state: 'opened' })),
@@ -666,6 +666,39 @@ describe('GitLab resource service', () => {
     await expect(branches.service.projectBranches('/repo', { owner: 'team', name: 'repo' })).rejects.toThrow('more branches');
   });
 
+  it('returns null CI instead of page-1 jobs when a pipeline has more jobs than OpenChamber reads (#1405)', async () => {
+    const { service } = setup({ Jobs: { all: list([{ id: 8, name: 'test', status: 'running' }], 2) } });
+    const result = await service.changeRequestContext('/repo', 5, { includeCIDetails: true });
+    expect(result.ci).toBeNull();
+  });
+
+  it('fails instead of returning capped board-picker collections as complete', async () => {
+    const labels = setup({ ProjectLabels: { all: list([{ name: 'bug', color: '#d73a4a' }], 2) } });
+    await expect(labels.service.listLabels('/repo', { owner: 'team', name: 'repo' })).rejects.toThrow('more labels');
+    const members = setup({ ProjectMembers: { all: list([{ id: 7, username: 'ann', state: 'active' }], 2) } });
+    await expect(members.service.listReviewerCandidates('/repo', { owner: 'team', name: 'repo' })).rejects.toThrow('more members');
+  });
+
+  it('reads multi-page board-picker collections under the shared collection bound', async () => {
+    const labels = Array.from({ length: 101 }, (_, index) => ({ name: `label-${index + 1}` }));
+    const members = Array.from({ length: 101 }, (_, index) => ({
+      id: index + 1, username: `user-${index + 1}`, state: 'active',
+    }));
+    const labelRead = vi.fn(async () => ({ data: labels, paginationInfo: { next: null } }));
+    const memberRead = vi.fn(async () => ({ data: members, paginationInfo: { next: null } }));
+    const { service } = setup({
+      ProjectLabels: { all: labelRead },
+      ProjectMembers: { all: memberRead },
+    });
+
+    await expect(service.listLabels('/repo', { owner: 'team', name: 'repo' })).resolves.toHaveLength(101);
+    await expect(service.listReviewerCandidates('/repo', { owner: 'team', name: 'repo' })).resolves.toHaveLength(101);
+    expect(labelRead).toHaveBeenCalledWith('2', { maxPages: 20, perPage: 100, showExpanded: true });
+    expect(memberRead).toHaveBeenCalledWith('2', {
+      includeInherited: true, maxPages: 20, perPage: 100, showExpanded: true,
+    });
+  });
+
   it('reads fork pipeline jobs from the pipeline project', async () => {
     const forkMR = { ...openMR, head_pipeline: { id: 9, status: 'running', project_id: 1 } };
     const { service, client } = setup({ MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => forkMR) } });
@@ -759,8 +792,8 @@ describe('GitLab comments and reviews', () => {
     const { service } = setup({
       MergeRequests: { ...setup().client.MergeRequests, edit: editMR, show: vi.fn(async () => ({ ...openMR, labels: ['bug'], reviewers: [{ id: 7, username: 'ann' }] })) },
       Issues: { ...setup().client.Issues, edit: editIssue },
-      ProjectLabels: { all: vi.fn(async () => [{ name: 'bug', color: '#d73a4a' }, { name: '' }]) },
-      ProjectMembers: { all: vi.fn(async () => [
+      ProjectLabels: { all: list([{ name: 'bug', color: '#d73a4a' }, { name: '' }]) },
+      ProjectMembers: { all: list([
         { id: 7, username: 'ann', avatar_url: `${origin}/a.png`, state: 'active' },
         { id: 8, username: 'gone', state: 'blocked' },
       ]) },
@@ -861,6 +894,46 @@ describe('GitLab merge request comparison reads', () => {
     expect(client.MergeRequests.allDiffs).toHaveBeenCalledWith('2', 5, expect.objectContaining({ showExpanded: true, perPage: 30, maxPages: 67 }));
   });
 
+  it('bounds the assembled patch at 50 MiB, counting every file diff toward the total', async () => {
+    const header = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n';
+    const body = '@@ -1 +1 @@\n+' + 'x'.repeat(50 * 1024 * 1024 - header.length - '@@ -1 +1 @@\n+'.length - 1) + '\n';
+    const atCap = setup({
+      MergeRequests: {
+        ...setup().client.MergeRequests,
+        allDiffs: list([{ old_path: 'a.ts', new_path: 'a.ts', a_mode: '100644', b_mode: '100644', diff: body }]),
+      },
+    });
+    const { patch } = await atCap.service.changeRequestPatch('/repo', 5, { project: { owner: 'team', name: 'repo' }, remote: 'origin' });
+    expect(patch).toBe(header + body);
+    expect(Buffer.byteLength(patch)).toBe(50 * 1024 * 1024);
+
+    // Three diffs of about 18 MiB each are individually far under the cap;
+    // only the assembled patch crosses it.
+    const hunk = '@@ -1 +1 @@\n+' + 'x'.repeat(18 * 1024 * 1024) + '\n';
+    const diff = { old_path: 'a.ts', new_path: 'a.ts', a_mode: '100644', b_mode: '100644', diff: hunk };
+    const overCap = setup({
+      MergeRequests: { ...setup().client.MergeRequests, allDiffs: list([diff, diff, diff]) },
+    });
+    await expect(overCap.service.changeRequestPatch('/repo', 5, { project: { owner: 'team', name: 'repo' }, remote: 'origin' }))
+      .rejects.toMatchObject({ code: 'patch-too-large', status: 413 });
+  });
+
+  it('rejects at the cap without building the pieces past it (#1456)', async () => {
+    const hunk = '@@ -1 +1 @@\n+' + 'x'.repeat(30 * 1024 * 1024) + '\n';
+    const big = { old_path: 'a.ts', new_path: 'a.ts', a_mode: '100644', b_mode: '100644', diff: hunk };
+    // The third file's diff throws if it is read: counting must reject on the
+    // second file (running total past 50 MiB) before this piece is ever built.
+    const poisoned = { old_path: 'b.ts', new_path: 'b.ts', a_mode: '100644', b_mode: '100644' };
+    Object.defineProperty(poisoned, 'diff', {
+      get() { throw new Error('the third diff must not be read'); },
+    });
+    const { service } = setup({
+      MergeRequests: { ...setup().client.MergeRequests, allDiffs: list([big, big, poisoned]) },
+    });
+    await expect(service.changeRequestPatch('/repo', 5, { project: { owner: 'team', name: 'repo' }, remote: 'origin' }))
+      .rejects.toMatchObject({ code: 'patch-too-large', status: 413 });
+  });
+
   it('reads both sides of a file at the merge base and the head', async () => {
     const showRaw = vi.fn(async (_project, path, ref) => `${path}@${ref.slice(0, 1)}`);
     const { service } = setup({
@@ -923,5 +996,25 @@ describe('GitLab live summaries', () => {
     const refused = Object.assign(new Error('401 Unauthorized'), { cause: { response: { status: 401 } } });
     const { service } = setup({ MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => { throw refused; }) } });
     await expect(service.liveSummaries({ refs: [{ owner: 'team', repo: 'app', number: 1 }] })).rejects.toBe(refused);
+  });
+});
+
+describe('GitLab merge-request list pagination (#1597)', () => {
+  it('fails the branch-status read instead of passing a capped list off as complete', async () => {
+    const other = { ...openMR, iid: 6, source_branch: 'other', web_url: `${origin}/team/repo/-/merge_requests/6` };
+    const { service } = setup({ MergeRequests: { ...setup().client.MergeRequests, all: list([other], 'next-page') } });
+    await expect(service.changeRequestStatus('/repo', 'feature')).rejects.toThrow('more pages than OpenChamber reads');
+  });
+
+  it('reconciles a create as unknown when the match list is only a prefix', async () => {
+    const exact = { ...openMR, target_branch: 'main' };
+    const { service } = setup(
+      { MergeRequests: { ...setup().client.MergeRequests, all: list([exact], 'next-page') } },
+      { canonicalReads: true },
+    );
+    const providerTarget = { sourceProjectId: '1', targetProjectId: '2' };
+    const target = { project: { id: '2', owner: 'team', name: 'repo' }, head: 'feature', base: 'main' };
+    await expect(service.reconcileCreateMutation(providerTarget, target))
+      .resolves.toEqual({ state: 'outcome-unknown' });
   });
 });

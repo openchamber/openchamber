@@ -542,6 +542,82 @@ describe('managed agent tool runtime', () => {
     expect(sent[17].input.withStatus).toBe('true');
   });
 
+  it('refuses a streamed callback response over the cap without consuming it whole', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    const prepared = await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false });
+    const tools = await loadTools(dataDir, 'over-cap');
+
+    const originalFetch = globalThis.fetch;
+    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    // The cap is 16 MiB: two 8 MiB chunks fit exactly, the third crosses it.
+    // A reader that buffered whole (response.text()) would keep reading
+    // until done at ten chunks; the bounded read must stop at the third.
+    let reads = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(8 * 1024 * 1024).fill(120);
+    const reader = {
+      read: async () => {
+        reads += 1;
+        return reads > 10 ? { done: true } : { done: false, value: chunk };
+      },
+      cancel: async () => { cancelled = true; },
+    };
+    globalThis.fetch = async () => ({
+      status: 200,
+      headers: { get: () => null },
+      body: { getReader: () => reader },
+    });
+    const context = { sessionID: 'ses_1', id: 'call_1', signal: new AbortController().signal, progress: async () => {} };
+    try {
+      const result = await tools.openchamber.execute({ action: 'session.list', parameters: {} }, context);
+      expect(JSON.parse(result.content)).toMatchObject({
+        ok: false,
+        error: { message: 'OpenChamber returned an invalid response', kind: 'runtime', status: 200 },
+      });
+      expect(result.metadata.openchamber.ok).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
+      if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+    }
+    expect(reads).toBe(3);
+    expect(cancelled).toBe(true);
+  });
+
+  it('returns an at-cap valid callback response byte-identically', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    const prepared = await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false });
+    const tools = await loadTools(dataDir, 'at-cap');
+
+    const originalFetch = globalThis.fetch;
+    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    const cap = 16 * 1024 * 1024;
+    const empty = JSON.stringify({ schemaVersion: 1, ok: true, action: 'session.list', data: { pad: '' } });
+    const body = JSON.stringify({ schemaVersion: 1, ok: true, action: 'session.list', data: { pad: 'x'.repeat(cap - empty.length) } });
+    expect(body.length).toBe(cap);
+    globalThis.fetch = async () => new Response(body);
+    const context = { sessionID: 'ses_1', id: 'call_1', signal: new AbortController().signal, progress: async () => {} };
+    try {
+      const result = await tools.openchamber.execute({ action: 'session.list', parameters: {} }, context);
+      expect(result.content).toBe(body);
+      expect(result.metadata.openchamber.ok).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
+      if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+    }
+  });
+
   it('omits a tool the user turned off', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: false, includeWeb: true, includeMemory: false });
@@ -600,7 +676,7 @@ describe('managed agent tool runtime', () => {
     const tool = await loadTools(dataDir, 'render');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
-    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['awaitAnswer', 'html', 'title']);
+    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['awaitAnswer', 'currentProvider', 'currentTier', 'html', 'message', 'resetAt', 'tiers', 'title']);
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('html');
     // How to write the page rides on its input, which no client cuts short.
     expect(tool.openchamber_render.input.properties.parameters.properties.html.description).toContain('--chart-1');

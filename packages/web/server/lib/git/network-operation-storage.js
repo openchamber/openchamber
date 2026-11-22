@@ -11,6 +11,10 @@ const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 256;
 const DEFAULT_TERMINAL_RETENTION_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
+// Chunk size for the in-flight capped handle read in readState (#1684):
+// reads accumulate in pieces sized to the bytes present, never one
+// maxBytes + 1 allocation up front.
+const READ_CHUNK_BYTES = 64 * 1024;
 const TERMINAL_STATES = new Set([
   'succeeded', 'partial', 'conflicted', 'failed', 'cancelled', 'outcome-unknown',
 ]);
@@ -461,7 +465,12 @@ export function createGitNetworkOperationStore({
   const readState = async () => {
     let handle;
     try {
-      handle = await fsImpl.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      // O_NONBLOCK (POSIX only) keeps open() from blocking on a FIFO
+      // with no writer before the handle stat below can refuse it as
+      // non-regular; O_NOFOLLOW stays so a symlink is judged at open.
+      handle = await fsImpl.open(filePath, process.platform === 'win32'
+        ? fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW
+        : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
     } catch (error) {
       if (error?.code === 'ENOENT') return emptyState();
       throw error?.code === 'ELOOP' ? invalidStore(error) : error;
@@ -470,7 +479,21 @@ export function createGitNetworkOperationStore({
       const stats = await handle.stat();
       if (!stats.isFile() || stats.size > maxBytes
         || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
-      return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords);
+      // The stat size is only a hint (#1684): enforce the cap in flight
+      // with the identity store's chunked handle read, so a file grown
+      // after the stat is refused having buffered at most maxBytes + 1
+      // bytes - never whole. The fsImpl seam and mode check above stay.
+      const chunks = [];
+      let total = 0;
+      while (total <= maxBytes) {
+        const chunk = Buffer.alloc(Math.min(READ_CHUNK_BYTES, maxBytes + 1 - total));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+        if (bytesRead === 0) break;
+        chunks.push(chunk.subarray(0, bytesRead));
+        total += bytesRead;
+      }
+      if (total > maxBytes) throw invalidStore();
+      return parseState(JSON.parse(Buffer.concat(chunks, total).toString('utf8')), maxRecords);
     } catch (error) {
       if (error?.code === 'GIT_NETWORK_OPERATION_STORAGE_INVALID') throw error;
       throw invalidStore(error);

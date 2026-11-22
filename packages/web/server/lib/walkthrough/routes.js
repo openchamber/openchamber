@@ -11,6 +11,20 @@ const modelIdSchema = z.string().trim().min(1).max(200).optional().catch(undefin
 // client is still there.
 const clientIsGone = (res) => res.writableEnded || res.destroyed;
 
+// Repeated query parameters are ambiguous scope: URLSearchParams.get
+// takes the first value while Object.fromEntries takes the last, so one
+// request could read from one directory while authorizing against
+// another. The comparison routes reject any repeated key with a 400,
+// the same fail-closed rule the sibling routes apply via typeof guards.
+const repeatedQueryParam = (query) => {
+  const seen = new Set();
+  for (const key of query.keys()) {
+    if (seen.has(key)) return key;
+    seen.add(key);
+  }
+  return null;
+};
+
 export function registerWalkthroughRoutes(app, { getWalkthroughService, validateReadContext }) {
   const respondWithError = (res, error, fallback) => {
     let bindingStatus = 0;
@@ -100,6 +114,8 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
   app.get('/api/walkthrough/pr-diff', async (req, res) => {
     try {
       const query = new URL(req.originalUrl, 'http://localhost').searchParams;
+      const repeated = repeatedQueryParam(query);
+      if (repeated) return res.status(400).json({ error: `query parameter must not be repeated: ${repeated}` });
       const directory = query.get('directory')?.trim() ?? '';
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       const source = parseSource(readSource(query.get('source')));
@@ -124,6 +140,8 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
   app.get('/api/walkthrough/pr-file', async (req, res) => {
     try {
       const query = new URL(req.originalUrl, 'http://localhost').searchParams;
+      const repeated = repeatedQueryParam(query);
+      if (repeated) return res.status(400).json({ error: `query parameter must not be repeated: ${repeated}` });
       const directory = query.get('directory')?.trim() ?? '';
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       const source = parseSource(readSource(query.get('source')));

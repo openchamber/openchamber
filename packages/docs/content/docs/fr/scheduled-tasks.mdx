@@ -22,6 +22,48 @@ Vous pouvez lancer n’importe quelle tâche immédiatement avec **run now** pou
 
 Cochez **Exécuter comme objectif** pour que l'exécution poursuive son prompt jusqu'au bout au lieu de s'arrêter après une réponse — voir [Objectifs de session](/session-goals/).
 
+## Boucles : les tâches planifiées sous forme de fichiers markdown
+
+Une **boucle** est une tâche planifiée définie comme un fichier markdown portable que vous pouvez committer dans votre dépôt. Déposez un fichier dans `.agents/loops/` et ouvrez la liste des tâches planifiées pour le synchroniser — aucun redémarrage du serveur n'est nécessaire :
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Où vivent les fichiers
+
+- **Portée projet** — `.agents/loops/*.md` dans le répertoire du projet ou tout répertoire parent jusqu'à la racine du worktree git.
+- **Portée utilisateur** — `~/.agents/loops/*.md` s'applique à chaque projet que vous ouvrez.
+
+Si une boucle de projet et une boucle utilisateur portent le même nom, la boucle de projet l'emporte.
+
+### Champs
+
+| Champ | Signification |
+|---|---|
+| `name` | Nom de la tâche (obligatoire, 80 caractères max). |
+| `schedule` | Expression cron (obligatoire) — les fichiers de boucle sont uniquement cron. |
+| `enabled` | À mettre à `true` pour exécuter. Les boucles sont **désactivées par défaut**, donc committer un fichier ne démarre jamais une tâche tout seul. Une boucle venue avec un dépôt attend aussi que vous l'activiez dans les tâches planifiées sur votre machine, et de nouveau après un changement de son horaire, de son modèle ou de son prompt. Les boucles dans `~/.agents/loops` fonctionnent avec `true` seul. |
+| `model` | `provider/model` (obligatoire), p. ex. `anthropic/claude-sonnet-4-5`. |
+| `agent` | Agent à utiliser (optionnel). |
+| `timezone` | Fuseau horaire IANA (optionnel, par défaut le fuseau du serveur). |
+| corps | Le prompt d'exécution (obligatoire). Peut être une commande slash, comme `/review src/`. |
+
+### Comment les boucles se comportent
+
+- Le **fichier fait autorité** tant qu'il existe. **Modifier** l'ouvre dans l'éditeur de fichiers intégré, le commutateur d'activation met à jour son frontmatter, et la suppression de la tâche supprime le fichier markdown après confirmation. **Exécuter maintenant** reste disponible.
+- L'état d'exécution (dernier passage, prochain passage, statut) vit dans la configuration du projet et n'est jamais réécrit dans le fichier markdown.
+- Renommer le champ `name` renomme la tâche en place. Si un fichier de boucle échoue temporairement à l'analyse (en cours d'édition, conflit de fusion), sa tâche est conservée avec la dernière bonne définition jusqu'à ce que le fichier soit corrigé.
+- Les horaires `daily`/`weekly`/`once` et les réglages d'objectifs restent réservés à l'interface ; les fichiers de boucle sont toujours cron.
+
 ## À quoi ressemble une réussite
 
 Après une exécution, la tâche indique quand elle a tourné pour la dernière fois, si elle a réussi et un lien vers la session créée. Si une exécution échoue, l’erreur s’affiche aussi à cet endroit.

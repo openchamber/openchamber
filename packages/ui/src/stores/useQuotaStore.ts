@@ -159,11 +159,14 @@ export const useQuotaStore = create<QuotaStore>()(
         const controller = new AbortController();
         const promise = Promise.resolve().then(async () => {
           try {
-            const result = await fetchQuota(providerId, { signal: controller.signal });
+            const fetched = await fetchQuota(providerId, { signal: controller.signal });
             if (generation !== quotaGeneration) return false;
-            // A reachable instance can still report that its provider request
-            // failed. Configuration is known, but there is no new usage sample.
-            if (!result.ok && result.configured) {
+            // One entry per stored credential (#481). A credential that failed
+            // while configured has no new usage sample; only when every
+            // credential failed does the provider as a whole count as failed.
+            const failures = fetched.filter(entry => !entry.ok && entry.configured);
+            if (failures.length === fetched.length) {
+              const result = failures[0];
               const message = result.error || 'Failed to fetch quota';
               set(state => {
                 const previous = state.results.find(entry => entry.providerId === providerId);
@@ -181,9 +184,11 @@ export const useQuotaStore = create<QuotaStore>()(
             }
             set((state) => {
               const refreshErrors = { ...state.refreshErrors };
-              delete refreshErrors[providerId];
-              const results = state.results.filter(entry => entry.providerId !== providerId);
-              results.push(result);
+              // A partial failure (one credential of several) still surfaces,
+              // alongside the samples the other credentials returned.
+              if (failures.length > 0) refreshErrors[providerId] = failures[0].error || 'Failed to fetch quota';
+              else delete refreshErrors[providerId];
+              const results = [...state.results.filter(entry => entry.providerId !== providerId), ...fetched];
               return { results, refreshErrors, error: Object.values(refreshErrors)[0] ?? null, lastUpdated: Date.now() };
             });
             return true;

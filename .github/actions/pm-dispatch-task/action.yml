@@ -1,0 +1,385 @@
+# Vendored from developing-today/code .github/actions/pm-dispatch-task/action.yml @ 6a1a351acbd59652cacc0e5a7bce56974368b29e
+# (2026-11-04, openchamber#1454): referencing the whole code repo as an
+# action repository fails in runner setup (archive staging), so this
+# composite action is vendored here byte-identical below this header
+# except its internal uses: lines, which point at the vendored local
+# actions in ./.github/actions/ instead of the remote code repo.
+# Re-sync from upstream when updating.
+name: pm-dispatch-task
+description: >-
+  Task-level entry point for pm-dispatch: dispatch a named, recurring task
+  (bolt, palette, suggestions, ci-fix, or any future library entry) through
+  the pm-dispatch-start / pm-dispatch-queue composite actions, using the
+  prompt library bundled with this action (prompts/<task>.md). It contains
+  no OIDC or HTTP plumbing of its own — dispatch goes through the
+  starter/queuer as `uses:` steps. The calling job MUST grant
+  `permissions: id-token: write` — the starter/queuer steps mint a GitHub
+  Actions OIDC token (audience pm-dispatch) to authenticate. For
+  `task: ci-fix` the calling job MUST also provide a GH_TOKEN in the job
+  environment (for example `GH_TOKEN: ${{ github.token }}`) whose token can
+  read issues in the target repo (for example `permissions: issues: read`),
+  which the dedupe step uses to search for an existing open tracking issue.
+inputs:
+  task:
+    description: "Task name: bolt | palette | suggestions | ci-fix today. Any string is accepted — the name selects prompts/<task>.md from this action's bundled prompt library, so future library entries work without any change to this action (an override input below can also supply the prompt for a task that has no library entry yet)."
+    required: true
+  repo:
+    description: "Target repo (owner/name). Any allowlisted repo may target any allowlisted repo."
+    required: false
+    default: ${{ github.repository }}
+  title:
+    description: "Optional session / tracking-issue title. For non-ci-fix tasks, when empty the title defaults to `Scheduled <Task> — <repo>`. For ci-fix the title is always the conventional `ci-fix: <workflow> failing on <branch>` (the dedupe search keys on that exact title), so this input is ignored for ci-fix."
+    required: false
+    default: ""
+  model:
+    description: 'Optional model hint, "provider/model" (passed through to the starter/queuer when non-empty).'
+    required: false
+    default: ""
+  priority:
+    description: "Optional priority: 10-90 or critical|high|normal|low. For ci-fix, when empty it defaults to high when the failed branch is the target repo's default branch, otherwise normal."
+    required: false
+    default: ""
+  prompt:
+    description: "Optional inline prompt override. Resolution order: prompt-file, then prompt-url, then prompt, then the bundled library prompt for the task (see the resolve step)."
+    required: false
+    default: ""
+  prompt-file:
+    description: "Optional path to a file containing the prompt, relative to the caller's workspace (the caller must check out its repo first). Takes precedence over prompt-url, prompt, and the library prompt."
+    required: false
+    default: ""
+  prompt-url:
+    description: "Optional https URL the prompt is fetched from (curl -fsS). Takes precedence over prompt and the library prompt, but not prompt-file."
+    required: false
+    default: ""
+  workflow:
+    description: "ci-fix context: name of the failed workflow."
+    required: false
+    default: ""
+  run-id:
+    description: "ci-fix context: id of the failed workflow run (substituted for {{run_id}} in the resolved prompt)."
+    required: false
+    default: ""
+  run-url:
+    description: "ci-fix context: URL of the failed workflow run (substituted for {{run_url}} in the resolved prompt)."
+    required: false
+    default: ""
+  branch:
+    description: "ci-fix context: head branch of the failed run (substituted for {{branch}}; also selects the ci-fix routing and the conventional tracking-issue title)."
+    required: false
+    default: ""
+  sha:
+    description: "ci-fix context: head SHA of the failed run (substituted for {{sha}} in the resolved prompt)."
+    required: false
+    default: ""
+  pr:
+    description: "ci-fix context: optional number of the pull request associated with the failed run (substituted for {{pr}} in the resolved prompt; may be empty)."
+    required: false
+    default: ""
+  default-branch:
+    description: "Default branch of the target repo. ci-fix failures on this branch dispatch at high priority via pm-dispatch-start; failures on any other branch are queued via pm-dispatch-queue."
+    required: false
+    default: ${{ github.event.repository.default_branch }}
+outputs:
+  task_id:
+    description: "pm-dispatch queue task id from whichever dispatch step ran."
+    value: ${{ steps.finalize.outputs.task_id }}
+  session_id:
+    description: "OpenCode session id (only set when pm-dispatch-start ran: non-ci-fix tasks, and fresh ci-fix failures on the default branch)."
+    value: ${{ steps.finalize.outputs.session_id }}
+  issue_number:
+    description: "Tracking issue number (attached, or created by the dispatch step)."
+    value: ${{ steps.finalize.outputs.issue_number }}
+  issue_url:
+    description: "Tracking issue URL."
+    value: ${{ steps.finalize.outputs.issue_url }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve the prompt, title and priority
+      id: resolve
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUT_TASK: ${{ inputs.task }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_TITLE: ${{ inputs.title }}
+        INPUT_PRIORITY: ${{ inputs.priority }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_PROMPT_FILE: ${{ inputs['prompt-file'] }}
+        INPUT_PROMPT_URL: ${{ inputs['prompt-url'] }}
+        INPUT_WORKFLOW: ${{ inputs.workflow }}
+        INPUT_RUN_ID: ${{ inputs['run-id'] }}
+        INPUT_RUN_URL: ${{ inputs['run-url'] }}
+        INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_SHA: ${{ inputs.sha }}
+        INPUT_PR: ${{ inputs.pr }}
+        INPUT_DEFAULT_BRANCH: ${{ inputs['default-branch'] }}
+        SUB_WORKFLOW: ${{ inputs.workflow }}
+        SUB_RUN_ID: ${{ inputs['run-id'] }}
+        SUB_RUN_URL: ${{ inputs['run-url'] }}
+        SUB_BRANCH: ${{ inputs.branch }}
+        SUB_SHA: ${{ inputs.sha }}
+        SUB_PR: ${{ inputs.pr }}
+      run: |
+        set -euo pipefail
+        # Resolve the prompt text. Resolution order (the Part 4 prompt
+        # sources, with the bundled library as the final fallback):
+        #   (1) prompt-file, (2) prompt-url, (3) the inline prompt input,
+        #   (4) the library file prompts/<task>.md bundled with this action.
+        # The first non-empty source wins. An override that is selected but
+        # missing/empty/unfetchable fails loudly rather than silently
+        # falling through; if no source yields text the step fails — for an
+        # unknown task with no override that is the
+        # "no library prompt for task '<task>'" error below.
+        resolved_prompt=""
+        prompt_source=""
+        if [ -n "$INPUT_PROMPT_FILE" ]; then
+          case "$INPUT_PROMPT_FILE" in
+            /*) prompt_path="$INPUT_PROMPT_FILE" ;;
+            *) prompt_path="${GITHUB_WORKSPACE:-$PWD}/$INPUT_PROMPT_FILE" ;;
+          esac
+          if [ ! -f "$prompt_path" ]; then
+            echo "::error::pm-dispatch-task: prompt-file not found: $INPUT_PROMPT_FILE (looked for $prompt_path; prompt-file is relative to the caller's workspace, and the caller must check out first)" >&2
+            exit 1
+          fi
+          resolved_prompt="$(cat "$prompt_path")"
+          prompt_source="prompt-file: $INPUT_PROMPT_FILE"
+          if [ -z "$resolved_prompt" ]; then
+            echo "::error::pm-dispatch-task: prompt-file is empty: $INPUT_PROMPT_FILE" >&2
+            exit 1
+          fi
+        elif [ -n "$INPUT_PROMPT_URL" ]; then
+          case "$INPUT_PROMPT_URL" in
+            https://*) ;;
+            *) echo "::error::pm-dispatch-task: prompt-url must be an https URL, got: $INPUT_PROMPT_URL" >&2; exit 1 ;;
+          esac
+          if ! resolved_prompt="$(curl -fsS "$INPUT_PROMPT_URL")"; then
+            echo "::error::pm-dispatch-task: failed to fetch prompt-url: $INPUT_PROMPT_URL" >&2
+            exit 1
+          fi
+          prompt_source="prompt-url: $INPUT_PROMPT_URL"
+          if [ -z "$resolved_prompt" ]; then
+            echo "::error::pm-dispatch-task: prompt-url returned an empty body: $INPUT_PROMPT_URL" >&2
+            exit 1
+          fi
+        elif [ -n "$INPUT_PROMPT" ]; then
+          resolved_prompt="$INPUT_PROMPT"
+          prompt_source="prompt (inline input)"
+        else
+          library_path="${ACTION_PATH}/prompts/${INPUT_TASK}.md"
+          if [ -f "$library_path" ]; then
+            resolved_prompt="$(cat "$library_path")"
+            prompt_source="library: prompts/${INPUT_TASK}.md"
+          fi
+          if [ -z "$resolved_prompt" ]; then
+            echo "::error::pm-dispatch-task: no library prompt for task '$INPUT_TASK' (looked for $library_path) and no prompt override supplied: set one of the prompt, prompt-file, or prompt-url inputs, or add prompts/$INPUT_TASK.md to the pm-dispatch-task prompt library." >&2
+            exit 1
+          fi
+        fi
+        if [ -z "$resolved_prompt" ]; then
+          echo "::error::pm-dispatch-task: no prompt resolved for task '$INPUT_TASK' from prompt-file, prompt-url, prompt, or the library prompt prompts/$INPUT_TASK.md." >&2
+          exit 1
+        fi
+        # ci-fix: substitute the run-context placeholders in the resolved
+        # text. Done in python3 so values containing slashes, colons or
+        # ampersands cannot corrupt the substitution (no sed delimiters or
+        # replacement-metacharacter escaping to get wrong). Missing values
+        # substitute as empty.
+        if [ "$INPUT_TASK" = "ci-fix" ]; then
+          if [ -z "$INPUT_WORKFLOW" ] || [ -z "$INPUT_BRANCH" ]; then
+            echo "::error::pm-dispatch-task: task 'ci-fix' requires the workflow and branch inputs (the conventional tracking-issue title and the routing both key on them)." >&2
+            exit 1
+          fi
+          resolved_prompt="$(printf '%s' "$resolved_prompt" | python3 -c '
+        import os, sys
+        text = sys.stdin.read()
+        for key in ("workflow", "run_id", "run_url", "branch", "sha", "pr"):
+            text = text.replace("{{" + key + "}}", os.environ.get("SUB_" + key.upper(), ""))
+        sys.stdout.write(text)
+        ')"
+          if [ -z "$resolved_prompt" ]; then
+            echo "::error::pm-dispatch-task: prompt became empty after ci-fix placeholder substitution." >&2
+            exit 1
+          fi
+        fi
+        # Effective title.
+        if [ "$INPUT_TASK" = "ci-fix" ]; then
+          title="ci-fix: ${INPUT_WORKFLOW} failing on ${INPUT_BRANCH}"
+        elif [ -n "$INPUT_TITLE" ]; then
+          title="$INPUT_TITLE"
+        else
+          task_capitalized="${INPUT_TASK^}"
+          title="Scheduled ${task_capitalized} — ${INPUT_REPO}"
+        fi
+        # Effective priority + default-branch flag. Only ci-fix defaults a
+        # priority when the caller left it empty: high on the default
+        # branch, normal anywhere else.
+        priority="$INPUT_PRIORITY"
+        is_default_branch="false"
+        if [ -n "$INPUT_DEFAULT_BRANCH" ] && [ -n "$INPUT_BRANCH" ] && [ "$INPUT_BRANCH" = "$INPUT_DEFAULT_BRANCH" ]; then
+          is_default_branch="true"
+        fi
+        if [ "$INPUT_TASK" = "ci-fix" ] && [ -z "$priority" ]; then
+          if [ "$is_default_branch" = "true" ]; then
+            priority="high"
+          else
+            priority="normal"
+          fi
+        fi
+        # Runtime-generated delimiter (#2712): prompt content is arbitrary
+        # (caller-supplied or template-built), so a fixed delimiter line in
+        # the prompt would truncate this output and corrupt the rest.
+        prompt_delim="PM_DISPATCH_TASK_PROMPT_EOF_$(openssl rand -hex 8)"
+        {
+          echo "prompt<<$prompt_delim"
+          echo "$resolved_prompt"
+          echo "$prompt_delim"
+          echo "prompt_source=$prompt_source"
+          echo "title=$title"
+          echo "priority=$priority"
+          echo "is_default_branch=$is_default_branch"
+        } >> "$GITHUB_OUTPUT"
+        echo "pm-dispatch-task: task=$INPUT_TASK prompt_source=$prompt_source title=$title priority=${priority:-none} is_default_branch=$is_default_branch"
+
+    - name: Dedupe against an existing open tracking issue (ci-fix only)
+      id: dedupe
+      if: inputs.task == 'ci-fix'
+      shell: bash
+      env:
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_TITLE: ${{ steps.resolve.outputs.title }}
+      run: |
+        set -euo pipefail
+        if [ -z "${GH_TOKEN:-}" ]; then
+          echo "::error::pm-dispatch-task: GH_TOKEN is not set in the job environment. For task 'ci-fix' the calling job must provide GH_TOKEN (its GitHub token) with issues read permission in the target repo so the dedupe search can list open issues." >&2
+          exit 1
+        fi
+        issues_json="$(gh issue list --repo "$INPUT_REPO" --state open --search "\"$INPUT_TITLE\" in:title" --json number,title)"
+        if ! printf '%s' "$issues_json" | jq -e 'type == "array"' > /dev/null; then
+          echo "::error::pm-dispatch-task: dedupe search returned unexpected output (expected a JSON array): $issues_json" >&2
+          exit 1
+        fi
+        issue_number="$(printf '%s' "$issues_json" | jq -r --arg title "$INPUT_TITLE" '[.[] | select(.title == $title)] | first | .number // empty')"
+        if [ -n "$issue_number" ]; then
+          mode="attach"
+        else
+          mode="fresh"
+        fi
+        {
+          echo "mode=$mode"
+          echo "issue_number=$issue_number"
+        } >> "$GITHUB_OUTPUT"
+        echo "pm-dispatch-task dedupe: mode=$mode issue_number=${issue_number:-none} title=$INPUT_TITLE"
+
+    - name: Dispatch via pm-dispatch-start (launch a session now)
+      id: dispatch_start
+      if: inputs.task != 'ci-fix' || (steps.dedupe.outputs.mode == 'fresh' && steps.resolve.outputs.is_default_branch == 'true')
+      uses: ./.github/actions/pm-dispatch-start
+      with:
+        repo: ${{ inputs.repo }}
+        title: ${{ steps.resolve.outputs.title }}
+        prompt: ${{ steps.resolve.outputs.prompt }}
+        model: ${{ inputs.model }}
+        priority: ${{ steps.resolve.outputs.priority }}
+        wait: "true"
+
+    - name: Dispatch via pm-dispatch-queue (attach to the existing tracking issue)
+      id: dispatch_attach
+      if: inputs.task == 'ci-fix' && steps.dedupe.outputs.mode == 'attach'
+      uses: ./.github/actions/pm-dispatch-queue
+      with:
+        repo: ${{ inputs.repo }}
+        issue_number: ${{ steps.dedupe.outputs.issue_number }}
+        title: ${{ steps.resolve.outputs.title }}
+        prompt: ${{ steps.resolve.outputs.prompt }}
+        model: ${{ inputs.model }}
+        kind: ci_investigation
+        priority: ${{ steps.resolve.outputs.priority }}
+
+    - name: Dispatch via pm-dispatch-queue (queue with a new tracking issue)
+      id: dispatch_queue
+      if: inputs.task == 'ci-fix' && steps.dedupe.outputs.mode == 'fresh' && steps.resolve.outputs.is_default_branch != 'true'
+      uses: ./.github/actions/pm-dispatch-queue
+      with:
+        repo: ${{ inputs.repo }}
+        issue: "true"
+        title: ${{ steps.resolve.outputs.title }}
+        prompt: ${{ steps.resolve.outputs.prompt }}
+        model: ${{ inputs.model }}
+        kind: ci_investigation
+        priority: ${{ steps.resolve.outputs.priority }}
+
+    - name: Finalize outputs and write the job summary
+      id: finalize
+      shell: bash
+      env:
+        INPUT_TASK: ${{ inputs.task }}
+        INPUT_REPO: ${{ inputs.repo }}
+        RESOLVE_TITLE: ${{ steps.resolve.outputs.title }}
+        PROMPT_SOURCE: ${{ steps.resolve.outputs.prompt_source }}
+        IS_DEFAULT_BRANCH: ${{ steps.resolve.outputs.is_default_branch }}
+        DEDUPE_MODE: ${{ steps.dedupe.outputs.mode }}
+        DEDUPE_ISSUE_NUMBER: ${{ steps.dedupe.outputs.issue_number }}
+        START_TASK_ID: ${{ steps.dispatch_start.outputs.task_id }}
+        START_SESSION_ID: ${{ steps.dispatch_start.outputs.session_id }}
+        START_ISSUE_NUMBER: ${{ steps.dispatch_start.outputs.issue_number }}
+        START_ISSUE_URL: ${{ steps.dispatch_start.outputs.issue_url }}
+        ATTACH_TASK_ID: ${{ steps.dispatch_attach.outputs.task_id }}
+        ATTACH_ISSUE_NUMBER: ${{ steps.dispatch_attach.outputs.issue_number }}
+        ATTACH_ISSUE_URL: ${{ steps.dispatch_attach.outputs.issue_url }}
+        QUEUE_TASK_ID: ${{ steps.dispatch_queue.outputs.task_id }}
+        QUEUE_ISSUE_NUMBER: ${{ steps.dispatch_queue.outputs.issue_number }}
+        QUEUE_ISSUE_URL: ${{ steps.dispatch_queue.outputs.issue_url }}
+      run: |
+        set -euo pipefail
+        task_id=""
+        for candidate in "$START_TASK_ID" "$ATTACH_TASK_ID" "$QUEUE_TASK_ID"; do
+          if [ -z "$task_id" ] && [ -n "$candidate" ]; then task_id="$candidate"; fi
+        done
+        session_id="$START_SESSION_ID"
+        issue_number=""
+        for candidate in "$START_ISSUE_NUMBER" "$ATTACH_ISSUE_NUMBER" "$QUEUE_ISSUE_NUMBER" "$DEDUPE_ISSUE_NUMBER"; do
+          if [ -z "$issue_number" ] && [ -n "$candidate" ]; then issue_number="$candidate"; fi
+        done
+        issue_url=""
+        for candidate in "$START_ISSUE_URL" "$ATTACH_ISSUE_URL" "$QUEUE_ISSUE_URL"; do
+          if [ -z "$issue_url" ] && [ -n "$candidate" ]; then issue_url="$candidate"; fi
+        done
+        if [ -z "$issue_url" ] && [ -n "$issue_number" ]; then
+          issue_url="https://github.com/${INPUT_REPO}/issues/${issue_number}"
+        fi
+        # Which path was taken through the routing above.
+        if [ "$INPUT_TASK" != "ci-fix" ]; then
+          path_taken="pm-dispatch-start (starter, wait=true)"
+        elif [ "$DEDUPE_MODE" = "attach" ]; then
+          path_taken="pm-dispatch-queue (queuer, attach to existing tracking issue)"
+        elif [ "$IS_DEFAULT_BRANCH" = "true" ]; then
+          path_taken="pm-dispatch-start (starter, fresh ci-fix on the default branch, wait=true)"
+        else
+          path_taken="pm-dispatch-queue (queuer, fresh ci-fix with a new tracking issue)"
+        fi
+        {
+          echo "task_id=$task_id"
+          echo "session_id=$session_id"
+          echo "issue_number=$issue_number"
+          echo "issue_url=$issue_url"
+        } >> "$GITHUB_OUTPUT"
+        {
+          echo "## pm-dispatch-task"
+          echo ""
+          echo "- Task: $INPUT_TASK"
+          echo "- Repository: $INPUT_REPO"
+          echo "- Title: $RESOLVE_TITLE"
+          echo "- Prompt source: $PROMPT_SOURCE"
+          echo "- Path taken: $path_taken"
+          echo "- Task id: ${task_id:-none}"
+          echo "- Session id: ${session_id:-none}"
+          if [ -n "$issue_number" ]; then
+            echo "- Issue: #$issue_number ($issue_url)"
+          else
+            echo "- Issue: none"
+          fi
+          echo "- Issue number: ${issue_number:-none}"
+          echo "- Issue URL: ${issue_url:-none}"
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "pm-dispatch-task: task=$INPUT_TASK path=$path_taken task_id=${task_id:-none} session_id=${session_id:-none} issue_number=${issue_number:-none} issue_url=${issue_url:-none}"

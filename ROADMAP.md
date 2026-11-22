@@ -4,7 +4,7 @@ This is the roadmap for the fork. It is grouped by area, and each row has a hori
 
 A row records intent. It is not a product decision and it is not a go-ahead to build. A new control, a changed default or a changed shortcut waits for the maintainer's answer, as `CLAUDE.md` says.
 
-Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20, 2026-10-21 and 2026-10-22.
+Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs of 2026-10-18, 2026-10-19, 2026-10-20, 2026-10-21, 2026-10-22 and 2026-10-23.
 
 ## Areas
 
@@ -35,10 +35,8 @@ Sources: open issues, [`TODO.md`](TODO.md), tracker issue #25 and the merged PRs
 
 | Title                                 | Horizon | Status   | Intent                                                  | Links |
 | ------------------------------------- | ------- | -------- | ------------------------------------------------------- | ----- |
-| Sessions sidebar on the phone sheet   | Next    | proposed | A layout for the sessions sidebar in the phone sheet.   | #18   |
 | Sidebar view mode without headers     | Next    | proposed | Keep the section order and drop the headers.            | #21   |
 | Choose session row lines and elements | Next    | proposed | Let the user pick what a session row shows.             | #22   |
-| Transcript does not blank mid-turn    | Next    | proposed | The transcript blanks for 57 to 149 ms twice in a turn. | #52   |
 
 ## Nested subagents
 
@@ -53,19 +51,14 @@ Subagents can launch subagents. Asks from any depth reach the root session, and 
 
 ## Routing, knowledge and cost
 
-These ask for features that sit on top of the OpenCode fork's routing and plan tracking. See `developing-today/opencode`'s roadmap.
+These ask for features that sit on top of the OpenCode fork's routing and plan tracking. See `developing-today-forks/opencode`'s roadmap.
 
 | Title                                              | Horizon | Status   | Intent                                                 | Links |
 | -------------------------------------------------- | ------- | -------- | ------------------------------------------------------ | ----- |
 | Model tier chooser and quota fallback card         | Later   | proposed | An interactive card through `render.page awaitAnswer`. | #14   |
-| Auto-publish agent task plans to Project Knowledge | Later   | proposed | With live progress.                                    | #15   |
 | Tier-aware dispatching and cost tracking           | Later   | proposed | For Project Knowledge plans.                           | #16   |
 
 ## Sync and transport
-
-| Title                                              | Horizon | Status   | Intent | Links |
-| -------------------------------------------------- | ------- | -------- | ------ | ----- |
-| Durable OpenChamber cursors for local event frames | Later   | proposed |        | #2    |
 
 ## Upgrades without dropped sessions
 
@@ -85,73 +78,4 @@ Both rows are proposals from `TODO.md`. They need the maintainer's approval of a
 
 ## Done
 
-| Title                                                             | Date       | Result                     |
-| ----------------------------------------------------------------- | ---------- | -------------------------- |
-| New sidebar layout: attention sections, movable sections          | 2026-10-16 | #20                        |
-| Worktree start points and branch templates                        | 2026-10-16 | #23                        |
-| Follow subsessions of subsessions                                 | 2026-10-18 | `6247e7e`                  |
-| Asks from nested subagents reach the root                         | 2026-10-18 | #69, flake pin in #75      |
-| Next-attention shortcut for sessions drawn project-first          | 2026-10-18 | #71                        |
-| `browser.type` checks the value landed                            | 2026-10-18 | #70                        |
-| Bot workflows skip when their app is not configured               | 2026-10-18 | #62, #66, #74              |
-| Concurrency groups per PR, issue or input                         | 2026-10-18 | #58, #76, #78, #86         |
-| Test isolation fixes for the UI suite                             | 2026-10-18 | #53, #57, #63              |
-| Contributing note on isolated test runs                           | 2026-10-18 | #50                        |
-| `queue: max` startup failure in issue-intake and pr-review fixed  | 2026-10-18 | #84, #85                   |
-| Cost rollup survives a parent cycle                               | 2026-10-18 | #79, #88                   |
-| Session trees survive a parent cycle (mobile, header, relocation) | 2026-10-19 | #92, #94, #101, #103, #105 |
-| PR checks run on pushes to main                                   | 2026-10-19 | #95, #96                   |
-| Dispatch-workflow concurrency keyed by its inputs                 | 2026-10-19 | #97                        |
-| Atomic-write renames retry on transient Windows errors            | 2026-10-19 | #98, #99, #106, #117, #125 |
-| Sonner toast-pin test no longer flakes                            | 2026-10-19 | #107, #108                 |
-| Stale WSL docs removed; French onboarding fixed                   | 2026-10-19 | #109, #110, #111, #112     |
-| Least-privilege permissions in the remaining workflows            | 2026-10-19 | #113                       |
-| Timeout caps on every workflow job that can carry one             | 2026-10-19 | #67, #116, #118, #119      |
-| Subagent chains count at any depth (8-level cap removed)          | 2026-10-19 | #123, #126                 |
-| Root `.env` untracked (already covered by `.gitignore`)           | 2026-10-19 | #120, #121                 |
-| Jules upstream-sync dispatches queue with `queue: max`            | 2026-10-19 | #124                       |
-| Remaining floating `@v4` action references SHA-pinned             | 2026-10-19 | #127, #128                 |
-| Self-handoff readiness timeout reports log, exit and pid state    | 2026-10-20 | #131, #132                 |
-| `queue: max` on stale, the last non-cancelling workflow           | 2026-10-20 | #133, #134                 |
-| Electron lint stub replaced with the shared oxlint command        | 2026-10-20 | #135, #136                 |
-| Electron `test:linux-desktop` smoke runs in pr checks             | 2026-10-20 | #137, #138                 |
-| Release pipeline actions aligned to the repo's v7 pins            | 2026-10-20 | #143, #144                 |
-| Desktop release pipeline cache aligned to v6.1.0                  | 2026-10-20 | #155, #156                 |
-| pr-intake github-script aligned to v8.0.0                         | 2026-10-20 | #157, #158                 |
-| Electron `build` bundles the main process (was a no-op stub)      | 2026-10-20 | #142, #159                 |
-| Jules action pinned to commit SHA (opencode#184 set)              | 2026-10-20 | #162                       |
-| Tracked `.create-pr-proof` screenshots removed + gitignored         | 2026-10-20 | #165, #166                 |
-| Malformed versions rejected in mobile release update check          | 2026-10-20 | #180, #181                 |
-| Malformed versions rejected in vscode upgrade check                 | 2026-10-21 | #182, #183                 |
-| Malformed versions rejected in web upgrade check                    | 2026-10-21 | #184, #187                 |
-| Malformed versions rejected in web package-manager check            | 2026-10-21 | #188, #189                 |
-| Malformed versions rejected in electron compareSemver               | 2026-10-21 | #185, #190                 |
-| Bare-key secret names masked and refused                            | 2026-10-21 | #208, #175, #211           |
-| Secret subtrees masked; plural secret names refused                 | 2026-10-21 | #214, #215, #219           |
-| Malformed weekly weekdays rejected instead of coerced               | 2026-10-21 | #209, #210                 |
-| ROADMAP Done records the five version-parse completions             | 2026-10-21 | #191, #192                 |
-| Non-mac releases can finalize without macOS manifests               | 2026-10-21 | #186, #193                 |
-| Android launch targets the real MainActivity class                  | 2026-10-21 | #173, #200                 |
-| ROADMAP Done records the #209 and #214/#215 completions             | 2026-10-21 | #220, #221                 |
-| updateSettings feeds projects the migrated settings                 | 2026-10-21 | #199, #223                 |
-| Electron relay and space-preview ports reject malformed values      | 2026-10-21 | #226, #227                 |
-| Passphrase values masked in opencode.config answers                 | 2026-10-21 | #222, #232                 |
-| Web serve --port rejects malformed and out-of-range values          | 2026-10-21 | #228, #229                 |
-| ROADMAP Done records the #226 completion                            | 2026-10-21 | #230, #231                 |
-| Web dev-tunnel ports reject malformed values                        | 2026-10-21 | #233, #234                 |
-| Env-config ports reject malformed and out-of-range values           | 2026-10-21 | #235, #238                 |
-| ROADMAP Done records the #222 completion                            | 2026-10-21 | #236, #237                 |
-| ROADMAP Done records the #228, #230, #233 and #235 completions      | 2026-10-21 | #239, #240                 |
-| SSH managed remote port read from anchored serve output             | 2026-10-22 | #241, #242                 |
-| ROADMAP Done records the #236 and #239 completions                  | 2026-10-22 | #243, #244                 |
-| Project environment command receives resolved vault values          | 2026-10-22 | #174, #245                 |
-| SSH remote probe reads status lines by prefix                       | 2026-10-22 | #246, #248                 |
-| Reload no longer joins a stale in-flight environment run          | 2026-10-22 | #247, #249                 |
-| ROADMAP Done records the #241, #243, #174 and #246 completions    | 2026-10-22 | #250, #251                 |
-| SSH remote answers read past login-shell banner output            | 2026-10-22 | #253, #254                 |
-| Remote tool resolution no longer returns a banner line            | 2026-10-22 | #255, #257                 |
-| ROADMAP Done records the #247, #250 and #253 completions          | 2026-10-22 | #252, #256, #258           |
-| ROADMAP Done records the #259 completion                          | 2026-10-22 | #262, #263                 |
-| GitHub vault-add route and client covered by tests                | 2026-10-22 | #178, #261                 |
-| Queued-goal inline fallback honours the objective limit opt-out   | 2026-10-22 | #207, #205                 |
-| Dev-server listener ports and pids reject trailing junk           | 2026-10-22 | #264, #265                 |
+Completed work is recorded in GitHub — see closed issues and merged PRs.

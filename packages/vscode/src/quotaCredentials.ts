@@ -3,11 +3,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fetchExeDevUsage } from './exeDevQuota';
+import { QUOTA_RESPONSE_MAX_BYTES, readBoundedResponseJson } from './bounded-response-body';
 import { renameSyncWithRetry } from './bridge-atomic-write';
+import { readCappedFileSync } from './opencodeConfig';
 
-export type ManagedProvider = 'exe-dev' | 'cursor' | 'zenmux';
+export type ManagedProvider = 'exe-dev' | 'cursor' | 'zenmux' | 'opendesign';
 type ManagedCredential = Record<string, string>;
-const providers = new Set<ManagedProvider>(['exe-dev', 'cursor', 'zenmux']);
+/** The managed-credential provider set: the one list every VS Code
+ * credential surface (bridge allowlist, manifest conformance) derives from. */
+export const MANAGED_PROVIDERS: readonly ManagedProvider[] = ['exe-dev', 'cursor', 'zenmux', 'opendesign'];
+const providers = new Set<ManagedProvider>(MANAGED_PROVIDERS);
+const QUOTA_CREDENTIAL_MAX_BYTES = 64 * 1024;
+
+// Open Design session validation, mirroring the quota fetcher in
+// quotaProviders.ts (which cannot be imported here: it imports this module).
+export const OPEN_DESIGN_API_BASE_URL = 'https://amr-api.open-design.ai/api';
+export const OPEN_DESIGN_SESSION_EXPIRED_ERROR = 'Open Design session expired; import a fresh session cookie in Settings';
 const directory = () => path.join(process.env.OPENCHAMBER_DATA_DIR ? path.resolve(process.env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'), 'quota');
 const target = (provider: ManagedProvider) => {
   if (!providers.has(provider)) throw new Error('Unsupported credential provider');
@@ -19,13 +30,30 @@ export const normalizeCredential = (provider: ManagedProvider, value: unknown): 
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   if (provider === 'exe-dev') return clean(data.usageToken) ? { usageToken: clean(data.usageToken) } : null;
   if (provider === 'zenmux') return clean(data.platformApiKey) ? { platformApiKey: clean(data.platformApiKey) } : null;
+  if (provider === 'opendesign') {
+    // Same shape the web credential store normalizes (credentials/providers.js):
+    // a browser-copied cookie header value, or a bare session token stored
+    // under its Better Auth cookie name, plus the workspace id.
+    const cookieInput = clean(data.cookie);
+    const workspaceId = clean(data.workspaceId);
+    if (!cookieInput || !workspaceId) return null;
+    const cookie = cookieInput.includes('better-auth') ? cookieInput : `better-auth.session_token=${cookieInput}`
+    return { cookie, workspaceId };
+  }
   const accessToken = clean(data.accessToken);
   const refreshToken = clean(data.refreshToken);
   return accessToken || refreshToken ? { accessToken, refreshToken } : null;
 };
 
 export const readCredential = (provider: ManagedProvider) => {
-  try { return normalizeCredential(provider, JSON.parse(fs.readFileSync(target(provider), 'utf8'))); }
+  try {
+    const filePath = target(provider);
+    const raw = readCappedFileSync(filePath, QUOTA_CREDENTIAL_MAX_BYTES, {
+      tooLarge: (file) => new Error(`Quota credential at ${file} exceeds the ${QUOTA_CREDENTIAL_MAX_BYTES}-byte limit`),
+      notRegular: (file) => Object.assign(new Error(`EISDIR: illegal operation on a directory, read '${file}'`), { code: 'EISDIR' }),
+    });
+    return normalizeCredential(provider, JSON.parse(raw));
+  }
   catch (error) { if ((error as { code?: string }).code !== 'ENOENT') console.warn(`Failed to read ${provider} quota credentials`); return null; }
 };
 export const credentialStatus = (provider: ManagedProvider) => {
@@ -74,16 +102,34 @@ export const deleteLegacyOllamaCloudCredential = () => {
   }
 };
 
-export const importCursorCredential = () => {
+const SQLITE_READ_TIMEOUT_MS = 5_000;
+
+export const importCursorCredential = ({ timeoutMs = SQLITE_READ_TIMEOUT_MS }: { timeoutMs?: number } = {}) => {
   const db = path.join(os.homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
   if (process.platform !== 'darwin' || !fs.existsSync(db)) throw new Error('Cursor credential import is unavailable');
-  const rows = JSON.parse(execFileSync('sqlite3', ['-json', db, "SELECT key,value FROM ItemTable WHERE key IN ('cursorAuth/accessToken','cursorAuth/refreshToken');"], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }) || '[]') as Array<{ key: string; value: string }>;
+  const rows = JSON.parse(execFileSync('sqlite3', ['-json', db, "SELECT key,value FROM ItemTable WHERE key IN ('cursorAuth/accessToken','cursorAuth/refreshToken');"], { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }) || '[]') as Array<{ key: string; value: string }>;
   const credential = normalizeCredential('cursor', { accessToken: rows.find((row) => row.key.endsWith('accessToken'))?.value, refreshToken: rows.find((row) => row.key.endsWith('refreshToken'))?.value });
   if (!credential) throw new Error('Cursor credentials are unavailable');
   return credential;
 };
 
 export const validateCredential = async (provider: ManagedProvider, credential: ManagedCredential, fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch) => {
+  if (provider === 'opendesign') {
+    if (!credential.cookie) throw new Error('Open Design session cookie is required');
+    if (!credential.workspaceId) throw new Error('Open Design workspace ID is required');
+    const sessionResponse = await fetchImpl(`${OPEN_DESIGN_API_BASE_URL}/auth/get-session`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Cookie: credential.cookie,
+        'x-vela-workspace-id': credential.workspaceId,
+        'User-Agent': 'OpenChamber quota provider',
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    const session = sessionResponse.ok ? await readBoundedResponseJson(sessionResponse, QUOTA_RESPONSE_MAX_BYTES).catch(() => null) : null;
+    if (!session || typeof session !== 'object') throw new Error(OPEN_DESIGN_SESSION_EXPIRED_ERROR);
+  }
   if (provider === 'zenmux') {
     const platformApiKey = credential.platformApiKey;
     if (!platformApiKey) throw new Error('ZenMux Platform API key is required');
@@ -102,7 +148,7 @@ export const validateCredential = async (provider: ManagedProvider, credential: 
   if (provider === 'cursor') {
     if (!credential.accessToken && credential.refreshToken) {
       const refresh = await fetch('https://api2.cursor.sh/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant_type: 'refresh_token', client_id: 'KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB', refresh_token: credential.refreshToken }), signal: AbortSignal.timeout(15_000) });
-      const payload = await refresh.json().catch(() => null) as { access_token?: string } | null;
+      const payload = (await readBoundedResponseJson(refresh, QUOTA_RESPONSE_MAX_BYTES)) as { access_token?: string } | null;
       if (!refresh.ok || !payload?.access_token) throw new Error('Cursor authentication failed');
       credential.accessToken = payload.access_token;
     }

@@ -147,6 +147,27 @@ describe('resolveOpenCodeEnvConfig OPENCODE_HOST', () => {
     expect(result.effectivePort).toBe(4096);
   });
 
+  it('warns that URL credentials in OPENCODE_HOST are ignored', () => {
+    const logger = { warn: vi.fn() };
+    const result = resolveOpenCodeEnvConfig({
+      env: { OPENCODE_HOST: 'https://user:pass@opencode.example:4096' },
+      logger,
+    });
+    expect(result.configuredOpenCodeHost).toEqual({ origin: 'https://opencode.example:4096', port: 4096 });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('URL credentials are ignored'));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('OPENCODE_SERVER_PASSWORD'));
+    const warned = logger.warn.mock.calls.flat().join(' ');
+    expect(warned).not.toContain('user:pass');
+    expect(warned).not.toContain(':pass@');
+  });
+
+  it('does not warn for a userinfo-free OPENCODE_HOST', () => {
+    const logger = { warn: vi.fn() };
+    const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'http://host:4096' }, logger });
+    expect(result.configuredOpenCodeHost).toEqual({ origin: 'http://host:4096', port: 4096 });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it('still rejects a host without a port', () => {
     const logger = { warn: vi.fn() };
     const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'https://opencode.example' }, logger });

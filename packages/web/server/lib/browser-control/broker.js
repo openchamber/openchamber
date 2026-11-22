@@ -64,6 +64,13 @@ export const createBrowserControlBroker = ({
      * Rejects with a BrowserControlError the agent can act on.
      */
     request(action, parameters = {}, { timeoutMs = DEFAULT_TIMEOUT_MS, signal, context } = {}) {
+      // A caller that has already abandoned the action must not cause one:
+      // check before dispatching, so nothing is emitted to a client and no
+      // pending request is created for a result nobody is waiting on.
+      if (signal?.aborted) {
+        return Promise.reject(new BrowserControlError('Browser action was cancelled', 499));
+      }
+
       const requestId = typeof createId === 'function' ? createId() : `browser-${Date.now()}-${pending.size}`;
       const boundedTimeout = Math.min(Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS), MAX_TIMEOUT_MS);
 

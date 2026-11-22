@@ -11,6 +11,7 @@ import { fork } from 'child_process';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 import { fileURLToPath } from 'url';
+import { StringDecoder } from 'node:string_decoder';
 
 import { applySherpaLoaderEnv } from './sherpa-loader.js';
 
@@ -22,6 +23,18 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_IDLE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_LOCAL_SAMPLE_RATE = 16000;
 const STDERR_TAIL_MAX_CHARS = 2000;
+
+function appendStderrTail(tail, text) {
+  const combined = tail + text;
+  let start = Math.max(0, combined.length - STDERR_TAIL_MAX_CHARS);
+  if (start > 0) {
+    const firstCodeUnit = combined.charCodeAt(start);
+    if (firstCodeUnit >= 0xdc00 && firstCodeUnit <= 0xdfff) {
+      start += 1;
+    }
+  }
+  return combined.slice(start);
+}
 
 function forkDictationWorker() {
   const env = { ...process.env };
@@ -36,11 +49,12 @@ function forkDictationWorker() {
 
 export class DictationWorkerClient {
   /**
-   * @param {{ requestTimeoutMs?: number, idleTtlMs?: number }} [options]
+   * @param {{ requestTimeoutMs?: number, idleTtlMs?: number, forkWorker?: typeof forkDictationWorker }} [options]
    */
   constructor(options = {}) {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.idleTtlMs = options.idleTtlMs ?? DEFAULT_IDLE_TTL_MS;
+    this.forkWorker = options.forkWorker ?? forkDictationWorker;
     this.pendingRequests = new Map();
     this.sessionEmitters = new Map();
     this.worker = null;
@@ -190,15 +204,25 @@ export class DictationWorkerClient {
     if (this.worker && !this.worker.killed && this.worker.connected) {
       return this.worker;
     }
-    const worker = forkDictationWorker();
+    const worker = this.forkWorker();
     this.worker = worker;
     this.stderrTail = '';
+    const stderrDecoder = new StringDecoder('utf8');
     worker.stderr?.on('data', (chunk) => {
-      const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
-      this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_MAX_CHARS);
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      const text = stderrDecoder.write(bytes);
+      if (this.worker === worker) {
+        this.stderrTail = appendStderrTail(this.stderrTail, text);
+      }
     });
     worker.on('message', (message) => this.handleWorkerMessage(message));
-    worker.on('close', (code, signal) => this.handleWorkerExit(worker, code, signal));
+    worker.on('close', (code, signal) => {
+      const remainingText = stderrDecoder.end();
+      if (this.worker === worker) {
+        this.stderrTail = appendStderrTail(this.stderrTail, remainingText);
+      }
+      this.handleWorkerExit(worker, code, signal);
+    });
     return worker;
   }
 

@@ -138,6 +138,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
           />
         );
       })}
+      <p className="mx-1 mb-1 text-[11px] leading-4 text-muted-foreground">{t('mcpDropdown.cacheNote')}</p>
     </WorkStatusCollapsibleSection>
   );
 };

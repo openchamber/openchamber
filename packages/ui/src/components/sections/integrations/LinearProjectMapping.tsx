@@ -11,6 +11,7 @@ import { useI18n } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import type { LinearAPI, LinearMappingResult } from '@/lib/api/types';
+import { linearMappingShowsEmptyTeamsNote, linearMappingTeamsTruncated } from '@/lib/linearProjectMapping';
 
 const NONE = '__none__';
 const INHERIT = '__inherit__';
@@ -171,7 +172,12 @@ export function LinearProjectMapping({
         title={t('settings.integrations.linear.mapping.teams')}
         info={t('settings.integrations.linear.mapping.teams.info')}
       >
-        {(mapping.teams ?? []).length === 0 ? (
+        {linearMappingTeamsTruncated(mapping) ? (
+          <p className="text-xs text-muted-foreground">
+            {t('settings.integrations.linear.mapping.teams.truncated')}
+          </p>
+        ) : null}
+        {linearMappingShowsEmptyTeamsNote(mapping) ? (
           <p className="text-xs text-muted-foreground">
             {t('settings.integrations.linear.mapping.emptyTeams')}
           </p>

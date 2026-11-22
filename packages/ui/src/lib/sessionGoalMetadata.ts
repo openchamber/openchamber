@@ -15,6 +15,13 @@ export interface SessionGoalPayload {
   objective: string;
   /** True when the objective text lives in a server-side file keyed by session id. */
   objectiveFile: boolean;
+  /**
+   * Hash of the objective text as last saved ('' for goals saved before
+   * revisions existed). Accounting merge-writes preserve it; a save that
+   * changes the objective replaces it — the edit-conflict signal for
+   * file-backed goals, whose text the record itself does not carry.
+   */
+  objectiveRevision: string;
   /** The user switched this goal's length limit off in the goal editor. */
   ignoreObjectiveLimit: boolean;
   status: SessionGoalStatus;
@@ -59,6 +66,7 @@ export function getSessionGoal(session: Session | null | undefined): SessionGoal
     // The limit is applied when a goal is saved; reading keeps what was saved.
     objective: objective.slice(0, SESSION_GOAL_CHAR_LIMIT_MAX),
     objectiveFile,
+    objectiveRevision: typeof goal.objectiveRevision === 'string' ? goal.objectiveRevision : '',
     ignoreObjectiveLimit: goal.ignoreObjectiveLimit === true,
     status: goal.status,
     tokenBudget,

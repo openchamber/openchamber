@@ -157,7 +157,7 @@ stdenvNoCC.mkDerivation {
 
   meta = {
     description = "Electron desktop client for OpenCode AI agent";
-    homepage = "https://github.com/developing-today/openchamber";
+    homepage = "https://github.com/developing-today-forks/openchamber";
     license = lib.licenses.mit;
     mainProgram = "openchamber-desktop";
     platforms = lib.platforms.darwin;

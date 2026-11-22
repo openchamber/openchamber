@@ -3,10 +3,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
+import { BUILT_IN_SKILL_LOCATION, readCappedFileSync, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
 import { filterPersistableSettingsChanges, withoutSecretSettings } from './settings-registry-gate';
 import { renameSyncWithRetry, renameWithRetry } from './bridge-atomic-write';
+import { readOpenCodeSkillsPayload } from './opencode-skills-response';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -28,6 +29,29 @@ const OPENCHAMBER_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'openc
 const MAGIC_PROMPTS_FILE_VERSION = 1;
 const MAGIC_PROMPT_ID_PATTERN = /^[a-z0-9._-]{1,160}$/;
 const MAGIC_PROMPT_TEXT_MAX_LENGTH = 200_000;
+
+// The three shared JSON stores this module reads (settings.json,
+// preferences.json, magic-prompts.json) are read synchronously on bridge hot
+// paths in a single-threaded extension host, so every read goes through the
+// handle-bounded readCappedFileSync (opencodeConfig.ts): the file is opened
+// with O_NONBLOCK on POSIX, judged regular and within its cap from the
+// handle, and never buffered past the cap — a FIFO or an oversized file can
+// neither freeze nor flood the host. Caps are sized from each file's
+// legitimate shape: settings.json carries instance facts and legacy keys
+// (8 MiB matches MAX_OPENCHAMBER_SETTINGS_BYTES in opencode.ts and the web
+// reader's cap for the same file); preferences.json holds only bounded
+// registry profile fields; magic-prompts.json holds overrides whose text is
+// already capped at MAGIC_PROMPT_TEXT_MAX_LENGTH per entry on save, so
+// 4 MiB is roughly twenty maximum-size overrides.
+const SHARED_SETTINGS_MAX_BYTES = 8 * 1024 * 1024;
+const PREFERENCES_MAX_BYTES = 4 * 1024 * 1024;
+const MAGIC_PROMPTS_MAX_BYTES = 4 * 1024 * 1024;
+
+const readSharedStoreSync = (filePath: string, maxBytes: number): string =>
+  readCappedFileSync(filePath, maxBytes, {
+    tooLarge: (target) => new Error(`${target} exceeds the ${maxBytes}-byte limit and was not read`),
+    notRegular: (target) => new Error(`${target} is not a regular file and was not read`),
+  });
 const isVisiblePromptId = (id: string): boolean => id.endsWith('.visible');
 
 const isPathInside = (candidatePath: string, parentPath: string): boolean => {
@@ -42,7 +66,7 @@ const findWorktreeRootForSkills = (workingDirectory?: string): string | null => 
     const gitPath = path.join(current, '.git');
     try {
       const stat = fs.statSync(gitPath);
-      if (stat.isFile()) {
+      if (stat.isFile() || stat.isDirectory()) {
         return current;
       }
     } catch {
@@ -134,7 +158,7 @@ export const fetchOpenCodeSkillsFromApi = async (
       return null;
     }
 
-    const payload = await response.json() as { data?: unknown } | null;
+    const payload = await readOpenCodeSkillsPayload(response);
     const skills = payload?.data;
     if (!Array.isArray(skills)) {
       return null;
@@ -191,7 +215,7 @@ export const fetchOpenCodeSkillsFromApi = async (
 // plan. preferences.json already fails closed below.
 const readSettingsJsonFromDisk = (): Record<string, unknown> => {
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_SHARED_SETTINGS_PATH, 'utf8');
+    const raw = readSharedStoreSync(OPENCHAMBER_SHARED_SETTINGS_PATH, SHARED_SETTINGS_MAX_BYTES);
     // SAFETY: JSON.parse returns untyped data; the check below keeps only a plain object.
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -218,7 +242,7 @@ let preferencesUnavailableLogged = false;
 const readPreferencesFromDisk = (): PreferencesReadResult => {
   let result: PreferencesReadResult;
   try {
-    const parsed = parsePreferencesDocument(fs.readFileSync(OPENCHAMBER_PREFERENCES_PATH, 'utf8'));
+    const parsed = parsePreferencesDocument(readSharedStoreSync(OPENCHAMBER_PREFERENCES_PATH, PREFERENCES_MAX_BYTES));
     result = parsed.ok ? { status: 'ok', fields: parsed.fields } : { status: 'unreadable', reason: parsed.reason };
   } catch (error) {
     // SAFETY: fs errors carry a `code` string; anything else is reported by message.
@@ -340,25 +364,99 @@ const sanitizeMagicPromptOverrides = (input: unknown): Record<string, string> =>
   return next;
 };
 
-const readMagicPromptFile = (): { version: number; overrides: Record<string, string> } => {
+const emptyMagicPromptState = (): { version: number; overrides: Record<string, string> } => ({
+  version: MAGIC_PROMPTS_FILE_VERSION,
+  overrides: {},
+});
+
+// A torn or otherwise unparseable magic-prompts file is user data, not an
+// empty store: move its bytes aside before any later write can overwrite
+// them, and name the preserved copy so the loss is recoverable. Returns the
+// preserved path, or null when the rename failed.
+const preserveCorruptMagicPromptFile = (error: unknown): string | null => {
+  const preservedPath = `${OPENCHAMBER_MAGIC_PROMPTS_PATH}.corrupt-${Date.now()}`;
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_MAGIC_PROMPTS_PATH, 'utf8');
+    renameSyncWithRetry(OPENCHAMBER_MAGIC_PROMPTS_PATH, preservedPath, (from, to) => fs.renameSync(from, to));
+    console.warn(
+      `[OpenChamber] ${OPENCHAMBER_MAGIC_PROMPTS_PATH} could not be parsed (${error instanceof Error ? error.message : String(error)}); preserved the unreadable file at ${preservedPath}.`,
+    );
+    return preservedPath;
+  } catch (preserveError) {
+    console.warn(
+      `[OpenChamber] Failed to preserve the unreadable magic prompts file at ${preservedPath}:`,
+      preserveError instanceof Error ? preserveError.message : String(preserveError),
+    );
+    return null;
+  }
+};
+
+// True after magic-prompts.json was found but could not be read (over its
+// byte cap, not a regular file, or another read error). While set, the file
+// is left alone: reads return the empty store and writes refuse, instead of
+// replacing bytes whose content we cannot see — the preferencesUnavailable
+// contract above, and #891's preservation rule extended to files that are
+// unreadable rather than unparseable.
+let magicPromptsUnavailable = false;
+
+const readMagicPromptFile = (): { version: number; overrides: Record<string, string> } => {
+  let raw: string;
+  try {
+    raw = readSharedStoreSync(OPENCHAMBER_MAGIC_PROMPTS_PATH, MAGIC_PROMPTS_MAX_BYTES);
+    magicPromptsUnavailable = false;
+  } catch (error) {
+    // ENOENT is the normal first-run case: an empty store, silently.
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (code === 'ENOENT') {
+      magicPromptsUnavailable = false;
+    } else {
+      magicPromptsUnavailable = true;
+    }
+    if (code !== 'ENOENT') {
+      console.warn(
+        `[OpenChamber] ${OPENCHAMBER_MAGIC_PROMPTS_PATH} could not be read (${error instanceof Error ? error.message : String(error)}); treating it as an empty store.`,
+      );
+    }
+    return emptyMagicPromptState();
+  }
+  try {
     const parsed = JSON.parse(raw) as { overrides?: unknown };
     return {
       version: MAGIC_PROMPTS_FILE_VERSION,
       overrides: sanitizeMagicPromptOverrides(parsed?.overrides),
     };
-  } catch {
-    return {
-      version: MAGIC_PROMPTS_FILE_VERSION,
-      overrides: {},
-    };
+  } catch (error) {
+    // A mutation must never overwrite bytes whose preservation just
+    // failed: they are the only copy of the user's overrides. Abort
+    // instead; the caller can retry once the file is movable.
+    const preservedPath = preserveCorruptMagicPromptFile(error);
+    if (!preservedPath) {
+      throw new Error(
+        `Failed to preserve the unreadable magic prompts file at ${OPENCHAMBER_MAGIC_PROMPTS_PATH}; refusing to overwrite it`,
+        { cause: error },
+      );
+    }
+    return emptyMagicPromptState();
   }
 };
 
 const writeMagicPromptFile = async (state: { version: number; overrides: Record<string, string> }): Promise<void> => {
-  await fs.promises.mkdir(path.dirname(OPENCHAMBER_MAGIC_PROMPTS_PATH), { recursive: true });
-  await fs.promises.writeFile(OPENCHAMBER_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2), 'utf8');
+  if (magicPromptsUnavailable) {
+    throw new Error(
+      `Refusing to overwrite ${OPENCHAMBER_MAGIC_PROMPTS_PATH}: its current contents could not be read within the ${MAGIC_PROMPTS_MAX_BYTES}-byte limit`,
+    );
+  }
+  // The per-entry save cap counts characters, but the read cap counts
+  // bytes: enough maximum-length multi-byte overrides would serialize past
+  // MAGIC_PROMPTS_MAX_BYTES and produce a file this module's own reader
+  // refuses (and, once unreadable, whose writes all refuse). Enforce the
+  // byte cap on the serialized document so a save can never lock the store.
+  const serialized = JSON.stringify(state, null, 2);
+  if (Buffer.byteLength(serialized, 'utf8') > MAGIC_PROMPTS_MAX_BYTES) {
+    throw new Error(
+      `Refusing to write ${OPENCHAMBER_MAGIC_PROMPTS_PATH}: the document exceeds the ${MAGIC_PROMPTS_MAX_BYTES}-byte limit`,
+    );
+  }
+  await writeJsonAtomic(OPENCHAMBER_MAGIC_PROMPTS_PATH, serialized);
 };
 
 const stripDerived = (source: Record<string, unknown>): Record<string, unknown> => {
@@ -551,6 +649,10 @@ export const resetMagicPromptOverride = async (id: string): Promise<{ version: n
 };
 
 export const resetAllMagicPromptOverrides = async (): Promise<{ version: number; overrides: Record<string, string> }> => {
+  // Read first (discarding the result) so a corrupt existing file is
+  // preserved — or the reset aborts — instead of being silently
+  // overwritten by the empty state below.
+  readMagicPromptFile();
   const next = {
     version: MAGIC_PROMPTS_FILE_VERSION,
     overrides: {},

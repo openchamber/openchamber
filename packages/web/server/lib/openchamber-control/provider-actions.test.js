@@ -138,6 +138,13 @@ describe('provider action contract', () => {
     const { run } = setup();
     await expectError(run('providers.nope'), 400, /Unsupported provider action/);
   });
+
+  it('rejects prototype-named actions instead of dispatching inherited members', async () => {
+    const { run } = setup();
+    for (const action of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      await expectError(run(action), 400, /Unsupported provider action/);
+    }
+  });
 });
 
 describe('providers.list', () => {

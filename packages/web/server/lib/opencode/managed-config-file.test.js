@@ -11,7 +11,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true } = {}) => {
+const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true, managed } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
   temporaryDirectories.push(dataDir);
   const agentToolRuntime = {
@@ -35,6 +35,8 @@ const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true }
     agentToolRuntime,
     readSettings: () => current.settings,
     isAgentMemoryAvailable: () => memoryAvailable,
+    // Undefined leaves the runtime's own default in place.
+    isManagedOpenCode: managed === undefined ? undefined : () => managed,
   });
   const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
   return { dataDir, runtime, agentToolRuntime, current, readConfigFile };
@@ -201,6 +203,16 @@ describe('managed OpenCode config file', () => {
     });
     await expect(fs.stat(path.join(dataDir, MANAGED_CONFIG_FILE_NAME))).rejects.toThrow();
     expect(await runtime.refreshManagedConfigFile()).toEqual({ updated: false, reason: 'external-config' });
+  });
+
+  // The Tools settings page shows its prompt cache note only when this is true, because
+  // only then does a switch change the running session's tool list (PR #306 review).
+  it('reports that tool switches apply live only for a launched OpenCode reading our config file', async () => {
+    expect((await createHarness({ managed: true })).runtime.appliesLive()).toBe(true);
+    expect((await createHarness({ managed: false })).runtime.appliesLive()).toBe(false);
+    expect((await createHarness({})).runtime.appliesLive()).toBe(false);
+    const userConfig = await createHarness({ managed: true, env: { OPENCODE_CONFIG: '/home/user/opencode.json' } });
+    expect(userConfig.runtime.appliesLive()).toBe(false);
   });
 
   it('leaves no temp file behind and never publishes a partial list', async () => {

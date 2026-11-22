@@ -27,6 +27,18 @@ Ouvrez **Paramètres → Projets** pour donner à un projet un nom, une couleur 
 
 > Dans VS Code, OpenChamber utilise toujours le dossier ouvert comme seul projet ; il n’y a donc rien à ajouter ni à changer. La page de paramètres Projets y est masquée.
 
+## Grouper les sessions dans des dossiers
+
+Dans la vue **Tree** de la barre latérale, faites un clic droit sur une session et choisissez **Move to folder** pour la placer dans un dossier, ou **New folder...** pour en créer un. Un dossier appartient à la racine du projet ou à un worktree, et la ligne du dossier a des boutons pour le renommer ou le supprimer. Supprimer un dossier conserve ses sessions ; elles retournent au projet.
+
+Les dossiers sont stockés sur le serveur OpenChamber, donc tout ce qui est connecté au même serveur affiche les mêmes : un autre ordinateur connecté à ce serveur, l'application web et le téléphone. Un changement sur l'un apparaît sur les autres en une seconde, sans rechargement. Chaque serveur a ses propres dossiers. Les dossiers repliés restent propres à chaque appareil.
+
+Le téléphone affiche les dossiers dans sa vue Tree mais ne peut pas les modifier. Déplacez les sessions sur le bureau ou dans l'application web.
+
+Quand un appareil se connecte pour la première fois après une mise à jour depuis une version qui conservait les dossiers sur chaque appareil, ses dossiers s'ajoutent à ceux du serveur. Un dossier portant le même nom au même endroit qu'un dossier déjà présent sur le serveur le rejoint, et ses sessions le suivent ; rien n'est perdu. Une session que le serveur a déjà classée reste dans le dossier du serveur.
+
+Supprimer une session la retire de son dossier, et fermer un projet supprime ses dossiers. Dans VS Code, les dossiers restent dans l'extension et ne sont pas partagés.
+
 ## Environnement du projet
 
 Quand les outils d’un projet viennent de direnv, de devenv ou d’un shell Nix, les hooks Git, le terminal et les [actions de projet](/fr/project-actions/) ne les trouvent pas seuls. Ouvrez **Paramètres → Projets**, choisissez le projet et, sous **Environnement** :

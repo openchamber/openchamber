@@ -22,7 +22,7 @@ Browsers key a cookie jar on the host only, never the port (RFC 6265). Two OpenC
 Compatibility: upgrading renames the cookie for any explicit-port host, so already-signed-in browser sessions must log in once again. No on-disk format changes.
 
 ## Public exports (ui-auth.js)
-- `readSessionTtlMs(raw, unitMs, fallbackMs)`: parses a positive session lifetime from an environment value, else the fallback. Defaults come from `OPENCHAMBER_UI_SESSION_TTL_HOURS` (12) and `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS` (7, used when the user ticks "trust this device").
+- `readSessionTtlMs(raw, unitMs, fallbackMs)`: parses a positive session lifetime from an environment value, else the fallback. Only a plain decimal spelling is honoured (digits with at most one decimal point, whitespace trimmed); exponent, hex, and signed spellings fall back, as does any lifetime above the 400-day maximum. Defaults come from `OPENCHAMBER_UI_SESSION_TTL_HOURS` (12) and `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS` (7, used when the user ticks "trust this device").
 - `createUiAuth({ password, cookieName, sessionTtlMs, trustedSessionTtlMs, readSettingsFromDiskMigrated })`: creates UI auth controller with methods:
   - `enabled`
   - `requireAuth(req, res, next)`
@@ -41,7 +41,7 @@ Compatibility: upgrading renames the cookie for any explicit-port host, so alrea
   - `dispose()`
 
 ## Public exports (ui-passkeys.js)
-- `createUiPasskeys({ passwordBinding, readSettingsFromDiskMigrated, storeFile, rpName, challengeTtlMs })`: creates passkey runtime with methods:
+- `createUiPasskeys({ passwordBinding, readSettingsFromDiskMigrated, storeFile, fs, rpName, challengeTtlMs })`: creates passkey runtime with methods:
   - `enabled`
   - `getStatus(req)`
   - `listPasskeys(req)`
@@ -53,3 +53,7 @@ Compatibility: upgrading renames the cookie for any explicit-port host, so alrea
   - `beginAuthentication(req)`
   - `finishAuthentication(payload)`
   - `dispose()`
+
+## Passkey store
+
+`ui-passkeys.json` stores the passkey user ID, credential public keys, counters, and labels. Its root must be a JSON object. The sync durable-store helpers preserve malformed non-empty JSON before a later write, refuse a write when preservation fails, and write atomically with mode `0600`. Missing and empty files both mean a fresh store under the shared durable-store contract; an existing empty file is initialized in place (it holds no bytes to preserve) so the generated user ID is persisted and stays stable across loads. Filesystem read errors other than a missing file propagate without replacing the active file. The optional `fs` argument keeps the file operations injectable in tests.

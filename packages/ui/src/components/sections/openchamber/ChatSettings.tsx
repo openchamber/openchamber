@@ -26,12 +26,18 @@ import {
   type InputHistoryScope,
 } from '@/lib/inputHistoryScope';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { QUESTION_TIMEOUT_MINUTES_MAX, QUESTION_TIMEOUT_MINUTES_MIN } from '@/lib/questionTimeout';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
-import { useUIStore, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import {
+  useUIStore,
+  type ActiveRunModelChangeBehavior,
+  type LargeTextPasteBehavior,
+} from '@/stores/useUIStore';
 
 import { MessageSearchSettings } from './MessageSearchSettings';
+import { ModelChoiceSettings } from './ModelChoiceSettings';
 import { SessionGoalCheckerField, SessionGoalLengthFields, SessionGoalMaxTurnsField } from './SessionGoalCheckerField';
 import { SessionGoalWriterFields } from './SessionGoalWriterFields';
 import { useChatSettingsTabStore, type ChatSettingsTab } from './chatSettingsTabs';
@@ -74,6 +80,11 @@ const LARGE_TEXT_PASTE_BEHAVIOR_OPTIONS: ChipOption<LargeTextPasteBehavior>[] = 
   { id: 'attach', labelKey: 'settings.openchamber.visual.option.largeTextPaste.attach.label' },
   { id: 'inline', labelKey: 'settings.openchamber.visual.option.largeTextPaste.inline.label' },
   { id: 'inline-double-paste', labelKey: 'settings.openchamber.visual.option.largeTextPaste.inlineDoublePaste.label' },
+];
+
+const ACTIVE_RUN_MODEL_CHANGE_OPTIONS: ChipOption<ActiveRunModelChangeBehavior>[] = [
+  { id: 'next-message', labelKey: 'settings.openchamber.visual.option.activeRunModelChange.nextMessage.label' },
+  { id: 'restart', labelKey: 'settings.openchamber.visual.option.activeRunModelChange.restart.label' },
 ];
 
 /** A sub-option that only matters while the option above it is on. */
@@ -343,6 +354,8 @@ const ComposerTab: React.FC = () => {
   const setFollowUpBehavior = useMessageQueueStore((state) => state.setFollowUpBehavior);
   const largeTextPasteBehavior = useUIStore((state) => state.largeTextPasteBehavior);
   const setLargeTextPasteBehavior = useUIStore((state) => state.setLargeTextPasteBehavior);
+  const activeRunModelChangeBehavior = useUIStore((state) => state.activeRunModelChangeBehavior);
+  const setActiveRunModelChangeBehavior = useUIStore((state) => state.setActiveRunModelChangeBehavior);
   const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
   const setAllowPromptingSubagentSessions = useUIStore((state) => state.setAllowPromptingSubagentSessions);
   const savePastedImagesAsFiles = useUIStore((state) => state.savePastedImagesAsFiles);
@@ -355,6 +368,10 @@ const ComposerTab: React.FC = () => {
   const inputHistoryLimit = useInputHistoryStore((state) => state.entryLimit);
   const applyInputHistoryScope = useInputHistoryStore((state) => state.applyScope);
   const applyInputHistoryLimit = useInputHistoryStore((state) => state.applyEntryLimit);
+  const questionTimeoutMinutes = useUIStore((state) => state.questionTimeoutMinutes);
+  const setQuestionTimeoutMinutes = useUIStore((state) => state.setQuestionTimeoutMinutes);
+  const questionsInBackground = useUIStore((state) => state.questionsInBackground);
+  const setQuestionsInBackground = useUIStore((state) => state.setQuestionsInBackground);
   const followUpOptions = useChipOptions(FOLLOW_UP_BEHAVIOR_OPTIONS);
   const historyScopeOptions = useChipOptions(INPUT_HISTORY_SCOPE_OPTIONS);
   const enterSendSelected = enterToSendConfigured ? enterToSend : !isMobile;
@@ -421,6 +438,23 @@ const ComposerTab: React.FC = () => {
                 onSelect={() => setLargeTextPasteBehavior(option.id)}
                 label={t(option.labelKey)}
                 ariaLabel={t('settings.openchamber.visual.field.largeTextPasteOptionAria', { option: t(option.labelKey) })}
+              />
+            ))}
+          </SettingsRadioGroup>
+        </SettingsControlGroup>
+        <SettingsControlGroup
+          title={t('settings.openchamber.visual.field.activeRunModelChange')}
+          info={t('settings.openchamber.visual.field.activeRunModelChangeInfo')}
+          settingsItem="chat.active-run-model-change"
+        >
+          <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.activeRunModelChange')}>
+            {ACTIVE_RUN_MODEL_CHANGE_OPTIONS.map((option) => (
+              <SettingsRadioOption
+                key={option.id}
+                selected={activeRunModelChangeBehavior === option.id}
+                onSelect={() => setActiveRunModelChangeBehavior(option.id)}
+                label={t(option.labelKey)}
+                ariaLabel={t(option.labelKey)}
               />
             ))}
           </SettingsRadioGroup>
@@ -504,6 +538,38 @@ const ComposerTab: React.FC = () => {
               </span>
             </div>
           </SettingsFieldRow>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title={t('settings.chat.questionTimeout.section')} contentClassName="space-y-3">
+        <SettingsFieldRow
+          label={t('settings.chat.questionTimeout.field')}
+          info={t('settings.chat.questionTimeout.info')}
+          settingsItem="chat.question-timeout"
+        >
+          <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+            <NumberInput
+              value={questionTimeoutMinutes}
+              onValueChange={setQuestionTimeoutMinutes}
+              min={QUESTION_TIMEOUT_MINUTES_MIN}
+              max={QUESTION_TIMEOUT_MINUTES_MAX}
+              step={1}
+              className={SETTINGS_NUMBER_INPUT_CLASS}
+              deferExternalValueWhileFocused
+              aria-label={t('settings.chat.questionTimeout.aria')}
+            />
+            <span className={SETTINGS_NUMBER_UNIT_CLASS}>{t('settings.chat.questionTimeout.unit')}</span>
+          </div>
+        </SettingsFieldRow>
+        <div className={SETTINGS_OPTION_STACK_CLASS}>
+          <SettingsCheckboxRow
+            checked={questionsInBackground}
+            onChange={setQuestionsInBackground}
+            label={t('settings.chat.questionsInBackground.field')}
+            ariaLabel={t('settings.chat.questionsInBackground.field')}
+            info={t('settings.chat.questionsInBackground.info')}
+            settingsItem="chat.questions-in-background"
+          />
         </div>
       </SettingsSection>
     </>
@@ -630,6 +696,9 @@ const AssistanceTab: React.FC = () => {
           </div>
         </SettingsSection>
       )}
+
+      {/* The history lives on the OpenChamber server, which VS Code does not have. */}
+      {isVSCode ? null : <ModelChoiceSettings />}
     </>
   );
 };

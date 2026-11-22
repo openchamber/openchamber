@@ -58,6 +58,75 @@ describe('keywords stage', () => {
   });
 });
 
+describe('keywords stage: named models and kinds of model', () => {
+  const copilot = {
+    providers: ['github-copilot', 'anthropic'],
+    models: [
+      { id: 'gemini-4-carbon', providerID: 'github-copilot' },
+      { id: 'gemini-3-flash', providerID: 'github-copilot' },
+      { id: 'claude-opus-5.5', providerID: 'github-copilot' },
+      { id: 'gpt-6-luna', providerID: 'github-copilot' },
+      { id: 'claude-opus-5.5', providerID: 'anthropic' },
+    ],
+    now,
+  };
+
+  it('scopes "provider/model#variant" to exactly that model, ignoring the variant', () => {
+    const result = keywords('prefer github-copilot/gemini-4-carbon#high', copilot);
+    expect(result).toMatchObject({ status: 'decided' });
+    expect(result.drafts).toEqual([
+      expect.objectContaining({ action: 'prefer', providers: ['github-copilot'], models: ['gemini-4-carbon'], factor: 3 }),
+    ]);
+  });
+
+  it('scopes a bare model id to every provider that serves it', () => {
+    const result = keywords('switch back to claude-opus-5.5 for 2 hours', copilot);
+    expect(result).toMatchObject({ status: 'decided', confidence: 'certain' });
+    expect(result.drafts).toEqual([
+      expect.objectContaining({ action: 'prefer', providers: ['github-copilot'], models: ['claude-opus-5.5'] }),
+      expect.objectContaining({ action: 'prefer', providers: ['anthropic'], models: ['claude-opus-5.5'] }),
+    ]);
+    expect(result.drafts[0].until).toBe(now + 2 * 60 * 60 * 1000);
+  });
+
+  it('reads a word shared with model names as a kind of model across providers', () => {
+    const result = keywords('prefer gemini models', copilot);
+    expect(result).toMatchObject({ status: 'decided', confidence: 'tentative' });
+    expect(result.drafts).toEqual([
+      expect.objectContaining({ action: 'prefer', providers: ['github-copilot'], models: ['gemini-4-carbon', 'gemini-3-flash'] }),
+    ]);
+  });
+
+  it('narrows a kind to the provider the sentence names', () => {
+    const result = keywords('avoid flash on github-copilot today', copilot);
+    expect(result.drafts).toEqual([
+      expect.objectContaining({ action: 'avoid', providers: ['github-copilot'], models: ['gemini-3-flash'] }),
+    ]);
+  });
+
+  it('keeps a provider whole when only its own name or alias is said', () => {
+    const result = keywords('use gpt more', { ...context });
+    expect(result.drafts).toEqual([expect.objectContaining({ providers: ['openai'], models: [] })]);
+  });
+
+  it('does not invent a provider that is not configured', () => {
+    expect(keywords('prefer openai', copilot)).toMatchObject({ status: 'unknown' });
+  });
+
+  it('refuses an unavailable exact reference without widening it to a provider or family', async () => {
+    const sentence = 'prefer github-copilot/claude-opus-missing#max';
+    expect(keywords(sentence, copilot)).toMatchObject({ status: 'unknown' });
+    const external = vi.fn();
+    expect(await interpret({ text: sentence, context: copilot, stages: { external } }))
+      .toMatchObject({ status: 'unknown' });
+    expect(external).not.toHaveBeenCalled();
+  });
+
+  it('treats a word no model shares as no target', () => {
+    expect(keywords('prefer cheap models', copilot)).toMatchObject({ status: 'unknown' });
+  });
+});
+
 describe('interpret', () => {
   const recorder = (result) => {
     const stage = vi.fn(async () => result);

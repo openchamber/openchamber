@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../opencode/auth.js', () => ({
-  readOpenCodeCredentials: async () => ({ deepseek: { key: 'test-token' } }),
-}));
+const readAuth = async () => ({ deepseek: { key: 'test-token' } });
 
 import { fetchQuota } from './deepseek.js';
 
@@ -34,7 +32,7 @@ describe('DeepSeek quota provider', () => {
   it('builds credits_balance window from documented USD payload (string balance)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD)));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.providerId).toBe('deepseek');
@@ -55,7 +53,7 @@ describe('DeepSeek quota provider', () => {
       ]
     })));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits_balance.valueLabel).toBe('¥100.00');
@@ -70,7 +68,7 @@ describe('DeepSeek quota provider', () => {
       ]
     })));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits_balance.valueLabel).toBe('$3.55');
@@ -85,7 +83,7 @@ describe('DeepSeek quota provider', () => {
       ]
     })));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits_balance.valueLabel).toBe('¥100.00');
@@ -97,7 +95,7 @@ describe('DeepSeek quota provider', () => {
       balance_infos: [{ currency: 'EUR', total_balance: '12.00', granted_balance: '0.00', topped_up_balance: '12.00' }],
     })));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('No quota data in response');
@@ -109,16 +107,26 @@ describe('DeepSeek quota provider', () => {
       balance_infos: [{ currency: 'USD', total_balance: 12.5, granted_balance: 0, topped_up_balance: 12.5 }]
     })));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits_balance.valueLabel).toBe('$12.50');
   });
 
+  it('fails the result for an over-cap response body instead of buffering it (#1282)', async () => {
+    const body = JSON.stringify({ pad: 'x'.repeat(1024 * 1024) });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    const result = await fetchQuota({ readAuth });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Quota response exceeded/);
+  });
+
   it('maps 401 to session-expired error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired — please re-authenticate with DeepSeek');
@@ -127,7 +135,7 @@ describe('DeepSeek quota provider', () => {
   it('maps 403 to session-expired error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({}) }));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired — please re-authenticate with DeepSeek');
@@ -140,7 +148,7 @@ describe('DeepSeek quota provider', () => {
       json: async () => { throw new SyntaxError('Unexpected token'); },
     }));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Invalid response from provider');
@@ -149,7 +157,7 @@ describe('DeepSeek quota provider', () => {
   it('reports a normalized timeout error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('The operation timed out.', 'TimeoutError')));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Request timed out');
@@ -161,7 +169,7 @@ describe('DeepSeek quota provider', () => {
       balance_infos: [{ currency: 'USD', total_balance: '', granted_balance: '0.00', topped_up_balance: '0.00' }]
     })));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);
@@ -175,7 +183,7 @@ describe('DeepSeek quota provider', () => {
       balance_infos: [{ currency: 'USD', total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' }]
     })));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits_balance.valueLabel).toBe('$0.00');

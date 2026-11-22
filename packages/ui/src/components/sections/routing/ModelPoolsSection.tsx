@@ -17,8 +17,10 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
   AUTONOMY_LEVELS,
+  POOL_DETAILS_MAX_LENGTH,
   fetchModelRoutes,
   fetchRouteStats,
+  saveModelRouteSchedules,
   saveModelRouteTuning,
   saveModelRoutes,
   type HedgeAccuracy,
@@ -28,13 +30,17 @@ import {
   type RouteTargetStats,
 } from '@/lib/routing/modelRoutesApi';
 import { PoolAdvancedFields } from '@/components/sections/routing/PoolAdvancedFields';
+import { PoolHealthSection } from '@/components/sections/routing/PoolHealthSection';
 import { CommitInput, PoolTargetOptions } from '@/components/sections/routing/PoolTargetOptions';
+import { RouteScheduleFields } from '@/components/sections/routing/RouteScheduleFields';
+import type { ScheduleList, ScheduleListValue, StoredSchedules } from '@/lib/routing/scheduleSchema';
 import { RouteTuningFields } from '@/components/sections/routing/RouteTuningFields';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
 import { PRESET_ROUTE_IDS, presetTargets, type PresetId } from '@/lib/routing/routePresets';
 import { pickedAutonomy, routeReference, routeReferenceID, targetLabel, targetUntil, withoutAbsentWeights } from '@/lib/routing/poolAdvanced';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 
 const PRESETS = [
   { id: 'cheap', titleKey: 'settings.pools.preset.cheap', infoKey: 'settings.pools.preset.cheapInfo' },
@@ -89,7 +95,37 @@ const TargetWait: React.FC<{ providerID: string; modelID: string }> = ({ provide
   );
 };
 
-/** One pool: its targets, its autonomy level, and an expert JSON view. */
+/** A paragraph field that saves when it loses focus, like `CommitInput` does for one line. */
+const CommitTextarea: React.FC<{
+  label: string;
+  value: string;
+  placeholder?: string;
+  onCommit: (value: string) => void;
+}> = ({ label, value, placeholder, onCommit }) => {
+  const [draft, setDraft] = React.useState(value);
+
+  React.useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  return (
+    <Textarea
+      aria-label={label}
+      value={draft}
+      placeholder={placeholder}
+      maxLength={POOL_DETAILS_MAX_LENGTH}
+      rows={3}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={(event) => {
+        const next = event.currentTarget.value.trim();
+        if (next !== value) onCommit(next);
+      }}
+      className="w-full"
+    />
+  );
+};
+
+/** One pool: what it is for, its targets, its autonomy level, and an expert JSON view. */
 const PoolRow: React.FC<{
   id: string;
   route: ModelRoute;
@@ -153,9 +189,10 @@ const PoolRow: React.FC<{
           <span className="typography-ui-label font-medium text-foreground truncate">
             {route.name || id}
           </span>
-          <span className="typography-meta text-muted-foreground truncate">
+          <span className="typography-meta text-muted-foreground truncate" title={route.description}>
             {t('settings.pools.targetCount', { count: targets.length })}
             {route.autonomy ? ` · ${route.autonomy}` : ''}
+            {route.description ? ` · ${route.description}` : ''}
           </span>
         </button>
         <Button size="sm" variant="ghost" onClick={onRemove}>
@@ -170,6 +207,22 @@ const PoolRow: React.FC<{
               value={route.name ?? ''}
               placeholder={id}
               onCommit={(next) => onChange({ ...route, name: next || undefined })}
+            />
+          </SettingsStackedField>
+          <SettingsStackedField label={t('settings.pools.poolDescription')} info={t('settings.pools.poolDescriptionInfo')} controlClassName="max-w-none">
+            <CommitInput
+              label={t('settings.pools.poolDescription')}
+              value={route.description ?? ''}
+              placeholder={t('settings.pools.poolDescriptionPlaceholder')}
+              onCommit={(next) => onChange({ ...route, description: next || undefined })}
+            />
+          </SettingsStackedField>
+          <SettingsStackedField label={t('settings.pools.poolDetails')} info={t('settings.pools.poolDetailsInfo')} controlClassName="max-w-none">
+            <CommitTextarea
+              label={t('settings.pools.poolDetails')}
+              value={route.details ?? ''}
+              placeholder={t('settings.pools.poolDetailsPlaceholder')}
+              onCommit={(next) => onChange({ ...route, details: next || undefined })}
             />
           </SettingsStackedField>
           <SettingsStackedField label={t('settings.pools.autonomy')} info={t('settings.pools.autonomyInfo')} controlClassName="max-w-none">
@@ -191,7 +244,7 @@ const PoolRow: React.FC<{
             </Select>
           </SettingsStackedField>
           <p className={SETTINGS_HELPER_CLASS}>{t(`settings.pools.autonomyHelp.${route.autonomy ?? 'unset'}`)}</p>
-          <div className="space-y-1">
+          <div className="space-y-1" data-settings-item="routing.pools-targets">
             {targets.map((target, index) => {
               const until = targetUntil(target);
               const concrete = concreteTarget(target);
@@ -401,24 +454,41 @@ export const ModelPoolsSection: React.FC = () => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
   const decisions = useRoutingStore((state) => state.decisions);
+  const settingsDirectory = useSettingsDirectory();
   const [routes, setRoutes] = React.useState<Record<string, ModelRoute> | null>(null);
+  const [available, setAvailable] = React.useState(true);
   const [drafts, setDrafts] = React.useState<Record<string, ModelRoute>>({});
   const [tuning, setTuning] = React.useState<ModelRouteTuning | null>(null);
+  const [schedules, setSchedules] = React.useState<ScheduleList | null>(null);
+  const [otherSchedules, setOtherSchedules] = React.useState<{ path: string; schedules: StoredSchedules }[]>([]);
+  const [otherRoutes, setOtherRoutes] = React.useState<{ path: string; routes: Record<string, ModelRoute> }[]>([]);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [newId, setNewId] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const lastSavedRef = React.useRef<Record<string, ModelRoute> | null>(null);
+  const lastSavedSchedulesRef = React.useRef<ScheduleList | null>(null);
 
   React.useEffect(() => {
     let cancelled = false;
-    fetchModelRoutes()
+    fetchModelRoutes(settingsDirectory)
       .then((state) => {
-        if (!cancelled && state.available) {
-          lastSavedRef.current = state.routes;
-          setRoutes(state.routes);
-          setTuning(state.tuning ?? null);
+        if (cancelled) return;
+        // A server without /api/model-routes answers 404, which the API
+        // layer reports as available: false rather than throwing. Without
+        // this branch routes stays null and the section below shows its
+        // Loading text forever.
+        if (!state.available) {
+          setAvailable(false);
+          return;
         }
+        lastSavedRef.current = state.routes;
+        setRoutes(state.routes);
+        setTuning(state.tuning ?? null);
+        lastSavedSchedulesRef.current = state.schedules ?? null;
+        setSchedules(state.schedules ?? null);
+        setOtherSchedules(state.otherSchedules ?? []);
+        setOtherRoutes(state.otherRoutes ?? []);
       })
       .catch((failure) => {
         if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure));
@@ -426,7 +496,7 @@ export const ModelPoolsSection: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [settingsDirectory]);
 
   const persist = React.useCallback(async (next: Record<string, ModelRoute>) => {
     setRoutes(next);
@@ -436,6 +506,7 @@ export const ModelPoolsSection: React.FC = () => {
       const state = await saveModelRoutes(payload);
       lastSavedRef.current = state.routes;
       setRoutes(state.routes);
+      setOtherRoutes(state.otherRoutes ?? []);
       setError(null);
     } catch (failure) {
       // A failed save rolls back to the last server-confirmed state so the
@@ -457,6 +528,33 @@ export const ModelPoolsSection: React.FC = () => {
       setError(failure instanceof Error ? failure.message : String(failure));
     }
   }, []);
+
+  // An empty list removes the key, so the config carries no `model_route_schedules: []`.
+  // Schedule saves go out one at a time, and only the newest edit's answer
+  // lands: an older save finishing late must not replace a newer list on
+  // screen, which the next edit would then write back.
+  const scheduleSaveChainRef = React.useRef<Promise<void>>(Promise.resolve());
+  const scheduleSaveSeqRef = React.useRef(0);
+  const saveSchedules = React.useCallback((next: ScheduleListValue) => {
+    const seq = ++scheduleSaveSeqRef.current;
+    setSchedules(next);
+    const run = scheduleSaveChainRef.current.then(async () => {
+      try {
+        const state = await saveModelRouteSchedules(next.length > 0 ? next : null, settingsDirectory);
+        lastSavedSchedulesRef.current = state.schedules ?? null;
+        if (seq !== scheduleSaveSeqRef.current) return;
+        setSchedules(state.schedules ?? null);
+        setOtherSchedules(state.otherSchedules ?? []);
+        setError(null);
+      } catch (failure) {
+        if (seq !== scheduleSaveSeqRef.current) return;
+        setSchedules(lastSavedSchedulesRef.current);
+        setError(failure instanceof Error ? failure.message : String(failure));
+      }
+    });
+    scheduleSaveChainRef.current = run;
+    return run;
+  }, [settingsDirectory]);
 
   const applyPreset = (preset: PresetId) => {
     if (!routes) return;
@@ -486,12 +584,26 @@ export const ModelPoolsSection: React.FC = () => {
     [decisions],
   );
 
+  // The health panel reads again whenever a pool's content changes.
+  const routesKey = React.useMemo(() => JSON.stringify(routes), [routes]);
+
+  const lowerTargetWeight = React.useCallback((poolID: string, targetRef: string) => {
+    if (!routes) return;
+    const route = routes[poolID];
+    if (!route) return;
+    const current = route.weights?.[targetRef] ?? 1;
+    const next = Math.max(0.1, Math.round((current / 2) * 100) / 100);
+    void persist({ ...routes, [poolID]: { ...route, weights: { ...route.weights, [targetRef]: next } } });
+  }, [routes, persist]);
+
   return (
     <SettingsSection title={t('settings.pools.title')}>
       <div className={SETTINGS_FIELDS_STACK_CLASS}>
         <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.description')}</p>
         {error ? <p className={SETTINGS_HELPER_CLASS}>{error}</p> : null}
-        {routes === null ? (
+        {!available ? (
+          <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.unavailable')}</p>
+        ) : routes === null ? (
           <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.loading')}</p>
         ) : (
           <>
@@ -550,10 +662,24 @@ export const ModelPoolsSection: React.FC = () => {
                 </Button>
               </div>
             </SettingsFieldRow>
+            {otherRoutes.map((file) => (
+              <div key={file.path} className="space-y-2">
+                <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.otherFile', { path: file.path })}</p>
+                <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{JSON.stringify(file.routes, null, 2)}</pre>
+              </div>
+            ))}
             <div className="space-y-2">
               <p className={SETTINGS_HELPER_CLASS}>{t('settings.pools.tuning.title')}</p>
               <RouteTuningFields tuning={tuning} onSave={(next) => void saveTuning(next)} />
             </div>
+            <RouteScheduleFields
+              scope="global"
+              schedules={schedules}
+              onChange={(next) => void saveSchedules(next)}
+              otherFiles={otherSchedules}
+              settingsItem="routing.pools-schedules"
+            />
+            <PoolHealthSection onLowerWeight={lowerTargetWeight} reloadKey={routesKey} />
             <PoolTelemetry />
             {recentDecisions.length > 0 ? (
               <div className="space-y-1">
