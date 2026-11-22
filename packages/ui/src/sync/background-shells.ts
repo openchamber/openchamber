@@ -271,8 +271,8 @@ export const replaceDirectoryShells = (rawDirectory: string, shells: readonly Ru
     draft.set(shell.id, shell);
   }
   if (draft) publish(draft, ended.length > 0 ? withEnded(state.ended, ended) : null);
-  return ended;
   for (const shell of ended) settleWaiters.get(shell.id)?.resolve('ended');
+  return ended;
 };
 
 export const backgroundShellRevision = (): number => revision;

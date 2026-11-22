@@ -70,7 +70,7 @@ describe('getVisibleContextRailSurfaces', () => {
       railOrder: ['notes', 'git', 'editor', 'pr', 'terminal', 'context'],
     });
     expect(surfaces.map((surface) => surface.id)).toEqual([
-      'notes',
+      'notes', 'messages',
       'git', 'pr', 'diff', 'walkthrough',
       'editor', 'terminal', 'browser',
       'context',

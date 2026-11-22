@@ -29,6 +29,13 @@ const deferredResponse = (body: unknown, status = 200) => {
   };
 };
 
+// A request reaches the server some microtasks after runtimeFetch is called;
+// wait for it before handing the server its next answer.
+const untilCalls = async (count: number) => {
+  for (let step = 0; step < 100 && calls.length < count; step += 1) await Promise.resolve();
+  expect(calls).toHaveLength(count);
+};
+
 describe('useSmallModelStore', () => {
   beforeEach(() => {
     responses = [];
@@ -101,14 +108,17 @@ describe('useSmallModelStore', () => {
     const stale = deferredResponse({ error: 'down' }, 500);
     responses = [stale.promise];
     const requestA = useSmallModelStore.getState().ensureFresh('/p');
+    await untilCalls(1);
     useSmallModelStore.getState().invalidate();
     const fresh = deferredResponse({ available: true });
     responses = [fresh.promise];
     const requestB = useSmallModelStore.getState().ensureFresh('/p');
+    await untilCalls(2);
     stale.resolve();
     await requestA;
     // B is still in flight; another reader must coalesce onto it, not fetch.
     void useSmallModelStore.getState().ensureFresh('/p');
+    for (let step = 0; step < 100; step += 1) await Promise.resolve();
     expect(calls).toHaveLength(2);
     fresh.resolve();
     await requestB;

@@ -2,7 +2,7 @@ import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { clampLiveBrowserTabs } from '@/lib/browser/liveTabs';
 import { isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
 import { clampQuestionTimeoutMinutes } from '@/lib/questionTimeout';
-import { normalizeActiveRunModelChangeBehavior, normalizeAgentTerminalsPlacement, normalizeLargeTextPasteBehavior, normalizeFileEditorKeymap } from './preferences';
+import { clipPairSafe, activeRunModelChangeBehaviorSchema, agentTerminalsPlacementSchema, largeTextPasteBehaviorSchema, fileEditorKeymapSchema } from './preferences';
 import type { UIStoreSlice } from './types';
 
 export const createPreferenceActions: UIStoreSlice<
@@ -196,7 +196,7 @@ export const createPreferenceActions: UIStoreSlice<
   },
 
   setActiveRunModelChangeBehavior: (value) => {
-    set({ activeRunModelChangeBehavior: normalizeActiveRunModelChangeBehavior(value) });
+    set({ activeRunModelChangeBehavior: activeRunModelChangeBehaviorSchema.parse(value) });
   },
 
   setSessionGoalAutoCreate: (value) => {
@@ -412,7 +412,7 @@ export const createPreferenceActions: UIStoreSlice<
   },
 
   setLargeTextPasteBehavior: (value) => {
-    set({ largeTextPasteBehavior: normalizeLargeTextPasteBehavior(value) });
+    set({ largeTextPasteBehavior: largeTextPasteBehaviorSchema.parse(value) });
   },
 
   setDocumentAttachBehavior: (value) => {
@@ -420,7 +420,7 @@ export const createPreferenceActions: UIStoreSlice<
   },
 
   setAgentTerminalsPlacement: (value) => {
-    set({ agentTerminalsPlacement: normalizeAgentTerminalsPlacement(value) });
+    set({ agentTerminalsPlacement: agentTerminalsPlacementSchema.parse(value) });
   },
 
   setAgentTerminalName: (ptyID, name) => {
@@ -547,11 +547,11 @@ export const createPreferenceActions: UIStoreSlice<
   },
 
   setFileEditorKeymap: (value) => {
-    set({ fileEditorKeymap: normalizeFileEditorKeymap(value) });
+    set({ fileEditorKeymap: fileEditorKeymapSchema.parse(value) });
   },
 
   setFileEditorVimMappings: (value) => {
-    set({ fileEditorVimMappings: value.slice(0, 10_000) });
+    set({ fileEditorVimMappings: clipPairSafe(value, 10_000) });
   },
 
 });
