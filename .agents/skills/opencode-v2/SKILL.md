@@ -247,18 +247,18 @@ Move every pin to the same tag and check out that tag in the reference
 checkout (`git checkout vX.Y.Z` in `~/projects/opencode`), `bun install`, then `bun run type-check`
 (it covers `packages/ui`, `packages/web` and `packages/vscode`); the isolated ui suites; web vitest; vscode
 tests. A new message `type` or event needs a case in `model.ts` and
-`events.ts` before it renders. Verify `@opencode/cli@<tag>` exists on npm:
-the Docker image installs it.
+`events.ts` before it renders.
 
-The desktop bundles OpenCode's server from those npm packages
-(`packages/electron/opencode-server`), and `server.mjs` there copies the
+Both `@openchamber/web` (including the Docker image) and desktop bundle OpenCode's server from those npm packages
+(`packages/web/opencode-server`), and `server.mjs` there copies the
 option mapping of OpenCode's `packages/cli/src/server-process.ts`. Diff that
 file between the tags (`git diff vOLD..vNEW -- packages/cli/src/server-process.ts packages/cli/src/node packages/cli/vite.node.config.ts`)
 and carry over every change to the `default` and `stdio` modes: a new
 environment variable, option or startup step, and a new native loader or
-rewrite in the Node build. Then `bun run --cwd packages/electron prepare:opencode-server`
-and `verify:opencode-server`, and one real turn through the staged server
-(`packages/electron/opencode-server/DOCUMENTATION.md`).
+rewrite in the Node build. Then `bun run --cwd packages/web prepare:opencode-server`,
+`bun run --cwd packages/electron prepare:opencode-server` and `verify:opencode-server`,
+and one real turn through the staged server
+(`packages/web/opencode-server/DOCUMENTATION.md`).
 
 Set `opencode.url` in `flake.nix` to the same `vX.Y.Z` tag and run
 `nix flake update opencode` from the OpenChamber root. Include `flake.nix` and
