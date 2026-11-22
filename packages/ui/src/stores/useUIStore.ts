@@ -70,6 +70,8 @@ export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
 export type AgentTerminalsPlacement = 'terminal-panel' | 'sidebar';
 export type SessionGoalChecker = 'classifier' | 'small-model';
+/** How sessions enter In work: only by Track, on every sent message, or when Jev says work started. */
+export type SessionWorkEntry = 'off' | 'every-message' | 'jev';
 /** What an approved goal spec does on send: it rides along with the typed message, or it is the message. */
 export type SessionGoalWriterSendMode = 'with-message' | 'goal-as-message';
 /** Whether a session without a goal turns the next message into one: never, after review, or straight away. */
@@ -1032,8 +1034,10 @@ interface UIStore {
   streamingAutoFollowEnabled: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
-  /** The "In work" sidebar block, the Track / Done actions, and sessions going in on a sent message. */
+  /** The "In work" sidebar block and the Track / Done actions. */
   sessionWorkEnabled: boolean;
+  /** How sessions enter In work besides Track; the server acts on it. */
+  sessionWorkEntry: SessionWorkEntry;
   /** Let Jev offer an AI review or a walkthrough after a turn that changed the project. */
   sessionReviewOfferEnabled: boolean;
   sessionGoalEnabled: boolean;
@@ -1366,6 +1370,7 @@ interface UIStore {
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionWorkEnabled: (value: boolean) => void;
+  setSessionWorkEntry: (value: SessionWorkEntry) => void;
   setSessionReviewOfferEnabled: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalChecker: (value: SessionGoalChecker) => void;
@@ -1626,6 +1631,7 @@ export const useUIStore = create<UIStore>()(
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         sessionWorkEnabled: true,
+        sessionWorkEntry: 'off',
         sessionReviewOfferEnabled: false,
         sessionGoalEnabled: true,
         sessionGoalChecker: 'small-model',
@@ -2730,6 +2736,10 @@ export const useUIStore = create<UIStore>()(
 
         setSessionWorkEnabled: (value) => {
           set({ sessionWorkEnabled: value });
+        },
+
+        setSessionWorkEntry: (value) => {
+          set({ sessionWorkEntry: value });
         },
 
         setSessionReviewOfferEnabled: (value) => {
@@ -3892,6 +3902,7 @@ export const useUIStore = create<UIStore>()(
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionWorkEnabled: state.sessionWorkEnabled,
+          sessionWorkEntry: state.sessionWorkEntry,
           sessionReviewOfferEnabled: state.sessionReviewOfferEnabled,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalChecker: state.sessionGoalChecker,

@@ -3,17 +3,20 @@
 ## Purpose
 
 Keeps the sessions the user is working in in one block at the top of the
-sidebar until they mark them done. Sending a message puts a session in work;
-the user alone closes it. While a session is in work, Jev says after a turn
-whether the work looks done; Jev never decides what goes in. Independently of work, the
+sidebar until they mark them done. The user chooses how sessions go in
+besides Track (`sessionWorkEntry`): not on their own, on every sent message,
+or when Jev says work started. The user alone closes. While a session is in
+work, Jev says after a turn whether the work looks done. Independently of work, the
 same call says whether the turn handed over changes worth a look (the
 composer then offers an AI review or a walkthrough). The same turn-end Jev call tells session assist whether the
 Small Model is worth waking.
 
 ## Files
 
-- `questions.js` — the turn-end Jev questions (measured wording, see
-  "Measurement"), the thresholds, and the decisions taken from the answers.
+- `questions.js` — the Jev questions (measured wording, see "Measurement"),
+  the thresholds, and the decisions taken from the answers.
+- `settings.js` — the `sessionWorkEntry` values and the rule for a settings
+  document without one (see "Settings").
 - `state.js` — `metadata.openchamber.work` and the merge patches that change
   it. Every patch is decided against the record at write time.
 - `runtime.js` — `createSessionWorkRuntime`: `processPayload` (a sent message,
@@ -24,8 +27,8 @@ Small Model is worth waking.
 `metadata.openchamber.work`:
 
 - `state`: `open` | `done`
-- `openedAt`, `openedBy` (`auto` for a sent message, `user` for Track; `jev`
-  on records from when Jev decided)
+- `openedAt`, `openedBy` (`auto` for a sent message, `jev` when Jev decided,
+  `user` for Track)
 - `doneAt` once the user closed it
 - `suggestDoneAt` while Jev thinks the last turn closed the work out
 
@@ -40,7 +43,8 @@ also exists in VS Code.
 
 ## Invariants
 
-- A sent message only opens. Nothing here ever writes `done`.
+- A sent message, or Jev reading one, only opens. Nothing here ever writes
+  `done`.
 - A message reopens a closed session only when it was sent after the user
   closed it (`openPatch` compares the message's `time.created` with `doneAt`).
 - Writes go through `updateSessionMetadata`, which decides the patch inside the
@@ -70,30 +74,47 @@ also exists in VS Code.
 
 ## When a session opens
 
-A user message was sent (`message.updated`, role user, from the hub's
-translation of `session.inbox.enqueued`), with the feature on: a session not
-already in work and eligible opens. A message with only files or attached
-context counts too; its text is empty. So does a shell command the user ran
-from the composer (`session.shell.started`; OpenCode records it as a shell
-message and a synthetic result, never as a user message, and only the user
-starts one). Each message id is handled once; a session
-already in work reads nothing from OpenCode. No Jev: until 2026-10, Jev judged
-whether a message started work, and every session now counts instead.
+Only while In work is on (`sessionWorkEnabled`), and only an eligible session
+not already in work; a session already in work reads nothing from OpenCode and
+costs no Jev call. Each message id is handled once. What opens depends on
+`sessionWorkEntry`:
+
+- `off`: nothing opens on its own; the user tracks sessions.
+- `every-message`: a sent user message (`message.updated`, role user, from the
+  hub's translation of `session.inbox.enqueued`) opens the session, no Jev. A
+  message with only files or attached context counts too; its text is empty.
+  So does a shell command the user ran from the composer
+  (`session.shell.started`; OpenCode records it as a shell message and a
+  synthetic result, never as a user message, and only the user starts one).
+- `jev`: Jev reads a sent message with text, with the three settled turns
+  before it as history (`loadSettledTurns`), and the session opens when
+  `decideOpen` says real work started. The turn-end call asks the same
+  questions about the finished turn while the session is not in work, which
+  catches work that only shows in the reply, a message with only files, and a
+  shell command. Without a classification provider nothing opens, as with
+  `off`.
 
 ## When Jev is asked
 
+- A message with text was sent, only with `sessionWorkEntry` `jev` and the
+  session not in work.
 - A turn ended: session assist calls `evaluateTurnEnd` before it arms its quiet
-  window. One call carries only the questions that apply: `wrap_up` while in
-  work, `review_ready` while the review offer is on, `recap` / `next_step` for
-  the assist fields the user has on. No applicable question, no call.
+  window. One call carries only the questions that apply: the open questions
+  (`change`, `toward_change`) with `sessionWorkEntry` `jev` while not in work,
+  `wrap_up` while in work, `review_ready` while the review offer is on,
+  `recap` / `next_step` for the assist fields the user has on. No applicable
+  question, no call.
 - Jev reads the request's first 1500 characters, the answer's first and last
   500, and three earlier turns cut as routing cuts them.
 
 ## Measurement
 
 156 real sessions (93 work, 50 not, 9 housekeeping, 4 neutral) set the wording;
-190 older held-out sessions, labelled before looking at answers, checked it.
-`wrap_up >= 0.8`
+190 older held-out sessions, labelled before looking at answers, checked it:
+for opening (`change >= 0.85` or `toward_change >= 0.9`), send and turn end
+together missed 4/92 work sessions and opened 10/78 non-work ones (four of
+them discussions of concrete changes, which count as work). The misses are
+work that starts inside a PR-review session. `wrap_up >= 0.8`
 reads the whole turn (a commit, push, merge, sync or release the answer
 reports done closes the work); on the held-out sessions it hinted 80 times
 across 106 work sessions, 22 of them followed by more edits, and caught 53 of
@@ -113,30 +134,51 @@ the wording or thresholds without re-running this measurement.
 
 ## Settings
 
-- `sessionWorkEnabled`: the block, the actions, and opening on a sent
-  message, default on.
+- `sessionWorkEnabled`: the block and the actions, default on. Off, nothing
+  opens whatever `sessionWorkEntry` says.
+- `sessionWorkEntry` ("Sessions enter In work"): `off` (default),
+  `every-message` or `jev`; not offered in VS Code. `jev` without a
+  classification provider behaves as `off`, and Settings shows Off with a note
+  until a provider is set up.
 - `sessionReviewOfferEnabled`: the review offer, default off (Settings → Chat →
   Session Assistance); not offered in VS Code, inert without a classification
   provider, independent of In work.
 
-Both are read at every use. A session in work also stays under its project
+All three are read at every use.
+
+Migration (2026-10): from 2026-10-12 until `sessionWorkEntry` existed, every
+sent message opened a session while `sessionWorkEnabled` was on. A settings
+document without a valid `sessionWorkEntry` gets one on the first migrated
+read (`migrateSettingsSessionWorkEntry` in `../opencode/settings-runtime.js`):
+`every-message` when `sessionWorkEnabled` is stored as `true`, so someone who
+had switched In work on keeps what they had, and `off` otherwise (stored
+`false`, or never set). The value is written, so a later change of
+`sessionWorkEnabled` never picks it again. Until that read happens, this
+runtime applies the same rule (`resolveSessionWorkEntry`). A session in work also stays under its project
 group and folders: In work is an extra view of it, not a move.
 
 ## Runtime parity
 
 - Web, desktop, hosted mobile, Capacitor: all of it; the server opens
   sessions and owns Jev.
-- VS Code: no OpenChamber server, so sessions do not open on their own and
-  there is no done hint and no review offer. The block and Track / Done work
+- VS Code: no OpenChamber server, so sessions do not open on their own, the
+  entry setting is not offered, and there is no done hint and no review
+  offer. The block and Track / Done work
   through the extension's metadata bridge.
 
 ## Tests
 
 `state.test.js` (patches, reopen rule, hint lifecycle), `runtime.test.js`
-(open on a sent message without Jev, the reopen rule, one handling per
+(each entry mode: off opens nothing; every message opens on a sent message,
+an attachment or a shell command without Jev; Jev decides opens on Jev's
+answer at send and at turn end, and behaves as off without a classification
+provider; the reopen rule, one handling per
 message, ineligible sessions, the combined turn-end
 call, the review offer with and without In work and looks done winning over
 it, a late answer after the next turn started, never closing, failure as
 unknown), plus the gate cases in
-`../session-assist/runtime.test.js`, and `updateSessionMetadata` in
+`../session-assist/runtime.test.js`, `loadSettledTurns` in
+`../session-assist/context.test.js`, the migration in
+`../opencode/settings-runtime.test.js`, normalization in
+`../opencode/settings-helpers.test.js`, and `updateSessionMetadata` in
 `../openchamber-sessions/session-metadata-store.test.js`.

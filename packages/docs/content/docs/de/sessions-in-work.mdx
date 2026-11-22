@@ -5,7 +5,7 @@ description: Halte die Sitzungen, an denen du arbeitest, sichtbar in der Seitenl
 
 # Sitzungen in Arbeit
 
-Jede Sitzung, in der du eine Nachricht sendest, kommt in den Bereich **In Arbeit** oben in der Seitenleiste und bleibt dort, bis du sie als erledigt markierst, egal wie lange du sie nicht mehr geöffnet hast. In deinen Projekten liegt jede Sitzung, die du je hattest; In Arbeit enthält nur, was du noch nicht abgeschlossen hast.
+Der Bereich **In Arbeit** oben in der Seitenleiste hält die Sitzungen, an denen du arbeitest, bis du sie als erledigt markierst, egal wie lange du sie nicht mehr geöffnet hast. In deinen Projekten liegt jede Sitzung, die du je hattest; In Arbeit enthält nur, was du noch nicht abgeschlossen hast.
 
 ## Wo du ihn findest
 
@@ -19,9 +19,15 @@ Wenn angeheftete Sitzungen einen eigenen Bereich **Angeheftet** über In Arbeit 
 
 ## Wie Sitzungen hineinkommen
 
-Sende eine Nachricht in einer Sitzung, und sie kommt in Arbeit. Das gilt für jede Projektsitzung, auch für Sitzungen in Worktrees.
+Verfolge eine Sitzung von Hand, wie unten beschrieben, oder lass Sitzungen von allein hineinkommen, mit **Wann eine Sitzung in Arbeit kommt** unter **Einstellungen → Sitzungen → Sitzungen in Arbeit**:
 
-Eine Sitzung, die du als erledigt markiert hast, kommt zurück, sobald du darin eine neue Nachricht sendest.
+- **Aus**, die Voreinstellung: Nur Sitzungen, die du verfolgst, kommen hinein.
+- **Jede Nachricht:** Sende eine Nachricht in einer Sitzung, und sie kommt hinein. Eine Sitzung, die du als erledigt markiert hast, kommt zurück, sobald du darin eine neue Nachricht sendest.
+- **Jev entscheidet:** Mit einem eingerichteten [Klassifizierungsanbieter](/de/classification-providers/) liest Jev jede Nachricht, die du sendest, und bringt die Sitzung in Arbeit, wenn du eine Änderung möchtest, einen Fehler meldest oder eine konkrete Änderung besprichst. Fragen, Erklärungen und Recherche zählen nicht. Jev schaut noch einmal hin, wenn der Agent einen Zug beendet, und erkennt so Arbeit, die erst aus der Antwort deutlich wird. Eine als erledigt markierte Sitzung kommt nur zurück, wenn Jev in einer danach gesendeten Nachricht neue Arbeit sieht. Ohne Klassifizierungsanbieter verhält sich Jev entscheidet wie Aus.
+
+Das gilt für jede Projektsitzung, auch für Sitzungen in Worktrees.
+
+Hattest du **Sitzungen in Arbeit anzeigen** selbst eingeschaltet, bevor es diese Einstellung gab, startet sie bei **Jede Nachricht**, so kamen Sitzungen bis dahin hinein. Sonst startet sie bei Aus.
 
 Chats, archivierte Sitzungen, Review-Sitzungen und Läufe [geplanter Aufgaben](/de/scheduled-tasks/) kommen nie hinein; forkst du einen Lauf, um daran weiterzuarbeiten, kommt der Fork hinein. Untersitzungen kommen nicht von allein hinein, sondern mit ihrer übergeordneten Sitzung.
 
@@ -56,16 +62,19 @@ Ein- und ausschalten kannst du sie unter **Einstellungen → Chat → Sitzungshi
 
 ## Einstellungen
 
-Öffne **Einstellungen → Sitzungen → Sitzungen in Arbeit**. Dort gibt es eine Einstellung, **Sitzungen in Arbeit anzeigen**, standardmäßig an. Schaltest du sie aus, ist die ganze Funktion aus: kein Bereich, und eine gesendete Nachricht bringt die Sitzung nicht mehr in Arbeit.
+Öffne **Einstellungen → Sitzungen → Sitzungen in Arbeit**:
+
+- **Sitzungen in Arbeit anzeigen**, standardmäßig an: Schaltest du sie aus, ist die ganze Funktion aus, ohne Bereich und ohne Sitzungen, die von allein hineinkommen.
+- **Wann eine Sitzung in Arbeit kommt**: Aus, Jede Nachricht oder Jev entscheidet, wie oben beschrieben.
 
 Um nur den Bereich auszublenden, nutze **Bereich In Arbeit anzeigen** im Ansichtsmenü der Seitenleiste.
 
 ## Wo es funktioniert
 
-Der Bereich und das manuelle Verfolgen und Abschließen funktionieren überall, auch in VS Code. Dass eine gesendete Nachricht die Sitzung in Arbeit bringt, der Hinweis „scheint erledigt“ und der Jev-Filter für Zusammenfassungen brauchen den OpenChamber-Server. Sie funktionieren also in der Desktop-App, in der Web-App und auf dem Handy, aber nicht in VS Code. In VS Code verfolgst du Sitzungen von Hand.
+Der Bereich und das manuelle Verfolgen und Abschließen funktionieren überall, auch in VS Code. Dass Sitzungen von allein in Arbeit kommen, der Hinweis „scheint erledigt“ und der Jev-Filter für Zusammenfassungen brauchen den OpenChamber-Server. Sie funktionieren also in der Desktop-App, in der Web-App und auf dem Handy, aber nicht in VS Code. In VS Code verfolgst du Sitzungen von Hand.
 
 ## Verwandt
 
-- [Klassifizierungsanbieter (Jev)](/de/classification-providers/): den Hinweis „scheint erledigt“ einrichten
+- [Klassifizierungsanbieter (Jev)](/de/classification-providers/): Jev entscheidet und den Hinweis „scheint erledigt“ einrichten
 - [Chats](/de/chats/): Unterhaltungen, die nicht in Arbeit kommen
 - [Sitzungsziele](/de/session-goals/): den Agenten bis zur Ziellinie arbeiten lassen

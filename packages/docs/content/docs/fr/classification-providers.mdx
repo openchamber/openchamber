@@ -15,10 +15,10 @@ Jev n’écrit jamais de code et ne répond pas dans votre chat. Il renvoie seul
 | --- | --- |
 | [Permissions et filet de sécurité](/fr/permissions/) | L’agent doit-il vous demander avant de lancer cette action ? |
 | [Routage automatique des modèles](/fr/auto-model-routing/) | À laquelle de vos catégories appartient ce prompt ? |
-| [Sessions en cours](/fr/sessions-in-work/) | Ce tour ressemble-t-il à la fin du travail ? |
+| [Sessions en cours](/fr/sessions-in-work/) | Avec **Jev décide** : ce message ou ce tour commence-t-il un travail ? Toujours : ce tour ressemble-t-il à la fin du travail ? |
 | [Récapitulatif et suggestion du prochain message](/fr/sessions-in-work/) | Un récapitulatif ou une suggestion vaut-il la peine d’être généré après ce tour ? |
 
-Sans fournisseur, le filet de sécurité et Auto sont masqués, et les sessions en cours ne reçoivent pas l’indication « semble terminé ». Les sessions passent quand même en cours quand vous envoyez un message. Les récapitulatifs et les suggestions fonctionnent toujours, simplement sans le filtre.
+Sans fournisseur, le filet de sécurité et Auto sont masqués, et les sessions en cours ne reçoivent pas l’indication « semble terminé ». **Jev décide** fonctionne comme Désactivé : les sessions ne passent en cours que si vous les suivez ou avec **Chaque message**. Les récapitulatifs et les suggestions fonctionnent toujours, simplement sans le filtre.
 
 ## Configuration
 
@@ -96,7 +96,7 @@ Si Jev est lent ou échoue sur une requête, rien ne casse. Chaque fonction a un
 
 - Le filet de sécurité laisse l’action en attente de votre décision.
 - Auto envoie le prompt à votre modèle de repli.
-- L’indication « semble terminé » n’apparaît pas sur les sessions en cours.
+- Aucune session ne passe en cours sur l’avis de Jev, et l’indication « semble terminé » n’apparaît pas.
 - Le récapitulatif et la suggestion sont générés comme si Jev n’existait pas.
 
 ## Ce que Jev voit

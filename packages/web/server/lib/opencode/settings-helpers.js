@@ -9,6 +9,7 @@ import {
 } from '../git/worktree-start-ref.js';
 import { isBranchTemplate } from '../git/branch-name-template.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
+import { isSessionWorkEntry } from '../session-work/settings.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
 
@@ -631,6 +632,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.sessionWorkEnabled === 'boolean') {
       result.sessionWorkEnabled = candidate.sessionWorkEnabled;
+    }
+    if (isSessionWorkEntry(candidate.sessionWorkEntry)) {
+      result.sessionWorkEntry = candidate.sessionWorkEntry;
     }
     if (typeof candidate.sessionReviewOfferEnabled === 'boolean') {
       result.sessionReviewOfferEnabled = candidate.sessionReviewOfferEnabled;

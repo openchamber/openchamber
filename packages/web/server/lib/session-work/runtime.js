@@ -1,12 +1,14 @@
 /**
- * "In work": a session goes into work when the user sends a message in it,
- * and Jev says when a turn looks like the end of that work, or handed over
- * changes worth a look. The user closes; this runtime never does. See
- * DOCUMENTATION.md.
+ * "In work": how a session goes into work is the user's choice
+ * (`sessionWorkEntry`): only by Track, on every sent message, or when Jev
+ * says real work started. Jev also says when a turn looks like the end of
+ * that work, or handed over changes worth a look. The user closes; this
+ * runtime never does. See DOCUMENTATION.md.
  *
- * - A user message was sent (`message.updated`, role user): the session opens,
- *   or reopens if the user closed it before sending. No Jev. A shell command
- *   the user ran (`session.shell.started`) does the same.
+ * - A user message was sent (`message.updated`, role user): with every
+ *   message, the session opens, or reopens if the user closed it before
+ *   sending; a shell command the user ran (`session.shell.started`) does the
+ *   same. With Jev deciding, Jev reads the message first.
  * - A turn ended: session assist calls `evaluateTurnEnd` before it arms its
  *   quiet window, and one Jev call answers both this runtime's questions and
  *   whether the Small Model is worth waking.
@@ -20,9 +22,17 @@ import path from 'path';
 import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
-import { loadAssistContext } from '../session-assist/context.js';
+import { loadAssistContext, loadSettledTurns } from '../session-assist/context.js';
 import { turnsToHistory, excerptHead, excerptHeadTail } from '../routing/history.js';
-import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } from './questions.js';
+import {
+  buildSendRequest,
+  buildTurnEndRequest,
+  decideAssist,
+  decideOpen,
+  decideReviewReady,
+  decideWrapUp,
+} from './questions.js';
+import { resolveSessionWorkEntry } from './settings.js';
 import { clearSuggestionPatch, offerReviewPatch, openPatch, readWork, suggestDonePatch } from './state.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
@@ -32,11 +42,12 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
   'settings.json',
 );
 
-/** In work defaults on, the review offer off; read at every use so a change applies without a restart. */
+/** In work defaults on, entry off, the review offer off; read at every use so a change applies without a restart. */
 const readSessionWorkSettings = () => {
   const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
   return {
     enabled: settings.sessionWorkEnabled !== false,
+    entry: resolveSessionWorkEntry(settings),
     reviewOffer: settings.sessionReviewOfferEnabled === true,
   };
 };
@@ -56,6 +67,7 @@ const userMessageSchema = z.object({
     info: z.object({
       id: z.string().min(1),
       role: z.literal('user'),
+      text: z.string().optional(),
       time: z.object({ created: z.number() }).partial().optional(),
     }),
   }),
@@ -83,7 +95,7 @@ const notWorkSessionSchema = z.object({ openchamber: z.object({ kind: z.enum(['r
 export function createSessionWorkRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  /** `{ enabled, reviewOffer }` as currently saved. */
+  /** `{ enabled, entry, reviewOffer }` as currently saved; `entry` is `off`, `every-message` or `jev`. */
   getSettings = readSessionWorkSettings,
   /** The classification provider's endpoint, or null when there is no Jev. */
   classifierEndpoint,
@@ -160,19 +172,40 @@ export function createSessionWorkRuntime({
     while (suggested.size > SEEN_MESSAGES_LIMIT) suggested.delete(suggested.keys().next().value);
   };
 
-  // Any sent message counts: one with only files or attached context has empty
-  // text. A shell command from the composer counts as one too.
-  const onUserMessage = async ({ sessionId, directory, messageId, createdAt }) => {
-    if (!getSettings().enabled) return;
+  // With every message, any sent message counts: one with only files or
+  // attached context has empty text, and a shell command from the composer
+  // counts as one too. Jev judges words, so it reads only messages with text;
+  // the turn-end check still reads the whole turn of the others.
+  const onUserMessage = async ({ sessionId, directory, messageId, text, createdAt }) => {
+    const { enabled, entry } = getSettings();
+    if (!enabled || entry === 'off') return;
+    if (entry === 'jev' && !text.trim()) return;
     if (seenMessages.has(messageId)) return;
     seenMessages.add(messageId);
     while (seenMessages.size > SEEN_MESSAGES_LIMIT) seenMessages.delete(seenMessages.values().next().value);
 
-    // A session already in work costs no read of OpenCode.
+    // A session already in work costs no read of OpenCode and no Jev call.
     if (readWork(await readMetadata(sessionId, directory))?.state === 'open') return;
-    const session = await eligibleSession(openCodeClient(directory), sessionId, AbortSignal.timeout(READ_TIMEOUT_MS));
-    if (!session || stopped) return;
-    await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt: createdAt, now: now() }), { directory });
+    if (entry === 'every-message') {
+      const session = await eligibleSession(openCodeClient(directory), sessionId, AbortSignal.timeout(READ_TIMEOUT_MS));
+      if (!session || stopped) return;
+      await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt: createdAt, now: now() }), { directory });
+      return;
+    }
+
+    const endpoint = await classifierEndpoint();
+    if (!endpoint) return;
+    const signal = AbortSignal.timeout(READ_TIMEOUT_MS);
+    const client = openCodeClient(directory);
+    const session = await eligibleSession(client, sessionId, signal);
+    if (!session) return;
+    const turns = await loadSettledTurns({ readPage: readPages(client, sessionId, signal), signal });
+    const { answers } = await jev.ask(
+      buildSendRequest({ history: turnsToHistory(turns), request: excerptHead(text.trim(), REQUEST_CHARS) }),
+      endpoint,
+    );
+    if (stopped || !decideOpen(answers)) return;
+    await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt: createdAt, now: now(), by: 'jev' }), { directory });
   };
 
   const retireSuggestion = (sessionId) => {
@@ -199,6 +232,7 @@ export function createSessionWorkRuntime({
         sessionId: sessionID,
         directory: payload.properties?.directory || directoryHint,
         messageId: shell.data.id,
+        text: '',
         createdAt: shell.data.created,
       }).catch((error) => console.warn('[session-work] could not check a shell command:', errorMessage(error)));
       return;
@@ -214,6 +248,7 @@ export function createSessionWorkRuntime({
       sessionId: sessionID,
       directory,
       messageId: info.id,
+      text: info.text ?? '',
       createdAt: info.time?.created ?? now(),
     }).catch((error) => console.warn('[session-work] could not check a sent message:', errorMessage(error)));
   };
@@ -240,6 +275,7 @@ export function createSessionWorkRuntime({
       if (!session || session.revert?.messageID) return null;
       const work = settings.enabled ? readWork(await readMetadata(sessionId, directory)) : null;
       const ask = {
+        open: settings.enabled && settings.entry === 'jev' && work?.state !== 'open',
         wrapUp: settings.enabled && work?.state === 'open',
         reviewReady: settings.reviewOffer,
         recap: assist.recap,
@@ -257,6 +293,10 @@ export function createSessionWorkRuntime({
       if (!request) return null;
       const { answers } = await jev.ask(request, endpoint);
       if (stopped) return null;
+      if (ask.open && decideOpen(answers)) {
+        const requestAt = turn.user.created ?? now();
+        await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt, now: now(), by: 'jev' }), { directory });
+      }
       // Looks done wins over a review offer from the same turn.
       const suggest = ask.wrapUp && decideWrapUp(answers)
         ? suggestDonePatch

@@ -664,6 +664,14 @@
     "sessionWorkEnabled": {
       "scope": "profile"
     },
+    "sessionWorkEntry": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "sessionReviewOfferEnabled": {
       "scope": "profile",
       "surfaces": [
