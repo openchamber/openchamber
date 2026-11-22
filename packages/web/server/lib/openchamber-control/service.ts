@@ -1,4 +1,5 @@
 import { asNonEmptyString, isBoolean, isPlainObject, isRecord, isString } from '../shared/guards.js';
+import { projectSettingsSchema, type ControlProject, type ProjectSettings, type UpdatedProject } from './project-settings.js';
 import { extractTextMessages, type MessageRecord, type TextMessage } from './session-text-messages.js';
 import path from 'node:path';
 import nodeFsPromises from 'node:fs/promises';
@@ -129,17 +130,6 @@ export interface ControlDependencies {
   randomWorktreeName?: () => Promise<string>;
 }
 
-/** A configured project as `sanitizeProjects` keeps it: identity plus the per-project settings. */
-interface ControlProject { id: string; path: string; label?: string; [setting: string]: JsonValue | undefined }
-
-/** A project's editable settings, as Project settings shows them. */
-type ProjectSettings = Partial<Record<string, JsonValue>>;
-
-interface UpdatedProject { project: { id: string; path: string; settings: ProjectSettings }; note: string; alsoCleared?: string[] }
-
-// The tool input is JSON, so a projectSettings object holds only JSON values.
-const projectSettingsSchema = z.record(z.string(), z.json());
-
 type SettingsCompute = (settings: ControlSettings | null) => SettingsDocument | null | Promise<SettingsDocument | null>;
 
 interface ActionModuleScope { directory?: unknown; projectId?: unknown; sessionId?: unknown }
@@ -253,7 +243,6 @@ const SCHEDULE_TASK_ID_ACTIONS = new Set([
   'schedule.delete',
   'schedule.toggle',
 ]);
-
 
 const normalizeWaitTimeoutMs = (value: ControlInput['timeout']) => {
   const seconds = value === undefined || value === null ? DEFAULT_WAIT_TIMEOUT_SECONDS : Number(value);

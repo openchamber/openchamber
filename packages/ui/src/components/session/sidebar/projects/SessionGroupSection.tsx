@@ -688,7 +688,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     }
     return byKey.size > 0 ? [...byKey.values()] : EMPTY_GROUP_ISSUES;
   }, [allGroupSessions, group.isArchivedBucket, group.isMain, groupPrSummary, hideGroupLabel, urlMatcher]);
-  // Repository issues (GitHub, GitLab, any host) and tracker items (Linear, ...) with their live state.
   const groupRepositoryIssueItems = React.useMemo(
     () => groupIssues.flatMap((issue) => (issue.source === 'repository' ? [repositoryThread(issue.ref.thread, issue.ref)] : [])),
     [groupIssues],

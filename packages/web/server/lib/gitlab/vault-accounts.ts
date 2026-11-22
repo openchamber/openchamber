@@ -5,6 +5,12 @@ import type { GitLabUser } from './user.js';
 
 type VaultCredential = { tokenReference?: string | undefined; tokenReadError?: string | undefined };
 
+/** What an account status adds for a vault account: why its token could not be read. */
+export type VaultAccountStatusFields = { tokenReadError?: string };
+
+/** A GitLab request refused the token (`GitLabRequestError` kind, network.ts). */
+export const isInvalidTokenFailure = (error: unknown) => error instanceof Error && 'kind' in error && error.kind === 'invalid-token';
+
 const vaultError = (status: number, body: { error: string; code: string; reason?: string }) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
 /** An account view that also says where a vault account's token is kept; never the token. */

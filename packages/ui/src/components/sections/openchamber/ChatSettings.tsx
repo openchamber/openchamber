@@ -33,14 +33,7 @@ import { QUESTION_TIMEOUT_MINUTES_MAX, QUESTION_TIMEOUT_MINUTES_MIN } from '@/li
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
-import {
-  DEFAULT_SELECTION_APPROVAL_TEXT,
-  useUIStore,
-  type ActiveRunModelChangeBehavior,
-  type ChatWidth,
-  type DocumentAttachBehavior,
-  type LargeTextPasteBehavior,
-} from '@/stores/useUIStore';
+import { DEFAULT_SELECTION_APPROVAL_TEXT, useUIStore, type ActiveRunModelChangeBehavior, type ChatWidth, type DocumentAttachBehavior, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 
 import { MessageSearchSettings } from './MessageSearchSettings';
 import { ModelChoiceSettings } from './ModelChoiceSettings';
