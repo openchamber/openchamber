@@ -481,6 +481,12 @@ interface ModelPickerListProps {
   };
   selectedModel?: { providerID: string; modelID: string } | null;
   /**
+   * Marks rows as chosen for a list where several models can be chosen at
+   * once. It replaces `selectedModel` for the check marks and makes the list
+   * multi-select for screen readers; it does not move the opening scroll.
+   */
+  isModelSelected?: (entry: ModelPickerEntry) => boolean;
+  /**
    * A row pinned above favorites and providers: the Auto routing entry. It is
    * not one of `providers`, takes part in keyboard navigation like any row,
    * and is filtered by the search query on its display name.
@@ -537,6 +543,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   onSelect,
   labels,
   selectedModel,
+  isModelSelected,
   leadingEntry = null,
   leadingAction = null,
   hiddenModels = [],
@@ -943,7 +950,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     const metadata = mergeModelMetadataWithLiveModel(entry.providerID, entry.model, getModelMetadata(entry.providerID, entry.modelID));
     const contextTokens = formatModelContextTokens(metadata?.limit?.context);
     const count = selectionCount?.(entry) ?? 0;
-    const isSelected = selectedModel?.providerID === entry.providerID && selectedModel.modelID === entry.modelID;
+    const isSelected = isModelSelected
+      ? isModelSelected(entry)
+      : selectedModel?.providerID === entry.providerID && selectedModel.modelID === entry.modelID;
     const favorite = isFavorite?.(entry) ?? false;
     // Same name as the provider's section header; the Auto row has no provider.
     const providerName = keyPrefix === 'leading' ? null : providerById.get(entry.providerID)?.name || entry.providerID;
@@ -1206,7 +1215,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           style={maxHeightStyle}
           onScroll={stickyHeaders ? (event) => syncStickyFade(event.currentTarget) : undefined}
         >
-          <div id={listboxId} role="listbox" aria-label={labels.list} className="px-1">
+          <div id={listboxId} role="listbox" aria-label={labels.list} aria-multiselectable={isModelSelected ? true : undefined} className="px-1">
           {includeNotSelected ? (
             <>
               <button

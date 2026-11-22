@@ -1,4 +1,6 @@
 import React from 'react';
+import type { Session } from '@/lib/opencode/model';
+import { SessionTimestamps } from './SessionTimestamps';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { Icon } from '@/components/icon/Icon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -16,6 +18,7 @@ type TimelineRowProject = {
 };
 
 type Props = {
+  session?: Session;
   /** One-line rows (tree rows, Chats, the Tree view's Pinned and In work):
       title and meta on one line, no branch line. */
   compact?: boolean;
@@ -112,6 +115,7 @@ const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string
 // The List view's list by time has no project headers and room for the name,
 // so its rows add a project line above the title.
 export const SessionTimelineRowBody: React.FC<Props> = ({
+  session,
   compact = false,
   project,
   chat = false,
@@ -158,11 +162,11 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     ? <TimelineProjectIcon project={project} label={projectLabel} />
     : chat ? <Icon name="chat-4" className="h-3 w-3 flex-shrink-0 text-muted-foreground/75" /> : null;
   if (compact) {
-    return <div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
+    return <div className="flex w-full min-w-0 flex-col gap-1"><div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
       {originMark}
       {titleLine}
       {meta}
-    </div>;
+    </div>{session ? <SessionTimestamps session={session} placement="row" /> : null}</div>;
   }
   return <div className="flex w-full min-w-0 flex-col gap-px">
     {/* Fixed 20px first line: the hover actions are positioned against the
@@ -209,5 +213,6 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         {elements.showProviderLogo && providerId ? <ProviderLogo providerId={providerId} className="h-3 w-3 flex-shrink-0 opacity-45" /> : null}
       </span>
     </div>
+    {session ? <SessionTimestamps session={session} placement="row" /> : null}
   </div>;
 };

@@ -488,6 +488,9 @@ export const registerSkillRoutes = (app, dependencies) => {
       );
 
       if (!scanResult.ok) {
+        if (scanResult.error?.kind === 'busy') {
+          return res.status(503).json({ ok: false, error: scanResult.error });
+        }
         if (scanResult.error?.kind === 'authRequired') {
           return res.status(401).json({
             ok: false,
@@ -898,7 +901,8 @@ export const registerSkillRoutes = (app, dependencies) => {
       const scope = asNonEmptyString(rawScope);
       const source = asNonEmptyString(rawSource);
       let location;
-      if (scope || source) {
+      // A supplied but empty filter is malformed too, never a delete-all.
+      if (rawScope !== undefined || rawSource !== undefined) {
         if (!['user', 'project'].includes(scope) || !['opencode', 'claude', 'agents'].includes(source)) {
           return res.status(400).json({ error: 'scope must be user or project and source opencode, claude or agents' });
         }

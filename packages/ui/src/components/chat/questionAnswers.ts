@@ -81,12 +81,18 @@ export type QuestionAnswerMessageLabels = {
     intro: string;
     /** Stands in for a question left without an answer. */
     unanswered: string;
+    /** How the agent should treat answers that arrive after the call ended, as a full sentence. */
+    guidance?: string;
+    /** The user's note with the answers, already set in its labelled line; omitted when empty. */
+    note?: string;
 };
 
 /**
  * The message that carries answers given after the call ended, in the
  * `"question"="answer"` shape OpenCode's tool result uses, so the agent reads
- * them the way it reads an answer to its call.
+ * them the way it reads an answer to its call. The guidance line says how
+ * the late answers weigh against what the agent did meanwhile, and the note
+ * comes last.
  */
 export function formatQuestionAnswers(
     prompts: readonly QuestionPrompt[],
@@ -98,5 +104,37 @@ export function formatQuestionAnswers(
         const text = answer && answer.length > 0 ? answer.join(', ') : labels.unanswered;
         return `- "${prompt.question}"="${text}"`;
     });
-    return [labels.intro, ...lines].join('\n');
+    const guidance = labels.guidance ? [labels.guidance] : [];
+    const note = labels.note ? [labels.note] : [];
+    return [labels.intro, ...lines, ...guidance, ...note].join('\n');
+}
+
+export type QuestionsMarkdownLabels = {
+    /** Heading for the user's answer under each question. */
+    answer: string;
+    /** Stands in for a question with no answer. */
+    unanswered: string;
+};
+
+/**
+ * Every question, its options, and the answer under it, as Markdown to paste
+ * elsewhere. `answers` null means there are none to show yet.
+ */
+export function formatQuestionsAsMarkdown(
+    prompts: readonly QuestionPrompt[],
+    answers: readonly QuestionAnswer[] | null,
+    labels: QuestionsMarkdownLabels,
+): string {
+    return prompts.map((prompt, index) => {
+        const lines = [`## ${prompt.header || `${index + 1}`}`, '', prompt.question];
+        if (prompt.options.length > 0) {
+            lines.push('');
+            for (const option of prompt.options) {
+                lines.push(option.description ? `- ${option.label}: ${option.description}` : `- ${option.label}`);
+            }
+        }
+        const answer = answers?.[index] ?? [];
+        lines.push('', `**${labels.answer}:** ${answer.length > 0 ? answer.join(', ') : labels.unanswered}`);
+        return lines.join('\n');
+    }).join('\n\n');
 }

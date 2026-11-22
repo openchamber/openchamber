@@ -7,6 +7,7 @@ import {
   isJsonObject,
   preserveMalformedJsonFileSync,
   readDurableJsonFileSync,
+  readDurableRawFileSync,
   writeDurableJsonFileSync,
 } from '../shared/durable-json-store.js';
 
@@ -201,7 +202,13 @@ export const createUiPasskeys = ({
   // registration begun in one load can be finished under another.
   const storeFileIsEmpty = () => {
     try {
-      const raw = storeFs.readFileSync(storeFile, 'utf8');
+      // The recheck goes through the durable store's bounded raw read
+      // (#2127): a plain readFileSync here would synchronously buffer
+      // whatever a concurrent writer swapped in after the initial
+      // bounded read, with no size cap and no regular-file check. Any
+      // refusal (too large, not regular, unreadable) means not empty:
+      // the fresh store must not be persisted over such a file.
+      const raw = readDurableRawFileSync(storeFile, { fs: storeFs });
       return typeof raw === 'string' && raw.trim() === '';
     } catch {
       return false;

@@ -48,6 +48,8 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.spellcheck', 'composer'],
   ['chat.input-history-scope', 'composer'],
   ['chat.input-history-limit', 'composer'],
+  ['chat.question-timeout', 'composer'],
+  ['chat.questions-in-background', 'composer'],
   ['chat.session-assistance', 'assistance'],
   ['chat.draft-starters-visible', 'assistance'],
   ['chat.session-recap', 'assistance'],

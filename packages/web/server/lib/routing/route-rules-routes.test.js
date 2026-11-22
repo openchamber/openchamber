@@ -54,6 +54,27 @@ const context = {
 };
 
 describe('interpret', () => {
+  it('writes a steer-back sentence as a prefer override for exactly that model', async () => {
+    const { app, store, dir } = setup();
+    const response = await request(app)
+      .post('/api/model-routes/interpret')
+      .send({
+        text: 'prefer github-copilot/gemini-4-carbon',
+        context: {
+          providers: ['github-copilot'],
+          models: [
+            { id: 'gemini-4-carbon', providerID: 'github-copilot' },
+            { id: 'claude-opus-5.5', providerID: 'github-copilot' },
+          ],
+        },
+      });
+    expect(response.body).toMatchObject({ status: 'applied' });
+    expect(store.list()).toEqual([
+      expect.objectContaining({ action: 'prefer', providers: ['github-copilot'], models: ['gemini-4-carbon'], factor: 3 }),
+    ]);
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'route-overrides.json'), 'utf8'));
+    expect(onDisk.overrides[0]).toMatchObject({ action: 'prefer', models: ['gemini-4-carbon'] });
+  });
   it('applies a certain keyword answer without asking a smart stage', async () => {
     const { app, jev, store } = setup();
     const response = await request(app)

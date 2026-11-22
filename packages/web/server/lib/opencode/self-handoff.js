@@ -12,6 +12,10 @@
 //   If the successor does not report ready in time, or exits first, the predecessor kills it and
 //   keeps serving.
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import { asNonEmptyString } from '../shared/guards.js';
+import { consumeHandoffRequest, resolveHandoffTarget } from './handoff-request.js';
 
 // The listener slot the successor sees, matching systemd socket activation (LISTEN_FDS=1 names fd 3).
 export const INHERITED_LISTEN_FD = 3;
@@ -99,6 +103,8 @@ export const createSelfHandoffRuntime = ({
   isShuttingDown,
   entry,
   apiOnly = false,
+  dataDir = process.env.OPENCHAMBER_DATA_DIR || path.join(os.homedir(), '.config', 'openchamber'),
+  runningVersion = 'unknown',
   env = process.env,
   timeoutMs = resolveHandoffTimeoutMs(env),
   log = console,
@@ -106,10 +112,16 @@ export const createSelfHandoffRuntime = ({
   let inFlight = null;
 
   const spawnSuccessor = (server, address) => {
+    const request = consumeHandoffRequest({ dataDir });
+    const hasOverride = request || asNonEmptyString(env.OPENCHAMBER_HANDOFF_ENTRY);
+    const target = hasOverride
+      ? resolveHandoffTarget({ request, env, entry, execPath: runtimeProcess.execPath, runningVersion })
+      : { ok: true, entry, execPath: runtimeProcess.execPath };
+    if (!target.ok) return { failure: target.reason };
     const { command, args } = buildSuccessorCommand({
-      execPath: runtimeProcess.execPath,
+      execPath: target.execPath,
       execArgv: runtimeProcess.execArgv,
-      entry,
+      entry: target.entry,
       port: address.port,
       host: address.address,
       apiOnly,
@@ -160,14 +172,19 @@ export const createSelfHandoffRuntime = ({
     // Only Node exposes the listening socket's descriptor. Bun's server, which the daemon runs under when
     // Bun is installed, does not, so such a process keeps serving and says so.
     const listenerFd = server._handle?.fd;
-    if (typeof listenerFd !== 'number' || listenerFd < 0) {
+    if (!Number.isFinite(listenerFd) || listenerFd < 0) {
       log.warn(`[handoff] the listening socket is not reachable from ${runtimeProcess.versions?.bun ? 'Bun' : 'this runtime'}; use a Node foreground server (systemd unit). Still serving`);
       return { ok: false, reason: 'no-listener-fd' };
     }
 
     let child;
     try {
-      child = spawnSuccessor(server, address);
+      const spawned = spawnSuccessor(server, address);
+      if (spawned?.failure) {
+        log.warn(`[handoff] could not resolve the successor: ${spawned.failure}; still serving`);
+        return { ok: false, reason: spawned.failure };
+      }
+      child = spawned;
     } catch (error) {
       log.warn(`[handoff] could not start the successor: ${error?.message ?? error}; still serving`);
       return { ok: false, reason: 'spawn-failed' };

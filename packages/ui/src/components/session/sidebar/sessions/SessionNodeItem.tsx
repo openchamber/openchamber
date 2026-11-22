@@ -1,5 +1,7 @@
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
+import { SessionRunDuration } from './SessionRunDuration';
+import { SessionTimestamps } from './SessionTimestamps';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 import React from 'react';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
@@ -428,6 +430,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // Optional row elements (branch, PR badge, provider logo, project icon,
   // goal, time). Live status and permission/question badges always show.
   const rowElements = useSessionDisplayStore((state) => state.sessionRowDisplay);
+  const countFromInput = useSessionDisplayStore((state) => state.sessionTimes.countFromInput);
+  const lastRunWhenIdle = useSessionDisplayStore((state) => state.sessionTimes.lastRunWhenIdle);
   // Two-line Chats and project rows in Tree keep their context (and the tree
   // slot and expansion that come with it); only the row body opens its
   // second line, the way a detailed zone row's body does.
@@ -990,6 +994,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             statusDot={null}
             pinnedMarker={null}
             timeSlot={sessionCompactUpdatedLabel}
+            session={resolvedSession}
             directoryIndicator={null}
             prBadge={primaryRef ? (
               <span
@@ -1737,6 +1742,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // one-line form, with the session's live state and time on the right.
   const rowBody = (
     <SessionTimelineRowBody
+      session={resolvedSession}
       compact={!isMultiLineTimelineContext(renderContext) && !twoLineTreeRow}
       project={timelineProject}
       chat={showsChatMark}
@@ -1756,8 +1762,12 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       statusDot={stateInSlot ? null : liveStateMark}
       pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker ? pinnedMarkerContent : null}
       timeSlot={showActivityDuration
-        ? <SessionActivityDuration sessionId={session.id} running={isStreaming} className="typography-micro" />
-        : sessionCompactUpdatedLabel}
+        ? (isStreaming && countFromInput
+          ? <SessionRunDuration sessionId={session.id} running fallback={<SessionActivityDuration sessionId={session.id} running className="typography-micro" />} />
+          : <SessionActivityDuration sessionId={session.id} running={isStreaming} className="typography-micro" />)
+        : lastRunWhenIdle && !isStreaming
+          ? <SessionRunDuration sessionId={session.id} running={false} fallback={sessionCompactUpdatedLabel} />
+          : sessionCompactUpdatedLabel}
       // Project rows leave the action indicator to their worktree header.
       directoryIndicator={!archivedBucket && sessionDirectory && renderContext !== 'project' ? <DirectoryActionIndicator directory={sessionDirectory} /> : null}
       prBadge={timelinePrBadge}
@@ -1949,6 +1959,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                       </div>
                     ) : null}
                     {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={trackerDirectory} /> : null}
+                    <SessionTimestamps session={resolvedSession} placement="hover" />
                     {currentRecap ? (
                       <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}

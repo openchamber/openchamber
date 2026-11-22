@@ -5,6 +5,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -86,6 +87,7 @@ export const dict = {
   ...sessionMenuHintsI18n.tr,
   ...sessionErrorRecoveryI18n.tr,
   ...sidebarLayoutI18n.tr,
+  ...activityTimesI18n.tr,
   ...projectKnowledgeI18n.tr,
   ...linearPanelI18n.tr,
   ...routingI18n.tr,
@@ -2432,6 +2434,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Yük devri kaynağı',
   'chat.messageBody.modelChanged.notice': 'Model değişti: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Model değişti: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Öncekini tercih et',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Model havuzlarının bir gün boyunca {model} modelini tercih etmesini sağla',
+  'chat.currentModel.label': 'Geçerli model: {model}',
+  'chat.currentModel.labelWithPool': 'Geçerli model: {model}, {pool} havuzundan',
+  'chat.currentModel.menu.openHint': 'Model seçmek için tıklayın',
+  'chat.currentModel.menu.timing': 'Geçiş',
+  'chat.currentModel.menu.directPickHelp': 'Doğrudan seçim, havuza dönene kadar havuzun yedek modele geçişini durdurur.',
+  'chat.currentModel.timing.immediately': 'Şimdi (süren yanıtı yeniden başlatır)',
+  'chat.currentModel.timing.nextStep': 'Sonraki adımda',
+  'chat.currentModel.timing.nextInput': 'Sonraki mesajla',
+  'chat.currentModel.menu.members': '{pool} havuzundaki modeller',
+  'chat.currentModel.menu.returnToPool': '{pool} havuzuna dön',
+  'chat.currentModel.toast.failed': 'Model değiştirilemedi',
   'chat.generatedResult.actions.copy': 'Kopyala',
   'chat.generatedResult.actions.copied': 'Kopyalandı',
   'chat.generatedResult.commit.title': 'Oluşturulan commit mesajı',
@@ -3846,8 +3861,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Bunu tut',
   'multirun.overview.addModel.action': 'Model ekle',
   'multirun.overview.addModel.hint': 'Bu çalıştırmada aynı promptu bir model daha çalıştırır',
-  'chat.parallel.settings.whereShared': 'Proje dizini',
-  'chat.parallel.settings.whereSharedHint': 'Tüm çalıştırmalar çalışma kopyanızda çalışır. Sorular ve araştırma için en iyisi.',
+  'chat.parallel.settings.whereShared': 'Ortak dizin',
+  'chat.parallel.settings.whereSharedHint': 'Tüm çalıştırmalar bu taslağın ayarlandığı dizinde çalışır. Sorular ve araştırma için en iyisi.',
   'chat.parallel.settings.whereWorktrees': 'Ayrı worktree\'ler',
   'chat.parallel.settings.whereWorktreesHint': 'Her çalıştırma kendi dalını kullanır, kod değişiklikleri çakışmaz. En iyisini tutun.',
   'chat.parallel.settings.baseBranchTitle': 'Temel dal',

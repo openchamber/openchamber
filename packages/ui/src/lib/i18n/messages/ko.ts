@@ -6,6 +6,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -148,6 +149,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionMenuHintsI18n.ko,
   ...sessionErrorRecoveryI18n.ko,
   ...sidebarLayoutI18n.ko,
+  ...activityTimesI18n.ko,
   ...projectKnowledgeI18n.ko,
   ...linearPanelI18n.ko,
   ...routingI18n.ko,
@@ -2602,6 +2604,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': '장애 조치 출처',
   'chat.messageBody.modelChanged.notice': '모델 변경됨: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': '모델 변경됨: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': '이전 모델 선호',
+  'chat.messageBody.modelChanged.preferPreviousTitle': '모델 풀이 하루 동안 {model}을(를) 우선하도록 설정',
+  'chat.currentModel.label': '현재 모델: {model}',
+  'chat.currentModel.labelWithPool': '현재 모델: {model} (풀 {pool})',
+  'chat.currentModel.menu.openHint': '클릭하여 모델 선택',
+  'chat.currentModel.menu.timing': '전환',
+  'chat.currentModel.menu.directPickHelp': '직접 선택하면 풀로 돌아갈 때까지 풀의 자동 대체 모델 전환이 중지됩니다.',
+  'chat.currentModel.timing.immediately': '지금 (진행 중인 응답을 다시 시작)',
+  'chat.currentModel.timing.nextStep': '다음 단계에서',
+  'chat.currentModel.timing.nextInput': '다음 메시지부터',
+  'chat.currentModel.menu.members': '풀 {pool}의 모델',
+  'chat.currentModel.menu.returnToPool': '풀 {pool}(으)로 돌아가기',
+  'chat.currentModel.toast.failed': '모델을 전환하지 못했습니다',
   'chat.generatedResult.actions.copy': '복사',
   'chat.generatedResult.actions.copied': '복사됨',
   'chat.generatedResult.commit.title': '생성된 커밋 메시지',
@@ -3848,8 +3863,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': '이것 남기기',
   'multirun.overview.addModel.action': '모델 추가',
   'multirun.overview.addModel.hint': '이 실행에서 같은 프롬프트를 모델 하나에 더 보냅니다',
-  'chat.parallel.settings.whereShared': '프로젝트 디렉터리',
-  'chat.parallel.settings.whereSharedHint': '모든 실행이 작업 사본에서 동작합니다. 질문과 조사에 가장 적합합니다.',
+  'chat.parallel.settings.whereShared': '공유 디렉터리',
+  'chat.parallel.settings.whereSharedHint': '모든 실행이 이 초안에 지정된 디렉터리에서 동작합니다. 질문과 조사에 가장 적합합니다.',
   'chat.parallel.settings.whereWorktrees': '개별 워크트리',
   'chat.parallel.settings.whereWorktreesHint': '실행마다 자체 브랜치를 사용해 코드 변경이 충돌하지 않습니다. 가장 좋은 것을 남기세요.',
   'chat.parallel.settings.baseBranchTitle': '기준 브랜치',
