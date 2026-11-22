@@ -64,6 +64,8 @@ const runningShellsSchema = z.array(z.object({
   metadata: z.record(z.string(), z.unknown()).nullish(),
   time: z.object({ started: z.number() }),
 }));
+// A shell's timeout counts only as a finite positive number; zod's number rejects NaN and Infinity.
+const shellTimeoutSchema = z.number().positive();
 const backgroundJobsSchema = z.array(z.object({
   kind: z.string(),
   sessionID: z.string(),
@@ -210,9 +212,9 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     return parsed.data.flatMap((shell) => {
       const owner = shell.metadata?.sessionID;
       if (shell.status !== 'running' || !isString(owner) || !owner) return [];
-      const timeout = shell.metadata?.timeout;
+      const timeout = shellTimeoutSchema.safeParse(shell.metadata?.timeout).data;
       const running: RunningSessionShell = { sessionID: owner, command: shell.command, startedAt: shell.time.started };
-      if (typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0) running.timeoutMs = timeout;
+      if (timeout !== undefined) running.timeoutMs = timeout;
       return [running];
     });
   };

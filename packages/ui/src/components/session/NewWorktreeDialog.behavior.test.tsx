@@ -33,6 +33,7 @@ let referenceProvider = 'github';
 let readContext: import('@/lib/api/types').SourceControlReadContext | null = null;
 let createdPath: string | null = null;
 let readIssue: () => Promise<import('@/lib/api/types').Issue | null> = async () => null;
+let readChangeRequest: () => Promise<import('@/lib/source-control/types').ChangeRequest | null> = async () => null;
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
 const selectSourceControlAuthEntry = () => githubAuthState;
@@ -138,7 +139,7 @@ mock.module('@/sync/session-actions', () => ({
   updateSessionTitle: async () => undefined,
 }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({
-  useRuntimeAPIs: () => ({ sourceControl: { issueGet: () => readIssue(), issueComments: async () => [] }, git: null }),
+  useRuntimeAPIs: () => ({ sourceControl: { issueGet: () => readIssue(), issueComments: async () => [], changeRequestContext: async () => ({ changeRequest: await readChangeRequest() }) }, git: null }),
 }));
 mock.module('@/stores/useGitStore', () => ({
   ...actualGitStore,
@@ -444,6 +445,14 @@ describe('NewWorktreeDialog behavior', () => {
       provider: 'review-host', instance: 'https://review.example.com', directory: project.path, repositoryId: 'repo', accountId: 'review#1', bindingRevision: 1, primaryRemote: 'origin',
     };
     validatedNames = [];
+    // The dialog reads the change again before it is offered as a source.
+    readChangeRequest = async (): Promise<import('@/lib/source-control/types').ChangeRequest> => ({
+      provider: 'review-host', instance: 'https://review.example.com', id: '1234', number: 1234, title: 'A change',
+      url: 'https://review.example.com/c/tools/app/+/1234', state: 'open', draft: false,
+      head: 'refs/changes/34/1234/5', base: 'main', headSha: 'a'.repeat(40),
+      project: { id: 'tools/app', owner: 'tools', name: 'app', provider: 'review-host', instance: 'https://review.example.com', url: 'https://review.example.com/tools/app' },
+      headProject: null,
+    });
     const dom = installDom();
     const root = createRoot(dom.container);
     try {
@@ -473,6 +482,7 @@ describe('NewWorktreeDialog behavior', () => {
       dom.restore();
       referenceProvider = 'github';
       readContext = null;
+      readChangeRequest = async () => null;
       useSourceControlProviderRegistry.setState(previousRegistry);
     }
   });

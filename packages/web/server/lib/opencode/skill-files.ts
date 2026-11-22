@@ -322,7 +322,7 @@ function readSkillSupportingFile(skillDir: string, relativePath: string) {
 // capped reader would refuse, so a save cannot strand the file. Callers
 // that write several files as one operation (skill create/update)
 // assert every file up front, so a refusal cannot leave a partial set.
-function assertSkillSupportingFileWithinCap(relativePath: unknown, content: unknown) {
+function assertSkillSupportingFileWithinCap<Path, Content>(relativePath: Path, content: Content) {
   if (isString(content) && Buffer.byteLength(content, 'utf8') > SKILL_SUPPORTING_FILE_MAX_BYTES) {
     throw Object.assign(
       new Error(`Skill file is too large to write: ${relativePath} exceeds the ${SKILL_SUPPORTING_FILE_MAX_BYTES} byte limit`),

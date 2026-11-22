@@ -17,6 +17,9 @@ import type { JsonValue } from '@opencode/client';
 
 const LEGACY_FILE_NAME = 'sessions-metadata.json';
 
+/** The legacy file as the durable reader hands it over: a JSON object (isJsonObject). */
+type LegacyMetadataFile = { [sessionID: string]: JsonValue | undefined };
+
 const metadataSchema = z.looseObject({});
 export type SessionMetadata = z.infer<typeof metadataSchema>;
 
@@ -143,8 +146,8 @@ export const createSessionMetadataStore = ({
   // The value judgement stays this store's: a JSON object (judged by the
   // primitive's reader via isJsonObject) whose entries are plain-object
   // metadata keyed by a non-empty session id; any other entry is dropped.
-  const parseLegacy = (parsed: Record<string, unknown>) => {
-    const result = new Map<string, Record<string, unknown>>();
+  const parseLegacy = (parsed: LegacyMetadataFile) => {
+    const result = new Map<string, SessionMetadata>();
     for (const [sessionID, value] of Object.entries(parsed)) {
       const id = asNonEmptyString(sessionID);
       if (id && isPlainObject(value)) result.set(id, value);

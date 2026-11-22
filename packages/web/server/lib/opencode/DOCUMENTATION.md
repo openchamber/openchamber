@@ -437,7 +437,7 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `removeProviderConfig(providerId, workingDirectory, scope?)`: Removes a provider block from the selected config layer.
 - `readModelSettings(workingDirectory)`: OpenCode's own per-model keys (`hidden`, `defaultVariant`, `lockVariant`), which the catalog OpenChamber reads drops, as `{ path, models: { 'provider/model': settings } }`. The user, user-override, project and custom files are merged per key, later files winning; within a file a provider in both spellings counts once, as `providers`, because OpenCode lets that entry replace a legacy `provider` entry whole. A malformed value reads as unset. `path` is the user file a change is written to.
 - `writeModelSettings(providerID, modelID, patch, workingDirectory)`: Sets or clears (`null`) those keys in the user file and returns the new `readModelSettings`. The entry is edited in the spelling the provider already uses in that file, because a new `providers` entry beside a legacy `provider` one would replace it whole and drop the rest of the user's definition; a provider with no entry gets a `providers` one, and an entry, provider or section emptied by a clear is removed. Refuses (409) a user file that does not parse.
-- `parseModelSettingsRequest(body)`: Parses a change from Settings (`providerID`, `modelID`, and `settings` with only those three keys) or returns the first reason it is refused.
+- `modelSettingsRequestSchema` and `modelSettingsRequestError(error)`: The schema for a change from Settings (`providerID`, `modelID`, and `settings` with only those three keys), and the first reason a rejected one is refused.
 
 ### Why bundled provider packages stay bare
 

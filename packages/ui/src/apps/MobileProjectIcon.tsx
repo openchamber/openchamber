@@ -61,7 +61,7 @@ export const MobileProjectIcon: React.FC<{
   return (
     <span
       className="flex size-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px] text-muted-foreground"
-      style={imageBackground}
+      style={image ? imageBackground : undefined}
     >
       {image ?? fallbackIcon}
     </span>

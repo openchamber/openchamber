@@ -1182,6 +1182,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         id={listboxId}
         role="listbox"
         aria-label={labels.list}
+        aria-multiselectable={isModelSelected ? true : undefined}
         className="relative w-full"
         style={{ height: virtualizer.getTotalSize() }}
       >

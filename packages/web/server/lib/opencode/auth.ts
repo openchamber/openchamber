@@ -182,7 +182,7 @@ const localCredentialRowSchema = z.object({
 // that is not a key or OAuth credential is skipped, as the server skips it.
 const localCredentialValueSchema = z.custom<CredentialValue>((value) => isPlainCredential(value));
 
-const isPlainCredential = (value: unknown) => value !== null && typeof value === 'object'
+const isPlainCredential = (value: unknown): value is { type: 'key' | 'oauth' } => value !== null && typeof value === 'object'
   && 'type' in value && (value.type === 'key' || value.type === 'oauth');
 
 const parseLocalCredentialValue = (raw: string) => {
@@ -316,18 +316,27 @@ const UPSTREAM_AUTH_REJECTION_BODY = 'authentication required';
  * The OpenCode client fails a rejected credential read with a 401 whose body
  * is the bare string `Authentication required`.
  */
-const statusOf = (value: unknown): unknown => {
-  if (value === null || typeof value !== 'object') return undefined;
-  if ('status' in value && value.status !== undefined) return value.status;
-  if ('statusCode' in value && value.statusCode !== undefined) return value.statusCode;
-  if ('response' in value && value.response !== null && typeof value.response === 'object' && 'status' in value.response) return value.response.status;
-  if ('cause' in value) return statusOf(value.cause);
+type StatusCarrier = { status?: unknown; statusCode?: unknown; response?: unknown; cause?: unknown };
+
+const isStatusCarrier = (value: unknown): value is StatusCarrier => value !== null && typeof value === 'object';
+
+const isInteger = (value: unknown): value is number => Number.isInteger(value);
+
+// The first status the error names, walking `cause`; a status that is not an
+// integer still ends the walk, and reads as no status.
+const statusOf = (value: StatusCarrier): number | undefined => {
+  if (value.status !== undefined) return isInteger(value.status) ? value.status : undefined;
+  if (value.statusCode !== undefined) return isInteger(value.statusCode) ? value.statusCode : undefined;
+  if (isStatusCarrier(value.response) && 'status' in value.response) return isInteger(value.response.status) ? value.response.status : undefined;
+  if ('cause' in value) return isStatusCarrier(value.cause) ? statusOf(value.cause) : undefined;
   return undefined;
 };
 
-const isCredentialSourceRejection = (error: unknown) => {
+// True for an object error; a primitive throw is never a credential rejection.
+const isCredentialSourceRejection = (error: unknown): error is StatusCarrier => {
+  if (!isStatusCarrier(error)) return false;
   const status = statusOf(error);
-  if (Number.isInteger(status)) return status === UPSTREAM_AUTH_REJECTION_STATUS;
+  if (status !== undefined) return status === UPSTREAM_AUTH_REJECTION_STATUS;
   return error instanceof Error
     && String(error.message ?? '').trim().toLowerCase() === UPSTREAM_AUTH_REJECTION_BODY;
 };
@@ -339,21 +348,19 @@ const isCredentialSourceRejection = (error: unknown) => {
  * failure's origin is recorded; consumers classify by that marker instead of
  * by the error text, which a provider's own API can reuse word for word.
  */
-// Mark a credential-path rejection with its provenance, or pass it
-// through untouched when it is already marked or is not an auth rejection.
-const markCredentialSourceRejection = (error: unknown) => {
-  if (isOpenCodeUpstreamAuthRejection(error) || !isCredentialSourceRejection(error)) return error;
-  return new OpenCodeUpstreamAuthError(
-    error instanceof Error ? error.message : undefined,
-    { cause: error },
-  );
-};
+// Mark a credential-path rejection with its provenance. Callers rethrow an
+// error that is already marked or is not an auth rejection untouched.
+const markCredentialSourceRejection = (error: StatusCarrier) => new OpenCodeUpstreamAuthError(
+  error instanceof Error ? error.message : undefined,
+  { cause: error },
+);
 
 const listCredentialEntries = async (current: CredentialSource) => {
   try {
     return await current.list();
   } catch (error) {
-    throw markCredentialSourceRejection(error);
+    if (!isOpenCodeUpstreamAuthRejection(error) && isCredentialSourceRejection(error)) throw markCredentialSourceRejection(error);
+    throw error;
   }
 };
 
@@ -366,7 +373,8 @@ const readEnvironmentKeys = async (current: CredentialSource): Promise<Record<st
   try {
     return current.listEnvironmentKeys ? await current.listEnvironmentKeys() : {};
   } catch (error) {
-    throw markCredentialSourceRejection(error);
+    if (!isOpenCodeUpstreamAuthRejection(error) && isCredentialSourceRejection(error)) throw markCredentialSourceRejection(error);
+    throw error;
   }
 };
 

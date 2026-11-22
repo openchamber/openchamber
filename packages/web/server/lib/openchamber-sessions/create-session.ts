@@ -36,7 +36,7 @@ interface CreateSessionOptions {
 
 // subagentPolicy is a field of the fork's OpenCode; the published client
 // types predate it, so it rides on the create body as an extra field.
-type MutableCreateInput = { -readonly [Key in keyof SessionCreateInput]: SessionCreateInput[Key] } & { subagentPolicy?: Record<string, unknown> };
+type MutableCreateInput = { -readonly [Key in keyof SessionCreateInput]: SessionCreateInput[Key] } & { subagentPolicy?: object };
 type SessionMetadata = NonNullable<SessionCreateInput['metadata']>;
 
 export const createSession = async ({ client, directory, title, titleByUser = false, startedByExtension = null, operatorParentId = null, model, variant, subagentPolicy }: CreateSessionOptions) => {

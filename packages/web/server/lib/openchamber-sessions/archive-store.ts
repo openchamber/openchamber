@@ -14,6 +14,9 @@ import type { JsonValue } from '@opencode/client';
 
 const ARCHIVE_FILE_NAME = 'sessions-archive.json';
 
+/** The archive file as the durable reader hands it over: a JSON object (isJsonObject). */
+type StoredArchiveFile = { [sessionID: string]: JsonValue | undefined };
+
 const asTimestamp = (value: JsonValue | undefined) => (isTimestamp(value) ? value : null);
 
 const asIdList = (ids: JsonValue | undefined) => {
@@ -51,7 +54,7 @@ export const createArchiveStore = ({
   // The value judgement stays this store's: a JSON object (judged by the
   // primitive's reader via isJsonObject) whose entries are positive
   // timestamps or explicit null unarchives; any other entry value is dropped.
-  const parseValue = (parsed: Record<string, unknown>) => {
+  const parseValue = (parsed: StoredArchiveFile) => {
     const result = new Map<string, number | null>();
     for (const [sessionID, value] of Object.entries(parsed)) {
       const id = asNonEmptyString(sessionID);
@@ -60,7 +63,7 @@ export const createArchiveStore = ({
         result.set(id, null);
         continue;
       }
-      const archivedAt = typeof value === 'number' ? asTimestamp(value) : null;
+      const archivedAt = asTimestamp(value);
       if (archivedAt) result.set(id, archivedAt);
     }
     return result;

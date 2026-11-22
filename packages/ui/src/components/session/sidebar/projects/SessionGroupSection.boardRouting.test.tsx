@@ -12,6 +12,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceBoardStore } from '@/stores/useSourceBoardStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { SessionGroupSectionProps } from './SessionGroupSection';
+import { githubLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { restoreModuleMock } from '../test-utils/moduleMocks';
 import * as buttonModule from '@/components/ui/button';
 import * as syncContextModule from '@/sync/sync-context';
@@ -32,6 +34,10 @@ Object.assign(globalThis, {
 
 // The system browser is where a misrouted chip would end up.
 const childStores = new ChildStoreManager();
+
+// A linked issue reads as GitHub's through the served provider's URL patterns.
+const github = githubLikeDescriptor();
+useSourceControlProviderRegistry.setState({ ordered: [github], byId: new Map([[github.id, github]]), status: 'ready', holdsList: true });
 
 const realButton = { ...buttonModule };
 const realSyncContext = { ...syncContextModule };

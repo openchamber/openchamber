@@ -48,7 +48,7 @@ describe("tunnel search reveal (#1764)", () => {
     const uiRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
     const settingsView = readFileSync(join(uiRoot, "components/views/SettingsView.tsx"), "utf-8");
     const tunnelSettings = readFileSync(join(uiRoot, "components/sections/openchamber/TunnelSettings.tsx"), "utf-8");
-    const uiStore = readFileSync(join(uiRoot, "stores/useUIStore.ts"), "utf-8");
+    const uiStore = readFileSync(join(uiRoot, "stores/ui/types.ts"), "utf-8");
 
     expect(settingsView).toContain("tunnelSearchRevealModeForResult(result.id)");
     expect(settingsView).toContain("setSettingsTunnelModeRequested(tunnelRevealMode)");

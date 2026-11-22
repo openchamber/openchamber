@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { isRecord } from '../shared/object-guards.js';
 import { callDaemon } from './mcpx-daemon.js';
 
 // The only shape a secret name takes: an environment variable name.
@@ -59,7 +60,7 @@ export const storeSecret = async (name: string | undefined, value: string | unde
   try {
     const answer = await callDaemon(`/v1/secrets/${encodeURIComponent(parsedName.data)}`, 'PUT', { value: body.data.value });
     // Only these fields leave, so a daemon reply that echoed the value cannot pass it on.
-    const stored: { name?: unknown; set?: unknown; source?: unknown } = answer !== null && typeof answer === 'object' ? answer : {};
+    const stored: { name?: unknown; set?: unknown; source?: unknown } = isRecord(answer) ? answer : {};
     return { status: 200, body: { name: stored.name, set: stored.set, source: stored.source } };
   } catch {
     // The daemon's error text is not forwarded, since it could repeat the value.

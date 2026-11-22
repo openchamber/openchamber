@@ -318,7 +318,9 @@ function mergeConfigs(base: OpenCodeConfigLayer, override: OpenCodeConfigLayer):
   return result;
 }
 
-function readConfigLayer(filePath?: string | null): { config: OpenCodeConfigLayer; error: (Error & { code: string }) | null } {
+type ConfigLayerRead = { config: OpenCodeConfigLayer; error: (Error & { code: string }) | null };
+
+function readConfigLayer(filePath?: string | null): ConfigLayerRead {
   try {
     return { config: readConfigFile(filePath), error: null };
   } catch (error) {
