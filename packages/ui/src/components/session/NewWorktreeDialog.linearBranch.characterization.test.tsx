@@ -143,7 +143,8 @@ mock.module('@/lib/worktrees/worktreeManager', () => ({
   ...actualWorktreeManager,
   validateWorktreeCreate: async () => ({ ok: true, errors: [] }),
 }));
-mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async () => null }));
+const actualWorktreeCreate = await import('@/lib/worktrees/worktreeCreate');
+mock.module('@/lib/worktrees/worktreeCreate', () => ({ ...actualWorktreeCreate, createWorktreeWithDefaults: async () => null }));
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({ waitForWorktreeBootstrap: async () => undefined }));
 mock.module('@/lib/openchamberConfig', () => ({
   getWorktreeCreateCommand: async () => '',

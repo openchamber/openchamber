@@ -82,6 +82,8 @@ const DOM_GLOBAL_NAMES = [
   'PointerEvent',
   'localStorage',
   'IS_REACT_ACT_ENVIRONMENT',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
 ] as const;
 
 const installDom = () => {
@@ -100,6 +102,8 @@ const installDom = () => {
     PointerEvent: happyWindow.PointerEvent,
     localStorage: happyWindow.localStorage,
     IS_REACT_ACT_ENVIRONMENT: true,
+    requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
+    cancelAnimationFrame: happyWindow.cancelAnimationFrame.bind(happyWindow),
   };
   for (const name of DOM_GLOBAL_NAMES) {
     Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });

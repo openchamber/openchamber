@@ -31,10 +31,12 @@ test('over the relay, Files media and prepared chat images are read through the 
     fetch: async (input) => {
       const url = new URL(String(input), 'http://tunnel');
       paths.push(url.pathname);
-      if (url.pathname.endsWith('/markdown-image-grants')) return Response.json({ results: [{ source: '/tmp/qr.png', status: 'ready', path: '/tmp/qr.png', outsideFileGrant: 'grant' }] });
+      if (url.pathname.endsWith('/markdown-image-grants')) return Response.json({ results: [{ source: '/tmp/qr.png', status: 'ready', path: '/tmp/qr.png' }] });
       expect(url.pathname).toBe('/api/fs/raw');
       if (url.searchParams.get('path') === '/tmp/qr.png') {
-        expect(url.searchParams.get('outsideFileGrant')).toBe('grant');
+        // This fork mints no outside-file grants (#1448): a path outside the
+        // workspace is read with allowOutsideWorkspace alone.
+        expect(url.searchParams.get('allowOutsideWorkspace')).toBe('true');
         return new Response(png, { headers: { 'Content-Type': 'image/png' } });
       }
       return new Response('%PDF', { headers: { 'Content-Type': 'application/pdf' } });

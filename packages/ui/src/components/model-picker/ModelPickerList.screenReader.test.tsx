@@ -159,6 +159,18 @@ test('a favorite row, which shows its provider only as a logo, names the provide
   expect(rowName(row)).toBe('Beta Lab Small');
 });
 
+test('the field never points at a row that is not in the page', async () => {
+  await renderPicker();
+  // Up from the first row wraps to the last row of the list, which may not be
+  // mounted until the list scrolls to it.
+  for (const key of ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowDown'] as const) {
+    await press(key);
+    const id = field().getAttribute('aria-activedescendant');
+    if (id) expect(activeRow()).toBe(highlightedRow());
+    else expect(highlightedRow()).toBeNull();
+  }
+});
+
 test('a multi-select list marks every chosen row and Enter chooses the highlighted one, chosen or not', async () => {
   const chosen = new Set(['labsmall/alpha', 'labsmall/beta']);
   const selected: string[] = [];

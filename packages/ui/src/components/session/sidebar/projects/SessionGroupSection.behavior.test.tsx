@@ -18,6 +18,7 @@ import * as sessionFolderDndModule from '../folders/sessionFolderDnd';
 import * as collapsedActivityIndicatorModule from '../sessions/collapsedActivityIndicator';
 import * as collapsedActivityStateModule from '../sessions/collapsedActivityState';
 import * as sessionTreeItemModule from '../sessions/SessionTreeItem';
+import * as deviceModule from '@/lib/device';
 
 type FolderCallbacks = {
   onRename: (name: string) => void;
@@ -43,6 +44,7 @@ const realSessionFolderDnd = { ...sessionFolderDndModule };
 const realCollapsedActivityIndicator = { ...collapsedActivityIndicatorModule };
 const realCollapsedActivityState = { ...collapsedActivityStateModule };
 const realSessionTreeItem = { ...sessionTreeItemModule };
+const realDevice = { ...deviceModule };
 
 mock.module('@/components/ui/button', () => ({
   Button: ({ onClick, children }: { onClick?: () => void; children?: React.ReactNode }) => {
@@ -91,6 +93,13 @@ mock.module('../sessions/SessionTreeItem', () => ({
   },
 }));
 
+// Dialogs read the device and its tablet layout as they render; this fixture has no real page to read them from.
+mock.module('@/lib/device', () => ({
+  ...realDevice,
+  useDeviceInfo: () => ({ isMobile: false }),
+  useTabletLayout: () => ({ enabled: false, roomyForPanels: false }),
+}));
+
 const { SessionGroupSection } = await import('./SessionGroupSection');
 
 afterAll(async () => {
@@ -101,6 +110,7 @@ afterAll(async () => {
   await restoreModuleMock('@/components/session/sidebar/sessions/collapsedActivityIndicator', realCollapsedActivityIndicator, () => import('../sessions/collapsedActivityIndicator'));
   await restoreModuleMock('@/components/session/sidebar/sessions/collapsedActivityState', realCollapsedActivityState, () => import('../sessions/collapsedActivityState'));
   await restoreModuleMock('@/components/session/sidebar/sessions/SessionTreeItem', realSessionTreeItem, () => import('../sessions/SessionTreeItem'));
+  await restoreModuleMock('@/lib/device', realDevice, () => import('@/lib/device'));
 });
 
 const folder: SessionFolder = {

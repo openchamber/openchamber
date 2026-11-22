@@ -395,14 +395,16 @@ test('a streaming session updating its record does not re-render the composer', 
  * after mount still receives the call. Nothing else covers the composer's
  * send path end to end.
  */
-test('sending from an existing session calls the session-actions sendMessage', async () => {
+test('sending from an existing session calls the session UI store sendMessage', async () => {
   const { useConfigStore } = await import('@/stores/useConfigStore');
-  const sessionActions = await import('@/sync/session-actions');
-  const { currentProviderId: originalProviderId, currentModelId: originalModelId } = useConfigStore.getState();
-  const calls: Parameters<typeof sessionActions.sendMessage>[] = [];
-  const sendSpy = spyOn(sessionActions, 'sendMessage').mockImplementation(async (...args) => { calls.push(args); });
+  const { useSessionUIStore } = await import('@/sync/session-ui-store');
+  const { currentProviderId: originalProviderId, currentModelId: originalModelId, isConnected, hasEverConnected } = useConfigStore.getState();
+  const originalSend = useSessionUIStore.getState().sendMessage;
+  const calls: Parameters<typeof originalSend>[] = [];
   try {
-    useConfigStore.setState({ currentProviderId: 'openai', currentModelId: 'gpt-test' });
+    // Connected, so the send is not held for OpenCode's startup.
+    useConfigStore.setState({ currentProviderId: 'openai', currentModelId: 'gpt-test', isConnected: true, hasEverConnected: true });
+    useSessionUIStore.setState({ sendMessage: async (...args) => { calls.push(args); } });
     await countComposerRenders('session', async (view) => {
       await act(async () => {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'hello' }, userEvent: 'input.type' });
@@ -419,8 +421,8 @@ test('sending from an existing session calls the session-actions sendMessage', a
       });
     });
   } finally {
-    sendSpy.mockRestore();
-    useConfigStore.setState({ currentProviderId: originalProviderId, currentModelId: originalModelId });
+    useSessionUIStore.setState({ sendMessage: originalSend });
+    useConfigStore.setState({ currentProviderId: originalProviderId, currentModelId: originalModelId, isConnected, hasEverConnected });
   }
   expect(calls).toHaveLength(1);
   const [content, providerID, modelID] = calls[0] ?? [];

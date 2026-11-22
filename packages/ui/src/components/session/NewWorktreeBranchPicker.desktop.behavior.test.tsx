@@ -106,6 +106,13 @@ const openDesktopDropdown = async (run: (input: HTMLInputElement, selected: { va
   }
 };
 
+// A list item's value carries its section ("Remote branches:remotes/…"), since
+// two sections may list the same branch; these checks read the branch part.
+const branchOfItem = (element: Element | null | undefined) => {
+  const value = element?.getAttribute('data-value');
+  return value == null ? value : value.slice(value.indexOf(':') + 1);
+};
+
 describe('NewWorktreeBranchPicker desktop dropdown', () => {
   test('a long list grows when its end comes into view, on the phone too', async () => {
     const branches = Array.from({ length: 450 }, (_, index) => `origin/branch-${String(index).padStart(3, '0')}`);
@@ -130,13 +137,13 @@ describe('NewWorktreeBranchPicker desktop dropdown', () => {
       expect(items()).toHaveLength(400);
       await act(async () => revealListEnd());
       expect(items()).toHaveLength(453);
-      expect(items()[452]?.getAttribute('data-value')).toBe('remotes/origin/branch-449');
+      expect(branchOfItem(items()[452])).toBe('remotes/origin/branch-449');
       await act(async () => {
         search.focus();
         Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(search, 'branch-449');
         search.dispatchEvent(new window.Event('input', { bubbles: true }));
       });
-      expect(items()[0]?.getAttribute('data-value')).toBe('remotes/origin/branch-449');
+      expect(branchOfItem(items()[0])).toBe('remotes/origin/branch-449');
       await act(async () => search.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
       expect(selected).toEqual([{ value: 'remotes/origin/branch-449', label: 'origin/branch-449' }]);
     }, branches);
@@ -149,7 +156,7 @@ describe('NewWorktreeBranchPicker desktop dropdown', () => {
           setter.call(search, 'feature');
           search.dispatchEvent(new window.Event('input', { bubbles: true }));
         });
-        const activeValue = () => document.querySelector('[data-slot="command-item"][data-selected="true"]')?.getAttribute('data-value');
+        const activeValue = () => branchOfItem(document.querySelector('[data-slot="command-item"][data-selected="true"]'));
         expect(activeValue()).toBe('feature/one');
         for (const [index, key] of keys.entries()) {
           await act(async () => {

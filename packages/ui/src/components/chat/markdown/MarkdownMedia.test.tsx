@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -22,6 +22,15 @@ let host: HTMLDivElement;
 let requests: string[];
 let batches: string[][];
 let revoked: string[];
+let restoreClock: (() => void) | undefined;
+// A ready image stays prepared for ten minutes: this fork mints no expiring
+// outside-file grants (#1448), so expiry comes from that cache alone.
+const expirePreparedImages = () => {
+  const later = Date.now() + 10 * 60_000 + 1;
+  const clock = spyOn(Date, 'now');
+  clock.mockReturnValue(later);
+  restoreClock = () => clock.mockRestore();
+};
 const flush = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); };
 function Chat({ children, settled = true, id = 'message' }: { children: React.ReactNode; settled?: boolean; id?: string }) {
   return <MarkdownMediaProvider content={id} mode="assistant" sessionId="session" messageId={id} directory="/repo" settled={settled}>{children}</MarkdownMediaProvider>;
@@ -50,7 +59,7 @@ beforeEach(() => {
   const reactRoot = createRoot(host);
   root = { render: (node) => reactRoot.render(<I18nProvider>{node}</I18nProvider>), unmount: () => reactRoot.unmount() };
 });
-afterEach(async () => { await act(async () => root.unmount()); globalThis.fetch = originalFetch; });
+afterEach(async () => { await act(async () => root.unmount()); globalThis.fetch = originalFetch; restoreClock?.(); restoreClock = undefined; });
 
 describe('React-owned Markdown media', () => {
   test('keeps remote chat images as links and badges as labels without issuing image requests', async () => {
@@ -163,6 +172,7 @@ describe('React-owned Markdown media', () => {
     const hiddenBatches = batches.length;
     await act(async () => render('visible')); await flush();
     expect(host.querySelector('img')).toBe(image);
+    expirePreparedImages();
     await act(async () => host.querySelector('button')?.click()); await flush();
     expect(batches.length).toBeGreaterThan(hiddenBatches);
     expect(popups).toHaveLength(1);
@@ -265,7 +275,7 @@ describe('React-owned Markdown media', () => {
     expect(urls).toBe(1);
     expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:runtime-1');
   });
-  test('does not open an obsolete gallery when its grant finishes after reconnect', async () => {
+  test('does not open an obsolete gallery when its refresh finishes after reconnect', async () => {
     const popups: import('../message/types').ToolPopupContent[] = [];
     let complete: (() => void) | undefined;
     globalThis.fetch = async (input, init) => {
@@ -295,6 +305,7 @@ describe('React-owned Markdown media', () => {
     if (!image) throw new Error('Missing image');
     Object.defineProperties(image, { naturalWidth: { value: 100 }, naturalHeight: { value: 100 } });
     await act(async () => image.dispatchEvent(new window.Event('load')));
+    expirePreparedImages();
     await act(async () => host.querySelector('button')?.click());
     expect(complete).toBeDefined();
     await act(async () => render('hidden')); await flush();
@@ -498,7 +509,7 @@ describe('React-owned Markdown media', () => {
     expect(host.querySelector('picture > span')).toBeNull();
     expect(host.querySelector('picture > img')?.hasAttribute('src')).toBe(false);
   });
-  test('refreshes expired grants once per part when opening a multi-image gallery', async () => {
+  test('refreshes expired prepared images once per part when opening a multi-image gallery', async () => {
     const part = <MarkdownMediaProvider content="expiry" mode="assistant" sessionId="expiry" messageId="expiry" directory="/repo" settled onShowPopup={() => {}}><MarkdownImage src="first.png" /><MarkdownImage src="second.png" /></MarkdownMediaProvider>;
     globalThis.fetch = async (input, init) => {
       if (String(input).includes('url-token')) return Response.json({ token: 'short', expiresAt: Date.now() + 60_000 });
@@ -511,6 +522,7 @@ describe('React-owned Markdown media', () => {
       await act(async () => image.dispatchEvent(new window.Event('load')));
     }
     expect(batches).toHaveLength(1);
+    expirePreparedImages();
     await act(async () => host.querySelector('button')?.click()); await flush();
     expect(batches).toHaveLength(2);
   });

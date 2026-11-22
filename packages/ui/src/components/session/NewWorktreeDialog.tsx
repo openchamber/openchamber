@@ -617,10 +617,13 @@ export function NewWorktreeDialog({
           headOwner = changeRequest?.headProject?.owner ?? headOwner;
           return changeRequest;
         },
-        isBranchInUse: async (branch) => (projectRef
-          ? (await validateWorktreeCreate(projectRef, { mode: 'new', branchName: branch, worktreeName: branch }))
-            .errors.some((entry) => entry.code === 'branch_in_use')
-          : false),
+        isBranchInUse: async (head) => {
+          const name = descriptorOf(reference.provider).features.branchHeads ? head : branch;
+          return projectRef
+            ? (await validateWorktreeCreate(projectRef, { mode: 'new', branchName: name, worktreeName: name }))
+              .errors.some((entry) => entry.code === 'branch_in_use')
+            : false;
+        },
       });
     } catch {
       return failure(t('session.githubIntegration.validation.failed'));
