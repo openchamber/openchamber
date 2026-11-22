@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
+import { EntryTimes } from './EntryTimes';
 import { readSessionNoticePart } from '@/lib/opencode/session-notices';
 import { Button } from '@/components/ui/button';
 import { ErrorResponseDetails } from '@/components/chat/ErrorResponseDetails';
@@ -1757,6 +1758,7 @@ const AssistantMessageBody = React.memo(({
                 if (notice) {
                     rendered.push(
                         <FadeInOnReveal key={`notice-${toolPart.id}`}>
+                            <EntryTimes part={toolPart} />
                             <SessionNoticeBlock notice={notice} blockId={toolPart.id} />
                         </FadeInOnReveal>
                     );

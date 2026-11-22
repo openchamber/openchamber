@@ -584,6 +584,16 @@ submenus (not in VS Code), then Collapse all / Expand all.
   `ses_` id, else title contains), lists every match without reveal limits,
   hides projects without matches, and counts one match per listed row.
 
+## Session times
+
+The display menu's Session times submenu (`shell/SessionTimestampSortMenu.tsx`) holds this window's choices, kept in `useSessionDisplayStore.sessionTimes` and `sessionTimestampSort` (local, not synced). By default the row looks as it did: its recorded times (created, last input, last completed output, last activity; `sync/session-activity-timestamps.ts`) and the last run's length sit in the whole-row hover card. In the row puts the chosen fields under the row; Hidden shows none. Sorting by a time keeps pins first and subsessions under their parent; sessions without that time go last in both directions.
+
+Two duration choices are off by default. Last run time when idle replaces an idle row's date with the time from its last prompt to its last activity. Counting from the last prompt makes a running row's counter span auto-continues, goal continuations and background waits, which record no new prompt. Either one falls back to the existing readout when no prompt was recorded. A row already counts while its session idles on a running subagent or background command (`useSessionTurnActivity`).
+
+### Why the times wait in the hover card by default
+
+Four extra lines on every row doubled its height and changed every list's rhythm. The hover card already carries the row's details, so the default view stays as it was and the denser modes are a choice.
+
 ## Search
 
 Dedicated search fields in the sidebar, mobile session list, and archive submit

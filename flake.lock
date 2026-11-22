@@ -5,11 +5,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1793665075,
-        "narHash": "sha256-xa5Wy5Y+Oag+7x5iq1SEfoT/8Cp+t9gNItErSr504HM=",
+        "lastModified": 1795030057,
+        "narHash": "sha256-tlIV1m85uC1LBFV8L1/QDwyP2aM8oTm6uaTlVjlItEo=",
         "owner": "dezren39",
         "repo": "fleet",
-        "rev": "082bd9e78bcac374d0b3bec89ec1ee9acd4386d1",
+        "rev": "a3c335a7416b3df2f5ebde0c98b6d9480193b1ea",
         "type": "github"
       },
       "original": {
@@ -93,11 +93,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1794981009,
-        "narHash": "sha256-do1coH5r+vKCkicSzWqQiYGwufDxxpGTnt0l4WFxX98=",
+        "lastModified": 1795261309,
+        "narHash": "sha256-CriaQjHmTHHa0iiZxMXCEBOfLN5hOuAjDJ9/3pNoui0=",
         "owner": "developing-today-forks",
         "repo": "opencode",
-        "rev": "f8522013c59030498dc1d3005087211c00b95de2",
+        "rev": "b70580bbee83c4f5773e733b4859ff6afd8ea1d9",
         "type": "github"
       },
       "original": {

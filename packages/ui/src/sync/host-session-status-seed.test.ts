@@ -4,6 +4,7 @@ import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import {
   applyGlobalSessionStatusEvent,
+  reconcileGlobalSessionStatusWithActive,
   replaceGlobalSessionStatusById,
   useGlobalSessionStatusStore,
 } from './global-session-status';
@@ -42,6 +43,7 @@ describe('buildHostStatusSeedEvents', () => {
     }, {
       isKnown: () => false,
       resolveDirectory: (id) => (id === 'a' ? '/repo' : id === 'b' ? '/other' : null),
+      mayBeRunning: () => true,
     });
 
     expect([...events.keys()]).toEqual(['/repo', '/other']);
@@ -64,6 +66,7 @@ describe('buildHostStatusSeedEvents', () => {
     }, {
       isKnown: (id) => id === 'known',
       resolveDirectory: (id) => (id === 'unplaced' ? null : '/repo'),
+      mayBeRunning: () => true,
     });
 
     expect([...events.keys()]).toEqual(['/repo']);
@@ -76,7 +79,10 @@ describe('buildHostStatusSeedEvents', () => {
 
 describe('seedGlobalSessionStatusFromHost', () => {
   let originalGetSnapshot: typeof opencodeClient.getHostSessionStatusSnapshot;
+  let originalGetActive: typeof opencodeClient.getActiveSessionStatuses;
   let snapshot: Awaited<ReturnType<typeof opencodeClient.getHostSessionStatusSnapshot>>;
+  // OpenCode's running list; null is a failed read.
+  let active: Awaited<ReturnType<typeof opencodeClient.getActiveSessionStatuses>>;
   let requests = 0;
 
   beforeEach(() => {
@@ -85,22 +91,74 @@ describe('seedGlobalSessionStatusFromHost', () => {
     resetSessionOrdering();
     resetSessionActivityTiming();
     requests = 0;
+    active = null;
     originalGetSnapshot = opencodeClient.getHostSessionStatusSnapshot;
+    originalGetActive = opencodeClient.getActiveSessionStatuses;
     opencodeClient.getHostSessionStatusSnapshot = async () => {
       requests += 1;
       return snapshot;
     };
+    opencodeClient.getActiveSessionStatuses = async () => active;
     useGlobalSessionsStore.getState().applySnapshot([
       session('busy-elsewhere', '/unopened'),
       session('settled-here', '/repo'),
+      session('space-session', '/spaces/0123456789ab/project'),
     ], [], 'ready');
   });
 
   afterEach(() => {
     resetGlobalBlockingRequests();
     opencodeClient.getHostSessionStatusSnapshot = originalGetSnapshot;
+    opencodeClient.getActiveSessionStatuses = originalGetActive;
     replaceGlobalSessionStatusById(new Map());
     useGlobalSessionsStore.getState().resetForRuntimeSwitch();
+  });
+
+  test('seeds only host entries OpenCode still runs; space sessions keep the host word', async () => {
+    // The host never heard these end: its map still says busy.
+    snapshot = {
+      serverTime: NOW,
+      sessions: {
+        'busy-elsewhere': { status: 'busy', lastUpdateAt: NOW },
+        'settled-here': { status: 'busy', lastUpdateAt: NOW },
+        'space-session': { status: 'busy', lastUpdateAt: NOW },
+      },
+    };
+    active = { 'busy-elsewhere': { type: 'busy' } };
+
+    await seedGlobalSessionStatusFromHost();
+
+    expect([...useGlobalSessionStatusStore.getState().statusById.keys()].sort()).toEqual(['busy-elsewhere', 'space-session']);
+  });
+
+  test('while a replaced OpenCode drains, the host word stands for sessions the current OpenCode does not list', async () => {
+    snapshot = {
+      serverTime: NOW,
+      openCodeDraining: true,
+      sessions: { 'busy-elsewhere': { status: 'busy', lastUpdateAt: NOW } },
+    };
+    active = {};
+
+    await seedGlobalSessionStatusFromHost();
+
+    expect(useGlobalSessionStatusStore.getState().statusById.has('busy-elsewhere')).toBe(true);
+  });
+
+  test('a session settled by the running-list check is not seeded again by the next list load', async () => {
+    snapshot = { serverTime: NOW, sessions: { 'settled-here': { status: 'busy', lastUpdateAt: NOW } } };
+    active = { 'settled-here': { type: 'busy' } };
+    await seedGlobalSessionStatusFromHost();
+    expect(useGlobalSessionStatusStore.getState().statusById.has('settled-here')).toBe(true);
+
+    // It finished, but its end never reached the host or this page.
+    await reconcileGlobalSessionStatusWithActive(async () => new Set(), () => true);
+    await reconcileGlobalSessionStatusWithActive(async () => new Set(), () => true);
+    expect(useGlobalSessionStatusStore.getState().statusById.has('settled-here')).toBe(false);
+
+    // A failed running-list read must not let the stale host entry back in.
+    active = null;
+    await seedGlobalSessionStatusFromHost();
+    expect(useGlobalSessionStatusStore.getState().statusById.has('settled-here')).toBe(false);
   });
 
   test('seeds an unopened directory session and never overrides a live observation', async () => {

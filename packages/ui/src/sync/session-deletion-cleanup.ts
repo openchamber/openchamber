@@ -6,6 +6,7 @@ import { createInputHistoryIdentity, useInputHistoryStore } from '@/stores/useIn
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { removeSessionActivityTimestamps } from './session-activity-timestamps';
 
 export const cleanupPersistedSessionState = (identity: {
   runtimeKey: string;
@@ -29,4 +30,5 @@ export const cleanupPersistedSessionState = (identity: {
   const chatDraftIdentity = createChatDraftIdentity(identity.runtimeKey, identity.directory, identity.sessionId);
   if (chatDraftIdentity) clearChatDraft(chatDraftIdentity, true);
   MessageFreshnessDetector.getInstance().clearSession(identity.sessionId);
+  removeSessionActivityTimestamps(identity.sessionId);
 };

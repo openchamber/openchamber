@@ -68,6 +68,30 @@ describe('scheduled-task run-history route time filters', () => {
     expect(listRuns).not.toHaveBeenCalled();
   });
 
+  it('rejects repeated since values with 400 and never calls the reader', async () => {
+    const listRuns = vi.fn(() => []);
+    const handler = captureRunHistoryHandler(listRuns);
+    const res = createResponse();
+
+    await handler(request({ since: ['100', '200'] }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.payload.error).toContain('since');
+    expect(listRuns).not.toHaveBeenCalled();
+  });
+
+  it('rejects repeated until values with 400 and never calls the reader', async () => {
+    const listRuns = vi.fn(() => []);
+    const handler = captureRunHistoryHandler(listRuns);
+    const res = createResponse();
+
+    await handler(request({ until: ['300', '400'] }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.payload.error).toContain('until');
+    expect(listRuns).not.toHaveBeenCalled();
+  });
+
   it('passes valid epoch-millisecond and date-string filters through', async () => {
     const runs = [{ id: 'run-1' }];
     const listRuns = vi.fn(() => runs);
@@ -89,6 +113,19 @@ describe('scheduled-task run-history route time filters', () => {
     const res = createResponse();
 
     await handler(request({}), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(listRuns).toHaveBeenCalledWith(
+      expect.objectContaining({ projectID: 'code', since: undefined, until: undefined }),
+    );
+  });
+
+  it('treats empty bounds as no filter', async () => {
+    const listRuns = vi.fn(() => []);
+    const handler = captureRunHistoryHandler(listRuns);
+    const res = createResponse();
+
+    await handler(request({ since: '', until: '' }), res);
 
     expect(res.statusCode).toBe(200);
     expect(listRuns).toHaveBeenCalledWith(

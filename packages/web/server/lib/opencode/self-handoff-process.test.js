@@ -13,6 +13,9 @@ import { fileURLToPath } from 'node:url';
 // and the OpenCode child is a fake that answers the 2.x endpoints the lifecycle probes.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cliPath = path.resolve(here, '../../../bin/cli.js');
+// Socket activation requires Node's fd-passing support. The project test command runs under Bun,
+// but the foreground server exercised here must use the supported Node runtime.
+const cliRuntime = process.versions.bun ? 'node' : process.execPath;
 
 const fakeOpenCodeSource = `
   const http = require('node:http');
@@ -120,6 +123,13 @@ const readJson = (file) => {
   }
 };
 
+// Handoff diagnostics must never print credentials from managed state.
+const summarizeState = (state) => state && Object.fromEntries(
+  ['version', 'pid', 'port', 'binary', 'args', 'instanceDir', 'startedAt']
+    .filter((key) => Object.hasOwn(state, key))
+    .map((key) => [key, state[key]]),
+);
+
 const readPid = (file) => {
   try {
     const pid = Number.parseInt(fs.readFileSync(file, 'utf8').trim(), 10);
@@ -222,7 +232,7 @@ const waitForPidChange = async (file, fromPid, timeoutMs) => {
 const startServer = (sandbox, { port, name, env = {} }) => {
   const logPath = sandbox.logPath(name);
   const logFd = fs.openSync(logPath, 'a');
-  const child = spawn(process.execPath, [cliPath, 'serve', '--foreground', '--port', String(port), '--host', '127.0.0.1'], {
+  const child = spawn(cliRuntime, [cliPath, 'serve', '--foreground', '--port', String(port), '--host', '127.0.0.1'], {
     env: { ...sandbox.env, ...env },
     stdio: ['ignore', logFd, logFd],
   });
@@ -231,12 +241,12 @@ const startServer = (sandbox, { port, name, env = {} }) => {
 };
 
 const runCli = (sandbox, args, env = {}) => new Promise((resolve) => {
-  const child = spawn(process.execPath, [cliPath, ...args], { env: { ...sandbox.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(cliRuntime, [cliPath, ...args], { env: { ...sandbox.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
-  child.once('exit', (code) => resolve({ code, stdout, stderr }));
+  child.once('close', (code) => resolve({ code, stdout, stderr }));
 });
 
 // Keeps one keep-alive client polling /health every ~10 ms. A refused connection is the listener being
@@ -451,7 +461,15 @@ describeUnlessWindows('self-handoff across real processes', () => {
     const run = await runHandoffUnderLoad();
     report({ run: 'handoff', handoffMs: run.handoffMs, ...run.counts, oldPid: run.oldPid, successorPid: run.successorPid });
 
-    expect(run.cli.code).toBe(0);
+    expect(run.cli.code, [
+      `handoff CLI exit code: ${run.cli.code}`,
+      `handoff CLI stdout:\n${run.cli.stdout || '(empty)'}`,
+      `handoff CLI stderr:\n${run.cli.stderr || '(empty)'}`,
+      `predecessor log:\n${run.log || '(empty)'}`,
+      `state before: ${JSON.stringify(summarizeState(run.openCodeBefore))}`,
+      `state after: ${JSON.stringify(summarizeState(run.openCodeAfter))}`,
+      `old pid: ${run.oldPid}; successor pid: ${run.successorPid}`,
+    ].join('\n\n')).toBe(0);
     expect(run.successorPid).not.toBeNull();
     expect(run.successorPid).not.toBe(run.oldPid);
     expect(run.predecessorExited).toBe(true);

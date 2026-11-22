@@ -110,6 +110,76 @@ loss window is accepted in exchange for atomic log replacement without
 cross-process locks. If compaction fails, the store logs the failure and leaves
 the log intact; a later append can retry it.
 
+## Sentences about models
+
+`route-interpreter.js` turns one sentence (`/route <sentence>` in the composer,
+or the "Prefer previous" button on a model-changed divider, which sends
+`prefer <provider/model>`) into overrides in OpenCode's `route-overrides.json`.
+OpenCode applies them to every pool, whatever its autonomy level: `avoid`
+takes a target out, `prefer` multiplies its weight (3 by default, `2x` and
+"less" change it), which ranks it first in an ordered pool, puts it alone in
+the top tier of a round-robin pool and makes a weighted draw pick it more
+often. The keyword stage reads what the sentence names, most specific first:
+
+- a `provider/model` reference the available catalog does not list: refused
+  as unknown, before any smart stage runs, so a model that is gone is never
+  widened into a whole provider or family;
+- one exact model, as `provider/model` or a bare id (a `#variant` is dropped,
+  because an override scopes a model, not its thinking variant); a bare id
+  covers every configured provider that serves it;
+- a model family the code knows (`opus`, `sonnet`, `haiku`: the newest one per
+  provider for `prefer`) or "claude", which asks which Claude is meant;
+- a kind of model: a word the sentence shares with the names of the models
+  available now, such as `gemini`, `gpt` or `flash`, scoped to the named
+  provider when there is one. The rule lists those models exactly, so a model
+  added later is not covered until the user says it again;
+- a configured provider, by id or alias (`gemini` for `google`). An alias of a
+  provider that is not configured names nothing, so "gemini" falls through to
+  the gemini models other providers serve.
+
+Kinds that are not words in model names, such as "cheap" or "fast", are not
+understood (`unknown`); cost tiers in `plans.json` are not read here. A rule
+lasts a day unless the sentence says otherwise ("for 2 hours", "today", "this
+week") and applies to every session. A session a round-robin or weighted pool
+has already drawn stays on its target (OpenCode's sticky choice), and an
+ordered pool keeps a session on the target answering it while that target is
+ready, so a preference shows on the next draw: a new session, or after the
+current target fails or is benched.
+
+## Picking a pool member directly
+
+While a pool is selected, the current-model line above the composer
+(`packages/ui/src/components/chat/CurrentModelIndicator.tsx`) opens a menu of
+the pool's members, read from the catalog OpenCode compiles for the pool
+(`settings.opencodeRoute.targets`; a pool whose members come only from
+patterns lists none and offers no menu). The user picks a member and when it
+applies (`packages/ui/src/lib/routing/poolMemberPick.ts`):
+
+- with the next message: only the composer's selection changes;
+- at the next step: the session's model switches now. OpenCode reloads the
+  session context before each model request (`session/runner/llm.ts`), so a
+  running turn makes its next request on the pick;
+- now: a running turn is replayed on the pick, as the "Stop and restart this
+  reply" choice for model changes during a reply does; an idle session
+  switches now.
+
+The OpenCode call runs first; the composer follows only when it succeeded.
+After a pick the composer holds that member, and the menu offers "Return to
+pool" for each pool listing it, with the same timings. Everything goes
+through OpenCode's own `session.switchModel` and the existing retry. VS Code
+shows the full model-changed text and the pool-member menu, but not "Prefer
+previous", which needs the OpenChamber server's `/api/model-routes/interpret`
+route that VS Code does not run.
+
+### Why a pick leaves the pool instead of pinning a member inside it
+
+OpenCode keeps a session's pool target in memory and has no route to set it,
+and route overrides apply to every session. So a pick makes the member the
+session's model: the session no longer fails over inside the pool until the
+user returns to it. Pool rotation (`pool-rotation.js`) moves sessions the same
+way for the same reason. A per-session target inside the pool needs an
+OpenCode route first.
+
 ## Invariants
 
 - The sentinel never reaches OpenCode. OpenCode 2.x holds the model and agent

@@ -1,4 +1,5 @@
 import React from 'react';
+import { SessionTimestampSortMenu } from './SessionTimestampSortMenu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -305,6 +306,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
       ))}
     </>);
   }
+  displayMenuSections.push(<SessionTimestampSortMenu key="session-times" />);
   // The list view keeps projects in the manual order and has no worktree
   // groups, so it offers its own layout instead; VS Code groups by workspace
   // only, so it sorts projects alone.

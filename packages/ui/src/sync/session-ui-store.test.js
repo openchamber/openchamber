@@ -22,6 +22,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
 import { useInputStore } from './input-store';
+import { shouldAutoCreateDraftWorktree } from '@/lib/worktrees/autoDraftWorktree';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -974,6 +975,81 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
   });
+
+  describe('a worktree inherited from the last session', () => {
+    const worktree = '/worktrees/alpha-earlier-task';
+    let originalAutoCreate;
+
+    beforeEach(() => {
+      originalAutoCreate = useConfigStore.getState().settingsAutoCreateWorktree;
+      useSessionUIStore.setState({
+        availableWorktreesByProject: new Map([[projectA.path, [{ path: worktree, projectDirectory: projectA.path, branch: 'earlier-task' }]]]),
+      });
+      getDeferredSafeStorage().setItem(
+        DRAFT_TARGET_KEY,
+        JSON.stringify({ projectId: projectA.id, directory: worktree, target: 'project' }),
+      );
+      useDirectoryStore.getState().setDirectory(worktree, { showOverlay: false });
+    });
+
+    afterEach(() => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: originalAutoCreate });
+    });
+
+    // Oracle: the rule from openNewSessionDraft. Only a directory the draft
+    // inherited goes back to the project root, and only while Auto-create
+    // worktree is on; a picked or pinned worktree always stays.
+    const opens = [
+      { name: 'implicit open', options: undefined, inherited: true },
+      { name: 'New chat forwarding the session directory', options: { directoryOverride: worktree, inheritedDirectory: true }, inherited: true },
+      { name: 'a picked worktree', options: { directoryOverride: worktree }, inherited: false },
+      { name: 'a pinned worktree', options: { directoryOverride: worktree, inheritedDirectory: true, preserveDirectoryOverride: true }, inherited: false },
+    ];
+    for (const autoCreate of [true, false]) {
+      for (const open of opens) {
+        const expected = autoCreate && open.inherited ? projectA.path : worktree;
+        test(`${open.name} with Auto-create worktree ${autoCreate ? 'on' : 'off'} aims at ${expected}`, () => {
+          useConfigStore.setState({ settingsAutoCreateWorktree: autoCreate });
+
+          useSessionUIStore.getState().openNewSessionDraft(open.options);
+          const draft = useSessionUIStore.getState().newSessionDraft;
+
+          expect(draft.target).toBe('project');
+          expect(draft.selectedProjectId).toBe(projectA.id);
+          expect(draft.directoryOverride).toBe(expected);
+        });
+      }
+    }
+
+    // Oracle: the default and the switch's own rule. A fresh config store
+    // has Auto-create worktree on, and every new chat opened from a session
+    // in an earlier worktree is a draft the switch acts on, so each first
+    // send makes its own worktree.
+    test('with the default setting, every new chat from a worktree session gets a worktree of its own', () => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: useConfigStore.getInitialState().settingsAutoCreateWorktree });
+      expect(useConfigStore.getState().settingsAutoCreateWorktree).toBe(true);
+
+      for (const open of [() => useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: worktree, inheritedDirectory: true }), () => useSessionUIStore.getState().openNewSessionDraft()]) {
+        open();
+        const draft = useSessionUIStore.getState().newSessionDraft;
+        expect(shouldAutoCreateDraftWorktree({
+          enabled: useConfigStore.getState().settingsAutoCreateWorktree,
+          draft,
+          projectPath: projectA.path,
+          isGitRepo: true,
+        })).toBe(true);
+      }
+    });
+
+    test('successive new chats keep aiming at the project root', () => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: true });
+
+      useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: worktree, inheritedDirectory: true });
+      expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe(projectA.path);
+      useSessionUIStore.getState().openNewSessionDraft();
+      expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe(projectA.path);
+    });
+  });
 });
 
 describe('createSession draft lifecycle', () => {
@@ -1225,6 +1301,75 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     });
     useProjectsStore.setState({ projects: [], activeProjectId: null });
     useSessionDisplayStore.setState({ singleProjectId: null });
+  });
+
+  // Oracle: a send handed off to a background goal (pendingGoal) leaves the
+  // user where they went: its session is created where the draft pointed,
+  // and neither the view nor a draft opened since changes. The send above
+  // without a goal still opens its session.
+  const waitFor = async (predicate) => {
+    for (let attempt = 0; attempt < 100 && !predicate(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(predicate()).toBe(true);
+  };
+  const handOffDraftSend = (draftSnapshot) => {
+    let rejectGoal;
+    const pendingGoal = new Promise((_resolve, reject) => { rejectGoal = reject; });
+    const sent = useSessionUIStore.getState().sendMessage(
+      'message for project A', 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal',
+      { draftSnapshot, pendingGoal },
+    ).catch((error) => error);
+    return { sent, rejectGoal };
+  };
+
+  test('a background goal send creates its session without pulling the user back from another chat', async () => {
+    const draftSnapshot = { open: true, draftId: 41, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+
+    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
+    useSessionUIStore.getState().setCurrentSession('session-project-b', '/projects/beta');
+
+    await waitFor(() => createSessionCalls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(createSessionCalls[0]).toBe('/projects/alpha');
+    expect(useSessionUIStore.getState().currentSessionId).toBe('session-project-b');
+    // The prompt waits for the goal; nothing was sent yet.
+    expect(sendMessageCalls).toHaveLength(0);
+
+    rejectGoal(new Error('goal not written'));
+    expect((await sent).message).toBe('goal not written');
+    expect(sendMessageCalls).toHaveLength(0);
+    expect(useSessionUIStore.getState().currentSessionId).toBe('session-project-b');
+  });
+
+  test('a background goal send leaves a new draft the user opened meanwhile open', async () => {
+    const draftSnapshot = { open: true, draftId: 51, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+
+    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
+    const nextDraft = { open: true, draftId: 52, directoryOverride: '/projects/alpha', parentID: null };
+    useSessionUIStore.setState({ newSessionDraft: nextDraft });
+
+    await waitFor(() => createSessionCalls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(useSessionUIStore.getState().currentSessionId).toBeNull();
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+    expect(useSessionUIStore.getState().newSessionDraft.draftId).toBe(52);
+
+    rejectGoal(new Error('goal not written'));
+    await sent;
+  });
+
+  test('a background goal send still opens its session when the user stayed on the draft', async () => {
+    const draftSnapshot = { open: true, draftId: 61, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+
+    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
+    await waitFor(() => createSessionCalls.length === 1);
+    await waitFor(() => useSessionUIStore.getState().currentSessionId === 'session-materialized');
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false);
+
+    rejectGoal(new Error('goal not written'));
+    await sent;
   });
 
   test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {

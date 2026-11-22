@@ -2693,11 +2693,19 @@ process.exit(safe ? 0 : 1);
   });
 
   it('reports a confirmed fetch timeout as cancelled with TIMEOUT', async () => {
-    const setupValue = setup({ spawnResults: [{ manual: true }], timeoutMs: 1 });
-    const plan = await setupValue.service.plan(request('fetch'));
-    await expect(setupValue.service.execute(plan.operationId)).resolves.toMatchObject({
-      state: 'cancelled', error: { code: 'TIMEOUT' },
-    });
+    vi.useFakeTimers();
+    try {
+      const setupValue = setup({ spawnResults: [{ manual: true }], timeoutMs: 1_000 });
+      const plan = await setupValue.service.plan(request('fetch'));
+      const running = setupValue.service.execute(plan.operationId);
+      await vi.waitFor(() => expect(setupValue.calls.some((call) => call.args.includes('fetch'))).toBe(true));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(running).resolves.toMatchObject({
+        state: 'cancelled', error: { code: 'TIMEOUT' },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('applies the operation deadline while authority validation is pending', async () => {

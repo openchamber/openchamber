@@ -1,5 +1,6 @@
 import { isSkillTool, toolDescription } from '@/lib/opencode/tools';
 import React from 'react';
+import { EntryTimes } from '../EntryTimes';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
@@ -358,6 +359,8 @@ const StaticToolRowInner: React.FC<{
     const isSkillGroup = isSkillTool(normalizedToolName);
 
     return (
+        <>
+        {firstPart ? <EntryTimes part={firstPart} /> : null}
         <div
             // oc-static-tool-row: on touch devices mobile.css raises this to the
             // same 36px floor the [role="button"] expandable/reasoning rows get,
@@ -458,6 +461,7 @@ const StaticToolRowInner: React.FC<{
                 </Text>
             ) : null}
         </div>
+        </>
     );
 };
 

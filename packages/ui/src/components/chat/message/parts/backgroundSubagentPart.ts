@@ -27,14 +27,14 @@ export const toBackgroundSubagentPart = (part: ToolPart, phase: BackgroundSubage
 
     switch (phase.kind) {
         case 'running':
-            return { ...part, state: { status: 'running', input, metadata, time: { start } } };
+            return { ...part, displayTime: { start }, state: { status: 'running', input, metadata, time: { start } } };
         case 'finished': {
             const { run } = phase;
             const time = { start, end: Math.max(start, run.reportedAt) };
             if (run.state === 'error') {
-                return { ...part, state: { status: 'error', input, metadata, error: run.output, time } };
+                return { ...part, displayTime: { start, end: run.reportedAt }, state: { status: 'error', input, metadata, error: run.output, time } };
             }
-            return { ...part, state: { ...state, output: run.output, time } };
+            return { ...part, displayTime: { start, end: run.reportedAt }, state: { ...state, output: run.output, time } };
         }
         case 'unknown':
             return part;

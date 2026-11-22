@@ -76,11 +76,8 @@ const useCatalog = ({ models = CATALOG_MODELS, agents = CATALOG_AGENTS, config =
 
 const sessionCommandMock = vi.fn(async () => undefined);
 const commandListMock = vi.fn(async () => ({ data: [] }));
-globalThis.__openchamberCreateWorktreeMock = createWorktreeMock;
-globalThis.__openchamberGetWorktreeBootstrapStatusMock = getWorktreeBootstrapStatusMock;
 const defaultPrimaryWorktreeRoot = async (directory) => ({ root: directory === '/repo/worktrees/side-task' ? '/repo/app' : directory });
 const resolvePrimaryWorktreeRootMock = vi.fn(defaultPrimaryWorktreeRoot);
-globalThis.__openchamberResolvePrimaryWorktreeRootMock = resolvePrimaryWorktreeRootMock;
 
 let registerOpenChamberSessionRoutes;
 let createOpenChamberSessionService;
@@ -91,11 +88,14 @@ let createOpenCodeSessionMetadata;
 // headers the routes build.
 const clientOptions = [];
 
-vi.mock('@opencode/client', () => ({
-  OpenCode: {
-    make: (options) => {
-      clientOptions.push(options);
-      return {
+const createOpenCodeClientMock = (options) => {
+  const scopedOptions = {
+    ...options,
+    headers: { ...options.headers, 'x-opencode-directory': encodeURIComponent(options.directory ?? '') },
+    fetch: globalThis.fetch,
+  };
+  clientOptions.push(scopedOptions);
+  return {
         session: {
           create: sessionCreateMock,
           fork: sessionForkMock,
@@ -113,27 +113,8 @@ vi.mock('@opencode/client', () => ({
         model: { list: modelListMock },
         agent: { list: agentListMock },
         config: { get: configGetMock },
-      };
-    },
-  },
-}));
-
-vi.mock('../git/index.js', () => ({
-  createWorktree: (...args) => globalThis.__openchamberCreateWorktreeMock(...args),
-  getWorktreeBootstrapStatus: (...args) => globalThis.__openchamberGetWorktreeBootstrapStatusMock(...args),
-  resolvePrimaryWorktreeRoot: (...args) => globalThis.__openchamberResolvePrimaryWorktreeRootMock(...args),
-  // Only moving a session into a worktree reaches these; the route tests
-  // inject their own through the service dependencies.
-  removeWorktree: vi.fn(),
-  getBranches: vi.fn(),
-  stashPush: vi.fn(),
-  getPathsWithoutChanges: vi.fn(async () => []),
-  stashApply: vi.fn(),
-  stashDrop: vi.fn(),
-  listStashes: vi.fn(),
-  validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
-  resolveWorktreeTopLevel: vi.fn(async (directory) => ({ root: directory, prefix: '' })),
-}));
+  };
+};
 
 /**
  * Archive state is OpenChamber's own now, so the routes take a store rather
@@ -220,6 +201,20 @@ const createApp = (overrides = {}, options = {}) => {
   const archiveStore = overrides.archiveStore ?? createMemoryArchiveStore();
   const sessionMetadataStore = overrides.sessionMetadataStore ?? createMemorySessionMetadataStore();
   const broadcastGlobalUiEvent = overrides.broadcastGlobalUiEvent ?? vi.fn();
+  const gitDependencies = {
+    createWorktree: createWorktreeMock,
+    getWorktreeBootstrapStatus: getWorktreeBootstrapStatusMock,
+    resolvePrimaryWorktreeRoot: resolvePrimaryWorktreeRootMock,
+    removeWorktree: vi.fn(),
+    getBranches: vi.fn(),
+    stashPush: vi.fn(),
+    getPathsWithoutChanges: vi.fn(async () => []),
+    stashApply: vi.fn(),
+    stashDrop: vi.fn(),
+    listStashes: vi.fn(),
+    validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
+    resolveWorktreeTopLevel: vi.fn(async (directory) => ({ root: directory, prefix: '' })),
+  };
   registerOpenChamberSessionRoutes(app, {
     archiveStore,
     sessionMetadataStore,
@@ -232,6 +227,8 @@ const createApp = (overrides = {}, options = {}) => {
     waitForOpenCodeReady: vi.fn(async () => undefined),
     worktreeBootstrapStore,
     hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
+    createOpenCodeClient: createOpenCodeClientMock,
+    ...gitDependencies,
     ...overrides,
   });
   return { app, calls, archiveStore, sessionMetadataStore, broadcastGlobalUiEvent };
@@ -389,6 +386,7 @@ describe('openchamber session routes', () => {
           openCode: createOpenCodeSessionMetadata({
             buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
             getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test' }),
+            createOpenCodeClient: createOpenCodeClientMock,
           }),
         }),
       });
@@ -522,6 +520,7 @@ describe('openchamber session routes', () => {
           openCode: createOpenCodeSessionMetadata({
             buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
             getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test' }),
+            createOpenCodeClient: createOpenCodeClientMock,
           }),
         }),
       });
@@ -955,7 +954,8 @@ describe('openchamber session routes', () => {
     });
     sessionPromptMock.mockImplementationOnce(async () => {
       const options = clientOptions.at(-1);
-      await options.fetch(`${options.baseUrl}/api/session/ses_123/prompt`, { method: 'POST', body: '{"text":"Run this"}' });
+      const response = await options.fetch(`${options.baseUrl}/api/session/ses_123/prompt`, { method: 'POST', body: '{"text":"Run this"}' });
+      if (response.headers.get('content-type')?.includes('text/html')) throw new Error('OpenCode returned HTML instead of a prompt response');
     });
     try {
       const { app } = createApp();
@@ -1139,13 +1139,23 @@ describe('openchamber session routes', () => {
       validateDirectoryPath: async (directory) => ({ ok: true, directory }),
       buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
       getOpenCodeAuthHeaders: () => ({}),
+      createOpenCodeClient: createOpenCodeClientMock,
       waitForOpenCodeReady: vi.fn(async () => undefined),
       worktreeBootstrapStore,
+      getWorktreeBootstrapStatus: getWorktreeBootstrapStatusMock,
       hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
       archiveStore: createMemoryArchiveStore(),
       sessionMetadataStore: createMemorySessionMetadataStore(),
+      createWorktree: createWorktreeMock,
+      removeWorktree: vi.fn(async () => true),
+      getPathsWithoutChanges: vi.fn(async () => []),
+      stashPush: vi.fn(),
+      stashApply: vi.fn(),
+      stashDrop: vi.fn(),
+      listStashes: vi.fn(),
       getBranches: vi.fn(async () => ({ all: [], defaultBranches: {} })),
       resolveWorktreeTopLevel,
+      resolvePrimaryWorktreeRoot: resolvePrimaryWorktreeRootMock,
       validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
     });
 
@@ -1177,13 +1187,23 @@ describe('openchamber session routes', () => {
       validateDirectoryPath: async (directory) => ({ ok: true, directory }),
       buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
       getOpenCodeAuthHeaders: () => ({}),
+      createOpenCodeClient: createOpenCodeClientMock,
       waitForOpenCodeReady: vi.fn(async () => undefined),
       worktreeBootstrapStore,
+      getWorktreeBootstrapStatus: getWorktreeBootstrapStatusMock,
       hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
       archiveStore: createMemoryArchiveStore(),
       sessionMetadataStore: createMemorySessionMetadataStore(),
+      createWorktree: createWorktreeMock,
+      removeWorktree: vi.fn(async () => true),
+      getPathsWithoutChanges: vi.fn(async () => []),
+      stashPush: vi.fn(),
+      stashApply: vi.fn(),
+      stashDrop: vi.fn(),
+      listStashes: vi.fn(),
       getBranches: vi.fn(async () => ({ all: [], defaultBranches: {} })),
       resolveWorktreeTopLevel,
+      resolvePrimaryWorktreeRoot: resolvePrimaryWorktreeRootMock,
       validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
     });
 

@@ -6,6 +6,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -148,6 +149,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionMenuHintsI18n['zh-CN'],
   ...sessionErrorRecoveryI18n['zh-CN'],
   ...sidebarLayoutI18n['zh-CN'],
+  ...activityTimesI18n['zh-CN'],
   ...projectKnowledgeI18n['zh-CN'],
   ...linearPanelI18n['zh-CN'],
   ...routingI18n['zh-CN'],
@@ -2568,6 +2570,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': '故障转移自',
   'chat.messageBody.modelChanged.notice': '模型已更改：{from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': '模型已更改：{from} → {to}（{reason}）',
+  'chat.messageBody.modelChanged.preferPrevious': '优先使用上一个',
+  'chat.messageBody.modelChanged.preferPreviousTitle': '让模型池在一天内优先使用 {model}',
+  'chat.currentModel.label': '当前模型：{model}',
+  'chat.currentModel.labelWithPool': '当前模型：{model}（来自模型池 {pool}）',
+  'chat.currentModel.menu.openHint': '点击选择模型',
+  'chat.currentModel.menu.timing': '切换',
+  'chat.currentModel.menu.directPickHelp': '直接选择会停止模型池的故障转移，直到你返回模型池。',
+  'chat.currentModel.timing.immediately': '立即（重新开始正在进行的回复）',
+  'chat.currentModel.timing.nextStep': '在下一步',
+  'chat.currentModel.timing.nextInput': '随下一条消息',
+  'chat.currentModel.menu.members': '模型池 {pool} 中的模型',
+  'chat.currentModel.menu.returnToPool': '返回模型池 {pool}',
+  'chat.currentModel.toast.failed': '无法切换模型',
   'chat.generatedResult.actions.copy': '复制',
   'chat.generatedResult.actions.copied': '已复制',
   'chat.generatedResult.commit.title': '生成的提交消息',
@@ -3849,8 +3864,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': '保留这个',
   'multirun.overview.addModel.action': '添加模型',
   'multirun.overview.addModel.hint': '在此运行中让另一个模型处理同一提示词',
-  'chat.parallel.settings.whereShared': '项目目录',
-  'chat.parallel.settings.whereSharedHint': '所有运行都在你的工作副本中进行。最适合提问和调研。',
+  'chat.parallel.settings.whereShared': '共享目录',
+  'chat.parallel.settings.whereSharedHint': '所有运行都在此草稿选定的目录中进行。最适合提问和调研。',
   'chat.parallel.settings.whereWorktrees': '独立工作树',
   'chat.parallel.settings.whereWorktreesHint': '每次运行使用自己的分支，代码更改不会冲突。保留最好的那个。',
   'chat.parallel.settings.baseBranchTitle': '基础分支',
