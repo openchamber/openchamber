@@ -9,7 +9,7 @@ type VaultCredential = { tokenReference?: string | undefined; tokenReadError?: s
 export type VaultAccountStatusFields = { tokenReadError?: string };
 
 /** A GitLab request refused the token (`GitLabRequestError` kind, network.ts). */
-export const isInvalidTokenFailure = (error: unknown) => error instanceof Error && 'kind' in error && error.kind === 'invalid-token';
+export const isInvalidTokenFailure = (error: unknown): error is Error & { kind: 'invalid-token' } => error instanceof Error && 'kind' in error && error.kind === 'invalid-token';
 
 const vaultError = (status: number, body: { error: string; code: string; reason?: string }) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
@@ -38,7 +38,7 @@ export const vaultAccountProblem = (active: VaultCredential, refused = false) =>
 export const verifyVaultToken = async (
   reference: string,
   verify: (token: string) => Promise<GitLabUser>,
-  isInvalidToken: (error: unknown) => boolean,
+  isInvalidToken: (error: Error) => boolean,
 ) => {
   const tokenReference = reference.trim();
   if (!isVaultReference(tokenReference)) {
@@ -49,7 +49,7 @@ export const verifyVaultToken = async (
   try {
     return { tokenReference, user: await verify(read.value) };
   } catch (error) {
-    if (isInvalidToken(error)) throw vaultError(401, { error: 'GitLab refused the token from 1Password', code: 'INVALID_TOKEN' });
+    if (error instanceof Error && isInvalidToken(error)) throw vaultError(401, { error: 'GitLab refused the token from 1Password', code: 'INVALID_TOKEN' });
     throw error;
   }
 };
@@ -59,9 +59,9 @@ export const createAddFromVault = <Credential>({ verify, setAccount, announce, i
   verify: (origin: string, token: string) => Promise<GitLabUser>;
   setAccount: (origin: string, input: { tokenReference: string; user: GitLabUser; source: 'pat' }) => Promise<Credential>;
   announce: (origin: string, credential: Credential, user: GitLabUser) => Promise<void>;
-  isInvalidToken: (error: unknown) => boolean;
+  isInvalidToken: (error: Error) => boolean;
 }) => async ({ instance: origin, reference }: { instance: string; reference: string }) => {
-  const { tokenReference, user } = await verifyVaultToken(typeof reference === 'string' ? reference : '', (token) => verify(origin, token), isInvalidToken);
+  const { tokenReference, user } = await verifyVaultToken(reference, (token) => verify(origin, token), isInvalidToken);
   await announce(origin, await setAccount(origin, { tokenReference, user, source: 'pat' }), user);
   return { connected: true, user };
 };

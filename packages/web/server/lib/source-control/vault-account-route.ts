@@ -8,7 +8,7 @@ import type { Request, Response } from '../shared/http-contracts.js';
 export const vaultAccountRoute = ({ load, requestInstance, fail }: {
   load: () => Promise<RegisteredProvider>;
   requestInstance: (req: Pick<Request, 'query'>) => string;
-  fail: (res: Response, error: unknown, impl: RegisteredProvider | undefined) => Response;
+  fail: (res: Response, error: Error, impl: RegisteredProvider | undefined) => Response;
 }) => async (req: Request, res: Response) => {
   let impl: RegisteredProvider | undefined;
   try {
@@ -22,7 +22,7 @@ export const vaultAccountRoute = ({ load, requestInstance, fail }: {
     const reference = hasProperties(req.body) ? req.body.reference : undefined;
     return res.json(await impl.auth.addFromVault({ instance, reference: isString(reference) ? reference : '' }));
   } catch (error) {
-    return fail(res, error, impl);
+    return fail(res, error instanceof Error ? error : new Error(String(error)), impl);
   }
 };
 

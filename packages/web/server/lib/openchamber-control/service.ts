@@ -1,5 +1,5 @@
 import { asNonEmptyString, isBoolean, isPlainObject, isRecord, isString } from '../shared/guards.js';
-import { projectSettingsSchema, type ControlProject, type ProjectSettings, type UpdatedProject } from './project-settings.js';
+import { projectSettingsSchema, type ControlProject, type UpdatedProject } from './project-settings.js';
 import { extractTextMessages, type MessageRecord, type TextMessage } from './session-text-messages.js';
 import path from 'node:path';
 import nodeFsPromises from 'node:fs/promises';
