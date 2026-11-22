@@ -276,6 +276,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
             <WorkStatusRow
               icon="database-2"
               label={t('chat.workStatus.replyCacheHit')}
+              tooltip={t('chat.workStatus.replyCacheHitDescription')}
               value={<WorkStatusValue>{`${lastReplyCacheHit.toFixed(1)}%`}</WorkStatusValue>}
             />
           ) : null}
