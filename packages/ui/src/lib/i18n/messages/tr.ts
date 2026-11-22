@@ -1,4 +1,5 @@
 import { settingsDict } from './tr.settings';
+import { multirunWorkflowI18n } from './multirun-workflow.i18n';
 import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -83,6 +84,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} alt agent kullanıldı',
   'sessions.sidebar.projectAction.active': 'Proje eylemi çalışıyor',
   ...settingsDict,
+  ...multirunWorkflowI18n.tr,
   ...messagingI18n.tr,
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,

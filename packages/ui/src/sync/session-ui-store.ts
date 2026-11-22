@@ -94,6 +94,11 @@ import { getRuntimeKey, isTransientRuntimeKey } from "@/lib/runtime-switch"
 import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession } from "./last-session-cache"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
+import { getMultiRunIdentity } from "@/lib/multirun/identity"
+import { buildRunParentContext } from "@/lib/multirun/parentContext"
+import { loadLaneLastReply } from "@/lib/multirun/laneData"
+import { useGlobalSessionStatusStore } from "./global-session-status"
+import { useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 
 export type { AttachedFile }
 
@@ -209,6 +214,23 @@ export async function routeMessage(params: {
   }
   const contextFiles = (params.additionalParts ?? []).flatMap((part) => part.files ?? [])
   const sendFiles = [...(params.files ?? []), ...contextFiles]
+
+  const ownSession = getDirectoryState(requestDirectory)?.session.find((session) => session.id === params.sessionId)
+    ?? useGlobalSessionsStore.getState().entityById.get(params.sessionId)
+  if (params.inputMode !== "shell" && ownSession && getMultiRunIdentity(ownSession)?.role === "parent") {
+    const sessions = new Map(useGlobalSessionsStore.getState().activeSessions.map((session) => [session.id, session]))
+    for (const session of getAllSyncSessions()) sessions.set(session.id, session)
+    const parentContext = await buildRunParentContext({ parent: ownSession, sessions: sessions.values() }, {
+      readSession: (id, directory) => opencodeClient.getSession(id, directory),
+      readReply: loadLaneLastReply,
+      isBusy: (id) => useGlobalSessionStatusStore.getState().activeSessionIds.has(id),
+      blocking: (id) => {
+        const requests = useGlobalBlockingRequestsStore.getState().bySession.get(id)
+        return requests?.permissions.length ? "permission" : requests?.forms.length || requests?.pages.length ? "question" : null
+      },
+    })
+    contextItems.push({ text: parentContext, metadata: undefined })
+  }
 
   if (params.inputMode === "shell") {
     await opencodeClient.shellSession({

@@ -24,7 +24,7 @@ async function withComposer(run: (input: {
   capture: Capture;
   render: () => Promise<void>;
   launches: CreateMultiRunParams[];
-}) => Promise<void>) {
+}) => Promise<void>, initialMessage = 'Fix the login') {
   const dom = installHookTestDom();
   const root = createRoot(dom.container);
   const capture: Capture = { composer: null };
@@ -39,7 +39,7 @@ async function withComposer(run: (input: {
       return { groupSlug: 'g', groupKey: 'id:g', sessionIds: ['a', 'b'], firstSessionId: 'a', failedCount: 0 };
     },
   });
-  let message = 'Fix the login';
+  let message = initialMessage;
   const Harness = () => {
     capture.composer = useParallelComposer({
       enabled: true,
@@ -146,5 +146,38 @@ describe('useParallelComposer worktree policy', () => {
       await act(async () => { await Promise.all([launch?.(), launch?.()]); });
       expect(launches).toHaveLength(1);
     });
+  });
+});
+
+describe('generated prompt variants', () => {
+  // Oracle: selected candidates become ordinary variants and preserve the
+  // original text. Each added variant owns its run-model array independently.
+  test('retains the original and admits exactly the chosen prompts with independent run models', async () => {
+    useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'm', providers: [] });
+    await withComposer(async ({ capture, render }) => {
+      await render();
+      await act(async () => capture.composer?.enter());
+      await act(async () => capture.composer?.addGeneratedVariants(['Selected B', 'Selected C']));
+      expect(capture.composer?.state?.variants.map((variant) => variant.text)).toEqual(['Fix the login', 'Selected B', 'Selected C']);
+      expect(capture.composer?.state?.active).toBe(1);
+      expect(capture.composer?.getActivePrompt()).toBe('Selected B');
+      expect(capture.composer?.state?.isolate).toBe(true);
+      await act(async () => capture.composer?.incrementModel(0));
+      expect(capture.composer?.state?.variants.map((variant) => variant.models[0]?.count)).toEqual([1, 2, 1]);
+    });
+  });
+
+  test('new prompts replace only the empty placeholder and empty selection changes nothing', async () => {
+    useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'm', providers: [] });
+    await withComposer(async ({ capture, render }) => {
+      await render();
+      await act(async () => capture.composer?.enter());
+      const before = capture.composer?.state;
+      await act(async () => capture.composer?.addGeneratedVariants(['', ' ']));
+      expect(capture.composer?.state).toBe(before);
+      await act(async () => capture.composer?.addGeneratedVariants(['Selected A', 'Selected B']));
+      expect(capture.composer?.state?.variants.map((variant) => variant.text)).toEqual(['Selected A', 'Selected B']);
+      expect(capture.composer?.state?.active).toBe(0);
+    }, '');
   });
 });

@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './ja.settings';
+import { multirunWorkflowI18n } from './multirun-workflow.i18n';
 import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -84,6 +85,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} サブエージェントを使用',
   'sessions.sidebar.projectAction.active': 'プロジェクトアクション実行中',
   ...settingsDict,
+  ...multirunWorkflowI18n.ja,
   ...messagingI18n.ja,
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber はここで Git 転送の状態を保存できません。サイトのストレージを許可して再読み込みしてください。それまで push と pull は一時停止します。',
