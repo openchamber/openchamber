@@ -201,7 +201,8 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
     connected: z.literal(true),
     defaultProjectPath: optionalText,
     teams: listOf(z.object({ id: text, key: optionalText, name: text, projectPath: optionalText })),
-  }).transform(({ defaultProjectPath, teams }) => ({ connected: true as const, defaultProjectPath, containers: teams })));
+    teamsMore: z.boolean().optional().catch(undefined),
+  }).transform(({ defaultProjectPath, teams, teamsMore }) => ({ connected: true as const, defaultProjectPath, containers: teams, containersMore: teamsMore })));
 
   return {
     authStatus: (provider) => call(provider, '/auth/status', GET, authStatusSchema, 'Failed to load Linear status'),

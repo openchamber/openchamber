@@ -404,7 +404,7 @@ describe('literal text a person typed', () => {
 // Cases from the fork's Markdown pipeline (markdownCore.test.ts) that the
 // Streamdown renderer has to keep.
 describe('fork Markdown cases on Streamdown', () => {
-  const hrefs = (body: HTMLElement): string[] => Array.from(body.querySelectorAll('a')).map((anchor) => decodeURI(anchor.getAttribute('href') ?? ''));
+  const hrefs = (body: ReturnType<typeof render>): string[] => Array.from(body.querySelectorAll('a')).map((anchor) => decodeURI(anchor.getAttribute('href') ?? ''));
   // CPU time, so other processes holding the cores do not count.
   const cpuMs = (run: () => void): number => {
     const start = process.cpuUsage();

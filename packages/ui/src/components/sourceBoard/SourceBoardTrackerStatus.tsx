@@ -7,6 +7,7 @@ import { toast } from '@/components/ui';
 import {
     DropdownMenu,
     DropdownMenuContent,
+    DropdownMenuLabel,
     DropdownMenuRadioGroup,
     DropdownMenuRadioItem,
     DropdownMenuTrigger,
@@ -23,28 +24,31 @@ const compareStates = (left: TrackerWorkflowState, right: TrackerWorkflowState):
     || left.name.localeCompare(right.name)
 );
 
-function useContainerStates(provider: string, containerId: string | null, enabled: boolean): TrackerWorkflowState[] {
+type ContainerStates = { states: TrackerWorkflowState[]; statesMore: boolean };
+const NO_STATES: ContainerStates = { states: [], statesMore: false };
+
+function useContainerStates(provider: string, containerId: string | null, enabled: boolean): ContainerStates {
     const { trackers } = useRuntimeAPIs();
-    const [loaded, setLoaded] = React.useState<{ key: string; states: TrackerWorkflowState[] } | null>(null);
+    const [loaded, setLoaded] = React.useState<{ key: string } & ContainerStates | null>(null);
     const key = `${provider}:${containerId ?? ''}`;
     React.useEffect(() => {
         if (!enabled || !containerId || !trackers) return;
         let cancelled = false;
         void trackers.states(provider, containerId)
             .then((result) => {
-                if (!cancelled && result.connected) setLoaded({ key, states: [...result.states].sort(compareStates) });
+                if (!cancelled && result.connected) setLoaded({ key, states: [...result.states].sort(compareStates), statesMore: result.statesMore === true });
             })
             .catch(() => undefined);
         return () => { cancelled = true; };
     }, [containerId, enabled, key, provider, trackers]);
-    return loaded && loaded.key === key ? loaded.states : [];
+    return loaded && loaded.key === key ? loaded : NO_STATES;
 }
 
 export const SourceBoardTrackerStatus: React.FC<{ item: TrackerItemSummary; onChanged: () => void }> = ({ item, onChanged }) => {
     const { t } = useI18n();
     const { trackers } = useRuntimeAPIs();
     const canUpdate = useTrackerDescriptor(item.provider).capabilities.stateUpdate;
-    const states = useContainerStates(item.provider, item.container?.id ?? null, canUpdate);
+    const { states, statesMore } = useContainerStates(item.provider, item.container?.id ?? null, canUpdate);
     const [updating, setUpdating] = React.useState(false);
     const currentId = item.state?.id ?? null;
     const look = trackerStateGlyph(item.state?.category);
@@ -104,6 +108,11 @@ export const SourceBoardTrackerStatus: React.FC<{ item: TrackerItemSummary; onCh
                         );
                     })}
                 </DropdownMenuRadioGroup>
+                {statesMore ? (
+                    <DropdownMenuLabel className="typography-micro font-normal text-muted-foreground">
+                        {t('sourceBoard.linear.statesMore')}
+                    </DropdownMenuLabel>
+                ) : null}
             </DropdownMenuContent>
         </DropdownMenu>
     );

@@ -40,8 +40,10 @@ const base = createWebAPIs();
 if (!base.trackers) throw new Error('The web runtime serves trackers');
 const apis: RuntimeAPIs = {
     ...base,
-    trackers: { ...base.trackers, states: async () => ({ connected: true, states: arriving }) },
+    trackers: { ...base.trackers, states: async () => ({ connected: true, states: arriving, statesMore }) },
 };
+
+let statesMore: boolean | undefined;
 
 const passthrough = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
 const actualDropdownMenu = await import('@/components/ui/dropdown-menu');
@@ -51,6 +53,7 @@ mock.module('@/components/ui/dropdown-menu', () => ({
     DropdownMenuTrigger: passthrough,
     DropdownMenuContent: passthrough,
     DropdownMenuRadioGroup: passthrough,
+    DropdownMenuLabel: passthrough,
     DropdownMenuRadioItem: ({ children, value }: React.PropsWithChildren<{ value: string }>) => <div data-state-id={value}>{children}</div>,
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
@@ -109,4 +112,56 @@ describe('SourceBoardTrackerStatus menu order', () => {
             }
         }
     });
+});
+
+// The tracker's statesMore says the team holds more states than the page it
+// answered with: the menu says the list is incomplete instead of passing the
+// first page off as every state, and lists what did arrive.
+describe('SourceBoardTrackerStatus incomplete state list', () => {
+    const NOTE = 'This list is incomplete: Linear has more states than could be fetched.';
+    const renderMenu = async (more: boolean | undefined): Promise<string> => {
+        statesMore = more;
+        const happyWindow = new Window({ url: 'http://localhost' });
+        const names = ['window', 'document', 'Node', 'Element', 'HTMLElement', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+        const previous = names.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+        const values = {
+            window: happyWindow,
+            document: happyWindow.document,
+            Node: happyWindow.Node,
+            Element: happyWindow.Element,
+            HTMLElement: happyWindow.HTMLElement,
+            IS_REACT_ACT_ENVIRONMENT: true,
+        };
+        for (const name of names) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
+        const container = document.createElement('div');
+        document.body.appendChild(container);
+        const root = createRoot(container);
+        try {
+            await act(async () => root.render(<I18nProvider><RuntimeAPIContext.Provider value={apis}><SourceBoardTrackerStatus item={issue} onChanged={() => undefined} /></RuntimeAPIContext.Provider></I18nProvider>));
+            await act(async () => { await Promise.resolve(); });
+            return container.textContent ?? '';
+        } finally {
+            await act(async () => root.unmount());
+            happyWindow.close();
+            statesMore = undefined;
+            for (const [name, descriptor] of previous) {
+                if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+                else Reflect.deleteProperty(globalThis, name);
+            }
+        }
+    };
+
+    test('a team with more states than one page shows the truncation note', async () => {
+        const text = await renderMenu(true);
+        expect(text).toContain(NOTE);
+        expect(text).toContain('Backlog');
+    });
+
+    for (const more of [false, undefined] as const) {
+        test(`statesMore ${String(more)} leaves the menu unchanged`, async () => {
+            const text = await renderMenu(more);
+            expect(text).not.toContain(NOTE);
+            expect(text).toContain('Backlog');
+        });
+    }
 });

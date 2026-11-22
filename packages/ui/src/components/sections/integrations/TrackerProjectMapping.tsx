@@ -12,11 +12,12 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import type { TrackerAPI, TrackerContainerMapping, TrackerMappingResult, TrackerProviderId } from '@/lib/api/types';
 import { trackerSettingsCopy } from './trackerSettingsCopy';
+import { trackerMappingContainersTruncated, trackerMappingShowsEmptyContainersNote } from '@/lib/trackers/mappingNotes';
 
-type MappingView = { defaultProjectPath: string | null; containers: TrackerContainerMapping[] };
+type MappingView = { defaultProjectPath: string | null; containers: TrackerContainerMapping[]; containersMore?: boolean };
 
 const toView = (result: TrackerMappingResult): MappingView | null => (
-  result.connected ? { defaultProjectPath: result.defaultProjectPath, containers: result.containers } : null
+  result.connected ? { defaultProjectPath: result.defaultProjectPath, containers: result.containers, containersMore: result.containersMore } : null
 );
 
 const NONE = '__none__';
@@ -163,7 +164,10 @@ export function TrackerProjectMapping({
         title={t(copy.containers)}
         info={t(copy.containersInfo)}
       >
-        {mapping.containers.length === 0 ? (
+        {copy.containersTruncated && trackerMappingContainersTruncated(mapping) ? (
+          <p className="text-xs text-muted-foreground">{t(copy.containersTruncated)}</p>
+        ) : null}
+        {trackerMappingShowsEmptyContainersNote(mapping) ? (
           <p className="text-xs text-muted-foreground">
             {t(copy.emptyContainers, { provider })}
           </p>

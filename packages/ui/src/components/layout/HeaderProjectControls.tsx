@@ -10,6 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useObserveProjectActionRuns, useProjectActions } from './projectActionsRunnerContext';
 import { ProjectActionRunIndicator } from './ProjectActionRunIndicator';
+import { ProjectActionDescription } from './ProjectActionDescription';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
@@ -75,6 +76,7 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
           <TooltipContent side="bottom">
             <div className="flex flex-col gap-0.5">
               <span>{label}</span>
+              <ProjectActionDescription action={shown} />
               <span className="typography-micro text-muted-foreground">
                 <TooltipLabelWithShortcut label={t('projectActions.header.allActions')} shortcut={allActionsShortcut} />
               </span>

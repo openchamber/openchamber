@@ -233,7 +233,15 @@ describe('Linear tracker over the Linear libraries', () => {
         { id: 's-review', name: 'In Review', category: 'in-progress', position: 2 },
         { id: 's-done', name: 'Done', category: 'done', position: 0 },
       ],
+      statesMore: false,
     });
+  });
+
+  it('says when the team holds more states than the page it read', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: { team: { states: { nodes: [{ id: 's-todo', name: 'Todo', type: 'unstarted', position: 0 }], pageInfo: { hasNextPage: true } } } },
+    })));
+    expect(await tracker.states('team-eng')).toMatchObject({ connected: true, statesMore: true });
   });
 
   it('returns live summaries with the category and, for older clients, the Linear type', async () => {
@@ -270,8 +278,17 @@ describe('Linear tracker over the Linear libraries', () => {
       connected: true,
       defaultProjectPath: '/repo',
       containers: [{ id: 'team-eng', key: 'ENG', name: 'Engineering', projectPath: '/eng' }],
+      containersMore: false,
     });
     expect((await tracker.mapping.get()).containers[0].projectPath).toBe('/eng');
+  });
+
+  it('says when Linear holds more teams than the pages it read', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: { teams: {
+      nodes: [{ id: 'team-eng', key: 'ENG', name: 'Engineering' }],
+      pageInfo: { hasNextPage: true, endCursor: null },
+    } } })));
+    expect(await tracker.mapping.get()).toMatchObject({ connected: true, containersMore: true });
   });
 
   it('round-trips the session comments preference', async () => {

@@ -309,6 +309,28 @@ describe('HeaderProjectAction lifecycle', () => {
     expect(primaryLabel()).toContain('Auto-discover dev server');
   });
 
+  // The header button shows only an icon, so its tooltip carries the action's
+  // whole name, and auto-discovery says what it does after its name.
+  test('the tooltip names the whole action', async () => {
+    mockedDeviceInfo.isMobile = false;
+    const longName = 'Build every package in the workspace and then run the whole test suite';
+    mockedActionsState.actions = [{ id: 'build', name: longName, command: 'bun run build' }];
+    await renderButton();
+    const tooltipText = () => runButton()?.nextElementSibling?.textContent ?? '';
+    expect(tooltipText()).toContain(longName);
+    expect(tooltipText()).not.toContain('Automatically discover and run the development server');
+  });
+
+  test('auto-discovery names itself first in its tooltip and what it does after', async () => {
+    mockedDeviceInfo.isMobile = false;
+    mockedActionsState.actions = [];
+    await renderButton();
+    const tooltipText = () => runButton()?.nextElementSibling?.textContent ?? '';
+    expect(tooltipText()).toContain('Auto-discover dev server');
+    expect(tooltipText().indexOf('Automatically discover and run the development server'))
+      .toBeGreaterThan(tooltipText().indexOf('Auto-discover dev server'));
+  });
+
   test('auto-discovery does not run an untrusted shared dev action when trust is skipped', async () => {
     mockedDeviceInfo.isMobile = false;
     mockedActionsState.actions = [{ id: 'dev', name: 'Dev server', command: 'bun run dev', source: 'shared' }];
