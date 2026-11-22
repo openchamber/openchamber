@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { generatePromptCandidates, parsePromptCandidates, selectPromptCandidates } from './promptCandidates';
+import { OpencodeApiError } from '@/lib/opencode/client';
 
 // Oracle: the declared candidate JSON schema and the explicit selected-ID set.
 test('accepts variations and new prompts and preserves complete prompt text', () => {
@@ -31,8 +32,18 @@ test('generates with each chosen model, forwards its effort, and preserves succe
   expect(calls).toEqual(['good', 'bad']);
   expect(result.candidates).toHaveLength(1);
   expect(result.candidates[0].model).toEqual(models[0]);
-  expect(result.failedModels).toEqual([models[1]]);
+  expect(result.failures).toEqual([{ model: models[1], reason: 'generation' }]);
   expect(selectPromptCandidates(result.candidates, new Set())).toEqual([]);
+});
+
+test('project-only model failure names server-wide unavailability while retaining successful candidates', async () => {
+  const models = [{ providerID: 'project', id: 'only-here' }, { providerID: 'global', id: 'available' }];
+  const result = await generatePromptCandidates({ original: 'Original', description: 'Two variations', models, directory: '/repo' }, async (_prompt, options) => {
+    if (options?.model?.providerID === 'project') throw new OpencodeApiError('generate.text', 'Model unavailable: project/only-here', { status: 400 });
+    return JSON.stringify({ candidates: [{ title: 'Available', text: 'Keep the successful prompt', kind: 'variation' }] });
+  });
+  expect(result.failures).toEqual([{ model: models[0], reason: 'model-unavailable' }]);
+  expect(result.candidates.map((candidate) => candidate.text)).toEqual(['Keep the successful prompt']);
 });
 
 test('supports new prompts without an original and multiselects only chosen candidates', async () => {

@@ -9,6 +9,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { generatePromptCandidates, selectPromptCandidates, type PromptCandidate } from '@/lib/multirun/promptCandidates';
 import { ModelMultiSelect, type ModelSelectionWithId } from './ModelMultiSelect';
 import { BusyDots } from '@/components/ui/busy-dots';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const draftScope = () => {
   const draft = useSessionUIStore.getState().newSessionDraft;
@@ -29,26 +30,30 @@ function CandidateReview({ original, directory, initialModels, onUse, onClose }:
   const [candidates, setCandidates] = React.useState<PromptCandidate[]>([]);
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = React.useState(false);
-  const [failed, setFailed] = React.useState(false);
+  const [failure, setFailure] = React.useState<{ kind: 'models'; models: string[] } | { kind: 'generation' } | null>(null);
   const generation = React.useRef(0);
   React.useEffect(() => () => { generation.current += 1; }, []);
   const generate = async () => {
     if (busy || !description.trim() || models.length === 0) return;
     const epoch = ++generation.current;
     setBusy(true);
-    setFailed(false);
+    setFailure(null);
     try {
       const result = await generatePromptCandidates({ original, description, directory, models: models.map((model) => ({ providerID: model.providerID, id: model.modelID, variant: model.variant })) });
       if (generation.current !== epoch || draftScope() !== scope) return;
       setCandidates((current) => [...current, ...result.candidates]);
-      setFailed(result.failedModels.length > 0);
+      const unavailable = result.failures.filter((item) => item.reason === 'model-unavailable');
+      setFailure(unavailable.length > 0 ? { kind: 'models', models: unavailable.map(({ model }) => `${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ''}`) }
+        : result.failures.length > 0 ? { kind: 'generation' } : null);
     } catch {
-      if (generation.current === epoch) setFailed(true);
+      if (generation.current === epoch) setFailure({ kind: 'generation' });
     } finally {
       if (generation.current === epoch) setBusy(false);
     }
   };
   const chosen = selectPromptCandidates(candidates, selected);
+  const statusText = failure?.kind === 'models' ? t('multirun.prompts.modelsUnavailable', { models: failure.models.join(', ') })
+    : failure ? t('multirun.prompts.failed') : busy ? t('multirun.prompts.generating') : '';
   return <>
     <DialogHeader>
       <DialogTitle>{t('multirun.prompts.title')}</DialogTitle>
@@ -59,7 +64,10 @@ function CandidateReview({ original, directory, initialModels, onUse, onClose }:
       <ModelMultiSelect selectedModels={models} onAdd={(model) => setModels((current) => [...current, model])} onRemove={(index) => setModels((current) => current.filter((_, i) => i !== index))} onUpdate={(index, model) => setModels((current) => current.map((item, i) => i === index ? model : item))} />
       <Button disabled={busy || !description.trim() || models.length === 0 || !directory} onClick={() => void generate()}>{t('multirun.prompts.generate')}</Button>
     </div>
-    <p className="h-5 truncate typography-meta text-muted-foreground" role={failed ? 'alert' : 'status'}>{failed ? t('multirun.prompts.failed') : busy ? <>{t('multirun.prompts.generating')}<BusyDots /></> : ''}</p>
+    <Tooltip>
+      <TooltipTrigger asChild><p className="h-5 truncate typography-meta text-muted-foreground" role={failure ? 'alert' : 'status'}>{statusText}{busy ? <BusyDots /> : null}</p></TooltipTrigger>
+      {statusText ? <TooltipContent side="top" className="max-w-lg">{statusText}</TooltipContent> : null}
+    </Tooltip>
     <div className="flex h-64 flex-col gap-2 overflow-y-auto">
       {candidates.map((candidate) => <div key={candidate.id} className="oc-tile shrink-0 rounded-lg p-3">
         <div className="flex items-center gap-2">

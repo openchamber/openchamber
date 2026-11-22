@@ -222,6 +222,37 @@ session-registration store. Importing creation back into that store through
 message routing caused an import-order crash. Keeping the read module independent
 of registration makes initialization safe from either entry point.
 
+## Prompt-candidate runtime verification
+
+The opt-in `promptCandidates.integration.test.ts` exercises stateless generation
+through real OpenCode and a loopback-only synthetic OpenAI-compatible provider.
+It observes selected model aliases and effort at the provider, validates partial
+success and explicit candidate selection, and checks that source artifacts stay
+unchanged. It configures synthetic models in the isolated server's global
+configuration and one additional project-only model, whose failure is explicit.
+It creates no generation sessions. Normal test runs
+report this case as skipped.
+
+Run it with `MULTIRUN_TEST_URL` and `MULTIRUN_TEST_ROOT` pointing to a server
+started by `bun run profile:serve`. The test verifies that server's project scope
+before creating the synthetic provider. It uses no real provider credentials or
+paid model requests. The temporary global configuration is removed only if it
+still matches this test's write, and the provider is closed. Candidate quality
+still requires a real-model evaluation.
+
+### Why project-only models fail explicitly
+
+OpenCode's stateless Generate route deliberately uses `global.config`, even when
+the client sends a project directory. A model defined only in that project's
+configuration can appear in its picker but is unavailable to generation. The UI
+names the unavailable models and directs the user to configure them globally or
+choose other models; successful candidates remain selectable. Generation remains
+stateless. Retained generation sessions would be a separate product decision.
+`generatePromptCandidates` reports a per-model failure reason, distinguishing
+server-wide model unavailability from generation or candidate-format failure.
+The implementation options are tracked in
+[#2478](https://github.com/developing-today-forks/openchamber/issues/2478).
+
 ## Overview
 
 `components/multirun/RunOverview.tsx` is a main-area surface

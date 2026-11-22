@@ -1,5 +1,6 @@
 export const multirunWorkflowI18n = {
   en: {
+    'multirun.prompts.modelsUnavailable': 'Prompt generation uses server-wide settings. {models} are unavailable there. Configure them globally or choose other models.',
     'multirun.fusion.isolatedHint': 'Each model has its own checkout. Files and results remain available after fusion.',
     'multirun.fusion.noGit': 'Separate worktrees require Git. Choose Shared directory in launch settings to continue with shared files.',
     'multirun.cleanup.warning': 'Cleanup removes other worktrees. Git snapshots keep tracked and non-ignored files. Ignored files are discarded.',
@@ -37,6 +38,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Clean up others',
   },
   de: {
+    'multirun.prompts.modelsUnavailable': 'Die Prompt-Erzeugung verwendet serverweite Einstellungen. {models} sind dort nicht verfügbar. Konfiguriere sie global oder wähle andere Modelle.',
     'multirun.fusion.isolatedHint': 'Jedes Modell hat seinen eigenen Checkout. Dateien und Ergebnisse bleiben nach Fusion verfügbar.',
     'multirun.fusion.noGit': 'Separate Worktrees benötigen Git. Wähle Gemeinsamer Ordner in den Startoptionen, um mit gemeinsamen Dateien fortzufahren.',
     'multirun.cleanup.warning': 'Die Bereinigung entfernt andere Worktrees. Git-Snapshots erhalten verfolgte und nicht ignorierte Dateien. Ignorierte Dateien werden verworfen.',
@@ -74,6 +76,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Andere aufräumen',
   },
   fr: {
+    'multirun.prompts.modelsUnavailable': "La génération de prompts utilise les réglages globaux du serveur. {models} ne sont pas disponibles dans ces réglages. Configurez-les globalement ou choisissez d'autres modèles.",
     'multirun.fusion.isolatedHint': 'Chaque modèle a sa propre copie de travail. Les fichiers et résultats restent disponibles après la fusion.',
     'multirun.fusion.noGit': 'Les worktrees séparés nécessitent Git. Choisissez le dossier partagé dans les réglages de lancement pour continuer avec des fichiers communs.',
     'multirun.cleanup.warning': 'Le nettoyage supprime les autres worktrees. Les instantanés Git conservent les fichiers suivis et non ignorés. Les fichiers ignorés sont supprimés.',
@@ -111,6 +114,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Nettoyer les autres',
   },
   nl: {
+    'multirun.prompts.modelsUnavailable': 'Promptgeneratie gebruikt serverbrede instellingen. {models} zijn daar niet beschikbaar. Configureer ze globaal of kies andere modellen.',
     'multirun.fusion.isolatedHint': 'Elk model heeft een eigen werkkopie. Bestanden en resultaten blijven na fusion beschikbaar.',
     'multirun.fusion.noGit': 'Aparte worktrees vereisen Git. Kies Gedeelde map in de startinstellingen om met gedeelde bestanden verder te gaan.',
     'multirun.cleanup.warning': 'Opruimen verwijdert andere worktrees. Git-snapshots bewaren gevolgde en niet-genegeerde bestanden. Genegeerde bestanden worden verwijderd.',
@@ -148,6 +152,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Andere opruimen',
   },
   es: {
+    'multirun.prompts.modelsUnavailable': 'La generación de prompts usa la configuración global del servidor. {models} no están disponibles allí. Configúralos globalmente o elige otros modelos.',
     'multirun.fusion.isolatedHint': 'Cada modelo tiene su propia copia de trabajo. Los archivos y resultados siguen disponibles tras fusion.',
     'multirun.fusion.noGit': 'Los worktrees separados requieren Git. Elige Directorio compartido en los ajustes de lanzamiento para continuar con archivos comunes.',
     'multirun.cleanup.warning': 'La limpieza elimina otros worktrees. Las instantáneas Git conservan archivos rastreados y no ignorados. Los archivos ignorados se descartan.',
@@ -185,6 +190,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Limpiar las demás',
   },
   ja: {
+    'multirun.prompts.modelsUnavailable': 'プロンプトの生成にはサーバー全体の設定を使います。その設定では {models} を利用できません。グローバル設定に追加するか、別のモデルを選んでください。',
     'multirun.fusion.isolatedHint': '各モデルに独立した作業コピーを用意します。融合後もファイルと結果は利用できます。',
     'multirun.fusion.noGit': '別々の worktree には Git が必要です。共有ファイルで続けるには起動設定で共有ディレクトリを選んでください。',
     'multirun.cleanup.warning': '整理すると他の worktree を削除します。Git のスナップショットは追跡対象と無視されていないファイルを保持します。無視されたファイルは破棄されます。',
@@ -222,6 +228,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': '他の実行を整理',
   },
   ko: {
+    'multirun.prompts.modelsUnavailable': '프롬프트 생성은 서버 전체 설정을 사용합니다. {models} 모델은 해당 설정에서 사용할 수 없습니다. 전역으로 설정하거나 다른 모델을 선택하세요.',
     'multirun.fusion.isolatedHint': '각 모델은 독립된 작업 사본을 사용합니다. 융합 후에도 파일과 결과를 이용할 수 있습니다.',
     'multirun.fusion.noGit': '별도 worktree에는 Git이 필요합니다. 공유 파일로 계속하려면 실행 설정에서 공유 디렉터리를 선택하세요.',
     'multirun.cleanup.warning': '정리하면 다른 worktree가 제거됩니다. Git 스냅샷은 추적 파일과 무시되지 않은 파일을 유지합니다. 무시된 파일은 삭제됩니다.',
@@ -259,6 +266,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': '다른 실행 정리',
   },
   pl: {
+    'multirun.prompts.modelsUnavailable': 'Generowanie promptów używa ustawień całego serwera. Modele {models} nie są tam dostępne. Skonfiguruj je globalnie lub wybierz inne modele.',
     'multirun.fusion.isolatedHint': 'Każdy model ma własną kopię roboczą. Pliki i wyniki pozostają dostępne po fusion.',
     'multirun.fusion.noGit': 'Osobne worktree wymagają Git. Wybierz Wspólny katalog w ustawieniach uruchomienia, aby użyć wspólnych plików.',
     'multirun.cleanup.warning': 'Sprzątanie usuwa inne worktree. Migawki Git zachowują śledzone i nieignorowane pliki. Ignorowane pliki zostają usunięte.',
@@ -296,6 +304,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Uporządkuj pozostałe',
   },
   'pt-BR': {
+    'multirun.prompts.modelsUnavailable': 'A geração de prompts usa as configurações globais do servidor. {models} não estão disponíveis nelas. Configure-os globalmente ou escolha outros modelos.',
     'multirun.fusion.isolatedHint': 'Cada modelo tem sua própria cópia de trabalho. Arquivos e resultados permanecem disponíveis após fusion.',
     'multirun.fusion.noGit': 'Worktrees separados exigem Git. Escolha Diretório compartilhado nas configurações de início para continuar com arquivos comuns.',
     'multirun.cleanup.warning': 'A limpeza remove outros worktrees. Os snapshots Git mantêm arquivos rastreados e não ignorados. Arquivos ignorados são descartados.',
@@ -333,6 +342,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Limpar as demais',
   },
   uk: {
+    'multirun.prompts.modelsUnavailable': 'Генерація запитів використовує загальні налаштування сервера. Моделі {models} там недоступні. Налаштуйте їх глобально або виберіть інші моделі.',
     'multirun.fusion.isolatedHint': 'Кожна модель має власну робочу копію. Файли й результати залишаються доступними після fusion.',
     'multirun.fusion.noGit': 'Окремі worktree потребують Git. Виберіть Спільний каталог у налаштуваннях запуску, щоб продовжити зі спільними файлами.',
     'multirun.cleanup.warning': 'Очищення видаляє інші worktree. Знімки Git зберігають відстежувані та неігноровані файли. Ігноровані файли видаляються.',
@@ -370,6 +380,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Очистити інші',
   },
   'zh-CN': {
+    'multirun.prompts.modelsUnavailable': '提示词生成使用服务器全局设置，其中无法使用 {models}。请在全局配置中添加这些模型，或选择其他模型。',
     'multirun.fusion.isolatedHint': '每个模型都有独立的工作副本。融合后文件和结果仍可访问。',
     'multirun.fusion.noGit': '独立 worktree 需要 Git。要使用共享文件继续，请在启动设置中选择共享目录。',
     'multirun.cleanup.warning': '清理会移除其他 worktree。Git 快照会保留已跟踪和未被忽略的文件。被忽略的文件会丢弃。',
@@ -407,6 +418,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': '清理其他运行',
   },
   'zh-TW': {
+    'multirun.prompts.modelsUnavailable': '提示詞產生使用伺服器全域設定，其中無法使用 {models}。請在全域設定中新增這些模型，或選擇其他模型。',
     'multirun.fusion.isolatedHint': '每個模型都有獨立的工作副本。融合後檔案和結果仍可存取。',
     'multirun.fusion.noGit': '獨立 worktree 需要 Git。若要使用共用檔案繼續，請在啟動設定中選擇共用目錄。',
     'multirun.cleanup.warning': '清理會移除其他 worktree。Git 快照會保留已追蹤和未被忽略的檔案。被忽略的檔案會捨棄。',
@@ -444,6 +456,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': '清理其他執行',
   },
   tr: {
+    'multirun.prompts.modelsUnavailable': 'İstem üretimi sunucu genelindeki ayarları kullanır. {models} bu ayarlarda kullanılamıyor. Bunları genel olarak yapılandırın veya başka modeller seçin.',
     'multirun.fusion.isolatedHint': 'Her modelin ayrı bir çalışma kopyası vardır. Dosyalar ve sonuçlar fusion sonrasında erişilebilir kalır.',
     'multirun.fusion.noGit': 'Ayrı worktree için Git gerekir. Paylaşılan dosyalarla devam etmek için başlatma ayarlarında Paylaşılan dizin seçin.',
     'multirun.cleanup.warning': 'Temizleme diğer worktree kopyalarını kaldırır. Git anlık görüntüleri izlenen ve yok sayılmayan dosyaları korur. Yok sayılan dosyalar silinir.',
@@ -481,6 +494,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'Diğerlerini temizle',
   },
   ar: {
+    'multirun.prompts.modelsUnavailable': 'يستخدم توليد الطلبات إعدادات الخادم العامة. النماذج {models} غير متاحة فيها. أضفها إلى الإعدادات العامة أو اختر نماذج أخرى.',
     'multirun.fusion.isolatedHint': 'لكل نموذج نسخة عمل مستقلة. تبقى الملفات والنتائج متاحة بعد الدمج.',
     'multirun.fusion.noGit': 'تتطلب worktree المنفصلة Git. اختر المجلد المشترك في إعدادات التشغيل للمتابعة بملفات مشتركة.',
     'multirun.cleanup.warning': 'يزيل التنظيف worktree الأخرى. تحفظ لقطات Git الملفات المتتبعة وغير المتجاهلة. تُحذف الملفات المتجاهلة.',
@@ -518,6 +532,7 @@ export const multirunWorkflowI18n = {
     'multirun.membership.cleanup': 'تنظيف البقية',
   },
   he: {
+    'multirun.prompts.modelsUnavailable': 'יצירת בקשות משתמשת בהגדרות הכלליות של השרת. המודלים {models} אינם זמינים שם. הגדירו אותם ברמה הכללית או בחרו מודלים אחרים.',
     'multirun.fusion.isolatedHint': 'לכל מודל יש עותק עבודה משלו. הקבצים והתוצאות נשארים זמינים אחרי המיזוג.',
     'multirun.fusion.noGit': 'worktree נפרדים דורשים Git. בחרו תיקייה משותפת בהגדרות ההפעלה כדי להמשיך עם קבצים משותפים.',
     'multirun.cleanup.warning': 'הניקוי מסיר worktree אחרים. תמונות Git שומרות קבצים במעקב וקבצים שאינם מוחרגים. קבצים מוחרגים נמחקים.',
