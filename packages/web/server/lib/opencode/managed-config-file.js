@@ -103,9 +103,9 @@ export const createManagedConfigRuntime = ({
    * token are always present, so a tool enabled later in the session can still
    * call back without a restart.
    */
-  const buildManagedChildEnv = async ({ agentToolToken = null } = {}) => {
+  const buildManagedChildEnv = async ({ agentToolToken = null, listenerPort = null } = {}) => {
     const directories = await materializeEnabledPlugins();
-    const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv({ reuseToken: agentToolToken }) : {};
+    const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv({ reuseToken: agentToolToken, listenerPort }) : {};
     if (ownsConfigFile()) {
       await writeConfigFile(directories);
       return { ...childEnv, OPENCODE_CONFIG: filePath };
