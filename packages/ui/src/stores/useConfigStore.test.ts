@@ -2178,6 +2178,15 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentVariantSelection.override).toBe('low');
   });
 
+  for (const [stored, expected] of [[undefined, true], [false, false], [true, true]] as const) {
+    test(`Auto-create worktree is ${expected ? 'on' : 'off'} when the settings document ${stored === undefined ? 'never set it' : `stores ${stored}`}`, async () => {
+      persistedOpenChamberSettings = stored === undefined ? {} : { autoCreateWorktree: stored };
+      useConfigStore.setState({ settingsAutoCreateWorktree: !expected });
+      await useConfigStore.getState().loadSessionDefaults();
+      expect(useConfigStore.getState().settingsAutoCreateWorktree).toBe(expected);
+    });
+  }
+
   test('does not choose Big Pickle while settings are still loading', async () => {
     useConfigStore.setState({ settingsDefaultsLoaded: false });
     getProvidersForConfigImpl = async () => (providerResponse('opencode', 'big-pickle'));
@@ -3289,6 +3298,12 @@ describe('useConfigStore provider persistence', () => {
 describe('ttsChunkedMode default', () => {
   test('defaults to disabled until the user enables it', () => {
     expect(useConfigStore.getState().ttsChunkedMode).toBe(false);
+  });
+});
+
+describe('Auto-create worktree default', () => {
+  test('starts on before the settings document loads', () => {
+    expect(useConfigStore.getInitialState().settingsAutoCreateWorktree).toBe(true);
   });
 });
 

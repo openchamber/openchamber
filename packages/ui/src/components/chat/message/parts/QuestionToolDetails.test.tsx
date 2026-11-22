@@ -53,16 +53,16 @@ const buttonsIn = (column: { sessionId: string; takesPrompts: boolean } | null) 
 };
 
 describe('QuestionToolDetails', () => {
-  test('an ended call offers Answer in a chat that shows its session and takes prompts', () => {
-    expect(buttonsIn({ sessionId: SESSION_ID, takesPrompts: true })).toContain('Answer');
+  test('an ended call offers Answer anyway in a chat that shows its session and takes prompts', () => {
+    expect(buttonsIn({ sessionId: SESSION_ID, takesPrompts: true })).toContain('Answer anyway');
   });
 
   test('a chat that takes no prompts offers no Answer, since no composer would send it', () => {
-    expect(buttonsIn({ sessionId: SESSION_ID, takesPrompts: false })).not.toContain('Answer');
+    expect(buttonsIn({ sessionId: SESSION_ID, takesPrompts: false })).not.toContain('Answer anyway');
   });
 
   test('a chat showing another session, or no chat column at all, offers no Answer', () => {
-    expect(buttonsIn({ sessionId: 'ses_other', takesPrompts: true })).not.toContain('Answer');
-    expect(buttonsIn(null)).not.toContain('Answer');
+    expect(buttonsIn({ sessionId: 'ses_other', takesPrompts: true })).not.toContain('Answer anyway');
+    expect(buttonsIn(null)).not.toContain('Answer anyway');
   });
 });

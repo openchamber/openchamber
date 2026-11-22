@@ -56,3 +56,49 @@ export function subagentPolicyForCreate(selectedRefs: readonly string[]): Subage
   if (selectedRefs.length === 0) return undefined
   return { models: [...selectedRefs] }
 }
+
+export interface SubagentPolicyWriter {
+  /**
+   * Toggles one exact ref on top of the newest policy: the last one asked for
+   * while writes are pending, else `saved`. The write is queued behind any
+   * earlier one, so writes reach the server in the order they were made.
+   */
+  toggle(saved: SubagentPolicy | undefined, ref: string, checked: boolean): void
+}
+
+/**
+ * Saves picker toggles one after another, so several can be made in a row
+ * without waiting for each to settle. Each write sends the whole policy with
+ * every earlier toggle applied, so the last write holds every change.
+ *
+ * `onPendingChange` reports the policy to show while writes are in flight and
+ * `null` once the last one settles, when the saved session record is again
+ * the source of truth. A failed write is reported through `onError` and the
+ * queue carries on with the writes behind it.
+ */
+export function createSubagentPolicyWriter(options: {
+  write: (policy: SubagentPolicy) => Promise<void>
+  onPendingChange: (pending: SubagentPolicy | null) => void
+  onError: (error: Error) => void
+}): SubagentPolicyWriter {
+  let pending: SubagentPolicy | null = null
+  let inFlight = 0
+  let queue: Promise<void> = Promise.resolve()
+  return {
+    toggle(saved, ref, checked) {
+      const next = toggleSubagentModel(pending ?? saved, ref, checked)
+      pending = next
+      inFlight += 1
+      options.onPendingChange(next)
+      queue = queue
+        .then(() => options.write(next))
+        .catch((error) => options.onError(error instanceof Error ? error : new Error(String(error))))
+        .then(() => {
+          inFlight -= 1
+          if (inFlight > 0) return
+          pending = null
+          options.onPendingChange(null)
+        })
+    },
+  }
+}
