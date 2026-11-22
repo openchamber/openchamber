@@ -30,7 +30,7 @@ const inFlight = new Map<string, Promise<GitHubRepoMeta | null>>();
 /** Remove expired entries so they do not accumulate until re-read. */
 export function pruneExpiredGitHubMeta(now = Date.now()) {
   for (const [repo, entry] of metaCache.entries()) {
-    if (!entry || typeof entry.expiresAt !== 'number' || now >= entry.expiresAt) {
+    if (!entry || now >= entry.expiresAt) {
       metaCache.delete(repo);
     }
   }

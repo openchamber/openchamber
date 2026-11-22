@@ -126,7 +126,7 @@ const formatSessionLine = (session: SessionDisplayInput | null | undefined) => {
   return `- \`${title}\` — ${selections.join(', ')}${status ? ` — status:${status}` : ''} — \`${directory}\``;
 };
 
-const parseSubagentModels = (value: unknown) => {
+const parseSubagentModels = (value: string | undefined) => {
   const raw = asNonEmptyString(value);
   if (!raw) return undefined;
   const models = raw.split(',').map((entry) => entry.trim()).filter(Boolean);

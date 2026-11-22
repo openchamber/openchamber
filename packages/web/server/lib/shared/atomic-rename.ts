@@ -9,7 +9,7 @@
 const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
 const RENAME_RETRY_DELAYS_MS = [10, 25, 50, 100];
 
-const isTransientRenameError = (error: unknown): boolean => (
+const isTransientRenameError = (error: unknown): error is { code: string } => (
   typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' && TRANSIENT_RENAME_CODES.has(error.code)
 );
 
@@ -18,7 +18,7 @@ const waitSync = (ms: number) => {
 };
 
 /** Async rename: `rename(source, destination)` is the caller's rename function (for example `fsPromises.rename`). */
-export const renameWithRetry = async (rename: (from: string, to: string) => Promise<unknown>, source: string, destination: string): Promise<void> => {
+export const renameWithRetry = async (rename: (from: string, to: string) => Promise<void>, source: string, destination: string): Promise<void> => {
   for (let attempt = 0; ; attempt++) {
     try {
       await rename(source, destination);
@@ -32,7 +32,7 @@ export const renameWithRetry = async (rename: (from: string, to: string) => Prom
 };
 
 /** Sync rename: waits between attempts with `Atomics.wait`, so callers stay synchronous. */
-export const renameSyncWithRetry = (renameSync: (from: string, to: string) => unknown, source: string, destination: string): void => {
+export const renameSyncWithRetry = (renameSync: (from: string, to: string) => void, source: string, destination: string): void => {
   for (let attempt = 0; ; attempt++) {
     try {
       renameSync(source, destination);

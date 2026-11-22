@@ -404,8 +404,8 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
   // Server-wide scheduled-task run limit (#765): a positive millisecond
   // count, clamped to the largest delay a timer can hold. Anything else
   // means "not set"; the settings sanitizer then drops the key.
-  const normalizeScheduledTasksMaxRunDurationMs = (value: unknown) => {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+  const normalizeScheduledTasksMaxRunDurationMs = <Value>(value: Value) => {
+    if (!isFiniteNumber(value) || value <= 0) {
       return undefined;
     }
     return clampNumber(Math.round(value), 1_000, 2_147_483_647);

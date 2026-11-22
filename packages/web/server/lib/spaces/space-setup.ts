@@ -46,7 +46,7 @@ const dropSplitTailHead = (text: string) => {
   return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
 };
 
-export const keptOutputOf = (text: unknown) => {
+export const keptOutputOf = <Text>(text: Text) => {
   const lines = String(text)
     .split('\n')
     .map((line) => line.split('\r').filter((part) => part !== '').at(-1) ?? '')

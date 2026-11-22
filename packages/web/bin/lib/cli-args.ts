@@ -324,7 +324,7 @@ function parseArgs(argv: string[] = process.argv.slice(2)) {
       case 'entry': {
         const { value, nextIndex } = consumeValue(i, inlineValue);
         i = nextIndex;
-        if (typeof value !== 'string' || value.trim().length === 0) {
+        if (value === undefined || value.trim().length === 0) {
           throw new TunnelCliError('Missing value for --entry.', EXIT_CODE.USAGE_ERROR);
         }
         options.handoffEntry = value.trim();

@@ -69,7 +69,7 @@ const tooLargeResult = (filePath: string, size: number, maxBytes: number): Bound
   limit: maxBytes,
 });
 
-const isMissingError = (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
+const isMissingError = (error: unknown): error is { code: 'ENOENT' } => typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 
 /**
  * Reads a whole file under a byte cap, refusing anything larger.

@@ -2,7 +2,7 @@ import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
-import { isRecord, isString } from '../shared/object-guards.js';
+import { isFunction, isRecord, isString } from '../shared/object-guards.js';
 import type OpenAI from 'openai';
 import type { ClientOptions } from 'openai';
 import type { SpeechCreateParams } from 'openai/resources/audio/speech';
@@ -68,7 +68,7 @@ const readSpeechBody = async (response: Response, timeoutMs: number, deadlineAt:
   });
 
   const readBounded = (async () => {
-    if (!response.body || typeof response.body.getReader !== 'function') {
+    if (!response.body || !isFunction(response.body.getReader)) {
       // No reader to stream or cancel through. The SDK's fetch responses
       // always expose one, so this is non-standard response shapes only;
       // the read still races the deadline above and its result is

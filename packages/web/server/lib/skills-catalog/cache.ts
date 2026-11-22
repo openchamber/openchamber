@@ -29,7 +29,7 @@ const inFlight = new Map<string, Promise<object>>();
 /** Remove expired entries so they do not accumulate until re-read. */
 export function pruneExpiredScans(now = Date.now()) {
   for (const [key, entry] of cache.entries()) {
-    if (!entry || typeof entry.expiresAt !== 'number' || now >= entry.expiresAt) {
+    if (!entry || now >= entry.expiresAt) {
       cache.delete(key);
     }
   }
