@@ -225,6 +225,10 @@ They describe one run of one command. A stored copy is the kind of stale address
 
 Discovery lists everything listening on the machine, and most of it belongs to the OS or other apps. The folder a process runs in separates the user's dev servers from that noise, and the panel's own folder comes first. A server whose folder is unknown stays in, and so does one that announced itself.
 
+### Why a port that serves no web page is listed only on request
+
+Windows discovery (`netstat`) reports no folder, so the folder test above cannot separate anything there, and the list used to be every listening port. The server asks each port for its root page (`packages/web/server/lib/dev-servers`): one that answered with something else is set aside behind "show hidden ports", next to the ones started outside every project. A port that has not answered yet, or a server too old to ask, stays in the list, as does an announced server, so a slow first compile never hides the app being started. A page's title and favicon name the row, and the port stays beside them.
+
 ### Why a failed tunnel is reported and the original URL is not loaded
 
 On a remote instance the original loopback address points at a different machine, so the user would see whatever runs on that port here, possibly another application, under the address they asked for. Discovery errors, a port the host does not offer and rejected authentication are authoritative refusals and must not look like a page.
@@ -264,6 +268,10 @@ Agent tabs run unthrottled, so one left behind by a finished session keeps a bus
 ### Why schemeless input defaults to `https:` except on loopback
 
 Dev servers overwhelmingly speak plain HTTP. Defaulting `localhost:5173` to HTTPS turns the most common address in the panel into a connection error.
+
+### Why typed text that is no address becomes a Google search
+
+The address bar is the panel's only input, so text such as `react hooks` is a search. Text counts as an address when its host could be a site: a dotted name, an IP, a loopback name or any name with an explicit port. A bare word is a search, and so is any text with a space. An explicit scheme other than http(s), with or without `//`, still gives a blank page. In the iframe runtime the frame loads the search with `igu=1`, the flag Google needs before it allows framing; the address bar shows the plain search address.
 
 ### Why retry uses a wider localhost test than the tunnel
 
