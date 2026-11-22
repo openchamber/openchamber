@@ -348,7 +348,9 @@ const withDeliveryText = (queues: Record<string, PersistedQueuedMessage[]>): Rec
     ]))
 );
 
-export const migrateMessageQueueState = (persistedState: unknown, version: number): Partial<MessageQueueStore> => {
+type PersistedQueueStore = Pick<MessageQueueState, 'queuedMessages' | 'quarantinedLegacyMessages' | 'followUpBehavior'>;
+
+export const migrateMessageQueueState = (persistedState: unknown, version: number): PersistedQueueStore => {
     const state = (persistedState ?? {}) as PersistedMessageQueueState;
     const legacyQueues = version < 2 ? (state.queuedMessages ?? {}) : {};
     return {
@@ -360,8 +362,6 @@ export const migrateMessageQueueState = (persistedState: unknown, version: numbe
         followUpBehavior: normalizeFollowUpBehavior(state.followUpBehavior, state.queueModeEnabled ?? null),
     };
 };
-
-type PersistedQueueStore = Pick<MessageQueueState, 'queuedMessages' | 'quarantinedLegacyMessages' | 'followUpBehavior'>;
 
 const storedQueueEnvelopeSchema = z.object({ state: z.unknown(), version: z.number().optional() });
 
