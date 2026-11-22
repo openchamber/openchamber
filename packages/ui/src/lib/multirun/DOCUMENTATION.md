@@ -49,10 +49,10 @@ project IDs are not used as a cross-worktree ownership oracle. The picker uses
 registered project/worktree ownership and computes candidates only while open. It writes an
 ID-bound marker without moving files, restarting work, or renaming the
 conversation. The imported session gets its own prompt variant so the caption
-and fusion task keep its original prompt. Imports currently require an ID-bound
-target; legacy title-only runs expose a disabled import action. Their lanes can
-still be opened and removed with confirmation in the owning project scope.
-Saved source guidance is offered for ID-bound members and stored fusion results.
+and fusion task keep its original prompt. Title-only legacy targets retain their
+owning project scope and group key. Imported members get ID-bound markers in
+that existing group. Saving a legacy source note similarly binds its marker,
+without renaming its conversation or changing membership.
 
 Removal requires `confirmed: true`; cancellation performs no operation.
 Confirmed removal revalidates the expected run before writing. It removes only
@@ -222,36 +222,52 @@ session-registration store. Importing creation back into that store through
 message routing caused an import-order crash. Keeping the read module independent
 of registration makes initialization safe from either entry point.
 
-## Prompt-candidate runtime verification
+## Retained prompt generation
 
-The opt-in `promptCandidates.integration.test.ts` exercises stateless generation
-through real OpenCode and a loopback-only synthetic OpenAI-compatible provider.
-It observes selected model aliases and effort at the provider, validates partial
-success and explicit candidate selection, and checks that source artifacts stay
-unchanged. It configures synthetic models in the isolated server's global
-configuration and one additional project-only model, whose failure is explicit.
-It creates no generation sessions. Normal test runs
-report this case as skipped.
+Each selected generation model gets a session in the requested project with
+deny-all tool permissions. `session.generate` receives the complete request and
+returns candidate text without executing an agent turn. The session is archived
+through the existing runtime archive workflow and is never deleted. Its request
+and raw output are saved as `resume:false` synthetic records. Until a later turn
+admits them, those records remain in the durable inbox; the history viewer reads
+both message history and inbox without resuming execution.
 
-Run it with `MULTIRUN_TEST_URL` and `MULTIRUN_TEST_ROOT` pointing to a server
-started by `bun run profile:serve`. The test verifies that server's project scope
-before creating the synthetic provider. It uses no real provider credentials or
-paid model requests. The temporary global configuration is removed only if it
-still matches this test's write, and the provider is closed. Candidate quality
-still requires a real-model evaluation.
+The composer retains references to all generation sessions, including failed or
+unselected results. Launch copies them into `multirun.generationSessions` on the
+run members. Parents and subsequent fusion results carry those references too.
+The overview's history control shows the archived request and output, reading
+only the selected generation session while the dialog is open. These references
+are provenance, not execution membership or fusion inputs.
 
-### Why project-only models fail explicitly
+Unavailable models and malformed candidates remain explicit per-model failures.
+Successful candidates survive sibling failures. A failed record or archive write
+is a retention failure: usable candidates and session references stay available,
+and the UI reports the incomplete save. A failed first archive attempt is retried
+once after generation; nothing is removed to recover from failure.
 
-OpenCode's stateless Generate route deliberately uses `global.config`, even when
-the client sends a project directory. A model defined only in that project's
-configuration can appear in its picker but is unavailable to generation. The UI
-names the unavailable models and directs the user to configure them globally or
-choose other models; successful candidates remain selectable. Generation remains
-stateless. Retained generation sessions would be a separate product decision.
-`generatePromptCandidates` reports a per-model failure reason, distinguishing
-server-wide model unavailability from generation or candidate-format failure.
-The implementation options are tracked in
+### Why generation uses retained project sessions
+
+The stateless Generate route uses `global.config`, so project-only models selected
+from a project catalog could not generate candidates. The existing session API
+resolves the requested project and model. Retaining and archiving those sessions
+preserves the work and avoids sidebar clutter without an upstream API change or
+automatic cleanup. This is the data-preserving choice for
 [#2478](https://github.com/developing-today-forks/openchamber/issues/2478).
+
+### Why generation records and model input are separate
+
+An orphan `resume:false` synthetic record is queued, not part of the transient
+generation transcript. The complete prompt therefore goes directly to
+`session.generate`; saved records serve the retained history viewer. Resuming
+those records to make them visible would start work the user did not select.
+
+The opt-in `promptCandidates.integration.test.ts` uses real OpenCode and a
+loopback synthetic provider. It verifies project-only model selection, aliases,
+effort, no advertised tools, archived session stamps and readable retained
+records. Run it with `MULTIRUN_TEST_URL` and `MULTIRUN_TEST_ROOT` pointing to a
+server started by `bun run profile:serve`. Normal runs report this case skipped.
+It changes no global provider configuration and uses no paid credentials.
+Candidate quality still requires a real-model evaluation.
 
 ## Overview
 

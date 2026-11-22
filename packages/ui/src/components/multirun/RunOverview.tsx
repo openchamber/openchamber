@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { createRunParent } from '@/lib/multirun/parent';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { AttachSessionDialog } from './AttachSessionDialog';
+import { PromptGenerationHistoryDialog } from './PromptGenerationHistoryDialog';
 import { AgentSelector } from './AgentSelector';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
 import { RunLaneCard } from './RunLaneCard';
@@ -140,6 +141,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   const [expandedPrompts, setExpandedPrompts] = React.useState<ReadonlySet<string>>(() => new Set());
   const [pendingModel, setPendingModel] = React.useState<{ runGroup: string | undefined; model: ModelSelectionWithId } | null>(null);
   const [attachOpen, setAttachOpen] = React.useState(false);
+  const [generationHistoryOpen, setGenerationHistoryOpen] = React.useState(false);
   const [fusionGuidance, setFusionGuidance] = React.useState('');
   const availableWorktrees = useSessionUIStore((state) => state.availableWorktreesByProject);
 
@@ -356,7 +358,8 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
   };
   const handleSaveGuidance = async (session: Session, guidance: string) => {
     setBusyAction('member');
-    try { await saveFusionGuidance({ session, runKey: run.key, guidance }); }
+    const group = memberById.get(session.id)?.identity.group;
+    try { await saveFusionGuidance({ session, runKey: run.key, guidance, legacyDirectory: group?.kind === 'legacy' ? group.scope : undefined }); }
     finally { setBusyAction(null); }
   };
 
@@ -411,7 +414,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
         actionsDisabled={busyAction !== null || bar.kind !== 'idle'}
         onOpenChat={() => openChat(member.sessionId)}
         onOpenDiff={() => openDiff(member.sessionId)}
-        guidance={finished && !(member.identity.group.kind === 'legacy' && member.identity.role === 'run') ? {
+        guidance={finished ? {
           saved: member.identity.guidance ?? '',
           disabled: busyAction !== null,
           onSave: (guidance) => handleSaveGuidance(session, guidance),
@@ -548,7 +551,10 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
               </div>
             </div>
             {!isMobile && run.variants.length === 1 ? renderAddModel(run.variants[0]) : null}
-            <Button variant="outline" size="sm" disabled={busyAction !== null || anchor === undefined || anchorMember?.identity.group.kind !== 'id'} onClick={() => setAttachOpen(true)}>
+            {run.generationSessions.length > 0 ? <Button variant="ghost" size={isMobile ? 'icon' : 'sm'} aria-label={t('multirun.prompts.history')} title={t('multirun.prompts.history')} onClick={() => setGenerationHistoryOpen(true)}>
+              <Icon name="history" className="size-4" />{isMobile ? null : t('multirun.prompts.history')}
+            </Button> : null}
+            <Button variant="outline" size="sm" disabled={busyAction !== null || anchor === undefined} onClick={() => setAttachOpen(true)}>
               <Icon name="add" className="size-4" />
               {t('multirun.membership.add')}
             </Button>
@@ -617,6 +623,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
         </div>
       </ScrollableOverlay>
       <AttachSessionDialog open={attachOpen} onOpenChange={setAttachOpen} sessions={eligibleSessions} busy={busyAction !== null} onAttach={handleAttach} />
+      <PromptGenerationHistoryDialog open={generationHistoryOpen} onOpenChange={setGenerationHistoryOpen} sources={run.generationSessions} />
 
       <div className={cn('pointer-events-none absolute inset-x-0 bottom-4 flex justify-center', isMobile ? 'px-3' : 'px-6')}>
         <div className="pointer-events-auto flex w-full max-w-4xl flex-wrap items-center gap-2 rounded-xl border border-[var(--interactive-border-hover)] bg-[var(--surface-elevated)] px-3 py-2 shadow-lg">

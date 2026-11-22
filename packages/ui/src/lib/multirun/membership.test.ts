@@ -70,6 +70,26 @@ function fixture() {
 }
 
 describe('multi-run membership', () => {
+  test('title-only legacy runs accept existing sessions and saved guidance with unchanged group and work', async () => {
+    const f = fixture();
+    const anchor = { ...f.anchor, metadata: { external: 'keep', openchamber: { artifacts: ['report.md'] } } };
+    const sibling = { ...f.sibling, metadata: { external: 'keep' } };
+    f.stored.set(anchor.id, anchor); f.stored.set(sibling.id, sibling);
+    const run = [...buildMultiRunIndex([anchor, sibling], () => '/repo').runs.values()][0];
+    if (!run || run.lanes[0].identity.group.kind !== 'legacy') throw new Error('Missing legacy-run premise');
+    const attached = await attachSessionToRun({ run, anchor, session: f.imported }, f.io);
+    expect(getMultiRunIdentity(attached)?.key).toBe(run.key);
+    expect(attached.directory).toBe(f.imported.directory);
+    expect(attached.title).toBe(f.imported.title);
+    await saveFusionGuidance({ session: anchor, runKey: run.key, legacyDirectory: '/repo', guidance: 'Keep the report structure.' }, f.io);
+    const saved = f.stored.get(anchor.id);
+    if (!saved) throw new Error('Lost legacy source');
+    expect(getMultiRunIdentity(saved)?.key).toBe(run.key);
+    expect(getMultiRunIdentity(saved)?.guidance).toBe('Keep the report structure.');
+    expect(saved.metadata?.openchamber).toMatchObject({ artifacts: ['report.md'] });
+    expect(saved.title).toBe(anchor.title);
+    expect(f.stored.get(sibling.id)).toBe(sibling);
+  });
   test('another worktree of the same repository can join even with a different native project ID', async () => {
     const f = fixture();
     f.stored.set(f.imported.id, { ...f.imported, projectID: 'old-worktree-location-id' });

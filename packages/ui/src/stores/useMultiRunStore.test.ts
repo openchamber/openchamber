@@ -292,6 +292,16 @@ describe('useMultiRunStore', () => {
     expect(upsertedSessions.map((session) => session.id)).toEqual(['ses_multirun_2']);
   });
 
+  test('archived generation references are bound to created run members', async () => {
+    const source = { sessionID: 'generation-source', directory: '/repo', providerID: 'p', modelID: 'generator' };
+    await useMultiRunStore.getState().createMultiRun({
+      name: 'Generated run', isolateRuns: false, generationSessions: [source],
+      groups: [{ prompt: 'Chosen candidate', models: [{ providerID: 'p', modelID: 'executor' }] }],
+    });
+    expect(upsertedSessions).toHaveLength(1);
+    expect(upsertedSessions[0].metadata?.openchamber).toMatchObject({ multirun: { generationSessions: [source] } });
+  });
+
   test('changing runtime while creating stops dispatch and registration', async () => {
     onCreate = () => {
       activeClient = { runtime: 'other-runtime.test' };

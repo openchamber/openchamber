@@ -330,6 +330,7 @@ export async function startRunFusion(input: {
       modelID: judge.modelID,
       role: 'fusion',
       title: run.title,
+      generationSessions: [...run.generationSessions],
       fusion: { passID, baseCommit, sources: sources.map((source, index) => ({
         sessionID: source.session.id, directory: source.session.directory,
         snapshotRef: snapshots[index]?.ref, snapshotCommit: snapshots[index]?.commit,

@@ -1101,7 +1101,8 @@ so streamed timestamps do not redraw it.
 
 "Generate prompts" in the prompt-variants settings opens the candidate review
 dialog. The description may ask for variations on the original, brand-new prompts,
-or both. Selected models call OpenCode's stateless `generate.text`; generation
+or both. Selected models use archived project-scoped generation sessions with
+deny-all tool permissions and OpenCode's transient `session.generate`; generation
 never runs candidate tasks. `lib/multirun/promptCandidates.ts` parses the bounded
 JSON response before it can enter composer state. One model's failure preserves
 the others' candidates. Generation models and execution models are separate choices.
@@ -1113,6 +1114,9 @@ added prompt receives an independent copy of the active variant's run models,
 which can then be changed in its tab. A runtime, draft, or target change prevents
 stale generation from being applied to another draft. Mobile does not offer this
 launch workflow, consistent with existing parallel-mode availability.
+Generation session references stay with the draft even when the review popup
+closes, and travel to the launched run for its retained history viewer. Requests
+and raw results are kept in archived sessions, including unselected candidates.
 
 ## Chat quote highlights
 
