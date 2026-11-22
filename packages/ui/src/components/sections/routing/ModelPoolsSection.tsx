@@ -22,6 +22,7 @@ import {
   type RouteTargetStats,
 } from '@/lib/routing/modelRoutesApi';
 import { PoolHealthSection } from '@/components/sections/routing/PoolHealthSection';
+import type { RoutingDraftAccess } from '@/components/sections/routing/PoolCategories';
 import { PoolList } from '@/components/sections/routing/PoolList';
 import { PoolPage } from '@/components/sections/routing/PoolPage';
 import { RouteScheduleFields } from '@/components/sections/routing/RouteScheduleFields';
@@ -129,7 +130,10 @@ const PoolTelemetry: React.FC = () => {
  * pool's own page when a row is opened. The list keeps what applies across
  * pools (presets, schedules, automatic review, health and telemetry).
  */
-export const ModelPoolsSection: React.FC = () => {
+export const ModelPoolsSection: React.FC<{
+  /** The Routing page's Auto draft, for the categories on a pool's page; absent when Auto is unavailable. */
+  routing?: RoutingDraftAccess;
+}> = ({ routing }) => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
   const decisions = useRoutingStore((state) => state.decisions);
@@ -289,6 +293,7 @@ export const ModelPoolsSection: React.FC = () => {
           id={openPoolId}
           route={openRoute}
           timeoutSummary={timeouts[openPoolId]}
+          routing={routing}
           otherPoolIDs={Object.keys(routes).filter((other) => other !== openPoolId)}
           onBack={() => setOpenPoolId(null)}
           onChange={(next) => {

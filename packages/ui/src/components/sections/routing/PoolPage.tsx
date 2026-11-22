@@ -20,7 +20,7 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import { CommitInput, CommitList, CommitTextarea } from '@/components/sections/routing/CommitInput';
 import { PoolAdvancedFields } from '@/components/sections/routing/PoolAdvancedFields';
-import { PoolCategories } from '@/components/sections/routing/PoolCategories';
+import { PoolCategories, type RoutingDraftAccess } from '@/components/sections/routing/PoolCategories';
 import { PoolFailoverFields } from '@/components/sections/routing/PoolFailoverFields';
 import { PoolMemberRow } from '@/components/sections/routing/PoolMemberRow';
 import { RangedNumberField } from '@/components/sections/routing/RangedNumberField';
@@ -56,12 +56,14 @@ export const PoolPage: React.FC<{
   route: ModelRoute;
   /** The server's wait summary for a saved pool; a draft has none yet. */
   timeoutSummary?: PoolTimeoutSummary;
+  /** The Routing page's Auto draft for this pool's categories; absent when Auto is unavailable. */
+  routing?: RoutingDraftAccess;
   /** The other pools, which can join this one as a member. */
   otherPoolIDs: readonly string[];
   onChange: (route: ModelRoute) => void;
   onRemove: () => void;
   onBack: () => void;
-}> = ({ id, route, timeoutSummary, otherPoolIDs, onChange, onRemove, onBack }) => {
+}> = ({ id, route, timeoutSummary, routing, otherPoolIDs, onChange, onRemove, onBack }) => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
   const hidden = useUIStore((state) => state.hiddenModels.some((entry) => entry.providerID === MODEL_ROUTE_PROVIDER_ID && entry.modelID === id));
@@ -327,7 +329,7 @@ export const PoolPage: React.FC<{
       </SettingsSection>
 
       <SettingsSection title={t('settings.pools.section.categories')} info={t('settings.pools.categories.info')}>
-        <PoolCategories poolID={id} poolName={name} poolDescription={route.description} />
+        <PoolCategories poolID={id} poolName={name} poolDescription={route.description} routing={routing} />
       </SettingsSection>
 
       <SettingsSection title={t('settings.pools.section.failover')}>

@@ -4,7 +4,9 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 
 import type { ModelRoute } from '@/lib/routing/modelRoutesApi';
+import type { RoutingConfig } from '@/lib/routing/routingApi';
 import type { ScheduleList, ScheduleListValue, StoredSchedules } from '@/lib/routing/scheduleSchema';
+import type { RoutingDraftAccess } from './PoolCategories';
 
 // Hand-rolled recorders rather than bun's `mock()`: its installed types omit
 // `.mock`/`mockClear`, while the runtime behaviour is all these tests need.
@@ -138,7 +140,7 @@ const textModel = (id: string, cost: number, context: number) => ({
   limit: { context, output: 1000 },
 });
 
-const renderSection = async () => {
+const renderSection = async (routing?: RoutingDraftAccess) => {
   const dom = installDom();
   // Imported after the DOM exists: Base UI and react-dom read the window when their modules load.
   const { createRoot } = await import('react-dom/client');
@@ -148,7 +150,7 @@ const renderSection = async () => {
   await act(async () => {
     root.render(
       <I18nProvider>
-        <ModelPoolsSection />
+        <ModelPoolsSection routing={routing} />
       </I18nProvider>,
     );
   });
@@ -174,6 +176,17 @@ const typeInto = async (input: HTMLInputElement, value: string) => {
   await act(async () => {
     input.value = value;
     input.dispatchEvent(new Event('focusout', { bubbles: true }));
+  });
+};
+
+// A controlled input listens for `input` events. The value goes through the
+// native setter so React's tracked value does not hide the change
+// (as `changeValue` in RouteRulesAdvanced.test.tsx does).
+const changeValue = async (input: HTMLInputElement, value: string) => {
+  const setValue = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+  await act(async () => {
+    setValue?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
 
@@ -589,6 +602,37 @@ describe('ModelPoolsSection', () => {
       await clickButton(dom.container, 'Save waits now');
       expect(routeSaves).toHaveLength(1);
       expect(Object.keys(routeSaves[0] as object)).toEqual(['kept', 'done']);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // Oracle: the Routing page's draft writer. A category edit on a pool page
+  // must reach it, not a separate save, so the Categories tab's pending edit
+  // and this one share one queue.
+  test('a category added or moved on a pool page goes through the Routing page draft and runs on the pool', async () => {
+    Object.assign(serverRoutes, { kept: { targets: ['p/cheap'], description: 'Quick fixes' } });
+    const draft: RoutingConfig = {
+      enabled: true,
+      fallback: null,
+      minConfidence: 0.5,
+      safetyNet: { enabled: false, threshold: 0.5 },
+      categories: [{ id: 'docs', builtin: false, enabled: true, name: 'Docs', description: 'Writing docs', model: null, variant: null, agent: null }],
+    };
+    const updates: RoutingConfig[] = [];
+    const { dom, cleanup } = await renderSection({ config: draft, update: (mutate) => { updates.push(mutate(draft)); } });
+    try {
+      await expandPool(dom.container);
+      expect(dom.container.textContent).toContain('No Auto category runs on this pool.');
+      await changeValue(findInput(dom.container, 'New category name'), 'Quick edits');
+      await clickButton(dom.container, 'Add category');
+      expect(updates.at(-1)?.categories.at(-1)).toEqual({
+        id: 'quick-edits', builtin: false, enabled: true, name: 'Quick edits', description: 'Quick fixes',
+        model: { providerID: 'opencode-route', modelID: 'kept' }, variant: null, agent: null,
+      });
+      await pickOption(dom.container, 'Run a category on this pool', 'Docs');
+      expect(updates.at(-1)?.categories[0]).toMatchObject({ id: 'docs', model: { providerID: 'opencode-route', modelID: 'kept' }, variant: null });
+      expect(routeSaves).toEqual([]);
     } finally {
       await cleanup();
     }

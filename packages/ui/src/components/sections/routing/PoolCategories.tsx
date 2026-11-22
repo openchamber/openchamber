@@ -4,9 +4,18 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
-import type { RoutingCategory } from '@/lib/routing/routingApi';
+import type { RoutingCategory, RoutingConfig } from '@/lib/routing/routingApi';
 import { MODEL_ROUTE_PROVIDER_ID } from '@/lib/sessionErrorRecovery';
-import { useRoutingStore } from '@/stores/useRoutingStore';
+
+/**
+ * The Routing page's draft of the Auto settings and its debounced writer. A
+ * category edit on a pool page goes through the same draft and save queue as
+ * the Categories tab, so a pending edit there cannot overwrite one made here.
+ */
+export type RoutingDraftAccess = {
+  config: RoutingConfig;
+  update: (mutate: (config: RoutingConfig) => RoutingConfig) => void;
+};
 
 const slugify = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
 
@@ -19,47 +28,36 @@ const runsOn = (category: RoutingCategory, poolID: string) =>
  * pool it also reads the pool's description and details, so the two are
  * edited side by side here.
  */
-export const PoolCategories: React.FC<{ poolID: string; poolName: string; poolDescription: string | undefined }> = ({
-  poolID,
-  poolName,
-  poolDescription,
-}) => {
+export const PoolCategories: React.FC<{
+  poolID: string;
+  poolName: string;
+  poolDescription: string | undefined;
+  /** Absent when Auto routing is not available on this server. */
+  routing: RoutingDraftAccess | undefined;
+}> = ({ poolID, poolName, poolDescription, routing }) => {
   const { t } = useI18n();
-  const config = useRoutingStore((state) => state.config);
-  const available = useRoutingStore((state) => state.available);
-  const saveConfig = useRoutingStore((state) => state.saveConfig);
   const [newName, setNewName] = React.useState('');
-  const [error, setError] = React.useState<string | null>(null);
 
-  if (!available || !config) return <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.unavailable')}</p>;
+  if (!routing) return <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.unavailable')}</p>;
 
-  const save = (categories: RoutingCategory[]) => {
-    setError(null);
-    saveConfig({ ...config, categories }).catch((failure) => {
-      setError(failure instanceof Error ? failure.message : String(failure));
-    });
-  };
-  const using = config.categories.filter((category) => runsOn(category, poolID));
-  const others = config.categories.filter((category) => !runsOn(category, poolID));
+  const using = routing.config.categories.filter((category) => runsOn(category, poolID));
+  const others = routing.config.categories.filter((category) => !runsOn(category, poolID));
   const poolModel = { providerID: MODEL_ROUTE_PROVIDER_ID, modelID: poolID };
+  // A category needs a description to be judged by; the pool's own one is the best first draft.
+  const description = poolDescription?.trim() || t('settings.pools.categories.defaultDescription', { name: poolName });
 
   const addCategory = () => {
     const name = newName.trim();
     if (!name) return;
-    const base = slugify(name) || `category-${Date.now()}`;
-    let id = base;
-    for (let counter = 2; config.categories.some((category) => category.id === id); counter += 1) id = `${base}-${counter}`;
-    save([...config.categories, {
-      id,
-      builtin: false,
-      enabled: true,
-      name,
-      // A category needs a description to be judged by; the pool's own one is the best first draft.
-      description: poolDescription?.trim() || t('settings.pools.categories.defaultDescription', { name: poolName }),
-      model: poolModel,
-      variant: null,
-      agent: null,
-    }]);
+    routing.update((config) => {
+      const base = slugify(name) || `category-${Date.now()}`;
+      let id = base;
+      for (let counter = 2; config.categories.some((category) => category.id === id); counter += 1) id = `${base}-${counter}`;
+      return {
+        ...config,
+        categories: [...config.categories, { id, builtin: false, enabled: true, name, description, model: poolModel, variant: null, agent: null }],
+      };
+    });
     setNewName('');
   };
 
@@ -79,9 +77,10 @@ export const PoolCategories: React.FC<{ poolID: string; poolName: string; poolDe
       {others.length > 0 ? (
         <Select
           value=""
-          onValueChange={(id) => save(config.categories.map((category) => (
-            category.id === id ? { ...category, model: poolModel, variant: null } : category
-          )))}
+          onValueChange={(id) => routing.update((config) => ({
+            ...config,
+            categories: config.categories.map((category) => (category.id === id ? { ...category, model: poolModel, variant: null } : category)),
+          }))}
         >
           <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('settings.pools.categories.use')}>
             <SelectValue placeholder={t('settings.pools.categories.use')} />
@@ -105,7 +104,6 @@ export const PoolCategories: React.FC<{ poolID: string; poolName: string; poolDe
           {t('settings.pools.categories.add')}
         </Button>
       </div>
-      {error ? <p className="typography-meta text-[var(--status-error-text)]">{error}</p> : null}
     </div>
   );
 };
