@@ -304,7 +304,7 @@ describe('session goal tick on v2 messages', () => {
   it('waits when the session is still running or the user just sent a message', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const generate = vi.fn();
-    const busy = v2OpenCode({ messages: [assistantRecord()], active: { [SESSION_ID]: { status: 'running' } } });
+    const busy = v2OpenCode({ messages: [assistantRecord()], active: { [SESSION_ID]: { type: 'running' } } });
     const seam = wired({ openchamber: { goal: activeGoal() } });
     const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
     await runTick(runtime);
@@ -330,7 +330,7 @@ describe('session goal tick and subagents', () => {
     const generate = vi.fn();
     const server = v2OpenCode({
       messages: [assistantRecord()],
-      active: { ses_child_2: { status: 'running' } },
+      active: { ses_child_2: { type: 'running' } },
       childPages: [[child('ses_child_1')], [child('ses_child_2')]],
     });
     const { runtime } = makeRuntime({
@@ -347,7 +347,7 @@ describe('session goal tick and subagents', () => {
 
   it('rechecks a working subagent and audits after it finishes without another parent event', async () => {
     quiet();
-    const active = { ses_child_1: { status: 'running' } };
+    const active = { ses_child_1: { type: 'running' } };
     const server = v2OpenCode({
       messages: [assistantRecord()],
       active,

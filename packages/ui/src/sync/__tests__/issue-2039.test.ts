@@ -101,6 +101,7 @@ const deferredStorage: Storage = {
 }
 
 mock.module("@/stores/utils/safeStorage", () => ({
+  getSafeStorage: () => deferredStorage,
   getDeferredSafeStorage: () => deferredStorage,
   getSafeSessionStorage: () => deferredStorage,
   createDeferredSafeJSONStorage: () => ({
@@ -868,7 +869,7 @@ describe("assistant answer worktree routing", () => {
     }
   })
 
-  test("removes the new worktree and surfaces the error when its checkout never populates", async () => {
+  test("keeps the new worktree and surfaces the error when its checkout never reports ready", async () => {
     projectsState.projects = [{ id: "project", path: "/repo" }]
     createdWorktreeProjects.length = 0
     const sourceWorktree = { path: "/worktrees/source", projectDirectory: "/repo", branch: "source", label: "source" }
@@ -914,7 +915,9 @@ describe("assistant answer worktree routing", () => {
     }
 
     expect(sessionCreated).toBe(false)
-    expect(requests.some((request) => request.url.includes("worktree") && request.method !== "GET")).toBe(true)
+    // A failed readiness check cannot prove the checkout holds nothing, so the
+    // worktree stays for recovery (resolveCreatedWorktreeStartDirectory).
+    expect(requests.some((request) => request.url.includes("worktree") && request.method !== "GET")).toBe(false)
   })
 
   test("creates a sibling worktree from the captured source worktree directory", async () => {
