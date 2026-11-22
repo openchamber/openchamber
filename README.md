@@ -131,6 +131,22 @@ openchamber update
 
 OpenChamber binds to localhost by default. Use `--lan` only on a trusted network and protect browser access with `--ui-password`.
 
+### Docker
+
+The [OpenChamber container image](https://github.com/openchamber/openchamber/pkgs/container/openchamber) includes OpenCode and supports Linux on x86_64 and ARM64. Set and export `OPENCHAMBER_UI_PASSWORD` before starting it:
+
+```bash
+docker run -d --name openchamber \
+  -p 127.0.0.1:3000:3000 \
+  -e OPENCHAMBER_UI_PASSWORD \
+  -v openchamber-config:/home/openchamber/.config \
+  -v openchamber-state:/home/openchamber/.local \
+  -v openchamber-workspaces:/home/openchamber/workspaces \
+  ghcr.io/openchamber/openchamber:latest
+```
+
+Open `http://localhost:3000`. The named volumes keep your settings, sessions and workspaces when you replace the container. To pin a version, replace `latest` with a release tag listed on the package page.
+
 ## Guides
 
 Go deeper with the OpenChamber guides:

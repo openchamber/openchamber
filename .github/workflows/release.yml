@@ -613,6 +613,8 @@ jobs:
     # Jobs a finishing run skips count as done; any failure still stops the release.
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.publish_release.outcome }}
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       DISCORD_UPDATE_ROLE_ID: ${{ secrets.DISCORD_UPDATE_ROLE_ID }}
@@ -707,6 +709,7 @@ jobs:
           node scripts/release-mirror/mirror-to-r2.mjs --channel stable --dir "$RUNNER_TEMP/release" --version "$VERSION" --keep "$LIVE"
 
       - name: Publish release
+        id: publish_release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
@@ -806,3 +809,72 @@ jobs:
             }
           }
           JSON
+
+  publish-container:
+    needs: [create-release, finalize-release]
+    # Notifications run after publication and can fail independently.
+    if: ${{ !cancelled() && needs.finalize-release.outputs.published == 'success' && github.repository == 'openchamber/openchamber' && github.event.inputs.dry_run != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: publish-container
+      queue: max
+    env:
+      IMAGE: ghcr.io/openchamber/openchamber
+      TAG: v${{ needs.create-release.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # First release only: set the package visibility to public in GHCR,
+      # then verify `docker pull ghcr.io/openchamber/openchamber:latest`
+      # from a client that isn't signed in to GHCR.
+      - name: Publish versioned image
+        id: image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.TAG }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      # A GitHub release can be public before its image is ready.
+      - name: Update latest to the highest published stable image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select((.draft or .prerelease) | not) | .tag_name | select(test("^v[0-9]+[.][0-9]+[.][0-9]+$"))' |
+            sort -Vr)
+          for release in $releases; do
+            if [[ "$release" == "$TAG" ]]; then
+              digest="$DIGEST"
+            elif ! digest=$(docker buildx imagetools inspect "$IMAGE:$release" --format '{{.Manifest.Digest}}' 2>&1); then
+              if [[ "$digest" == "ERROR: $IMAGE:$release: not found" ]]; then
+                continue
+              fi
+              printf '%s\n' "$digest" >&2
+              exit 1
+            fi
+            docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE@$digest"
+            break
+          done
