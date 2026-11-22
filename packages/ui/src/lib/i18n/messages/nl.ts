@@ -3850,7 +3850,6 @@ export const dict = {
   'multirun.overview.addModel.hint': 'Voert dezelfde prompt uit op nog één model in deze uitvoering',
   'chat.parallel.settings.whereShared': 'Gedeelde map',
   'chat.parallel.settings.whereSharedHint': 'Alle runs werken in de map waar dit concept op staat. Het beste voor vragen en onderzoek.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'Volgt "Worktree automatisch aanmaken" tot je zelf kiest.',
   'chat.parallel.settings.whereWorktrees': 'Aparte worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Elke run krijgt een eigen branch, zodat codewijzigingen elkaar nooit botsen. Houd de beste over.',
   'chat.parallel.settings.baseBranchTitle': 'Basisbranch',

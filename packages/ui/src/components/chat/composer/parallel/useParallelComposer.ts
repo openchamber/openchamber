@@ -8,6 +8,7 @@ import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { waitForPendingDraftWorktreeRequest } from '@/lib/worktrees/pendingDraftWorktree';
+import { selectWorktreeStartFrom } from '@/lib/worktrees/worktreeStartSource';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { CreateMultiRunParams } from '@/types/multirun';
 
@@ -31,8 +32,6 @@ export type ParallelComposerState = {
   variants: ParallelVariant[];
   active: number;
   isolate: boolean;
-  /** Set once the user picks where the runs work; until then `isolate` follows Auto-create worktree. */
-  isolateChosen: boolean;
   baseBranch: string;
   /** Null until the project's commands are loaded. */
   setupCommands: string[] | null;
@@ -71,29 +70,24 @@ const resolveDraftDirectory = async (): Promise<string | undefined> => {
  * variant it leaves and loads the one it opens, so autocomplete, drafts and
  * attachments stay the composer's own. Only offered on a new-session draft.
  *
- * Where the runs work starts on the draft's Auto-create worktree policy
- * (`autoIsolate`): separate worktrees where a single send would get a new
- * worktree, else the draft's directory shared by every run. It keeps following
- * the policy until the user picks in the launch settings.
+ * Every run starts on separate worktrees, whatever the draft is aimed at, each
+ * branched from where Settings say parallel runs start; the launch settings
+ * can switch to the draft's directory shared by every run.
  */
 export function useParallelComposer(input: {
   enabled: boolean;
   draftOpen: boolean;
   draftProjectId: string | null;
-  /** Whether Auto-create worktree would give this draft's first send a new worktree. */
-  autoIsolate: boolean;
   message: string;
   setMessage: (text: string) => void;
 }) {
   const { t } = useI18n();
-  const { enabled, draftOpen, draftProjectId, autoIsolate, message, setMessage } = input;
+  const { enabled, draftOpen, draftProjectId, message, setMessage } = input;
   const [state, setState] = React.useState<ParallelComposerState | null>(null);
   const [isLaunching, setIsLaunching] = React.useState(false);
   const launchingRef = React.useRef(false);
   const messageRef = React.useRef(message);
   messageRef.current = message;
-  const autoIsolateRef = React.useRef(autoIsolate);
-  autoIsolateRef.current = autoIsolate;
 
   const enter = React.useCallback((text = '') => {
     const config = useConfigStore.getState();
@@ -104,12 +98,8 @@ export function useParallelComposer(input: {
       ? [{ providerID, modelID, displayName: displayName || undefined, variant: config.currentVariant || undefined, count: 1 }]
       : [];
     if (text) setMessage(text);
-    setState({ variants: [{ id: 'A', text: '', models: seed }], active: 0, isolate: autoIsolateRef.current, isolateChosen: false, baseBranch: '', setupCommands: null, fuse: null });
+    setState({ variants: [{ id: 'A', text: '', models: seed }], active: 0, isolate: true, baseBranch: '', setupCommands: null, fuse: null });
   }, [setMessage]);
-
-  React.useEffect(() => {
-    setState((current) => (current && !current.isolateChosen && current.isolate !== autoIsolate ? { ...current, isolate: autoIsolate } : current));
-  }, [autoIsolate]);
 
   const exit = React.useCallback(() => setState(null), []);
 
@@ -196,7 +186,7 @@ export function useParallelComposer(input: {
     setMessage(variants[active].text);
   }, [setMessage, state]);
 
-  const setIsolate = React.useCallback((isolate: boolean) => update((current) => ({ ...current, isolate, isolateChosen: true })), [update]);
+  const setIsolate = React.useCallback((isolate: boolean) => update((current) => ({ ...current, isolate })), [update]);
   const setBaseBranch = React.useCallback((baseBranch: string) => update((current) => ({ ...current, baseBranch })), [update]);
   const setSetupCommands = React.useCallback((setupCommands: string[]) => update((current) => ({ ...current, setupCommands })), [update]);
   const setFuse = React.useCallback((fuse: ParallelFuseJudge | null) => update((current) => ({ ...current, fuse })), [update]);
@@ -237,6 +227,7 @@ export function useParallelComposer(input: {
       agent: config.currentAgentName || undefined,
       isolateRuns: current.isolate,
       worktreeBaseBranch: current.isolate ? current.baseBranch || undefined : undefined,
+      worktreeStartFrom: current.isolate ? selectWorktreeStartFrom(config, 'parallel') : undefined,
       files: attachments.length > 0
         ? attachments.map((file) => ({ mime: file.mimeType, filename: file.filename, url: file.dataUrl }))
         : undefined,

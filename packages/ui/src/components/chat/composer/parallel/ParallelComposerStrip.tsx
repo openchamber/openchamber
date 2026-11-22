@@ -90,9 +90,6 @@ function LaunchSettingsDialog({
                   description={t('chat.parallel.settings.whereWorktreesHint')}
                 />
               </SettingsRadioGroup>
-              {state.isolateChosen ? null : (
-                <p className="typography-micro text-muted-foreground">{t('chat.parallel.settings.whereFollowsAutoWorktree')}</p>
-              )}
             </SettingsColumnBlock>
             <SettingsColumnBlock title={t('chat.parallel.settings.baseBranchTitle')}>
               <BranchSelector

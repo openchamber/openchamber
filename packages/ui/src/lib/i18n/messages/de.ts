@@ -3848,7 +3848,6 @@ export const dict = {
   'multirun.overview.addModel.hint': 'Derselbe Prompt auf einem weiteren Modell in diesem Lauf',
   'chat.parallel.settings.whereShared': 'Gemeinsames Verzeichnis',
   'chat.parallel.settings.whereSharedHint': 'Alle Läufe arbeiten in dem Verzeichnis, auf das dieser Entwurf zeigt. Am besten für Fragen und Recherche.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'Folgt "Worktree automatisch erstellen", bis du selbst wählst.',
   'chat.parallel.settings.whereWorktrees': 'Getrennte Worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Jeder Lauf bekommt einen eigenen Branch, Codeänderungen kollidieren nie. Behalte den besten.',
   'chat.parallel.settings.baseBranchTitle': 'Basis-Branch',

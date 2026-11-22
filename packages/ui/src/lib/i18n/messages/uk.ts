@@ -3851,7 +3851,6 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.addModel.hint': 'Той самий промпт ще на одній моделі в цьому запуску',
   'chat.parallel.settings.whereShared': 'Спільна папка',
   'chat.parallel.settings.whereSharedHint': 'Усі запуски працюють у папці, вибраній для цієї чернетки. Найкраще для питань і досліджень.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'Діє за налаштуванням "Автоматично створювати worktree", доки ви не оберете самі.',
   'chat.parallel.settings.whereWorktrees': 'Окремі worktree',
   'chat.parallel.settings.whereWorktreesHint': 'Кожен запуск отримує власну гілку, тож зміни коду не конфліктують. Залиште найкращий.',
   'chat.parallel.settings.baseBranchTitle': 'Базова гілка',

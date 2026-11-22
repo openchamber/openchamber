@@ -3849,7 +3849,6 @@ export const dict = {
   'multirun.overview.addModel.hint': 'Le même prompt sur un modèle de plus dans cette exécution',
   'chat.parallel.settings.whereShared': 'Dossier partagé',
   'chat.parallel.settings.whereSharedHint': 'Toutes les exécutions travaillent dans le dossier choisi pour ce brouillon. Idéal pour les questions et la recherche.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'Suit "Créer un worktree automatiquement" jusqu\'à ce que vous choisissiez.',
   'chat.parallel.settings.whereWorktrees': 'Worktrees séparés',
   'chat.parallel.settings.whereWorktreesHint': 'Chaque exécution a sa propre branche, les modifications de code ne se heurtent jamais. Gardez la meilleure.',
   'chat.parallel.settings.baseBranchTitle': 'Branche de base',

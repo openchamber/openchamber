@@ -3746,7 +3746,6 @@ export const dict = {
   'multirun.overview.addModel.hint': 'מריץ את אותה הנחיה על מודל נוסף בהרצה הזו',
   'chat.parallel.settings.whereShared': 'תיקייה משותפת',
   'chat.parallel.settings.whereSharedHint': 'כל ההרצות עובדות בתיקייה שנבחרה לטיוטה הזו. הכי מתאים לשאלות ולמחקר.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'פועל לפי "יצירת עץ עבודה אוטומטית" עד שתבחרו בעצמכם.',
   'chat.parallel.settings.whereWorktrees': 'עצי עבודה נפרדים',
   'chat.parallel.settings.whereWorktreesHint': 'כל הרצה מקבלת ענף משלה, כך ששינויי קוד לעולם לא מתנגשים. בסוף שומרים את הטובה ביותר.',
   'chat.parallel.settings.baseBranchTitle': 'ענף בסיס',

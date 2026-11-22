@@ -1000,14 +1000,15 @@ so the box grows upward and the text field never moves: one row of model chips
 lane) plus a summary button that opens the launch settings dialog: two fixed
 columns (where lanes work, base branch, setup | fusion, judge and its effort,
 prompt variants) where options that do not apply are disabled, not hidden, so
-the dialog keeps its size. Where the lanes work follows the draft's
-**Auto-create worktree** policy (`shouldAutoCreateDraftWorktree`, the same check
-a single send makes) until the user picks in the launch settings: on, for a
-draft aimed at a git project's root, each lane gets its own worktree; off, or a
-draft aimed at a worktree, every lane shares the draft's directory (the
+the dialog keeps its size. Every run starts on **Separate worktrees**, whatever
+the draft is aimed at and whatever the Auto-create worktree switch says: each
+lane gets a new worktree and branch from the picked base branch, else from
+where Settings say parallel runs start (`selectWorktreeStartFrom(…, 'parallel')`,
+the default remote's default branch such as `origin/main` unless changed),
+resolved at launch so it holds even when the launch settings were never
+opened. **Shared directory** puts every lane in the draft's directory (the
 worktree it points at, waiting for one Quick worktree is still making, else the
-project root). A project that is not a git repository always shares. Under the
-radio group a note says the choice still follows the switch. A tab row shows only
+project root). A project that is not a git repository always shares. A tab row shows only
 once there are two or more variants. Model pickers there render through a
 portal because the box clips its content; the footer drops the model button
 and keeps the ordinary send button (`ComposerActionButtons` with a
@@ -1017,14 +1018,15 @@ the `isLaunching` state, blocks a second launch before the re-render. Launching 
 draft text and attachments, and opens the run overview. Attachments go to every
 variant; prompt text is sent as typed, the way the old launcher sent it.
 
-### Why the run follows Auto-create worktree and not its own default
+### Why runs default to separate worktrees and not the draft's directory
 
-The parallel mode used to start every run in the project root whatever the
-draft showed: with Auto-create worktree on, one model got a worktree and
-several models shared the checkout, and a draft aimed at a worktree ran its
-lanes in the root. Reading the switch the draft already shows makes a run land
-where a single send would, per lane. An explicit pick in the launch settings
-still wins, so sharing stays available with the switch on.
+The parallel mode used to start every run in the project root, so several
+models edited one checkout and a draft aimed at a worktree ran its lanes in the
+root. Lanes that change code need a checkout each to be compared and kept, so
+the maintainer chose separate worktrees from the Settings start as the default,
+even for a draft aimed at a worktree or with Auto-create worktree off. That
+switch names one worktree for one session and does not fit several lanes.
+Shared directory stays one click away for questions and research.
 
 ## Chat quote highlights
 

@@ -71,7 +71,10 @@ An isolated run gives each lane a branch of its own
 (`laneBranches.uniqueLaneBranchName`): the `<run>/<model>` seed, suffixed past
 the repository's local branches and the launch's earlier lanes. The server
 refuses an existing branch, so without this a second run with the same title,
-or two models whose slugs match (`gpt-5`, `gpt.5`), failed those lanes. A
+or two models whose slugs match (`gpt-5`, `gpt.5`), failed those lanes. Every lane of a launch starts from one ref, read once:
+the picked base branch, else `worktreeStartFrom` (the Settings start for
+parallel runs), else the project root's `HEAD`. A failed read fails the launch
+instead of starting lanes elsewhere. A
 shared run puts every lane in `sharedDirectory`, the draft's directory.
 `runActions.askOtherModels` turns a chat into a run by writing membership onto
 it and adding lanes that re-send its first prompt; it refuses any turn but the

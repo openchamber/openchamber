@@ -3851,7 +3851,6 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.addModel.hint': '在此运行中让另一个模型处理同一提示词',
   'chat.parallel.settings.whereShared': '共享目录',
   'chat.parallel.settings.whereSharedHint': '所有运行都在此草稿选定的目录中进行。最适合提问和调研。',
-  'chat.parallel.settings.whereFollowsAutoWorktree': '在你自行选择之前，跟随“自动创建工作树”。',
   'chat.parallel.settings.whereWorktrees': '独立工作树',
   'chat.parallel.settings.whereWorktreesHint': '每次运行使用自己的分支，代码更改不会冲突。保留最好的那个。',
   'chat.parallel.settings.baseBranchTitle': '基础分支',

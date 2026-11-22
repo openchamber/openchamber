@@ -17,6 +17,7 @@ let onCreate = () => {};
 let isGitRepository = false;
 let waitForWorktreeSetup = false;
 let localBranches: string[] = [];
+const startRefReads: Array<{ directory: string; startFrom: string }> = [];
 let failBranchListing = false;
 const usedFolders = new Set<string>();
 const createWorktreeWithDefaultsMock = mock((project: { id?: string; path: string }, args: Record<string, unknown>, options: unknown) => {
@@ -132,6 +133,11 @@ mock.module('@/lib/gitApi', () => ({
 mock.module('@/lib/worktrees/worktreeCreate', () => ({
   createWorktreeWithDefaults: createWorktreeWithDefaultsMock,
   resolveRootTrackingRemote: mock(() => Promise.resolve(null)),
+  // Settings' remote default names origin/main; the project root needs no ref.
+  resolveDefaultWorktreeStartRef: mock((directory: string, startFrom: string) => {
+    startRefReads.push({ directory, startFrom });
+    return Promise.resolve(startFrom === 'remote-default' ? 'remotes/origin/main' : undefined);
+  }),
 }));
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
@@ -226,6 +232,7 @@ describe('useMultiRunStore', () => {
     isGitRepository = false;
     waitForWorktreeSetup = false;
     localBranches = [];
+    startRefReads.length = 0;
     failBranchListing = false;
     usedFolders.clear();
     childState.session = [];
@@ -366,6 +373,37 @@ describe('useMultiRunStore', () => {
 
   const laneDirectories = () => registeredDirectories.map((entry) => entry.directory);
   const requestedBranches = () => worktreeCreateCalls.map((call) => call.args.branchName);
+  const requestedStartRefs = () => worktreeCreateCalls.map((call) => call.args.startRef);
+
+  test('isolated runs start every lane from the Settings start, read once', async () => {
+    isGitRepository = true;
+    await useMultiRunStore.getState().createMultiRun({
+      name: 'Fix thing',
+      isolateRuns: true,
+      worktreeStartFrom: 'remote-default',
+      groups: [{ prompt: 'Fix it', models: [{ providerID: 'openai', modelID: 'gpt-5' }, { providerID: 'anthropic', modelID: 'claude' }] }],
+    });
+    expect(startRefReads).toEqual([{ directory: '/repo', startFrom: 'remote-default' }]);
+    expect(requestedStartRefs()).toEqual(['remotes/origin/main', 'remotes/origin/main']);
+  });
+
+  test('isolated runs: a picked base branch wins, and the project root start is HEAD', async () => {
+    isGitRepository = true;
+    await useMultiRunStore.getState().createMultiRun({
+      name: 'Fix thing',
+      isolateRuns: true,
+      worktreeBaseBranch: 'feature/x',
+      worktreeStartFrom: 'remote-default',
+      groups: [{ prompt: 'Fix it', models: [{ providerID: 'openai', modelID: 'gpt-5' }] }],
+    });
+    await useMultiRunStore.getState().createMultiRun({
+      name: 'Fix other',
+      isolateRuns: true,
+      worktreeStartFrom: 'project-root',
+      groups: [{ prompt: 'Fix it', models: [{ providerID: 'openai', modelID: 'gpt-5' }] }],
+    });
+    expect(requestedStartRefs()).toEqual(['feature/x', 'HEAD']);
+  });
 
   test('isolated runs: every lane gets its own branch, worktree and session directory', async () => {
     isGitRepository = true;

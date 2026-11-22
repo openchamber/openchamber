@@ -3850,7 +3850,6 @@ export const dict = {
   'multirun.overview.addModel.hint': 'Runs the same prompt on one more model in this run',
   'chat.parallel.settings.whereShared': 'Shared directory',
   'chat.parallel.settings.whereSharedHint': 'All runs work in the directory this draft is set to. Best for questions and research.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'Follows "Auto-create worktree" until you choose.',
   'chat.parallel.settings.whereWorktrees': 'Separate worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Each run gets its own branch, so code changes never collide. Keep the best one.',
   'chat.parallel.settings.baseBranchTitle': 'Base branch',

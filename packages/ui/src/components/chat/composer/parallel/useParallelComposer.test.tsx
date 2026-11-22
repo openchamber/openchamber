@@ -7,13 +7,13 @@ import {
   createPendingDraftWorktreeRequest,
   resolvePendingDraftWorktreeRequest,
 } from '@/lib/worktrees/pendingDraftWorktree';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { CreateMultiRunParams } from '@/types/multirun';
 import { useParallelComposer, type ParallelComposer } from './useParallelComposer';
 
-type Props = { autoIsolate: boolean };
 type Capture = { composer: ParallelComposer | null };
 
 /**
@@ -22,7 +22,7 @@ type Capture = { composer: ParallelComposer | null };
  */
 async function withComposer(run: (input: {
   capture: Capture;
-  render: (props: Props) => Promise<void>;
+  render: () => Promise<void>;
   launches: CreateMultiRunParams[];
 }) => Promise<void>) {
   const dom = installHookTestDom();
@@ -40,19 +40,18 @@ async function withComposer(run: (input: {
     },
   });
   let message = 'Fix the login';
-  const Harness = ({ autoIsolate }: Props) => {
+  const Harness = () => {
     capture.composer = useParallelComposer({
       enabled: true,
       draftOpen: true,
       draftProjectId: 'p1',
-      autoIsolate,
       message,
       setMessage: (text) => { message = text; },
     });
     return null;
   };
-  const render = (props: Props) => act(async () => root.render(
-    React.createElement(I18nProvider, null, React.createElement(Harness, props)),
+  const render = () => act(async () => root.render(
+    React.createElement(I18nProvider, null, React.createElement(Harness)),
   ));
   try {
     await run({ capture, render, launches });
@@ -78,46 +77,47 @@ const openDraft = (options: Parameters<ReturnType<typeof useSessionUIStore.getSt
 };
 
 describe('useParallelComposer worktree policy', () => {
-  test('auto-create worktree on: separate worktrees by default', async () => {
-    openDraft({ target: 'project', selectedProjectId: 'p1', directoryOverride: '/repo' });
+  test('separate worktrees by default, from where Settings say parallel runs start', async () => {
+    useConfigStore.setState({ settingsWorktreeStartFrom: 'project-root', settingsWorktreeStartFromOverrides: { parallel: 'remote-default' } });
+    // Aimed at an existing worktree, the run still gets new worktrees.
+    openDraft({ target: 'project', selectedProjectId: 'p1', directoryOverride: '/repo-worktrees/picked', preserveDirectoryOverride: true });
     await withComposer(async ({ capture, render, launches }) => {
-      await render({ autoIsolate: true });
+      await render();
       await enterWithTwoModels(capture);
       expect(capture.composer?.state?.isolate).toBe(true);
       await act(async () => { await capture.composer?.launch(); });
       expect(launches).toHaveLength(1);
       expect(launches[0].isolateRuns).toBe(true);
+      expect(launches[0].worktreeStartFrom).toBe('remote-default');
+      expect(launches[0].worktreeBaseBranch).toBeUndefined();
       expect(launches[0].sharedDirectory).toBeUndefined();
       expect(launches[0].groups[0].models).toHaveLength(2);
     });
   });
 
-  test('auto-create worktree off: the runs share the draft directory and no worktree is asked for', async () => {
+  test('a picked base branch wins over the Settings start', async () => {
+    openDraft({ target: 'project', selectedProjectId: 'p1', directoryOverride: '/repo' });
+    await withComposer(async ({ capture, render, launches }) => {
+      await render();
+      await enterWithTwoModels(capture);
+      await act(async () => capture.composer?.setBaseBranch('feature/x'));
+      await act(async () => { await capture.composer?.launch(); });
+      expect(launches[0].worktreeBaseBranch).toBe('feature/x');
+    });
+  });
+
+  test('shared directory: the runs share the draft directory and no worktree is asked for', async () => {
     openDraft({ target: 'project', selectedProjectId: 'p1', directoryOverride: '/repo-worktrees/picked', preserveDirectoryOverride: true });
     await withComposer(async ({ capture, render, launches }) => {
-      await render({ autoIsolate: false });
+      await render();
       await enterWithTwoModels(capture);
-      expect(capture.composer?.state?.isolate).toBe(false);
+      await act(async () => capture.composer?.setIsolate(false));
       await act(async () => { await capture.composer?.launch(); });
       expect(launches[0].isolateRuns).toBe(false);
       expect(launches[0].sharedDirectory).toBe('/repo-worktrees/picked');
       expect(launches[0].setupCommands).toBeUndefined();
       expect(launches[0].worktreeBaseBranch).toBeUndefined();
-    });
-  });
-
-  test('follows the switch until the user chooses, then keeps the choice', async () => {
-    openDraft({ target: 'project', selectedProjectId: 'p1', directoryOverride: '/repo' });
-    await withComposer(async ({ capture, render }) => {
-      await render({ autoIsolate: false });
-      await enterWithTwoModels(capture);
-      await render({ autoIsolate: true });
-      expect(capture.composer?.state?.isolate).toBe(true);
-      await act(async () => capture.composer?.setIsolate(false));
-      await render({ autoIsolate: false });
-      await render({ autoIsolate: true });
-      expect(capture.composer?.state?.isolate).toBe(false);
-      expect(capture.composer?.state?.isolateChosen).toBe(true);
+      expect(launches[0].worktreeStartFrom).toBeUndefined();
     });
   });
 
@@ -125,8 +125,9 @@ describe('useParallelComposer worktree policy', () => {
     const requestId = createPendingDraftWorktreeRequest();
     openDraft({ target: 'project', selectedProjectId: 'p1', directoryOverride: '/repo', pendingWorktreeRequestId: requestId });
     await withComposer(async ({ capture, render, launches }) => {
-      await render({ autoIsolate: false });
+      await render();
       await enterWithTwoModels(capture);
+      await act(async () => capture.composer?.setIsolate(false));
       let launched: Promise<void> | undefined;
       await act(async () => { launched = capture.composer?.launch(); });
       expect(launches).toHaveLength(0);
@@ -139,7 +140,7 @@ describe('useParallelComposer worktree policy', () => {
   test('pressing launch twice before it settles starts one run', async () => {
     openDraft({ target: 'project', selectedProjectId: 'p1', directoryOverride: '/repo' });
     await withComposer(async ({ capture, render, launches }) => {
-      await render({ autoIsolate: true });
+      await render();
       await enterWithTwoModels(capture);
       const launch = capture.composer?.launch;
       await act(async () => { await Promise.all([launch?.(), launch?.()]); });

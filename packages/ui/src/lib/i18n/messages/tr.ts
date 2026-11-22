@@ -3848,7 +3848,6 @@ export const dict = {
   'multirun.overview.addModel.hint': 'Bu çalıştırmada aynı promptu bir model daha çalıştırır',
   'chat.parallel.settings.whereShared': 'Ortak dizin',
   'chat.parallel.settings.whereSharedHint': 'Tüm çalıştırmalar bu taslağın ayarlandığı dizinde çalışır. Sorular ve araştırma için en iyisi.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'Siz seçene kadar "Worktree\'yi otomatik oluştur" ayarını izler.',
   'chat.parallel.settings.whereWorktrees': 'Ayrı worktree\'ler',
   'chat.parallel.settings.whereWorktreesHint': 'Her çalıştırma kendi dalını kullanır, kod değişiklikleri çakışmaz. En iyisini tutun.',
   'chat.parallel.settings.baseBranchTitle': 'Temel dal',

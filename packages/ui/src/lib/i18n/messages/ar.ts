@@ -3746,7 +3746,6 @@ export const dict = {
   'multirun.overview.addModel.hint': 'يشغّل الطلب نفسه على نموذج إضافي في هذا التشغيل',
   'chat.parallel.settings.whereShared': 'مجلد مشترك',
   'chat.parallel.settings.whereSharedHint': 'تعمل جميع عمليات التشغيل في المجلد المحدد لهذه المسودة. الأفضل للأسئلة والبحث.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'يتبع "إنشاء شجرة عمل تلقائيًا" حتى تختار بنفسك.',
   'chat.parallel.settings.whereWorktrees': 'أشجار عمل منفصلة',
   'chat.parallel.settings.whereWorktreesHint': 'يحصل كل تشغيل على فرعه الخاص، فلا تتعارض تغييرات الشيفرة أبدًا. احتفظ بالأفضل.',
   'chat.parallel.settings.baseBranchTitle': 'الفرع الأساسي',

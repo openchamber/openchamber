@@ -7,7 +7,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
-import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
+import { createWorktreeWithDefaults, resolveDefaultWorktreeStartRef, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { resolveCreatedWorktreeStartDirectory } from '@/lib/worktrees/worktreeStartDirectory';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -224,6 +224,11 @@ export const useMultiRunStore = create<MultiRunStore>()(
           assertCurrent();
           const takenBranches = shouldIsolateRuns ? await readLocalBranchNames(directory) : new Set<string>();
           assertCurrent();
+          // A failed read throws, so lanes never quietly start somewhere other than Settings say.
+          const startRef = shouldIsolateRuns
+            ? params.worktreeBaseBranch || await resolveDefaultWorktreeStartRef(directory, params.worktreeStartFrom ?? 'project-root') || 'HEAD'
+            : undefined;
+          assertCurrent();
           // A worktree the draft just made may still be running its setup commands.
           if (!shouldIsolateRuns && sharedDirectory !== directory && await getWorktreeSetupWaitEnabled(project)) {
             assertCurrent();
@@ -312,7 +317,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   mode: 'new',
                   branchName: laneBranch,
                   worktreeName: laneBranch,
-                  startRef: params.worktreeBaseBranch || 'HEAD',
+                  startRef,
                   setupCommands: commandsToRun,
                   returnAfterDirectoryCreated: true,
                 }, {

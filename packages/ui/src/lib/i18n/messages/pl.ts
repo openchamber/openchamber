@@ -3855,7 +3855,6 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.addModel.hint': 'Ten sam prompt na jeszcze jednym modelu w tym uruchomieniu',
   'chat.parallel.settings.whereShared': 'Wspólny katalog',
   'chat.parallel.settings.whereSharedHint': 'Wszystkie uruchomienia pracują w katalogu wybranym dla tego szkicu. Najlepsze do pytań i badań.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': 'Działa według "Automatycznie twórz worktree", dopóki sam nie wybierzesz.',
   'chat.parallel.settings.whereWorktrees': 'Osobne worktree',
   'chat.parallel.settings.whereWorktreesHint': 'Każde uruchomienie ma własną gałąź, więc zmiany w kodzie się nie zderzają. Zachowaj najlepsze.',
   'chat.parallel.settings.baseBranchTitle': 'Gałąź bazowa',

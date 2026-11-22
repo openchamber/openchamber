@@ -3850,7 +3850,6 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.addModel.hint': '이 실행에서 같은 프롬프트를 모델 하나에 더 보냅니다',
   'chat.parallel.settings.whereShared': '공유 디렉터리',
   'chat.parallel.settings.whereSharedHint': '모든 실행이 이 초안에 지정된 디렉터리에서 동작합니다. 질문과 조사에 가장 적합합니다.',
-  'chat.parallel.settings.whereFollowsAutoWorktree': '직접 고르기 전까지 "worktree 자동 생성"을 따릅니다.',
   'chat.parallel.settings.whereWorktrees': '개별 워크트리',
   'chat.parallel.settings.whereWorktreesHint': '실행마다 자체 브랜치를 사용해 코드 변경이 충돌하지 않습니다. 가장 좋은 것을 남기세요.',
   'chat.parallel.settings.baseBranchTitle': '기준 브랜치',
