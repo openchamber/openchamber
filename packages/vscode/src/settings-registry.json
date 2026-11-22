@@ -664,6 +664,9 @@
     "sessionWorkEnabled": {
       "scope": "profile"
     },
+    "continueWithModelMode": {
+      "scope": "profile"
+    },
     "sessionWorkEntry": {
       "scope": "profile",
       "surfaces": [

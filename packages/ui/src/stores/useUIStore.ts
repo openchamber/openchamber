@@ -13,6 +13,7 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOpt
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
 import type { PermissionMode } from './utils/permissionAutoAccept';
+import { CONTINUE_WORK_MODES, type ContinueWorkMode } from '@/lib/opencode/model-handoff';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { rebaseMovedPath } from '@/lib/filePathMoves';
@@ -110,6 +111,9 @@ const normalizeLargeTextPasteBehavior = (value: PersistedUIFieldValue): LargeTex
 const normalizeAgentTerminalsPlacement = (value: PersistedUIFieldValue): AgentTerminalsPlacement => (
   value === 'sidebar' ? 'sidebar' : DEFAULT_AGENT_TERMINALS_PLACEMENT
 );
+
+/** Stopping everything is the default; keeping work running is the choice a user makes. */
+const continueWithModelModeSchema = z.enum(CONTINUE_WORK_MODES).catch('stop');
 
 const normalizeActiveRunModelChangeBehavior = (value: PersistedUIFieldValue): ActiveRunModelChangeBehavior => (
   value === 'restart' ? 'restart' : DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR
@@ -1036,6 +1040,8 @@ interface UIStore {
   sessionSuggestionEnabled: boolean;
   /** The "In work" sidebar block and the Track / Done actions. */
   sessionWorkEnabled: boolean;
+  /** What "Continue with another model" does by default with the session's running shell commands and subagents. */
+  continueWithModelMode: ContinueWorkMode;
   /** How sessions enter In work besides Track; the server acts on it. */
   sessionWorkEntry: SessionWorkEntry;
   /** Let Jev offer an AI review or a walkthrough after a turn that changed the project. */
@@ -1370,6 +1376,7 @@ interface UIStore {
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionWorkEnabled: (value: boolean) => void;
+  setContinueWithModelMode: (value: ContinueWorkMode) => void;
   setSessionWorkEntry: (value: SessionWorkEntry) => void;
   setSessionReviewOfferEnabled: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
@@ -1631,6 +1638,7 @@ export const useUIStore = create<UIStore>()(
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         sessionWorkEnabled: true,
+        continueWithModelMode: 'stop',
         sessionWorkEntry: 'off',
         sessionReviewOfferEnabled: false,
         sessionGoalEnabled: true,
@@ -2738,6 +2746,10 @@ export const useUIStore = create<UIStore>()(
           set({ sessionWorkEnabled: value });
         },
 
+        setContinueWithModelMode: (value) => {
+          set({ continueWithModelMode: value });
+        },
+
         setSessionWorkEntry: (value) => {
           set({ sessionWorkEntry: value });
         },
@@ -3839,6 +3851,7 @@ export const useUIStore = create<UIStore>()(
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
           state.agentTerminalsPlacement = normalizeAgentTerminalsPlacement(state.agentTerminalsPlacement);
+          state.continueWithModelMode = continueWithModelModeSchema.parse(state.continueWithModelMode);
           state.activeRunModelChangeBehavior = normalizeActiveRunModelChangeBehavior(state.activeRunModelChangeBehavior);
 
           if (state.toolJsonViewMode !== 'summary'
@@ -3902,6 +3915,7 @@ export const useUIStore = create<UIStore>()(
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionWorkEnabled: state.sessionWorkEnabled,
+          continueWithModelMode: state.continueWithModelMode,
           sessionWorkEntry: state.sessionWorkEntry,
           sessionReviewOfferEnabled: state.sessionReviewOfferEnabled,
           sessionGoalEnabled: state.sessionGoalEnabled,

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage, Metadata, Part, StructuredError, SyntheticMessage, ToolState, UserMessage } from '@/lib/opencode/model';
 
-import { createParsedStatus, getActiveAssistantContext, hasBackgroundableWork, limitResetsAt } from './useAssistantStatus';
+import { createParsedStatus, getActiveAssistantContext, limitResetsAt } from './useAssistantStatus';
+import { hasBackgroundableWork } from '@/lib/opencode/tools';
 
 const userMessage = (id: string): UserMessage => ({
     id,

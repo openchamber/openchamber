@@ -24,6 +24,13 @@
  * prompt's turn (`TurnRecord.waitingNotices`). One that lands after an answer
  * stays as its own entry and renders as a notice row between turns. Everything else the timeline never shows is dropped here
  * instead of rendering as an empty row.
+ *
+ * A handoff note ("Continued with <model>") is admitted after the continue
+ * sequence stopped the run, right before the "Continue" prompt, and the run
+ * that prompt starts reads it first. So it never joins the stopped run's last
+ * step, even one closed later than the note was admitted, and it goes on with
+ * the prompt that follows it: it renders in that prompt's turn, below the
+ * model-changed divider, as a row of the new run's first step.
  */
 
 import type { Part, TextPart } from '@/lib/opencode/model';
@@ -160,6 +167,11 @@ export const attachSyntheticContext = (messages: ChatMessageEntry[]): ChatMessag
         lastStep = null;
         queuedOverStep = null;
     };
+    const runningStepAt = (at: number): StepRows | null => {
+        if (lastStep && stepWasRunningAt(lastStep.source, at)) return lastStep;
+        if (queuedOverStep && stepRanAt(queuedOverStep.source, at)) return queuedOverStep;
+        return null;
+    };
 
     for (const [index, message] of messages.entries()) {
         const role = message.info.role;
@@ -198,10 +210,9 @@ export const attachSyntheticContext = (messages: ChatMessageEntry[]): ChatMessag
 
         const notice = readSessionNotice(message.info);
         if (notice) {
-            const created = message.info.time.created;
-            const step = lastStep && stepWasRunningAt(lastStep.source, created)
-                ? lastStep
-                : queuedOverStep && stepRanAt(queuedOverStep.source, created) ? queuedOverStep : null;
+            // The run before a handoff note was stopped before the note came,
+            // whatever time its last step was closed with.
+            const step = notice.kind === 'handoff' ? null : runningStepAt(message.info.time.created);
             if (step) {
                 const part = noticePartFor(message, notice, step.source.info.id, 'after');
                 step.after = [...step.after, part];
@@ -217,7 +228,11 @@ export const attachSyntheticContext = (messages: ChatMessageEntry[]): ChatMessag
 
         if (role === 'user') {
             const runningStep: StepRows | null = lastStep && stepRanAt(lastStep.source, message.info.time.created) ? lastStep : queuedOverStep;
+            // A handoff note waiting here belongs to the run this prompt starts.
+            const handoffs = pendingNotices.filter((pending) => pending.notice.kind === 'handoff');
+            pendingNotices = pendingNotices.filter((pending) => pending.notice.kind !== 'handoff');
             endRun();
+            pendingNotices = handoffs;
             queuedOverStep = runningStep;
             const contextParts = pendingContext;
             pendingContext = [];

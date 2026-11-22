@@ -14,6 +14,9 @@
  *   the plugin's description as it is.
  * - "Continuing after restart" (`metadata.notice: "restart"`): the OpenCode
  *   server restarted mid-turn and the agent carries on.
+ * - "Continued with <model>" (`metadata.openchamberModelHandoff`): the user
+ *   moved the session to another model; the row opens to the note that told
+ *   the new model where the previous one stopped (`./model-handoff`).
  * - A `!command` that could not start (`source: "shell"`, `state: "error"`,
  *   no `shellID`): otherwise the failure shows nowhere.
  * - "Moved to <folder>": an "Instructions updated" whose sources include the
@@ -46,6 +49,7 @@ import { readContextPart } from "@/lib/messages/contextParts"
 import { readShellCancellation, readShellCompletion } from "./background-shell"
 import { readDispatchedSessionResult } from "./dispatched-session"
 import type { Message, Metadata, Part, ToolPart } from "./model"
+import { readModelHandoff } from "./model-handoff"
 import { isSubagentCancellationNote, readSubagentRun } from "./subagent-run"
 
 export type SessionNotice =
@@ -53,6 +57,7 @@ export type SessionNotice =
   | { kind: "restart"; text: string }
   | { kind: "command-failed"; command: string; text: string }
   | { kind: "moved"; folder: string | null; text: string }
+  | { kind: "handoff"; providerID: string; modelID: string; text: string }
 
 const HIDDEN_DESCRIPTIONS = new Set(["ACP embedded context"])
 
@@ -83,6 +88,8 @@ export function readSessionNotice(message: Message): SessionNotice | undefined {
   if (readShellCompletion(message) || readShellCancellation(message) || isSubagentCancellationNote(message)) return undefined
   if (HIDDEN_DESCRIPTIONS.has(description) || instructionsLoadedSchema.safeParse(metadata).success) return undefined
   const text = message.text
+  const handoff = readModelHandoff(message)
+  if (handoff) return { kind: "handoff", providerID: handoff.to.providerID, modelID: handoff.to.modelID, text }
   if (restartSchema.safeParse(metadata).success) return { kind: "restart", text }
   if (failedCommandSchema.safeParse(metadata).success) return { kind: "command-failed", command: description, text }
   return { kind: "plugin", label: description, text }
@@ -104,6 +111,12 @@ const noticeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("restart"), text: z.string() }),
   z.object({ kind: z.literal("command-failed"), command: z.string(), text: z.string() }),
   z.object({ kind: z.literal("moved"), folder: z.string().nullable(), text: z.string() }),
+  z.object({
+    kind: z.literal("handoff"),
+    providerID: z.string(),
+    modelID: z.string(),
+    text: z.string(),
+  }),
 ])
 
 const noticePartMetadataSchema = z.object({ [NOTICE_METADATA_KEY]: noticeSchema })

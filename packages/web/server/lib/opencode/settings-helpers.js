@@ -633,6 +633,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionWorkEnabled === 'boolean') {
       result.sessionWorkEnabled = candidate.sessionWorkEnabled;
     }
+    if (candidate.continueWithModelMode === 'stop' || candidate.continueWithModelMode === 'keep') {
+      result.continueWithModelMode = candidate.continueWithModelMode;
+    }
     if (isSessionWorkEntry(candidate.sessionWorkEntry)) {
       result.sessionWorkEntry = candidate.sessionWorkEntry;
     }

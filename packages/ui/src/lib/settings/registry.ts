@@ -46,6 +46,7 @@ import { sidebarLayoutSchema } from '@/stores/sidebarLayout';
 import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior, type SessionWorkEntry } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
+import { CONTINUE_WORK_MODES } from '@/lib/opencode/model-handoff';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -595,6 +596,7 @@ export const SETTINGS_REGISTRY = {
   sessionRecapEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionRecapEnabled', (v) => useUIStore.getState().setSessionRecapEnabled(v)) }),
   sessionSuggestionEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionSuggestionEnabled', (v) => useUIStore.getState().setSessionSuggestionEnabled(v)) }),
   sessionWorkEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionWorkEnabled', (v) => useUIStore.getState().setSessionWorkEnabled(v)) }),
+  continueWithModelMode: field({ scope: 'profile', parse: parseOneOf(CONTINUE_WORK_MODES), ui: uiStore('continueWithModelMode', (v) => useUIStore.getState().setContinueWithModelMode(v)) }),
   // How sessions enter In work. The OpenChamber server opens them, which VS
   // Code does not have.
   sessionWorkEntry: field({

@@ -8,6 +8,8 @@ import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { BackgroundWorkButton } from './BackgroundWorkButton';
+import { ContinueWithModelIconButton } from './ContinueWithModelButtons';
+import { useContinueWithModelAction } from '../continueWithModelContext';
 import { registerFloatingPanelClearanceReader } from '@/components/chat/composer/state/composerInsetReaders';
 
 /** The scroll action: the arrow, plus the status label while the session works. */
@@ -45,6 +47,7 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
     const { activeModel, working } = useAssistantStatus();
     const providers = useConfigStore((state) => state.providers);
     const backgroundWork = useBackgroundSessionWork();
+    const continueWithModel = useContinueWithModelAction();
 
     const modelName = React.useMemo(() => {
         if (!activeModel) return null;
@@ -63,11 +66,12 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
             <ScrollAction onClick={onClick}>
                 {/* leading-5: `truncate` clips at the line box, and a 16px one
                     cut off descenders in fonts with taller metrics. */}
-                <span className={cn('-ms-px min-w-0 truncate text-[13px] leading-5 text-muted-foreground', working.canBackground ? 'pe-1' : 'pe-2')}>
+                <span className={cn('-ms-px min-w-0 truncate text-[13px] leading-5 text-muted-foreground', working.canBackground || continueWithModel ? 'pe-1' : 'pe-2')}>
                     {label}
                 </span>
             </ScrollAction>
-            {working.canBackground ? <BackgroundWorkButton onClick={backgroundWork} className="me-0.5 h-6 w-6" /> : null}
+            {working.canBackground ? <BackgroundWorkButton onClick={backgroundWork} className={cn('h-6 w-6', !continueWithModel && 'me-0.5')} /> : null}
+            {continueWithModel ? <ContinueWithModelIconButton onClick={continueWithModel} className="me-0.5 h-6 w-6" /> : null}
         </>
     );
 };
