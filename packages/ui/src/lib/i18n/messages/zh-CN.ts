@@ -1332,6 +1332,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '请检查仓库的子模块和 Git LFS 配置，然后重试。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '仓库中的文件太多。',
   'worktree.bootstrap.toast.branchNameConflict': '分支名称与现有分支冲突：名称相同，或其中一个嵌套在另一个之下。请重命名分支，然后重新创建工作树。',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '未获取子模块：OpenChamber 只通过网络远程仓库获取子模块，而这个 worktree 没有可用的远程。仓库的远程是这台电脑上的文件夹、没有远程，或分支没有跟踪任何远程。请直接在仓库文件夹中工作，或从 upstream 为网络远程的分支创建 worktree。',
+  'worktree.bootstrap.toast.lfsSourceLocal': '未获取 Git LFS 文件：OpenChamber 只通过网络远程仓库获取这些文件，而这个 worktree 没有可用的远程。仓库的远程是这台电脑上的文件夹、没有远程，或分支没有跟踪任何远程。请直接在仓库文件夹中工作，或从 upstream 为网络远程的分支创建 worktree。',
   'worktree.bootstrap.toast.cancelled': '工作树设置已取消。准备好后请重试。',
   'worktree.bootstrap.toast.transportFailed': '请检查仓库访问权限和网络连接，然后重试。',
   'worktree.bootstrap.toast.timeoutDescription': '工作树已创建，但后台设置超时。',

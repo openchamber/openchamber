@@ -1229,6 +1229,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Pruefe die Submodule- und Git-LFS-Konfiguration des Repositorys und versuche es erneut.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Das Repository enthält zu viele Dateien.',
   'worktree.bootstrap.toast.branchNameConflict': 'Der Branch-Name kollidiert mit einem vorhandenen Branch: derselbe Name oder einer liegt im anderen. Benenne den Branch um und erstelle die Worktree erneut.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Submodule wurden nicht geladen: OpenChamber lädt sie nur über ein Netzwerk-Remote, und dieser Worktree hat keins. Das Remote des Repositorys ist ein Ordner auf diesem Computer, es gibt kein Remote, oder der Branch verfolgt keins. Arbeite direkt im Repository-Ordner oder erstelle den Worktree von einem Branch, dessen Upstream ein Netzwerk-Remote ist.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git-LFS-Dateien wurden nicht geladen: OpenChamber lädt sie nur über ein Netzwerk-Remote, und dieser Worktree hat keins. Das Remote des Repositorys ist ein Ordner auf diesem Computer, es gibt kein Remote, oder der Branch verfolgt keins. Arbeite direkt im Repository-Ordner oder erstelle den Worktree von einem Branch, dessen Upstream ein Netzwerk-Remote ist.',
   'worktree.bootstrap.toast.cancelled': 'Die Worktree-Einrichtung wurde abgebrochen. Versuche es erneut, wenn du bereit bist.',
   'worktree.bootstrap.toast.transportFailed': 'Pruefe den Repository-Zugriff und die Netzwerkverbindung und versuche es erneut.',
   'worktree.bootstrap.toast.timeoutDescription': 'Die Worktree wurde erstellt, aber die Hintergrund-Einrichtung hat ein Timeout.',

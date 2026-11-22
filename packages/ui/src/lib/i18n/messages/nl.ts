@@ -1326,6 +1326,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Controleer de configuratie van de submodules en Git LFS van de repository en probeer het opnieuw.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'De repository bevat te veel bestanden.',
   'worktree.bootstrap.toast.branchNameConflict': 'De branchnaam botst met een bestaande branch: dezelfde naam, of de ene genest in de andere. Hernoem de branch en maak de worktree opnieuw aan.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Submodules zijn niet opgehaald: OpenChamber haalt ze alleen op via een netwerkremote, en deze worktree heeft er geen. De remote van de repository is een map op deze computer, er is geen remote, of de branch volgt er geen. Werk in de repositorymap zelf, of maak de worktree vanaf een branch waarvan de upstream een netwerkremote is.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS-bestanden zijn niet opgehaald: OpenChamber haalt ze alleen op via een netwerkremote, en deze worktree heeft er geen. De remote van de repository is een map op deze computer, er is geen remote, of de branch volgt er geen. Werk in de repositorymap zelf, of maak de worktree vanaf een branch waarvan de upstream een netwerkremote is.',
   'worktree.bootstrap.toast.cancelled': 'De worktree-installatie is geannuleerd. Probeer het opnieuw wanneer je klaar bent.',
   'worktree.bootstrap.toast.transportFailed': 'Controleer de toegang tot de repository en de netwerkverbinding en probeer het opnieuw.',
   'worktree.bootstrap.toast.timeoutDescription': 'De worktree is aangemaakt, maar de achtergrondinrichting heeft een time-out gehad.',

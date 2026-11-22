@@ -1328,6 +1328,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': 'リポジトリのサブモジュールと Git LFS の設定を確認してから、再試行してください。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'リポジトリのファイルが多すぎます。',
   'worktree.bootstrap.toast.branchNameConflict': 'ブランチ名が既存のブランチと衝突しています（同じ名前か、一方がもう一方の中に入れ子になっています）。ブランチ名を変更して、ワークツリーをもう一度作成してください。',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'サブモジュールは取得されませんでした。OpenChamber はネットワーク上のリモート経由でのみ取得しますが、この worktree には使えるリモートがありません。リポジトリのリモートがこのコンピューター上のフォルダーか、リモートが存在しないか、ブランチが何も追跡していません。リポジトリのフォルダーで直接作業するか、upstream がネットワーク上のリモートであるブランチから worktree を作成してください。',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS ファイルは取得されませんでした。OpenChamber はネットワーク上のリモート経由でのみ取得しますが、この worktree には使えるリモートがありません。リポジトリのリモートがこのコンピューター上のフォルダーか、リモートが存在しないか、ブランチが何も追跡していません。リポジトリのフォルダーで直接作業するか、upstream がネットワーク上のリモートであるブランチから worktree を作成してください。',
   'worktree.bootstrap.toast.cancelled': 'ワークツリーのセットアップはキャンセルされました。準備ができたら再試行してください。',
   'worktree.bootstrap.toast.transportFailed': 'リポジトリへのアクセスとネットワーク接続を確認してから、再試行してください。',
   'worktree.bootstrap.toast.timeoutDescription': 'ワークツリーは作成されましたが、バックグラウンドセットアップがタイムアウトしました。',

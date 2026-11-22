@@ -16,7 +16,7 @@ const ERROR_CODES = new Set([
   'REMOTE_CHANGED', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
   'CONFLICT', 'CANCELLED', 'TIMEOUT', 'OUTCOME_UNKNOWN', 'RUNTIME_UNSUPPORTED', 'UNKNOWN',
   'GIT_LFS_CLIENT_MISSING', 'PATH_LENGTH_LIMIT', 'CHECKOUT_TOO_LARGE',
-  'BRANCH_NAME_CONFLICT',
+  'BRANCH_NAME_CONFLICT', 'SUBMODULE_SOURCE_LOCAL', 'LFS_SOURCE_LOCAL',
 ]);
 const HYDRATION_STATUSES = new Set([
   'succeeded', 'authorization-required', 'invalid', 'client-missing', 'failed', 'cancelled', 'not-needed',
@@ -42,6 +42,8 @@ const SAFE_ERROR_MESSAGES: Readonly<Record<PropertyKey, string>> = Object.freeze
   CHECKOUT_TOO_LARGE: 'Worktree checkout has too many files to inspect',
   PATH_LENGTH_LIMIT: 'Git reported "File name too long". The worktree checkout path exceeds this system\'s path-length limit. Enable OS long paths or use a shorter repository path.',
   BRANCH_NAME_CONFLICT: 'Git could not create the worktree branch: its name clashes with an existing branch (the same name, or one nested inside the other). Rename the branch and create the worktree again.',
+  SUBMODULE_SOURCE_LOCAL: 'Submodules weren\'t fetched: OpenChamber fetches them only through a network remote, and this worktree has none to use. The repository\'s remote is a folder on this computer, it has no remote, or its branch tracks none. Work in the repository folder itself, or start the worktree from a branch whose upstream is a network remote.',
+  LFS_SOURCE_LOCAL: 'Git LFS files weren\'t fetched: OpenChamber fetches them only through a network remote, and this worktree has none to use. The repository\'s remote is a folder on this computer, it has no remote, or its branch tracks none. Work in the repository folder itself, or start the worktree from a branch whose upstream is a network remote.',
 });
 
 function errorMessageFor<Code>(code: Code): BootstrapFailureMessage | undefined;

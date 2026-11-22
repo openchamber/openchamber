@@ -173,6 +173,10 @@ const bootstrapFailureDescription = (status: GitWorktreeBootstrapStatus): string
       return t('worktree.bootstrap.toast.repositoryTooManyFiles');
     case 'BRANCH_NAME_CONFLICT':
       return t('worktree.bootstrap.toast.branchNameConflict');
+    case 'SUBMODULE_SOURCE_LOCAL':
+      return t('worktree.bootstrap.toast.submoduleSourceLocal');
+    case 'LFS_SOURCE_LOCAL':
+      return t('worktree.bootstrap.toast.lfsSourceLocal');
     case 'CANCELLED':
       return t('worktree.bootstrap.toast.cancelled');
     case 'TIMEOUT':

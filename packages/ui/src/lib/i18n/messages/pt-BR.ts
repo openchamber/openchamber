@@ -1326,6 +1326,8 @@ export const dict: Record<I18nKey, string> = {
   "worktree.bootstrap.toast.invalidConfiguration": "Revise a configuração de submódulos e do Git LFS do repositório e tente novamente.",
   "worktree.bootstrap.toast.repositoryTooManyFiles": "O repositório tem arquivos demais.",
   "worktree.bootstrap.toast.branchNameConflict": "O nome do branch conflita com um branch existente: o mesmo nome, ou um aninhado dentro do outro. Renomeie o branch e crie o worktree novamente.",
+  "worktree.bootstrap.toast.submoduleSourceLocal": "Os submódulos não foram buscados: o OpenChamber só os busca por um remoto de rede, e este worktree não tem nenhum. O remoto do repositório é uma pasta neste computador, não há remoto ou a branch não acompanha nenhum. Trabalhe na própria pasta do repositório ou crie o worktree a partir de uma branch cujo upstream seja um remoto de rede.",
+  "worktree.bootstrap.toast.lfsSourceLocal": "Os arquivos do Git LFS não foram buscados: o OpenChamber só os busca por um remoto de rede, e este worktree não tem nenhum. O remoto do repositório é uma pasta neste computador, não há remoto ou a branch não acompanha nenhum. Trabalhe na própria pasta do repositório ou crie o worktree a partir de uma branch cujo upstream seja um remoto de rede.",
   "worktree.bootstrap.toast.cancelled": "A configuração do worktree foi cancelada. Tente novamente quando estiver pronto.",
   "worktree.bootstrap.toast.transportFailed": "Verifique o acesso ao repositório e a conexão de rede e tente novamente.",
   "worktree.bootstrap.toast.timeoutDescription": "O worktree foi criado, mas a configuração em segundo plano atingiu o tempo limite.",

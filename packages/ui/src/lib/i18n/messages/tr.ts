@@ -3789,6 +3789,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Repository submodule ve Git LFS yapılandırmasını gözden geçirin, ardından yeniden deneyin.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repository\'de çok fazla dosya var.',
   'worktree.bootstrap.toast.branchNameConflict': 'Dal adı mevcut bir dalla çakışıyor: aynı ad ya da biri diğerinin içinde. Dalı yeniden adlandırın ve worktree\'yi yeniden oluşturun.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Alt modüller alınmadı: OpenChamber bunları yalnızca ağ üzerindeki bir remote üzerinden alır ve bu worktree\'nin kullanabileceği bir remote yok. Deponun remote\'u bu bilgisayardaki bir klasör, hiç remote yok ya da dal hiçbirini izlemiyor. Doğrudan depo klasöründe çalışın veya worktree\'yi upstream\'i bir ağ remote\'u olan bir daldan oluşturun.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS dosyaları alınmadı: OpenChamber bunları yalnızca ağ üzerindeki bir remote üzerinden alır ve bu worktree\'nin kullanabileceği bir remote yok. Deponun remote\'u bu bilgisayardaki bir klasör, hiç remote yok ya da dal hiçbirini izlemiyor. Doğrudan depo klasöründe çalışın veya worktree\'yi upstream\'i bir ağ remote\'u olan bir daldan oluşturun.',
   'worktree.bootstrap.toast.cancelled': 'Worktree kurulumu iptal edildi. Hazır olduğunuzda yeniden deneyin.',
   'worktree.bootstrap.toast.transportFailed': 'Repository erişimini ve ağ bağlantısını kontrol edin, ardından yeniden deneyin.',
   'gitView.pr.actions.openOnProvider': '{provider} üzerinde aç',

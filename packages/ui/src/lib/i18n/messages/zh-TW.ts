@@ -1351,6 +1351,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '請檢查儲存庫的子模組與 Git LFS 設定，然後重試。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '儲存庫中的檔案太多。',
   'worktree.bootstrap.toast.branchNameConflict': '分支名稱與現有分支衝突：名稱相同，或其中一個巢狀於另一個之下。請重新命名分支，然後重新建立 worktree。',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '未取得子模組：OpenChamber 只會透過網路遠端取得子模組，而這個 worktree 沒有可用的遠端。存放庫的遠端是這台電腦上的資料夾、沒有遠端，或分支沒有追蹤任何遠端。請直接在存放庫資料夾中工作，或從 upstream 為網路遠端的分支建立 worktree。',
+  'worktree.bootstrap.toast.lfsSourceLocal': '未取得 Git LFS 檔案：OpenChamber 只會透過網路遠端取得這些檔案，而這個 worktree 沒有可用的遠端。存放庫的遠端是這台電腦上的資料夾、沒有遠端，或分支沒有追蹤任何遠端。請直接在存放庫資料夾中工作，或從 upstream 為網路遠端的分支建立 worktree。',
   'worktree.bootstrap.toast.cancelled': 'worktree 設定已取消。準備好後請重試。',
   'worktree.bootstrap.toast.transportFailed': '請檢查儲存庫存取權限與網路連線，然後重試。',
   'worktree.bootstrap.toast.timeoutDescription': 'worktree 已建立，但背景設定逾時。',

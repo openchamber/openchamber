@@ -1326,6 +1326,8 @@ export const dict: Record<I18nKey, string> = {
   "worktree.bootstrap.toast.invalidConfiguration": "Перевірте конфігурацію підмодулів і Git LFS у репозиторії, а потім повторіть спробу.",
   "worktree.bootstrap.toast.repositoryTooManyFiles": "У репозиторії забагато файлів.",
   "worktree.bootstrap.toast.branchNameConflict": "Назва гілки конфліктує з наявною гілкою: така сама назва або одна вкладена в іншу. Перейменуйте гілку й створіть worktree ще раз.",
+  "worktree.bootstrap.toast.submoduleSourceLocal": "Сабмодулі не підтягнуто: OpenChamber бере їх лише через мережевий remote, а в цього worktree такого немає. Remote репозиторію — папка на цьому комп'ютері, remote немає взагалі або гілка нічого не відстежує. Працюйте в самій папці репозиторію або створіть worktree від гілки, чий upstream — мережевий remote.",
+  "worktree.bootstrap.toast.lfsSourceLocal": "Файли Git LFS не підтягнуто: OpenChamber бере їх лише через мережевий remote, а в цього worktree такого немає. Remote репозиторію — папка на цьому комп'ютері, remote немає взагалі або гілка нічого не відстежує. Працюйте в самій папці репозиторію або створіть worktree від гілки, чий upstream — мережевий remote.",
   "worktree.bootstrap.toast.cancelled": "Налаштування worktree скасовано. Повторіть спробу, коли будете готові.",
   "worktree.bootstrap.toast.transportFailed": "Перевірте доступ до репозиторію та мережеве з’єднання, а потім повторіть спробу.",
   "worktree.bootstrap.toast.timeoutDescription": "Worktree створено, але час очікування фонового налаштування минув.",

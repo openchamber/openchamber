@@ -3514,6 +3514,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Vérifiez la configuration des sous-modules et de Git LFS du dépôt, puis réessayez.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Le dépôt contient trop de fichiers.',
   'worktree.bootstrap.toast.branchNameConflict': 'Le nom de la branche entre en conflit avec une branche existante : le même nom, ou l’un imbriqué dans l’autre. Renommez la branche et recréez le worktree.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Les sous-modules n\'ont pas été récupérés : OpenChamber ne les récupère que via un remote réseau, et ce worktree n\'en a aucun. Le remote du dépôt est un dossier sur cet ordinateur, il n\'y a pas de remote, ou la branche n\'en suit aucun. Travaillez dans le dossier du dépôt lui-même, ou créez le worktree à partir d\'une branche dont l\'upstream est un remote réseau.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Les fichiers Git LFS n\'ont pas été récupérés : OpenChamber ne les récupère que via un remote réseau, et ce worktree n\'en a aucun. Le remote du dépôt est un dossier sur cet ordinateur, il n\'y a pas de remote, ou la branche n\'en suit aucun. Travaillez dans le dossier du dépôt lui-même, ou créez le worktree à partir d\'une branche dont l\'upstream est un remote réseau.',
   'worktree.bootstrap.toast.cancelled': 'La configuration du worktree a été annulée. Réessayez lorsque vous êtes prêt.',
   'worktree.bootstrap.toast.transportFailed': 'Vérifiez l’accès au dépôt et la connexion réseau, puis réessayez.',
   'worktree.bootstrap.toast.timeoutDescription': 'Le worktree a été créé, mais la configuration en arrière-plan a expiré.',
