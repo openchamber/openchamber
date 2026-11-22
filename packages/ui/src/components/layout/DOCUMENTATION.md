@@ -28,8 +28,12 @@ no resize handle; `variant="side"` marks the side zones there. No zone in
 that window expands, since the center already takes the room. The mode
 itself, routing and following the main window live in `lib/contextWindow`
 (`DOCUMENTATION.md` there). While a main window is detached, `MainLayout`
-mounts no zones, panes, rail, drop overlay or fit arbiter, and keeps only
-the closed right zone, whose slot holds the work-status card. The rail and
+mounts no zones, panes, drop overlay or fit arbiter, and keeps only the
+closed right zone, whose slot holds the work-status card. In the rail's place
+it shows `DetachedPanelRail`: a pressed button that brings the panel window
+to the front, and in the slot of the detach control a button that brings the
+panel back to this window, so the panel is never out of reach from the chat
+window. The rail and
 the zone header (`ContextZoneWindowButtons`) carry the control that detaches
 the panel; in the panel window the rail's control sends it back.
 

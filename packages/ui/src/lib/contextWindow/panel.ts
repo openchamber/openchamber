@@ -115,6 +115,9 @@ export const startContextWindowPanel = (): (() => void) => {
       case 'close':
         window.close();
         return;
+      case 'return':
+        returnPanelToOwner();
+        return;
       case 'attached':
         attachments.settle(message.requestId, message.files);
         return;

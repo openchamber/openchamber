@@ -9,7 +9,7 @@ import { getMiniChatRuntimeArgs, invokeDesktop, isElectronShell } from '@/lib/de
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { afterDelay } from '@/lib/timing/afterDelay';
 import { generateUuid } from '@/lib/uuid';
-import { buildContextWindowUrl, isContextWindow, isWindowId } from './role';
+import { buildContextWindowUrl, isContextWindow, isContextWindowUrl, isWindowId } from './role';
 import { carryShownSurfaces, closeEveryZone, explicitPanelWindowPlacement, latestPanelOwner, panelWindowPlacement, withPanelEntry, withoutPanelEntry } from './layoutState';
 import { withoutForeignComparisons } from '@/stores/ui/contextPanelState';
 import type { UIStore } from '@/stores/ui/types';
@@ -55,6 +55,7 @@ type Owner = {
   queued: ContextWindowMessage[];
   lastFollow: string;
   cancelWait: (() => void) | null;
+  returnRequested: boolean;
 };
 
 let owner: Owner | null = null;
@@ -158,6 +159,10 @@ const panelReady = (): void => {
   if (!owner) return;
   stopWaiting();
   owner.ready = true;
+  if (owner.returnRequested) {
+    requestReturn(owner);
+    return;
+  }
   sendFollowState(true);
   const queued = owner.queued.splice(0);
   for (const message of queued) post(message);
@@ -208,6 +213,57 @@ export const detachContextPanel = async (options: { restoreFrom?: ReadonlySet<st
   return 'opened';
 };
 
+const readHref = (target: Window): string | null => {
+  try {
+    return target.location.href;
+  } catch {
+    return null;
+  }
+};
+
+const findWebPanelWindow = (current: Owner): Window | null => {
+  if (current.panel && !current.panel.closed) return current.panel;
+  const found = window.open('', `openchamber-context-${current.id}`);
+  if (!found) return null;
+  const href = readHref(found);
+  if (href === 'about:blank') found.close();
+  if (!href || !isContextWindowUrl(href, current.id, window.location.origin)) return null;
+  current.panel = found;
+  return found;
+};
+
+export const showContextPanelWindow = (): void => {
+  if (!owner || !useContextWindowStore.getState().detached) return;
+  if (isElectronShell()) {
+    void invokeDesktop('desktop_open_context_window', { ownerId: owner.id, ...getMiniChatRuntimeArgs() }).catch(() => {});
+    return;
+  }
+  const panel = findWebPanelWindow(owner);
+  if (panel) panel.focus();
+  else returnContextPanel();
+};
+
+function returnAndClose(): void {
+  if (!owner) return;
+  const id = owner.id;
+  returnContextPanel();
+  post({ kind: 'close', ownerId: id });
+}
+
+function requestReturn(current: Owner): void {
+  current.returnRequested = true;
+  if (!current.ready || !post({ kind: 'return', ownerId: current.id })) {
+    returnAndClose();
+    return;
+  }
+  stopWaiting();
+  current.cancelWait = afterDelay(PANEL_REPLY_MS, returnAndClose);
+}
+
+export const bringContextPanelBack = (): void => {
+  if (owner && useContextWindowStore.getState().detached) requestReturn(owner);
+};
+
 const runQueuedHere = (queued: readonly ContextWindowMessage[]): void => {
   for (const message of queued) {
     if (message.kind !== 'action') continue;
@@ -220,6 +276,7 @@ const runQueuedHere = (queued: readonly ContextWindowMessage[]): void => {
 const returnContextPanel = (): void => {
   if (!owner || !useContextWindowStore.getState().detached) return;
   stopWaiting();
+  owner.returnRequested = false;
   setDetached(false);
   if (owner.panel && !owner.panel.closed) owner.panel.close();
   owner.panel = null;
@@ -311,6 +368,7 @@ export const startContextWindowOwner = (): (() => void) => {
     queued: [],
     lastFollow: '',
     cancelWait: null,
+    returnRequested: false,
   };
   owner = current;
   channel.onmessage = onMessage;

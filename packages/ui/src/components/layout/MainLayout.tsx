@@ -13,6 +13,7 @@ import { followZonePlacementOfOtherWindows } from './zoneSync';
 import { useContextWindowOwner } from '@/hooks/useContextWindowOwner';
 import { useContextWindowStore } from '@/lib/contextWindow/store';
 import { ContextPanelRail } from './ContextPanelRail';
+import { DetachedPanelRail } from './DetachedPanelRail';
 import { GuestHosts } from './GuestHosts';
 import { PluginPane } from './PluginPane';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
@@ -231,11 +232,9 @@ export const MainLayout: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                            {contextPanelDetached ? null : (
-                                <div data-page-scroll-lock="true">
-                                    <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
-                                </div>
-                            )}
+                            <div data-page-scroll-lock="true">
+                                <ErrorBoundary>{contextPanelDetached ? <DetachedPanelRail /> : <ContextPanelRail />}</ErrorBoundary>
+                            </div>
                             <ErrorBoundary><GuestHosts /></ErrorBoundary>
                         </div>
                     </div>

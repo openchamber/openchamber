@@ -66,6 +66,13 @@ with the owner's runtime; the web opens a same-origin popup with
   closes the main window's zones; closing the panel window carries what it
   showed back (`carryShownSurfaces`) and drops its entry. Tabs travel per
   owner (`panels[ownerId]`), so two main windows each keep their own panel.
+- The main window can raise its panel window (`showContextPanelWindow`:
+  the desktop shell focuses it, the web focuses the popup, found again by its
+  window name after a reload of the main window) and ask for the panel back
+  (`bringContextPanelBack`): it sends `return`, and the panel window answers
+  as its own return button does, so the panel comes back with what that
+  window showed. A panel window that is not ready, or does not answer within
+  `PANEL_REPLY_MS`, is returned from the owner's side and told to close.
 - Closing the panel window ends the mode. Desktop reports it through
   `openchamber:context-window-closed`; the web checks the popup it holds
   right after `panel-gone`. The return button sends `panel-returned` first,

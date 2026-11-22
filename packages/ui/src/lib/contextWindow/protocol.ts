@@ -57,6 +57,7 @@ export const contextWindowMessageSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('owner-taken'), ownerId: z.string(), instance: z.string() }),
   z.object({ kind: z.literal('owner-gone'), ownerId: z.string() }),
   z.object({ kind: z.literal('close'), ownerId: z.string() }),
+  z.object({ kind: z.literal('return'), ownerId: z.string() }),
   z.object({ kind: z.literal('prefs'), ownerId: z.string(), fields: z.record(z.string(), z.unknown()) }),
   z.object({ kind: z.literal('follow'), ownerId: z.string(), state: followStateSchema }),
   z.object({ kind: z.literal('action'), ownerId: z.string(), action: z.enum(ROUTED_CONTEXT_ACTIONS), args: z.array(z.unknown()) }),

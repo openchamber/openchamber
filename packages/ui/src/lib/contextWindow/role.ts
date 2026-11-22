@@ -25,3 +25,12 @@ export const buildContextWindowUrl = (pageUrl: string, owner: string): string =>
   url.searchParams.set(CONTEXT_WINDOW_PARAM, owner);
   return url.toString();
 };
+
+export const isContextWindowUrl = (href: string, owner: string, origin: string): boolean => {
+  try {
+    const url = new URL(href);
+    return url.origin === origin && url.searchParams.get(CONTEXT_WINDOW_PARAM) === owner;
+  } catch {
+    return false;
+  }
+};
