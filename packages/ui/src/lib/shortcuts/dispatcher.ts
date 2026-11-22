@@ -12,6 +12,8 @@ import { isIMECompositionEvent } from '../ime';
 const SEQUENCE_TIMEOUT_MS = 3000;
 const MODIFIER_KEYS = new Set(['alt', 'control', 'meta', 'shift']);
 
+const namesCtrl = (chord: string): boolean => parseShortcut(chord)?.chords[0]?.modifiers.has('ctrl') === true;
+
 export interface ShortcutDispatcherOptions {
   registry: ShortcutRegistry;
   getBinding: (actionId: ShortcutActionId) => ShortcutCombo;
@@ -65,6 +67,12 @@ export class ShortcutDispatcher {
     const singles = matches.filter((match) => (
       match.chords.length === 1 && eventMatchesShortcut(event, match.chords[0])
     ));
+    // In a macOS browser `mod` also matches Control, so a Ctrl chord the user
+    // bound on purpose (ctrl+b) and a Cmd default (mod+b) both match one
+    // press. The binding that names Control is the more specific one.
+    if (singles.length > 1) {
+      singles.sort((left, right) => Number(namesCtrl(right.chords[0])) - Number(namesCtrl(left.chords[0])));
+    }
     if (singles.length > 0 && this.invoke(singles, event)) {
       return true;
     }

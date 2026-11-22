@@ -21,6 +21,10 @@ the web server and survives UI disconnects.
   tokensCommitted,         // closed segments' total (one segment per compaction)
   turnsUsed,               // auto-continuations sent (capped at the Settings turn limit)
   auditFailStreak,         // consecutive progress checks that could not run
+  errorStreak,             // consecutive errored turns the loop recovered from
+  recoveryTried,           // 'provider/model#variant' keys a recovery already used
+  errorStreak,             // consecutive errored turns the loop recovered from
+  recoveryTried,           // 'provider/model#variant' keys a recovery already used
   statusReason,            // why settled; 'resumed' is a kickoff signal from UI
   evaluationProviderID,    // provider of the latest check; '' when Jev answered
   evaluationModelID,       // model of the latest check (Jev's model id for Jev)
@@ -168,15 +172,29 @@ progress check judges against. `spec-writer.js` owns it.
 3. On fire (`tick`), gated by the `sessionGoalEnabled` setting:
    - fetch session (skip sub-agent sessions), require an `active` goal;
    - authoritative live-activity check after the quiet window: re-read
-     `/api/session/active`, bail if the parent resumed; then list the
-      parent's subagent sessions through `GET /api/session?parentID=` (cursor
-      paged) and bail while any of them is active. The loop rechecks after
+     `/api/session/active`, bail if the parent resumed; then read the
+      background work (`background-work.js`): the parent's subagent sessions
+      that are active (`GET /api/session?parentID=`, cursor paged) and the
+      running shells of `GET /api/shell` whose `metadata.sessionID` is the
+      parent or one of its children. While any of it runs, the stop is a
+      pause: the report is not audited, so "it says it's done" never settles
+      a goal whose background work is still going. The loop rechecks after
       another quiet window so a missed parent idle event cannot strand the
-      goal when the child finishes. A status or children fetch failure is
+      goal when the work finishes. A status, children or shell fetch failure is
       unknown, not empty, so it skips the audit and retries after another quiet
       window;
-     both reads live in `../opencode/session-activity.js`, shared with the
-     notification runtime;
+     the status and children reads live in `../opencode/session-activity.js`,
+     shared with the notification runtime;
+   - background work with no timeout of its own (every subagent, and every
+     shell without `metadata.timeout`, which OpenCode sets only for a
+     background command started with an explicit timeout) gets a default one,
+     `DEFAULT_BACKGROUND_CHECK_MS` (30 minutes). Once some of it has run that
+     long since it started, or since the last check, the loop sends the parent
+     a status-check prompt naming each overdue task, asking it to confirm
+     progress or stop and redo stalled work, then waits a full window again.
+     The check is an auto-continuation: it counts toward the turn cap. When
+     the loop last asked lives in memory, so after a restart the first check
+     comes as soon as some work is past its window;
    - messages come from `/api/session/:id/message` as v2's flat records
      (`type`, `content[]`, `model`, `finish`, `tokens`); `toLoopMessage`
      projects them into the `{ info, parts }` view the rest of the tick reads,
@@ -205,15 +223,32 @@ progress check judges against. `spec-writer.js` owns it.
      stop), with a tick-side safety net. Messages sent while paused leave
      the goal alone; Resume re-arms the loop, and resuming over an aborted
      tail skips the audit and goes straight to a continuation nudge;
-    - terminal checks, cheapest first: assistant turn error → `blocked`;
-      `tokensUsed >= tokenBudget` → `budgetLimited`;
+    - a turn that ended in an error is recovered (`recovery.js`), not settled:
+      a refusal (`provider.content-filter`) moves the session to another
+      model through `POST /api/session/:id/model`, trying other efforts of the
+      same model, then the same model from another provider (same `modelID`
+      in `/api/model`), then `/api/model/default`; an error of the serving
+      provider (auth, quota, no route, unsupported operation, an
+      empty-completion streak) walks the same ladder without the same
+      provider's efforts; any other error gets a continuation whose prompt
+      names the error and asks the agent to fix what it can and keep going.
+      Each recovery is an auto-continuation. The goal blocks when no model
+      is left (`refused by every available model` / `no other model
+      available`), after `ORDINARY_ERROR_LIMIT` (3) consecutive ordinary
+      errors, or after `RECOVERY_STREAK_LIMIT` (8) recoveries of any kind. A
+      turn that ends cleanly resets `errorStreak` and `recoveryTried`, and so
+      does settling, so Resume starts afresh. Pools fail over inside OpenCode
+      first (a refusal before any output moves to the next member there), so
+      an error that reaches the loop from a pool has exhausted it or came
+      after output started;
+    - terminal checks, cheapest first: `tokensUsed >= tokenBudget` → `budgetLimited`;
       `turnsUsed >= ` the turn limit (Settings → Goal, `sessionGoalMaxAutoTurns`, 1–200, default 20; read on every tick) → `blocked`;
     - error classification is independent of `finish`: `MessageAbortedError`
       keeps the pause/resume behavior; only a `finish: "length"` with no
       error, or `MessageOutputLengthError`, is an in-progress truncation that
       skips the audit and continues. Any other non-null error wins over a
-      length finish and blocks with its non-empty `error.name`, or
-      `assistant turn failed` when unnamed;
+      length finish and goes to the recovery above, named by its non-empty
+      `error.name`, or `assistant turn failed` when unnamed;
     - length recovery is bounded separately from the token budget and
       auto-continuation cap: the first truncation permits one continuation, but
       a second consecutive completed, non-summary assistant turn that is also
@@ -467,6 +502,23 @@ ordering used by create and scheduled goals.
   permanently is outside this recovery guarantee.
 
 ## Decisions
+
+### Why stalled background work gets a status check and is not killed
+
+A job without a timeout can be a long build or a hung one, and only the agent
+can read its output and tell which. Killing it at a default limit would throw
+away real work; waiting forever lets a hung job hold the goal with nothing
+running. Asking the top-level session every window keeps the job and still
+bounds how long a stall goes unnoticed. A job with its own timeout is left to
+it: OpenCode ends it there.
+
+### Why the loop moves a refused session to another model rather than retrying
+
+A refusal is the provider's answer to this request, so the same model at the
+same effort refuses again. The ladder tries what is closest first (another
+effort, then the same model elsewhere) and ends at the user's default model.
+The models it switched through are kept on the goal, so a restart cannot make
+it loop over them.
 
 ### Why a draft creates its session before its background goal is written, and not after
 
