@@ -54,7 +54,6 @@ const STATE_LINE = {
 } satisfies Record<Exclude<SpaceCondition['kind'], 'busy' | 'action_failed' | 'unreachable'>, { text: I18nKey; tone: StatusTone; action: SpaceAction }>;
 
 type StatusTone = 'note' | 'busy' | 'stopped' | 'warning' | 'error';
-const TONE_RANK = { note: 0, busy: 1, stopped: 2, warning: 3, error: 4 } satisfies Record<StatusTone, number>;
 
 type StatusLine = { tone: StatusTone; text: string; action?: { label: string; run: () => void } };
 
@@ -200,20 +199,5 @@ export const SpaceStatusLines: React.FC<{
         </div>
       ))}
     </div>
-  );
-};
-
-export const SpaceStatusMark: React.FC<{ spaceId: string; className?: string }> = ({ spaceId, className }) => {
-  const { t } = useI18n();
-  const lines = useSpaceStatusLines(spaceId);
-  if (lines.length === 0) return null;
-  const tone = lines.reduce<StatusTone>((top, line) => (TONE_RANK[line.tone] > TONE_RANK[top] ? line.tone : top), 'note');
-  if (tone === 'stopped') {
-    return <span className={cn('flex-shrink-0 typography-micro text-muted-foreground', className)}>{t('spaces.row.state.stopped')}</span>;
-  }
-  return (
-    <span role="img" aria-label={lines[0]?.text} className={cn('inline-flex flex-shrink-0 items-center', TONE_CLASS[tone], className)}>
-      <LineIcon tone={tone} className="size-3" />
-    </span>
   );
 };

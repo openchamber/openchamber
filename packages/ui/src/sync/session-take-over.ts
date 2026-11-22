@@ -17,17 +17,3 @@ export const takeOverSession = async (sessionId: string, directory: string | nul
     throw error;
   }
 };
-
-export const takeOverSessions = async (sessions: readonly Session[], directoryOf: (session: Session) => string | null): Promise<string[]> => {
-  const failed: string[] = [];
-  const runtimeKey = getRuntimeKey();
-  for (const session of sessions) {
-    if (getRuntimeKey() !== runtimeKey) break;
-    try {
-      await takeOverSession(session.id, directoryOf(session));
-    } catch {
-      failed.push(session.id);
-    }
-  }
-  return failed;
-};

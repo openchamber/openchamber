@@ -25,7 +25,7 @@ const MODELS_DEV_API_URL = "https://models.dev/api.json";
 // (#1006): the models.dev catalog is several megabytes, so the 16 MiB cap is
 // generous on purpose. The deadline bounds time, the cap bounds memory, and
 // an over-cap body throws like a fetch failure so the next source is tried.
-export const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
+const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
 
 const normalizeProviderId = (value: string) => value?.toLowerCase?.() ?? '';
@@ -262,7 +262,7 @@ const transformModelsDevResponse = (payload: ConfigFieldValue): Map<string, Mode
 
     return metadataMap;
 };
-export const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => {
+const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => {
     if (typeof fetch !== 'function') {
         return new Map();
     }

@@ -228,18 +228,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public addTextToInput(text: string) {
-    if (this._view) {
-      this._view.show(true);
-      
-      this._view.webview.postMessage({
-        type: 'command',
-        command: 'addToContext',
-        payload: { text }
-      });
-    }
-  }
-
   public focusChatInput(): void {
     if (!this._view) {
       return;
@@ -302,27 +290,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public addFileMentions(paths: string[]) {
-    if (!this._view) {
-      return;
-    }
-
-    const cleanedPaths = paths
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0);
-
-    if (cleanedPaths.length === 0) {
-      return;
-    }
-
-    this._view.show(true);
-    this._view.webview.postMessage({
-      type: 'command',
-      command: 'addFileMentions',
-      payload: { paths: cleanedPaths },
-    });
-  }
-
   public createNewSessionWithPrompt(prompt: string) {
     if (this._view) {
       this._view.show(true);
@@ -365,6 +332,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /** @public Called by sessionActivityWatcher through the provider it is handed; knip does not follow it there. */
   public postMessage(message: unknown): void {
     if (this._view) {
       this._view.webview.postMessage(message);

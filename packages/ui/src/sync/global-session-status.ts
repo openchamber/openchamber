@@ -171,18 +171,6 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
   return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest, waitingOnImage, waitingOnExtension);
 };
 
-export const useFirstSessionWithOpenTurn = (sessionIds: readonly string[]): string | null => {
-  const inTurn = useGlobalSessionStatusStore((state) => (
-    sessionIds.find((id) => state.activeSessionIds.has(id) || hasActiveSubagent(id, state.activeSessionIds)) ?? null
-  ));
-  const inWorkflow = useWorkflowActivityStore((state) => sessionIds.find((id) => state.runningSessionIds.has(id)) ?? null);
-  const onShell = useBackgroundShellsStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
-  const onImage = useBackgroundImagesStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
-  const onPullRequest = usePrWatchStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
-  const onExtension = useExtensionWaitsStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
-  return inTurn ?? inWorkflow ?? onShell ?? onImage ?? onPullRequest ?? onExtension;
-};
-
 export const collectOpenTurnSessionIds = (
   activeSessionIds: ReadonlySet<string>,
   waitingSessionIds: readonly Iterable<string>[],

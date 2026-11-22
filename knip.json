@@ -36,6 +36,7 @@
       ],
       "ignoreMembers": [
         "getDerivedStateFromError",
+        "getSnapshotBeforeUpdate",
         "componentDidCatch",
         "componentDidUpdate",
         "render",
@@ -143,6 +144,10 @@
       "project": [
         "src/**/*.ts",
         "scripts/**/*.ts"
+      ],
+      "ignoreMembers": [
+        "code",
+        "status"
       ]
     },
     "packages/mobile": {

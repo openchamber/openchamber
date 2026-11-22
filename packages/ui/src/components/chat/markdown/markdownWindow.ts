@@ -48,6 +48,7 @@ export class MarkdownWindow {
   private listeners = new Set<() => void>();
   private stop: (() => void) | null = null;
   private frame: number | null = null;
+  /** @public Called through the instance a hook or context holds; knip does not follow it there. */
   charsPerLine = 80;
 
   subscribe = (listener: () => void) => {

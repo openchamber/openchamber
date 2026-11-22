@@ -179,5 +179,3 @@ export const mergeRowGuestMarks = (lists: ReadonlyArray<readonly RowGuestMark[]>
   }
   return [...byGuest.values()].sort((a, b) => a.order - b.order);
 };
-
-export const ROW_GUEST_MARKS_SHOWN = 2;

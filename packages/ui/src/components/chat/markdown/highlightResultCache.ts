@@ -76,9 +76,4 @@ export class HighlightResultCache<T> {
     this.map.set(key, { value, bytes: entryBytes });
     this.totalBytes += entryBytes;
   }
-
-  clear(): void {
-    this.map.clear();
-    this.totalBytes = 0;
-  }
 }

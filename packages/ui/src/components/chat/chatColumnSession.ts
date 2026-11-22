@@ -52,7 +52,7 @@ export const ChatColumnTakesPromptsContext = React.createContext(false);
 
 export const useChatColumnTakesPrompts = (): boolean => React.useContext(ChatColumnTakesPromptsContext);
 
-export type ChatColumnExpandedInput = {
+type ChatColumnExpandedInput = {
   expanded: boolean;
   setExpanded: (expanded: boolean) => void;
 };

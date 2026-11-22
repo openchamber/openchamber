@@ -341,10 +341,6 @@ type SpaceRemoval = z.infer<typeof removalSchema>;
 export const startSpace = (spaceId: string): Promise<SpaceEntry> =>
   request(`${SPACES_ROUTE}/${spaceId}/start`, spaceEntrySchema, { method: 'POST' });
 
-export const setSpaceTaskTitle = async (spaceId: string, title: string): Promise<void> => {
-  await request(`${SPACES_ROUTE}/${spaceId}/task-title`, z.object({ applied: z.boolean(), taskTitle: spaceTaskTitleSchema.nullable() }), { method: 'PUT', body: JSON.stringify({ title }) });
-};
-
 export const stopSpace = (spaceId: string): Promise<SpaceEntry> =>
   request(`${SPACES_ROUTE}/${spaceId}/stop`, spaceEntrySchema, { method: 'POST' });
 

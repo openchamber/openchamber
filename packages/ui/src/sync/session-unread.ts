@@ -53,15 +53,6 @@ export const useSessionMarkedUnread = (sessionId: string): boolean => (
   useGlobalSessionsStore(useCallback((state) => isSessionMarkedUnread(state.entityById.get(sessionId)), [sessionId]))
 )
 
-const hasUnreadSession = (state: { entityById: ReadonlyMap<string, Session> }): boolean => {
-  for (const session of state.entityById.values()) {
-    if (isSessionUnread(session)) return true
-  }
-  return false
-}
-
-export const useHasUnreadSession = (): boolean => useGlobalSessionsStore(hasUnreadSession)
-
 const pendingViews = new Map<string, number>()
 
 const keptMarks = new Set<string>()

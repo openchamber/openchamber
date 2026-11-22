@@ -37,19 +37,6 @@ export const collectSessionSubtreeIds = (
   return [...ids];
 };
 
-export const collectParentIdDescendantIds = (root: SessionNode): string[] => {
-  const ids: string[] = [];
-  const visit = (node: SessionNode): void => {
-    for (const child of node.children) {
-      if (child.session.parentID !== node.session.id) continue;
-      ids.push(child.session.id);
-      visit(child);
-    }
-  };
-  visit(root);
-  return ids;
-};
-
 export const buildActiveSessionTreeFromCache = (root: Session): SessionNode => {
   const childrenByParentId = new Map<string, Session[]>();
   for (const session of readGlobalSessionLineage().descendantsOf(root.id, 'active')) {

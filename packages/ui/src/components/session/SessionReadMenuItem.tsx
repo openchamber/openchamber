@@ -33,7 +33,7 @@ export function SessionReadMenuItem({ sessionId, Item, className, iconClassName 
   );
 }
 
-export function SessionReadShortcut() {
+function SessionReadShortcut() {
   const { t } = useI18n();
   return (
     <span className="ms-auto ps-3 typography-meta text-muted-foreground">

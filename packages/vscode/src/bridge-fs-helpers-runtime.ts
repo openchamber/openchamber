@@ -20,7 +20,7 @@ const parsePlainDecimalInt = (raw: string | undefined): number | null => {
   return Number.isSafeInteger(value) ? value : null;
 };
 
-export const createGitCheckIgnoreTimeoutMs = () => {
+const createGitCheckIgnoreTimeoutMs = () => {
   const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
   // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
   // instead, so a larger configured timeout falls back to the default
@@ -558,7 +558,7 @@ export const searchDirectory = async (
 // (`packages/web/server/lib/opencode/models-metadata.js`): the 8 s deadline
 // bounds time, the cap bounds memory, and an over-cap body throws like a fetch
 // failure so the api:models/metadata error shape applies.
-export const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
+const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
 
 // The bounded read the web copy gets from readBoundedResponseText
 // (`packages/web/server/lib/shared/response-body.js`), mirrored here: a

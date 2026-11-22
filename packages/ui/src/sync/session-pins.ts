@@ -14,12 +14,6 @@ export function toggleSessionPin(target: PinTarget): Promise<void> {
   return writeSessionPin(key, target, !useSessionPinnedStore.getState().ids.has(key), null);
 }
 
-export function setSessionPinList(target: PinTarget, pinned: boolean, list: string | null): Promise<void> {
-  const key = getPinnedSessionKey(getRuntimeKey(), target.directory, target.sessionId);
-  if (!key) return Promise.resolve();
-  return writeSessionPin(key, target, pinned, list);
-}
-
 function writeSessionPin(key: string, target: PinTarget, pinned: boolean, list: string | null): Promise<void> {
   setPendingPin(key, pinned);
 

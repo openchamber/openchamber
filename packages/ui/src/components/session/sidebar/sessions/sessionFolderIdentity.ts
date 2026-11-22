@@ -8,18 +8,12 @@ export const getSessionFolderIdentityKey = (scopeKey: string, folderId: string):
   `${scopeKey}\u0000${folderId}`
 );
 
-export const getSessionDragId = (dragKey: string): string => `session-drag:${dragKey}`;
-
-export const getSessionFolderDropId = (scopeKey: string, folderId: string): string => (
-  `folder-drop:${getSessionFolderIdentityKey(scopeKey, folderId)}`
-);
-
 export const getSessionFolderOwnerKey = (
   projectId: string | null | undefined,
   directory: string | null | undefined,
 ): string | null => projectId ?? getChatsRootFromDirectory(directory) ?? normalizePath(directory ?? null);
 
-export const getAuthoritativeSessionFolderOwnerKey = (
+const getAuthoritativeSessionFolderOwnerKey = (
   session: Session,
   owner: DirectoryOwner | undefined,
 ): string | null => {
@@ -30,17 +24,7 @@ export const getAuthoritativeSessionFolderOwnerKey = (
 
 const WORK_FOLDER_OWNER_PREFIX = 'work:';
 
-export const getWorkFolderOwnerKey = (directory: string): string => `${WORK_FOLDER_OWNER_PREFIX}${directory}`;
-
-export const getGroupFolderOwnerKey = (
-  projectId: string | null | undefined,
-  group: Pick<SessionGroup, 'isMain' | 'isArchivedBucket' | 'directory' | 'worktree' | 'space'>,
-): string | null => {
-  const directory = normalizePath(group.directory ?? null);
-  return !group.isMain && !group.isArchivedBucket && (group.worktree !== null || group.space) && directory
-    ? getWorkFolderOwnerKey(directory)
-    : getSessionFolderOwnerKey(projectId, group.directory);
-};
+const getWorkFolderOwnerKey = (directory: string): string => `${WORK_FOLDER_OWNER_PREFIX}${directory}`;
 
 export const resolveSessionFolderOwnerKey = (
   session: Session,

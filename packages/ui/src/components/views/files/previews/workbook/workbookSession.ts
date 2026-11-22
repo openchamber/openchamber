@@ -316,8 +316,4 @@ export class WorkbookSession {
     this.engine = null;
     throw new Error('The edited workbook did not read back');
   }
-
-  get currentBytes(): Uint8Array<ArrayBuffer> {
-    return this.bytes;
-  }
 }

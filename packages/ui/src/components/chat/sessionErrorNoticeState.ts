@@ -1,7 +1,6 @@
 import type { AssistantMessage, Message } from '@/lib/opencode/model';
 import { getLastConversationMessage } from '@/lib/opencode/model';
 import { isStoppedTurnError } from '@/lib/messages/assistantError';
-import { type StructuredError } from '@/lib/opencode/model';
 
 /** A retry OpenCode scheduled for a step: the attempt it will make, when, and the error that caused it. */
 export type ScheduledRetry = NonNullable<AssistantMessage['retry']>;
@@ -40,16 +39,6 @@ export const readLastMessageState = (last: Message | null | undefined): LastMess
     };
   }
   return { role: last.role, timestamp: last.time.created, hasError: false, failed: false };
-};
-
-export const findRecordedTurnError = (messages: readonly Message[] | undefined): StructuredError | null => {
-  if (!messages) return null;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role === 'user' || message.role === 'assistant') return null;
-    if (message.role === 'idle') return message.outcome === 'failed' ? message.error ?? null : null;
-  }
-  return null;
 };
 
 const UNANSWERED_RECHECK_DELAYS_MS: readonly number[] = [0, 10_000, 30_000];

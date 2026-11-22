@@ -73,6 +73,7 @@ export class CodeSelectionComments {
   private stopTracking: (() => void) | null = null;
   private readonly measureKey = {};
 
+  /** @public Called through the instance a hook or context holds; knip does not follow it there. */
   readonly extension: Extension = ViewPlugin.define((view) => ({
     update: (update) => {
       if (update.selectionSet || update.docChanged || update.focusChanged || update.geometryChanged) this.editorChanged(update);

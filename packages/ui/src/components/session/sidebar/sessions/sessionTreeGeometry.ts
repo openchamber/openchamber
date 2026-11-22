@@ -4,8 +4,6 @@ export const SESSION_TREE_BASE_PADDING_PX = 6;
 
 export const sessionTreeRowPaddingLeft = (depth: number): string => fileTreeRowPaddingLeft(depth, SESSION_TREE_BASE_PADDING_PX);
 
-export const sessionDetailedRowPaddingLeft = (depth: number): string => `calc(${sessionTreeRowPaddingLeft(depth)} + 4px)`;
-
 export const sessionTreeTextInset = (depth: number): string => `calc(${sessionTreeRowPaddingLeft(depth)} + 20px)`;
 
 export type SessionTreeGuide = { level: number; end: boolean };

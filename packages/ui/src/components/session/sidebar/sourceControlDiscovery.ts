@@ -22,8 +22,6 @@ export const sourceControlDiscoverySignature = (
   [...candidates].sort((left, right) => (left.directory < right.directory ? -1 : left.directory > right.directory ? 1 : 0)),
 );
 
-export const RELAY_BINDING_READ_CONCURRENCY = 8;
-
 export const readWithConcurrency = async <T, R>(items: readonly T[], limit: number, read: (item: T) => Promise<R>): Promise<void> => {
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {

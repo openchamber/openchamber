@@ -767,19 +767,6 @@ export async function setGitWorktreeTitle(
   return gitHttp.setGitWorktreeTitle(directory, title, by);
 }
 
-export async function setGitWorktreePinned(
-  directory: string,
-  pinned: boolean,
-  list: string | null = null,
-): Promise<import('./api/types').GitWorktreePinResult> {
-  const runtime = getRuntimeGit();
-  if (runtime?.worktree?.setPinned) {
-    return runtime.worktree.setPinned(directory, pinned, list);
-  }
-  if (runtime) throw new Error('Pinning a worktree task is not available here');
-  return gitHttp.setGitWorktreePinned(directory, pinned, list);
-}
-
 export async function snapshotGitWorktree(
   directory: string,
   payload: import('./api/types').GitWorktreeSnapshotPayload

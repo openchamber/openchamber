@@ -89,6 +89,7 @@ export class DictationStreamSender {
         this.resolveDrainWaiters();
     }
 
+    /** @public Called through the instance a hook or context holds; knip does not follow it there. */
     stopWaitingForDrain(): void {
         this.resolveDrainWaiters();
     }

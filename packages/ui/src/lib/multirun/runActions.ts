@@ -38,14 +38,6 @@ export async function renameRun(run: MultiRunSummary, title: string, sessionById
   return failed;
 }
 
-export async function detachFromRun(session: Session, runTitle: string): Promise<void> {
-  const result = await requestSessionMetadataUpdate(session.id, { openchamber: { multirun: null } }, session.directory);
-  if (result.outcome !== 'updated') throw new Error(`Multi-run membership was not removed: ${result.reason}`);
-  registerMultiRunSession({ ...session, metadata: result.metadata }, session.directory);
-  const title = runTitle.trim();
-  if (title && title !== session.title) await useSessionUIStore.getState().updateSessionTitle(session.id, title);
-}
-
 export async function archiveRun(run: MultiRunSummary): Promise<{ archivedIds: string[]; failedIds: string[] }> {
   return useSessionUIStore.getState().archiveSessions([...run.memberIds]);
 }

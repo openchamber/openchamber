@@ -4,10 +4,3 @@ import type { StartSessionWorktreeMenuLoadArgs, StartSessionWorktreeMenuLoadResu
 type SessionWorktreeMenuLoader = (args: StartSessionWorktreeMenuLoadArgs) => StartSessionWorktreeMenuLoadResult;
 
 export const useSessionWorktreeMenuLoader = create<{ load: SessionWorktreeMenuLoader | null }>(() => ({ load: null }));
-
-export const publishSessionWorktreeMenuLoader = (load: SessionWorktreeMenuLoader): (() => void) => {
-  useSessionWorktreeMenuLoader.setState({ load });
-  return () => {
-    if (useSessionWorktreeMenuLoader.getState().load === load) useSessionWorktreeMenuLoader.setState({ load: null });
-  };
-};

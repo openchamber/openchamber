@@ -3,7 +3,8 @@ import { parseMetadata } from '@/lib/metadataParse';
 import type { Metadata, Session } from '@/lib/opencode/model';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
-import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
+
+const DEFAULT_PIN_LIST = 'pinned';
 
 export const getPinnedSessionKey = (runtimeKey: string, directory: string, sessionId: string): string | null => {
   const normalizedDirectory = normalizePath(directory);
@@ -45,12 +46,6 @@ export const isSessionPinnedInMetadata = (session: Session | null | undefined): 
 );
 
 export const isPinnedMetadata = (metadata: Metadata): boolean => pinnedSchema.safeParse(metadata).success;
-
-export const getSessionPinList = (session: Session | null | undefined): string | null => {
-  const parsed = parseMetadata(pinnedSchema, session?.metadata);
-  if (!parsed.success) return null;
-  return parsed.data.openchamber.pinned.list ?? DEFAULT_PIN_LIST;
-};
 
 const openchamberSchema = z.object({ openchamber: z.record(z.string(), z.json()) });
 

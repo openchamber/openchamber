@@ -11,13 +11,6 @@ export const useOpenCodeTrustPaused = (directory: string | null | undefined): bo
   () => false,
 );
 
-/** The first of `directories` the user declined to trust, or null. */
-export const useOpenCodeTrustPausedDirectory = (directories: readonly string[]): string | null => React.useSyncExternalStore(
-  subscribeOpenCodeTrust,
-  () => directories.find((directory) => isOpenCodeTrustPaused(directory)) ?? null,
-  () => null,
-);
-
 /**
  * Shows the trust prompt for a paused folder again. Once trusted, the folder's
  * sessions and its agents and models load, which the decline left unloaded.

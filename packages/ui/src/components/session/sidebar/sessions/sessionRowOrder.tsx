@@ -11,9 +11,9 @@ export type SessionRowOrderEntry = {
   descendantRange?: readonly [start: number, end: number];
 };
 
-export type SessionRowLifecycle = { time?: { archived?: number | null }; archived?: boolean };
+type SessionRowLifecycle = { time?: { archived?: number | null }; archived?: boolean };
 
-export function mergeSessionRowLifecycle(entries: readonly SessionRowOrderEntry[], sessions: ReadonlyMap<string, SessionRowLifecycle>): ReadonlyMap<string, SessionRowLifecycle> {
+function mergeSessionRowLifecycle(entries: readonly SessionRowOrderEntry[], sessions: ReadonlyMap<string, SessionRowLifecycle>): ReadonlyMap<string, SessionRowLifecycle> {
   const lifecycle = new Map(sessions);
   for (const entry of entries) if (!lifecycle.has(entry.id)) lifecycle.set(entry.id, { archived: entry.archived });
   return lifecycle;
@@ -27,7 +27,7 @@ type SessionRowOrderRegistry = {
   getWorks: () => readonly SessionRowOrderWork[];
 };
 
-export type SessionRowOrderWork = { group: SessionGroup; projectId: string };
+type SessionRowOrderWork = { group: SessionGroup; projectId: string };
 
 const EMPTY_WORKS: readonly SessionRowOrderWork[] = [];
 

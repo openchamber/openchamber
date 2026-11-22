@@ -41,6 +41,7 @@ export class MarkdownMediaOwner {
   private resolver = getRuntimeUrlResolver();
   constructor(readonly options: MediaOwner) {}
 
+  /** @public Called through the instance a hook or context holds; knip does not follow it there. */
   connect(): void {
     if (!this.disposed && this.controller.signal.aborted) this.controller = new AbortController();
   }
@@ -142,6 +143,7 @@ export class MarkdownMediaOwner {
     return pending;
   }
 
+  /** @public Called through the instance a hook or context holds; knip does not follow it there. */
   async load(source: string): Promise<Blob> {
     const signal = this.controller.signal;
     const { mode, directory, sessionId, messageId } = this.options;
@@ -154,6 +156,7 @@ export class MarkdownMediaOwner {
     return (await fetchBypassingRuntimeBridge(url, { signal })).blob();
   }
 
+  /** @public Called through the instance a hook or context holds; knip does not follow it there. */
   addGallery(image: GalleryImage): () => void {
     const key = `${this.runtimeKey}\0${this.options.sessionId ?? ''}\0${this.options.messageId ?? ''}`;
     let entries = galleries.get(key);
@@ -162,6 +165,7 @@ export class MarkdownMediaOwner {
     return () => { entries.delete(image); if (!entries.size) galleries.delete(key); };
   }
 
+  /** @public Called through the instance a hook or context holds; knip does not follow it there. */
   async openGallery(element: HTMLElement, show: (content: ToolPopupContent) => void): Promise<void> {
     const signal = this.controller.signal;
     this.check(signal);

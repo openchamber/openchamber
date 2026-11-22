@@ -61,7 +61,7 @@ const createGitCheckIgnoreTimeoutMs = () => {
 // Byte cap for the api:fs:read handler, matching the web twin
 // (MAX_READ_BYTES in packages/web/server/lib/fs/routes.js) and the local-fs
 // proxy twin (LOCAL_FS_READ_MAX_BYTES in bridge-localfs-proxy-runtime.ts).
-export const FS_READ_MAX_BYTES = 16 * 1024 * 1024;
+const FS_READ_MAX_BYTES = 16 * 1024 * 1024;
 
 const GIT_CHECK_IGNORE_TIMEOUT_MS = createGitCheckIgnoreTimeoutMs();
 

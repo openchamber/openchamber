@@ -129,18 +129,22 @@ export class WorkbookBook {
     return this.call('workbook.edit', { book: this.id, sheet, cells });
   }
 
+  /** @public Called through the WorkbookBook handle OfficeArtifact keeps; knip does not follow it there. */
   restore(sheet: number, cells: CellRestore[]) {
     return this.call('workbook.restore', { book: this.id, sheet, cells });
   }
 
+  /** @public Called through the WorkbookBook handle OfficeArtifact keeps; knip does not follow it there. */
   restructure(change: StructureChange) {
     return this.call('workbook.restructure', { book: this.id, change });
   }
 
+  /** @public Called through the WorkbookBook handle OfficeArtifact keeps; knip does not follow it there. */
   restoreBytes(bytes: Uint8Array<ArrayBuffer>) {
     return this.call('workbook.restoreBytes', { book: this.id, bytes });
   }
 
+  /** @public Called through the WorkbookBook handle OfficeArtifact keeps; knip does not follow it there. */
   seen(keys: string[]) {
     return this.call('workbook.seen', { book: this.id, keys });
   }
