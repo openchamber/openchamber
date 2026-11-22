@@ -273,3 +273,14 @@ test('a server with several sign-in methods lets the user pick one', async () =>
   expect(container.textContent).toContain('Browser');
   expect(container.textContent).toContain('Device code');
 });
+
+// Switching a server with Code Mode off changes the tool list, which providers
+// cache as the start of the prompt; the section says so next to its switches.
+test('the section shows the prompt cache note next to its switches', async () => {
+  const { dict } = await import('@/lib/i18n/messages/en');
+  const note = dict['mcpDropdown.cacheNote'];
+  expect(note.length).toBeGreaterThan(0);
+  await render();
+  expect(container.querySelectorAll('[role="switch"]').length).toBeGreaterThan(0);
+  expect(container.textContent?.split(note).length).toBe(2);
+});

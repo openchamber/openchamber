@@ -30,6 +30,8 @@ let checkHealthImpl = async () => true;
 let probeHealthImpl: (() => Promise<'healthy' | 'unhealthy' | 'unreachable'>) | null = null;
 let probeHealthOptions: Array<{ waitMs?: number } | undefined> = [];
 let loadSettingsImpl: (() => Promise<DesktopSettings | null>) | null = null;
+let disabledProvidersAnswer: string[] = [];
+let modelsCatalogAnswer: (() => Response) | null = null;
 type TestProjectsState = {
   activeProjectId: string | null;
   projects: Array<{ id: string; path: string; label: string; defaultAgent?: string; defaultModel?: string; defaultVariant?: string }>;
@@ -192,6 +194,10 @@ environment.respond(async (url, init) => {
   if (url.pathname === '/api/fs/directory-stats') {
     const { paths } = JSON.parse(String(init?.body));
     return Response.json({ results: paths.map((path: string) => ({ path, isDirectory: directoryAvailability === 'available', reason: directoryAvailability === 'missing' ? 'not-found' : 'unavailable' })) });
+  }
+  if (url.pathname === '/api/provider/disabled') return Response.json({ providers: disabledProvidersAnswer });
+  if (url.pathname === '/api/openchamber/models-metadata' || url.hostname === 'models.dev') {
+    if (modelsCatalogAnswer) return modelsCatalogAnswer();
   }
   if (url.pathname === '/api/opencode/trust') return Response.json({ directory, trusted: !trustPendingDirectories.has(directory), fingerprint: null, items: [] });
   if (url.pathname === '/api/location' || url.pathname === '/api/session') return Response.json({}, { status: 401 });
@@ -3720,6 +3726,82 @@ describe('useConfigStore provider persistence', () => {
     expect(reloaded.directoryScoped[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['fresh']);
   });
 
+  // Oracle: the stated precedence; a locked model default (Settings, or OpenCode's
+  // lockVariant) outranks every pick, the session's saved one and cycling included.
+  test('a locked model default is the effort the composer sends, whatever is picked', async () => {
+    const { useOpenCodeModelSettings } = await import('@/lib/opencodeModelSettings');
+    const sessionId = 'ses_locked_default';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+    useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, 'plan', 'openai', 'gpt-5.5', 'high');
+    useUIStore.setState({ modelDefaultVariants: { 'openai/gpt-5.5': 'low' }, modelDefaultVariantLocks: ['openai/gpt-5.5'] });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('plan')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      settingsDefaultVariant: 'high',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    try {
+      useConfigStore.getState().setAgent('plan');
+      expect(useConfigStore.getState().currentVariant).toBe('low');
+      useConfigStore.getState().setCurrentVariantOverride('high', undefined);
+      expect(useConfigStore.getState().currentVariant).toBe('low');
+      expect(useConfigStore.getState().cycleCurrentVariant()).toBe('low');
+      expect(useConfigStore.getState().getDefaultVariantForModel('openai', 'gpt-5.5')).toBe('low');
+
+      // Unlocked, the same default yields to the effort configured next to the default model.
+      useUIStore.setState({ modelDefaultVariantLocks: [] });
+      expect(useConfigStore.getState().getDefaultVariantForModel('openai', 'gpt-5.5')).toBe('high');
+
+      // OpenCode's own lock counts too.
+      useOpenCodeModelSettings.setState({ models: { 'openai/gpt-5.5': { defaultVariant: 'high', lockVariant: true } } });
+      expect(useConfigStore.getState().getLockedVariantForModel('openai', 'gpt-5.5')).toBe('high');
+      // A lock on an effort the model does not offer is left out.
+      useOpenCodeModelSettings.setState({ models: { 'openai/gpt-5.5': { defaultVariant: 'max', lockVariant: true } } });
+      expect(useConfigStore.getState().getLockedVariantForModel('openai', 'gpt-5.5')).toBeUndefined();
+    } finally {
+      useUIStore.setState({ modelDefaultVariants: {}, modelDefaultVariantLocks: [] });
+      useOpenCodeModelSettings.setState({ models: {} });
+    }
+  });
+
+  test('a provider turned off in Settings stays out of a second location whose OpenCode still lists it', async () => {
+    const { rememberDisabledProviders } = await import('@/lib/disabledProviders');
+    // The app has just reloaded: nothing has read the disabled list yet and
+    // Settings > Providers has not been opened. The second location's
+    // OpenCode has not reloaded either, so its catalog still lists groq.
+    disabledProvidersAnswer = ['groq'];
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('groq'), providerInfo('live')],
+      models: [model('groq', 'groq-model'), model('live', 'live-model')],
+      default: { providerID: 'live', id: 'live-model' },
+    });
+    try {
+      await useConfigStore.getState().loadProviders({ directory: OTHER_DIRECTORY });
+
+      const providers = selectProvidersForDirectory(useConfigStore.getState(), OTHER_DIRECTORY);
+      expect(providers.map((entry) => entry.id)).toEqual(['live']);
+    } finally {
+      // The snapshot is kept per runtime; clear it so later tests read their own answers.
+      disabledProvidersAnswer = [];
+      rememberDisabledProviders([]);
+    }
+  });
+
+  for (const [stored, expected] of [[undefined, true], [false, false], [true, true]] as const) {
+    test(`Auto-create worktree is ${expected ? 'on' : 'off'} when the settings document ${stored === undefined ? 'never set it' : `stores ${stored}`}`, async () => {
+      persistedOpenChamberSettings = stored === undefined ? {} : { autoCreateWorktree: stored };
+      useConfigStore.setState({ settingsAutoCreateWorktree: !expected });
+      await useConfigStore.getState().loadSessionDefaults();
+      expect(useConfigStore.getState().settingsAutoCreateWorktree).toBe(expected);
+    });
+  }
+
   describe('setters write config-store only when the selection changes', () => {
     afterEach(() => {
       storage = new Map<string, string>();
@@ -4187,6 +4269,83 @@ describe('useConfigStore provider persistence', () => {
         useSessionUIStore.setState({ newSessionDraft: draftBefore });
       }
     });
+  });
+});
+
+describe('Auto-create worktree default', () => {
+  test('starts on before the settings document loads', () => {
+    expect(useConfigStore.getInitialState().settingsAutoCreateWorktree).toBe(true);
+  });
+});
+
+describe('models.dev catalog byte cap', () => {
+  const streamedCatalog = (chunks: string[], onPull?: () => void): Response => {
+    let index = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        onPull?.();
+        if (index >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(new TextEncoder().encode(chunks[index]));
+        index += 1;
+      },
+    });
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  // The catalog is fetched when the idle callback fires; run it at once and
+  // let the reads settle on microtasks.
+  const fetchCatalog = async (settled: () => boolean): Promise<Map<string, ModelMetadata> | null> => {
+    const { ensureModelsMetadataFetch, resetModelsMetadataRequest } = await import('./config/metadata');
+    const originalIdle = window.requestIdleCallback;
+    window.requestIdleCallback = (callback: IdleRequestCallback) => { callback({ didTimeout: false, timeRemaining: () => 0 }); return 0; };
+    let stored: Map<string, ModelMetadata> | null = null;
+    try {
+      resetModelsMetadataRequest();
+      ensureModelsMetadataFetch(() => new Map(), (metadata) => { stored = metadata; });
+      for (let step = 0; step < 10_000 && stored === null && !settled(); step += 1) await Promise.resolve();
+      return stored;
+    } finally {
+      window.requestIdleCallback = originalIdle;
+      resetModelsMetadataRequest();
+    }
+  };
+
+  test('a streamed over-cap catalog body is refused during the read and both sources fall back to an empty map', async () => {
+    const originalWarn = console.warn;
+    let warnings = 0;
+    console.warn = () => { warnings += 1; };
+    let pulls = 0;
+    const chunk = 'x'.repeat(9 * 1024 * 1024);
+    // Two 9 MiB chunks cross the 16 MiB cap on each source. The bounded
+    // reader cancels there; a Response wrapper may prefetch one chunk ahead,
+    // but five chunks per source (10 pulls) would mean the bodies were
+    // consumed whole.
+    modelsCatalogAnswer = () => streamedCatalog([chunk, chunk, chunk, chunk, chunk], () => { pulls += 1; });
+    try {
+      expect(await fetchCatalog(() => warnings >= 2)).toBeNull();
+      expect(warnings).toBe(2);
+      expect(pulls).toBeLessThan(10);
+    } finally {
+      console.warn = originalWarn;
+      modelsCatalogAnswer = null;
+    }
+  });
+
+  test('a representative streamed catalog body parses into the same metadata map as before', async () => {
+    const payload = JSON.stringify({
+      openai: { id: 'openai', models: { 'gpt-x': { id: 'gpt-x', name: 'GPT X' } } },
+    });
+    modelsCatalogAnswer = () => streamedCatalog([payload.slice(0, 10), payload.slice(10)]);
+    try {
+      const metadata = await fetchCatalog(() => false);
+      expect(metadata?.size).toBe(1);
+      expect(metadata?.get('openai/gpt-x')?.name).toBe('GPT X');
+    } finally {
+      modelsCatalogAnswer = null;
+    }
   });
 });
 
