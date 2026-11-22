@@ -246,6 +246,7 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
       connected: z.literal(true),
       states: listOf(z.object({ id: text, name: text, type: optionalText, position: z.number().catch(0) })
         .transform(({ id, name, type, position }) => ({ id, name, category: linearStateCategory(type), position }))),
+      statesMore: z.boolean().optional().catch(undefined),
     })), 'Failed to load Linear workflow states'),
 
     updateState: (provider, input) => call(provider, '/issues/update', { method: 'POST', body: JSON.stringify({ id: input.id, stateId: input.stateId }) }, itemResult(provider), 'Failed to update Linear issue'),

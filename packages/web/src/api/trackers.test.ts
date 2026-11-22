@@ -260,6 +260,12 @@ describe('web trackers: a server from before /api/tracker', () => {
     });
   });
 
+  it('keeps the truncated-states signal on the legacy wire', async () => {
+    legacyServer(() => Response.json({ connected: true, states: [{ id: 's-todo', name: 'Todo', type: 'unstarted', position: 0 }], statesMore: true }));
+    const result = await createWebTrackerAPI({ fetch: fetchMock }).states('linear', 'team-eng');
+    expect(result.connected && result.statesMore).toBe(true);
+  });
+
   it('keeps the truncated-teams signal on both wires', async () => {
     const team = { id: 'team-eng', key: 'ENG', name: 'Engineering', projectPath: null };
     legacyServer(() => Response.json({ connected: true, defaultProjectPath: null, teams: [team], teamsMore: true }));

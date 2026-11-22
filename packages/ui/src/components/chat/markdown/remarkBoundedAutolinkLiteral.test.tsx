@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Streamdown } from 'streamdown';
-import type { Construct, Extension, Tokenizer } from 'micromark-util-types';
+import type { Construct, Event, Extension, Tokenizer } from 'micromark-util-types';
 import type { Pluggable, Processor } from 'unified';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath } from './streamdownPlugins';
-import { AUTOLINK_LITERAL_EVENT_LIMIT, remarkBoundedAutolinkLiteral } from './remarkBoundedAutolinkLiteral';
+import { remarkBoundedAutolinkLiteral } from './remarkBoundedAutolinkLiteral';
 
 // The fork's #4204 fixture: pretty-printed JSON with no blank line, one paragraph.
 const dataDump = (count: number): string => {
@@ -25,15 +25,28 @@ const dataDump = (count: number): string => {
   return `Review the following data dump. Docs: https://example.com/docs\n\n${JSON.stringify(rows, null, 2)}\nwith \\(x^2\\) at the end`;
 };
 
-// Records the paragraph length, in events, at every literal-autolink attempt
-// that reaches the GFM tokenizer, which walks back over all of them.
+// For every literal-autolink attempt that reaches the GFM tokenizer, records how
+// many events its previousUnbalanced walk reads: back to an unbalanced label, a
+// token an earlier walk marked, or the paragraph start.
+const walkLength = (events: Event[]): number => {
+  let read = 0;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    read += 1;
+    const token = events[index][1];
+    if ((token.type === 'labelLink' || token.type === 'labelImage') && token._balanced !== true) break;
+    if (token._gfmAutolinkLiteralWalkedInto === true) break;
+  }
+  return read;
+};
 const LITERALS = new Set(['wwwAutolink', 'protocolAutolink', 'emailAutolink']);
-const recordAttempts = (seen: number[]) => function recordLiteralAttempts(this: Processor) {
+// One plugin instance: Streamdown may reuse a processor built from the same plugins.
+let reads: number[] = [];
+function recordLiteralAttempts(this: Processor) {
   const wrap = (construct: Construct): Construct => {
     if (!construct.name || !LITERALS.has(construct.name)) return construct;
     const { tokenize } = construct;
     const recorded: Tokenizer = function (effects, ok, nok) {
-      seen.push(this.events.length);
+      reads.push(walkLength(this.events));
       return tokenize.call(this, effects, ok, nok);
     };
     return { ...construct, tokenize: recorded };
@@ -48,15 +61,15 @@ const recordAttempts = (seen: number[]) => function recordLiteralAttempts(this: 
   };
   const extensions = this.data('micromarkExtensions');
   if (extensions) this.data('micromarkExtensions', extensions.map(wrapExtension));
-};
+}
 
 const processing = getMarkdownProcessingOptions(false, false, false);
 const remarkPlugins = processing.remarkPlugins ?? [];
 const boundAt = remarkPlugins.indexOf(remarkBoundedAutolinkLiteral);
 
 // `bounded: false` is the reference: the same pipeline without the bound.
-const render = (source: string, { bounded = true, seen }: { bounded?: boolean; seen?: number[] } = {}): string => {
-  const plugins: Pluggable[] = [...remarkPlugins.slice(0, boundAt), ...(seen ? [recordAttempts(seen)] : []), ...(bounded ? [remarkBoundedAutolinkLiteral] : []), ...remarkPlugins.slice(boundAt + 1)];
+const render = (source: string, { bounded = true, record = false }: { bounded?: boolean; record?: boolean } = {}): string => {
+  const plugins: Pluggable[] = [...remarkPlugins.slice(0, boundAt), ...(record ? [recordLiteralAttempts] : []), ...(bounded ? [remarkBoundedAutolinkLiteral] : []), ...remarkPlugins.slice(boundAt + 1)];
   return renderToStaticMarkup(<Streamdown
     mode="static" parseIncompleteMarkdown={false} controls={false}
     plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
@@ -67,34 +80,73 @@ const render = (source: string, { bounded = true, seen }: { bounded?: boolean; s
 };
 const hrefs = (html: string): string[] => [...html.matchAll(/<a\b[^>]*href="([^"]*)"/g)].map((match) => match[1]);
 
-describe('bounded GFM literal autolinks', () => {
-  test('the chat pipeline bounds the literal autolink right after GFM', () => {
+const filler = 'word '.repeat(6000);
+// Shapes where the literal tokenizer and the later mdast pass link differently,
+// so a declined attempt the tokenizer would have taken changes the output.
+const urls = [
+  'https://example.com。 tail',
+  'www.example.org/x and a@b.co',
+  'https://example.com/*foo*bar',
+  'https://x.com/a?b=c_d_',
+  'https://x.com/a*',
+  'https://x.com/a\\_b',
+  'https://x.com/?a=1&amp;b=2',
+  'https://x.com/[a](b)',
+];
+
+describe('linear GFM literal autolinks', () => {
+  test('the chat pipeline adds the plugin right after GFM', () => {
     expect(boundAt).toBeGreaterThan(0);
   });
 
-  test('the tokenizer never walks back over more than the limit, where unbounded it does', () => {
-    const source = dataDump(300);
-    const unbounded: number[] = [];
-    render(source, { bounded: false, seen: unbounded });
-    // Positive control: the fixture does reach past the limit.
-    expect(Math.max(...unbounded)).toBeGreaterThan(AUTOLINK_LITERAL_EVENT_LIMIT);
-    const bounded: number[] = [];
-    render(source, { seen: bounded });
-    expect(bounded.length).toBeGreaterThan(0);
-    expect(Math.max(...bounded)).toBeLessThanOrEqual(AUTOLINK_LITERAL_EVENT_LIMIT);
+  test('no literal attempt walks back over the paragraph again, where unbounded every one does', () => {
+    const total = (rows: number, bounded = true): number => {
+      reads = [];
+      render(dataDump(rows), { bounded, record: true });
+      return reads.reduce((sum, read) => sum + read, 0);
+    };
+    const unbounded = total(300, false);
+    // Positive control: the dump opens with `[`, so each attempt walks back to it.
+    expect(unbounded).toBeGreaterThan(1_000_000);
+    // Linear: four times the rows read about four times the events, not sixteen.
+    expect(total(1200)).toBeLessThan(6 * total(300));
+    expect(total(300) * 50).toBeLessThan(unbounded);
   });
 
-  test('the data dump renders the same with and without the bound', () => {
+  test('the data dump renders the same as without the plugin', () => {
     const source = dataDump(300);
     expect(render(source)).toBe(render(source, { bounded: false }));
   });
 
+  for (const lead of ['', '[ ', '![ ', '[balanced](x) ']) {
+    test(`URLs late in a long paragraph opening with ${JSON.stringify(lead)} render the same as without the plugin`, () => {
+      for (const url of urls) {
+        const source = `${lead}${filler} see ${url} done`;
+        expect(render(source)).toBe(render(source, { bounded: false }));
+      }
+    });
+  }
+
   test('a bare URL late in a long paragraph is still linked, with the CJK boundary', () => {
-    const filler = 'word '.repeat(6000);
-    const late = `${filler} see https://example.com。 then www.example.org/x and a@b.co done`;
-    expect(hrefs(render(late))).toEqual(['https://example.com', 'http://www.example.org/x', 'mailto:a@b.co']);
-    expect(render(late)).toBe(render(late, { bounded: false }));
+    expect(hrefs(render(`${filler} see https://example.com。 then www.example.org/x and a@b.co done`)))
+      .toEqual(['https://example.com', 'http://www.example.org/x', 'mailto:a@b.co']);
   });
+
+  // The plugin's own walk is not visible to the recorder above, so the whole
+  // render is measured too, in CPU time so other processes do not count:
+  // linear is about four times the cost for four times the rows, quadratic
+  // sixteen.
+  test('four times the rows costs well under sixteen times the CPU', () => {
+    const cpuMs = (rows: number): number => {
+      const source = dataDump(rows);
+      const start = process.cpuUsage();
+      render(source);
+      const used = process.cpuUsage(start);
+      return (used.user + used.system) / 1000;
+    };
+    cpuMs(300);
+    expect(cpuMs(1200)).toBeLessThan(10 * cpuMs(300));
+  }, 60_000);
 
   // Smoke: the fork rendered this dump inside the default test timeout.
   test('the data dump from the report renders', () => {

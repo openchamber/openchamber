@@ -310,7 +310,8 @@ describe('HeaderProjectAction lifecycle', () => {
   });
 
   // The header button shows only an icon, so its tooltip carries the action's
-  // whole name, and auto-discovery says what it does after its name.
+  // whole name. Upstream's label already does; this guards it against a cut,
+  // and keeps the auto-discovery description off other actions.
   test('the tooltip names the whole action', async () => {
     mockedDeviceInfo.isMobile = false;
     const longName = 'Build every package in the workspace and then run the whole test suite';
