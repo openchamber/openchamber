@@ -86,6 +86,11 @@ describe('handoff target options', () => {
       'Unknown option for status: --entry (used by: handoff)',
     );
   });
+
+  it('parses --handoff-probe for a successor serve and defaults it off', () => {
+    expect(parseArgs(['serve', '--foreground', '--handoff-probe']).options.handoffProbe).toBe(true);
+    expect(parseArgs(['serve', '--foreground']).options.handoffProbe).toBe(false);
+  });
 });
 
 describe('CLI argument helper boundaries', () => {

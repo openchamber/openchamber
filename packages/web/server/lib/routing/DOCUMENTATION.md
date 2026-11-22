@@ -711,6 +711,14 @@ hand-written config and a saved one behave alike:
   (`pool-timeouts.test.js` checks idempotence and explicit values over
   generated chains).
 
+The wait only moves a request to another target. From
+developing-today-forks/opencode#2676 on, when it passes and no other target can
+take the request, OpenCode keeps the last target going until
+`health.lastTargetTimeoutMs` (15 minutes by default; `false` for no limit)
+instead of failing. The validator accepts that key with the same bounds as
+`firstTokenTimeoutMs`; the normalizer leaves it alone, and Settings only
+mentions it in the wait's help text.
+
 Only pools in the user file take part: the validator already refuses a route
 reference to a pool that is not in the saved map. `GET` and `PUT` also return
 `timeouts`, per pool the wait OpenCode applies now and what longest and

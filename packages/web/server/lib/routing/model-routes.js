@@ -45,7 +45,7 @@ const ROUTE_KEYS = [
 export const MAX_DESCRIPTION_LENGTH = 200;
 export const MAX_DETAILS_LENGTH = 2000;
 const TARGET_KEYS = ["model", "exclude", "defaultVariant", "variants", "until", "limit", "cache_format", "window"];
-const HEALTH_KEYS = ["firstTokenTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
+const HEALTH_KEYS = ["firstTokenTimeoutMs", "lastTargetTimeoutMs", "maxResponseTimeMs", "minOutputTokensPerSecond", "sampleWindow", "slowThreshold", "cooldownMs", "quotaCooldownMs"];
 const BUDGET_KEYS = ["requestsPerMinute", "requestsPerDay", "tokensPerMinute", "tokensPerDay", "softLimit"];
 const TUNING_KEYS = ["enabled", "intervalMinutes", "windowHours", "notes"];
 const SCHEDULE_KEYS = ["id", "targets", "when", "factor", "weight", "note"];
@@ -206,6 +206,8 @@ export const sourcesFromLayers = (layers) => [
 
 const HEALTH_LIMITS = {
   firstTokenTimeoutMs: MAX_MS,
+  // How long the last target a request can use may stay silent (developing-today-forks/opencode#2676).
+  lastTargetTimeoutMs: MAX_MS,
   maxResponseTimeMs: MAX_MS,
   cooldownMs: MAX_MS,
   quotaCooldownMs: MAX_MS,
@@ -220,7 +222,7 @@ const validateHealth = (id, health) => {
   for (const [key, max] of Object.entries(HEALTH_LIMITS)) {
     const value = health[key];
     if (value === undefined) continue;
-    if (key === "firstTokenTimeoutMs" && value === false) continue;
+    if ((key === "firstTokenTimeoutMs" || key === "lastTargetTimeoutMs") && value === false) continue;
     if (!isWhole(value, 1, max)) return `route "${id}" health.${key} must be a whole number from 1 to ${max}`;
   }
   if (health.minOutputTokensPerSecond !== undefined && !isPositiveNumber(health.minOutputTokensPerSecond))

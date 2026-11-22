@@ -1037,8 +1037,10 @@ export const createAgentToolRuntime = (dependencies: AgentToolDependencies) => {
     return pluginDirectory;
   };
 
-  const createChildEnv = ({ reuseToken = null }: { reuseToken?: string | null } = {}) => {
-    const port = getActivePort();
+  const createChildEnv = ({ reuseToken = null, listenerPort = null }: { reuseToken?: string | null; listenerPort?: number | null } = {}) => {
+    // A handoff successor previews its launch before it listens: it passes the port it is
+    // about to serve on, which is the port the callback URL will name once it listens.
+    const port = listenerPort !== null && Number.isInteger(listenerPort) && listenerPort > 0 ? listenerPort : getActivePort();
     if (!Number.isInteger(port) || port === null || port <= 0) {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }

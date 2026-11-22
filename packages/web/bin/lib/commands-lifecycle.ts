@@ -461,10 +461,20 @@ const readHandoffTarget = (entryOverride: string | undefined) => {
   return { entry, version: pkg.data.version };
 };
 
+const instanceHandoffSchema = z.object({ handoffProtocol: z.number().int() }).loose();
+const instanceSpeaksHandoffProtocol = (instanceOptions: JsonValue) => instanceHandoffSchema.safeParse(instanceOptions).success;
+
 async function handOffInstance(instance: LifecycleInstance, options: HandoffOptions = {}): Promise<HandoffResult> {
   const pidFilePath = await getPidFilePath(instance.port);
   const fromPid = instance.pid;
   if (fromPid === null || !Number.isInteger(fromPid) || fromPid <= 0) return { port: instance.port, ok: false, reason: 'unknown-pid' };
+  // Bootstrap: an instance started before handoff protocol 2 has no handoffProtocol in
+  // its instance file. It cannot read the request file or speak the probe protocol, so
+  // the first hop onto the feature is a one-time restart; every later hop is a handoff.
+  const instanceOptions = instance.instanceFilePath ? readInstanceOptions(instance.instanceFilePath) : null;
+  if (!instanceSpeaksHandoffProtocol(instanceOptions)) {
+    return { port: instance.port, ok: false, reason: 'predecessor-too-old', message: 'the running instance predates handoff protocol 2; restart required' };
+  }
   try {
     const target = readHandoffTarget(options.handoffEntry);
     writeHandoffRequest({

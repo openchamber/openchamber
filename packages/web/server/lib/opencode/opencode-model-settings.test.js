@@ -13,6 +13,7 @@ import { registerOpenCodeRoutes } from './routes.js';
 // replaces a legacy `provider` entry of the same id whole.
 
 const providersModule = fileURLToPath(new URL('./providers.js', import.meta.url));
+const routesModule = fileURLToPath(new URL('./routes.js', import.meta.url));
 let isolatedHome;
 let configDir;
 
@@ -91,12 +92,42 @@ describe('OpenCode model settings in the config files', () => {
 });
 
 describe('the model settings route', () => {
+  // No app-wide JSON parser: the server parses bodies only for listed path
+  // prefixes (core-routes.js), so the route must parse its own. A global parser
+  // here once hid a route that received no body at all.
   const createApp = () => {
     const app = express();
-    app.use(express.json());
     registerOpenCodeRoutes(app, { resolveProjectDirectory: vi.fn(async () => ({ directory: null })) });
     return app;
   };
+
+  it('saves a change sent over HTTP and reads it back, with no app-wide body parser', () => {
+    fs.writeFileSync(userFile(), JSON.stringify({ provider: { mock: { options: { baseURL: 'http://x/v1' }, models: { ok: { name: 'OK' } } } } }));
+    const script = `
+      import express from 'express';
+      import { registerOpenCodeRoutes } from ${JSON.stringify(routesModule)};
+      const app = express();
+      registerOpenCodeRoutes(app, { resolveProjectDirectory: async () => ({ directory: null }) });
+      const server = app.listen(0, '127.0.0.1', async () => {
+        const base = 'http://127.0.0.1:' + server.address().port + '/api/config/opencode-model-settings';
+        const put = await fetch(base, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ providerID: 'mock', modelID: 'ok', settings: { hidden: true, defaultVariant: 'high' } }) });
+        const get = await fetch(base);
+        console.log(JSON.stringify({ put: put.status, putBody: await put.json(), get: get.status, getBody: await get.json() }));
+        process.exit(0);
+      });
+    `;
+    const env = { ...process.env, OPENCODE_CONFIG_DIR: configDir, HOME: isolatedHome };
+    delete env.OPENCODE_CONFIG;
+    delete env.OPENCODE_CONFIG_PATH;
+    delete env.OPENCHAMBER_ENTERPRISE_MODE;
+    const result = spawnSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script], { env, encoding: 'utf8', cwd: path.dirname(routesModule), timeout: 60_000 });
+    if (result.status !== 0) throw new Error(result.stderr);
+    const answer = JSON.parse(result.stdout.trim().split('\n').pop());
+    expect([answer.put, answer.get]).toEqual([200, 200]);
+    expect(answer.putBody.models['mock/ok']).toEqual({ hidden: true, defaultVariant: 'high' });
+    expect(answer.getBody.models['mock/ok']).toEqual({ hidden: true, defaultVariant: 'high' });
+    expect(stored().provider.mock).toEqual({ options: { baseURL: 'http://x/v1' }, models: { ok: { name: 'OK', hidden: true, defaultVariant: 'high' } } });
+  });
 
   it('refuses a write in enterprise mode and an unknown or malformed setting', async () => {
     const agent = request(createApp());
@@ -114,5 +145,8 @@ describe('the model settings route', () => {
       { providerID: 'p', modelID: 'm', settings: { defaultVariant: 'two words' } },
     ];
     for (const body of cases) expect((await agent.put('/api/config/opencode-model-settings').send(body)).status).toBe(400);
+    // The refusal names the field, so the route did read the body.
+    const named = await agent.put('/api/config/opencode-model-settings').send({ providerID: 'p', modelID: 'm', settings: { hidden: 'yes' } });
+    expect(named.body.error).toMatch(/^settings\.hidden: /);
   });
 });

@@ -11,17 +11,35 @@
 //   5. The predecessor closes its listener and drains. It leaves OpenCode running and exits.
 //   If the successor does not report ready in time, or exits first, the predecessor kills it and
 //   keeps serving.
+//
+// Upgrade handoffs (the successor entry came from a handoff request file or
+// OPENCHAMBER_HANDOFF_ENTRY, so it may be a different version) run protocol 2:
+// the successor is spawned with --handoff-probe and proves itself before it
+// listens. It runs its preflight, sends `openchamber:handoff-hello`, and only
+// listens on fd 3 once the predecessor answers `openchamber:handoff-go`; a
+// failed preflight or a refusal travels as `openchamber:handoff-abort` with a
+// named reason. Same-install restarts keep the one-phase protocol above.
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { asNonEmptyString } from '../shared/guards.js';
+import { asNonEmptyString, isRecord } from '../shared/guards.js';
 import { consumeHandoffRequest, resolveHandoffTarget } from './handoff-request.js';
+import { isSupportedOpenCodeVersion } from './compatibility.js';
+import { MANAGED_OPENCODE_STATE_VERSION } from './managed-opencode-state.js';
 
 // The listener slot the successor sees, matching systemd socket activation (LISTEN_FDS=1 names fd 3).
 export const INHERITED_LISTEN_FD = 3;
 export const SELF_HANDOFF_SIGNAL = 'SIGURG';
 export const HANDOFF_READY_MESSAGE = 'openchamber:handoff-ready';
+export const HANDOFF_HELLO_MESSAGE = 'openchamber:handoff-hello';
+export const HANDOFF_GO_MESSAGE = 'openchamber:handoff-go';
+export const HANDOFF_ABORT_MESSAGE = 'openchamber:handoff-abort';
+export const HANDOFF_PROBE_FLAG = '--handoff-probe';
 export const HANDOFF_FROM_ENV = 'OPENCHAMBER_HANDOFF_FROM';
+// Protocol 2 is the hello/go probe phase. The accepted range sits next to the
+// message names so a future protocol 3 widens it in exactly one place.
+export const HANDOFF_PROTOCOL_VERSION = 2;
+const HANDOFF_PROTOCOL_RANGE = { min: 2, max: 2 };
 
 const DEFAULT_HANDOFF_TIMEOUT_MS = 30_000;
 const TERMINATE_GRACE_MS = 3_000;
@@ -45,8 +63,10 @@ export const resolveHandoffTimeoutMs = (env = process.env) => {
 };
 
 // The successor runs the same CLI entry in foreground mode, so it writes its own pid and instance
-// files and takes the inherited listener on the same port.
-export const buildSuccessorCommand = ({ execPath, execArgv, entry, port, host, apiOnly }) => ({
+// files and takes the inherited listener on the same port. An upgrade successor (a different
+// install entry) also gets --handoff-probe: it must prove itself with the hello/go exchange
+// before it listens, because once it listens it is already serving real requests.
+export const buildSuccessorCommand = ({ execPath, execArgv, entry, port, host, apiOnly, probe = false }) => ({
   command: '/bin/sh',
   args: [
     '-c',
@@ -61,9 +81,40 @@ export const buildSuccessorCommand = ({ execPath, execArgv, entry, port, host, a
     String(port),
     '--host',
     host,
+    ...(probe ? [HANDOFF_PROBE_FLAG] : []),
     ...(apiOnly ? ['--api-only'] : []),
   ],
 });
+
+// The predecessor's half of the protocol-2 proof, evaluated on the successor's hello before the
+// successor is told to listen. Every check is a fact the successor declared about itself: the
+// protocol range this build accepts, the state-file version this build writes (the successor
+// verified it can read that version from disk), a managed-OpenCode decision that keeps the
+// running child (adopt, or a handoff the drain protects), and the running OpenCode's version
+// inside the range this build supports. A `start` or `replace` decision would drop the running
+// OpenCode's sessions, so it refuses the takeover and the predecessor keeps serving.
+export const canTakeOver = (hello, {
+  stateVersion = MANAGED_OPENCODE_STATE_VERSION,
+  isSupportedOpenCodeVersion: isSupported = isSupportedOpenCodeVersion,
+} = {}) => {
+  if (!isRecord(hello)) return { ok: false, detail: 'the successor hello is not an object' };
+  const protocol = hello.handoffProtocol;
+  if (!Number.isInteger(protocol) || protocol < HANDOFF_PROTOCOL_RANGE.min || protocol > HANDOFF_PROTOCOL_RANGE.max) {
+    return { ok: false, detail: `handoff protocol ${String(protocol)} is outside the accepted range ${HANDOFF_PROTOCOL_RANGE.min}..${HANDOFF_PROTOCOL_RANGE.max}` };
+  }
+  if (hello.stateVersion !== stateVersion) {
+    return { ok: false, detail: `the successor verified state version ${String(hello.stateVersion)}, this process writes version ${stateVersion}` };
+  }
+  const decision = isRecord(hello.opencode) ? hello.opencode.decision : undefined;
+  if (decision !== 'adopt' && decision !== 'handoff') {
+    return { ok: false, detail: `the successor would ${decision === 'start' || decision === 'replace' ? decision : 'not adopt'} the managed OpenCode, which drops its sessions` };
+  }
+  const openCodeVersion = isRecord(hello.opencode) ? hello.opencode.version : undefined;
+  if (asNonEmptyString(openCodeVersion) && !isSupported(openCodeVersion)) {
+    return { ok: false, detail: `the running OpenCode reports version ${openCodeVersion}, which this build does not support` };
+  }
+  return { ok: true };
+};
 
 const signalProcessGroup = (pid, signal) => {
   try {
@@ -108,6 +159,7 @@ export const createSelfHandoffRuntime = ({
   env = process.env,
   timeoutMs = resolveHandoffTimeoutMs(env),
   log = console,
+  reclaimOpenCodeOwnership = /** @type {null | ((input: { successorPid: number }) => Promise<boolean>)} */ (null),
 }) => {
   let inFlight = null;
 
@@ -125,21 +177,52 @@ export const createSelfHandoffRuntime = ({
       port: address.port,
       host: address.address,
       apiOnly,
+      // Only an override target can be a different version, so only it runs the probe phase.
+      probe: Boolean(hasOverride),
     });
     // The listener lands at INHERITED_LISTEN_FD, the slot LISTEN_FDS=1 names; the IPC channel follows it.
     const stdio = ['ignore', 'inherit', 'inherit'];
     stdio[INHERITED_LISTEN_FD] = server._handle.fd;
     stdio.push('ipc');
-    return spawn(command, args, {
+    const child = spawn(command, args, {
       detached: true,
       stdio,
       env: { ...env, [HANDOFF_FROM_ENV]: String(runtimeProcess.pid) },
     });
+    return { child, probe: Boolean(hasOverride) };
   };
 
-  const awaitSuccessorReady = (child) => new Promise((resolve) => {
+  // One timer budgets the whole sequence, hello and go included: a probe successor gets no
+  // extra time beyond what a one-phase successor had. A probe successor that fails its own
+  // preflight says so with an abort message and its reason is the outcome; a hello this
+  // process refuses is answered with an abort and the outcome is `incompatible`.
+  const awaitSuccessorReady = (child, { probe = false } = {}) => new Promise((resolve) => {
     const timer = setTimeout(() => finish({ ok: false, reason: 'timeout' }), timeoutMs);
+    let phase = probe ? 'hello' : 'ready';
     const onMessage = (message) => {
+      if (probe && message?.type === HANDOFF_ABORT_MESSAGE) {
+        finish({ ok: false, reason: asNonEmptyString(message.reason) ?? 'preflight-failed', detail: asNonEmptyString(message.detail) ?? undefined });
+        return;
+      }
+      if (phase === 'hello' && message?.type === HANDOFF_HELLO_MESSAGE) {
+        const verdict = canTakeOver(message);
+        if (!verdict.ok) {
+          try {
+            child.send?.({ type: HANDOFF_ABORT_MESSAGE, reason: 'incompatible', detail: verdict.detail });
+          } catch {
+            // The successor is gone; its exit settles the outcome the same way.
+          }
+          finish({ ok: false, reason: 'incompatible', detail: verdict.detail });
+          return;
+        }
+        phase = 'ready';
+        try {
+          child.send?.({ type: HANDOFF_GO_MESSAGE });
+        } catch {
+          // Same as above: the exit event reports the failure.
+        }
+        return;
+      }
       if (message?.type === HANDOFF_READY_MESSAGE) finish({ ok: true, successorPid: child.pid });
     };
     const onExit = (code, signal) => finish({ ok: false, reason: 'exited', code, signal });
@@ -178,23 +261,35 @@ export const createSelfHandoffRuntime = ({
     }
 
     let child;
+    let probe = false;
     try {
       const spawned = spawnSuccessor(server, address);
       if (spawned?.failure) {
         log.warn(`[handoff] could not resolve the successor: ${spawned.failure}; still serving`);
         return { ok: false, reason: spawned.failure };
       }
-      child = spawned;
+      child = spawned.child;
+      probe = spawned.probe;
     } catch (error) {
       log.warn(`[handoff] could not start the successor: ${error?.message ?? error}; still serving`);
       return { ok: false, reason: 'spawn-failed' };
     }
     log.log(`[handoff] starting successor ${child.pid} on port ${address.port}`);
 
-    const outcome = await awaitSuccessorReady(child);
+    const outcome = await awaitSuccessorReady(child, { probe });
     if (!outcome.ok) {
       log.warn(`[handoff] successor did not become ready (${outcome.reason}); still serving`);
       await terminateSuccessor(child);
+      // A successor that got as far as adopting claimed the managed OpenCode (the process
+      // registry and the instance folder name it as owner). Take both back before reporting
+      // the failure, so no record names the dead successor as the owner of a running child.
+      if (reclaimOpenCodeOwnership) {
+        try {
+          await reclaimOpenCodeOwnership({ successorPid: child.pid });
+        } catch (error) {
+          log.warn(`[handoff] could not re-claim the managed OpenCode after the failed handoff: ${error?.message ?? error}`);
+        }
+      }
       return outcome;
     }
 

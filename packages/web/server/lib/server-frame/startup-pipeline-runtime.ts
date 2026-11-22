@@ -51,6 +51,7 @@ type PipelineOptions =
     scheduleOpenCodeApiDetection: () => void;
     bootstrapOpenCodeAtStartup: () => Promise<void>;
     onListenerReady?: (() => Promise<void>) | null;
+    handoffProbeGate?: ((input: { port: number; bindHost: string }) => Promise<void>) | null;
     staticRoutesRuntime: ReturnType<typeof createStaticRoutesRuntime>;
     tunnelRuntimeContext: { setActivePort: (port: number) => void };
     attachSignals: boolean;
@@ -99,6 +100,7 @@ export const createStartupPipelineRuntime = (dependencies: StartupPipelineDepend
       bootstrapOpenCodeAtStartup,
       onListenerReady = null,
       requestHandoff = null,
+      handoffProbeGate = null,
       staticRoutesRuntime,
       process,
       crypto,
@@ -205,6 +207,10 @@ export const createStartupPipelineRuntime = (dependencies: StartupPipelineDepend
     });
 
     const bindHost = serverStartupRuntime.resolveBindHost(host);
+    // A handoff-probe successor proves itself before this listen: once the server
+    // listens on the inherited socket it is already serving requests, so the
+    // predecessor's go has to arrive first. A refused gate aborts the start.
+    if (handoffProbeGate) await handoffProbeGate({ port, bindHost });
     const startupResult = await serverStartupRuntime.startListeningAndMaybeTunnel({
       port,
       bindHost,

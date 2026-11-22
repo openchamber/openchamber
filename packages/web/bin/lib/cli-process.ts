@@ -45,6 +45,9 @@ export interface InstanceWriteFields {
   uiPassword?: unknown;
   apiOnly?: unknown;
   startedAt?: unknown;
+  version?: string | undefined;
+  entry?: string | undefined;
+  handoffProtocol?: number | undefined;
 }
 
 export interface ProcessStateOptions {
@@ -148,6 +151,12 @@ function writeInstanceOptions(instanceFilePath: string, options: InstanceWriteFi
       hasUiPassword: isProcessText(options.uiPassword),
       apiOnly: options.apiOnly === true,
       startedAt: Number.isFinite(options.startedAt) ? options.startedAt : Date.now(),
+      // What is running, so `openchamber handoff` and `status` can read it back: the
+      // install entry and version this process serves, and the handoff protocol it
+      // speaks. A file without handoffProtocol names a pre-protocol-2 instance.
+      version: options.version ? options.version : undefined,
+      entry: options.entry ? options.entry : undefined,
+      handoffProtocol: Number.isInteger(options.handoffProtocol) ? options.handoffProtocol : undefined,
     };
     fs.writeFileSync(instanceFilePath, JSON.stringify(toStore, null, 2), { mode: 0o600 });
   } catch (error) {

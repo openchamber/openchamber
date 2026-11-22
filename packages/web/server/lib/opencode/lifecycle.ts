@@ -1,6 +1,6 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 import { execFile, spawn, spawnSync } from 'node:child_process';
-import { accessSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, openSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, stripHostInjectedEnv } from '../inherited-env.js';
@@ -202,7 +202,7 @@ export interface OpenCodeLifecycleDependencies {
   buildAugmentedPath?: () => string;
   buildManagedOpenCodePath?: () => string;
   getManagedOpenCodeShellEnvSnapshot?: () => ProcessEnvironment | null;
-  getManagedOpenCodeEnv?: (options?: { agentToolToken?: string | null }) => Promise<ProcessEnvironment>;
+  getManagedOpenCodeEnv?: (options?: { agentToolToken?: string | null; listenerPort?: number | null }) => Promise<ProcessEnvironment>;
   getUserEnvironment?: () => EnvironmentVariables;
   getActiveSessionCount?: () => number;
   reapManagedOrphanedProcesses?: typeof reapOrphanedProcesses;
@@ -2105,6 +2105,88 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     externalReadinessTimer.unref?.();
   };
 
+  // Read-only twin of the decision startOpenCodeOnce makes, for the self-handoff probe: a
+  // successor reports it in its hello before it listens, so the predecessor can refuse a
+  // takeover that would drop the running OpenCode. It spawns nothing, claims nothing,
+  // writes no state and signals nothing; the inputs are the same ones the real start
+  // computes (recorded state, binary identity, launch fingerprint, ownership, health).
+  const previewManagedOpenCodeLaunch = async ({ listenerPort = null }: { listenerPort?: number | null } = {}) => {
+    const recordedState = readManagedOpenCodeState(managedPaths.statePath);
+    if (!recordedState) return { decision: { action: 'adopt', reason: 'no-managed-state' }, openCodeVersion: null };
+    if (otherServerOwning(recordedState.pid) !== null) {
+      return { decision: { action: 'start', reason: 'unverified-owner' }, openCodeVersion: null };
+    }
+    await applyOpencodeBinaryFromSettings({ strict: true });
+    const resolvedBinary = ensureOpencodeCliEnv();
+    const binaryIdentity = resolveBinaryIdentity(resolvedBinary);
+    await checkOpenCodeBinary(resolveManagedOpenCodeLaunchSpec(resolvedBinary));
+    const hostname = env.ENV_CONFIGURED_OPENCODE_HOSTNAME;
+    const desiredPort = env.ENV_CONFIGURED_OPENCODE_PORT ?? 0;
+    const spawnPort = desiredPort === 0 || desiredPort === recordedState.port
+      ? recordedState.port
+      : await resolveManagedOpenCodePort(desiredPort, hostname);
+    const openCodePassword = await ensureLocalOpenCodeServerPassword({
+      rotateManaged: true,
+      reusePassword: credentialRotationPending ? null : (recordedState.password ?? null),
+    });
+    const managedEnv = await getManagedOpenCodeEnv({
+      agentToolToken: credentialRotationPending ? null : (recordedState.agentToolToken ?? null),
+      listenerPort,
+    });
+    const fingerprint = computeLaunchFingerprint({
+      binary: binaryIdentity,
+      hostname,
+      port: spawnPort,
+      cwd: state.openCodeWorkingDirectory,
+      password: openCodePassword,
+      managedEnv,
+    });
+    const ownsPid = isOwnedOpenCodePid(recordedState.pid, recordedState.binary);
+    const healthy = ownsPid ? await probeManagedOpenCodeHealth(`http://${formatHost(hostname)}:${recordedState.port}`) : false;
+    const decision = decideManagedOpenCodeLaunch({
+      state: recordedState,
+      ownsPid,
+      binary: binaryIdentity,
+      args: managedOpenCodeArgs(hostname),
+      fingerprint,
+      port: spawnPort,
+      healthy,
+    });
+    const openCodeVersion = healthy
+      ? await readExternalOpenCodeVersion(`http://${formatHost(hostname)}:${recordedState.port}`, getOpenCodeAuthHeaders())
+      : null;
+    return { decision, openCodeVersion };
+  };
+
+  // The rollback half of a failed self-handoff: a successor that got as far as adopting
+  // claimed the managed OpenCode, so the process registry and the instance folder name the
+  // successor as owner. After the predecessor kills it, both records name the predecessor
+  // again. Idempotent, and it leaves an OpenCode another live server owns alone.
+  const reclaimManagedOpenCodeOwnership = async ({ successorPid }: { successorPid: number | null }) => {
+    const record = readManagedOpenCodeState(managedPaths.statePath);
+    if (!record) return false;
+    const owner = readProcessOwner(record.pid);
+    if (owner !== null && Number.isInteger(owner) && owner !== process.pid && owner !== successorPid && isPidAlive(owner)) return false;
+    await registerAsOwner(record);
+    if (record.instanceDir) {
+      try {
+        const ownerPath = path.join(record.instanceDir, 'owner');
+        let current = null;
+        try {
+          current = Number.parseInt(readFileSync(ownerPath, 'utf8').trim(), 10);
+        } catch {
+          // No owner file yet: claiming the folder is the point.
+        }
+        if (current === null || !Number.isInteger(current) || current === successorPid || current === process.pid || !isPidAlive(current)) {
+          writeFileSync(ownerPath, `${process.pid}\n`);
+        }
+      } catch {
+        // The folder is best effort; the registry is the ownership record.
+      }
+    }
+    return true;
+  };
+
   const bootstrapOpenCodeAtStartup = async () => {
     const bootstrapStartedAt = performance.now();
     const bootstrapError: LifecycleFailure = { cause: null };
@@ -2612,6 +2694,8 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
     },
     reloadOpenCode,
     startOpenCode,
+    previewManagedOpenCodeLaunch,
+    reclaimManagedOpenCodeOwnership,
     restartOpenCode,
     closeDrainingOpenCode: () => drainingOpenCode.closeAll('openchamber-stop'),
     waitForOpenCodeReady,

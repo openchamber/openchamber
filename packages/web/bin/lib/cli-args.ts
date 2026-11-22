@@ -73,6 +73,7 @@ export interface CliOptions {
   subagentModels?: string | undefined;
   handoffEntry?: string | undefined;
   allowDowngrade?: boolean;
+  handoffProbe?: boolean;
   rotateCredentials?: boolean;
 }
 
@@ -238,6 +239,7 @@ function parseArgs(argv: string[] = process.argv.slice(2)) {
     withStatus: false,
     handoffEntry: undefined,
     allowDowngrade: false,
+    handoffProbe: false,
   };
 
   const removedFlagErrors = [];
@@ -572,6 +574,11 @@ function parseArgs(argv: string[] = process.argv.slice(2)) {
         break;
       case 'allow-downgrade':
         options.allowDowngrade = true;
+        break;
+      case 'handoff-probe':
+        // Set by the predecessor's successor spawn, never by hand: the process
+        // must prove itself over IPC before it listens (handoff protocol 2).
+        options.handoffProbe = true;
         break;
       case 'last':
         options.last = true;

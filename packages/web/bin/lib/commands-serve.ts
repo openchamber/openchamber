@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import { pathToFileURL } from 'url';
 import { spawn } from 'child_process';
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
@@ -12,6 +13,7 @@ import { getPidFilePath, getInstanceFilePath, readPidFile, writePidFile, writeIn
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
 import { resolveInheritedListenFd } from '../../server/lib/server-frame/server-startup-runtime.js';
 import {
+  HANDOFF_PROTOCOL_VERSION,
   HANDOFF_READY_MESSAGE,
   SELF_HANDOFF_SIGNAL,
   isSelfHandoffEnabled,
@@ -33,6 +35,7 @@ import {
 import type { CliOptions } from './cli-args.js';
 import type { CliNotice } from './cli-process.js';
 import { isString } from '../../server/lib/shared/object-guards.js';
+import { HandoffProbeAbort } from '../../server/lib/opencode/handoff-probe.js';
 
 export interface ServeOptions extends Partial<Omit<CliOptions, 'port' | 'host' | 'uiPassword' | 'apiOnly'>> {
   port?: unknown;
@@ -79,6 +82,20 @@ function isServePort(value: unknown): value is number {
 
 const DAEMON_READY_TIMEOUT_MS = 30000;
 
+// This CLI's own install: the entry it runs from and the version its package.json
+// declares. Written into the instance file so a later `openchamber handoff` can tell
+// what is running and whether it speaks handoff protocol 2.
+const readOwnInstallInfo = () => {
+  try {
+    const entry = fs.realpathSync(path.resolve(process.argv[1]));
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(path.dirname(entry), '..', 'package.json'), 'utf8'));
+    if (pkg?.name !== '@openchamber/web' || !/^\d+\.\d+\.\d+/.test(pkg?.version ?? '')) return null;
+    return { entry, version: pkg.version };
+  } catch {
+    return null;
+  }
+};
+
 function createServeCommand({
   serverPath,
   checkOpenCodeCLI,
@@ -89,6 +106,10 @@ function createServeCommand({
 async function serveCommand(options: ServeOptions) {
     // A self-handoff successor is started with its predecessor's pid in the environment; take it before anything spawns.
     const handoffPredecessor = takeHandoffPredecessor(process.env);
+    const ownInstall = readOwnInstallInfo();
+    const instanceIdentity = ownInstall
+      ? { version: ownInstall.version, entry: ownInstall.entry, handoffProtocol: HANDOFF_PROTOCOL_VERSION }
+      : {};
     const showOutput = shouldRenderHumanOutput(options);
     const jsonMessages: { level: string; code: string | undefined; message: string }[] = [];
     const emitNotice = (notice: CliNotice) => {
@@ -241,16 +262,30 @@ async function serveCommand(options: ServeOptions) {
       }
 
       const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
-      const controller = await startWebUiServer({
-        port: targetPort,
-        host: effectiveHost,
-        uiPassword: effectiveUiPassword,
-        apiOnly: options.apiOnly === true,
-        attachSignals: false,
-        exitOnShutdown: false,
-        // The successor takes over its predecessor's instance folder (instance-dir.js).
-        handoffPredecessor,
-      });
+      let controller;
+      try {
+        controller = await startWebUiServer({
+          port: targetPort,
+          host: effectiveHost,
+          uiPassword: effectiveUiPassword,
+          apiOnly: options.apiOnly === true,
+          attachSignals: false,
+          exitOnShutdown: false,
+          // The successor takes over its predecessor's instance folder (instance-dir.js).
+          handoffPredecessor,
+          // A probe successor proves itself to the predecessor before it listens.
+          handoffProbe: options.handoffProbe === true,
+        });
+      } catch (error) {
+        // The probe gate refused the takeover (or the predecessor did): the
+        // predecessor keeps serving, and this process exits without having
+        // listened or written pid files. The outcome names the reason.
+        if (error instanceof HandoffProbeAbort) {
+          console.error(`[handoff] takeover refused before listening: ${error.message}`);
+          process.exit(1);
+        }
+        throw error;
+      }
 
       const resolvedPort = controller.getPort();
 
@@ -269,6 +304,7 @@ async function serveCommand(options: ServeOptions) {
         launchMode: 'foreground',
         uiPassword: effectiveUiPassword,
         apiOnly: options.apiOnly === true,
+        ...instanceIdentity,
       }, emitNotice);
 
       // systemd (NotifyAccess=all) moves the main pid here before the predecessor exits. Then the predecessor
@@ -446,6 +482,7 @@ async function serveCommand(options: ServeOptions) {
       launchMode: 'daemon',
       uiPassword: effectiveUiPassword,
       apiOnly: options.apiOnly === true,
+      ...instanceIdentity,
     }, emitNotice);
 
     const serveResult = {

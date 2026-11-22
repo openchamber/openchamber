@@ -8,6 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { writeHandoffRequest } from './handoff-request.js';
+import { readManagedProcessOwner } from './managed-process-registry.js';
 
 // Real processes throughout: the CLI runs `serve --foreground` on a random port with a temporary HOME,
 // and the OpenCode child is a fake that answers the 2.x endpoints the lifecycle probes.
@@ -111,6 +113,7 @@ const createSandbox = async () => {
     dataDir,
     statePath: path.join(dataDir, 'managed-opencode', 'state.json'),
     pidFilePath: (port) => path.join(dataDir, 'run', `openchamber-${port}.pid`),
+    instanceFilePath: (port) => path.join(dataDir, 'run', `openchamber-${port}.json`),
     logPath: (name) => path.join(root, `${name}.log`),
   };
 };
@@ -229,10 +232,10 @@ const waitForPidChange = async (file, fromPid, timeoutMs) => {
   return null;
 };
 
-const startServer = (sandbox, { port, name, env = {} }) => {
+const startServer = (sandbox, { port, name, env = {}, cli = cliPath }) => {
   const logPath = sandbox.logPath(name);
   const logFd = fs.openSync(logPath, 'a');
-  const child = spawn(cliRuntime, [cliPath, 'serve', '--foreground', '--port', String(port), '--host', '127.0.0.1'], {
+  const child = spawn(cliRuntime, [cli, 'serve', '--foreground', '--port', String(port), '--host', '127.0.0.1'], {
     env: { ...sandbox.env, ...env },
     stdio: ['ignore', logFd, logFd],
   });
@@ -240,8 +243,8 @@ const startServer = (sandbox, { port, name, env = {} }) => {
   return { child, logPath };
 };
 
-const runCli = (sandbox, args, env = {}) => new Promise((resolve) => {
-  const child = spawn(cliRuntime, [cliPath, ...args], { env: { ...sandbox.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+const runCli = (sandbox, args, env = {}, cli = cliPath) => new Promise((resolve) => {
+  const child = spawn(cliRuntime, [cli, ...args], { env: { ...sandbox.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -372,11 +375,11 @@ const waitForReadyOrBindFailure = async (port, { timeoutMs = 60_000, child, logP
 // and handoff arguments, so a retry cannot respawn one process the way #683 respawns the
 // gatekeeper child: the failed attempt is stopped and the start sequence runs again. Bounded
 // at five attempts; a fifth collision, and any non-collision failure, throws.
-const startReadyServer = async (sandbox, { name, env = {} }) => {
+const startReadyServer = async (sandbox, { name, env = {}, cli = cliPath }) => {
   let lastBindError = null;
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     const port = await freePort();
-    const server = startServer(sandbox, { port, name, env });
+    const server = startServer(sandbox, { port, name, env, cli });
     try {
       await waitForReadyOrBindFailure(port, { child: server.child, logPath: server.logPath, pidFilePath: sandbox.pidFilePath(port) });
       return { ...server, port };
@@ -641,5 +644,443 @@ describeUnlessWindows('self-handoff across real processes', () => {
     expect(predecessorExited).toBe(true);
     const ready = datagrams.find((line) => line.includes(`MAINPID=${successorPid}`));
     expect(ready).toMatch(/READY=1/);
+  }, 120_000);
+});
+
+// Upgrade takeover across two installs of the web package (issue #81). Each install is a copy of
+// packages/web with an edited package version and its dependency trees linked back to the real
+// tree, so both run this code and differ only in the version they report. Stub installs are a
+// hand-written bin/cli.js plus a package.json: they stand in for a successor that misbehaves in
+// one specific way.
+const webPackageRoot = path.resolve(here, '../../..');
+const installCache = new Map();
+
+const buildInstall = async (name, version, { stub = null } = {}) => {
+  const key = `${name}@${version}@${stub === null ? 'real' : 'stub'}`;
+  if (installCache.has(key)) return installCache.get(key);
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), `oc-install-${name}-`));
+  const webDir = path.join(root, 'web');
+  if (stub !== null) {
+    await fsp.mkdir(path.join(webDir, 'bin'), { recursive: true });
+    await fsp.writeFile(path.join(webDir, 'bin', 'cli.js'), stub);
+    await fsp.writeFile(path.join(webDir, 'package.json'), `${JSON.stringify({ name: '@openchamber/web', version }, null, 2)}\n`);
+  } else {
+    await fsp.cp(webPackageRoot, webDir, {
+      recursive: true,
+      filter: (src) => !src.split(path.sep).includes('node_modules'),
+    });
+    const ownModules = path.join(webPackageRoot, 'node_modules');
+    if (fs.existsSync(ownModules)) await fsp.symlink(ownModules, path.join(webDir, 'node_modules'), 'dir');
+    const rootModules = path.resolve(webPackageRoot, '..', '..', 'node_modules');
+    if (fs.existsSync(rootModules)) await fsp.symlink(rootModules, path.join(root, 'node_modules'), 'dir');
+    const packagePath = path.join(webDir, 'package.json');
+    const pkg = JSON.parse(await fsp.readFile(packagePath, 'utf8'));
+    pkg.version = version;
+    await fsp.writeFile(packagePath, `${JSON.stringify(pkg, null, 2)}\n`);
+  }
+  const install = { root, webDir, cli: path.join(webDir, 'bin', 'cli.js'), version };
+  installCache.set(key, install);
+  return install;
+};
+
+const waitForLog = async (logPath, needle, timeoutMs = 20_000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if ((await fsp.readFile(logPath, 'utf8')).includes(needle)) return true;
+    } catch { /* the log may not exist yet */ }
+    await new Promise((resolve) => { setTimeout(resolve, 100); });
+  }
+  return false;
+};
+
+const readInstance = async (sandbox, port) => JSON.parse(await fsp.readFile(sandbox.instanceFilePath(port), 'utf8'));
+
+const validHello = (protocol) => ({
+  type: 'openchamber:handoff-hello',
+  version: '2.6.0',
+  handoffProtocol: protocol,
+  stateVersion: 1,
+  opencode: { decision: 'adopt', reason: 'matches-state', version: '2.2.4' },
+});
+
+const stubHelloSource = (hello, { afterGo }) => `
+  const hello = ${JSON.stringify(hello)};
+  if (typeof process.send === 'function') {
+    process.send(hello);
+    process.on('message', (message) => {
+      if (message && message.type === 'openchamber:handoff-abort') process.exit(0);
+      if (message && message.type === 'openchamber:handoff-go') { ${afterGo} }
+    });
+  }
+  setInterval(() => {}, 1000);
+`;
+
+describe('upgrade handoff across installs', () => {
+  it('takes over from the older install with no refused or failed request', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const installB = await buildInstall('b', '2.6.0');
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, { name: 'upgrade-old', cli: installA.cli });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const before = JSON.parse(await fsp.readFile(sandbox.statePath, 'utf8'));
+    const client = startClient(port);
+    try {
+      const cli = await runCli(sandbox, ['handoff', '--port', String(port)], {}, installB.cli);
+      const successorPid = await waitForPidChange(pidFile, oldPid, 40_000);
+      await waitForReady(port, { logPath: predecessor.logPath, pidFilePath: pidFile });
+      const predecessorExited = await waitForExit(predecessor.child, 15_000);
+      const counts = await client.stop();
+      const after = JSON.parse(await fsp.readFile(sandbox.statePath, 'utf8'));
+      const instance = await readInstance(sandbox, port);
+
+      expect(cli.code).toBe(0);
+      expect(predecessorExited).toBe(true);
+      expect(successorPid).not.toBe(oldPid);
+      expect(after.pid).toBe(before.pid);
+      expect(after.port).toBe(before.port);
+      expect(instance.version).toBe('2.6.0');
+      expect(instance.handoffProtocol).toBe(2);
+      expect(counts.refused).toBe(0);
+      expect(counts.failed).toBe(0);
+      expect(counts.ok).toBeGreaterThan(0);
+    } finally {
+      client.stop();
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('refuses a downgrade without the flag and allows it with the flag', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const installB = await buildInstall('b', '2.6.0');
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, { name: 'downgrade', cli: installB.cli });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const client = startClient(port);
+    try {
+      const refused = await runCli(sandbox, ['handoff', '--port', String(port)], {}, installA.cli);
+      expect(refused.code).not.toBe(0);
+      expect(await waitForLog(predecessor.logPath, 'downgrade-refused')).toBe(true);
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+
+      const allowed = await runCli(sandbox, ['handoff', '--port', String(port), '--allow-downgrade'], {}, installA.cli);
+      const successorPid = await waitForPidChange(pidFile, oldPid, 40_000);
+      await waitForReady(port, { logPath: predecessor.logPath, pidFilePath: pidFile });
+      const counts = await client.stop();
+
+      expect(allowed.code).toBe(0);
+      expect(successorPid).not.toBe(oldPid);
+      expect((await readInstance(sandbox, port)).version).toBe('2.4.0');
+      expect(counts.refused).toBe(0);
+      expect(counts.failed).toBe(0);
+    } finally {
+      client.stop();
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('refuses a handoff to an entry whose install cannot be verified', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, { name: 'entry-invalid', cli: installA.cli });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const client = startClient(port);
+    try {
+      const bogusRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'oc-bogus-'));
+      await fsp.mkdir(path.join(bogusRoot, 'bin'), { recursive: true });
+      await fsp.writeFile(path.join(bogusRoot, 'bin', 'cli.js'), 'setInterval(() => {}, 1000);\n');
+      await fsp.writeFile(path.join(bogusRoot, 'package.json'), `${JSON.stringify({ name: 'not-openchamber', version: '2.6.0' })}\n`);
+      writeHandoffRequest({
+        dataDir: sandbox.dataDir,
+        entry: path.join(bogusRoot, 'bin', 'cli.js'),
+        execPath: cliRuntime,
+        version: '2.6.0',
+      });
+      process.kill(oldPid, 'SIGURG');
+
+      expect(await waitForLog(predecessor.logPath, 'could not resolve the successor: entry-invalid')).toBe(true);
+      const counts = await client.stop();
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+      expect(counts.refused).toBe(0);
+      expect(counts.failed).toBe(0);
+    } finally {
+      client.stop();
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('keeps serving when the successor never sends hello', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const silent = await buildInstall('silent', '2.6.0', { stub: 'setInterval(() => {}, 1000);\n' });
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, {
+      name: 'silent-successor',
+      cli: installA.cli,
+      env: { OPENCHAMBER_HANDOFF_TIMEOUT_MS: '4000' },
+    });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const client = startClient(port);
+    try {
+      writeHandoffRequest({ dataDir: sandbox.dataDir, entry: silent.cli, execPath: cliRuntime, version: '2.6.0' });
+      process.kill(oldPid, 'SIGURG');
+
+      expect(await waitForLog(predecessor.logPath, 'did not become ready (timeout)')).toBe(true);
+      const counts = await client.stop();
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+      expect(counts.refused).toBe(0);
+      expect(counts.failed).toBe(0);
+    } finally {
+      client.stop();
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('aborts a successor whose hello names an unknown protocol', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const alien = await buildInstall('alien', '2.6.0', {
+      stub: stubHelloSource(validHello(99), { afterGo: '' }),
+    });
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, {
+      name: 'alien-successor',
+      cli: installA.cli,
+      env: { OPENCHAMBER_HANDOFF_TIMEOUT_MS: '10000' },
+    });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const client = startClient(port);
+    try {
+      writeHandoffRequest({ dataDir: sandbox.dataDir, entry: alien.cli, execPath: cliRuntime, version: '2.6.0' });
+      process.kill(oldPid, 'SIGURG');
+
+      expect(await waitForLog(predecessor.logPath, '(incompatible)')).toBe(true);
+      const counts = await client.stop();
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+      expect(counts.refused).toBe(0);
+      expect(counts.failed).toBe(0);
+    } finally {
+      client.stop();
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('keeps serving when the successor hangs after go', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const hanging = await buildInstall('hanging', '2.6.0', {
+      stub: stubHelloSource(validHello(2), { afterGo: '' }),
+    });
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, {
+      name: 'hanging-successor',
+      cli: installA.cli,
+      env: { OPENCHAMBER_HANDOFF_TIMEOUT_MS: '4000' },
+    });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const client = startClient(port);
+    try {
+      writeHandoffRequest({ dataDir: sandbox.dataDir, entry: hanging.cli, execPath: cliRuntime, version: '2.6.0' });
+      process.kill(oldPid, 'SIGURG');
+
+      expect(await waitForLog(predecessor.logPath, 'did not become ready (timeout)')).toBe(true);
+      const counts = await client.stop();
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+      expect(counts.refused).toBe(0);
+      expect(counts.failed).toBe(0);
+    } finally {
+      client.stop();
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('keeps serving when the successor exits after go', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const exiting = await buildInstall('exiting', '2.6.0', {
+      stub: stubHelloSource(validHello(2), { afterGo: 'process.exit(0);' }),
+    });
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, {
+      name: 'exiting-successor',
+      cli: installA.cli,
+      env: { OPENCHAMBER_HANDOFF_TIMEOUT_MS: '10000' },
+    });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const client = startClient(port);
+    try {
+      writeHandoffRequest({ dataDir: sandbox.dataDir, entry: exiting.cli, execPath: cliRuntime, version: '2.6.0' });
+      process.kill(oldPid, 'SIGURG');
+
+      expect(await waitForLog(predecessor.logPath, 'did not become ready (exited)')).toBe(true);
+      const counts = await client.stop();
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+      expect(counts.refused).toBe(0);
+      expect(counts.failed).toBe(0);
+    } finally {
+      client.stop();
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('re-claims OpenCode ownership after a successor that claimed it hangs', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const registryModule = path.join(webPackageRoot, 'server', 'lib', 'opencode', 'managed-process-registry.js');
+    const sourceHook = path.join(webPackageRoot, 'scripts', 'register-server-sources.mjs');
+    const claimStub = `
+      (async () => {
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const { pathToFileURL } = require('node:url');
+        const configHome = process.env.XDG_CONFIG_HOME || path.join(process.env.HOME, '.config');
+        const state = JSON.parse(fs.readFileSync(path.join(configHome, 'openchamber', 'managed-opencode', 'state.json'), 'utf8'));
+        // The registry is TypeScript; the source hook lets this plain node stub import it.
+        await import(pathToFileURL(${JSON.stringify(sourceHook)}).href);
+        const { registerManagedProcess } = await import(pathToFileURL(${JSON.stringify(registryModule)}).href);
+        await registerManagedProcess({ pid: state.pid, ownerPid: process.pid, port: state.port, binary: 'stub', runtime: 'web' });
+        if (state.instanceDir) fs.writeFileSync(path.join(state.instanceDir, 'owner'), String(process.pid));
+        if (typeof process.send === 'function') {
+          process.send(${JSON.stringify(validHello(2))});
+          process.on('message', (message) => {
+            if (message && message.type === 'openchamber:handoff-abort') process.exit(0);
+          });
+        }
+        setInterval(() => {}, 1000);
+      })();
+    `;
+    const claiming = await buildInstall('claiming', '2.6.0', { stub: claimStub });
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, {
+      name: 'claiming-successor',
+      cli: installA.cli,
+      env: { OPENCHAMBER_HANDOFF_TIMEOUT_MS: '4000' },
+    });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const state = JSON.parse(await fsp.readFile(sandbox.statePath, 'utf8'));
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = path.join(sandbox.dataDir, 'managed-opencode');
+    try {
+      expect(readManagedProcessOwner(state.pid)).toBe(oldPid);
+      writeHandoffRequest({ dataDir: sandbox.dataDir, entry: claiming.cli, execPath: cliRuntime, version: '2.6.0' });
+      process.kill(oldPid, 'SIGURG');
+
+      expect(await waitForLog(predecessor.logPath, 'did not become ready (timeout)')).toBe(true);
+      await waitUntil(() => readManagedProcessOwner(state.pid) === oldPid, 10_000);
+      expect(readManagedProcessOwner(state.pid)).toBe(oldPid);
+      expect((await fsp.readFile(path.join(state.instanceDir, 'owner'), 'utf8')).trim()).toBe(String(oldPid));
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+    } finally {
+      delete process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('refuses the takeover when the managed state version cannot be read', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const installB = await buildInstall('b', '2.6.0');
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, { name: 'state-version', cli: installA.cli });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    const client = startClient(port);
+    try {
+      const state = JSON.parse(await fsp.readFile(sandbox.statePath, 'utf8'));
+      state.version = 999;
+      await fsp.writeFile(sandbox.statePath, `${JSON.stringify(state, null, 2)}\n`);
+
+      const cli = await runCli(sandbox, ['handoff', '--port', String(port)], {}, installB.cli);
+      expect(cli.code).not.toBe(0);
+      expect(await waitForLog(predecessor.logPath, '(preflight-failed)')).toBe(true);
+      const counts = await client.stop();
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+      expect(counts.refused).toBe(0);
+      expect(counts.failed).toBe(0);
+    } finally {
+      client.stop();
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('names predecessor-too-old for an instance that predates protocol 2', async () => {
+    const installA = await buildInstall('a', '2.4.0');
+    const installB = await buildInstall('b', '2.6.0');
+    const sandbox = await createSandbox();
+    const predecessor = await startReadyServer(sandbox, { name: 'bootstrap', cli: installA.cli });
+    const { port } = predecessor;
+    const pidFile = sandbox.pidFilePath(port);
+    const oldPid = parseInt(await fsp.readFile(pidFile, 'utf8'), 10);
+    try {
+      const instancePath = sandbox.instanceFilePath(port);
+      const instance = JSON.parse(await fsp.readFile(instancePath, 'utf8'));
+      delete instance.handoffProtocol;
+      await fsp.writeFile(instancePath, `${JSON.stringify(instance, null, 2)}\n`);
+
+      const cli = await runCli(sandbox, ['handoff', '--port', String(port)], {}, installB.cli);
+      expect(cli.code).not.toBe(0);
+      expect(`${cli.stdout}\n${cli.stderr}`).toContain('predecessor-too-old');
+      expect(parseInt(await fsp.readFile(pidFile, 'utf8'), 10)).toBe(oldPid);
+      await expect(fetchHealth(port)).resolves.toMatchObject({ status: 200 });
+    } finally {
+      await teardown(sandbox, port, [predecessor.child]);
+    }
+  }, 120_000);
+
+  it('exits when the predecessor dies before answering the hello', async () => {
+    const installB = await buildInstall('b', '2.6.0');
+    const sandbox = await createSandbox();
+    const port = await freePort();
+    // The test process plays the predecessor: it holds the listening socket and the IPC
+    // channel, receives the hello, and then goes away without answering. A successor that
+    // waited anyway would hold its copy of the listener open and wedge the port.
+    const listener = net.createServer();
+    await new Promise((resolve) => { listener.listen(port, '127.0.0.1', resolve); });
+    const logPath = sandbox.logPath('orphaned-successor');
+    const logFd = fs.openSync(logPath, 'a');
+    // Spawned the way the self-handoff runtime spawns a successor: through the shell
+    // wrapper that names the successor's own pid in LISTEN_PID, with the listener at fd 3.
+    const child = spawn('/bin/sh', ['-c', 'export LISTEN_PID=$$ LISTEN_FDS=1; exec "$@"', 'openchamber-handoff-successor', cliRuntime, installB.cli, 'serve', '--foreground', '--port', String(port), '--host', '127.0.0.1', '--handoff-probe'], {
+      env: { ...sandbox.env, OPENCHAMBER_HANDOFF_FROM: String(process.pid) },
+      stdio: ['ignore', logFd, logFd, listener._handle.fd, 'ipc'],
+    });
+    fs.closeSync(logFd);
+    try {
+      const hello = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no hello from the successor')), 30_000);
+        child.on('message', (message) => {
+          if (message?.type === 'openchamber:handoff-hello') {
+            clearTimeout(timer);
+            resolve(message);
+          }
+        });
+      });
+      expect(hello.handoffProtocol).toBe(2);
+      child.disconnect();
+      expect(await waitForExit(child, 20_000)).toBe(true);
+      expect(await waitForLog(logPath, 'the predecessor closed the handoff channel')).toBe(true);
+    } finally {
+      listener.close();
+      if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+      await teardown(sandbox, port, [child]);
+    }
   }, 120_000);
 });

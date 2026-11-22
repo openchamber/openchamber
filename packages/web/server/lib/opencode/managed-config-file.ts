@@ -170,8 +170,8 @@ export const createManagedConfigRuntime = ({
     return writing;
   };
 
-  const buildManagedChildEnv = async ({ agentToolToken = null }: { agentToolToken?: string | null } = {}) => {
-    const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv({ reuseToken: agentToolToken }) : {};
+  const buildManagedChildEnv = async ({ agentToolToken = null, listenerPort = null }: { agentToolToken?: string | null; listenerPort?: number | null } = {}) => {
+    const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv({ reuseToken: agentToolToken, listenerPort }) : {};
     if (ownsConfigFile()) {
       await writeLatestConfigFile();
       return { ...childEnv, OPENCODE_CONFIG: filePath };

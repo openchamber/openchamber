@@ -69,13 +69,16 @@ example, set **Trivial** to `opencode-route/cheap-fast`, **Implement** to
 `opencode-route/frontier-heavy`. Jev still makes the task decision; the chosen
 route then tries its providers in order.
 
-OpenCode moves to another target on retryable provider failures, quota or
-authentication errors, and a missed first-output deadline. Completed requests
+OpenCode moves to another target when a target fails or misses its first-output
+deadline. The one exception is a request too large for the model, which is
+shrunk instead. Completed requests
 can also mark a target degraded using the configured latency or throughput
 thresholds. Cooldowns are shared by sessions in the OpenCode process and restored after a
 restart, and OpenCode records every routing decision, attempt (exact error
 code and message, timings, token counts) and cooldown in its database for later
-analysis. A turn is never replayed after any answer or tool output has started.
+analysis. A turn is never replayed: if a target fails after its answer or tool
+output has started, the partial reply stays, and a recent OpenCode continues it
+on the next model in a new reply.
 
 OpenCode also reads each response's rate-limit headers and moves traffic off a
 target whose provider says its window is spent, before the provider starts refusing it.
@@ -92,14 +95,15 @@ time. Older OpenCode versions wait 10 seconds, which cuts off models that think
 for a while before they answer, so when Settings saves your pools it writes a
 30-second wait into every pool that has none; a recent OpenCode waits 30
 seconds by default. OpenCode applies only the wait of the pool you picked, so a
-pool that contains other pools waits as long as the slowest pool inside it. On
-the pool's page, under **Waiting and failover**, you can choose the shortest
+pool that contains other pools waits as long as the slowest pool inside it. The
+wait only moves a request on: with no model left to move to, a recent OpenCode
+keeps waiting for the last one, up to 15 minutes (`lastTargetTimeoutMs`),
+instead of failing. On the pool's page, under **Waiting and failover**, you can choose the shortest
 instead, a number of your own, no limit, or **Each pool its own**: the pool's
 own models then wait 30 seconds and the models of each pool inside wait as long
 as that pool would, which needs a recent OpenCode. If a reply fails, **Try the
 next pool model** retries with the next model in the pool that has not failed
-for that message; once every model has failed, the reply lists the models it
-tried.
+for that message; once no model is left to try, the reply says so.
 
 Open a pool in **Settings → Routing → Model pools** to set each model's effort
 in its own row: the provider's default (no effort is sent), a default the

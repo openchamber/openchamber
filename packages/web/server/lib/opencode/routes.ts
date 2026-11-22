@@ -1,6 +1,6 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
 import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
-import 'express';
+import express from 'express';
 import { resolveNpmRegistryRequest } from '../npm/npm-registry-config.js';
 import { readBoundedResponseJson, readBoundedResponseText } from '../shared/response-body.js';
 import { readBoundedFile } from '../shared/bounded-file-read.js';
@@ -490,7 +490,8 @@ export const registerOpenCodeRoutes = <Settings extends { opencodeBinary?: unkno
     }
   });
 
-  app.put('/api/config/opencode-model-settings', refuseInEnterpriseMode, async (req, res) => {
+  // The server-wide body parser covers only listed path prefixes, so this route parses its own.
+  app.put('/api/config/opencode-model-settings', express.json({ limit: '16kb' }), refuseInEnterpriseMode, async (req, res) => {
     const request = modelSettingsRequestSchema.safeParse(req.body);
     if (!request.success) return res.status(400).json({ error: modelSettingsRequestError(request.error) });
     const { providerID, modelID, settings } = request.data;

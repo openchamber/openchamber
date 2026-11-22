@@ -161,6 +161,7 @@ import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/server-frame/shutdown-runtime.js';
 import { createSelfHandoffRuntime } from './lib/opencode/self-handoff.js';
+import { createHandoffProbeGate } from './lib/opencode/handoff-probe.js';
 import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, onGuestServiceEnded, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
 import { guestMarks } from './lib/guests/marks.js';
 import { guestServiceRegistryDir } from './lib/guests/service-registry.js';
@@ -317,6 +318,8 @@ interface WebUiServerOptions {
   builtInExtensionsDir?: string | undefined;
   // A self-handoff successor: the pid of the server handing its socket to this one.
   handoffPredecessor?: number | undefined;
+  // A self-handoff successor that proves itself to its predecessor before it listens (handoff-probe.js).
+  handoffProbe?: boolean | undefined;
 }
 
 applyConnectAttemptTimeout();
@@ -2039,7 +2042,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   // adopt/handoff start and null for a rotation start. Forward it; dropping
   // it would mint a fresh token on every start and strand the adopted
   // OpenCode, which still calls back with the token it was started with.
-  getManagedOpenCodeEnv: async ({ agentToolToken = null } = {}) => (retireClaudePlugin({ buildOpenCodeUrl, getOpenCodeAuthHeaders, directory: openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(), notify: (payload) => broadcastUiNotification(payload) }), managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv({ agentToolToken }) : {}),
+  getManagedOpenCodeEnv: async ({ agentToolToken = null, listenerPort = null } = {}) => (retireClaudePlugin({ buildOpenCodeUrl, getOpenCodeAuthHeaders, directory: openCodeLifecycleRuntime.getDefaultOpenCodeDirectory(), notify: (payload) => broadcastUiNotification(payload) }), managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv({ agentToolToken, listenerPort }) : {}),
   getInstanceDir: () => instanceDir,
   getHandoffPredecessorPid: () => handoffPredecessorPid,
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
@@ -3260,7 +3263,19 @@ async function main(options: WebUiServerOptions = {}) {
     runningVersion: OPENCHAMBER_VERSION,
     apiOnly,
     log: console,
+    reclaimOpenCodeOwnership: ({ successorPid }) => openCodeLifecycleRuntime.reclaimManagedOpenCodeOwnership({ successorPid }),
   });
+  // A probe successor proves itself to its predecessor before the pipeline listens:
+  // the gate runs the preflight and the hello/go exchange on the same IPC channel the
+  // ready message later uses. See handoff-probe.js.
+  const handoffProbeGate = options.handoffProbe === true && handoffPredecessorPid !== null
+    ? createHandoffProbeGate({
+      version: OPENCHAMBER_VERSION,
+      dataDir: OPENCHAMBER_DATA_DIR,
+      previewOpenCode: ({ listenerPort }) => openCodeLifecycleRuntime.previewManagedOpenCodeLaunch({ listenerPort }),
+      log: console,
+    })
+    : null;
   // openchamber.restart (config-actions.js) restarts through the same handoff.
   if (attachSignals) requestSelfHandoff = selfHandoffRuntime.requestHandoff;
 
@@ -3320,6 +3335,7 @@ async function main(options: WebUiServerOptions = {}) {
     attachSignals,
     apiOnly,
     requestHandoff: selfHandoffRuntime.requestHandoff,
+    handoffProbeGate,
     dictationModelsDir: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'speech-models'),
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
