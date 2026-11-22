@@ -1041,4 +1041,43 @@ describe('upgrade handoff across installs', () => {
       await teardown(sandbox, port, [predecessor.child]);
     }
   }, 120_000);
+
+  it('exits when the predecessor dies before answering the hello', async () => {
+    const installB = await buildInstall('b', '2.6.0');
+    const sandbox = await createSandbox();
+    const port = await freePort();
+    // The test process plays the predecessor: it holds the listening socket and the IPC
+    // channel, receives the hello, and then goes away without answering. A successor that
+    // waited anyway would hold its copy of the listener open and wedge the port.
+    const listener = net.createServer();
+    await new Promise((resolve) => { listener.listen(port, '127.0.0.1', resolve); });
+    const logPath = sandbox.logPath('orphaned-successor');
+    const logFd = fs.openSync(logPath, 'a');
+    // Spawned the way the self-handoff runtime spawns a successor: through the shell
+    // wrapper that names the successor's own pid in LISTEN_PID, with the listener at fd 3.
+    const child = spawn('/bin/sh', ['-c', 'export LISTEN_PID=$$ LISTEN_FDS=1; exec "$@"', 'openchamber-handoff-successor', cliRuntime, installB.cli, 'serve', '--foreground', '--port', String(port), '--host', '127.0.0.1', '--handoff-probe'], {
+      env: { ...sandbox.env, OPENCHAMBER_HANDOFF_FROM: String(process.pid) },
+      stdio: ['ignore', logFd, logFd, listener._handle.fd, 'ipc'],
+    });
+    fs.closeSync(logFd);
+    try {
+      const hello = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('no hello from the successor')), 30_000);
+        child.on('message', (message) => {
+          if (message?.type === 'openchamber:handoff-hello') {
+            clearTimeout(timer);
+            resolve(message);
+          }
+        });
+      });
+      expect(hello.handoffProtocol).toBe(2);
+      child.disconnect();
+      expect(await waitForExit(child, 20_000)).toBe(true);
+      expect(await waitForLog(logPath, 'the predecessor closed the handoff channel')).toBe(true);
+    } finally {
+      listener.close();
+      if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+      await teardown(sandbox, port, [child]);
+    }
+  }, 120_000);
 });
