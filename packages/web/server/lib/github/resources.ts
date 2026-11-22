@@ -12,7 +12,6 @@ import {
   mapProject,
   mapReviewComment,
   mapWorkflowJob,
-  requireGitHubCheckRuns,
   requireGitHubComment,
   requireGitHubIssue,
   requireGitHubPullFile,
@@ -20,7 +19,6 @@ import {
   requireGitHubRepoNetwork,
   requireGitHubReviewComment,
   requireGitHubStatuses,
-  requireGitHubWorkflowJobs,
   requireProviderArray,
 } from './mappers.js';
 import {
@@ -61,7 +59,6 @@ type ListedPull = Rest['pulls']['list']['response']['data'][number];
 type Issue = Rest['issues']['get']['response']['data'];
 type CheckRun = Rest['checks']['listForRef']['response']['data']['check_runs'][number];
 type Job = Rest['actions']['listJobsForWorkflowRun']['response']['data']['jobs'][number];
-type Annotation = Rest['checks']['listAnnotations']['response']['data'][number];
 type Identity = Pick<ReturnType<typeof mapProject>, 'provider' | 'instance'>;
 export interface GitHubResourceModules {
   octokit: typeof import('./octokit.js');

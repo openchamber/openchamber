@@ -601,4 +601,92 @@ describe('source-control auth storage', () => {
       await expect(store.setAccount(origin, { tokenReference: 'plain', user: { id: 9, login: 'u' }, source: 'pat' })).rejects.toThrow();
     });
   });
+  it('rejects oversize auth files without parsing the entire file', async () => {
+    const { filePath, store } = await makeStore();
+    
+    // Write an oversize file directly (create a large JSON structure)
+    const largeData = { version: 2, providers: { gitlab: { instances: {} } } };
+    for (let i = 0; i < 5000; i++) {
+      largeData.providers.gitlab.instances[`instance-${i}`] = {
+        activeCredentialId: null,
+        credentials: Array(100).fill().map((_, j) => ({
+          credentialId: `cred-${i}-${j}`,
+          revision: 1,
+          providerUserId: `user-${i}-${j}`,
+          user: { id: i * 100 + j, login: `user${i}-${j}` },
+          source: 'pat',
+          scope: 'api',
+          status: 'valid'
+        })),
+        cliDisabled: false,
+        cliActive: false
+      };
+    }
+    await fs.writeFile(filePath, JSON.stringify(largeData), 'utf8');
+    
+    // Verify the file is actually oversize
+    const stat = await fs.stat(filePath);
+    expect(stat.size).toBeGreaterThan(1_048_576);
+    
+    // Attempting to read should throw INVALID_SOURCE_CONTROL_AUTH
+    await expect(store.readInstance('https://gitlab.com'))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUTH' });
+  });
+
+  // The fork's oversize test above builds a file that is also invalid, so it
+  // fails without the cap too; this one is valid JSON with padding, so only
+  // the 1 MiB cap in auth-file-read.ts refuses it.
+  it('rejects an oversize auth file that would otherwise parse', async () => {
+    const { filePath, store } = await makeStore();
+    await store.setAccount('https://gitlab.com', { token: 'valid-token', user: { id: 1, login: 'testuser' }, source: 'pat' });
+    await fs.writeFile(filePath, `${await fs.readFile(filePath, 'utf8')}${' '.repeat(1_048_577)}`, 'utf8');
+
+    await expect(store.readInstance('https://gitlab.com')).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUTH' });
+  });
+
+  it('rejects non-regular files (FIFO) promptly without wedging the transaction chain', async () => {
+    const { directory, filePath, store } = await makeStore();
+    
+    // Create a FIFO at the auth path using shell
+    await execFileAsync('mkfifo', [filePath]);
+    
+    // Attempting to read should throw INVALID_SOURCE_CONTROL_AUTH (not hang)
+    const readPromise = store.readInstance('https://gitlab.com');
+    
+    // Should settle promptly (within 1 second)
+    await expect(
+      Promise.race([
+        readPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Read hung')), 1000))
+      ])
+    ).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUTH' });
+    
+    // Clean up the FIFO
+    await fs.unlink(filePath);
+  });
+
+  it('allows valid auth files under the size limit', async () => {
+    const { filePath, store } = await makeStore();
+    const validScope = 'api read_api read_user'; // Normal scope size
+    
+    // Write a valid file
+    await store.setAccount('https://gitlab.com', {
+      token: 'valid-token',
+      user: { id: 1, login: 'testuser' },
+      source: 'pat',
+      scope: validScope
+    });
+    
+    // Should read successfully
+    await expect(store.readInstance('https://gitlab.com'))
+      .resolves.toMatchObject({
+        activeAccountId: expect.any(String),
+        accounts: expect.arrayContaining([
+          expect.objectContaining({
+            id: expect.any(String),
+            token: 'valid-token'
+          })
+        ])
+      });
+  });
 });
