@@ -83,6 +83,14 @@ export const composerModelForSpaceAccess = (providers: readonly string[]): { pro
   return null;
 };
 
+export const followSpaceModel = (directory: string): boolean => {
+  const model = composerModelForSpace(directory);
+  if (!model) return false;
+  useConfigStore.getState().setProvider(model.providerId);
+  useConfigStore.getState().setModel(model.modelId);
+  return true;
+};
+
 export const composerModelForSpace = (directory: string): { providerId: string; modelId: string } | null => {
   const spaceId = spaceIdOfDirectory(directory);
   const entry = spaceId ? useSpacesStore.getState().journey?.get(spaceId) : undefined;
