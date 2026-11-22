@@ -717,6 +717,14 @@ export const isGhCliDisabledForHost = async (host: string) => {
   return (await instanceAuthStore().github.readInstance(host)).cliDisabled;
 };
 
+// Removal reads settings strictly (fork #1274): a malformed settings.json is an
+// error the user can fix, never read as a gh login that is already inactive.
+export const isGhCliActiveForRemoval = async (host: string) => {
+  if (normalizeInstance(host) !== 'github.com') return isGhCliActiveForHost(host);
+  const settings = readSettingsFileForUpdate();
+  return !settings.ghCliDisabled && Boolean(settings.ghCliActive);
+};
+
 export const isGhCliActiveForHost = async (host: string) => {
   if (normalizeInstance(host) === 'github.com') return isGhCliActive();
   return (await instanceAuthStore().github.readInstance(host)).cliActive;

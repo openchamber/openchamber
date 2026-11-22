@@ -53,7 +53,7 @@ interface CheckRunDTO extends Identity {
   id: string; name: string; status: string; startedAt?: string; completedAt?: string; conclusion?: string | null; detailsUrl?: string;
   application?: { name: string | undefined; slug: string | undefined };
   output?: { title: string | undefined; summary: string | undefined; text: string | undefined };
-  job?: WorkflowJob; annotations?: ReturnType<typeof mapAnnotations>;
+  job?: WorkflowJob; annotations?: ReturnType<typeof mapAnnotations>; annotationsTruncated?: true;
 }
 export interface CI {
   summary: Pick<ChecksSummary, 'state' | 'total' | 'success' | 'failure' | 'pending'> & Partial<Pick<ChecksSummary, 'inProgress' | 'queued' | 'startedAt'>>;
@@ -400,7 +400,7 @@ export function mapFile(file: PullFile) {
   return result;
 }
 
-export function mapCheckRun(run: Run, { job, annotations }: { job?: WorkflowJob; annotations?: ReturnType<typeof mapAnnotations> } = {}, identity: Identity) {
+export function mapCheckRun(run: Run, { job, annotations, annotationsTruncated }: { job?: WorkflowJob; annotations?: ReturnType<typeof mapAnnotations>; annotationsTruncated?: boolean } = {}, identity: Identity) {
   const result: CheckRunDTO = { ...identity, id: String(run.id), name: run.name, status: run.status };
   if (text(run.started_at)) result.startedAt = run.started_at;
   if (text(run.completed_at)) result.completedAt = run.completed_at;
@@ -413,6 +413,7 @@ export function mapCheckRun(run: Run, { job, annotations }: { job?: WorkflowJob;
   }
   if (job) result.job = job;
   if (annotations) result.annotations = annotations;
+  if (annotationsTruncated) result.annotationsTruncated = true;
   return result;
 }
 
