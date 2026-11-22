@@ -66,12 +66,13 @@ export default defineConfig({
       "anti-slop/no-unsafe-dictionary-type": ["error", { allowInTypeGuards: true }],
     },
   }, {
-    // Fork divergence from upstream: the fork's server code keeps its comments.
+    // Fork divergence from upstream: the fork's server and CLI code keeps its comments.
     // The owner's standing rule is that a comment explains a reason where the
     // reader meets the code (a deliberate oddity, a hardcoded number, a
     // workaround, the only test of a behavior); upstream's no-comments rule
-    // would delete about 3,100 of exactly those from packages/web/server.
-    files: ["packages/web/server/**/*.ts"],
+    // would delete about 3,100 of exactly those from packages/web/server,
+    // and 98 more from packages/web/bin.
+    files: ["packages/web/server/**/*.ts", "packages/web/bin/**/*.ts"],
     rules: {
       "openchamber/no-comments": "off",
     },

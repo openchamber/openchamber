@@ -47,7 +47,7 @@ const isFiniteNumber = (value: unknown): value is number => Number.isFinite(valu
 // The monitor API can report percentages outside [0, 100]; clamp at the
 // read site. Non-finite or non-number input stays null. (No clamp inside
 // toUsageWindow: wafer's overage branch deliberately exceeds 100.)
-const clampUsedPercent = (value: unknown) =>
+const clampUsedPercent = <Value>(value: Value) =>
   isNumber(value) && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
 
 const ZAI_RESET_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;

@@ -9,6 +9,7 @@ import { spawn } from 'child_process';
 import { StringDecoder } from 'node:string_decoder';
 
 import { getLocalSttModelSpec } from './model-catalog.js';
+import { isFunction } from '../../shared/object-guards.js';
 import type { NodeFetch } from './node-fetch.js';
 
 // A download that delivers no bytes for this long is stalled, not slow:
@@ -105,7 +106,7 @@ export async function downloadToFile(
         return;
       }
       digest.update(chunk);
-      if (typeof onProgress === 'function') {
+      if (isFunction(onProgress)) {
         onProgress(downloadedBytes, bytes);
       }
       callback(null, chunk);
@@ -314,7 +315,9 @@ export async function ensureLocalSttModel({ modelsDir, modelId, onProgress, fetc
 
   if (!(await archiveMatchesPins(archivePath, spec))) {
     await rm(archivePath, { force: true }).catch(() => undefined);
-    await downloadToFile(spec.archiveUrl, archivePath, onProgress, { bytes: spec.bytes, sha256: spec.sha256, ...(fetchImpl ? { fetchImpl } : {}) });
+    const expected: Parameters<typeof downloadToFile>[3] = { bytes: spec.bytes, sha256: spec.sha256 };
+    if (fetchImpl) expected.fetchImpl = fetchImpl;
+    await downloadToFile(spec.archiveUrl, archivePath, onProgress, expected);
   }
 
   const stagingDir = path.join(modelsDir, `.staging-${spec.extractedDir}-${Date.now()}`);

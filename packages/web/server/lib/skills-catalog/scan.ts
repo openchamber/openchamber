@@ -61,10 +61,10 @@ const SKILL_MD_TOO_LARGE_WARNING = 'SKILL.md is larger than the 4 MiB size limit
 
 // A failed git-show whose output exceeded the exec maxBuffer is an
 // over-cap SKILL.md, not a generic read failure.
-export function isGitOutputTooLarge(result: unknown) {
-  if (!result || typeof result !== 'object') return false;
-  if ('code' in result && result.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return true;
-  return /maxbuffer/i.test(String('message' in result ? result.message || '' : ''));
+export function isGitOutputTooLarge(result: { code?: unknown; message?: unknown } | null | undefined) {
+  if (!result) return false;
+  if (result.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return true;
+  return /maxbuffer/i.test(String(result.message || ''));
 }
 
 export async function readSkillMdFile(filePath: string) {

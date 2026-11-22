@@ -1,5 +1,6 @@
 
 import { execFileSync } from 'child_process';
+import type { ExecFileSyncOptionsWithStringEncoding } from 'child_process';
 import { createHash } from 'node:crypto';
 import os from 'os';
 import path from 'path';
@@ -7,6 +8,7 @@ import path from 'path';
 import { readOpenCodeCredentials } from '../../../opencode/auth.js';
 import type { LegacyAuthFile } from '../../../opencode/auth.js';
 import { asNonEmptyString, normalizeTimestamp, getAuthEntry, normalizeAuthEntry, readJsonFile } from '../../utils/index.js';
+import type { JsonValue } from '../../../shared/json-values.js';
 
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 const OPENCODE_AUTH_ALIASES = ['anthropic', 'claude'];
@@ -54,6 +56,21 @@ export const configureClaudeCredentialEnvironment = (read: typeof readEnvironmen
   readEnvironment = read;
 };
 
+/** Where discovery reads: the Keychain command, the credentials file and OpenCode's credential store. */
+interface ClaudeCredentialSources {
+  execFileSync: (command: string, args: string[], options: ExecFileSyncOptionsWithStringEncoding) => string;
+  readJsonFile: (filePath: string) => JsonValue | null;
+  readOpenCodeCredentials: () => Promise<LegacyAuthFile>;
+}
+
+const defaultSources: ClaudeCredentialSources = { execFileSync, readJsonFile, readOpenCodeCredentials };
+let sources = defaultSources;
+
+/** Replaces some sources (tests); `null` restores the real ones. */
+export const configureClaudeCredentialSources = (next: Partial<ClaudeCredentialSources> | null) => {
+  sources = next ? { ...defaultSources, ...next } : defaultSources;
+};
+
 export const readClaudeCredentialContext = (): ClaudeCredentialContext => {
   try {
     return { configDir: readEnvironment().CLAUDE_CONFIG_DIR || null, error: null };
@@ -82,7 +99,7 @@ const readKeychainCredential = (configDir: string | null) => {
     const service = configDir
       ? `${KEYCHAIN_SERVICE}-${createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`
       : KEYCHAIN_SERVICE;
-    raw = execFileSync('security', ['find-generic-password', '-s', service, '-w'], {
+    raw = sources.execFileSync('security', ['find-generic-password', '-s', service, '-w'], {
       encoding: 'utf8',
       timeout: 10_000,
       stdio: ['ignore', 'pipe', 'ignore']
@@ -100,7 +117,7 @@ const readKeychainCredential = (configDir: string | null) => {
 };
 
 const readCredentialsFile = (configDir: string | null) => {
-  const blob: unknown = readJsonFile(path.join(configDir ?? path.join(os.homedir(), '.claude'), '.credentials.json'));
+  const blob: unknown = sources.readJsonFile(path.join(configDir ?? path.join(os.homedir(), '.claude'), '.credentials.json'));
   return parseClaudeCodeBlob(isCredentialBlob(blob) ? blob : null, 'credentials-file');
 };
 
@@ -134,5 +151,5 @@ export const loadClaudeCredential = async (context = readClaudeCredentialContext
   if (context.error) return null;
   const local = readKeychainCredential(context.configDir) ?? readCredentialsFile(context.configDir);
   if (local || context.configDir) return local;
-  return readOpenCodeCredential(await readOpenCodeCredentials()) ?? readEnvCredential();
+  return readOpenCodeCredential(await sources.readOpenCodeCredentials()) ?? readEnvCredential();
 };

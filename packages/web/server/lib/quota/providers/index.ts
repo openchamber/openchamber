@@ -4,6 +4,7 @@ import { listStoredCredentials, readOpenCodeCredentials } from '../../opencode/a
 import { isOpenCodeUpstreamAuthRejection } from '../../opencode/credential-auth-error.js';
 import { readConfigLayers } from '../../opencode/config-files.js';
 import { isRecord } from '../../opencode/config-v2.js';
+import { isFunction } from '../../shared/object-guards.js';
 import { extensionQuotaProvider, extensionQuotaProviderEntries } from '../extension-registry.js';
 import { QuotaRouteError } from '../route-error.js';
 import { asNonEmptyString, buildResult } from '../utils/index.js';
@@ -363,7 +364,7 @@ export const listUsagePageProviders = () => providerEntries()
  */
 export const OPENCODE_UPSTREAM_AUTH_ERROR = 'OpenCode upstream authentication failed: the running OpenCode rejected the credentials OpenChamber presented (shared credential path, not this provider’s own credential). Check the OpenCode server password OpenChamber connects with.';
 
-export const isOpenCodeUpstreamAuthError = (error: unknown) => isOpenCodeUpstreamAuthRejection(error);
+export const isOpenCodeUpstreamAuthError = <Failure>(error: Failure) => isOpenCodeUpstreamAuthRejection(error);
 
 const upstreamAuthFailureResult = (providerId: string | null, providerName: string): ProviderResult => ({
   ...buildResult({
@@ -467,7 +468,7 @@ const isCredentialUsable = (provider: QuotaProvider, row: StoredCredentialRow, a
     // isConfigured verdict re-keys the row under the base id, which cannot
     // judge a row whose credential lives under another integration (a
     // Console sign-in stored under its own instance integration).
-    if (typeof provider.isCredentialUsable === 'function') {
+    if (isFunction(provider.isCredentialUsable)) {
       return Boolean(provider.isCredentialUsable(row));
     }
     return Boolean(provider.isConfigured({ [authKey]: row.value }));

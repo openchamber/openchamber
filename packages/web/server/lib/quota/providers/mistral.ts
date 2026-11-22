@@ -11,7 +11,7 @@ export const aliases = ['mistral'];
 
 const MISTRAL_MODELS_URL = 'https://api.mistral.ai/v1/models';
 
-const apiKeyOfEntry = (value: unknown) => {
+const apiKeyOfEntry = <Entry>(value: Entry) => {
   const entry = asAuthFields(normalizeAuthEntry(value));
   return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token) ?? asNonEmptyString(entry?.access);
 };
@@ -20,7 +20,7 @@ const apiKeyOf = (auth: LegacyAuthFile) => apiKeyOfEntry(getAuthEntry(auth, alia
 
 export const isConfigured = (auth: LegacyAuthFile) => Boolean(apiKeyOf(auth));
 
-const errorMessage = (error: unknown) => (error instanceof Error ? error.message : 'Request failed');
+const errorMessage = <Failure>(error: Failure) => (error instanceof Error ? error.message : 'Request failed');
 
 /**
  * A standard API key on a plan without a billing allowance answers the

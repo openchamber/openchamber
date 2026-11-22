@@ -66,7 +66,7 @@ export type SettingsHelpersDependencies = Pick<Normalization,
   normalizeTunnelProvider: typeof normalizeTunnelProvider;
   normalizeTunnelMode: typeof normalizeTunnelMode;
   normalizeOptionalPath: typeof normalizeOptionalPath;
-  normalizeScheduledTasksMaxRunDurationMs?: (value: unknown) => number | undefined;
+  normalizeScheduledTasksMaxRunDurationMs?: <Value>(value: Value) => number | undefined;
   // True when OpenCode's managed tool config applies changes without a restart.
   areManagedToolsLive?: () => boolean;
 };
@@ -358,7 +358,7 @@ export type SanitizedSettings = Partial<Record<BooleanSettingsKey, boolean>>
     usageModelGroups?: Record<string, UsageModelGroups>;
     sttProvider?: 'local' | 'openai-compatible';
     sidebarSessionRowDisplay?: Record<string, string | boolean>;
-    sidebarLayout?: Record<string, unknown>;
+    sidebarLayout?: Partial<Record<string, string | string[] | boolean | number>>;
     agentTerminalsPlacement?: string;
     continueWithModelMode?: string;
     sessionWorkEntry?: string;
@@ -382,8 +382,8 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     normalizeDirectoryPath,
     normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
-    normalizeScheduledTasksMaxRunDurationMs = (value: unknown) => (
-      typeof value === 'number' && Number.isFinite(value) && value > 0
+    normalizeScheduledTasksMaxRunDurationMs = <Value>(value: Value) => (
+      isFiniteNumber(value) && value > 0
         ? Math.min(Math.max(Math.round(value), 1_000), 2_147_483_647)
         : undefined
     ),
@@ -958,7 +958,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (candidate.sessionTabsPerWorkspace === true || candidate.sessionTabsPerWorkspace === false) {
       result.sessionTabsPerWorkspace = candidate.sessionTabsPerWorkspace;
     }
-    if (typeof candidate.agentTerminalsPlacement === 'string') {
+    if (isString(candidate.agentTerminalsPlacement)) {
       const placement = candidate.agentTerminalsPlacement.trim();
       if (placement === 'terminal-panel' || placement === 'sidebar') {
         result.agentTerminalsPlacement = placement;

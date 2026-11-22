@@ -37,7 +37,7 @@ const voiceKeysPath = () => path.join(resolveDataDir(), 'voice-keys.json');
 // malformed file aside, and the writer is mode-explicit. The schema is the
 // reader's value judgement, so a parseable file holding the wrong shape is
 // malformed here exactly as a torn one is.
-const isStoredKeysValue = (value: unknown) => storedKeysSchema.safeParse(value).success;
+const isStoredKeysValue = (value: unknown): value is z.infer<typeof storedKeysSchema> => storedKeysSchema.safeParse(value).success;
 
 const errorDetails = z.object({ code: z.unknown().optional(), message: z.unknown().optional() });
 

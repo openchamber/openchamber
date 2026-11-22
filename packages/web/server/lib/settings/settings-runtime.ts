@@ -73,6 +73,8 @@ export type SettingsRuntimeDependencies = Pick<Normalization,
   onLastDirectoryChanged?: (directory: SettingsDocument[string]) => void;
 };
 
+interface SettingsMigration { settings: SettingsDocument; changed: boolean }
+
 export interface SettingsReadOptions {
   surface?: SettingsSurface | null;
 }
@@ -1186,7 +1188,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   // first time settings are read, so a later change of `sessionWorkEnabled`
   // never picks it again: someone who had switched In work on keeps every
   // sent message putting a session in work, everyone else starts at Off.
-  const migrateSettingsSessionWorkEntry = (settings: SettingsDocument): { settings: SettingsDocument; changed: boolean } => {
+  const migrateSettingsSessionWorkEntry = (settings: SettingsDocument): SettingsMigration => {
     if (isSessionWorkEntry(settings.sessionWorkEntry)) {
       return { settings, changed: false };
     }

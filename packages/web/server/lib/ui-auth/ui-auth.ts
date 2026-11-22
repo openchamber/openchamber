@@ -112,7 +112,7 @@ const MAX_SESSION_TTL_MS = 400 * 24 * HOUR_MS;
 // Number(...) would silently honour '1e3' as 1000 units and '0x10' as 16
 // for this security control — the same class #624 removed from the
 // rate-limit reader below.
-export const readSessionTtlMs = (raw: unknown, unitMs: number, fallbackMs: number) => {
+export const readSessionTtlMs = <Raw>(raw: Raw, unitMs: number, fallbackMs: number) => {
   const text = String(raw ?? '').trim();
   if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) {
     return fallbackMs;

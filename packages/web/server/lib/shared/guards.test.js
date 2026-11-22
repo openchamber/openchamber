@@ -7,6 +7,7 @@ import {
   isRecord,
   isString,
 } from './guards.js';
+import { errorCodeOf, errorStatusOf } from './object-guards.js';
 
 class Example {
   constructor() {
@@ -126,5 +127,26 @@ describe('re-exported public APIs', () => {
   it('quota/utils/transformers.js re-exports the shared asNonEmptyString', async () => {
     const transformers = await import('../quota/utils/transformers.js');
     expect(transformers.asNonEmptyString).toBe(asNonEmptyString);
+  });
+});
+
+// The oracle is the contract in object-guards.ts: a string or number field is
+// returned as is, an absent field (or a non-object throw) is undefined, and
+// any other field value is null.
+describe('errorCodeOf and errorStatusOf', () => {
+  const cases = [
+    [Object.assign(new Error('x'), { code: 'ENOENT', status: 404 }), 'ENOENT', 404],
+    [{ code: 7, status: '503' }, 7, '503'],
+    [{ code: { nested: true }, status: true }, null, null],
+    [{ code: undefined }, undefined, undefined],
+    [{}, undefined, undefined],
+    [new Error('plain'), undefined, undefined],
+    ['ENOENT', undefined, undefined],
+    [null, undefined, undefined],
+    [undefined, undefined, undefined],
+  ];
+  it.each(cases)('reads %o', (error, code, status) => {
+    expect(errorCodeOf(error)).toBe(code);
+    expect(errorStatusOf(error)).toBe(status);
   });
 });

@@ -1,6 +1,7 @@
 import express from 'express';
 import { z } from 'zod';
 
+import { isNumber, isString } from '../shared/object-guards.js';
 import type { Application } from '../shared/http-contracts.js';
 import type { SayTtsCapability } from './capability-runtime.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
@@ -63,11 +64,11 @@ export function speechVoiceHeaderValue(voice: string) {
 // `say` accepts from our clients (default 200, preview slider ~100-200);
 // anything else — non-numeric strings, fractions, injected shell syntax —
 // is rejected by the route with a 400 instead of reaching a command.
-export function parseSayRate(rate: unknown) {
+export function parseSayRate<Rate>(rate: Rate) {
   let value: number | null = null;
-  if (typeof rate === 'number') {
+  if (isNumber(rate)) {
     value = rate;
-  } else if (typeof rate === 'string' && /^\d+$/.test(rate.trim())) {
+  } else if (isString(rate) && /^\d+$/.test(rate.trim())) {
     value = Number(rate.trim());
   }
   if (value === null || !Number.isInteger(value) || value < 50 || value > 1000) {

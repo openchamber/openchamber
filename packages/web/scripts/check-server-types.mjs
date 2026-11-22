@@ -60,7 +60,7 @@ export function findPairedDeclarations(files) {
   return files.filter((file) => fs.existsSync(file.replace(/\.ts$/, '.d.ts')));
 }
 
-export function checkServerTypes(root = webRoot, lint = process.argv.includes('--lint')) {
+export function checkServerTypes(root = webRoot, lint = process.argv.includes('--lint'), lintBatchBudget = COMMAND_LENGTH_BUDGET) {
   const files = findServerTypeScript(root);
   const paired = findPairedDeclarations(files);
   if (paired.length) {
@@ -80,13 +80,16 @@ export function checkServerTypes(root = webRoot, lint = process.argv.includes('-
   }
   if (lint) {
     if (!files.length) return 0;
+    // Every batch runs before the exit code is decided, so a failing batch
+    // cannot hide the findings of the batches after it.
+    let failed = 0;
     for (const config of ['oxlint.config.ts', 'oxlint.anti-slop.config.ts']) {
-      for (const batch of batchByCommandLength(files.map((file) => path.relative(root, file)))) {
+      for (const batch of batchByCommandLength(files.map((file) => path.relative(root, file)), lintBatchBudget)) {
         const result = spawnSync('bunx', ['oxlint', '-c', path.resolve(webRoot, '../..', config), '--report-unused-disable-directives', ...batch], { cwd: root, stdio: 'inherit' });
-        if (result.status !== 0) return result.status ?? 1;
+        if (result.status !== 0 && failed === 0) failed = result.status ?? 1;
       }
     }
-    return 0;
+    return failed;
   }
   try {
     assertServerProgramBoundary(root);

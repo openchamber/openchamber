@@ -416,7 +416,7 @@ export function registerSourceControlRoutes(app: Router, dependencies: SourceCon
       },
     }),
   });
-  const sendBindingOperationError = (res: Response, error: unknown) => (errorFields(error).code === 'SOURCE_CONTROL_TRANSPORT_CONFIG_PARTIAL'
+  const sendBindingOperationError = <Failure>(res: Response, error: Failure) => (errorFields(error).code === 'SOURCE_CONTROL_TRANSPORT_CONFIG_PARTIAL'
     ? res.status(500).json({ error: errorFields(error).message, code: errorFields(error).code, committed: true })
     : sendBindingError(res, error));
   app.get('/api/source-control/binding', async (req, res) => {
@@ -427,13 +427,13 @@ export function registerSourceControlRoutes(app: Router, dependencies: SourceCon
       return sendBindingError(res, error);
     }
   });
-  const bindingRoutes: Array<[string, (intent: BindingIntent) => Promise<unknown>]> = [
+  const bindingRoutes = [
     ['/api/source-control/binding/provider', bindingOperations.setProvider],
     ['/api/source-control/binding/transport', bindingOperations.setTransport],
     ['/api/source-control/binding/transport/remove', bindingOperations.removeTransport],
     ['/api/source-control/binding/reset', bindingOperations.reset],
     ['/api/source-control/binding/auxiliary', bindingOperations.setAuxiliary],
-  ];
+  ] as const;
   for (const [routePath, operation] of bindingRoutes) {
     app.post(routePath, async (req, res) => {
       try {

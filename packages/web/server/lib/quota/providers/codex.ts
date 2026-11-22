@@ -213,7 +213,7 @@ const readCodexInstanceIds = () => {
     const { mergedConfig } = readConfigLayers();
     const ids: string[] = [];
     for (const sectionKey of ['providers', 'provider']) {
-      const section = (mergedConfig as Record<string, unknown> | null | undefined)?.[sectionKey];
+      const section = mergedConfig?.[sectionKey];
       if (!isRecord(section)) continue;
       for (const [id, definition] of Object.entries(section)) {
         const instanceOf = isRecord(definition) ? asNonEmptyString(definition.instanceOf) : null;
@@ -227,7 +227,7 @@ const readCodexInstanceIds = () => {
   }
 };
 
-const entryWithToken = (entry: unknown) => {
+const entryWithToken = <Entry>(entry: Entry) => {
   const normalized = asFields(normalizeAuthEntry(entry));
   return normalized && getAccessToken(normalized) ? normalized : null;
 };

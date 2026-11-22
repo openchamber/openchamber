@@ -27,16 +27,22 @@ export const isPresent = <Value>(value: Value): value is NonNullable<Value> => B
 
 export const hasProperties = <Value>(value: Value): value is Value & Readonly<Record<string, unknown>> => value != null;
 
+/** A field of a thrown value: a string or number as is, undefined when absent, null for any other value. */
+export const errorFieldValue = (value: unknown): string | number | null | undefined => {
+  if (value === undefined) return undefined;
+  return typeof value === 'string' || typeof value === 'number' ? value : null;
+};
+
 /** The `code` of a thrown value (a Node system error's `ENOENT`, an app error's code), or undefined. */
-export const errorCodeOf = (error: unknown): unknown => (error != null && typeof error === 'object' && 'code' in error ? error.code : undefined);
+export const errorCodeOf = (error: unknown): string | number | null | undefined => (error != null && typeof error === 'object' && 'code' in error ? errorFieldValue(error.code) : undefined);
 
 export const isNumber = (value: unknown): value is number => typeof value === 'number';
 
 export const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
-export const isFunction = (value: unknown): value is (...args: never[]) => unknown => typeof value === 'function';
+export const isFunction = (value: unknown): value is (...args: never[]) => void => typeof value === 'function';
 
 export const isObjectLike = (value: unknown): value is object => value !== null && typeof value === 'object';
 
 /** The `status` of a thrown value (an HTTP error's status), or undefined. */
-export const errorStatusOf = (error: unknown): unknown => (error != null && typeof error === 'object' && 'status' in error ? error.status : undefined);
+export const errorStatusOf = (error: unknown): string | number | null | undefined => (error != null && typeof error === 'object' && 'status' in error ? errorFieldValue(error.status) : undefined);
