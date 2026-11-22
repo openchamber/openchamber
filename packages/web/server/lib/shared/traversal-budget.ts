@@ -33,14 +33,16 @@
 // The budget knows counts and a clock only — no paths, no fs surface,
 // nothing domain-specific (the lib/shared admission rule).
 
-const requirePositiveInt = (name: string, value: unknown): number => {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+const isPositiveInt = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 1;
+
+const requirePositiveInt = <Value>(name: string, value: Value): number => {
+  if (!isPositiveInt(value)) {
     throw new RangeError(`createTraversalBudget: ${name} must be a positive integer, got ${String(value)}`);
   }
   return value;
 };
 
-const optionalPositiveInt = (name: string, value: unknown): number | null => (value === undefined ? null : requirePositiveInt(name, value));
+const optionalPositiveInt = <Value>(name: string, value: Value): number | null => (value === undefined ? null : requirePositiveInt(name, value));
 
 /**
  * Create the one budget object a directory walk consults.

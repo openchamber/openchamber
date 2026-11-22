@@ -9,8 +9,7 @@ import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
-import { readSourceControlVaultToken } from '../source-control/vault-token.js';
-import { isVaultReference } from '../environment/vault.js';
+import { createAddFromVault, vaultAccountProblem, withTokenReference } from './vault-accounts.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountEvents, AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderReadContext, ProviderSession } from '../source-control/provider-contract.js';
 import type { AuthCredential, createSourceControlAuthStore } from '../source-control/auth-storage.js';
@@ -106,6 +105,7 @@ type PatchRead = ReadInput & { number: number; sourceRepo?: { owner: string; rep
 type Failure = { status?: number; kind?: string; message?: unknown };
 
 const hasFailureFields = (value: unknown): value is Failure => value != null;
+const isInvalidTokenFailure = (error: unknown) => hasFailureFields(error) && error.kind === 'invalid-token';
 const isCreate = (step: ResolveInput): step is Extract<ResolveInput, { kind: 'change-request-create' }> => step.kind === 'change-request-create';
 const includes = <T extends SourceControlJson>(items: readonly T[], value: SourceControlJson | undefined): value is T => {
   const candidates: readonly (SourceControlJson | undefined)[] = items;
@@ -114,24 +114,20 @@ const includes = <T extends SourceControlJson>(items: readonly T[], value: Sourc
 const validNames = (value: SourceControlJson | undefined, limit: number): value is string[] =>
   !(!Array.isArray(value) || value.length > limit || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256));
 
-const accountView = (origin: string, account: AuthCredential, current: boolean, accounts: AuthCredential[]) => {
-  const view = {
-    id: account.id,
-    credentialId: account.id,
-    credentialRevision: account.credentialRevision,
-    providerUserId: account.providerUserId,
-    providerUserStatus: accounts.some((candidate) => (
-      candidate.providerUserId === account.providerUserId && candidate.status === 'valid'
-    )) ? 'available' : 'unavailable',
-    user: { ...account.user, provider: 'gitlab', instance: origin },
-    scope: account.scope,
-    current,
-    source: account.source,
-    status: account.status === 'invalid' ? 'invalid' : 'valid',
-  };
-  // Where a vault account's token is kept (op://…); never the token.
-  return account.tokenReference ? { ...view, tokenReference: account.tokenReference } : view;
-};
+const accountView = (origin: string, account: AuthCredential, current: boolean, accounts: AuthCredential[]) => withTokenReference({
+  id: account.id,
+  credentialId: account.id,
+  credentialRevision: account.credentialRevision,
+  providerUserId: account.providerUserId,
+  providerUserStatus: accounts.some((candidate) => (
+    candidate.providerUserId === account.providerUserId && candidate.status === 'valid'
+  )) ? 'available' : 'unavailable',
+  user: { ...account.user, provider: 'gitlab', instance: origin },
+  scope: account.scope,
+  current,
+  source: account.source,
+  status: account.status === 'invalid' ? 'invalid' : 'valid',
+}, account);
 
 const cliAccountView = (origin: string, user: GitLabUser, current: boolean) => ({
   id: `${origin}#cli:${user.id}`,
@@ -145,7 +141,7 @@ const cliAccountView = (origin: string, user: GitLabUser, current: boolean) => (
   status: 'valid',
 });
 
-const responseError = (status: number, body: { error: string; status?: string; code?: string; reason?: string }) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
+const responseError = (status: number, body: { error: string; status?: string }) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
 const invalidMutationContext = (message: string) => Object.assign(new Error(message), {
   code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT',
@@ -511,7 +507,6 @@ type StatusAccount = ReturnType<typeof accountView> | ReturnType<typeof cliAccou
 type AccountStatus = {
   provider: string; instance: string; status: string; connected: boolean;
   accounts: StatusAccount[]; cli?: StatusCli; user?: PresentedUser; scope?: string; reason?: string; message?: unknown;
-  /** Why a vault-backed token could not be read (a fork vault account), shown instead of marking it invalid. */
   tokenReadError?: string;
 };
 type CliState = { status: 'disabled' | 'gone' | 'unknown' } | { status: 'usable'; token: string; user: GitLabUser };
@@ -627,14 +622,8 @@ export function createProvider(options: GitLabProviderOptions) {
       };
     }
 
-    // A vault account is never marked invalid: an unreadable or refused token is most likely
-    // rotated or mistyped in the vault, and the next read picks the fix up. Its status says why.
-    if (active.tokenReference && active.tokenReadError) {
-      return {
-        provider: 'gitlab', instance: origin, status: 'provider-error', connected: false, tokenReadError: active.tokenReadError,
-        message: `The token at ${active.tokenReference} could not be read (${active.tokenReadError})`, accounts,
-      };
-    }
+    const unreadVault = vaultAccountProblem(active);
+    if (unreadVault) return { provider: 'gitlab', instance: origin, status: 'provider-error', connected: false, ...unreadVault, accounts };
     try {
       const user = await verify(origin, active.token);
       const cliStatus: StatusCli = { available: Boolean(cli), disabled: instance.cliDisabled, active: false };
@@ -647,9 +636,8 @@ export function createProvider(options: GitLabProviderOptions) {
       return status;
     } catch (error) {
       const kind = classifyGitLabFailure(error);
-      if (active.tokenReference && hasFailureFields(error) && error.kind === 'invalid-token') {
-        return { provider: 'gitlab', instance: origin, status: 'provider-error', connected: false, message: `GitLab refused the token at ${active.tokenReference}; update it there`, accounts };
-      }
+      const refusedVault = vaultAccountProblem(active, isInvalidTokenFailure(error));
+      if (refusedVault) return { provider: 'gitlab', instance: origin, status: 'provider-error', connected: false, ...refusedVault, accounts };
       if (hasFailureFields(error) && error.kind === 'invalid-token') {
         const renewedNow = await invalidateAccount({ instance: origin, accountId: active.id, renew: !renewed });
         return buildStatus(origin, renewedNow);
@@ -817,28 +805,7 @@ export function createProvider(options: GitLabProviderOptions) {
         await announceConnectedAccount(origin, credential, user);
         return { connected: true, user };
       },
-      /**
-       * Adds an account whose token stays in a vault: `reference` (op://…) is read,
-       * the token is checked with the instance, and only the reference is stored.
-       */
-      addFromVault: async ({ instance: origin, reference }: Instance & { reference: string }) => {
-        const trimmed = isString(reference) ? reference.trim() : '';
-        if (!isVaultReference(trimmed)) {
-          throw responseError(400, { error: 'reference must be a 1Password reference such as op://Vault/item/field', code: 'INVALID_REFERENCE' });
-        }
-        const read = await readSourceControlVaultToken(trimmed);
-        if (!read.ok) throw responseError(400, { error: `The token could not be read from 1Password (${read.reason})`, code: 'VAULT_READ_FAILED', reason: read.reason });
-        let user;
-        try {
-          user = await verify(origin, read.value);
-        } catch (error) {
-          if (hasFailureFields(error) && error.kind === 'invalid-token') throw responseError(401, { error: 'GitLab refused the token from 1Password', code: 'INVALID_TOKEN' });
-          throw error;
-        }
-        const credential = await store.setAccount(origin, { tokenReference: trimmed, user, source: 'pat' });
-        await announceConnectedAccount(origin, credential, user);
-        return { connected: true, user };
-      },
+      addFromVault: createAddFromVault({ verify, setAccount: store.setAccount, announce: announceConnectedAccount, isInvalidToken: isInvalidTokenFailure }),
       activate: async ({ instance: origin, accountId }: Account) => {
         if (accountId.startsWith(`${origin}#cli:`)) {
           const usable = await getUsableGlab(origin);

@@ -145,7 +145,10 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
   };
 
   // `eventId` is the space's OpenCode id when the event came from its stream; the announcements have none.
-  const inject = (spaceId: string, payload: JsonValue, directory: string, eventId?: string) => hub.injectEvent({ payload, directory, spaceId, ...(eventId ? { eventId } : {}) });
+  const inject = (spaceId: string, payload: JsonValue, directory: string, eventId?: string) => {
+    const event = { payload, directory, spaceId };
+    hub.injectEvent(eventId ? { ...event, eventId } : event);
+  };
 
   const announce = (spaceId: string, status: 'connected' | 'disconnected', wasReady: boolean) => {
     inject(spaceId, { type: 'openchamber:space-stream', properties: { spaceId, status, wasReady, timestamp: now() } }, 'global');

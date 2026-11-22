@@ -29,6 +29,6 @@ export const withVaultToken = async <Credential extends { tokenReference?: strin
 };
 
 /** A stored vault account: a PAT that keeps a well-formed reference and no token. */
-export const isStoredVaultAccount = (value: { [key: string]: unknown }, validText: (text: unknown) => text is string) => (
+export const isStoredVaultAccount = (value: { readonly source?: unknown; readonly tokenReference?: unknown }, validText: (text: unknown) => text is string) => (
   !Object.hasOwn(value, 'token') && value.source === 'pat' && validText(value.tokenReference) && isVaultReference(value.tokenReference)
 );

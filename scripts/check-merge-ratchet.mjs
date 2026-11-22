@@ -6,15 +6,22 @@
 // This check counts only what the merge itself adds:
 //
 //   rules: for each anti-slop rule, the total over every file either side
-//   changed since the merge base must satisfy merged <= fork + upstream - base.
-//   Totals over the whole set, not per file, so upstream's moves and splits are
-//   not new.
+//   changed since the merge base must not exceed the sum of each file's
+//   fork + upstream - base, clamped at 0. Totals over the whole set, not per
+//   file, so upstream's moves and splits are not new.
 //
 //   length: a source file over the size limit may not exceed its larger parent
 //   plus the lines the fork itself added to that path since the base. A file
 //   over that carries merge glue or fork code moved into an upstream file.
+//   Where upstream moved a file, or turned a server `.js` file into `.ts`, the
+//   fork's side is read at the path the fork still uses.
 //
-// Usage: node scripts/check-merge-ratchet.mjs --fork <ref> --upstream <ref>
+// Each side is linted with a copy of the config at that side's own root. The
+// config's path overrides (the server's comments, its parser allowances) match
+// paths relative to the config file, so linting a side from a temporary
+// directory with the repository's config would silently skip every override.
+//
+// Usage: node scripts/check-merge-ratchet.mjs --fork <ref> --upstream <ref> [--moved <new>=<old>]...
 // The merged side is the working tree. The base is `git merge-base fork upstream`.
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -119,13 +126,29 @@ const ruleTotals = (counts) => {
   return totals;
 };
 
-/** Rules whose merged total exceeds fork + upstream - base. */
+/**
+ * Per rule, the totals of each side and the allowance: each file's
+ * fork + upstream - base, clamped at 0, summed. Unclamped, a path both sides
+ * removed or moved (base had findings, neither side has them there) would
+ * take its base findings off the allowance for every other file.
+ */
 export const findMergeRatchetViolations = ({ base, fork, upstream, merged }) => {
-  const rules = new Set([...base.keys(), ...fork.keys(), ...upstream.keys(), ...merged.keys()]);
-  return [...rules].sort().map((rule) => {
-    const counts = { base: base.get(rule) ?? 0, fork: fork.get(rule) ?? 0, upstream: upstream.get(rule) ?? 0, merged: merged.get(rule) ?? 0 };
-    return { rule, ...counts, allowed: counts.fork + counts.upstream - counts.base };
-  });
+  const [baseTotals, forkTotals, upstreamTotals, mergedTotals] = [base, fork, upstream, merged].map(ruleTotals);
+  const allowed = new Map();
+  for (const key of new Set([...base.keys(), ...fork.keys(), ...upstream.keys()])) {
+    const rule = key.split('\0')[1];
+    const share = Math.max(0, (fork.get(key) ?? 0) + (upstream.get(key) ?? 0) - (base.get(key) ?? 0));
+    allowed.set(rule, (allowed.get(rule) ?? 0) + share);
+  }
+  const rules = new Set([...baseTotals.keys(), ...forkTotals.keys(), ...upstreamTotals.keys(), ...mergedTotals.keys()]);
+  return [...rules].sort().map((rule) => ({
+    rule,
+    base: baseTotals.get(rule) ?? 0,
+    fork: forkTotals.get(rule) ?? 0,
+    upstream: upstreamTotals.get(rule) ?? 0,
+    allowed: allowed.get(rule) ?? 0,
+    merged: mergedTotals.get(rule) ?? 0,
+  }));
 };
 
 /** Lines each path gained on the fork since the base, from `git diff --numstat`. */
@@ -145,8 +168,36 @@ export const findMergeLengthViolations = (sizes) => sizes.filter(({ file, merged
 ));
 
 const SERVER_SOURCE = /^packages\/web\/(server|bin)\/.*\.ts$/;
-/** The fork's server and CLI are JavaScript where upstream's are TypeScript; a `.ts` file's fork side is its `.js` twin. */
-const javaScriptPathOf = (file) => (SERVER_SOURCE.test(file) ? file.replace(/\.ts$/, '.js') : file);
+
+/** Where upstream moved each file from since the base, keyed by its new path. */
+const upstreamRenames = (baseRef, upstreamRef) => {
+  const renames = new Map();
+  for (const line of git(['diff', '--find-renames', '--name-status', baseRef, upstreamRef]).split('\n')) {
+    const [status, from, to] = line.split('\t');
+    if (status?.startsWith('R') && from && to) renames.set(to, from);
+  }
+  return renames;
+};
+
+/**
+ * The path a merged file's fork side lives at: a `--moved new=old` given on
+ * the command line, where git sees upstream moved it from (the fork kept the
+ * old path), or the `.js` twin of a server or CLI `.ts` file; else the same
+ * path. Upstream's server moves often rewrite a file past what git's rename
+ * detection matches; those are named with `--moved`, and the output says
+ * which fork path each over-limit file was measured against.
+ */
+const forkPathResolver = ({ moved, renames, forkHas }) => (file) => {
+  const direct = moved.get(file) ?? renames.get(file);
+  if (direct) return direct;
+  if (forkHas(file)) return file;
+  const twin = SERVER_SOURCE.test(file) ? file.replace(/\.ts$/, '.js') : null;
+  return twin && forkHas(twin) ? twin : file;
+};
+
+const readMoves = (argv) => new Map(argv.flatMap((arg, index) => (
+  argv[index - 1] === '--moved' && arg.includes('=') ? [arg.split('=', 2)] : []
+)));
 
 const main = () => {
   const argv = process.argv.slice(2);
@@ -158,9 +209,15 @@ const main = () => {
   const files = [...new Set([
     ...changedPaths(baseRef, forkRef), ...changedPaths(baseRef, upstreamRef), ...changedPaths(baseRef), ...untrackedPaths(),
   ])].filter((file) => !file.startsWith('tools/oxlint/')).sort();
-  const forkJavaScript = readTree(forkRef, files.filter((file) => SERVER_SOURCE.test(file)).map(javaScriptPathOf));
-  const forkJavaScriptLines = (file) => {
-    const content = forkJavaScript.get(javaScriptPathOf(file));
+  const forkFiles = new Set(git(['ls-tree', '-r', '--name-only', forkRef, 'packages']).split('\n'));
+  const forkPathOf = forkPathResolver({
+    moved: readMoves(argv),
+    renames: upstreamRenames(baseRef, upstreamRef),
+    forkHas: (file) => forkFiles.has(file),
+  });
+  const forkElsewhere = readTree(forkRef, [...new Set(files.map(forkPathOf))]);
+  const forkLinesElsewhere = (file) => {
+    const content = forkElsewhere.get(forkPathOf(file));
     return content === undefined ? null : countLines(content);
   };
   console.log(`${files.length} lintable file(s) changed on either side.`);
@@ -174,10 +231,8 @@ const main = () => {
   };
 
   const counts = Object.fromEntries(Object.entries(sides).map(([side, contents]) => [side, fileRuleCounts(contents)]));
-  const rows = findMergeRatchetViolations({
-    base: ruleTotals(counts.base), fork: ruleTotals(counts.fork), upstream: ruleTotals(counts.upstream), merged: ruleTotals(counts.merged),
-  });
-  console.log('\n▶ rules (merged <= fork + upstream - base)');
+  const rows = findMergeRatchetViolations(counts);
+  console.log('\n▶ rules (merged <= sum of each file\'s max(0, fork + upstream - base))');
   console.log('rule\tbase\tfork\tupstream\tallowed\tmerged');
   for (const row of rows) console.log(`${row.rule}\t${row.base}\t${row.fork}\t${row.upstream}\t${row.allowed}\t${row.merged}${row.merged > row.allowed ? '\tOVER' : ''}`);
   const ruleViolations = rows.filter((row) => row.merged > row.allowed);
@@ -186,12 +241,13 @@ const main = () => {
     // A file's findings can come from either parent under another path, so
     // this lists where to look, not what is new.
     for (const { rule } of ruleViolations) {
-      console.log(`\n  ${rule}: files with more findings than either parent`);
+      console.log(`\n  ${rule}: files over their own share`);
       for (const [key, merged] of counts.merged) {
         const [file, keyRule] = key.split('\0');
         if (keyRule !== rule) continue;
-        const parent = Math.max(counts.fork.get(key) ?? 0, counts.upstream.get(key) ?? 0);
-        if (merged > parent) console.log(`    ${file}: ${merged} (fork ${counts.fork.get(key) ?? 0}, upstream ${counts.upstream.get(key) ?? 0})`);
+        const [forkCount, upstreamCount, baseCount] = [counts.fork, counts.upstream, counts.base].map((side) => side.get(key) ?? 0);
+        const share = Math.max(0, forkCount + upstreamCount - baseCount);
+        if (merged > share) console.log(`    ${file}: ${merged}, its share ${share} (base ${baseCount}, fork ${forkCount}, upstream ${upstreamCount})`);
       }
     }
   }
@@ -200,13 +256,14 @@ const main = () => {
   const lengthViolations = findMergeLengthViolations([...sides.merged].map(([file, content]) => ({
     file,
     merged: countLines(content),
-    fork: sides.fork.has(file) ? countLines(sides.fork.get(file)) : forkJavaScriptLines(file),
+    fork: sides.fork.has(file) ? countLines(sides.fork.get(file)) : forkLinesElsewhere(file),
     upstream: sides.upstream.has(file) ? countLines(sides.upstream.get(file)) : null,
-    forkAdded: added.get(file) ?? added.get(javaScriptPathOf(file)) ?? 0,
+    forkAdded: added.get(file) ?? added.get(forkPathOf(file)) ?? 0,
   })));
   console.log(`\n▶ length (files over ${SIZE_LIMIT} lines: merged <= max(fork, upstream) + fork's own additions)`);
   for (const { file, merged, fork, upstream, forkAdded } of lengthViolations) {
-    console.log(`  ${file}: ${merged} lines; fork ${fork ?? '-'}, upstream ${upstream ?? '-'}, fork added ${forkAdded}`);
+    const lineage = forkPathOf(file) === file ? '' : ` (fork side ${forkPathOf(file)})`;
+    console.log(`  ${file}: ${merged} lines; fork ${fork ?? '-'}, upstream ${upstream ?? '-'}, fork added ${forkAdded}${lineage}`);
   }
   if (lengthViolations.length === 0) console.log('  No file over its allowance.');
 

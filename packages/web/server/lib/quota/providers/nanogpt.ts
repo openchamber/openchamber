@@ -1,3 +1,4 @@
+import { asAuthFields } from './fields.js';
 import { readQuotaJson } from '../utils/response-body.js';
 import { z } from 'zod';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
@@ -52,10 +53,8 @@ export const providerId = 'nano-gpt';
 export const providerName = 'NanoGPT';
 export const aliases = ['nano-gpt', 'nanogpt', 'nano_gpt'];
 
-const asKeyFields = (value: unknown): { key?: unknown; token?: unknown } | null => (value !== null && typeof value === 'object' ? value : null);
-
 const getApiKey = (auth: LegacyAuthFile) => {
-  const entry = asKeyFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 

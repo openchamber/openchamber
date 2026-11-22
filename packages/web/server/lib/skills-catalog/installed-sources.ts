@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
 import { readBoundedFileSync } from '../shared/bounded-file-read.js';
+import { z } from 'zod';
+import type { JsonValue } from '../shared/json-values.js';
 
 const VERSION = 1;
 const FILE_NAME = 'skills-installed-sources.json';
@@ -39,11 +41,14 @@ const installedSourcesPath = () => path.join(
 
 const entryKey = (entry: InstalledSourceEntry) => [entry.sourceId, entry.skillDir, entry.scope].join(' ');
 
-const entriesByName = (payload: unknown) => {
-  if (!payload || typeof payload !== 'object' || !('version' in payload) || payload.version !== VERSION
-    || !('entries' in payload) || !Array.isArray(payload.entries)) return null;
+// The provenance file: this format's version and a list; entries are judged one by one below.
+const installedSourcesFileSchema = z.object({ version: z.literal(VERSION), entries: z.array(z.unknown()) });
+
+const entriesByName = (payload: JsonValue) => {
+  const file = installedSourcesFileSchema.safeParse(payload);
+  if (!file.success) return null;
   const byName = new Map<string, InstalledSourceEntry[]>();
-  for (const entry of payload.entries) {
+  for (const entry of file.data.entries) {
     if (!isInstalledSourceEntry(entry)) continue;
     const skillName = entry.skillName.trim();
     const list = byName.get(skillName) ?? [];
@@ -126,7 +131,7 @@ const readInstalledSourcesForUpdate = () => {
  * the same name adds its own entry. Refuses (throws MALFORMED) rather than
  * overwrite a malformed provenance file.
  */
-export const appendInstalledSources = (entries: unknown) => {
+export const appendInstalledSources = <Entries>(entries: Entries) => {
   const valid = (Array.isArray(entries) ? entries : []).filter(isInstalledSourceEntry);
   if (valid.length === 0) return;
 

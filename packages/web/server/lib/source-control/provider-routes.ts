@@ -3,7 +3,8 @@ import express from 'express';
 import { pipeline } from 'node:stream/promises';
 
 import { hasProperties, isString } from '../shared/guards.js';
-import { isVaultReference } from '../environment/vault.js';
+import { addFromVaultReference, vaultAccountRoute } from './vault-account-route.js';
+import { requestNonNegativeInteger } from './request-integers.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { mutationReceipt } from './mutation-executor.js';
 import { readBranchTip } from './change-id.js';
@@ -135,20 +136,6 @@ function requestIssueNumber(value: QueryValue | undefined) {
   const text = requestText(value);
   if (!/^[1-9]\d*$/.test(text)) return null;
   const number = Number(text);
-  return Number.isSafeInteger(number) ? number : null;
-}
-
-// Pages and numbers are judged as written: parseInt would read "10junk" as 10
-// and "2.9" as 2.
-const requestNumber = requestIssueNumber;
-
-// A binding revision is an exact count, so its query spelling is judged as
-// written: no trim, sign, fraction, exponent, radix prefix or leading zeros.
-// A loose Number(...) would reinterpret "1e3" as 1000 and pass the binding
-// authority check whenever that happened to be the current revision.
-function requestNonNegativeInteger(value: QueryValue | undefined) {
-  if (!isString(value) || !/^(0|[1-9]\d*)$/.test(value)) return null;
-  const number = Number(value);
   return Number.isSafeInteger(number) ? number : null;
 }
 
@@ -636,10 +623,8 @@ export function registerProviderRoutes(app: Router, {
         const requestedToken = bodyField(req.body, 'token');
         const token = isString(requestedToken) ? requestedToken.trim() : '';
         if (!token) return res.status(400).json({ error: 'token is required' });
-        // A vault reference (op://…) in place of the token adds an account that keeps only the reference.
-        if (isVaultReference(token) && impl.auth.addFromVault instanceof Function) {
-          return res.json(await impl.auth.addFromVault({ instance, reference: token }));
-        }
+        const fromVault = await addFromVaultReference(impl, instance, token);
+        if (fromVault) return res.json(fromVault);
         if (!takesUsername) return res.json(await impl.auth.connectToken({ instance, token }));
         const requestedUsername = bodyField(req.body, 'username');
         const username = isString(requestedUsername) ? requestedUsername.trim() : '';
@@ -683,24 +668,11 @@ export function registerProviderRoutes(app: Router, {
       }
     });
 
-    // Fork: add an account whose token stays in a vault; `reference` is an op://vault/item/field reference.
-    target.post(authPaths('/auth/vault'), async (req, res) => {
-      let impl;
-      try {
-        impl = await loadImplementation(id);
-        if (!(impl.auth.addFromVault instanceof Function)) return unsupportedCapability(res);
-        let instance;
-        try { instance = requestInstance(req); }
-        catch (error) { return res.status(400).json({ error: routeError(error)?.message }); }
-        const reference = bodyField(req.body, 'reference');
-        return res.json(await impl.auth.addFromVault({ instance, reference: isString(reference) ? reference : '' }));
-      } catch (error) {
-        const lockResponse = sendAuthStorageError(res, error);
-        if (lockResponse) return lockResponse;
-        const kind = impl ? impl.classifyFailure(error) : 'provider-error';
-        return res.status(errorStatus(kind)).json({ error: routeError(error)?.message || `Failed to add the ${label} account` });
-      }
-    });
+    target.post(authPaths('/auth/vault'), vaultAccountRoute({
+      load: () => loadImplementation(id), requestInstance,
+      fail: (res, error, impl) => sendAuthStorageError(res, error)
+        ?? res.status(errorStatus(impl ? impl.classifyFailure(error) : 'provider-error')).json({ error: routeError(error)?.message || `Failed to add the ${label} account` }),
+    }));
 
     target.post(authPaths('/auth/activate'), async (req, res) => {
       try {
@@ -1026,7 +998,7 @@ export function registerProviderRoutes(app: Router, {
       return res.json(await impl.resources.listChangeRequests({
         session,
         directory,
-        page: requestNumber(req.query?.page) ?? 1,
+        page: requestIssueNumber(req.query?.page) ?? 1,
         query: requestText(req.query?.query) || undefined,
         ...readListFilter(req.query),
         context: trustedContext, remote: trustedContext.primaryRemote,
@@ -1034,7 +1006,7 @@ export function registerProviderRoutes(app: Router, {
     });
 
     boundRead('changeRequests', '/pulls/context', async ({ req, res, impl, instance, directory, trustedContext }) => {
-      const number = requestNumber(req.query?.number);
+      const number = requestIssueNumber(req.query?.number);
       if (!number) return res.status(400).json({ error: 'number is required' });
       const revision = readRevision(descriptor, req.query?.revision);
       const session = await sessionFor(impl, instance, trustedContext.accountId);
@@ -1050,7 +1022,7 @@ export function registerProviderRoutes(app: Router, {
       }, revision)));
     }, {
       validate: (req) => {
-        if (!requestNumber(req.query?.number)) return 'number is required';
+        if (!requestIssueNumber(req.query?.number)) return 'number is required';
         if (projectSelectorProblem(req)) return 'complete project selector is required';
         const problem = revisionProblem(descriptor, req.query?.revision);
         return problem ? { error: problem, code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT' } : null;
@@ -1062,7 +1034,7 @@ export function registerProviderRoutes(app: Router, {
       return res.json(await requireResource(impl, 'listIssues').call(impl.resources, {
         session,
         directory,
-        page: requestNumber(req.query?.page) ?? 1,
+        page: requestIssueNumber(req.query?.page) ?? 1,
         query: requestText(req.query?.query) || undefined,
         ...readListFilter(req.query),
         context: trustedContext, remote: trustedContext.primaryRemote,

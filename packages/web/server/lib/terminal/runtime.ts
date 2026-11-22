@@ -712,7 +712,7 @@ export function createTerminalRuntime({
       // under every runtime (Bun delivers the oversized message whole), so
       // refuse it here — before it is parsed — with the same 1009 the ws
       // layer would have used.
-      const frameBytes = typeof raw === 'string'
+      const frameBytes = isText(raw)
         ? Buffer.byteLength(raw)
         : Array.isArray(raw) ? raw.reduce((total, part) => total + part.byteLength, 0) : raw.byteLength;
       if (frameBytes > TERMINAL_WS_MAX_PAYLOAD_BYTES) { try { socket.close(1009, 'Terminal frame too large'); } catch { /* already closing */ } return; }

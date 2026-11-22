@@ -1,5 +1,5 @@
 
-import { asNonEmptyString, isRecord } from '../shared/guards.js';
+import { normalizeQueueBinding, type SessionQueueBinding, type SessionQueueBindingSource } from './session-queue-binding.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
 import { isString } from '../shared/object-guards.js';
 import type { JsonValue } from '../shared/json-values.js';
@@ -146,31 +146,6 @@ const extractSessionStatusUpdate = (input: JsonValue | undefined) => {
 };
 
 const readRequestId = <Value>(value: Value) => (isString(value) && value.trim() ? value.trim() : '');
-
-// Allowlist projection for a session's queue binding (observability
-// contract v1, #1473): only the four binding components can reach the
-// snapshot, each an explicit null when the source cannot verify it, and
-// a non-object source value means no known binding at all.
-const normalizeQueueBinding = (binding: JsonValue | undefined): SessionQueueBinding | null => {
-  if (!isRecord(binding)) return null;
-  const numberOrNull = <Value>(value: Value) => (isNumber(value) && Number.isFinite(value) ? value : null);
-  return {
-    taskId: numberOrNull(binding.taskId),
-    issueNumber: numberOrNull(binding.issueNumber),
-    queue: asNonEmptyString(binding.queue),
-    lane: asNonEmptyString(binding.lane),
-  };
-};
-
-/** The launch side's source of a session's queue binding: the task ledger row bound to the session id. */
-export type SessionQueueBindingSource = (sessionId: string) => JsonValue | undefined;
-
-interface SessionQueueBinding {
-  taskId: number | null;
-  issueNumber: number | null;
-  queue: string | null;
-  lane: string | null;
-}
 
 interface SessionActivityEntry {
   type: ActivityPhase;

@@ -339,7 +339,7 @@ async function serveCommand(options: ServeOptions) {
       process.on('SIGTERM', () => { void shutdownForegroundServer('SIGTERM'); });
       process.on('SIGQUIT', () => { void shutdownForegroundServer('SIGQUIT'); });
       process.on('SIGHUP', () => {
-        controller.reload().catch((error: unknown) => console.error('Reload failed:', error));
+        controller.reload().catch(<Failure>(error: Failure) => console.error('Reload failed:', error));
       });
 
       await new Promise(() => {});

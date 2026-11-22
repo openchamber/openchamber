@@ -1,3 +1,4 @@
+import { asAuthFields } from './fields.js';
 import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import type { LegacyAuthFile } from '../../opencode/auth.js';
@@ -22,10 +23,8 @@ export const aliases = ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'];
 const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
 const WAFER_WINDOW_SECONDS = 5 * 3600;
 
-const asKeyFields = (value: unknown): { key?: unknown; token?: unknown } | null => (value !== null && typeof value === 'object' ? value : null);
-
 const getApiKey = (auth: LegacyAuthFile) => {
-  const entry = asKeyFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
+  const entry = asAuthFields(normalizeAuthEntry(getAuthEntry(auth, aliases)));
   return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 

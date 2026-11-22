@@ -278,7 +278,7 @@ export const createUiPasskeys = ({
       // refusal (too large, not regular, unreadable) means not empty:
       // the fresh store must not be persisted over such a file.
       const raw = readDurableRawFileSync(storeFile, { fs: storeFs });
-      return typeof raw === 'string' && raw.trim() === '';
+      return isString(raw) && raw.trim() === '';
     } catch {
       return false;
     }
@@ -292,7 +292,7 @@ export const createUiPasskeys = ({
       store = {
         version: DEFAULT_STORE_VERSION,
         userID: decodeUserId(parsed?.userID) ? parsed.userID : store.userID,
-        passwordBinding: typeof parsed?.passwordBinding === 'string' ? parsed.passwordBinding : '',
+        passwordBinding: isString(parsed?.passwordBinding) ? parsed.passwordBinding : '',
         passkeys: Array.isArray(parsed?.passkeys) ? parsed.passkeys.map(parseStoredPasskey).filter(Boolean) : [],
       };
     }

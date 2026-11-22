@@ -86,7 +86,7 @@ export const createManagedTunnelConfigRuntime = <PresetInput>(deps: ManagedTunne
 
   const emptyConfig = (): ManagedRemoteTunnelConfig => ({ version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] });
 
-  const sanitizeManagedRemoteTunnelConfigEntries = (value: unknown) => {
+  const sanitizeManagedRemoteTunnelConfigEntries = <Entries>(value: Entries) => {
     if (!Array.isArray(value)) return [];
     const result: ManagedRemoteTunnelEntry[] = [];
     const seenIds = new Set();
@@ -130,7 +130,7 @@ export const createManagedTunnelConfigRuntime = <PresetInput>(deps: ManagedTunne
   // preserved as corrupt.
   const storeOptions = { fs: fsPromises, validateValue: isJsonObject };
 
-  const configFromValue = (value: Record<string, unknown>): ManagedRemoteTunnelConfig => ({
+  const configFromValue = (value: { tunnels?: unknown }): ManagedRemoteTunnelConfig => ({
     version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
     tunnels: sanitizeManagedRemoteTunnelConfigEntries(value.tunnels),
   });

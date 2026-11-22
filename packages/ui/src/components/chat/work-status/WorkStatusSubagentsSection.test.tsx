@@ -325,7 +325,7 @@ describe('subagent status rows', () => {
     expect(rowNamed('Grandchild').parentElement?.textContent).toContain('$0.5');
     await publish({
       // SAFETY: fixtures carry only the fields the section reads (their presence per session).
-      permission: { grandchild: [{ id: 'permission', sessionID: 'grandchild', action: 'bash', resources: ['*'], metadata: {} } as unknown as PermissionRequest] },
+      permission: { grandchild: [{ id: 'permission', sessionID: 'grandchild', action: 'bash', resources: ['*'], metadata: {} } as PermissionRequest] },
     });
     expect(rowNamed('Child').parentElement?.textContent).toContain('needs permission');
     expect(rowNamed('Grandchild').parentElement?.textContent).toContain('needs permission');

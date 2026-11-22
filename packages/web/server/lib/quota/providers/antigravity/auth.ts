@@ -1,3 +1,4 @@
+import { isObjectLike } from '../../../shared/object-guards.js';
 import {
   ANTIGRAVITY_ACCOUNTS_PATHS,
   readJsonFile,
@@ -72,7 +73,7 @@ interface StoreOAuthFields {
 const hasStoreOAuthFields = (value: unknown): value is StoreOAuthFields => value !== null && typeof value === 'object';
 
 export const resolveAntigravityStoreAuth = (auth: LegacyAuthFile | null | undefined) => {
-  if (!auth || typeof auth !== 'object') {
+  if (!auth || !isObjectLike(auth)) {
     return null;
   }
 

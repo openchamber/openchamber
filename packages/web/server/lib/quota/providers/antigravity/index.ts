@@ -31,7 +31,7 @@ const resolveAuthCandidates = async () => {
     if (fileAuth.refreshToken) candidates.push({ ...fileAuth, refreshToken: fileAuth.refreshToken, origin: 'file' });
   }
   let storeReadFailed = false;
-  let storeReadError: unknown = null;
+  let storeReadError = null;
   const pushStoreAuth = (auth: LegacyAuthFile) => {
     const storeAuth = resolveAntigravityStoreAuth(auth);
     if (storeAuth && !candidates.some((candidate) => candidate.refreshToken === storeAuth.refreshToken)) {

@@ -24,6 +24,7 @@ import {
 } from './cli-process.js';
 import { SELF_HANDOFF_SIGNAL, isSelfHandoffEnabled, resolveHandoffTimeoutMs } from '../../server/lib/opencode/self-handoff.js';
 import { getDataDir } from './cli-paths.js';
+import { z } from 'zod';
 import { asNonEmptyString, isString } from '../../server/lib/shared/guards.js';
 import { writeHandoffRequest } from '../../server/lib/opencode/handoff-request.js';
 import {
@@ -447,16 +448,17 @@ type HandoffResult =
 type RotateOptions = RestartOptions;
 type RotateResult = { fromPort: number; toPort: number | undefined; launchMode: 'foreground' | 'daemon'; ok: true };
 
+// The package.json beside a handoff entry names the OpenChamber web package and its version.
+const openChamberPackageSchema = z.object({ name: z.literal('@openchamber/web'), version: z.string() });
+
 const readHandoffTarget = (entryOverride: string | undefined) => {
   const entryArg = entryOverride || process.argv[1];
   if (!asNonEmptyString(entryArg)) throw new Error('Unable to resolve this OpenChamber CLI entry.');
   const entry = fs.realpathSync(path.resolve(entryArg));
   const packagePath = path.resolve(path.dirname(entry), '..', 'package.json');
-  const pkg: unknown = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-  const name = pkg && typeof pkg === 'object' && 'name' in pkg ? pkg.name : undefined;
-  const version = pkg && typeof pkg === 'object' && 'version' in pkg ? pkg.version : undefined;
-  if (name !== '@openchamber/web' || !isString(version)) throw new Error('The selected entry is not an OpenChamber installation.');
-  return { entry, version };
+  const pkg = openChamberPackageSchema.safeParse(JSON.parse(fs.readFileSync(packagePath, 'utf8')));
+  if (!pkg.success) throw new Error('The selected entry is not an OpenChamber installation.');
+  return { entry, version: pkg.data.version };
 };
 
 async function handOffInstance(instance: LifecycleInstance, options: HandoffOptions = {}): Promise<HandoffResult> {

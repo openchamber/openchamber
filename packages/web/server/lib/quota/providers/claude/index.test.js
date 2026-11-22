@@ -3,13 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const credential = vi.fn();
 const context = vi.fn();
 
-vi.mock('./auth.js', () => ({
+import { configureClaudeCredentialDiscovery, fetchQuota, isConfigured, resetClaudeQuotaCache } from './index.js';
+
+// Credential discovery is injected through the module's discovery seam.
+const discovery = {
   findClaudeCredential: () => credential(),
   loadClaudeCredential: async () => credential(),
   readClaudeCredentialContext: () => context(),
-}));
-
-import { fetchQuota, isConfigured, resetClaudeQuotaCache } from './index.js';
+};
 
 const CREDENTIAL = {
   accessToken: 'access-a',
@@ -49,12 +50,14 @@ const errorResponse = (status, headers = {}) => ({
 
 beforeEach(() => {
   resetClaudeQuotaCache();
+  configureClaudeCredentialDiscovery(discovery);
   credential.mockReturnValue(CREDENTIAL);
   context.mockReturnValue({ configDir: null, error: null });
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  configureClaudeCredentialDiscovery(null);
 });
 
 describe('Claude quota provider', () => {
