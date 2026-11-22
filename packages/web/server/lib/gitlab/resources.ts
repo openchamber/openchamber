@@ -1,7 +1,7 @@
 import { documentDataUrl } from '../source-control/document-versions.js';
 import { createHash } from 'node:crypto';
 import { pairedDiffLine } from '../source-control/review-position.js';
-import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
+import { changeRequestNetworkTarget, changeRequestSourceInNetwork } from '../source-control/repository-network.js';
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { readDiffStats, readReviewerStates } from './context-extras.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
@@ -512,7 +512,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         try {
           const raw = await client.MergeRequests.show(target.project.id, number);
           if (options.requireNetwork
-            && changeRequestNetworkTarget(targets, obj(raw)?.target_project_id, (candidate, id) => candidate.raw.id === id) !== target) {
+            && (changeRequestNetworkTarget(targets, obj(raw)?.target_project_id, (candidate, id) => candidate.raw.id === id) !== target
+              || !changeRequestSourceInNetwork(targets, obj(raw)?.source_project_id, (candidate, id) => candidate.raw.id === id))) {
             throw Object.assign(new Error('GitLab merge request is outside the bound repository network'), { status: 404 });
           }
           return { target, raw };
