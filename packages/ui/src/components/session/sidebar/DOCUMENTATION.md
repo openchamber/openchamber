@@ -509,6 +509,21 @@ submenus (not in VS Code), then Collapse all / Expand all.
   Both views draw the same zone headers, with the leading icon that turns
   into the collapse chevron on hover and the Chats new-chat button; project
   headers are shared too, with the same hover actions and menu.
+- Headerless (`headerlessSidebar`, per surface, off by default; the display
+  menu's Hide section headers, issue #21) draws the same views' section order
+  with no zone, project, worktree, group or folder headers. It is a row-model
+  mode, not a CSS hide, so collapse is ignored, section dragging has no
+  headers, sticky headers are absent, and Collapse all / Expand all are
+  hidden. Each session is listed once, where the order first places it, so a
+  pinned or in-work session stays in its zone instead of repeating under its
+  project. A thin `section-divider` row marks each section boundary. Every
+  row uses a form that names its project: `timeline-by-time` when the List is
+  sorted by time, `mixed-flat` when it is compact, otherwise
+  `timeline-mixed`. The list is flat, so subsessions are not opened under
+  their parent. One whole-list limit replaces the per-container ones: 20 rows
+  plus 20 per Show more (`activity:headerless`), and search still lists every
+  match. Done/Archive navigation follows the rows actually drawn. Desktop
+  first; the phone surface keeps its own persisted choice (see #18).
 - Below Chats, Pinned and In work it renders one project
   header per project followed by that project's non-archived root sessions
   from every worktree and space, in the shared lifecycle order with pinned

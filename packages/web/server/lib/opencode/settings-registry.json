@@ -319,6 +319,10 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sidebarHeaderless": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "sidebarSessionRowDisplay": {
       "scope": "profile",
       "perSurface": true

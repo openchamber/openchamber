@@ -6491,11 +6491,14 @@ app.whenReady().then(async () => {
     try {
       const enabled = await readLinuxAutostartEnabled();
       if (enabled) {
-        await setLinuxAutostartEnabled({
+        const result = await setLinuxAutostartEnabled({
           enabled: true,
           appName: app.getName(),
           backgroundArg: BACKGROUND_START_ARG,
         });
+        if (!result.supported) {
+          log.info('[electron] Linux autostart entry is owned by another application', result);
+        }
       }
     } catch (error) {
       log.warn('[electron] failed to reconcile Linux autostart entry', error);

@@ -468,6 +468,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const rawSidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
   // VS Code keeps the projects view only; the mode switch is hidden there.
   const sidebarViewMode = isVSCode ? 'projects' : rawSidebarViewMode;
+  // Headerless draws the same order with no headers; VS Code keeps its headers.
+  const storedHeaderlessSidebar = useSessionDisplayStore((state) => state.headerlessSidebar);
+  const headerlessSidebar = !isVSCode && storedHeaderlessSidebar;
   // The timeline keeps projects in the user's own order; dragging is its only sort.
   const projectSortOrder = sidebarViewMode === 'timeline' ? 'manual' : storedProjectSortOrder;
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
@@ -684,6 +687,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           isDesktopShellRuntime,
           projectSortOrder,
           sidebarViewMode,
+          headerlessSidebar,
           emptyState,
           searchEmptyState,
           isSessionsLoading,
