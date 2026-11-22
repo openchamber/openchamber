@@ -46,7 +46,7 @@ const createRuntime = (overrides = {}) => {
   const gracefulShutdown = vi.fn(async () => {});
   const log = { log: vi.fn(), warn: vi.fn() };
   const runtime = createSelfHandoffRuntime({
-    process: { pid: 1001, execPath: '/usr/bin/node', execArgv: [] },
+    process: { pid: 1001, execPath: process.execPath, execArgv: [] },
     getServer: () => fakeServer(),
     spawn: vi.fn(),
     gracefulShutdown,
