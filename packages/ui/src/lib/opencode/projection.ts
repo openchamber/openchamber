@@ -189,6 +189,7 @@ export function projectToolPart(
     tool: tool.name,
     state,
     executed: tool.executed,
+    displayTime: compact({ start: tool.time.created, end: tool.time.completed }),
   })
 }
 
@@ -226,20 +227,26 @@ export function projectAssistantContent(
           type: "text",
           text: item.text,
           time: compact({ start: owner.created, end: owner.completed ?? (followed ? owner.created : undefined) }),
+          displayTime: {},
+          timeSource: "message",
         })
         break
       }
       case "reasoning": {
         const ordinal = reasoningOrdinal
         reasoningOrdinal += 1
-        parts.push({
+        parts.push(compact({
           id: partIds.reasoning(owner.messageID, ordinal),
           sessionID: owner.sessionID,
           messageID: owner.messageID,
           type: "reasoning",
           text: item.text,
-          time: compact({ start: item.time?.created ?? owner.created, end: item.time?.completed }),
-        })
+          time: item.time
+            ? compact({ start: item.time.created, end: item.time.completed })
+            : compact({ start: owner.created, end: owner.completed }),
+          displayTime: compact({ start: item.time?.created, end: item.time?.completed }),
+          timeSource: item.time ? undefined : "message",
+        }))
         break
       }
       case "tool":

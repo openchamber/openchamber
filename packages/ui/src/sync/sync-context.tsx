@@ -104,6 +104,7 @@ import {
   setSessionParentResolver,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
+import { recordSessionTimestampEvents } from "./session-activity-timestamps"
 import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
 import { applyPersistentPtyEvents } from "./persistent-ptys"
@@ -297,6 +298,7 @@ const getDirectoryEventState = (
 const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
   applySessionEventsToGlobalSessions(batch.globalSessionEvents)
   for (const [directory, events] of batch.globalStatusEventsByDirectory) {
+    recordSessionTimestampEvents(events)
     // Before statuses: an idle that follows a command's start in the same
     // flush must see the command.
     applyBackgroundShellEvents(directory, events)
@@ -2110,6 +2112,7 @@ export function handleEvent(
       applyBackgroundShellEvents(directory, [payload])
       applyPersistentPtyEvents(directory, [payload])
       applyGlobalSessionStatusEvent(directory, payload)
+      recordSessionTimestampEvents([payload])
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
     }
   }

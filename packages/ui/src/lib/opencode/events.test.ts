@@ -179,7 +179,7 @@ describe("translateWireEvent", () => {
         type: "message.part.updated",
         properties: {
           sessionID: "ses_1",
-          part: { id: "msg_a:text:1", sessionID: "ses_1", messageID: "msg_a", type: "text", text: "", time: { start: 1000 } },
+          part: { id: "msg_a:text:1", sessionID: "ses_1", messageID: "msg_a", type: "text", text: "", time: { start: 1000 }, displayTime: { start: 1000 } },
         },
       },
     ])
@@ -372,7 +372,7 @@ describe("translateWireEvent", () => {
 describe("routing helpers", () => {
   test("routeWireEvent tags events with the wire location, else global", () => {
     const routed = routeWireEvent({ ...base, type: "session.idle", data: { sessionID: "ses_1" } })
-    expect(routed).toEqual([{ directory: "/repo", event: { type: "session.idle", properties: { sessionID: "ses_1" } } }])
+    expect(routed).toEqual([{ directory: "/repo", event: { type: "session.idle", at: 1000, properties: { sessionID: "ses_1" } } }])
     const global = routeWireEvent({ id: "evt_2", type: "server.connected", data: {} })
     expect(global[0].directory).toBe("global")
   })

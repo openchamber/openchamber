@@ -15,6 +15,7 @@
  */
 
 import React from 'react';
+import { EntryTimes } from './EntryTimes';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -41,9 +42,9 @@ import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 
 /** The shared frame every notice row sits in, so they line up with messages. */
-const NoticeRow: React.FC<{ children: React.ReactNode; spacingClassName?: string }> = ({ children, spacingClassName = 'pb-2' }) => (
+const NoticeRow: React.FC<{ children: React.ReactNode; spacingClassName?: string; message: Message }> = ({ children, message, spacingClassName = 'pb-2' }) => (
     <div className={cn('w-full', spacingClassName)}>
-        <div className="chat-message-column">{children}</div>
+        <div className="chat-message-column"><EntryTimes message={message} />{children}</div>
     </div>
 );
 
@@ -61,7 +62,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
     // The compaction opens a turn, and the activity row under it brings its own
     // top margin, so the row spaces itself above to keep both gaps even.
     return (
-        <NoticeRow spacingClassName="pt-1">
+        <NoticeRow message={message} spacingClassName="pt-1">
             <ReasoningTimelineBlock
                 text={summary}
                 blockId={message.id}
@@ -138,7 +139,7 @@ const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }> }> = 
     const toggle = React.useCallback(() => setExpanded((value) => !value), []);
 
     return (
-        <NoticeRow>
+        <NoticeRow message={message}>
             <ToolPart part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} />
         </NoticeRow>
     );
@@ -246,7 +247,7 @@ const SubagentRunNotice: React.FC<{ message: SyntheticMessage; run: SubagentRun 
     const canCut = !isRunningSubagentRunMessage(message.id) && chatSurfaceMode !== 'peek';
 
     return (
-        <NoticeRow>
+        <NoticeRow message={message}>
             <div className="group/subagent-run">
                 <ToolPart part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} />
                 {canCut ? <SubagentRunActions message={message} canFork={chatSurfaceMode !== 'mini-chat'} alwaysVisible={isMobile} /> : null}
@@ -288,7 +289,7 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
     }, [result.sessionID]);
 
     return (
-        <NoticeRow>
+        <NoticeRow message={message}>
             <ReasoningTimelineBlock
                 text={result.output}
                 blockId={message.id}
@@ -345,7 +346,7 @@ const MessagingNoticeRow: React.FC<{ message: SyntheticMessage; notice: Messagin
     }, [directory, notice.seq, notice.topic]);
 
     return (
-        <NoticeRow>
+        <NoticeRow message={message}>
             <ReasoningTimelineBlock
                 text={notice.body}
                 blockId={message.id}
@@ -399,7 +400,7 @@ export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
     const notice = readSessionNotice(message);
     if (notice) {
         return (
-            <NoticeRow>
+            <NoticeRow message={message}>
                 <SessionNoticeBlock notice={notice} blockId={`notice:${message.id}`} />
             </NoticeRow>
         );
