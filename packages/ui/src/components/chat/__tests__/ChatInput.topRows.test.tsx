@@ -65,6 +65,8 @@ spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     return Response.json({ directory: '/workspace', project: { id: 'project', directory: '/workspace', canonical: '/workspace' } });
   }
   if (path.endsWith('/session')) return Response.json({ data: [] });
+  // The settings hold the project the session works in, as they would for a user who added it.
+  if (path.endsWith('/config/settings')) return Response.json({ projects: [{ id: 'project', path: '/workspace' }], activeProjectId: 'project' });
   return Response.json({});
 });
 
@@ -95,6 +97,7 @@ const { ChatInput } = await import('../ChatInput');
 const { SyncProvider } = await import('@/sync/sync-context');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { opencodeClient } = await import('@/lib/opencode/client');
 const { applyBackgroundShellEvents } = await import('@/sync/background-shells');
 const { applyPersistentPtyEvents } = await import('@/sync/persistent-ptys');
@@ -152,6 +155,8 @@ afterAll(() => {
 const KEYSTROKES = 6;
 
 test('a session with a background command and an agent terminal shows each strip once, however often the composer renders', async () => {
+  // The session's folder is a project the user added, so opening it needs no admission.
+  useProjectsStore.setState({ projects: [{ id: 'project', path: DIRECTORY }], activeProjectId: 'project' });
   useDirectoryStore.setState({ currentDirectory: DIRECTORY });
   useSessionUIStore.setState({ currentSessionId: SESSION, currentSessionDirectory: DIRECTORY });
   applyBackgroundShellEvents(DIRECTORY, [

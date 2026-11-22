@@ -13,7 +13,7 @@ test('Canary is the release app with other icons, so an update replaces one with
   const config = canaryBuildConfig(releaseConfig);
   const withReleaseIcons = JSON.parse(JSON.stringify(config).replaceAll('resources/icons-canary', 'resources/icons'));
   assert.deepEqual(withReleaseIcons, releaseConfig);
-  assert.equal(config.appId, 'dev.openchamber.desktop');
+  assert.equal(config.appId, 'today.developing.openchamber');
   assert.equal(config.productName, 'OpenChamber');
   assert.equal(config.extraMetadata, releaseConfig.extraMetadata);
   // The release configuration is left as it was.

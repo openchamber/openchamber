@@ -43,6 +43,11 @@ const collect = (root, found = []) => {
   return found;
 };
 
+// A suite that loads the `vscode` module runs inside the VS Code extension
+// host (`--extensionTestsPath`, packages/vscode/README.md); no runner here can
+// load it, so it is reported as skipped with that reason.
+const EXTENSION_HOST_SUITE = /(?:from\s+|require\(\s*)['"]vscode['"]/;
+
 /** `null` when the file names no known runner, so it is reported instead of skipped silently. */
 const resolveCommand = (file) => {
   const source = readFileSync(file, 'utf8');
@@ -58,6 +63,7 @@ const resolveCommand = (file) => {
   if (/(?:from\s+|require\(\s*)['"]node:test['"]/.test(source)) {
     return { label: 'node', command: 'node', args: ['--test', file] };
   }
+  if (EXTENSION_HOST_SUITE.test(source)) return { skip: 'runs in the VS Code extension host' };
   return null;
 };
 
@@ -138,6 +144,7 @@ files.sort();
 
 const failures = [];
 const unknown = [];
+const skipped = [];
 let passed = 0;
 let next = 0;
 
@@ -148,6 +155,10 @@ const worker = async () => {
     const resolved = resolveCommand(file);
     if (!resolved) {
       unknown.push(relative);
+      continue;
+    }
+    if (resolved.skip) {
+      skipped.push({ relative, reason: resolved.skip });
       continue;
     }
     const { code, output, dropped, timedOut } = await run(resolved);
@@ -170,10 +181,14 @@ for (const failure of failures) {
   console.error(`\n===== ${failure.relative} (${failure.label}) =====\n${failure.output}`);
 }
 
+for (const { relative, reason } of skipped) {
+  console.error(`SKIP ${relative}: ${reason}`);
+}
+
 for (const file of unknown) {
   console.error(`UNKNOWN RUNNER ${file}: imports neither bun:test nor node:test`);
 }
 
-console.log(`\n${passed}/${files.length} test files passed${failures.length ? `, ${failures.length} failed` : ''}${unknown.length ? `, ${unknown.length} with no known runner` : ''}`);
+console.log(`\n${passed}/${files.length} test files passed${failures.length ? `, ${failures.length} failed` : ''}${skipped.length ? `, ${skipped.length} skipped` : ''}${unknown.length ? `, ${unknown.length} with no known runner` : ''}`);
 
 process.exit(failures.length > 0 || unknown.length > 0 ? 1 : 0);

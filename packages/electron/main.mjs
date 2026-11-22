@@ -1,6 +1,6 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
 import { createWindowGeometryState } from './window-geometry-state.mjs';
-import { OPEN_IN_APP_SPAWN_TIMEOUT_MS, WHERE_SPAWN_TIMEOUT_MS, WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS } from './spawn-sync-timeouts.mjs';
+import { OPEN_IN_APP_SPAWN_TIMEOUT_MS } from './spawn-sync-timeouts.mjs';
 import { compareSemver } from './semver-compare.mjs';
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, systemPreferences, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';

@@ -13,9 +13,14 @@ describe('Electron version', () => {
     const declaredMajor = /(\d+)\./.exec(declared ?? '')?.[1];
     const flake = readFileSync(new URL('../../flake.nix', import.meta.url), 'utf8');
     const pinned = [...flake.matchAll(/electron = pkgs\.electron_(\d+);/g)].map((match) => match[1]);
+    // The flake can also read the major from package.json at evaluation time,
+    // which fails evaluation instead of drifting.
+    const readsDeclaredMajor = /electronSpec = \(lib\.importJSON \.\/packages\/electron\/package\.json\)\.devDependencies\.electron;/.test(flake)
+      && /electronMajor = lib\.versions\.major \(lib\.removePrefix "\^" electronSpec\);/.test(flake)
+      && /pkgs\.\$\{"electron_\$\{electronMajor\}"\}/.test(flake);
 
     assert.ok(declaredMajor, 'package.json declares no electron version');
-    assert.ok(pinned.length > 0, 'flake.nix pins no pkgs.electron_NN');
+    assert.ok(pinned.length > 0 || readsDeclaredMajor, 'flake.nix neither pins pkgs.electron_NN nor reads the major from package.json');
     assert.deepEqual(pinned, pinned.map(() => declaredMajor));
   });
 });
