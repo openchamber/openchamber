@@ -7,12 +7,16 @@
 // confirmed entries are forgotten in batches, so 27,800 entries take about a
 // hundred file writes instead of 27,800.
 
-import { hasMessage, hasTag, isTimestamp } from './contracts.js';
+import fsDefault from 'node:fs';
+import pathDefault from 'node:path';
+import { hasCode, hasMessage, hasTag, isTimestamp } from './contracts.js';
 import type { createArchiveStore } from './archive-store.js';
 import type { OpenCodeSessionArchive } from './session-archive.js';
 
 const CONCURRENCY = 6;
 const FORGET_BATCH = 250;
+/** The archive file as it was before the first migration forgot anything; read-only, never overwritten. */
+export const MIGRATED_ARCHIVE_FILE_NAME = 'sessions-archive.migrated.json';
 
 type Outcome = 'confirmed' | 'missing' | 'failed' | 'unconfirmed' | 'gone';
 
@@ -33,11 +37,28 @@ interface ArchiveMigrationOptions {
   store: ReturnType<typeof createArchiveStore>;
   openCode: OpenCodeSessionArchive;
   runForSession: <Result>(id: string, work: () => Promise<Result>) => Promise<Result>;
+  fsPromises?: Pick<typeof fsDefault.promises, 'readFile' | 'writeFile'>;
 }
 
 const describeFailure = <Failure>(error: Failure) => (hasMessage(error) ? error.message : undefined) ?? error;
 
-export const createArchiveMigration = ({ store, openCode, runForSession }: ArchiveMigrationOptions) => {
+export const createArchiveMigration = ({ store, openCode, runForSession, fsPromises = fsDefault.promises }: ArchiveMigrationOptions) => {
+  // The owner keeps the original archive times (OpenCode stamps its own), so
+  // the file's bytes are copied aside once, before any entry is forgotten.
+  // An existing copy is the original from an earlier start and is kept.
+  // A failed copy stops the run: nothing is forgotten without it.
+  const keepOriginal = async () => {
+    const copyPath = pathDefault.join(pathDefault.dirname(store.filePath), MIGRATED_ARCHIVE_FILE_NAME);
+    try {
+      await fsPromises.writeFile(copyPath, await fsPromises.readFile(store.filePath), { flag: 'wx', mode: 0o444 });
+      return true;
+    } catch (error) {
+      if (hasCode(error) && error.code === 'EEXIST') return true;
+      console.warn('[openchamber-sessions] could not keep a copy of the archive file; the migration waits for the next start:', describeFailure(error));
+      return false;
+    }
+  };
+
   const pushAndConfirm = async (id: string, archived: boolean): Promise<Outcome> => {
     try {
       await openCode.setArchived(id, archived);
@@ -90,7 +111,11 @@ export const createArchiveMigration = ({ store, openCode, runForSession }: Archi
   };
 
   return async (): Promise<ArchiveMigrationResult> => {
-    const first = await runPass(Object.keys(await store.getAll()));
+    const pending = Object.keys(await store.getAll());
+    if (pending.length > 0 && !(await keepOriginal())) {
+      return { remaining: pending.length, confirmed: 0, missing: 0, failed: 0, unconfirmed: 0 };
+    }
+    const first = await runPass(pending);
     const retry = [...first].filter(([, outcome]) => outcome === 'failed' || outcome === 'unconfirmed').map(([id]) => id);
     const second = retry.length > 0 ? await runPass(retry) : new Map<string, Outcome>();
     const final = new Map([...first, ...second]);

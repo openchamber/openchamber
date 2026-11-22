@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createArchiveStore } from './archive-store.js';
 import { createSessionArchive } from './session-archive.js';
+import { createArchiveMigration, MIGRATED_ARCHIVE_FILE_NAME } from './archive-migration.js';
 
 // Oracle: the archive file as written (the ids and their kind, archived or
 // explicitly restored) against the state a fake OpenCode holds afterwards.
@@ -187,5 +188,39 @@ describe('archive migration into OpenCode', () => {
     expect(openCode.archivedAt.get('ses_a')).toBe(9);
     const kept = fs.readdirSync(dataDir).filter((name) => name !== 'sessions-archive.json');
     expect(kept.map((name) => fs.readFileSync(path.join(dataDir, name), 'utf8'))).toContain('{"ses_a": 17000');
+  });
+  it('keeps the original file read-only beside it before forgetting anything, and never replaces that copy', async () => {
+    const ids = idsOf(400);
+    const { dataDir, filePath } = archiveFile(fileOf(ids));
+    const original = fs.readFileSync(filePath, 'utf8');
+    const copyPath = path.join(dataDir, MIGRATED_ARCHIVE_FILE_NAME);
+    const openCode = fakeOpenCode({ sessions: [...ids, 'ses_later'] });
+
+    await createSessionArchive({ store: openStore(dataDir).store, openCode }).migrateLegacy();
+    expect(fs.readFileSync(copyPath, 'utf8')).toBe(original);
+    expect(fs.statSync(copyPath).mode & 0o777).toBe(0o444);
+
+    // A later start with a different file keeps the first copy, the one with the original times.
+    fs.writeFileSync(filePath, JSON.stringify({ ses_later: 1_800_000_000_000 }));
+    await createSessionArchive({ store: openStore(dataDir).store, openCode }).migrateLegacy();
+    expect(fs.readFileSync(copyPath, 'utf8')).toBe(original);
+    expect(JSON.parse(fs.readFileSync(copyPath, 'utf8'))).toEqual(fileOf(ids));
+  });
+
+  it('pushes and forgets nothing when the copy cannot be written', async () => {
+    const ids = idsOf(20);
+    const { dataDir, filePath } = archiveFile(fileOf(ids));
+    const before = fs.readFileSync(filePath, 'utf8');
+    const openCode = fakeOpenCode({ sessions: ids });
+    const store = openStore(dataDir).store;
+    const fsPromises = { ...fs.promises, writeFile: async () => { throw Object.assign(new Error('read-only volume'), { code: 'EROFS' }); } };
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const migrate = createArchiveMigration({ store, openCode, runForSession: (_id, work) => work(), fsPromises });
+
+    await expect(migrate()).resolves.toMatchObject({ remaining: 20, confirmed: 0 });
+
+    expect(openCode.setArchived).not.toHaveBeenCalled();
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
+    expect(fs.existsSync(path.join(dataDir, MIGRATED_ARCHIVE_FILE_NAME))).toBe(false);
   });
 });
