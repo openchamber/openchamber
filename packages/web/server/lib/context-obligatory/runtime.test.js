@@ -93,6 +93,43 @@ describe('context obligatory runtime', () => {
     });
   });
 
+  const expectBadPinDropped = async (badCreatedAt) => {
+    const { synthetic } = fakeOpenCode();
+    const persistContextCursor = vi.fn(async () => undefined);
+    const { runtime } = makeRuntime({
+      readSessionMetadata: async () => ({
+        openchamber: {
+          context_obligatory_messages: [
+            { id: 'msg_a', createdAt: badCreatedAt, role: 'assistant' },
+            { id: 'msg_u', createdAt: 1, role: 'user' },
+          ],
+        },
+      }),
+      persistContextCursor,
+    });
+
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0].text).toContain('Keep this rule');
+    expect(synthetic[0].text).not.toContain('Old answer');
+    expect(persistContextCursor).toHaveBeenCalledWith('ses_1', '/repo', {
+      openchamber: { context_obligatory_last_compaction_message_id: 'msg_compact' },
+    });
+  };
+
+  it('drops a pin whose createdAt is NaN and still re-injects the valid pins', async () => {
+    await expectBadPinDropped(Number.NaN);
+  });
+
+  it('drops a pin whose createdAt is Infinity and still re-injects the valid pins', async () => {
+    await expectBadPinDropped(Number.POSITIVE_INFINITY);
+  });
+
+  it('drops a pin whose createdAt is finite but out of Date range and still re-injects the valid pins', async () => {
+    await expectBadPinDropped(1e21);
+  });
+
   it('does not re-send for a compaction it already handled', async () => {
     const { synthetic } = fakeOpenCode();
     const { runtime } = makeRuntime({

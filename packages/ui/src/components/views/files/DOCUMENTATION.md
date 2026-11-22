@@ -311,7 +311,13 @@ viewer to the source view and records that mode for the path.
 A binary editor has no text draft. `GuestFileEditor` reads the file's bytes at
 mount (`/api/fs/raw` through `runtimeFetch`, `loadCanvasBytes`) and loads the
 frame once they are here; too many bytes or a failed read fall back to the
-built-in view with a toast. Its snapshot is bytes, written with
+built-in view with a toast. The byte read judges the cap before and during
+the read (`readCanvasResponseBytes` in `fileCanvas.ts`): a declared
+`Content-Length` over `GUEST_FILE_EDITOR_CONTENT_MAX` refuses before the
+body is touched, and a streamed body is cut off past the cap, so an over-cap
+file is never buffered whole. The mount gate waits for the view's stat
+while the size is unknown; a stat that settles with no size (no
+`files.statFile`, or it failed) mounts and lets that bounded read judge. Its snapshot is bytes, written with
 `files.uploadFile(..., { overwrite: true })`, the same atomic temp-and-rename
 write uploads use, with the stat baseline cleared so the poll does not take
 the write for an external change. The binary guards (`isBinaryFile`,

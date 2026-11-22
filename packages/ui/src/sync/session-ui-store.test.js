@@ -21,6 +21,8 @@ import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
+import { useInputStore } from './input-store';
+import { shouldAutoCreateDraftWorktree } from '@/lib/worktrees/autoDraftWorktree';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -973,6 +975,81 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
   });
+
+  describe('a worktree inherited from the last session', () => {
+    const worktree = '/worktrees/alpha-earlier-task';
+    let originalAutoCreate;
+
+    beforeEach(() => {
+      originalAutoCreate = useConfigStore.getState().settingsAutoCreateWorktree;
+      useSessionUIStore.setState({
+        availableWorktreesByProject: new Map([[projectA.path, [{ path: worktree, projectDirectory: projectA.path, branch: 'earlier-task' }]]]),
+      });
+      getDeferredSafeStorage().setItem(
+        DRAFT_TARGET_KEY,
+        JSON.stringify({ projectId: projectA.id, directory: worktree, target: 'project' }),
+      );
+      useDirectoryStore.getState().setDirectory(worktree, { showOverlay: false });
+    });
+
+    afterEach(() => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: originalAutoCreate });
+    });
+
+    // Oracle: the rule from openNewSessionDraft. Only a directory the draft
+    // inherited goes back to the project root, and only while Auto-create
+    // worktree is on; a picked or pinned worktree always stays.
+    const opens = [
+      { name: 'implicit open', options: undefined, inherited: true },
+      { name: 'New chat forwarding the session directory', options: { directoryOverride: worktree, inheritedDirectory: true }, inherited: true },
+      { name: 'a picked worktree', options: { directoryOverride: worktree }, inherited: false },
+      { name: 'a pinned worktree', options: { directoryOverride: worktree, inheritedDirectory: true, preserveDirectoryOverride: true }, inherited: false },
+    ];
+    for (const autoCreate of [true, false]) {
+      for (const open of opens) {
+        const expected = autoCreate && open.inherited ? projectA.path : worktree;
+        test(`${open.name} with Auto-create worktree ${autoCreate ? 'on' : 'off'} aims at ${expected}`, () => {
+          useConfigStore.setState({ settingsAutoCreateWorktree: autoCreate });
+
+          useSessionUIStore.getState().openNewSessionDraft(open.options);
+          const draft = useSessionUIStore.getState().newSessionDraft;
+
+          expect(draft.target).toBe('project');
+          expect(draft.selectedProjectId).toBe(projectA.id);
+          expect(draft.directoryOverride).toBe(expected);
+        });
+      }
+    }
+
+    // Oracle: the default and the switch's own rule. A fresh config store
+    // has Auto-create worktree on, and every new chat opened from a session
+    // in an earlier worktree is a draft the switch acts on, so each first
+    // send makes its own worktree.
+    test('with the default setting, every new chat from a worktree session gets a worktree of its own', () => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: useConfigStore.getInitialState().settingsAutoCreateWorktree });
+      expect(useConfigStore.getState().settingsAutoCreateWorktree).toBe(true);
+
+      for (const open of [() => useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: worktree, inheritedDirectory: true }), () => useSessionUIStore.getState().openNewSessionDraft()]) {
+        open();
+        const draft = useSessionUIStore.getState().newSessionDraft;
+        expect(shouldAutoCreateDraftWorktree({
+          enabled: useConfigStore.getState().settingsAutoCreateWorktree,
+          draft,
+          projectPath: projectA.path,
+          isGitRepo: true,
+        })).toBe(true);
+      }
+    });
+
+    test('successive new chats keep aiming at the project root', () => {
+      useConfigStore.setState({ settingsAutoCreateWorktree: true });
+
+      useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: worktree, inheritedDirectory: true });
+      expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe(projectA.path);
+      useSessionUIStore.getState().openNewSessionDraft();
+      expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe(projectA.path);
+    });
+  });
 });
 
 describe('createSession draft lifecycle', () => {
@@ -1224,6 +1301,75 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     });
     useProjectsStore.setState({ projects: [], activeProjectId: null });
     useSessionDisplayStore.setState({ singleProjectId: null });
+  });
+
+  // Oracle: a send handed off to a background goal (pendingGoal) leaves the
+  // user where they went: its session is created where the draft pointed,
+  // and neither the view nor a draft opened since changes. The send above
+  // without a goal still opens its session.
+  const waitFor = async (predicate) => {
+    for (let attempt = 0; attempt < 100 && !predicate(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(predicate()).toBe(true);
+  };
+  const handOffDraftSend = (draftSnapshot) => {
+    let rejectGoal;
+    const pendingGoal = new Promise((_resolve, reject) => { rejectGoal = reject; });
+    const sent = useSessionUIStore.getState().sendMessage(
+      'message for project A', 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal',
+      { draftSnapshot, pendingGoal },
+    ).catch((error) => error);
+    return { sent, rejectGoal };
+  };
+
+  test('a background goal send creates its session without pulling the user back from another chat', async () => {
+    const draftSnapshot = { open: true, draftId: 41, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+
+    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
+    useSessionUIStore.getState().setCurrentSession('session-project-b', '/projects/beta');
+
+    await waitFor(() => createSessionCalls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(createSessionCalls[0]).toBe('/projects/alpha');
+    expect(useSessionUIStore.getState().currentSessionId).toBe('session-project-b');
+    // The prompt waits for the goal; nothing was sent yet.
+    expect(sendMessageCalls).toHaveLength(0);
+
+    rejectGoal(new Error('goal not written'));
+    expect((await sent).message).toBe('goal not written');
+    expect(sendMessageCalls).toHaveLength(0);
+    expect(useSessionUIStore.getState().currentSessionId).toBe('session-project-b');
+  });
+
+  test('a background goal send leaves a new draft the user opened meanwhile open', async () => {
+    const draftSnapshot = { open: true, draftId: 51, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+
+    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
+    const nextDraft = { open: true, draftId: 52, directoryOverride: '/projects/alpha', parentID: null };
+    useSessionUIStore.setState({ newSessionDraft: nextDraft });
+
+    await waitFor(() => createSessionCalls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(useSessionUIStore.getState().currentSessionId).toBeNull();
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+    expect(useSessionUIStore.getState().newSessionDraft.draftId).toBe(52);
+
+    rejectGoal(new Error('goal not written'));
+    await sent;
+  });
+
+  test('a background goal send still opens its session when the user stayed on the draft', async () => {
+    const draftSnapshot = { open: true, draftId: 61, directoryOverride: '/projects/alpha', parentID: null, title: 'Project A draft' };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+
+    const { sent, rejectGoal } = handOffDraftSend(draftSnapshot);
+    await waitFor(() => createSessionCalls.length === 1);
+    await waitFor(() => useSessionUIStore.getState().currentSessionId === 'session-materialized');
+    expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false);
+
+    rejectGoal(new Error('goal not written'));
+    await sent;
   });
 
   test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {
@@ -1966,6 +2112,34 @@ describe('goal objective directory scoping', () => {
     expect(useSessionGoalArmStore.getState().armed).toBe(true);
   });
 
+  test('a queued goal keeps the composer flags: a settled spec is not rewritten and briefs the agent', async () => {
+    const specRequests = [];
+    const sent = [];
+    opencodeClient.sendMessage = async (params) => {
+      sent.push(params);
+      return 'msg';
+    };
+    const metadataFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if ((input instanceof Request ? input.url : String(input)).endsWith('/api/goals/spec')) {
+        specRequests.push(JSON.parse(init.body));
+        return Response.json({ spec: 'Rewritten', providerID: 'provider-a', modelID: 'model-a' });
+      }
+      return metadataFetch(input, init);
+    };
+    useUIStore.setState({ sessionGoalRewriteAll: true });
+    try {
+      await sendQueued('ship it', { objective: 'Approved <spec>', tokenBudget: null, settled: true, briefAgent: true, ignoreLimit: true });
+
+      expect(specRequests).toEqual([]);
+      expect(metadataWrites[0].patch.openchamber.goal).toMatchObject({ objective: 'Approved <spec>', ignoreObjectiveLimit: true });
+      expect(JSON.stringify(sent[0])).toContain('<goal-spec>\\nApproved &lt;spec&gt;\\n</goal-spec>');
+    } finally {
+      useUIStore.setState({ sessionGoalRewriteAll: false });
+      globalThis.fetch = metadataFetch;
+    }
+  });
+
   test('a queued message without a goal starts none, even while the composer is armed', async () => {
     await sendQueued('plain queued message', null);
 
@@ -2318,5 +2492,103 @@ describe('send does not wait for session knowledge before showing the message', 
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0].messageId).toBe(added[0].id);
     expect(sendCalls[0].context).toBeUndefined();
+  });
+});
+
+describe('retryMessage replay', () => {
+  let originalGetSessionMessages;
+  let originalGetSession;
+  let originalStageRevert;
+  let originalSendMessage;
+
+  afterEach(() => {
+    opencodeClient.getSessionMessages = originalGetSessionMessages;
+    opencodeClient.getSession = originalGetSession;
+    opencodeClient.stageRevert = originalStageRevert;
+    useSessionUIStore.setState({ sendMessage: originalSendMessage });
+    setSyncRefs({}, new ChildStoreManager(), '');
+    setActionRefs(new ChildStoreManager(), () => '');
+    setOptimisticRefs(() => {}, () => {});
+  });
+
+  test('replays prompt text, files, and attached context with the chosen model without replacing the draft', async () => {
+    originalGetSessionMessages = opencodeClient.getSessionMessages;
+    originalGetSession = opencodeClient.getSession;
+    originalStageRevert = opencodeClient.stageRevert;
+    originalSendMessage = useSessionUIStore.getState().sendMessage;
+
+    const directory = '/retry/project';
+    const sessionId = 'session-retry';
+    const session = {
+      id: sessionId,
+      title: 'Retry test',
+      directory,
+      projectID: 'project',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+      agent: 'build',
+    };
+    const context = createContextPart({
+      kind: 'file-quote',
+      fileLabel: 'src/app.ts',
+      quote: 'old code',
+      text: 'change this',
+    });
+    const contextMessage = {
+      id: 'context-1',
+      sessionID: sessionId,
+      role: 'synthetic',
+      time: { created: 1 },
+      text: context.text,
+      metadata: context.metadata,
+    };
+    const prompt = { id: 'prompt-1', sessionID: sessionId, role: 'user', time: { created: 2 } };
+    const childStores = new ChildStoreManager();
+    childStores.ensureChild(directory, { bootstrap: false }).setState({
+      session: [session],
+      message: { [sessionId]: [contextMessage, prompt] },
+      part: {
+        [prompt.id]: [
+          { id: 'text-1', sessionID: sessionId, messageID: prompt.id, type: 'text', text: 'please update the file' },
+          { id: 'file-1', sessionID: sessionId, messageID: prompt.id, type: 'file', mime: 'image/png', filename: 'screen.png', url: 'data:image/png;base64,aGVsbG8=' },
+        ],
+      },
+      session_status: {},
+    });
+    setSyncRefs({}, childStores, directory);
+    setActionRefs(childStores, () => directory);
+    setOptimisticRefs(() => {}, () => {});
+    useSessionUIStore.setState({
+      currentSessionId: sessionId,
+      currentSessionDirectory: directory,
+      sendMessage: async (...args) => { sent.push(args); },
+    });
+    useInputStore.setState({ pendingInputText: 'keep this unrelated draft', pendingInputMode: 'replace' });
+
+    const sent = [];
+    const staged = [];
+    opencodeClient.getSessionMessages = async () => ({ items: [] });
+    opencodeClient.stageRevert = async (...args) => { staged.push(args); };
+    opencodeClient.getSession = async () => ({ ...session, revert: { messageID: 'context-1' } });
+
+    await useSessionUIStore.getState().retryMessage(sessionId, prompt.id, {
+      providerID: 'provider-b',
+      id: 'model-b',
+      variant: 'high',
+    });
+
+    expect(staged).toHaveLength(1);
+    expect(useInputStore.getState().pendingInputText).toBe('keep this unrelated draft');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].slice(0, 4)).toEqual(['please update the file', 'provider-b', 'model-b', 'build']);
+    expect(sent[0][4].map(({ dataUrl, mimeType, filename }) => ({ dataUrl, mimeType, filename }))).toEqual([{
+      dataUrl: 'data:image/png;base64,aGVsbG8=',
+      mimeType: 'image/png',
+      filename: 'screen.png',
+    }]);
+    expect(sent[0][6]).toEqual([{ text: context.text, synthetic: true, metadata: context.metadata }]);
+    expect(sent[0][7]).toBe('high');
+    expect(sent[0][9]).toMatchObject({ sessionId, directory, userInitiated: true });
   });
 });

@@ -39,6 +39,13 @@ export function fingerprintRemoteUrl(value) {
   return crypto.createHash('sha256').update(authority).digest('base64url');
 }
 
+// The sensitive assignment keys, converged with the git redactor
+// (lib/git/redaction.js): the same key/value and header shapes must not
+// survive on one surface while the other strips them (#1920). The scheme
+// pattern runs first so 'authorization: Bearer <value>' loses the value,
+// not just the scheme word.
+const sensitiveKeyPattern = 'x-api-key|access[-_]token|api[-_]key|client[-_]secret|oauth[-_]token|private[-_]token|authorization|password|secret|token';
+
 export function redactSensitiveText(value) {
   return String(value || '')
     .replace(urlPattern, (match) => {
@@ -51,5 +58,16 @@ export function redactSensitiveText(value) {
       return `${redactRemoteUrl(remote)}${suffix}`;
     })
     .replace(/([a-z][a-z0-9+.-]*:\/\/)([^\s/@]+)@/gi, '$1')
-    .replace(/\b(authorization|private-token|oauth-token)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]');
+    .replace(/\b(authorization\s*:\s*(?:bearer|basic))\s+[^\s,;]+/gi, '$1 [redacted]')
+    // #2074/#2128: quoted values (JSON/Python-dumped headers/config) — the quote between
+    // key and colon defeated both neighbours, and a quoted value must keep
+    // its quotes: redact only the credential inside them, preserving the
+    // key, separator, scheme word, and JSON structure.
+    .replace(new RegExp(`\\b(${sensitiveKeyPattern})(["']?\\s*[:=]\\s*["'])((?:bearer|basic)\\s+)?[^\\s"',;]+`, 'gi'), '$1$2$3[redacted]')
+    // #2074: scheme-headed assignment values for any sensitive key
+    // (authorization=Bearer <t>, api_key: Bearer <t>) — the plain assignment
+    // pattern below refuses bearer/basic-headed values to protect the
+    // scheme word, so redact the credential after it explicitly.
+    .replace(new RegExp(`\\b(${sensitiveKeyPattern})(\\s*[:=]\\s*(?:bearer|basic))\\s+[^\\s,;]+`, 'gi'), '$1$2 [redacted]')
+    .replace(new RegExp(`\\b(${sensitiveKeyPattern})\\s*[:=]\\s*(?!(?:bearer|basic)\\s)[^\\s"',;]+`, 'gi'), '$1=[redacted]');
 }

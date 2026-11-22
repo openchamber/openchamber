@@ -8,6 +8,7 @@ import { getMessagingConfig, parseMessagingConfig, setMessagingConfig } from './
 let tempDir;
 let configPath;
 let previousConfigEnv;
+let previousHome;
 
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 const writeJson = (filePath, value) => {
@@ -21,11 +22,18 @@ beforeEach(() => {
   previousConfigEnv = process.env.OPENCODE_CONFIG;
   // Settings writes to OPENCODE_CONFIG when set, so the real user config stays untouched.
   process.env.OPENCODE_CONFIG = configPath;
+  // Homedir-derived sources (the config layers' fallbacks and the legacy
+  // ~/.opencode global) must not leak the machine's real OpenCode state
+  // into these tests (#2309): pin HOME inside the temp dir.
+  previousHome = process.env.HOME;
+  process.env.HOME = path.join(tempDir, 'home');
 });
 
 afterEach(() => {
   if (previousConfigEnv === undefined) delete process.env.OPENCODE_CONFIG;
   else process.env.OPENCODE_CONFIG = previousConfigEnv;
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 

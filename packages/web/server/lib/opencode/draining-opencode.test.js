@@ -137,4 +137,12 @@ describe('resolveOpenCodeDrainGraceMs', () => {
     expect(resolveOpenCodeDrainGraceMs({ OPENCHAMBER_OPENCODE_DRAIN_GRACE_MS: 'soon' })).toBe(DEFAULT_OPENCODE_DRAIN_GRACE_MS);
     expect(resolveOpenCodeDrainGraceMs({ OPENCHAMBER_OPENCODE_DRAIN_GRACE_MS: '-1' })).toBe(DEFAULT_OPENCODE_DRAIN_GRACE_MS);
   });
+
+  it('falls back to the default for non-decimal spellings a bare Number() would honour', () => {
+    for (const raw of ['1e3', '0x10', '5.9', ' ', '+5000', '5000.0', '99999999999999999999999999']) {
+      expect(resolveOpenCodeDrainGraceMs({ OPENCHAMBER_OPENCODE_DRAIN_GRACE_MS: raw })).toBe(DEFAULT_OPENCODE_DRAIN_GRACE_MS);
+    }
+    // A plain decimal spelling still counts after trimming.
+    expect(resolveOpenCodeDrainGraceMs({ OPENCHAMBER_OPENCODE_DRAIN_GRACE_MS: ' 5000 ' })).toBe(5000);
+  });
 });

@@ -1,0 +1,41 @@
+name: require-main-gate test
+
+# Regression guard for #1565: .github/scripts/test-require-main-gate.sh
+# exercises the release gate (.github/scripts/require-main-gate.sh, invoked
+# by the reusable require-main-gate.yml workflow) that decides whether a
+# release SHA may publish. The suite passed manually but nothing ran it, so
+# a gate regression could ship or block releases unnoticed. This workflow
+# runs it whenever the gate, its test, or the gate's caller workflow changes.
+# It is a test-only check: the gate and release gating logic are unchanged.
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - '.github/scripts/require-main-gate.sh'
+      - '.github/scripts/test-require-main-gate.sh'
+      - '.github/workflows/require-main-gate.yml'
+      - '.github/workflows/require-main-gate-test.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/scripts/require-main-gate.sh'
+      - '.github/scripts/test-require-main-gate.sh'
+      - '.github/workflows/require-main-gate.yml'
+      - '.github/workflows/require-main-gate-test.yml'
+  workflow_dispatch:
+
+jobs:
+  require-main-gate-test:
+    name: Test the release main gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the require-main-gate test suite
+        run: bash .github/scripts/test-require-main-gate.sh

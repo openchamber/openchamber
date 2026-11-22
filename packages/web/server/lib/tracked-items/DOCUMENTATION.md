@@ -19,7 +19,7 @@ Server-owned live state of the pull requests, merge requests and issues that con
 
 ## Persistence
 
-`tracked-items.json` in the data directory holds the last known states (12 h retention, at most 500 entries, written 2 s after a change through a temp file and rename). It is a cache: a missing or malformed file restores nothing. Clients also persist what they received (`useTrackedItemsStore`), so a restarted app shows the last known colours at once.
+`tracked-items.json` in the data directory holds the last known states (12 h retention, at most 500 entries, written 2 s after a change through a temp file and rename). It is a cache: a missing, non-regular, oversized, wrong-version or wrong-shape file restores nothing; a file that does not parse as JSON throws so the restore failure is logged (the next save overwrites it); other unexpected I/O failures throw too. Clients also persist what they received (`useTrackedItemsStore`), so a restarted app shows the last known colours at once.
 
 ## Runtimes
 

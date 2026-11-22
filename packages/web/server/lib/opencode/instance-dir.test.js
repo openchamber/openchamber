@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,6 +46,37 @@ describe('prepareInstanceDir', () => {
     await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 505, isPidAlive: (pid) => pid === 404 });
 
     expect((await fs.readdir(instancesDir)).sort()).toEqual(['404', '505', 'notes']);
+  });
+
+  it.skipIf(process.platform === 'win32')('a FIFO owner file refuses promptly into the folder-name fallback (#1793)', async () => {
+    const dataDir = await createDataDir();
+    const instancesDir = instancesDirOf(dataDir);
+    const folder = path.join(instancesDir, '707');
+    await fs.mkdir(folder, { recursive: true });
+    execFileSync('mkfifo', [path.join(folder, 'owner')]);
+
+    // The whole-file read this replaces never settles on a FIFO; settling
+    // at all is the assertion. The fallback pid (the folder name) is
+    // alive, so the folder is kept.
+    const dir = await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 505, isPidAlive: (pid) => pid === 707 });
+
+    expect(dir).toBe(path.join(instancesDir, '505'));
+    expect((await fs.readdir(instancesDir)).sort()).toEqual(['505', '707']);
+  });
+
+  it('an over-cap owner file refuses into the folder-name fallback (#1793)', async () => {
+    const dataDir = await createDataDir();
+    const instancesDir = instancesDirOf(dataDir);
+    const folder = path.join(instancesDir, '909');
+    await fs.mkdir(folder, { recursive: true });
+    // A whole read would parseInt the leading 808 (dead) and the folder
+    // would be removed as abandoned; the bounded read refuses, so the
+    // owner is the folder-name pid 909, which is alive and kept.
+    await fs.writeFile(path.join(folder, 'owner'), `808\n${' '.repeat(4096)}`);
+
+    await prepareInstanceDir({ fsPromises: fs, path, dataDir, pid: 505, isPidAlive: (pid) => pid === 909 });
+
+    expect((await fs.readdir(instancesDir)).sort()).toEqual(['505', '909']);
   });
 
   it('keeps its own folder from an earlier run with the same pid', async () => {

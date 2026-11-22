@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fetchUpdateNotes, renderUpdateNotes } from './update-notes.js';
+import { fetchUpdateNotes, renderUpdateNotes, CHANGELOG_INDEX_MAX_BYTES } from './update-notes.js';
 
 const compare = (a, b) => {
   const pa = a.split('.').map(Number);
@@ -74,5 +74,23 @@ describe('fetchUpdateNotes', () => {
   it('renders a successful response', async () => {
     const ok = async () => ({ ok: true, json: async () => index });
     expect(await fetchUpdateNotes('1.2.2', '1.2.3', compare, { fetch: ok })).toMatch(/^## \[1\.2\.3\] - 2026-03-03\n\n\*\*Comments everywhere\*\*/);
+  });
+
+  it('renders a within-cap real response through the bounded reader', async () => {
+    const ok = async () => new Response(JSON.stringify(index), { status: 200 });
+    expect(await fetchUpdateNotes('1.2.2', '1.2.3', compare, { fetch: ok })).toMatch(/^## \[1\.2\.3\] - 2026-03-03\n\n\*\*Comments everywhere\*\*/);
+  });
+
+  it('returns null for an over-cap body like any other failure', async () => {
+    const overCap = async () => new Response(JSON.stringify(index), {
+      status: 200,
+      headers: { 'content-length': String(CHANGELOG_INDEX_MAX_BYTES + 1) },
+    });
+    expect(await fetchUpdateNotes('1.2.2', '1.2.3', compare, { fetch: overCap })).toBe(null);
+  });
+
+  it('returns null when the bounded body crosses the cap mid-stream', async () => {
+    const overCap = async () => new Response(JSON.stringify(index), { status: 200 });
+    expect(await fetchUpdateNotes('1.2.2', '1.2.3', compare, { fetch: overCap, maxBytes: 10 })).toBe(null);
   });
 });

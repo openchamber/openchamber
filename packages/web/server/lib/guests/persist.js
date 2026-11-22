@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 
 import { GUEST_CAPABILITIES } from '@openchamber/sdk';
 
@@ -136,30 +137,45 @@ const knownGrantsOnly = (grants) => Object.fromEntries(
   Object.entries(grants).map(([guestId, list]) => [guestId, list.filter((capability) => knownCapabilities.has(capability))]),
 );
 
+/**
+ * Read cap for extensions.json. A legitimate file holds small bounded
+ * records keyed by installed guest: filesystem paths, git origins
+ * (ref at most 256 chars, identity id at most 128), short capability
+ * and scope lists, socket overrides. The guest count is not
+ * hard-clamped, but even a pathological 1,000 installed guests at a
+ * few KB of records each stays in the low single-digit MB. 8 MiB
+ * gives headroom over that while keeping one oversized file from
+ * being buffered whole - and a FIFO from wedging the store's
+ * serialized write lock, whose reads go through this helper.
+ */
+export const EXTENSIONS_STORE_READ_MAX_BYTES = 8 * 1024 * 1024;
+
 export const readExtensionStore = async (persistPath) => {
-  try {
-    const raw = await fs.readFile(persistPath, 'utf8');
-    const parsed = parseStore(raw);
-    if (!parsed) {
-      throw new Error('Invalid extensions store');
-    }
-    const store = {
-      paths: parsed.paths,
-      sources: parsed.sources ?? {},
-      gitOrigins: knownGitOriginsOnly(parsed.gitOrigins ?? {}),
-      capabilityGrants: knownGrantsOnly(parsed.capabilityGrants ?? {}),
-      capabilityScopes: knownScopesOnly(parsed.capabilityScopes ?? {}),
-      disabledGuests: parsed.disabledGuests ?? {},
-      serviceSocketOverrides: parsed.serviceSocketOverrides ?? {},
-    };
-    if (parsed.storageIds) store.storageIds = knownStorageIdsOnly(parsed.storageIds);
-    return store;
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+  const result = await readBoundedFile(persistPath, EXTENSIONS_STORE_READ_MAX_BYTES);
+  if (!result.ok) {
+    // Missing stays the authoritative empty store. An over-cap or
+    // non-regular target follows the malformed path (the Invalid
+    // throw below): it must never silently read as empty.
+    if (result.reason === 'missing') {
       return emptyStore();
     }
-    throw error;
+    throw new Error('Invalid extensions store');
   }
+  const parsed = parseStore(result.buffer.toString('utf8'));
+  if (!parsed) {
+    throw new Error('Invalid extensions store');
+  }
+  const store = {
+    paths: parsed.paths,
+    sources: parsed.sources ?? {},
+    gitOrigins: knownGitOriginsOnly(parsed.gitOrigins ?? {}),
+    capabilityGrants: knownGrantsOnly(parsed.capabilityGrants ?? {}),
+    capabilityScopes: knownScopesOnly(parsed.capabilityScopes ?? {}),
+    disabledGuests: parsed.disabledGuests ?? {},
+    serviceSocketOverrides: parsed.serviceSocketOverrides ?? {},
+  };
+  if (parsed.storageIds) store.storageIds = knownStorageIdsOnly(parsed.storageIds);
+  return store;
 };
 
 const writeExtensionStoreUnlocked = async (

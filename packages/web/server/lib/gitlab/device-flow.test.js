@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { defaultGitLabClientId, exchangeGitLabDeviceCode, probeGitLabAuth, refreshGitLabAccessToken } from './device-flow.js';
+import { AUTH_BODY_MAX_BYTES, GitLabRequestError } from './network.js';
 
 const json = (body, status = 200) => Response.json(body, { status });
 
@@ -114,5 +115,48 @@ describe('GitLab device flow', () => {
     const down = vi.fn().mockResolvedValueOnce(json({ message: 'maintenance' }, 503));
     await expect(refreshGitLabAccessToken({ origin, clientId: 'client', refreshToken: 'live', fetch: down }))
       .rejects.toMatchObject({ kind: 'temporarily-unavailable' });
+  });
+});
+
+describe('GitLab auth body cap (#1021)', () => {
+  const chunked = (chunks, status = 200) => new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+      controller.close();
+    },
+  }), { status, headers: { 'Content-Type': 'application/json' } });
+
+  it('refuses a streamed over-cap device-flow answer with no content-length as provider-error', async () => {
+    // Two 600 KiB chunks cross the 1 MiB cap only while streaming: there is
+    // no content-length for the reader to check up front.
+    const fetch = vi.fn(async () => chunked(['x'.repeat(600 * 1024), 'x'.repeat(600 * 1024)]));
+    const error = await exchangeGitLabDeviceCode({ origin: 'https://gitlab.example.com', clientId: 'client', deviceCode: 'device', fetch }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(GitLabRequestError);
+    expect(error).toMatchObject({ kind: 'provider-error', status: 200 });
+  });
+
+  it('refuses an over-cap probe answer instead of classifying the host as not-gitlab', async () => {
+    const fetch = vi.fn(async () => chunked(['x'.repeat(AUTH_BODY_MAX_BYTES + 1)]));
+    await expect(probeGitLabAuth({ origin: 'https://gitlab.example.com', clientId: 'client', fetch }))
+      .rejects.toMatchObject({ kind: 'provider-error', status: 200 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('still parses an answer that lands exactly at the cap', async () => {
+    const prefix = '{"access_token":"tok","pad":"';
+    const suffix = '"}';
+    const body = prefix + 'x'.repeat(AUTH_BODY_MAX_BYTES - prefix.length - suffix.length) + suffix;
+    expect(body.length).toBe(AUTH_BODY_MAX_BYTES);
+    const fetch = vi.fn(async () => new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await expect(exchangeGitLabDeviceCode({ origin: 'https://gitlab.example.com', clientId: 'client', deviceCode: 'device', fetch }))
+      .resolves.toMatchObject({ status: 'connected', accessToken: 'tok' });
+  });
+
+  it('keeps returning null for an ordinary malformed answer under the cap', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('not json', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await expect(probeGitLabAuth({ origin: 'https://example.com', clientId: 'client', fetch })).resolves.toMatchObject({
+      confirmed: false, device: { reason: 'not-gitlab' },
+    });
   });
 });

@@ -319,6 +319,18 @@ export const generateBridgeCommitMessage = async ({
   return parsed;
 };
 
+// `execGit` returns failures as `{ exitCode, stderr }` instead of throwing, so a
+// read whose exit code is ignored turns a non-repository or a broken index into
+// an empty, conflict-free answer. Reads whose output is the answer `''` keep
+// checking the exit code themselves.
+const requireGitOutput = (result: ExecGitResult, args: string[]): string => {
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim();
+    throw new Error(`git ${args.join(' ')} failed: ${detail || `exit code ${result.exitCode}`}`);
+  }
+  return result.stdout;
+};
+
 const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -399,8 +411,9 @@ export async function handleSpecialGitBridgeMessage(
       try {
         const listed = await gitService.getGitRangeFiles(directory, base, head);
         files = Array.isArray(listed) ? listed : [];
-      } catch {
-        files = [];
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: `Failed to list changed files for ${base}...${head}: ${message}` };
       }
 
       if (files.length === 0) {
@@ -479,17 +492,17 @@ export async function handleSpecialGitBridgeMessage(
       }
 
       try {
-        const statusResult = await deps.execGit(['status', '--porcelain'], directory);
-        const statusPorcelain = statusResult.stdout;
+        const statusArgs = ['status', '--porcelain'];
+        const statusPorcelain = requireGitOutput(await deps.execGit(statusArgs, directory), statusArgs);
 
-        const unmergedResult = await deps.execGit(['diff', '--name-only', '--diff-filter=U'], directory);
-        const unmergedFiles = unmergedResult.stdout
+        const unmergedArgs = ['diff', '--name-only', '--diff-filter=U'];
+        const unmergedFiles = requireGitOutput(await deps.execGit(unmergedArgs, directory), unmergedArgs)
           .split('\n')
           .map((line) => line.trim())
           .filter(Boolean);
 
-        const diffResult = await deps.execGit(['diff'], directory);
-        const diff = diffResult.stdout;
+        const diffArgs = ['diff'];
+        const diff = requireGitOutput(await deps.execGit(diffArgs, directory), diffArgs);
 
         let operation: 'merge' | 'rebase' = 'merge';
         let headInfo = '';
@@ -502,7 +515,16 @@ export async function handleSpecialGitBridgeMessage(
           const mergeHead = mergeHeadResult.stdout.trim();
           let mergeMsg = '';
           try {
-            const mergeMsgPath = path.join(directory, '.git', 'MERGE_MSG');
+            // Resolve MERGE_MSG through git: in a linked worktree `.git` is
+            // a file pointing at the real git dir, so joining it as a
+            // directory always fails and the merge message is lost.
+            // `--git-path` returns the per-worktree path (relative to the
+            // working tree in a main worktree, absolute in a linked one).
+            const mergeMsgPathResult = await deps.execGit(['rev-parse', '--git-path', 'MERGE_MSG'], directory);
+            const mergeMsgPathRaw = mergeMsgPathResult.exitCode === 0 ? mergeMsgPathResult.stdout.trim() : '';
+            const mergeMsgPath = mergeMsgPathRaw
+              ? path.resolve(directory, mergeMsgPathRaw)
+              : path.join(directory, '.git', 'MERGE_MSG');
             mergeMsg = await fs.promises.readFile(mergeMsgPath, 'utf8');
           } catch {
             // MERGE_MSG may not exist

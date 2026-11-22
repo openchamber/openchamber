@@ -1,3 +1,5 @@
+import type { WorktreeStartFrom } from '@/lib/worktrees/worktreeStartSource';
+
 interface MultiRunModelSelection {
   providerID: string;
   modelID: string;
@@ -32,8 +34,14 @@ export interface CreateMultiRunParams {
   title?: string;
   groups: MultiRunGroup[];
   agent?: string;
+  /** The branch every lane starts from; absent means `worktreeStartFrom`. */
   worktreeBaseBranch?: string;
+  /** The Settings start for parallel runs, used when no base branch was picked; absent means the project root. */
+  worktreeStartFrom?: WorktreeStartFrom;
+  /** Separate worktrees require Git; false explicitly chooses shared files. */
   isolateRuns?: boolean;
+  /** Where lanes work when they share a directory: the draft's checkout. The project directory when absent. */
+  sharedDirectory?: string;
   /** Files sent with every variant. */
   files?: MultiRunFileAttachment[];
   setupCommands?: string[];

@@ -94,12 +94,15 @@ export const resolveWorktreeStartDirectory = async (project: ProjectRef, worktre
 };
 
 export type CreatedWorktreeStartDeps = {
+  /** New root checkouts must be populated before any session can start there. */
+  waitForCheckout: (worktreeRoot: string) => Promise<void>;
   resolve: (project: ProjectRef, worktreeRoot: string) => Promise<string>;
   /** Removes the worktree and its local branch. */
   remove: (project: ProjectRef, worktree: WorktreeMetadata) => Promise<void>;
 };
 
 const createdWorktreeStartDeps: CreatedWorktreeStartDeps = {
+  waitForCheckout: waitForWorktreeGitReady,
   resolve: resolveWorktreeStartDirectory,
   remove: async (project, worktree) => {
     // Loaded on failure only: worktreeManager reaches the session store, which imports this module.
@@ -119,6 +122,9 @@ export const resolveCreatedWorktreeStartDirectory = async (
   worktree: WorktreeMetadata,
   deps: CreatedWorktreeStartDeps = createdWorktreeStartDeps,
 ): Promise<string> => {
+  // A failed readiness request cannot prove this directory has no artifacts.
+  // Preserve it for recovery while preventing a session from starting there.
+  await deps.waitForCheckout(worktree.path);
   try {
     return await deps.resolve(project, worktree.path);
   } catch (error) {

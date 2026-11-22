@@ -1,22 +1,28 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './es.settings';
+import { multirunWorkflowI18n } from './multirun-workflow.i18n';
 import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { continueWithModelI18n } from './continue-with-model.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
@@ -28,7 +34,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode viene incluido en OpenChamber. Actualiza OpenChamber para obtener OpenCode v2.",
@@ -77,6 +85,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} subagentes utilizados',
   'sessions.sidebar.projectAction.active': 'Acción del proyecto en curso',
   ...settingsDict,
+  ...multirunWorkflowI18n.es,
   ...messagingI18n.es,
   'gitView.context.configure': 'Configurar repositorio',
   'gitView.context.description': 'Remotos que la identidad del repositorio no alcanza y acceso para submódulos y Git LFS. Las identidades están en los ajustes de Git.',
@@ -152,19 +161,24 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.es,
   ...referencePickerI18n.es,
   ...sessionMenuHintsI18n.es,
+  ...sessionErrorRecoveryI18n.es,
   ...sidebarLayoutI18n.es,
+  ...activityTimesI18n.es,
   ...projectKnowledgeI18n.es,
   ...linearPanelI18n.es,
   ...routingI18n.es,
+  ...poolSettingsI18n.es,
   ...pluginPanelI18n.es,
   ...surfacePanelI18n.es,
   ...fileArtifactsI18n.es,
   ...fileContentSearchI18n.es,
   ...htmlRenderI18n.es,
+  ...sessionLocationI18n.es,
   ...sessionNoticesI18n.es,
   ...usageStatsI18n.es,
   ...webSearchI18n.es,
   ...sessionWarmingI18n.es,
+  ...continueWithModelI18n.es,
   ...isolatedSpacesI18n.es,
   ...sourceBoardI18n.es,
   ...projectActionsI18n.es,
@@ -176,7 +190,9 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.es,
   ...integrationsCatalogI18n['es'],
   ...sessionGoalWriterI18n['es'],
+  ...subsessionModelsI18n['es'],
   ...diffFindI18n['es'],
+  ...questionAnswersI18n['es'],
   'terminalView.actions.attachSelection': 'Adjuntar salida seleccionada',
   'terminalView.actions.copySelection': 'Copiar salida seleccionada',
   'terminalView.toast.selectionCopied': 'Salida copiada',
@@ -485,6 +501,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.status.sent": "Enviado",
   "sessions.scheduledTasks.dialog.status.skipped": "Omitido",
   "sessions.scheduledTasks.dialog.status.cancelled": "Cancelado",
+  'sessions.scheduledTasks.dialog.status.timeout': 'Tiempo agotado',
   "sessions.scheduledTasks.dialog.nextRun.label": "Próximo",
   "sessions.scheduledTasks.dialog.lastRun.label": "Última ejecución",
   "sessions.scheduledTasks.dialog.lastRun.runningNow": "ejecutándose ahora",
@@ -602,6 +619,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.showWork": "Mostrar en curso",
   "sessions.sidebar.header.displayMode.showPinned": "Mostrar ancladas",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Filas detalladas",
+  "sessions.sidebar.header.displayMode.sidebarRows": "Filas de la barra lateral…",
   "sessions.sidebar.activity.pinnedTitle": "Ancladas",
   "sessions.sidebar.header.displayMode.showArchived": "Mostrar sesiones archivadas",
   "sessions.sidebar.header.displayMode.collapseAll": "Colapsar todo",
@@ -630,6 +648,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.viewMode.label": "Vista",
   "sessions.sidebar.header.viewMode.projects": "Árbol",
   "sessions.sidebar.header.viewMode.timeline": "Lista",
+  "sessions.sidebar.header.viewMode.headerless": "Ocultar encabezados de sección",
   "sessions.sidebar.activity.chatsEmpty": "Aún no hay chats.",
   "chat.chatInput.chooseProject": "Elegir proyecto",
   "sessions.archivePage.allDirectories": "Todos los directorios",
@@ -954,7 +973,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.actions.deleteLocalBranch": "Eliminar rama local",
   "sessions.sidebar.sessionDialogs.actions.deleting": "Eliminando…",
   "sessions.sidebar.sessionDialogs.actions.deleteWorktree": "Eliminar worktree",
-  "gitView.branch.branchToMergeInto": "Rama de destino del merge",
+  "gitView.branch.branchToMergeInto": "Rama a fusionar en {branch}",
   "gitView.branch.branchToRebaseOnto": "rama de destino del rebase",
   "gitView.branch.create": "Crear nueva rama...",
   "gitView.branch.currentBadge": "Actual",
@@ -993,11 +1012,11 @@ export const dict: Record<I18nKey, string> = {
   "gitView.branch.updateTitle": "Actualizar rama",
   "gitView.changes.changedFilesAria": "Archivos modificados",
   "gitView.changes.clearSelectionAria": "Limpiar selección de archivos",
-  "gitView.changes.collapseDirectoryAria": "Contraer directorio",
-  "gitView.changes.expandDirectoryAria": "Expandir directorio",
+  "gitView.changes.collapseDirectoryAria": "Contraer directorio {path}",
+  "gitView.changes.expandDirectoryAria": "Expandir directorio {path}",
   "gitView.changes.revertAll": "Revertir todo",
-  "gitView.changes.revertAllDescriptionPlural": "Se descartarán los cambios locales de todos los archivos de la lista.",
-  "gitView.changes.revertAllDescriptionSingle": "Se descartarán los cambios locales del archivo seleccionado.",
+  "gitView.changes.revertAllDescriptionPlural": "¿Revertir {count} archivos modificados? Esto no se puede deshacer.",
+  "gitView.changes.revertAllDescriptionSingle": "¿Revertir {count} archivo modificado? Esto no se puede deshacer.",
   "gitView.changes.revertAllDialogTitle": "¿Revertir todos los cambios?",
   "gitView.changes.revertDirectoryAria": "Revertir cambios en {path}",
   "gitView.changes.revertDirectory": "Revertir carpeta",
@@ -1005,18 +1024,18 @@ export const dict: Record<I18nKey, string> = {
   "gitView.changes.revertDirectoryDescriptionSingle": "Se descartarán los cambios locales de {count} archivo en {path}.",
   "gitView.changes.revertDirectoryDialogTitle": "¿Revertir cambios de la carpeta?",
   "gitView.changes.revertDirectoryTooltip": "Revertir cambios de la carpeta",
-  "gitView.changes.revertFileAria": "Revertir archivo",
+  "gitView.changes.revertFileAria": "Revertir cambios en {path}",
   "gitView.changes.revertFileTooltip": "Revertir cambios",
   "gitView.changes.reverting": "Revertiendo...",
   "gitView.changes.selectAllAria": "Seleccionar todos los archivos",
-  "gitView.changes.selectFileAria": "Seleccionar archivo",
+  "gitView.changes.selectFileAria": "Seleccionar {path}",
   "gitView.changes.stagedTitle": "Preparados",
   "gitView.changes.resizeSplitAria": "Ajustar tamaño de cambios preparados y sin preparar",
   "gitView.changes.stageAllAria": "Preparar todos los cambios",
   "gitView.changes.stageDirectoryAria": "Preparar todos los cambios en {path}",
   "gitView.changes.stageFileAria": "Preparar {path}",
   "gitView.changes.title": "Cambios",
-  "gitView.changes.toggleDirectorySelectionAria": "Alternar selección de directorio",
+  "gitView.changes.toggleDirectorySelectionAria": "Alternar selección de {path}",
   "gitView.changes.unstageAllAria": "Quitar todos los cambios del área preparada",
   "gitView.changes.unstageDirectoryAria": "Quitar del área preparada todos los cambios en {path}",
   "gitView.changes.unstageFileAria": "Quitar {path} del área preparada",
@@ -1055,12 +1074,12 @@ export const dict: Record<I18nKey, string> = {
   "gitView.common.done": "Hecho",
   "gitView.common.processing": "Procesando...",
   "gitView.common.reset": "Restablecer",
-  "gitView.conflict.abortOperation": "Abortar operación",
+  "gitView.conflict.abortOperation": "Abortar {operation}",
   "gitView.conflict.conflictedFiles": "Archivos en conflicto:",
   "gitView.conflict.continueLater": "Continuar más tarde",
-  "gitView.conflict.detectedDescription": "Se detectaron conflictos que debes resolver.",
-  "gitView.conflict.detectedTitle": "Conflictos detectados",
-  "gitView.conflict.errorLoadingDetails": "No se pudo cargar detalles",
+  "gitView.conflict.detectedDescription": "Resuelve los conflictos de {operation} para continuar.",
+  "gitView.conflict.detectedTitle": "Conflictos de {operation} detectados",
+  "gitView.conflict.errorLoadingDetails": "No se pudieron cargar los detalles del conflicto: {message}",
   "gitView.conflict.headInfo": "Información de HEAD:",
   "gitView.conflict.loadFailed": "No se pudo cargar",
   "gitView.conflict.loading": "Cargando detalles del conflicto...",
@@ -1079,8 +1098,8 @@ export const dict: Record<I18nKey, string> = {
   "gitView.header.updateBranch": "Actualizar rama",
   "gitView.header.openPullRequest": "Abrir pull request",
   "gitView.header.openRepository": "Ver repositorio en {provider}",
-  "gitView.header.removeRemoteAria": "Eliminar remoto",
-  "gitView.header.removeRemoteTitle": "Eliminar remoto",
+  "gitView.header.removeRemoteAria": "Eliminar remoto {name}",
+  "gitView.header.removeRemoteTitle": "Eliminar remoto {name}",
   "gitView.header.upstreamSynced": "sincronizado",
   "gitView.header.upstreamTooltip": "Comparado con {target}.",
   "gitView.header.upstreamTooltipTracking": "Comparado con {target}. Los indicadores principales de sincronización aún reflejan {tracking}.",
@@ -1138,15 +1157,15 @@ export const dict: Record<I18nKey, string> = {
   "gitView.integrate.cherryPickConflictToast": "Conflictos de cherry-pick detectados",
   "gitView.integrate.cherryPickContinueFailedToast": "No se pudo continuar el cherry-pick",
   "gitView.integrate.cherryPickFinishedToast": "Cherry-pick completado",
-  "gitView.integrate.commitsMovedDescriptionPlural": "Commits movidos",
-  "gitView.integrate.commitsMovedDescriptionSingle": "Commit movido",
+  "gitView.integrate.commitsMovedDescriptionPlural": "{count} commits movidos a {branch}",
+  "gitView.integrate.commitsMovedDescriptionSingle": "{count} commit movido a {branch}",
   "gitView.integrate.commitsMovedToast": "Commits movidos",
   "gitView.integrate.commitsToMove": "Commits por mover",
-  "gitView.integrate.conflictsInFiles": "Conflictos en archivos",
+  "gitView.integrate.conflictsInFiles": "Conflictos en {count} archivos",
   "gitView.integrate.currentCommit": "Commit actual",
   "gitView.integrate.currentSession": "Sesión actual",
   "gitView.integrate.failedToMoveToast": "No se pudieron mover los commits",
-  "gitView.integrate.moreFiles": "Más archivos",
+  "gitView.integrate.moreFiles": "{count} archivos más",
   "gitView.integrate.move": "Mover",
   "gitView.integrate.moveCommits": "Mover commits",
   "gitView.integrate.moving": "Moviendo…",
@@ -1158,10 +1177,10 @@ export const dict: Record<I18nKey, string> = {
   "gitView.integrate.previewUnavailable": "Vista previa no disponible",
   "gitView.integrate.showAll": "Mostrar todo",
   "gitView.integrate.showLess": "Mostrar menos",
-  "gitView.integrate.showingFirstCommits": "Mostrando los primeros commits",
+  "gitView.integrate.showingFirstCommits": "Mostrando los primeros {count} commits",
   "gitView.integrate.target": "Destino",
   "gitView.integrate.title": "Reintegrar commits",
-  "gitView.integrate.toMoveCount": "Commits por mover",
+  "gitView.integrate.toMoveCount": "{count} commits por mover",
   "gitView.operation.abort": "Abortar",
   "gitView.operation.continue": "Continuar",
   "gitView.operation.inProgressTitle": "{operation} en progreso",
@@ -1176,11 +1195,11 @@ export const dict: Record<I18nKey, string> = {
   "gitView.operation.readyToContinueHint": "Todos los conflictos están resueltos. Continúa para finalizar la operación.",
   "gitView.operation.resolveConflictsHint": "Resuelve los conflictos y luego continúa la operación.",
   "gitView.operation.resolveWithAi": "Resolver con IA",
-  "gitView.stash.confirmButton": "Guardar cambios y continuar",
-  "gitView.stash.description": "Tienes cambios sin commit que podrían sobrescribirse. Guárdalos temporalmente antes de continuar.",
+  "gitView.stash.confirmButton": "{operation}",
+  "gitView.stash.description": "Guarda temporalmente tus cambios locales antes de iniciar {operation}.",
   "gitView.stash.mergeWith": "Merge con",
   "gitView.stash.rebaseOnto": "Rebase sobre",
-  "gitView.stash.restoreAfterOperation": "Restaurar después de la operación",
+  "gitView.stash.restoreAfterOperation": "Restaurar los cambios guardados después de {operation}",
   "gitView.stash.restoreAria": "Restaurar stash",
   "gitView.stash.stepRestore": "Restaura tus cambios guardados",
   "gitView.stash.stepStash": "Guarda tus cambios sin commit",
@@ -1283,6 +1302,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.pr.checks.openRun": "Abrir",
   "gitView.pr.checks.failedAnnotations": "Anotaciones fallidas",
   "gitView.pr.checks.failedAnnotationsShown": "Anotaciones fallidas (se muestran {shown} de {total})",
+  "gitView.pr.checks.annotationsTruncated": "Las anotaciones están incompletas: esta ejecución tiene más anotaciones de las que pudieron cargarse.",
   "gitView.pr.field.baseBranch": "Rama base",
   "gitView.pr.field.description": "Descripción",
   "gitView.pr.field.title": "Título",
@@ -1858,6 +1878,8 @@ export const dict: Record<I18nKey, string> = {
   "diffView.nestedRepository.noChanges": "No hay cambios en este repositorio",
   "diffView.unavailable.untrackedDirectoryTitle": "Carpeta con archivos nuevos",
   "diffView.unavailable.untrackedDirectoryDescription": "Esta carpeta contiene demasiados archivos nuevos para listarlos uno por uno. Prepárala (stage) o añádela a .gitignore si no pertenece al repositorio.",
+  "diffView.unavailable.tooLargeTitle": "El archivo es demasiado grande para mostrar el diff",
+  "diffView.unavailable.tooLargeDescription": "Supera el límite de 20 MiB para diffs de archivos.",
   "diffView.submodule.title": "Submódulo",
   "diffView.submodule.commitChanged": "Commit {from} → {to}",
   "diffView.submodule.commitUnchanged": "Sigue en el commit {commit}",
@@ -2570,6 +2592,19 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.modelAttribution.failoverLabel": "Conmutado por error desde",
   "chat.messageBody.modelChanged.notice": "Modelo cambiado: {from} → {to}",
   "chat.messageBody.modelChanged.noticeWithReason": "Modelo cambiado: {from} → {to} ({reason})",
+  "chat.messageBody.modelChanged.preferPrevious": "Preferir el anterior",
+  "chat.messageBody.modelChanged.preferPreviousTitle": "Hacer que los pools de modelos prefieran {model} durante un día",
+  "chat.currentModel.label": "Modelo actual: {model}",
+  "chat.currentModel.labelWithPool": "Modelo actual: {model} del pool {pool}",
+  "chat.currentModel.menu.openHint": "Haz clic para elegir un modelo",
+  "chat.currentModel.menu.timing": "Cambiar",
+  "chat.currentModel.menu.directPickHelp": "Una selección directa desactiva el cambio automático del pool hasta que vuelvas a él.",
+  "chat.currentModel.timing.immediately": "Ahora (reinicia una respuesta en curso)",
+  "chat.currentModel.timing.nextStep": "En el siguiente paso",
+  "chat.currentModel.timing.nextInput": "Con el siguiente mensaje",
+  "chat.currentModel.menu.members": "Modelos del pool {pool}",
+  "chat.currentModel.menu.returnToPool": "Volver al pool {pool}",
+  "chat.currentModel.toast.failed": "No se pudo cambiar el modelo",
   "chat.generatedResult.actions.copy": "Copiar",
   "chat.generatedResult.actions.copied": "Copiado",
   "chat.generatedResult.commit.title": "Mensaje de commit generado",
@@ -3046,6 +3081,7 @@ export const dict: Record<I18nKey, string> = {
   "mcpDropdown.status.needsAuth": "Necesita autenticación",
   "mcpDropdown.status.needsRegistration": "Necesita registro: {error}",
   "mcpDropdown.empty.configureInConfig": "Configura los servidores MCP en Ajustes.",
+  "mcpDropdown.cacheNote": "Activar o desactivar un servidor con Code Mode apagado hace que el siguiente turno de una sesión en curso no use la caché del prompt.",
   "sessionAuth.error.rateLimitTitle": "Demasiados intentos",
   "sessionAuth.error.networkTitle": "No se puede alcanzar el servidor",
   "sessionAuth.error.rateLimitDescriptionSingle": "Por favor, espera {minutes} minuto antes de intentarlo de nuevo.",
@@ -3850,8 +3886,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': 'Quedarme con este',
   'multirun.overview.addModel.action': 'Añadir un modelo',
   'multirun.overview.addModel.hint': 'El mismo prompt en un modelo más dentro de esta ejecución',
-  'chat.parallel.settings.whereShared': 'Directorio del proyecto',
-  'chat.parallel.settings.whereSharedHint': 'Todas las ejecuciones trabajan en tu copia. Ideal para preguntas e investigación.',
+  'chat.parallel.settings.whereShared': 'Directorio compartido',
+  'chat.parallel.settings.whereSharedHint': 'Todas las ejecuciones trabajan en el directorio elegido para este borrador. Ideal para preguntas e investigación.',
   'chat.parallel.settings.whereWorktrees': 'Worktrees separados',
   'chat.parallel.settings.whereWorktreesHint': 'Cada ejecución tiene su propia rama, así los cambios de código nunca chocan. Quédate con la mejor.',
   'chat.parallel.settings.baseBranchTitle': 'Rama base',

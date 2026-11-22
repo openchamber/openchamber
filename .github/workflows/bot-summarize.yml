@@ -7,6 +7,7 @@ on:
 # Comment runs never cancel an active run, so with the default single
 # queue a third summarize command on the same issue silently replaces
 # the pending second one. Queue every run.
+  workflow_dispatch:
 concurrency:
   group: bot-summarize-${{ github.event_name }}-${{ github.event.issue.number }}
   cancel-in-progress: false

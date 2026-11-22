@@ -1,4 +1,5 @@
 import { readDiskCache, writeDiskCache } from './disk-cache.js';
+import { readBoundedResponseText } from '../shared/response-body.js';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const CACHE_TTL_MS = 3 * 60 * 60 * 1000;
@@ -7,9 +8,28 @@ const FAILURE_CACHE_TTL_MS = 5 * 60 * 1000;
 // metadata enrichment can never abort catalog loading.
 const FETCH_TIMEOUT_MS = 1500;
 const DISK_CACHE_FILE = 'skills-github-meta.json';
+// Repo metadata needs only two scalar fields and ordinary responses are a
+// few KiB; cap the body at 1 MiB (matching the GitLab auth-body precedent)
+// so an oversized response cannot be buffered whole into the server.
+const REPO_META_MAX_BYTES = 1 * 1024 * 1024;
 
 const metaCache = new Map();
 const inFlight = new Map();
+
+/** Remove expired entries so they do not accumulate until re-read. */
+export function pruneExpiredGitHubMeta(now = Date.now()) {
+  for (const [repo, entry] of metaCache.entries()) {
+    if (!entry || typeof entry.expiresAt !== 'number' || now >= entry.expiresAt) {
+      metaCache.delete(repo);
+    }
+  }
+  return metaCache.size;
+}
+
+/** Raw entry count for tests (no implicit prune). */
+export function getGitHubMetaCacheSize() {
+  return metaCache.size;
+}
 
 let diskLoaded = false;
 let diskWriteTimer = null;
@@ -71,9 +91,14 @@ const parseMeta = (payload) => {
 
 const fetchRepoMeta = async (normalizedRepo) => {
   loadDiskEntries();
+  pruneExpiredGitHubMeta();
   const cached = metaCache.get(normalizedRepo);
-  if (cached && Date.now() < cached.expiresAt) {
-    return cached.value;
+  if (cached) {
+    if (Date.now() >= cached.expiresAt) {
+      metaCache.delete(normalizedRepo);
+    } else {
+      return cached.value;
+    }
   }
 
   const existing = inFlight.get(normalizedRepo);
@@ -98,7 +123,15 @@ const fetchRepoMeta = async (normalizedRepo) => {
         return null;
       }
 
-      const value = parseMeta(await response.json());
+      const read = await readBoundedResponseText(response, REPO_META_MAX_BYTES);
+      if (read.tooLarge) {
+        // Over-cap must flow through the failure-cache path below, not
+        // resolve as a (non-cached) null parse.
+        throw new Error(`GitHub repo-meta response exceeded ${REPO_META_MAX_BYTES} bytes`);
+      }
+      // Response.json() strips a leading UTF-8 BOM; the bounded reader
+      // does not, so strip it here. Invalid JSON throws, as before.
+      const value = parseMeta(JSON.parse(read.text.replace(/^\uFEFF/, '')));
       if (value) {
         metaCache.set(normalizedRepo, { expiresAt: Date.now() + CACHE_TTL_MS, value });
         scheduleDiskWrite();

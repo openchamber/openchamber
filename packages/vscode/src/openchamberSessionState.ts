@@ -36,6 +36,11 @@ import { renameWithRetry } from './bridge-atomic-write';
 
 const ARCHIVE_FILE_NAME = 'sessions-archive.json';
 const METADATA_FILE_NAME = 'sessions-metadata.json';
+// Match the web durable JSON store's 32 MiB cap for these shared files.
+const MAX_SESSION_STATE_FILE_BYTES = 32 * 1024 * 1024;
+const SESSION_STATE_READ_CHUNK_BYTES = 64 * 1024;
+const SESSION_STATE_OPEN_FLAGS =
+  process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
 type JsonObject = { [key: string]: JsonValue };
@@ -50,8 +55,14 @@ export type SessionMetadata = JsonObject;
 type ArchivedSessions = Record<string, number | null>;
 type StoredSessionMetadata = Record<string, SessionMetadata>;
 
+type SessionStateFileHandle = {
+  stat: () => Promise<{ isFile: () => boolean; size: number }>;
+  read: (buffer: Buffer, offset: number, length: number, position: number) => Promise<{ bytesRead: number }>;
+  close: () => Promise<void>;
+};
+
 export type SessionStateFs = {
-  readFile: (filePath: string, encoding: 'utf8') => Promise<string>;
+  open: (filePath: string, flags: string | number) => Promise<SessionStateFileHandle>;
   writeFile: (filePath: string, data: string, encoding: 'utf8') => Promise<void>;
   rename: (from: string, to: string) => Promise<void>;
   mkdir: (dirPath: string, options: { recursive: true }) => Promise<string | undefined>;
@@ -159,14 +170,45 @@ export const createSessionStateStore = ({
 
   /**
    * Parses one state file. A missing file is the normal first run and reads
-   * as empty; unreadable bytes are moved aside so the next write cannot
-   * overwrite what the user had, and read as empty too. An I/O failure other
-   * than "missing" is reported as `null`: unknown, not empty.
+   * as empty. Over-cap, non-regular, and other I/O failures are unknown and
+   * return `null`; malformed JSON is moved aside before reading as empty.
    */
   const readJsonObjectFile = async (filePath: string): Promise<JsonObject | null> => {
     let raw: string;
     try {
-      raw = await fsPromises.readFile(filePath, 'utf8');
+      const handle = await fsPromises.open(filePath, SESSION_STATE_OPEN_FLAGS);
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile()) {
+          console.warn(`[openchamber-sessions] could not read ${path.basename(filePath)}: not a regular file`);
+          return null;
+        }
+        if (stat.size > MAX_SESSION_STATE_FILE_BYTES) {
+          console.warn(
+            `[openchamber-sessions] could not read ${path.basename(filePath)}: exceeds ${MAX_SESSION_STATE_FILE_BYTES} bytes`,
+          );
+          return null;
+        }
+
+        const chunks: Buffer[] = [];
+        let total = 0;
+        while (total <= MAX_SESSION_STATE_FILE_BYTES) {
+          const chunk = Buffer.alloc(Math.min(SESSION_STATE_READ_CHUNK_BYTES, MAX_SESSION_STATE_FILE_BYTES + 1 - total));
+          const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+          if (bytesRead === 0) break;
+          chunks.push(chunk.subarray(0, bytesRead));
+          total += bytesRead;
+        }
+        if (total > MAX_SESSION_STATE_FILE_BYTES) {
+          console.warn(
+            `[openchamber-sessions] could not read ${path.basename(filePath)}: exceeds ${MAX_SESSION_STATE_FILE_BYTES} bytes`,
+          );
+          return null;
+        }
+        raw = Buffer.concat(chunks, total).toString('utf8');
+      } finally {
+        await handle.close();
+      }
     } catch (error) {
       if (error instanceof Error && isMissingFileError(error)) return {};
       console.warn(`[openchamber-sessions] could not read ${path.basename(filePath)}:`, describeError(error));

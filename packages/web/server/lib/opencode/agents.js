@@ -40,6 +40,7 @@ import {
 
 const USER_AGENT_DIRS = ['agents', 'agent', 'modes', 'mode'].map((name) => path.join(OPENCODE_CONFIG_DIR, name));
 const PROJECT_AGENT_DIR_NAMES = ['agents', 'agent', 'modes', 'mode'];
+const AGENT_WALK_MAX_DIRS = 5000;
 
 /** Ensure the v2 project agent directory exists. */
 function ensureProjectAgentDir(workingDirectory) {
@@ -84,30 +85,39 @@ function buildUserAgentIndex(cache) {
   if (cache.userAgentIndexReady) return;
   cache.userAgentIndexReady = true;
 
-  const dirsToVisit = USER_AGENT_DIRS.filter((dir) => fs.existsSync(dir));
-  while (dirsToVisit.length > 0) {
-    const dir = dirsToVisit.pop();
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
+  // Each seed is a separate root. Once a root uses its 5000-directory budget,
+  // its remaining stack is skipped and the index keeps the files found so far.
+  for (const rootDir of [...USER_AGENT_DIRS].reverse()) {
+    if (!fs.existsSync(rootDir)) continue;
+    const dirsToVisit = [rootDir];
+    let visitedDirs = 0;
+    while (dirsToVisit.length > 0 && visitedDirs < AGENT_WALK_MAX_DIRS) {
+      const dir = dirsToVisit.pop();
+      if (!dir) continue;
+      visitedDirs += 1;
 
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-      const agentName = entry.name.slice(0, -3);
-      if (!cache.userAgentIndexByName.has(agentName)) {
-        cache.userAgentIndexByName.set(agentName, path.join(dir, entry.name));
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
       }
-    }
 
-    for (let i = entries.length - 1; i >= 0; i -= 1) {
-      const entry = entries[i];
-      if (entry.isDirectory()) {
-        dirsToVisit.push(path.join(dir, entry.name));
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+        const agentName = entry.name.slice(0, -3);
+        if (!cache.userAgentIndexByName.has(agentName)) {
+          cache.userAgentIndexByName.set(agentName, path.join(dir, entry.name));
+        }
+      }
+
+      for (let i = entries.length - 1; i >= 0; i -= 1) {
+        const entry = entries[i];
+        if (entry.isDirectory()) {
+          dirsToVisit.push(path.join(dir, entry.name));
+        }
       }
     }
   }
@@ -542,20 +552,26 @@ function deleteAgent(agentName, workingDirectory, scope) {
 // ============== DISABLED ==============
 
 /** Agent ids under one agents directory, nested ones as `group/name`. */
-function collectAgentIds(dir, prefix, ids) {
+function collectAgentIds(dir, prefix, ids, budget = { visitedDirs: 0 }) {
+  // Propagate truncation so ancestor walks also stop at the first unvisited directory.
+  if (budget.visitedDirs >= AGENT_WALK_MAX_DIRS) return true;
+  budget.visitedDirs += 1;
+
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return;
+    return false;
   }
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      collectAgentIds(path.join(dir, entry.name), `${prefix}${entry.name}/`, ids);
+      const truncated = collectAgentIds(path.join(dir, entry.name), `${prefix}${entry.name}/`, ids, budget);
+      if (truncated) return true;
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
       ids.add(`${prefix}${entry.name.slice(0, -3)}`);
     }
   }
+  return false;
 }
 
 /**

@@ -65,6 +65,32 @@ describe('plan routes', () => {
     expect(listed.body.notes.map((note) => note.text)).toEqual(['ran out of claude too fast']);
   });
 
+  it('defaults malformed note limits and clamps valid limits', async () => {
+    const dataDir = dir();
+    const notes = Array.from({ length: 505 }, (_value, index) => JSON.stringify({
+      id: `note-${index}`,
+      at: new Date(Date.parse(NOW) + index * 1000).toISOString(),
+      kind: 'other',
+      text: `note ${index}`,
+      source: 'user',
+    }));
+    fs.writeFileSync(path.join(dataDir, 'plan-notes.jsonl'), `${notes.join('\n')}\n`);
+    const app = createApp(dataDir);
+
+    for (const limit of ['10junk', '2.9', '1e3']) {
+      const listed = await request(app).get('/api/routing/plans/notes').query({ limit }).expect(200);
+      expect(listed.body.notes).toHaveLength(50);
+      expect(listed.body.notes[0].text).toBe('note 455');
+    }
+
+    const ten = await request(app).get('/api/routing/plans/notes?limit=10').expect(200);
+    expect(ten.body.notes).toHaveLength(10);
+    const two = await request(app).get('/api/routing/plans/notes?limit=2').expect(200);
+    expect(two.body.notes).toHaveLength(2);
+    const capped = await request(app).get('/api/routing/plans/notes?limit=500').expect(200);
+    expect(capped.body.notes).toHaveLength(500);
+  });
+
   it('refuses to write over a malformed plan file, and leaves it as it was', async () => {
     const dataDir = dir();
     fs.writeFileSync(path.join(dataDir, 'plans.json'), '{ broken');

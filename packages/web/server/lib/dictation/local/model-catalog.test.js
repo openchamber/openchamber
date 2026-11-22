@@ -1,11 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_LOCAL_TTS_MODEL,
+  LOCAL_STT_MODEL_CATALOG,
   LOCAL_TTS_MODEL_CATALOG,
   getLocalSttModelSpec,
   getLocalTtsDefaultSpeaker,
   resolveLocalTtsModelForLanguage,
 } from './model-catalog.js';
+
+describe('local model catalog pins', () => {
+  it('pins a byte size and sha256 for every STT and TTS archive', () => {
+    for (const catalog of [LOCAL_STT_MODEL_CATALOG, LOCAL_TTS_MODEL_CATALOG]) {
+      for (const [id, spec] of Object.entries(catalog)) {
+        expect(Number.isInteger(spec.bytes) && spec.bytes > 0, id).toBe(true);
+        expect(spec.sha256, id).toMatch(/^[0-9a-f]{64}$/);
+      }
+    }
+  });
+});
+
+describe('getLocalSttModelSpec', () => {
+  it('rejects Object.prototype member names with the unknown-id error (#988)', () => {
+    for (const modelId of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      expect(() => getLocalSttModelSpec(modelId), modelId).toThrowError(
+        `Unknown local speech model id: ${modelId}`,
+      );
+    }
+  });
+
+  it('still resolves a real catalog id', () => {
+    const [id] = Object.keys(LOCAL_STT_MODEL_CATALOG);
+    const spec = getLocalSttModelSpec(id);
+    expect(spec.id).toBe(id);
+    expect(Array.isArray(spec.requiredFiles)).toBe(true);
+  });
+});
 
 describe('local TTS catalog', () => {
   it('keeps the selected model when it speaks the language', () => {

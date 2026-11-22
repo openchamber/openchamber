@@ -1,22 +1,28 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './uk.settings';
+import { multirunWorkflowI18n } from './multirun-workflow.i18n';
 import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { continueWithModelI18n } from './continue-with-model.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
@@ -28,7 +34,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode входить до складу OpenChamber. Оновіть OpenChamber, щоб отримати OpenCode v2.",
@@ -77,6 +85,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': 'Залучено сабагентів: {count}',
   'sessions.sidebar.projectAction.active': 'Виконується дія проєкту',
   ...settingsDict,
+  ...multirunWorkflowI18n.uk,
   ...messagingI18n.uk,
   'gitView.context.configure': 'Налаштувати репозиторій',
   'gitView.context.description': 'Remote, до яких ідентичність репозиторію не дістає, і доступ для сабмодулів і Git LFS. Ідентичності — в налаштуваннях Git.',
@@ -152,19 +161,24 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.uk,
   ...referencePickerI18n.uk,
   ...sessionMenuHintsI18n.uk,
+  ...sessionErrorRecoveryI18n.uk,
   ...sidebarLayoutI18n.uk,
+  ...activityTimesI18n.uk,
   ...projectKnowledgeI18n.uk,
   ...linearPanelI18n.uk,
   ...routingI18n.uk,
+  ...poolSettingsI18n.uk,
   ...pluginPanelI18n.uk,
   ...surfacePanelI18n.uk,
   ...fileArtifactsI18n.uk,
   ...fileContentSearchI18n.uk,
   ...htmlRenderI18n.uk,
+  ...sessionLocationI18n.uk,
   ...sessionNoticesI18n.uk,
   ...usageStatsI18n.uk,
   ...webSearchI18n.uk,
   ...sessionWarmingI18n.uk,
+  ...continueWithModelI18n.uk,
   ...isolatedSpacesI18n.uk,
   ...sourceBoardI18n.uk,
   ...projectActionsI18n.uk,
@@ -176,7 +190,9 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.uk,
   ...integrationsCatalogI18n['uk'],
   ...sessionGoalWriterI18n['uk'],
+  ...subsessionModelsI18n['uk'],
   ...diffFindI18n['uk'],
+  ...questionAnswersI18n['uk'],
   'terminalView.actions.attachSelection': 'Прикріпити вибраний вивід',
   'terminalView.actions.copySelection': 'Скопіювати вибраний вивід',
   'terminalView.toast.selectionCopied': 'Вивід скопійовано',
@@ -485,6 +501,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.status.sent": "Надіслано",
   "sessions.scheduledTasks.dialog.status.skipped": "Пропущено",
   "sessions.scheduledTasks.dialog.status.cancelled": "Скасовано",
+  'sessions.scheduledTasks.dialog.status.timeout': 'Час вичерпано',
   "sessions.scheduledTasks.dialog.nextRun.label": "Далі",
   "sessions.scheduledTasks.dialog.lastRun.label": "Останній запуск",
   "sessions.scheduledTasks.dialog.lastRun.runningNow": "виконується зараз",
@@ -602,6 +619,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.showWork": "Показувати «В роботі»",
   "sessions.sidebar.header.displayMode.showPinned": "Показувати «Закріплені»",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Детальні рядки",
+  "sessions.sidebar.header.displayMode.sidebarRows": "Рядки бічної панелі…",
   "sessions.sidebar.activity.pinnedTitle": "Закріплені",
   "sessions.sidebar.header.displayMode.showArchived": "Показувати архівовані сесії",
   "sessions.sidebar.header.displayMode.collapseAll": "Згорнути все",
@@ -630,6 +648,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.viewMode.label": "Вигляд",
   "sessions.sidebar.header.viewMode.projects": "Деревом",
   "sessions.sidebar.header.viewMode.timeline": "Списком",
+  "sessions.sidebar.header.viewMode.headerless": "Сховати заголовки розділів",
   "sessions.sidebar.activity.chatsEmpty": "Чатів ще немає.",
   "chat.chatInput.chooseProject": "Вибрати проєкт",
   "sessions.archivePage.allDirectories": "Всі директорії",
@@ -993,11 +1012,11 @@ export const dict: Record<I18nKey, string> = {
   "gitView.branch.updateTitle": "Оновлення гілки",
   "gitView.changes.changedFilesAria": "Змінені файли",
   "gitView.changes.clearSelectionAria": "Очистити вибір файлу",
-  "gitView.changes.collapseDirectoryAria": "Згорнути каталог",
-  "gitView.changes.expandDirectoryAria": "Розгорнути каталог",
+  "gitView.changes.collapseDirectoryAria": "Згорнути каталог {path}",
+  "gitView.changes.expandDirectoryAria": "Розгорнути каталог {path}",
   "gitView.changes.revertAll": "Скасувати все",
-  "gitView.changes.revertAllDescriptionPlural": "Скасувати зміни у вибраних файлах?",
-  "gitView.changes.revertAllDescriptionSingle": "Скасувати зміни у вибраному файлі?",
+  "gitView.changes.revertAllDescriptionPlural": "Скасувати зміни у {count} файлах? Це не можна буде повернути.",
+  "gitView.changes.revertAllDescriptionSingle": "Скасувати зміни у {count} файлі? Це не можна буде повернути.",
   "gitView.changes.revertAllDialogTitle": "Скасувати всі зміни?",
   "gitView.changes.revertDirectoryAria": "Скасувати зміни в каталозі {path}",
   "gitView.changes.revertDirectory": "Скасувати папку",
@@ -1005,18 +1024,18 @@ export const dict: Record<I18nKey, string> = {
   "gitView.changes.revertDirectoryDescriptionSingle": "Локальні зміни в {count} файлі у {path} буде відкинуто.",
   "gitView.changes.revertDirectoryDialogTitle": "Скасувати зміни в папці?",
   "gitView.changes.revertDirectoryTooltip": "Скасувати зміни в папці",
-  "gitView.changes.revertFileAria": "Скасувати зміни у файлі",
+  "gitView.changes.revertFileAria": "Скасувати зміни у {path}",
   "gitView.changes.revertFileTooltip": "Скасувати зміни",
   "gitView.changes.reverting": "Скасування...",
   "gitView.changes.selectAllAria": "Вибрати всі файли",
-  "gitView.changes.selectFileAria": "Вибрати файл",
+  "gitView.changes.selectFileAria": "Вибрати {path}",
   "gitView.changes.stagedTitle": "Індексовані",
   "gitView.changes.resizeSplitAria": "Змінити розмір індексованих і неіндексованих змін",
   "gitView.changes.stageAllAria": "Додати всі зміни до індексу",
   "gitView.changes.stageDirectoryAria": "Додати до індексу всі зміни в {path}",
   "gitView.changes.stageFileAria": "Додати {path} до індексу",
   "gitView.changes.title": "Зміни",
-  "gitView.changes.toggleDirectorySelectionAria": "Перемкнути вибір каталогу",
+  "gitView.changes.toggleDirectorySelectionAria": "Перемкнути вибір каталогу {path}",
   "gitView.changes.unstageAllAria": "Прибрати всі зміни з індексу",
   "gitView.changes.unstageDirectoryAria": "Прибрати з індексу всі зміни в {path}",
   "gitView.changes.unstageFileAria": "Прибрати {path} з індексу",
@@ -1055,12 +1074,12 @@ export const dict: Record<I18nKey, string> = {
   "gitView.common.done": "Готово",
   "gitView.common.processing": "Обробка...",
   "gitView.common.reset": "Скинути",
-  "gitView.conflict.abortOperation": "Перервати операцію",
+  "gitView.conflict.abortOperation": "Перервати {operation}",
   "gitView.conflict.conflictedFiles": "Конфліктні файли:",
   "gitView.conflict.continueLater": "Продовжити пізніше",
-  "gitView.conflict.detectedDescription": "Виявлено конфлікт. Вирішіть його в поточній або новій сесії.",
-  "gitView.conflict.detectedTitle": "Виявлено конфлікт Git",
-  "gitView.conflict.errorLoadingDetails": "Помилка завантаження деталей",
+  "gitView.conflict.detectedDescription": "Вирішіть конфлікти {operation}, щоб продовжити.",
+  "gitView.conflict.detectedTitle": "Виявлено конфлікти {operation}",
+  "gitView.conflict.errorLoadingDetails": "Не вдалося завантажити деталі конфлікту: {message}",
   "gitView.conflict.headInfo": "Інформація HEAD:",
   "gitView.conflict.loadFailed": "Помилка завантаження",
   "gitView.conflict.loading": "Завантаження деталей конфлікту...",
@@ -1079,8 +1098,8 @@ export const dict: Record<I18nKey, string> = {
   "gitView.header.updateBranch": "Оновити гілку",
   "gitView.header.openPullRequest": "Відкрити pull request",
   "gitView.header.openRepository": "Переглянути репозиторій на {provider}",
-  "gitView.header.removeRemoteAria": "Видалити remote",
-  "gitView.header.removeRemoteTitle": "Видалити remote",
+  "gitView.header.removeRemoteAria": "Видалити remote {name}",
+  "gitView.header.removeRemoteTitle": "Видалити remote {name}",
   "gitView.header.upstreamSynced": "синхронізовано",
   "gitView.header.upstreamTooltip": "Порівняно з {target}.",
   "gitView.header.upstreamTooltipTracking": "Порівняно з {target}. Основні індикатори синхронізації все ще відображають {tracking}.",
@@ -1138,15 +1157,15 @@ export const dict: Record<I18nKey, string> = {
   "gitView.integrate.cherryPickConflictToast": "Виявлено конфлікти cherry-pick",
   "gitView.integrate.cherryPickContinueFailedToast": "Не вдалося продовжити cherry-pick",
   "gitView.integrate.cherryPickFinishedToast": "Cherry-pick завершено",
-  "gitView.integrate.commitsMovedDescriptionPlural": "Коміти переміщено",
-  "gitView.integrate.commitsMovedDescriptionSingle": "Коміт переміщено",
+  "gitView.integrate.commitsMovedDescriptionPlural": "Переміщено {count} комітів до {branch}.",
+  "gitView.integrate.commitsMovedDescriptionSingle": "Переміщено {count} коміт до {branch}.",
   "gitView.integrate.commitsMovedToast": "Коміти переміщено",
   "gitView.integrate.commitsToMove": "Коміти для переміщення",
-  "gitView.integrate.conflictsInFiles": "Конфлікти у файлах",
+  "gitView.integrate.conflictsInFiles": "Конфлікти у {count} файлах",
   "gitView.integrate.currentCommit": "Поточний коміт",
   "gitView.integrate.currentSession": "Поточна сесія",
   "gitView.integrate.failedToMoveToast": "Не вдалося перемістити коміти",
-  "gitView.integrate.moreFiles": "Більше файлів",
+  "gitView.integrate.moreFiles": "Ще {count} файлів",
   "gitView.integrate.move": "Перемістити",
   "gitView.integrate.moveCommits": "Переміщення комітів",
   "gitView.integrate.moving": "Переміщення…",
@@ -1158,10 +1177,10 @@ export const dict: Record<I18nKey, string> = {
   "gitView.integrate.previewUnavailable": "Попередній перегляд недоступний",
   "gitView.integrate.showAll": "Показати все",
   "gitView.integrate.showLess": "Показати менше",
-  "gitView.integrate.showingFirstCommits": "Показано перші коміти",
+  "gitView.integrate.showingFirstCommits": "Показано перші {count} комітів",
   "gitView.integrate.target": "Ціль",
   "gitView.integrate.title": "Перенесення комітів",
-  "gitView.integrate.toMoveCount": "До переміщення",
+  "gitView.integrate.toMoveCount": "{count} до переміщення",
   "gitView.operation.abort": "Перервати",
   "gitView.operation.continue": "Продовжити",
   "gitView.operation.inProgressTitle": "Виконується {operation}",
@@ -1176,11 +1195,11 @@ export const dict: Record<I18nKey, string> = {
   "gitView.operation.readyToContinueHint": "Усі конфлікти вирішено. Продовжте, щоб завершити операцію.",
   "gitView.operation.resolveConflictsHint": "Вирішіть конфлікти, потім продовжіть операцію.",
   "gitView.operation.resolveWithAi": "Вирішити за допомогою ШІ",
-  "gitView.stash.confirmButton": "Підтвердити",
-  "gitView.stash.description": "Опис",
+  "gitView.stash.confirmButton": "{operation}",
+  "gitView.stash.description": "Збережіть локальні зміни в stash перед початком {operation}.",
   "gitView.stash.mergeWith": "Злити з",
   "gitView.stash.rebaseOnto": "Перебазувати на",
-  "gitView.stash.restoreAfterOperation": "Відновити після операції",
+  "gitView.stash.restoreAfterOperation": "Відновити збережені зміни після {operation}",
   "gitView.stash.restoreAria": "Відновити stash",
   "gitView.stash.stepRestore": "Відновити відкладені зміни",
   "gitView.stash.stepStash": "Сховати незакомічені зміни",
@@ -1283,6 +1302,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.pr.checks.openRun": "Відкрити",
   "gitView.pr.checks.failedAnnotations": "Анотації з помилками",
   "gitView.pr.checks.failedAnnotationsShown": "Анотації з помилками (показано {shown} з {total})",
+  "gitView.pr.checks.annotationsTruncated": "Анотації неповні — у цьому запуску більше анотацій, ніж вдалося завантажити.",
   "gitView.pr.field.baseBranch": "Базова гілка",
   "gitView.pr.field.description": "Опис",
   "gitView.pr.field.title": "Назва",
@@ -1858,6 +1878,8 @@ export const dict: Record<I18nKey, string> = {
   "diffView.nestedRepository.noChanges": "У цьому репозиторії немає змін",
   "diffView.unavailable.untrackedDirectoryTitle": "Тека з новими файлами",
   "diffView.unavailable.untrackedDirectoryDescription": "У цій теці забагато нових файлів, щоб показувати їх окремо. Застейджте її або додайте в .gitignore, якщо їй не місце в репозиторії.",
+  "diffView.unavailable.tooLargeTitle": "Файл завеликий для відображення diff",
+  "diffView.unavailable.tooLargeDescription": "Він перевищує ліміт 20 MiB для diff файлів.",
   "diffView.submodule.title": "Субмодуль",
   "diffView.submodule.commitChanged": "Коміт {from} → {to}",
   "diffView.submodule.commitUnchanged": "Досі на коміті {commit}",
@@ -2570,6 +2592,19 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.modelAttribution.failoverLabel": "Перемкнуто з",
   "chat.messageBody.modelChanged.notice": "Модель змінено: {from} → {to}",
   "chat.messageBody.modelChanged.noticeWithReason": "Модель змінено: {from} → {to} ({reason})",
+  "chat.messageBody.modelChanged.preferPrevious": "Віддати перевагу попередній",
+  "chat.messageBody.modelChanged.preferPreviousTitle": "Нехай пули моделей протягом дня віддають перевагу {model}",
+  "chat.currentModel.label": "Поточна модель: {model}",
+  "chat.currentModel.labelWithPool": "Поточна модель: {model} з пулу {pool}",
+  "chat.currentModel.menu.openHint": "Натисніть, щоб вибрати модель",
+  "chat.currentModel.menu.timing": "Перемкнути",
+  "chat.currentModel.menu.directPickHelp": "Прямий вибір вимикає перехід на резервну модель до повернення в пул.",
+  "chat.currentModel.timing.immediately": "Зараз (перезапускає поточну відповідь)",
+  "chat.currentModel.timing.nextStep": "На наступному кроці",
+  "chat.currentModel.timing.nextInput": "З наступним повідомленням",
+  "chat.currentModel.menu.members": "Моделі в пулі {pool}",
+  "chat.currentModel.menu.returnToPool": "Повернутися до пулу {pool}",
+  "chat.currentModel.toast.failed": "Не вдалося перемкнути модель",
   "chat.generatedResult.actions.copy": "Копіювати",
   "chat.generatedResult.actions.copied": "Скопійовано",
   "chat.generatedResult.commit.title": "Згенероване повідомлення коміту",
@@ -3046,6 +3081,7 @@ export const dict: Record<I18nKey, string> = {
   "mcpDropdown.status.needsAuth": "Потребує аутентифікації",
   "mcpDropdown.status.needsRegistration": "Потребує реєстрації: {error}",
   "mcpDropdown.empty.configureInConfig": "Налаштуйте сервери MCP у Налаштуваннях.",
+  "mcpDropdown.cacheNote": "Якщо перемкнути сервер із вимкненим Code Mode, наступний хід активної сесії не використає кеш промпту.",
   "sessionAuth.error.rateLimitTitle": "Забагато спроб",
   "sessionAuth.error.networkTitle": "Неможливо отримати доступ до сервера",
   "sessionAuth.error.rateLimitDescriptionSingle": "Зачекайте {minutes} хвилину перед повторною спробою.",
@@ -3850,8 +3886,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': 'Залишити цей',
   'multirun.overview.addModel.action': 'Додати модель',
   'multirun.overview.addModel.hint': 'Той самий промпт ще на одній моделі в цьому запуску',
-  'chat.parallel.settings.whereShared': 'Папка проєкту',
-  'chat.parallel.settings.whereSharedHint': 'Усі запуски працюють у вашій робочій копії. Найкраще для питань і досліджень.',
+  'chat.parallel.settings.whereShared': 'Спільна папка',
+  'chat.parallel.settings.whereSharedHint': 'Усі запуски працюють у папці, вибраній для цієї чернетки. Найкраще для питань і досліджень.',
   'chat.parallel.settings.whereWorktrees': 'Окремі worktree',
   'chat.parallel.settings.whereWorktreesHint': 'Кожен запуск отримує власну гілку, тож зміни коду не конфліктують. Залиште найкращий.',
   'chat.parallel.settings.baseBranchTitle': 'Базова гілка',

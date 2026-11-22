@@ -173,3 +173,148 @@ describe('remote client auth runtime', () => {
     }
   });
 });
+
+describe('remote client auth runtime store durability', () => {
+  it('preserves a corrupt store instead of silently discarding every paired client', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const storePath = path.join(dir, 'remote-clients.json');
+      const corrupt = '{"version":1,"clients":[{"id":"phone-a","label":"Phone A"';
+      await fs.writeFile(storePath, corrupt, 'utf8');
+
+      expect(await runtime.listClients()).toEqual([]);
+      const preserved = (await fs.readdir(dir)).filter((name) => name.includes('.corrupt-'));
+      expect(preserved).toHaveLength(1);
+      expect(await fs.readFile(path.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
+
+      // The next routine write lands in a fresh store file and must not
+      // destroy the preserved bytes — previously it overwrote them and the
+      // paired clients were gone for good.
+      await runtime.createClient({ label: 'Phone B' });
+      expect(await fs.readFile(path.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
+      expect(await runtime.listClients()).toHaveLength(1);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('revalidates an empty snapshot before treating the store as missing (Codex, PR #1019 pattern)', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const storePath = path.join(dir, 'remote-clients.json');
+      await runtime.createClient({ label: 'Phone' });
+
+      // First read returns empty bytes (a torn/empty snapshot) while the
+      // file on disk already holds the valid store written above:
+      // treating that snapshot as a missing store would let the next
+      // mutation overwrite the live clients.
+      let emptyPending = true;
+      const emptyReadRuntime = createRemoteClientAuthRuntime({
+        fsPromises: {
+          ...fs,
+          readFile: async (target, ...rest) => {
+            if (emptyPending && String(target) === storePath) {
+              emptyPending = false;
+              return '';
+            }
+            return fs.readFile(target, ...rest);
+          },
+        },
+        path,
+        crypto,
+        storePath,
+      });
+
+      await emptyReadRuntime.createClient({ label: 'Tablet' });
+      expect(JSON.parse(await fs.readFile(storePath, 'utf8')).clients).toHaveLength(2);
+      expect((await fs.readdir(dir)).filter((name) => name.includes('.corrupt-'))).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes via a temp file in the same directory renamed into place, never directly to the store path', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-remote-clients-atomic-'));
+    const storePath = path.join(dir, 'remote-clients.json');
+    const writeTargets = [];
+    const renameCalls = [];
+    const runtime = createRemoteClientAuthRuntime({
+      fsPromises: {
+        ...fs,
+        writeFile: async (target, ...rest) => {
+          writeTargets.push(String(target));
+          return fs.writeFile(target, ...rest);
+        },
+        rename: async (from, to) => {
+          renameCalls.push([String(from), String(to)]);
+          return fs.rename(from, to);
+        },
+      },
+      path,
+      crypto,
+      storePath,
+    });
+    try {
+      await runtime.createClient({ label: 'Laptop' });
+      expect(writeTargets.length).toBeGreaterThan(0);
+      expect(writeTargets).not.toContain(storePath);
+      expect(writeTargets.every((target) => target.startsWith(`${storePath}.tmp-`))).toBe(true);
+      expect(renameCalls).toEqual(writeTargets.map((target) => [target, storePath]));
+      expect(await fs.readdir(dir)).toEqual(['remote-clients.json']);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the previous valid store intact and no temp file behind when the rename fails', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const storePath = path.join(dir, 'remote-clients.json');
+      await runtime.createClient({ label: 'Laptop' });
+      const before = await fs.readFile(storePath, 'utf8');
+
+      const failingRuntime = createRemoteClientAuthRuntime({
+        fsPromises: {
+          ...fs,
+          rename: async () => {
+            throw new Error('rename failed');
+          },
+        },
+        path,
+        crypto,
+        storePath,
+      });
+      let caught = null;
+      try {
+        await failingRuntime.createClient({ label: 'Phone' });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught?.message).toBe('rename failed');
+      expect(await fs.readFile(storePath, 'utf8')).toBe(before);
+      expect(await fs.readdir(dir)).toEqual(['remote-clients.json']);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('cuts a label that straddles the 80-char cap at the surrogate pair boundary', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const created = await runtime.createClient({ label: `${'d'.repeat(79)}\u{1F600}x` });
+      expect(created.client.label).toBe('d'.repeat(79));
+      expect(created.client.label.isWellFormed()).toBe(true);
+      expect(Buffer.from(created.client.label, 'utf8').toString('utf8')).toBe(created.client.label);
+
+      const stored = await fs.readFile(path.join(dir, 'remote-clients.json'), 'utf8');
+      expect(stored).not.toContain('\\ud83d');
+      expect(JSON.parse(stored).clients[0].label).toBe('d'.repeat(79));
+
+      const ascii = await runtime.createClient({ label: 'a'.repeat(120) });
+      expect(ascii.client.label).toBe('a'.repeat(80));
+      expect(ascii.client.label.length).toBe(80);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -40,3 +40,33 @@ describe('Git redaction', () => {
     expect(result.stdout).toContain('[truncated]');
   });
 });
+
+describe('Git redaction (#2074 residual shapes)', () => {
+  const secret = 'SECRET123';
+
+  it.each([
+    ['authorization equals Bearer', 'authorization=Bearer SECRET123'],
+    ['authorization equals Basic', 'authorization=Basic SECRET123'],
+    ['mid-line token equals Bearer', 'fatal: token=Bearer SECRET123'],
+    ['api_key colon Bearer', 'api_key: Bearer SECRET123'],
+    ['JSON authorization Bearer', '{"authorization": "Bearer SECRET123"}'],
+    ['JSON x-api-key', '{"x-api-key": "SECRET123"}'],
+  ])('redacts the secret in: %s', (_name, input) => {
+    const output = redactGitText(input);
+    expect(output).not.toContain(secret);
+    expect(output).toContain('[redacted]');
+  });
+
+  it('preserves JSON structure and the scheme word inside quotes', () => {
+    expect(redactGitText('{"authorization": "Bearer SECRET123"}')).toBe('{"authorization": "Bearer [redacted]"}');
+    expect(redactGitText('{"x-api-key": "SECRET123"}')).toBe('{"x-api-key": "[redacted]"}');
+  });
+
+  it('redacts single-quoted credential shapes while preserving their structure', () => {
+    expect(redactGitText("{'x-api-key': 'SECRET123'}")).toBe("{'x-api-key': '[redacted]'}");
+    expect(redactGitText("{'password': 'SECRET123'}")).toBe("{'password': '[redacted]'}");
+    expect(redactGitText("{'authorization': 'Bearer SECRET123'}")).toBe("{'authorization': 'Bearer [redacted]'}");
+    expect(redactGitText("authorization: 'Bearer SECRET123'")).toBe("authorization: 'Bearer [redacted]'");
+    expect(redactGitText("{'ref': 'main'}")).toBe("{'ref': 'main'}");
+  });
+});

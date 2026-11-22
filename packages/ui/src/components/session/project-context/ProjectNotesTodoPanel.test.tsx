@@ -41,6 +41,8 @@ for (const [name, value] of Object.entries({
   HTMLInputElement: browser.HTMLInputElement,
   HTMLTextAreaElement: browser.HTMLTextAreaElement,
   PointerEvent: browser.PointerEvent,
+  Event: browser.Event,
+  CustomEvent: browser.CustomEvent,
   ResizeObserver: browser.ResizeObserver,
   MutationObserver: browser.MutationObserver,
   EventSource: TestEventSource,

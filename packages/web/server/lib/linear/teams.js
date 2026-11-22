@@ -1,5 +1,5 @@
 import { clearLinearAuth, getLinearAuth } from './auth.js';
-import { fetchLinearGraphql, getValidLinearAccessToken } from './client.js';
+import { fetchLinearGraphql, getValidLinearAuthorization } from './client.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
 
 const TEAMS_QUERY = `
@@ -28,12 +28,13 @@ function readTeam(node) {
 
 export async function listLinearTeams() {
   try {
-    const token = await getValidLinearAccessToken();
+    const token = await getValidLinearAuthorization();
     if (!token) {
       return { connected: false };
     }
 
     const teams = [];
+    let teamsMore = false;
     let after = null;
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const variables = { first: PAGE_SIZE };
@@ -57,14 +58,21 @@ export async function listLinearTeams() {
       }
       after = readTrimmedString(pageInfo.endCursor);
       if (!after) {
+        teamsMore = true;
         break;
+      }
+      if (page === MAX_PAGES - 1) {
+        teamsMore = true;
       }
     }
 
-    return { connected: true, teams };
+    return { connected: true, teams, teamsMore };
   } catch (error) {
     if (error?.status === 401) {
-      clearLinearAuth(getLinearAuth()?.workspaceId);
+      const failed = getLinearAuth();
+      if (!failed?.tokenReference) {
+        clearLinearAuth(failed?.workspaceId);
+      }
       return { connected: false };
     }
     throw error;

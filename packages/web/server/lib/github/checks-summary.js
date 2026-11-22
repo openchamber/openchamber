@@ -14,14 +14,30 @@ export function dedupeCheckRuns(checkRuns) {
       byName.set(key, run);
       continue;
     }
-    const previousStartedAt = Date.parse(previous?.started_at || '') || 0;
-    const startedAt = Date.parse(run?.started_at || '') || 0;
+    // GitHub assigns ever-increasing run ids, so when either side has not
+    // started yet (no parseable started_at) the larger id is the newer run.
+    // A missing started_at must not read as epoch 0, or a queued re-run
+    // could never displace the previous completed run (#1408).
+    const previousStartedAt = parseStartedAt(previous?.started_at);
+    const startedAt = parseStartedAt(run?.started_at);
+    if (previousStartedAt == null || startedAt == null) {
+      if ((run?.id ?? 0) > (previous?.id ?? 0)) {
+        byName.set(key, run);
+      }
+      continue;
+    }
     if (startedAt > previousStartedAt
       || (startedAt === previousStartedAt && (run?.id ?? 0) > (previous?.id ?? 0))) {
       byName.set(key, run);
     }
   }
   return Array.from(byName.values());
+}
+
+function parseStartedAt(value) {
+  if (typeof value !== 'string' || value === '') return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 export function summarizeCheckRuns(checkRuns) {

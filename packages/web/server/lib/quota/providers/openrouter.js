@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
 import { isRecord, toProviderEntity } from '../../opencode/config-v2.js';
@@ -14,7 +15,7 @@ import {
 
 export const providerId = 'openrouter';
 export const providerName = 'OpenRouter';
-const aliases = ['openrouter'];
+export const aliases = ['openrouter'];
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 const PERIOD_SECONDS = { daily: 86400, weekly: 604800, monthly: 30 * 86400 };
 
@@ -55,15 +56,15 @@ export const resolveResetAt = (limitReset, nowMs) => {
   return null;
 };
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
 
-export const fetchQuota = async () => {
-  const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
+
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -99,7 +100,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     const data = asObject(payload?.data);
 
     if (data === null) {

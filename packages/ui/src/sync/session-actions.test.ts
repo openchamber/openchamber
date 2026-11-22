@@ -98,6 +98,11 @@ mock.module("@/lib/opencode/client", () => ({
       const record = sessionRecords.get(sessionId)
       if (record) sessionRecords.set(sessionId, { ...record, title })
     }),
+    updateSessionSubagentPolicy: mock(async (sessionId: string, subagentPolicy: SubagentPolicy, directory?: string | null) => {
+      replyCalls.push({ method: "session.subagentPolicy", params: { sessionID: sessionId, subagentPolicy, directory } })
+      const record = sessionRecords.get(sessionId)
+      if (record) sessionRecords.set(sessionId, { ...record, subagentPolicy })
+    }),
     moveSession: mock(async (sessionId: string, directory: string) => {
       replyCalls.push({ method: "session.move", params: { sessionID: sessionId, directory } })
       const error = sessionMoveErrorsById.get(sessionId)
@@ -175,8 +180,22 @@ mock.module("@/stores/useConfigStore", () => ({
   },
 }))
 
+// What a send hands to routing and goal saving, for the background-goal tests.
+const routedMessages: Array<{ sessionId: string; directory?: string | null; content: string }> = []
+const savedGoals: Array<{ sessionId: string; objective: string; tokenBudget: number | null; ignoreLimit?: boolean }> = []
+let materializeDraft: () => Promise<{ sessionId: string; directory: string | null; agent?: string }> = async () => {
+  throw new Error("materializeOpenDraftSession is not stubbed for a send")
+}
+let uiCurrentSessionId: string | null = null
+
 // Mock useSessionUIStore
 mock.module("./session-ui-store", () => ({
+  routeMessage: async (input: { sessionId: string; directory?: string | null; content: string }) => {
+    routedMessages.push({ sessionId: input.sessionId, directory: input.directory, content: input.content })
+  },
+  materializeOpenDraftSession: async () => materializeDraft(),
+  resolveVariantToRecord: () => undefined,
+  expandSlashCommandGoalObjective: (content: string) => content,
   useSessionUIStore: {
     getState: () => ({
       getDirectoryForSession: (sessionId: string) => {
@@ -184,7 +203,7 @@ mock.module("./session-ui-store", () => ({
         if (sessionId === "session-b") return "/other/project"
         return null
       },
-      currentSessionId: null,
+      currentSessionId: uiCurrentSessionId,
       setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => {
         selectedSessions.push({ sessionId, directoryHint })
       },
@@ -242,6 +261,79 @@ mock.module("@/stores/useInlineCommentDraftStore", () => ({
 mock.module("@/lib/messages/contextParts", () => ({
   draftFromContextPayload: () => null,
   readContextPart: () => null,
+}))
+
+mock.module("@/stores/useSessionGoalArmStore", () => ({
+  useSessionGoalArmStore: {
+    getState: () => ({
+      consume: () => ({ armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }),
+      setArmed: () => {},
+    }),
+  },
+}))
+
+mock.module("@/stores/useUIStore", () => ({
+  useUIStore: {
+    getState: () => ({ sessionGoalDefaultBudgetEnabled: false, sessionGoalDefaultBudget: null }),
+  },
+}))
+
+mock.module("@/stores/useCommandsStore", () => ({
+  useCommandsStore: { getState: () => ({}) },
+  selectCommandsForDirectory: () => [],
+}))
+
+mock.module("@/stores/useInputHistoryStore", () => ({
+  useInputHistoryStore: { getState: () => ({ appendSubmissions: () => {} }) },
+  createInputHistoryIdentity: () => ({}),
+}))
+
+mock.module("@/stores/useSessionTabsStore", () => ({
+  useSessionTabsStore: { getState: () => ({ pinTab: () => {} }) },
+}))
+
+mock.module("@/lib/sessionGoalActions", () => ({
+  setSessionGoal: async (
+    sessionId: string,
+    _directory: string | undefined,
+    input: { objective: string; tokenBudget: number | null; ignoreLimit?: boolean },
+  ) => {
+    savedGoals.push({ sessionId, objective: input.objective, tokenBudget: input.tokenBudget, ignoreLimit: input.ignoreLimit })
+    return { outcome: "saved", rewrittenSpec: null }
+  },
+}))
+
+mock.module("@/lib/goalWriter", () => ({
+  buildGoalIntroReminder: (_tokenBudget: number | null, spec: string | null) => `goal-intro:${spec ?? ""}`,
+}))
+
+mock.module("@/lib/sessionKnowledgeApi", () => ({
+  syncSessionKnowledge: async () => {},
+}))
+
+mock.module("@/lib/userSendAnimation", () => ({
+  markPendingUserSendAnimation: () => {},
+}))
+
+mock.module("./user-message-resume", () => ({
+  prepareUserMessageResume: () => null,
+}))
+
+mock.module("./selection-store", () => ({
+  useSelectionStore: {
+    getState: () => ({
+      getSessionAgentSelection: () => null,
+      saveSessionModelSelection: () => {},
+      saveSessionAgentSelection: () => {},
+      saveAgentModelVariantForSession: () => {},
+    }),
+  },
+}))
+
+mock.module("./viewport-store", () => ({
+  useViewportStore: { getState: () => ({}), setState: () => {} },
+  getViewportSessionMemory: () => new Map(),
+  viewportSessionKey: (sessionId: string) => sessionId,
 }))
 
 mock.module("@/stores/useGlobalSessionsStore", () => ({
@@ -387,7 +479,7 @@ mock.module("./sync-refs", () => ({
 
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
-import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import type { Message, Part, Session, SessionStatus, SubagentPolicy } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
@@ -1516,6 +1608,43 @@ describe("updateSessionTitle live state", () => {
     const renameCall = replyCalls.find((call) => call.method === "session.rename")
     expect(renameCall?.params.directory).toBe("/test/project/.worktrees/feature")
     globalActiveSessions = []
+  })
+})
+
+describe("updateSessionSubagentPolicy live state", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    sessionRecords.clear()
+  })
+
+  test("publishes the re-read policy to the global and live stores", async () => {
+    const oldSession = sessionFixture("session-a")
+    const sessionStore = createStore({}, { session: [oldSession] })
+    const childStores = createChildStores([["/test/project", sessionStore]])
+    sessionRecords.set("session-a", oldSession)
+
+    const { setActionRefs, updateSessionSubagentPolicy } = await import("./session-actions")
+    setActionRefs(childStores, () => "/current/project")
+
+    const subagentPolicy = {
+      models: ["opencode-go/*", "anthropic/claude-sonnet-5"],
+      excludedModels: ["openai/gpt-5"],
+      agentOverrides: { build: { models: ["anthropic/claude-sonnet-5"] } },
+    }
+    const session = await updateSessionSubagentPolicy("session-a", "/test/project", subagentPolicy)
+
+    const policyCall = replyCalls.find((call) => call.method === "session.subagentPolicy")
+    expect(policyCall?.params.sessionID).toBe("session-a")
+    expect(policyCall?.params.subagentPolicy).toEqual(subagentPolicy)
+    expect(policyCall?.params.directory).toBe("/test/project")
+    // The update answers with nothing, so the published record is the
+    // re-read session carrying the policy the server kept.
+    expect(session.subagentPolicy).toEqual(subagentPolicy)
+    // SAFETY: the store under test holds the Session records the action
+    // published; the mock's capture array is the same records untyped.
+    expect((globalUpsertedSessions[0] as Session)?.subagentPolicy).toEqual(subagentPolicy)
+    expect(sessionStore.getState().session[0].subagentPolicy).toEqual(subagentPolicy)
   })
 })
 
@@ -2852,6 +2981,32 @@ describe("revertToMessage paged message lookup", () => {
     expect(sessionStore.getState().session[0]?.revert?.messageID).toBe("msg_old")
     expect(replyCalls.filter((call) => call.method === "session.messages")).toHaveLength(2)
   })
+
+  test("stops the paged lookup at the page cap when cursors never repeat and the target never appears", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const newer: Message = { id: "msg_newer", sessionID: "session-a", role: "user", time: { created: 3 } }
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [newer] },
+      part: {},
+    })
+    const currentStore = createStore({})
+    const childStores = createChildStores([
+      ["/test/project", sessionStore],
+      ["/current/project", currentStore],
+    ])
+    // Every page offers a brand-new cursor and never the target message.
+    cursorMessagePages = Array.from({ length: 600 }, (_, index) => ({
+      items: [{ info: { id: `msg_page_${index}`, sessionID: "session-a", role: "user", time: { created: 1 } } as Message, parts: [] }],
+      cursor: { next: String(index + 1) },
+    }))
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(childStores, () => "/current/project")
+
+    await expect(revertToMessage("session-a", "msg_missing")).rejects.toThrow("was not found")
+    expect(replyCalls.filter((call) => call.method === "session.messages")).toHaveLength(500)
+  })
 })
 
 describe("dismissPermission passes directory", () => {
@@ -3562,6 +3717,52 @@ describe("dismissOpenPermissionsForSession", () => {
   })
 })
 
+describe("dismissPermissionsAfterInterrupt", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    permissionReplyError = null
+  })
+
+  const twoLevelStore = () => createStore({
+    "session-a": [buildPermission("perm-root", "session-a")],
+    "session-child": [buildPermission("perm-child", "session-child")],
+  }, {
+    session: [sessionFixture("session-a"), { ...sessionFixture("session-child"), parentID: "session-a" }],
+  })
+
+  // Keeping work running keeps a subagent that waits for the user waiting:
+  // only the interrupted session's own request goes.
+  test("the session scope clears the stopped session's request and leaves its subagent's", async () => {
+    const store = twoLevelStore()
+    const childStores = createChildStores([["/test/project", store]])
+    // The interrupt already dropped the request, so OpenCode no longer knows it.
+    permissionReplyError = Object.assign(new Error("permission.reply failed (404): PermissionNotFoundError"), { status: 404 })
+
+    const { setActionRefs, dismissPermissionsAfterInterrupt } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await dismissPermissionsAfterInterrupt("session-a", "session")
+
+    expect(replyCalls.filter((call) => call.method === "permission.reply").map((call) => call.params.requestID)).toEqual(["perm-root"])
+    expect(store.getState().permission["session-a"]).toBe(undefined)
+    expect(store.getState().permission["session-child"]).toHaveLength(1)
+  })
+
+  test("the tree scope clears the subagents' requests too", async () => {
+    const store = twoLevelStore()
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissPermissionsAfterInterrupt } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await dismissPermissionsAfterInterrupt("session-a", "tree")
+
+    expect(replyCalls.filter((call) => call.method === "permission.reply").map((call) => call.params.requestID).sort()).toEqual(["perm-child", "perm-root"])
+    expect(store.getState().permission["session-a"]).toBe(undefined)
+    expect(store.getState().permission["session-child"]).toBe(undefined)
+  })
+})
+
 describe("setSessionWorkState", () => {
   const savedArchiveResponse = archiveBatchResponse
 
@@ -3614,3 +3815,138 @@ describe("setSessionWorkState", () => {
     expect(globalUpsertedSessions).toHaveLength(0)
   })
 });
+
+// Oracle: the send contract in SendMessageOptions.pendingGoal. Nothing is
+// routed or saved until the goal settles; once it does, the message goes to
+// the session captured at submit time with the written spec as its goal; a
+// rejected goal sends nothing.
+describe("sendMessage with a goal still being written", () => {
+  type Outcome = { goal: { objective?: string; tokenBudget: number | null; settled?: boolean; briefAgent?: boolean; ignoreLimit?: boolean }; content: string | null }
+  const deferred = () => {
+    let resolve!: (value: Outcome) => void
+    let reject!: (error: Error) => void
+    const promise = new Promise<Outcome>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const spec = "## Objective\nShip it"
+
+  beforeEach(() => {
+    routedMessages.length = 0
+    savedGoals.length = 0
+    uiCurrentSessionId = null
+    materializeDraft = async () => { throw new Error("materializeOpenDraftSession is not stubbed for a send") }
+  })
+
+  test("a reply waits for its goal, then goes to the session it was sent from with the spec as its goal", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-a",
+      directory: "/test/project",
+      pendingGoal: goal.promise,
+    })
+    await flush()
+    expect(routedMessages).toEqual([])
+    expect(savedGoals).toEqual([])
+
+    // The user moved to another chat while the goal was written.
+    uiCurrentSessionId = "session-b"
+    goal.resolve({ goal: { objective: spec, tokenBudget: 5000, settled: true, briefAgent: true, ignoreLimit: true }, content: null })
+    await sent
+
+    expect(savedGoals).toEqual([{ sessionId: "session-a", objective: spec, tokenBudget: 5000, ignoreLimit: true }])
+    expect(routedMessages).toEqual([{ sessionId: "session-a", directory: "/test/project", content: "Ship it" }])
+  })
+
+  test("a spec sent as the message replaces the typed text", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-a",
+      pendingGoal: goal.promise,
+    })
+    goal.resolve({ goal: { objective: spec, tokenBudget: null, settled: true }, content: spec })
+    await sent
+
+    expect(routedMessages.map((message) => message.content)).toEqual([spec])
+    expect(savedGoals.map((saved) => saved.objective)).toEqual([spec])
+  })
+
+  test("a goal that is not written sends nothing", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-a",
+      pendingGoal: goal.promise,
+    })
+    goal.reject(new Error("No small model available"))
+
+    await expect(sent).rejects.toThrow("No small model available")
+    expect(routedMessages).toEqual([])
+    expect(savedGoals).toEqual([])
+  })
+
+  test("a draft creates its session at once and sends its first prompt only with the goal", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const created: Array<{ sessionId: string; directory: string | null }> = []
+    let materialized = 0
+    materializeDraft = async () => {
+      materialized += 1
+      return { sessionId: "created", directory: "/test/project" }
+    }
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      // SAFETY: the draft path reads only `open` here; materializeOpenDraftSession, which reads the rest, is stubbed.
+      draftSnapshot: { open: true } as import("./session-ui-store").NewSessionDraftState,
+      pendingGoal: goal.promise,
+      onSessionCreated: (sessionId, directory) => { created.push({ sessionId, directory }) },
+    })
+    await flush()
+    expect(materialized).toBe(1)
+    expect(created).toEqual([{ sessionId: "created", directory: "/test/project" }])
+    expect(routedMessages).toEqual([])
+    expect(savedGoals).toEqual([])
+
+    uiCurrentSessionId = "session-b"
+    goal.resolve({ goal: { objective: spec, tokenBudget: null, settled: true, briefAgent: true }, content: null })
+    await sent
+
+    expect(savedGoals.map((saved) => saved.sessionId)).toEqual(["created"])
+    expect(routedMessages).toEqual([{ sessionId: "created", directory: "/test/project", content: "Ship it" }])
+  })
+
+  test("a draft whose goal is not written creates its session and sends nothing to it", async () => {
+    const { sendMessage } = await import("./session-actions")
+    materializeDraft = async () => ({ sessionId: "created", directory: "/test/project" })
+    const goal = deferred()
+    const sent = sendMessage("Ship it", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      // SAFETY: the draft path reads only `open` here; materializeOpenDraftSession, which reads the rest, is stubbed.
+      draftSnapshot: { open: true } as import("./session-ui-store").NewSessionDraftState,
+      pendingGoal: goal.promise,
+    })
+    goal.reject(new Error("cancelled"))
+
+    await expect(sent).rejects.toThrow("cancelled")
+    expect(routedMessages).toEqual([])
+    expect(savedGoals).toEqual([])
+  })
+
+  test("a slow goal does not hold later sends", async () => {
+    const { sendMessage } = await import("./session-actions")
+    const goal = deferred()
+    const waiting = sendMessage("Waiting task", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-a",
+      directory: "/test/project",
+      pendingGoal: goal.promise,
+    })
+    await sendMessage("Next task", "p", "m", undefined, undefined, undefined, undefined, undefined, "normal", {
+      sessionId: "session-b",
+      directory: "/other/project",
+    })
+    expect(routedMessages).toEqual([{ sessionId: "session-b", directory: "/other/project", content: "Next task" }])
+    goal.resolve({ goal: { objective: spec, tokenBudget: null, settled: true }, content: null })
+    await waiting
+    expect(routedMessages.map((message) => message.content)).toEqual(["Next task", "Waiting task"])
+  })
+})

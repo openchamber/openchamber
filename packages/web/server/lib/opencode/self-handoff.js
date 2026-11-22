@@ -12,6 +12,10 @@
 //   If the successor does not report ready in time, or exits first, the predecessor kills it and
 //   keeps serving.
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import { asNonEmptyString } from '../shared/guards.js';
+import { consumeHandoffRequest, resolveHandoffTarget } from './handoff-request.js';
 
 // The listener slot the successor sees, matching systemd socket activation (LISTEN_FDS=1 names fd 3).
 export const INHERITED_LISTEN_FD = 3;
@@ -29,8 +33,15 @@ const SUCCESSOR_EXEC_SCRIPT = 'export LISTEN_PID=$$ LISTEN_FDS=1; exec "$@"';
 export const isSelfHandoffEnabled = (env = process.env) => env.OPENCHAMBER_SELF_HANDOFF !== '0';
 
 export const resolveHandoffTimeoutMs = (env = process.env) => {
-  const value = Number(env.OPENCHAMBER_HANDOFF_TIMEOUT_MS);
-  return Number.isInteger(value) && value > 0 ? value : DEFAULT_HANDOFF_TIMEOUT_MS;
+  // Only a plain decimal spelling counts: a bare Number(...) would silently
+  // honour '1e3' (a 1 s grace period), '0x10' (16 ms), '+5000', and '5000.0'.
+  const raw = String(env.OPENCHAMBER_HANDOFF_TIMEOUT_MS ?? '').trim();
+  if (!/^\d+$/.test(raw)) return DEFAULT_HANDOFF_TIMEOUT_MS;
+  const value = Number(raw);
+  // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
+  // instead, so a larger configured timeout falls back to the default
+  // rather than killing every handoff successor immediately.
+  return Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : DEFAULT_HANDOFF_TIMEOUT_MS;
 };
 
 // The successor runs the same CLI entry in foreground mode, so it writes its own pid and instance
@@ -92,6 +103,8 @@ export const createSelfHandoffRuntime = ({
   isShuttingDown,
   entry,
   apiOnly = false,
+  dataDir = process.env.OPENCHAMBER_DATA_DIR || path.join(os.homedir(), '.config', 'openchamber'),
+  runningVersion = 'unknown',
   env = process.env,
   timeoutMs = resolveHandoffTimeoutMs(env),
   log = console,
@@ -99,10 +112,16 @@ export const createSelfHandoffRuntime = ({
   let inFlight = null;
 
   const spawnSuccessor = (server, address) => {
+    const request = consumeHandoffRequest({ dataDir });
+    const hasOverride = request || asNonEmptyString(env.OPENCHAMBER_HANDOFF_ENTRY);
+    const target = hasOverride
+      ? resolveHandoffTarget({ request, env, entry, execPath: runtimeProcess.execPath, runningVersion })
+      : { ok: true, entry, execPath: runtimeProcess.execPath };
+    if (!target.ok) return { failure: target.reason };
     const { command, args } = buildSuccessorCommand({
-      execPath: runtimeProcess.execPath,
+      execPath: target.execPath,
       execArgv: runtimeProcess.execArgv,
-      entry,
+      entry: target.entry,
       port: address.port,
       host: address.address,
       apiOnly,
@@ -153,14 +172,19 @@ export const createSelfHandoffRuntime = ({
     // Only Node exposes the listening socket's descriptor. Bun's server, which the daemon runs under when
     // Bun is installed, does not, so such a process keeps serving and says so.
     const listenerFd = server._handle?.fd;
-    if (typeof listenerFd !== 'number' || listenerFd < 0) {
+    if (!Number.isFinite(listenerFd) || listenerFd < 0) {
       log.warn(`[handoff] the listening socket is not reachable from ${runtimeProcess.versions?.bun ? 'Bun' : 'this runtime'}; use a Node foreground server (systemd unit). Still serving`);
       return { ok: false, reason: 'no-listener-fd' };
     }
 
     let child;
     try {
-      child = spawnSuccessor(server, address);
+      const spawned = spawnSuccessor(server, address);
+      if (spawned?.failure) {
+        log.warn(`[handoff] could not resolve the successor: ${spawned.failure}; still serving`);
+        return { ok: false, reason: spawned.failure };
+      }
+      child = spawned;
     } catch (error) {
       log.warn(`[handoff] could not start the successor: ${error?.message ?? error}; still serving`);
       return { ok: false, reason: 'spawn-failed' };

@@ -14,6 +14,7 @@ import {
   guestRedirectUri,
   saveGuestAccessToken,
   saveGuestOAuthClient,
+  GUEST_OAUTH_RESPONSE_MAX,
   refreshGuestAccessToken,
   startGuestAuthorization,
   storedTokensUsable,
@@ -32,6 +33,12 @@ const clickupGuest = {
       account: { path: '/api/v2/user', name: 'user.username' },
     },
   },
+};
+
+// UTF-8 round-trip oracle: TextEncoder replaces lone surrogates with U+FFFD.
+const isPairSafeAfterUtf8RoundTrip = (account) => {
+  const decoded = new TextDecoder().decode(new TextEncoder().encode(account));
+  return decoded === account && !decoded.includes('\uFFFD');
 };
 
 afterEach(() => {
@@ -303,6 +310,28 @@ describe('saveGuestAccessToken with a basic scheme', () => {
     }
   });
 
+  test('keeps a provider account label at the surrogate-pair boundary', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-basic-'));
+    const persistPath = guestAuthPersistPath(dir);
+    const originalFetch = globalThis.fetch;
+    const straddlingLabel = `${'a'.repeat(199)}😀`;
+    const expectedAccount = 'a'.repeat(199);
+    globalThis.fetch = async () => new Response(JSON.stringify({ displayName: straddlingLabel }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    try {
+      const result = await saveGuestAccessToken({ guest: jiraGuest, persistPath, token: 'api-token', username: 'ada' });
+      const stored = await getGuestAuth('jira', persistPath);
+      expect(result.account).toBe(expectedAccount);
+      expect(stored.account).toBe(expectedAccount);
+      expect(isPairSafeAfterUtf8RoundTrip(stored.account)).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('refuses a basic integration without a username', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-basic-'));
     const persistPath = guestAuthPersistPath(dir);
@@ -321,6 +350,39 @@ describe('saveGuestAccessToken with a basic scheme', () => {
     try {
       const result = await saveGuestAccessToken({ guest, persistPath, token: 'api-token', username: 'ada@acme.example' });
       expect(result).toEqual({ connected: true, account: 'ada@acme.example' });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps the username fallback at the surrogate-pair boundary', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-basic-'));
+    const persistPath = guestAuthPersistPath(dir);
+    const guest = { ...jiraGuest, integration: { ...jiraGuest.integration, token: { apiOrigin: 'https://acme.atlassian.net', scheme: 'basic' } } };
+    const straddlingUsername = `${'a'.repeat(199)}😀`;
+    const expectedAccount = 'a'.repeat(199);
+    try {
+      const result = await saveGuestAccessToken({ guest, persistPath, token: 'api-token', username: straddlingUsername });
+      const stored = await getGuestAuth('jira', persistPath);
+      expect(result.account).toBe(expectedAccount);
+      expect(stored.account).toBe(expectedAccount);
+      expect(isPairSafeAfterUtf8RoundTrip(stored.account)).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('still clips ASCII account labels at exactly 200 code units', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-basic-'));
+    const persistPath = guestAuthPersistPath(dir);
+    const guest = { ...jiraGuest, integration: { ...jiraGuest.integration, token: { apiOrigin: 'https://acme.atlassian.net', scheme: 'basic' } } };
+    const username = 'a'.repeat(201);
+    try {
+      const result = await saveGuestAccessToken({ guest, persistPath, token: 'api-token', username });
+      const stored = await getGuestAuth('jira', persistPath);
+      expect(result.account).toBe('a'.repeat(200));
+      expect(stored.account).toBe('a'.repeat(200));
+      expect(isPairSafeAfterUtf8RoundTrip(stored.account)).toBe(true);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -475,6 +537,108 @@ describe('saveGuestOAuthClient', () => {
       await expect(startGuestAuthorization({ guest: moved, persistPath, origin: 'http://127.0.0.1:4096' }))
         .resolves.toMatchObject({ authorizationUrl: expect.stringContaining('client_id=app-id-2') });
     } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('guest OAuth response cap (#1085)', () => {
+  const streamedResponse = (text, onPull) => {
+    const bytes = new TextEncoder().encode(text);
+    let offset = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        if (offset >= bytes.length) {
+          controller.close();
+          return;
+        }
+        const chunk = bytes.subarray(offset, offset + 8192);
+        offset += chunk.byteLength;
+        if (onPull) onPull(offset);
+        controller.enqueue(chunk);
+      },
+    });
+    // No Content-Length header: the body arrives chunked, so only a
+    // streaming cap can stop it before it is buffered whole.
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+
+  const seedRefreshable = async (persistPath) => {
+    await patchGuestAuth('clickup', {
+      clientId: 'app-id',
+      clientSecret: 'app-secret',
+      clientTarget: credentialTarget(clickupGuest.integration),
+      accessToken: 'access-a',
+      refreshToken: 'refresh-a',
+      target: credentialTarget(clickupGuest.integration),
+    }, persistPath);
+  };
+
+  test('a streamed over-cap token answer is refused without being buffered whole', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-oauth-'));
+    const persistPath = guestAuthPersistPath(dir);
+    await seedRefreshable(persistPath);
+    const total = GUEST_OAUTH_RESPONSE_MAX * 2;
+    const body = JSON.stringify({ access_token: 'access-new', pad: 'x'.repeat(total) });
+    let pulled = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => streamedResponse(body, (offset) => { pulled = offset; });
+    try {
+      await expect(refreshGuestAccessToken({ guest: clickupGuest, persistPath }))
+        .rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' });
+      expect(pulled).toBeLessThan(body.length);
+      expect((await getGuestAuth('clickup', persistPath)).accessToken).toBe('access-a');
+    } finally {
+      globalThis.fetch = originalFetch;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('an at-cap token answer still exchanges successfully', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-oauth-'));
+    const persistPath = guestAuthPersistPath(dir);
+    await seedRefreshable(persistPath);
+    const skeleton = JSON.stringify({ access_token: 'access-at-cap', pad: '' });
+    const body = JSON.stringify({
+      access_token: 'access-at-cap',
+      pad: 'x'.repeat(GUEST_OAUTH_RESPONSE_MAX - skeleton.length),
+    });
+    expect(body.length).toBe(GUEST_OAUTH_RESPONSE_MAX);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => streamedResponse(body);
+    try {
+      await refreshGuestAccessToken({ guest: clickupGuest, persistPath });
+      expect((await getGuestAuth('clickup', persistPath)).accessToken).toBe('access-at-cap');
+    } finally {
+      globalThis.fetch = originalFetch;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a streamed over-cap account answer does not connect with a fabricated account', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-oauth-'));
+    const persistPath = guestAuthPersistPath(dir);
+    const jiraGuest = {
+      id: 'jira',
+      integration: {
+        name: 'Jira',
+        description: 'Issues',
+        token: {
+          apiOrigin: 'https://acme.atlassian.net',
+          scheme: 'basic',
+          account: { path: '/rest/api/3/myself', name: 'displayName' },
+        },
+      },
+    };
+    const body = JSON.stringify({ displayName: 'Ada', pad: 'x'.repeat(GUEST_OAUTH_RESPONSE_MAX) });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => streamedResponse(body);
+    try {
+      await expect(saveGuestAccessToken({ guest: jiraGuest, persistPath, token: 'api-token', username: 'ada@acme.example' }))
+        .rejects.toMatchObject({ code: 'TOKEN_INVALID' });
+      expect((await getGuestAuth('jira', persistPath))?.accessToken).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
       await fs.rm(dir, { recursive: true, force: true });
     }
   });

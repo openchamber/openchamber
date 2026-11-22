@@ -38,7 +38,8 @@ export const createRelayDevTunnelBridge = ({ createMessageChannel, logger = cons
 
   return {
     async open({ targetKey, remotePort, spaceId = null, webContents }) {
-      const port = Number.parseInt(String(remotePort), 10);
+      const rawPort = String(remotePort).trim();
+      const port = /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
       if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error('A valid remote port is required');
       if (!targetKey) throw new Error('A relay target key is required');
       if (spaceId !== null && !SPACE_ID.test(String(spaceId))) throw new Error('A valid space id is required');

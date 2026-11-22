@@ -455,6 +455,9 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       if (error.message?.includes('already exists')) {
         return res.status(409).json({ error: error.message });
       }
+      if (error.message?.includes('-byte limit')) {
+        return res.status(413).json({ error: error.message });
+      }
       if (error.message?.includes('Snippet name') || error.message?.includes('Project directory')) {
         return res.status(400).json({ error: error.message });
       }
@@ -474,6 +477,9 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.error('[API:PATCH /api/config/snippets/:name] Failed:', error);
       if (error.message?.includes('not found')) {
         return res.status(404).json({ error: error.message });
+      }
+      if (error.message?.includes('-byte limit')) {
+        return res.status(413).json({ error: error.message });
       }
       if (error.message?.includes('Snippet name')) {
         return res.status(400).json({ error: error.message });

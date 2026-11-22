@@ -1,19 +1,33 @@
 name: pr checks
 
+# CI policy: .github/ci-policy.md (fleet design developing-today/code#1779
+# sec.3.3/sec.3.4; Phase 2, developing-today/code#1781). This workflow is
+# openchamber's designated main-gate for the Phase 3 remediation chain.
+# Main-gate triggers (Drew 2026-11-04): the nightly schedule below
+# and workflow_dispatch only. There is no push or pull_request
+# trigger and no PR tier: this workflow does not run on pull_request,
+# so nothing here gates a merge. All five jobs (lint, type-check,
+# tests, build, flake-eval) run on every trigger. Merged code is verified by the
+# next nightly run, or sooner by a manual dispatch on the exact SHA.
+# The workflow name stays
+# "pr checks" because the Phase 3 watcher (main-broken.yml) references
+# it by that name.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-  # Merged code gets the same verification on main itself: without this, a
-  # merge that breaks main is only discovered by the next PR's run.
-  push:
-    branches: [main]
+  # The nightly run is the automatic verification for merged code:
+  # without it, a merge that breaks main would only be discovered by
+  # a manual dispatch.
+  schedule:
+    # Nightly backstop for the main tier: the full suite (including the
+    # tests and build jobs that no longer run on PRs) re-runs even on
+    # days with no merge, so nothing removed from PRs can vanish.
+    - cron: '37 5 * * *'
+  workflow_dispatch:
 
-# A new push to the same PR makes the older run pointless. Push runs have
-# no pull_request payload, so they fall back to the unique run_id (the
-# label-merge-conflict pattern): every merge keeps its own run instead of
-# sharing one group that a newer merge would cancel.
+# Every trigger is scheduled or manual, so each run is keyed by its
+# unique run_id: each nightly or dispatched run keeps its own run
+# instead of sharing one group that a newer run would cancel.
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number || github.run_id }}
+  group: pr-checks-${{ github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -27,6 +41,7 @@ permissions:
 # job, not the sum.
 jobs:
   type-check:
+    name: "basic: type-check"
     timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
@@ -41,6 +56,7 @@ jobs:
         run: bun run type-check
 
   lint:
+    name: "basic: lint"
     timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
@@ -56,7 +72,10 @@ jobs:
       - name: Changelog outputs match their sources
         run: bun run changelog:check
 
+  # Runs on the nightly schedule and on manual dispatch -- the
+  # workflow's only triggers.
   tests:
+    name: "full (main tier): tests"
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
@@ -76,10 +95,13 @@ jobs:
           bun run test:updater
           bun run test:linux-desktop
 
+  # Runs on the nightly schedule and on manual dispatch -- the
+  # workflow's only triggers.
   # Catches what type-check cannot: bundling, Vite-only syntax, the web
   # build's memory ceiling. The packages whose `build` is only a type-check (`tsc -b`)
   # (ui) or a no-op (electron) are covered by the type-check job.
   build:
+    name: "full (main tier): build"
     timeout-minutes: 20
     runs-on: ubuntu-24.04
     steps:
@@ -96,3 +118,61 @@ jobs:
         run: bun run --cwd packages/vscode build
       - name: Prepare mobile web assets
         run: bun run --cwd packages/mobile build:assets
+
+  # Evaluates this repo's own flake outputs without building them
+  # (#1566): PR #1386 broke every flake output by adding an input the
+  # outputs formals did not accept, and no workflow here noticed - the
+  # upstream nix-eval.yml job is gated to openchamber/openchamber and
+  # evaluates outputs this flake does not have. The drvPath evals
+  # force the full outputs evaluation for one system; `nix flake show`
+  # walks the whole output tree. Red/green proof at implementation:
+  # both commands fail on the pre-#1389 flake shape (commit c9c959f193,
+  # outputs formals without '...') and pass on current main.
+  flake-eval:
+    name: "full (main tier): flake eval"
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Evaluate this flake's own outputs (no builds)
+        run: |
+          nix flake show
+          nix eval --raw .#packages.x86_64-linux.openchamber.drvPath
+          nix eval --raw .#packages.x86_64-linux.openchamber-desktop.drvPath
+          nix eval --raw .#packages.x86_64-linux.default.drvPath
+          nix eval --raw .#devShells.x86_64-linux.default.drvPath
+          nix eval --raw .#devShells.x86_64-linux.fleet.drvPath
+      # The start-wrapper guard check (#2056) pins the generated wrapper
+      # bytes for the code#2562 single-instance guard defect. It is a
+      # check, not a package, so the drvPath evals above never reach
+      # it, and the upstream nix-eval.yml that would run flake checks
+      # is gated to openchamber/openchamber. Build it here — this job
+      # is Linux-only (ubuntu-24.04) and the check is Linux-only.
+      - name: Build the start-wrapper guard check (#2056)
+        run: nix build .#checks.x86_64-linux.start-wrapper-guard
+
+  # On failure of any main job above, hand the failure to the central
+  # pm-dispatch ci-fix task (developing-today/code#2672). The wrapper is
+  # best-effort only: continue-on-error keeps a dispatch problem from
+  # masking the real CI result.
+  ci-fix:
+    needs: [type-check, lint, tests, build, flake-eval]
+    if: failure()
+    permissions:
+      id-token: write
+      issues: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/pm-dispatch-ci-fix
+        continue-on-error: true
+        env:
+          GH_TOKEN: "${{ github.token }}"

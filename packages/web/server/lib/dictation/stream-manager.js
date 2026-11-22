@@ -42,6 +42,15 @@ const FINAL_TIMEOUT_MAX_MS = 5 * 60 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_SEGMENT_MS = 15 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_AUDIO_SECOND_MS = 1500;
 const FINAL_TIMEOUT_PER_MISSING_SEQ_MS = 250;
+// Reorder-buffer bound (buffered bytes, not entries): chunks arrive in order
+// over a single ordered WebSocket and the UI sender flushes sequentially, so
+// the legitimate reorder window is a handful of chunks. One decoded chunk can
+// be ~384 KiB (the per-message WS maxPayload is 512 KiB), so an entry cap
+// cannot bound memory -- bytes can. 8 MiB is >20 largest-possible chunks and
+// ~500 typical 16 KiB chunks: far above any legitimate gap, far below the
+// retention a wedged stream would otherwise grow to for the life of the
+// connection. Crossing it fails the stream (retryable) instead of buffering.
+const MAX_REORDER_BUFFER_BYTES = 8 * 1024 * 1024;
 const SILENCE_PEAK_THRESHOLD = 300;
 // Pause detection looks at ~50 ms frames. A frame is quiet when its RMS sits
 // within ~10 dB of the quietest frame in the last ~10 s of the stream (the
@@ -167,12 +176,13 @@ export class DictationStreamManager {
    * @param {number} [params.segmentMinSeconds] audio before a pause may split a segment
    * @param {number} [params.segmentMaxSeconds] hard segment cap for pauseless speech
    */
-  constructor({ emit, createSttSession, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds }) {
+  constructor({ emit, createSttSession, finalTimeoutMs, segmentMinSeconds, segmentMaxSeconds, maxReorderBufferBytes }) {
     this.emit = emit;
     this.createSttSession = createSttSession;
     this.finalTimeoutMs = finalTimeoutMs ?? DEFAULT_FINAL_TIMEOUT_MS;
     this.segmentMinSeconds = segmentMinSeconds ?? DEFAULT_SEGMENT_MIN_SECONDS;
     this.segmentMaxSeconds = segmentMaxSeconds ?? DEFAULT_SEGMENT_MAX_SECONDS;
+    this.maxReorderBufferBytes = maxReorderBufferBytes ?? MAX_REORDER_BUFFER_BYTES;
     this.streams = new Map();
   }
 
@@ -269,6 +279,7 @@ export class DictationStreamManager {
           ? null
           : new Pcm16MonoResampler({ inputRate, outputRate: stt.requiredSampleRate }),
       receivedChunks: new Map(),
+      reorderBufferedBytes: 0,
       nextSeqToForward: 0,
       ackSeq: -1,
       segmentMinBytes: secondsToPcm16Bytes(this.segmentMinSeconds, stt.requiredSampleRate),
@@ -321,13 +332,26 @@ export class DictationStreamManager {
       if (chunk.length % 2 !== 0) {
         chunk = chunk.subarray(0, chunk.length - 1);
       }
+      if (
+        seq > state.nextSeqToForward &&
+        state.reorderBufferedBytes + chunk.length > this.maxReorderBufferBytes
+      ) {
+        this.failAndCleanupStream(
+          dictationId,
+          `Dictation reorder buffer exceeded ${this.maxReorderBufferBytes} bytes waiting for seq ${state.nextSeqToForward}`,
+          true,
+        );
+        return;
+      }
       state.receivedChunks.set(seq, chunk);
+      state.reorderBufferedBytes += chunk.length;
     }
 
     while (state.receivedChunks.has(state.nextSeqToForward)) {
       const nextSeq = state.nextSeqToForward;
       const pcm16 = state.receivedChunks.get(nextSeq);
       state.receivedChunks.delete(nextSeq);
+      state.reorderBufferedBytes -= pcm16.length;
 
       const resampled = state.resampler ? state.resampler.processChunk(pcm16) : pcm16;
       if (resampled.length > 0) {

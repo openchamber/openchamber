@@ -1,7 +1,6 @@
 import express from 'express';
 import { guestStorageRequestSchema } from '@openchamber/sdk/schemas';
 import { runGuestStorage } from './storage.js';
-import fs from 'node:fs/promises';
 import os from 'node:os';
 import { z } from 'zod';
 
@@ -20,6 +19,7 @@ import {
 } from '@openchamber/sdk';
 
 import {
+  GUEST_ASSET_MAX_BYTES,
   findInstalledGuest,
   hasGuestFrame,
   isGuestPanelId,
@@ -28,6 +28,7 @@ import {
   toPublicGuest,
 } from './catalog.js';
 import { runGuestFileOperation } from './files.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import { injectGuestAssetTokens, parseGuestUrlToken } from './html-tokens.js';
 import { injectGuestDocumentStyles } from './html-styles.js';
 import { installGuest, installGuestFromZipBuffer, parseInstallRequest, uninstallGuest } from './install.js';
@@ -204,6 +205,19 @@ const sendInstallResult = (res, result) => {
 const declaredSettings = (guest) => {
   const fields = guest.integration?.settings ?? [];
   return new Map(fields.map((field) => [field.id, field]));
+};
+
+// A plain slice at the cap can land between the halves of a surrogate pair,
+// leaving a lone high surrogate that persists to the guest auth store and
+// encodes as U+FFFD for every reader; move a cut inside a pair back to the
+// pair boundary. Mirrors clipPairSafe in client-auth/pairing.js.
+const clipPairSafe = (text, limit) => {
+  if (text.length <= limit) {
+    return text;
+  }
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
 };
 
 export const registerGuestRoutes = (app, {
@@ -447,7 +461,7 @@ export const registerGuestRoutes = (app, {
       if (!allowed.has(key) || typeof value !== 'string') {
         continue;
       }
-      settings[key] = value.trim().slice(0, 2000);
+      settings[key] = clipPairSafe(value.trim(), 2000);
     }
     const stored = await patchGuestAuth(guest.id, { settings }, authPath);
     return { status: 200, body: await toGuestAuthResponse(guest.integration, stored) };
@@ -881,12 +895,23 @@ export const registerGuestRoutes = (app, {
         return res.status(404).end();
       }
       const { filePath, contentType } = served;
-      let raw;
+      // The cap is enforced during the read itself, judged from the opened
+      // handle (readBoundedFile): the resolver's stat is only a hint, so a
+      // file grown or swapped after it — or one whose size the stat could
+      // not report — is refused here having buffered at most the cap + 1
+      // byte, never read whole into the server.
+      let read;
       try {
-        raw = await fs.readFile(filePath);
+        read = await readBoundedFile(filePath, GUEST_ASSET_MAX_BYTES);
       } catch {
         return res.status(404).end();
       }
+      if (!read.ok) {
+        return read.reason === 'too-large'
+          ? res.status(413).json({ error: 'file-too-large' })
+          : res.status(404).end();
+      }
+      const raw = read.buffer;
       const token = parseGuestUrlToken(req.query.oc_url_token);
       const body = contentType.startsWith('text/html')
         ? injectGuestDocumentStyles(injectGuestAssetTokens(raw.toString('utf8'), token))

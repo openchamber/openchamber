@@ -1,3 +1,9 @@
+import {
+  preserveMalformedJsonFile,
+  readDurableJsonFile,
+  writeDurableJsonFile,
+} from '../shared/durable-json-store.js';
+
 const STORE_VERSION = 1;
 const PAIRING_ID_PREFIX = 'pair_';
 const SECRET_BYTES = 32;
@@ -18,12 +24,22 @@ const normalizeOptionalString = (value) => {
 // fall back to the device's own reported name instead of this placeholder.
 const PAIRING_LABEL_PLACEHOLDER = 'Pair new device';
 
+// A plain slice at the cap can land between the halves of a surrogate pair,
+// leaving a lone high surrogate that encodes as U+FFFD on disk and in the
+// device list; move a cut that lands inside a pair back to the pair boundary.
+const clipPairSafe = (text, limit) => {
+  if (text.length <= limit) return text;
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
+
 // The operator's typed device label, capped. Returns null when unset so callers
 // can distinguish "no name given" from a real name.
 const normalizeStoredLabel = (value) => {
   const normalized = normalizeOptionalString(value);
   if (!normalized) return null;
-  return normalized.length > MAX_LABEL_LENGTH ? normalized.slice(0, MAX_LABEL_LENGTH) : normalized;
+  return clipPairSafe(normalized, MAX_LABEL_LENGTH);
 };
 
 const normalizeTimestamp = (value) => {
@@ -42,14 +58,6 @@ const normalizeAllowedClientKinds = (value) => {
   if (!Array.isArray(value)) return ['mobile', 'desktop'];
   const kinds = value.map(normalizeClientKind).filter(Boolean);
   return kinds.length > 0 ? Array.from(new Set(kinds)) : ['mobile', 'desktop'];
-};
-
-const safeJsonParse = (raw) => {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
 };
 
 const constantTimeEqual = (left, right, crypto) => {
@@ -129,7 +137,11 @@ export const createClientPairingRuntime = ({
           id: typeof session.id === 'string' ? session.id : generateId(),
           secretHash: typeof session.secretHash === 'string' ? session.secretHash : '',
           createdAt: typeof session.createdAt === 'string' ? session.createdAt : nowIso(),
-          expiresAt: normalizeTimestamp(session.expiresAt) || new Date(Date.now() + ttlMs).toISOString(),
+          // A missing or unparseable expiresAt stays null: such a session is
+          // expired everywhere it is judged (pending, relay demand, redeem,
+          // sweep). Substituting a fresh TTL here would keep its pairing
+          // secret redeemable indefinitely and persist the fabricated stamp.
+          expiresAt: normalizeTimestamp(session.expiresAt),
           usedAt: normalizeTimestamp(session.usedAt),
           cancelledAt: normalizeTimestamp(session.cancelledAt),
           clientId: normalizeOptionalString(session.clientId),
@@ -143,19 +155,60 @@ export const createClientPairingRuntime = ({
       : [],
   });
 
-  const readStore = async () => {
-    try {
-      const raw = await fsPromises.readFile(storePath, 'utf8');
-      return normalizeStore(safeJsonParse(raw));
-    } catch (error) {
-      if (error?.code === 'ENOENT') return normalizeStore(null);
-      throw error;
+  // This store rides the shared durable-store primitive (design #976):
+  // the strict reader judges the file, the preserve helper moves a
+  // malformed file aside under the collision-proof preserve name, and
+  // the writer is mode-explicit. A torn or otherwise unparseable file is
+  // pairing state, not an empty store: its bytes are preserved before
+  // any later write can overwrite them, and the loss stays recoverable.
+  // The value judgement stays the one this store always made - any
+  // parsed JSON reaches normalizeStore, which tolerates every shape -
+  // so only unparseable bytes are malformed here. The preserve helper
+  // re-reads and re-judges the on-disk bytes before renaming anything,
+  // so a valid replacement that landed in the meantime is never moved
+  // aside (Codex, PR #890); a 'replaced' outcome re-reads that valid
+  // file instead (bounded - repeated replacement is a race no read
+  // should chase). A mutation must never overwrite bytes whose
+  // preservation failed: they are the only copy of the pairing
+  // sessions, so the read fails closed instead.
+  const readStore = async (replacements = 0) => {
+    const result = await readDurableJsonFile(storePath, { fs: fsPromises });
+    if (result.state === 'valid') return normalizeStore(result.value);
+    // The primitive collapses an absent file and an EXISTING empty or
+    // whitespace-only file into the same 'missing' answer. Only the
+    // absent file is the first-run case: empty bytes are unparseable,
+    // and the pre-migration reader revalidated them before treating the
+    // store as empty - another process sharing this file can replace
+    // the empty bytes with valid state while this read is in flight,
+    // and returning an empty store here would let a mutation overwrite
+    // that replacement and drop its sessions (Codex, PR #1019). So a
+    // 'missing' verdict goes through the preserve helper too: it
+    // re-reads and re-judges the on-disk bytes, answers 'replaced' for
+    // a valid replacement (re-read below), 'missing' for a truly
+    // absent file (the first-run return) or for still-empty bytes
+    // (which hold no sessions, so there is nothing to preserve), and
+    // 'preserved' if the re-read bytes are malformed.
+    const preservation = await preserveMalformedJsonFile(storePath, { fs: fsPromises });
+    if (preservation.preserved) {
+      console.warn(`Failed to read pairing store: preserved the unreadable file at ${preservation.preservedPath}`);
+      return normalizeStore(null);
     }
+    if (preservation.outcome === 'missing') return normalizeStore(null);
+    if (preservation.outcome === 'replaced' && replacements < 3) {
+      return readStore(replacements + 1);
+    }
+    throw new Error('Failed to preserve the unreadable pairing store; refusing to overwrite it');
   };
 
   const writeStore = async (store) => {
+    // The directory mode stays stated here: the primitive's writer
+    // creates the directory without a mode, and this store has always
+    // made its directory 0o700. The file itself is written by the
+    // primitive with its mode stated (0o600 - the store holds session
+    // secret hashes), and the chmod keeps the mode true even when the
+    // rename landed over an existing file with wider permissions.
     await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
-    await fsPromises.writeFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
+    await writeDurableJsonFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { fs: fsPromises, mode: 0o600 });
     if (typeof fsPromises.chmod === 'function') {
       await fsPromises.chmod(storePath, 0o600).catch(() => {});
     }
@@ -172,7 +225,7 @@ export const createClientPairingRuntime = ({
       // Never used or cancelled: drop once the session itself has expired —
       // it can no longer be redeemed and would otherwise sit in the store forever.
       const expiresAt = Date.parse(session.expiresAt || '');
-      return !Number.isFinite(expiresAt) || expiresAt > now;
+      return Number.isFinite(expiresAt) && expiresAt > now;
     });
   };
 
@@ -257,7 +310,8 @@ export const createClientPairingRuntime = ({
       const session = store.sessions.find((entry) => entry.id === normalizedId);
       if (!session) throw redeemError();
       if (session.cancelledAt || session.usedAt) throw redeemError();
-      if (Date.parse(session.expiresAt) <= Date.now()) throw redeemError();
+      const expiresAtMs = Date.parse(session.expiresAt);
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) throw redeemError();
       if (!session.allowedClientKinds.includes(normalizedKind)) throw redeemError();
       if (!constantTimeEqual(session.secretHash, hashSecret(normalizedSecret), crypto)) throw redeemError();
 

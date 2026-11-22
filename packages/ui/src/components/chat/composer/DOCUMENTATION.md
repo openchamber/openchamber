@@ -46,7 +46,13 @@ as answers change, an `external` field is an information step, Enter in a
 text box moves to the next step and Cmd/Ctrl+Enter submits. Submit is
 enabled only once every question is answered; a submit with a required
 question still open jumps to it. It shows the
-oldest pending form and counts the rest in its header. The BTW sheet keeps
+oldest pending form and counts the rest in its header. The header's close
+button and Dismiss both cancel the form without a message, which ends the
+agent's turn. Answer later (agent questions only) cancels it with a message
+saying the user will answer later, so the agent goes on, and the question
+stays answerable from its transcript row. With a question timeout set (`questionTimeoutMinutes`), the header counts
+the minutes left before `sync/question-timeouts.ts` closes the form the same
+way. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
@@ -716,10 +722,19 @@ and the send path reading the same grammar.
   when the selected value is unchanged.
   Beside the branch select (and in the mobile branch sheet) sits the
   **Auto-create worktree** switch (`settingsAutoCreateWorktree`, the profile
-  setting `autoCreateWorktree`, also on Settings → Sessions) with an optional
+  setting `autoCreateWorktree`, also on Settings → Sessions; on until the user
+  turns it off, `DEFAULT_AUTO_CREATE_WORKTREE`) with an optional
   name kept on the draft (`autoWorktreeName`). It shows, and applies, only
   while a git project draft is aimed at its project root
   (`shouldAutoCreateDraftWorktree` in `lib/worktrees/autoDraftWorktree.ts`).
+  While the switch is on, a new chat does not reuse the worktree of the
+  session it was opened from: `openNewSessionDraft` aims a draft whose
+  directory was only inherited (the live or last directory, or a caller's
+  `inheritedDirectory: true`, which New chat from a session passes) at the
+  project root when that directory is one of the project's worktrees, so the
+  first send makes a fresh worktree. A worktree the caller picked
+  (`directoryOverride` without `inheritedDirectory`, or a pinned
+  `preserveDirectoryOverride`) stays.
   `ChatInput` starts it right before the first send, when nothing can cancel
   the send any more: it puts a pending worktree request on the draft snapshot
   and the live draft, and draft materialization waits on it as it does for
@@ -1001,6 +1016,30 @@ on-screen event timeline (removed in `debug(ui): remove the mobile swap
 timeline overlay`, restorable from git) settled in one screenshot what two
 rounds of plausible fixes could not.
 
+## Subsession models
+
+The footer's "Subsession models" button (`SubsessionModelsControl`) opens the
+same `ModelPickerList` the composer's model picker uses: search, arrows and
+Enter, favorites, recents, provider order and collapsed sections all behave
+the same. The difference is that several models can be chosen, so rows are
+marked through `isModelSelected` and choosing a row, by click or Enter, toggles
+it and keeps the menu open. Wildcard and `#variant` entries set through config
+or the API sit above the list as read-only lines and are kept on every save.
+
+On a session each toggle PATCHes the whole policy. Toggles made while a save
+is in flight queue behind it in `createSubagentPolicyWriter`
+(`lib/opencode/subagentPolicy.ts`), each built on the one before, and the
+pending policy shows at once; when the last save settles the re-read session
+record is the source of truth again. A failed save shows a toast and the
+writes behind it still run. In a new-session draft the selection lives in
+`useSubsessionDraftStore` and goes out with the create call.
+
+### Why queue toggles and not disable the list while saving
+
+The first version disabled every row until a save settled, so choosing three
+models meant three waits and clicks during a save were lost. Queueing keeps
+writes in order, so the last write always holds every change.
+
 ## Run in parallel
 
 The desktop model picker offers "Run on several models" right under Auto
@@ -1022,15 +1061,58 @@ so the box grows upward and the text field never moves: one row of model chips
 lane) plus a summary button that opens the launch settings dialog: two fixed
 columns (where lanes work, base branch, setup | fusion, judge and its effort,
 prompt variants) where options that do not apply are disabled, not hidden, so
-the dialog keeps its size. Lanes share the project directory by default;
-worktrees are opt-in, and a tab row only
+the dialog keeps its size. Every run starts on **Separate worktrees**, whatever
+the draft is aimed at and whatever the Auto-create worktree switch says: each
+lane gets a new worktree and branch from the picked base branch, else from
+where Settings say parallel runs start (`selectWorktreeStartFrom(…, 'parallel')`,
+the default remote's default branch such as `origin/main` unless changed),
+resolved at launch so it holds even when the launch settings were never
+opened. **Shared directory** puts every lane in the draft's directory (the
+worktree it points at, waiting for one Quick worktree is still making, else the
+project root). Shared files require an explicit choice, including for a project
+without Git. A tab row shows only
 once there are two or more variants. Model pickers there render through a
 portal because the box clips its content; the footer drops the model button
 and keeps the ordinary send button (`ComposerActionButtons` with a
 `sendLabel` naming the run count), disabled below two runs or while
-launching. Enter and the send button launch instead of sending. Launching goes through `useMultiRunStore.createMultiRun`, clears the
+launching. Enter and the send button launch instead of sending; a ref, not
+the `isLaunching` state, blocks a second launch before the re-render. Launching goes through `useMultiRunStore.createMultiRun`, clears the
 draft text and attachments, and opens the run overview. Attachments go to every
 variant; prompt text is sent as typed, the way the old launcher sent it.
+
+### Why runs default to separate worktrees and not the draft's directory
+
+The parallel mode used to start every run in the project root, so several
+models edited one checkout and a draft aimed at a worktree ran its lanes in the
+root. Lanes that change code need a checkout each to be compared and kept, so
+the maintainer chose separate worktrees from the Settings start as the default,
+even for a draft aimed at a worktree or with Auto-create worktree off. That
+switch names one worktree for one session and does not fit several lanes.
+Shared directory stays one click away for questions and research.
+
+The fusion settings explain that fusion creates a new result while retaining
+the individual sessions. Manual fusion waits for review and source guidance
+in the overview; automatic fusion remains an optional first pass.
+
+The parent's normal composer shows a role hint with a tappable explanation of
+guidance: it applies to the parent and future fusion, while individual steering
+uses the member's own chat. `useRunParentHint` selects the role as a primitive value,
+so streamed timestamps do not redraw it.
+
+"Generate prompts" in the prompt-variants settings opens the candidate review
+dialog. The description may ask for variations on the original, brand-new prompts,
+or both. Selected models call OpenCode's stateless `generate.text`; generation
+never runs candidate tasks. `lib/multirun/promptCandidates.ts` parses the bounded
+JSON response before it can enter composer state. One model's failure preserves
+the others' candidates. Generation models and execution models are separate choices.
+
+Candidates start unselected. Only an explicit multiselection followed by "Add
+selected prompts" creates ordinary variants through `addGeneratedVariants`.
+Existing nonempty prompts survive; empty placeholder variants are omitted. Each
+added prompt receives an independent copy of the active variant's run models,
+which can then be changed in its tab. A runtime, draft, or target change prevents
+stale generation from being applied to another draft. Mobile does not offer this
+launch workflow, consistent with existing parallel-mode availability.
 
 ## Chat quote highlights
 

@@ -47,6 +47,7 @@ import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDro
 import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { SessionMenuItemHint } from '@/components/session/SessionMenuItemHint';
 import { MoveChatToProjectDialog } from '@/components/session/MoveChatToProjectDialog';
+import { ChangeSessionLocationDialog } from '@/components/session/ChangeSessionLocationDialog';
 import { HeaderSessionArchiveMenuItem } from './HeaderSessionArchiveMenuItem';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
@@ -60,6 +61,8 @@ import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
+import { ContinueWithModelDialog } from '@/components/chat/ContinueWithModelDialog';
+import { canContinueWithAnotherModel } from '@/sync/continue-with-model';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -344,6 +347,16 @@ export const Header: React.FC = () => {
     return normalize(raw || '');
   }, [currentSession?.directory]);
   const isCurrentSessionAiRenaming = useIsSessionAiRenamePending(currentSessionId ?? '', sessionDirectory);
+  // The session the dialog was opened for; switching sessions does not redirect it.
+  const [continueWithModelTarget, setContinueWithModelTarget] = React.useState<{ sessionId: string; directory: string } | null>(null);
+  const canContinueCurrentSession = Boolean(sessionDirectory) && canContinueWithAnotherModel(
+    currentSessionId && currentSession ? { id: currentSessionId, parentID: currentSession.parentId ?? undefined } : null,
+  );
+  const openContinueWithModel = React.useCallback(() => {
+    // The directory the chat reads this session from, as the composer sends from it.
+    const directory = normalize(useSessionUIStore.getState().currentSessionDirectory || '') || sessionDirectory;
+    if (currentSessionId && directory) setContinueWithModelTarget({ sessionId: currentSessionId, directory });
+  }, [currentSessionId, sessionDirectory]);
 
   const draftDirectory = useSessionUIStore((state) => {
     if (!state.newSessionDraft?.open) {
@@ -411,6 +424,7 @@ export const Header: React.FC = () => {
   const pendingHeaderRenameRef = React.useRef<string | null>(null);
   const [headerSessionTitleDraft, setHeaderSessionTitleDraft] = React.useState('');
   const [moveChatDialogOpen, setMoveChatDialogOpen] = React.useState(false);
+  const [changeLocationDialogOpen, setChangeLocationDialogOpen] = React.useState(false);
   const hasProjects = useProjectsStore((state) => state.projects.length > 0);
   const [pendingHeaderRetentionAction, setPendingHeaderRetentionAction] = React.useState<{ action: 'archive' | 'delete'; sessionId: string } | null>(null);
   const headerRenameFormRef = React.useRef<HTMLFormElement | null>(null);
@@ -561,6 +575,26 @@ export const Header: React.FC = () => {
       messages: buildSessionTreeMoveMessages(t, {
         success: 'sessions.moveChatToProject.success',
         failure: 'sessions.moveChatToProject.failed',
+      }),
+    });
+  }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
+
+  // Any folder the user names. The session is read from every known session,
+  // archived ones included: a session whose folder was deleted is often
+  // archived, and the active list alone made this a silent no-op for it.
+  const changeCurrentSessionLocation = React.useCallback((directory: string) => {
+    if (!currentSessionId || !sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree) return;
+    const root = useGlobalSessionsStore.getState().entityById.get(currentSessionId);
+    if (!root) return;
+    requestSessionTreeMove({
+      kind: 'directory',
+      root,
+      descendants: collectSessionMoveDescendants(root, []),
+      sourceDirectory: sessionDirectory,
+      directory,
+      messages: buildSessionTreeMoveMessages(t, {
+        success: 'sessions.changeLocation.success',
+        failure: 'sessions.changeLocation.failed',
       }),
     });
   }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
@@ -936,6 +970,7 @@ export const Header: React.FC = () => {
     const { Item, Separator } = components;
     const canMoveToWorktree = isActive && !isVSCode && !isChatContext && currentSession && !currentSession.parentId;
     const canMoveToProject = isActive && !isVSCode && isChatContext && currentSession && !currentSession.parentId && hasProjects;
+    const canChangeLocation = isActive && !isVSCode && currentSession && !currentSession.parentId;
     return (
       <>
         <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}>
@@ -954,6 +989,13 @@ export const Header: React.FC = () => {
           <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}>
             <Item onClick={() => void exportCurrentSession()}>
               <Icon name="download" className="me-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}
+            </Item>
+          </SessionMenuItemHint>
+        ) : null}
+        {isActive && canContinueCurrentSession ? (
+          <SessionMenuItemHint hint={t('chat.continueWithModel.menuHint')}>
+            <Item onClick={openContinueWithModel}>
+              <Icon name="arrow-left-right" className="me-1 size-4" />{t('chat.continueWithModel.action')}
             </Item>
           </SessionMenuItemHint>
         ) : null}
@@ -997,6 +1039,22 @@ export const Header: React.FC = () => {
             </span>
           </SessionMenuItemHint>
         ) : null}
+        {canChangeLocation ? (
+          <SessionMenuItemHint hint={isCurrentSessionActive
+            ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+            : t('sessions.changeLocation.hint')}>
+            <span className="block">
+              <Item
+                disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
+                onClick={() => setChangeLocationDialogOpen(true)}
+                className="w-full"
+              >
+                <Icon name="folder" className="me-1 size-4" />
+                {t('sessions.changeLocation.menu')}
+              </Item>
+            </span>
+          </SessionMenuItemHint>
+        ) : null}
         <Separator />
         <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.closeOtherTabs')}>
           <Item onClick={closeOtherTabs}>
@@ -1016,7 +1074,7 @@ export const Header: React.FC = () => {
         </SessionMenuItemHint>
       </>
     );
-  }, [copySessionIdFor, currentSession, currentSessionOpenDirectory, exportCurrentSession, hasElectronDesktopIPC, hasProjects, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, openSessionInMiniChat, renderGuestSessionActionItems, sessionDirectory, t]);
+  }, [canContinueCurrentSession, copySessionIdFor, currentSession, currentSessionOpenDirectory, exportCurrentSession, hasElectronDesktopIPC, hasProjects, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, openContinueWithModel, openSessionInMiniChat, renderGuestSessionActionItems, sessionDirectory, t]);
 
   const renderDesktop = () => (
     <div
@@ -1069,11 +1127,13 @@ export const Header: React.FC = () => {
             <TooltipContent side="bottom">{t('header.mainSurface.backToChat')}</TooltipContent>
           </Tooltip>
           <div className="me-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-start">
-            <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+            {/* Sized in rem like the session title below, so both lines grow
+                with the interface size. */}
+            <span className="truncate typography-ui-header font-normal leading-tight text-foreground max-w-full">
               {activeSurfaceHeader.title}
             </span>
             {activeSurfaceHeader.subtitle ? (
-              <span className="truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75 max-w-full">
+              <span className="truncate typography-micro text-[0.65625rem] font-normal leading-tight text-muted-foreground/75 max-w-full">
                 {activeSurfaceHeader.subtitle}
               </span>
             ) : null}
@@ -1110,7 +1170,7 @@ export const Header: React.FC = () => {
                     onChange={(event) => setHeaderSessionTitleDraft(event.target.value)}
                     onKeyDown={(event) => handleSessionRenameKeyDown(event, () => setIsRenamingHeaderSession(false))}
                     placeholder={t('sessions.sidebar.session.menu.rename')}
-                    className="min-w-0 flex-1 bg-transparent typography-ui-label text-[14px] font-normal leading-tight outline-none placeholder:text-muted-foreground"
+                    className="min-w-0 flex-1 bg-transparent typography-ui-header font-normal leading-tight outline-none placeholder:text-muted-foreground"
                   />
                   <button
                     type="submit"
@@ -1131,18 +1191,22 @@ export const Header: React.FC = () => {
                   </button>
                 </form>
               ) : isNewSessionDraftOpen ? null : (
-                <span dir="auto" className="oc-ui-start-align truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+                // The typography scale's header step: 14px at 100%, and in rem,
+                // so it grows with the interface size like the rest of the header.
+                <span dir="auto" className="oc-ui-start-align truncate typography-ui-header font-normal leading-tight text-foreground max-w-full">
                   {currentSessionTitle}
                 </span>
               )}
               {showHeaderMetaRow ? (
                 // A draft has no title of its own, so its project and branch
-                // are the title: title-sized, not a caption under nothing.
+                // are the title: title-sized, not a caption under nothing. The
+                // caption keeps 10.5px at 100%, below the scale's smallest
+                // step, in rem so it grows with the title above it.
                 <span className={cn(
                   'flex min-w-0 max-w-full items-center gap-1.5 truncate font-normal leading-tight',
                   isNewSessionDraftOpen
-                    ? 'typography-ui-label text-[14px] text-foreground'
-                    : 'typography-micro text-[10.5px] text-muted-foreground/75',
+                    ? 'typography-ui-header text-foreground'
+                    : 'typography-micro text-[0.65625rem] text-muted-foreground/75',
                 )}>
                   {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                   {currentBranchLabel ? (
@@ -1164,7 +1228,9 @@ export const Header: React.FC = () => {
               ) : null}
             </div>
             <div className={cn(
-              'flex h-[18px] shrink-0 items-center justify-center',
+              // One title line high, in rem, so the button stays level with
+              // the title at every interface size.
+              'flex h-4.5 shrink-0 items-center justify-center',
               // Top-aligned only when the title has a metadata line under it;
               // alone, the title is centred and the button must follow.
               showHeaderMetaRow ? 'self-start' : 'self-center',
@@ -1181,7 +1247,7 @@ export const Header: React.FC = () => {
                   }}
                 >
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="xs" className="h-[18px] w-6 px-0 text-muted-foreground hover:bg-transparent hover:text-foreground" aria-label={t('header.sessionActions.openAria')}>
+                    <Button variant="ghost" size="xs" className="h-4.5 w-6 px-0 text-muted-foreground hover:bg-transparent hover:text-foreground" aria-label={t('header.sessionActions.openAria')}>
                       <Icon name="more" className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -1191,6 +1257,13 @@ export const Header: React.FC = () => {
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}><DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="me-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem></SessionMenuItemHint>
                     <DropdownMenuSeparator />
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}><DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="me-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem></SessionMenuItemHint>
+                    {canContinueCurrentSession ? (
+                      <SessionMenuItemHint hint={t('chat.continueWithModel.menuHint')}>
+                        <DropdownMenuItem onClick={openContinueWithModel}>
+                          <Icon name="arrow-left-right" className="me-1 size-4" />{t('chat.continueWithModel.action')}
+                        </DropdownMenuItem>
+                      </SessionMenuItemHint>
+                    ) : null}
                     {hasElectronDesktopIPC ? (
                       <DropdownMenuItem onClick={() => openSessionInMiniChat(currentSessionId, currentSessionOpenDirectory)}>
                         <Icon name="picture-in-picture-2" className="me-1 size-4" />{t('sessions.sidebar.session.menu.openInMiniChat')}
@@ -1211,6 +1284,23 @@ export const Header: React.FC = () => {
                           >
                             <Icon name="folder-shared" className="me-1 size-4" />
                             {t('sessions.sidebar.session.menu.moveToWorktree')}
+                          </DropdownMenuItem>
+                        </span>
+                      </SessionMenuItemHint>
+                    ) : null}
+                    {!isVSCode && currentSession && !currentSession.parentId ? (
+                      <SessionMenuItemHint hint={isCurrentSessionActive
+                        ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+                        : t('sessions.changeLocation.hint')}>
+                        <span className="block">
+                          <DropdownMenuItem
+                            disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
+                            onClick={() => setChangeLocationDialogOpen(true)}
+                            className="w-full"
+                            data-session-change-location="true"
+                          >
+                            <Icon name="folder" className="me-1 size-4" />
+                            {t('sessions.changeLocation.menu')}
                           </DropdownMenuItem>
                         </span>
                       </SessionMenuItemHint>
@@ -1364,6 +1454,20 @@ export const Header: React.FC = () => {
         open={moveChatDialogOpen}
         onOpenChange={setMoveChatDialogOpen}
         onPick={moveCurrentChatToProject}
+      />
+      {continueWithModelTarget ? (
+        <ContinueWithModelDialog
+          open
+          onOpenChange={(open) => { if (!open) setContinueWithModelTarget(null); }}
+          sessionId={continueWithModelTarget.sessionId}
+          directory={continueWithModelTarget.directory}
+        />
+      ) : null}
+      <ChangeSessionLocationDialog
+        open={changeLocationDialogOpen}
+        onOpenChange={setChangeLocationDialogOpen}
+        currentDirectory={sessionDirectory || null}
+        onPick={changeCurrentSessionLocation}
       />
       <Dialog open={pendingHeaderRetentionAction !== null} onOpenChange={(open) => { if (!open) setPendingHeaderRetentionAction(null); }}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">

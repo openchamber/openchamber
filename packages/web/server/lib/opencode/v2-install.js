@@ -5,9 +5,29 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { requireOpenCodeV2 } from './compatibility.js';
+import { readBoundedResponseBytes, readBoundedResponseText } from '../shared/response-body.js';
 
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
 const NPM_REGISTRY = 'https://registry.npmjs.org';
+
+// Download size caps. Every response body below is read through the shared
+// bounded readers, so an oversized body is refused while it streams in
+// instead of being buffered whole first. The installer script is 15,737
+// bytes today, so 1 MB leaves it generous headroom; anything larger is not
+// a shell installer and must never reach the file that gets executed. The
+// registry JSON answers are single-version documents of a few KB, under
+// the same 1 MB cap. The Windows package is one compiled binary: the
+// current x64 package unpacks to 254,943,358 bytes (npm metadata), so its
+// tarball gets 512 MB, several times the size of the package it carries.
+const INSTALLER_SCRIPT_MAX_BYTES = 1024 * 1024;
+const PACKAGE_METADATA_MAX_BYTES = 1024 * 1024;
+const WINDOWS_ARCHIVE_MAX_BYTES = 512 * 1024 * 1024;
+
+const readBoundedJson = async (response, maxBytes, tooLargeError) => {
+  const bounded = await readBoundedResponseBytes(response, maxBytes);
+  if (bounded.tooLarge) throw new Error(tooLargeError);
+  return JSON.parse(bounded.bytes.toString('utf8'));
+};
 
 const releaseSchema = z.object({ version: z.string().regex(/^2\.\d+\.\d+$/) });
 const packageDistSchema = z.object({
@@ -63,8 +83,10 @@ const extractArchive = (tarCommand, archive, destination) => new Promise((resolv
 const prepareInstallerScript = async ({ version, workDirectory, env, fetchImpl }) => {
   const response = await fetchImpl('https://opencode.ai/v2/install', { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error('Could not download the OpenCode installer.');
+  const bounded = await readBoundedResponseText(response, INSTALLER_SCRIPT_MAX_BYTES);
+  if (bounded.tooLarge) throw new Error('Could not download the OpenCode installer.');
   const script = path.join(workDirectory, 'install.sh');
-  await fs.writeFile(script, await response.text(), { mode: 0o600 });
+  await fs.writeFile(script, bounded.text, { mode: 0o600 });
   return () => runInstaller(script, version, env);
 };
 
@@ -75,11 +97,13 @@ const prepareInstallerScript = async ({ version, workDirectory, env, fetchImpl }
 const prepareWindowsBinary = async ({ version, arch, directory, workDirectory, fetchImpl, tarCommand }) => {
   const metadataResponse = await fetchImpl(`${NPM_REGISTRY}/${windowsPackage(arch).replace('/', '%2F')}/${version}`, { signal: AbortSignal.timeout(15_000) });
   if (!metadataResponse.ok) throw new Error('Could not resolve the OpenCode v2 package.');
-  const { dist } = packageDistSchema.parse(await metadataResponse.json());
+  const { dist } = packageDistSchema.parse(await readBoundedJson(metadataResponse, PACKAGE_METADATA_MAX_BYTES, 'Could not resolve the OpenCode v2 package.'));
   if (new URL(dist.tarball).origin !== NPM_REGISTRY) throw new Error('The OpenCode v2 package is not served by the npm registry.');
   const archiveResponse = await fetchImpl(dist.tarball, { signal: AbortSignal.timeout(INSTALL_TIMEOUT_MS) });
   if (!archiveResponse.ok) throw new Error('Could not download the OpenCode v2 package.');
-  const archive = Buffer.from(await archiveResponse.arrayBuffer());
+  const boundedArchive = await readBoundedResponseBytes(archiveResponse, WINDOWS_ARCHIVE_MAX_BYTES);
+  if (boundedArchive.tooLarge) throw new Error('Could not download the OpenCode v2 package.');
+  const archive = boundedArchive.bytes;
   if (`sha512-${createHash('sha512').update(archive).digest('base64')}` !== dist.integrity) {
     throw new Error('The downloaded OpenCode v2 package failed its integrity check.');
   }
@@ -118,7 +142,7 @@ export const installOpenCodeV2 = async ({
   try {
     const releaseResponse = await fetchImpl(`${NPM_REGISTRY}/@opencode%2Fcli/latest`, { signal: AbortSignal.timeout(15_000) });
     if (!releaseResponse.ok) throw new Error('Could not resolve the OpenCode v2 release.');
-    const { version } = releaseSchema.parse(await releaseResponse.json());
+    const { version } = releaseSchema.parse(await readBoundedJson(releaseResponse, PACKAGE_METADATA_MAX_BYTES, 'Could not resolve the OpenCode v2 release.'));
     const replaceBinary = windows
       ? await prepareWindowsBinary({ version, arch, directory, workDirectory: lock, fetchImpl, tarCommand })
       : await prepareInstallerScript({ version, workDirectory: lock, env, fetchImpl });

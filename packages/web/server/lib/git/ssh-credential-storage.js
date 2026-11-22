@@ -10,6 +10,18 @@ const hasExactKeys = (value, keys) => {
   const actual = Object.keys(value);
   return actual.length === keys.length && actual.every((key) => keys.includes(key));
 };
+// Named generous byte cap for the store file (design #1655 rule 4):
+// parseStore states no count or length clamp (a finding, not changed here),
+// and append's maxKeys = 256 at ~4.2 KiB nominal per key (an absolute
+// privateKeyPath, a 52-char fingerprint, an id, JSON overhead) puts a full
+// legitimate store near 1.1 MiB — 4 MiB, the identity-store sibling shape,
+// leaves generous headroom while still bounding the read.
+const MAX_STORE_BYTES = 4 * 1024 * 1024;
+// Chunk size for the in-flight capped handle read in readState (#1766,
+// mirroring #1684): reads accumulate in pieces sized to the bytes
+// present, never one maxBytes + 1 allocation up front.
+const READ_CHUNK_BYTES = 64 * 1024;
+
 const invalidStore = () => Object.assign(new Error('Managed SSH credential store is invalid'), {
   code: 'INVALID_MANAGED_SSH_CREDENTIAL_STORE',
 });
@@ -50,7 +62,12 @@ export function createManagedSshCredentialStore({ filePath, fsImpl = fs, lockWai
   const readState = async () => {
     let handle;
     try {
-      handle = await fsImpl.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      // O_NONBLOCK (POSIX only) keeps open() from blocking on a FIFO
+      // with no writer before the handle stat below can refuse it as
+      // non-regular; O_NOFOLLOW stays so a symlink is judged at open.
+      handle = await fsImpl.open(filePath, process.platform === 'win32'
+        ? fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW
+        : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
     } catch (error) {
       if (error?.code === 'ENOENT') return Object.freeze({ version: 1, keys: Object.freeze([]) });
       if (error?.code === 'ELOOP') throw invalidStore();
@@ -59,7 +76,21 @@ export function createManagedSshCredentialStore({ filePath, fsImpl = fs, lockWai
     try {
       const stats = await handle.stat();
       if (!stats.isFile() || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
-      return parseStore(JSON.parse(await handle.readFile('utf8')));
+      if (stats.size > MAX_STORE_BYTES) throw invalidStore();
+      // The stat size is only a hint (#1766): enforce the cap in flight
+      // with a chunked handle read, so a file grown after the stat is
+      // refused having buffered at most MAX_STORE_BYTES + 1 bytes.
+      const chunks = [];
+      let total = 0;
+      while (total <= MAX_STORE_BYTES) {
+        const chunk = Buffer.alloc(Math.min(READ_CHUNK_BYTES, MAX_STORE_BYTES + 1 - total));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+        if (bytesRead === 0) break;
+        chunks.push(chunk.subarray(0, bytesRead));
+        total += bytesRead;
+      }
+      if (total > MAX_STORE_BYTES) throw invalidStore();
+      return parseStore(JSON.parse(Buffer.concat(chunks, total).toString('utf8')));
     } catch (error) {
       if (error?.code === 'INVALID_MANAGED_SSH_CREDENTIAL_STORE') throw error;
       throw invalidStore();

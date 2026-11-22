@@ -9,6 +9,18 @@ const PATCH = `diff --git a/src/a.ts b/src/a.ts
 +const added = true;
 `;
 
+
+const encoder = new TextEncoder();
+// The diff read asks Octokit for the raw body stream (parseSuccessResponseBody:
+// false), so mocks resolve a web stream of the body, not the body itself.
+const streamOf = (chunks) => new ReadableStream({
+  start(controller) {
+    for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+    controller.close();
+  },
+});
+const diffResponse = (chunks, headers = {}) => ({ data: streamOf(chunks), headers });
+
 describe('getPullRequestDiff', () => {
   let request;
   let getOctokitForAccountId;
@@ -34,7 +46,7 @@ describe('getPullRequestDiff', () => {
   });
 
   beforeEach(() => {
-    request = vi.fn().mockResolvedValue({ data: PATCH });
+    request = vi.fn().mockResolvedValue(diffResponse([PATCH]));
     getOctokitForAccountId = vi.fn().mockResolvedValue({ octokit: { request } });
     onAccountUnavailable = vi.fn();
     // The bound repository is a fork of `upstream/project`: the same network the
@@ -62,6 +74,7 @@ describe('getPullRequestDiff', () => {
       repo: 'openchamber',
       pull_number: 2122,
       headers: { accept: 'application/vnd.github.v3.diff' },
+      request: { parseSuccessResponseBody: false },
     });
     expect(getOctokitForAccountId).toHaveBeenCalledWith(readContext.accountId, expect.any(Object));
     expect(resolveGitHubRepoFromDirectory).toHaveBeenCalledWith('/repo', 'upstream');
@@ -108,10 +121,63 @@ describe('getPullRequestDiff', () => {
   });
 
   it('allows an empty comparison but rejects malformed GitHub bodies', async () => {
-    request.mockResolvedValue({ data: '' });
+    request.mockResolvedValue(diffResponse(['']));
     expect((await read({ allowEmpty: true })).patch).toBe('');
-    request.mockResolvedValue({ data: { message: 'Not a diff' } });
+    request.mockResolvedValue(diffResponse(['{"message":"Not a diff"}']));
     await expect(read()).rejects.toThrow();
+  });
+
+  it('returns an at-cap diff byte-identically and rejects an over-cap diff', async () => {
+    const prefix = 'diff --git a/src/a.ts b/src/a.ts\n';
+    const atCap = prefix + 'x'.repeat(50 * 1024 * 1024 - prefix.length);
+    request.mockResolvedValue(diffResponse([atCap]));
+    expect((await read()).patch).toBe(atCap);
+
+    request.mockResolvedValue(diffResponse([atCap, 'x']));
+    await expect(read()).rejects.toMatchObject({ code: 'patch-too-large', statusCode: 413 });
+  });
+
+  it('stops pulling the body as soon as the streamed bytes cross the cap (#1456)', async () => {
+    const chunk = 'y'.repeat(10 * 1024 * 1024);
+    const chunks = ['diff --git a/src/a.ts b/src/a.ts\n', chunk, chunk, chunk, chunk, chunk, chunk, chunk, chunk];
+    let pulled = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        const next = chunks[pulled];
+        pulled += 1;
+        if (next === undefined) controller.close();
+        else controller.enqueue(encoder.encode(next));
+      },
+    });
+    request.mockResolvedValue({ data: body, headers: {} });
+
+    await expect(read()).rejects.toMatchObject({ code: 'patch-too-large', statusCode: 413 });
+    // The cap is crossed on the sixth chunk; the remaining chunks are never pulled.
+    expect(pulled).toBeLessThan(chunks.length);
+  });
+
+  it('refuses an over-cap declared Content-Length by cancelling the body unread (#1456)', async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const body = new ReadableStream({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(encoder.encode('diff --git a/src/a.ts b/src/a.ts\n'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    request.mockResolvedValue({
+      data: body,
+      headers: { 'content-length': String(50 * 1024 * 1024 + 1) },
+    });
+
+    await expect(read()).rejects.toMatchObject({ code: 'patch-too-large', statusCode: 413 });
+    expect(cancelled).toBe(true);
+    // Construction fills the stream's one-chunk internal queue; the body is
+    // cancelled from the declared length alone, never drained.
+    expect(pulled).toBeLessThanOrEqual(1);
   });
 
   it('requires the exact bound account before repository resolution', async () => {
@@ -125,7 +191,7 @@ describe('getPullRequestDiff', () => {
   });
 
   it('treats an empty diff as a missing pull request rather than an empty review', async () => {
-    request.mockResolvedValue({ data: '   ' });
+    request.mockResolvedValue(diffResponse(['   ']));
 
     await expect(read()).rejects.toMatchObject({
       code: 'empty-diff',

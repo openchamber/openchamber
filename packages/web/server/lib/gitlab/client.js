@@ -1,4 +1,5 @@
 import { Gitlab } from '@gitbeaker/rest';
+import { readBoundedResponseBytes, readBoundedResponseText } from '../shared/response-body.js';
 import { isPlainObject, isString } from './validation.js';
 
 // GitBeaker's bundled requester follows redirects with the credential header
@@ -8,6 +9,26 @@ import { isPlainObject, isString } from './validation.js';
 // already be applied, so it surfaces to the durable executor instead.
 const RETRY_STATUSES = new Set([429, 502]);
 const MAX_READ_ATTEMPTS = 3;
+// Every request carries this per-attempt deadline, combined with the signal
+// the caller supplied (the downloader disconnect signal, or the one
+// GitBeaker builds from its queryTimeout). A self-managed instance that
+// accepts a connection and then stalls otherwise hangs a request for
+// GitBeaker's five-minute default, and the downloader without any bound.
+// The module's other fetches use the same 10s bound (network.js).
+const GITLAB_REQUEST_TIMEOUT_MS = 10_000;
+// The error surface only ever shows a short excerpt, so the error body
+// read is capped well above the excerpt instead of buffering the whole
+// answer from a user-configured, possibly self-managed instance.
+const ERROR_DETAIL_MAX_BYTES = 1_024;
+const ERROR_DETAIL_EXCERPT_CHARS = 200;
+// Success answers are read whole and parsed, so that read is capped
+// while it streams in instead of buffering an unbounded answer from a
+// user-configured, possibly self-managed instance. The callers are
+// paginated (perPage <= 100) list and detail answers plus
+// RepositoryFiles.showRaw raw files, which fit comfortably under
+// 16 MiB, and the cap matches the 16 MiB bound the models.dev and npm
+// success reads set under #1006.
+const SUCCESS_BODY_MAX_BYTES = 16 * 1024 * 1024;
 
 const decamelize = (key) => key.replace(/([a-z\d])([A-Z])/g, '$1_$2').toLowerCase();
 
@@ -36,17 +57,34 @@ function formatQuery(searchParams) {
   return params.join('&');
 }
 
+const successBodyTooLarge = () => Object.assign(
+  new Error(`GitLab response exceeded ${SUCCESS_BODY_MAX_BYTES} bytes`),
+  { code: 'response_too_large' },
+);
+
 async function parseBody(response, asStream) {
   if (asStream) return response.body;
   if (response.status === 204) return null;
   const contentType = (response.headers.get('content-type') || '').split(';')[0].trim();
-  if (contentType === 'application/json') return (await response.json()) || {};
-  if (contentType.startsWith('text/')) return (await response.text()) || '';
-  return response.blob();
+  if (contentType === 'application/json' || contentType.startsWith('text/')) {
+    const read = await readBoundedResponseText(response, SUCCESS_BODY_MAX_BYTES);
+    if (read.tooLarge) throw successBodyTooLarge();
+    // Response.json()/text() strip a leading UTF-8 BOM; the bounded
+    // reader does not, so strip it here to keep the values callers
+    // see unchanged.
+    const text = read.text.replace(/^\uFEFF/, '');
+    if (contentType === 'application/json') return JSON.parse(text) || {};
+    return text || '';
+  }
+  const read = await readBoundedResponseBytes(response, SUCCESS_BODY_MAX_BYTES);
+  if (read.tooLarge) throw successBodyTooLarge();
+  return new Blob([read.bytes], { type: response.headers.get('content-type') || '' });
 }
 
 async function requestError(request, response) {
-  const content = await response.text().catch(() => '');
+  const read = await readBoundedResponseText(response, ERROR_DETAIL_MAX_BYTES)
+    .catch(() => ({ tooLarge: true }));
+  const content = read.tooLarge ? '' : read.text;
   let description = content;
   if ((response.headers.get('content-type') || '').includes('application/json')) {
     try {
@@ -57,12 +95,39 @@ async function requestError(request, response) {
       description = content;
     }
   }
+  description = (description || '').slice(0, ERROR_DETAIL_EXCERPT_CHARS);
   return new Error(description || `GitLab request failed with status ${response.status}`, {
     cause: { description, request, response },
   });
 }
 
 const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+// The deadline aborts through its own controller, so a stall rejects with
+// an AbortError, which classifyGitLabFailure (network.js) maps to
+// unreachable. A caller abort arrives through the combined signal with
+// timedOut() false, so the two stay distinguishable for the retry policy.
+function deadlineSignal(callerSignal) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => { controller.abort(); }, GITLAB_REQUEST_TIMEOUT_MS);
+  return {
+    signal: callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal,
+    timedOut: () => controller.signal.aborted,
+    clear: () => { clearTimeout(timer); },
+  };
+}
+
+// One fetch bounded by the deadline. The bound covers the call itself,
+// which for the downloader means the wait for response headers: the body
+// it returns streams to the route caller without the deadline running.
+async function fetchOnceWithDeadline(fetchImpl, url, init, callerSignal) {
+  const deadline = deadlineSignal(callerSignal);
+  try {
+    return await fetchImpl(new Request(url, { ...init, signal: deadline.signal }));
+  } finally {
+    deadline.clear();
+  }
+}
 
 function createRequesterFn(fetchImpl) {
   return (serviceOptions) => {
@@ -81,13 +146,23 @@ function createRequesterFn(fetchImpl) {
       url.search = formatQuery(searchParams);
       const attempts = method === 'GET' ? MAX_READ_ATTEMPTS : 1;
       for (let attempt = 1; ; attempt += 1) {
-        const request = new Request(url, { method, headers, body: payload, signal, redirect: 'error' });
-        const response = await fetchImpl(request);
-        if (response.ok) {
-          return { body: await parseBody(response, asStream), headers: Object.fromEntries(response.headers.entries()), status: response.status };
+        const deadline = deadlineSignal(signal);
+        try {
+          const request = new Request(url, { method, headers, body: payload, signal: deadline.signal, redirect: 'error' });
+          const response = await fetchImpl(request);
+          if (response.ok) {
+            return { body: await parseBody(response, asStream), headers: Object.fromEntries(response.headers.entries()), status: response.status };
+          }
+          if (attempt >= attempts || !RETRY_STATUSES.has(response.status)) throw await requestError(request, response);
+          await response.body?.cancel().catch(() => {});
+        } catch (error) {
+          // A deadline abort retries like a 429/502 for reads and surfaces
+          // for mutations, which are sent once. A caller abort has
+          // timedOut() false and surfaces at once for every method.
+          if (!deadline.timedOut() || attempt >= attempts) throw error;
+        } finally {
+          deadline.clear();
         }
-        if (attempt >= attempts || !RETRY_STATUSES.has(response.status)) throw await requestError(request, response);
-        await response.body?.cancel().catch(() => {});
         await delay(2 ** attempt * 250);
       }
     };
@@ -107,7 +182,7 @@ export function createGitLabDownloader({ origin, token, tokenType = 'token', fet
   return async (apiPath, { range, signal } = {}) => {
     const headers = range ? { range } : {};
     const url = new URL(`api/v4/${apiPath}`, `${origin}/`);
-    const response = await fetchImpl(new Request(url, { headers: { ...headers, ...credential }, redirect: 'manual', signal }));
+    const response = await fetchOnceWithDeadline(fetchImpl, url, { headers: { ...headers, ...credential }, redirect: 'manual' }, signal);
     if (response.status < 300 || response.status >= 400) return response;
     await response.body?.cancel().catch(() => {});
     const location = response.headers.get('location');
@@ -115,7 +190,7 @@ export function createGitLabDownloader({ origin, token, tokenType = 'token', fet
     if (!next || (next.protocol !== 'https:' && next.origin !== url.origin)) {
       throw new Error('GitLab redirected the file to an address it may not be read from');
     }
-    return fetchImpl(new Request(next, { headers, redirect: 'error', signal }));
+    return fetchOnceWithDeadline(fetchImpl, next, { headers, redirect: 'error' }, signal);
   };
 }
 

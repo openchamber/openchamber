@@ -678,15 +678,15 @@ export const requestDirectoryAccess = async (
   return { success: false, error: 'Native directory picker not available' };
 };
 
-const isDesktopFileGrantResult = (
+const isDesktopFileResult = (
   value: unknown
-): value is { path?: unknown; outsideFileGrant?: unknown } => (
+): value is { path?: unknown } => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
 
 export const requestFileAccess = async (
   options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
-): Promise<{ success: boolean; path?: string; outsideFileGrant?: string; error?: string }> => {
+): Promise<{ success: boolean; path?: string; error?: string }> => {
   if (hasDesktopInvoke() && isDesktopLocalOriginActive()) {
     try {
       const selected = await getDesktopBridge()?.openDialog?.({
@@ -703,7 +703,7 @@ export const requestFileAccess = async (
       if (typeof selected === 'string') {
         return { success: true, path: selected };
       }
-      if (!isDesktopFileGrantResult(selected)) {
+      if (!isDesktopFileResult(selected)) {
         return { success: false, error: 'File selection cancelled' };
       }
       const path = typeof selected.path === 'string' ? selected.path : '';
@@ -713,7 +713,6 @@ export const requestFileAccess = async (
       return {
         success: true,
         path,
-        outsideFileGrant: typeof selected.outsideFileGrant === 'string' ? selected.outsideFileGrant : undefined,
       };
     } catch (error) {
       console.warn('Failed to request file access', error);

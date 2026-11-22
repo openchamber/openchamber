@@ -39,6 +39,9 @@ on:
 # run. Key by the distinguishing inputs and queue every run.
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.model }}-${{ inputs.opencode_version }}
+  # queue: max forbids cancel-in-progress: true (GitHub validation rejects
+  # the combination and the workflow dies at startup with zero jobs, #1337).
+  # Keep the literal false so every run queues, per the note above.
   cancel-in-progress: false
   queue: max
 

@@ -1,0 +1,378 @@
+{
+  "schema": "quota-provider-manifest/v1",
+  "contract": "The five registry-contract rules live in DOCUMENTATION.md (Provider registry contract, design #1808). This manifest is the one logical provider set: every surface list is a view of it, a surface absence is always a named exception below - never silent - and aliases are not providers.",
+  "surfaces": {
+    "web": "packages/web/server/lib/quota/providers/index.js registry keys",
+    "vscode_dispatch": "packages/vscode/src/quotaProviders.ts fetchQuotaForProvider switch cases",
+    "vscode_configured": "packages/vscode/src/quotaProviders.ts listConfiguredQuotaProviders configured set",
+    "ui_catalog": "packages/ui/src/lib/quota/providers/index.ts QUOTA_PROVIDERS",
+    "ui_union": "packages/ui/src/types/quota.ts QuotaProviderId",
+    "docs": "packages/web/server/lib/quota/DOCUMENTATION.md Supported provider IDs (dispatcher) table"
+  },
+  "providers": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "cline-pass",
+      "name": "ClinePass",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "command-code",
+      "name": "Command Code",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "deepinfra",
+      "name": "DeepInfra",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "exe-dev",
+      "name": "exe.dev",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "google",
+      "name": "Google (Code Assist, per-model)",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "hyper",
+      "name": "Charm Hyper",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "zai-coding-plan",
+      "name": "z.ai",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "zhipuai-coding-plan",
+      "name": "Zhipu AI Coding Plan",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "kimi-for-coding",
+      "name": "Kimi for Coding",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "meta",
+      "name": "Meta Model API",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral AI",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "opendesign",
+      "name": "Open Design",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "nano-gpt",
+      "name": "NanoGPT",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "github-copilot",
+      "name": "GitHub Copilot",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "minimax-coding-plan",
+      "name": "MiniMax Coding Plan (minimax.io)",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "minimax-cn-coding-plan",
+      "name": "MiniMax Coding Plan (minimaxi.com)",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "ollama-cloud",
+      "name": "Ollama Cloud",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "wafer",
+      "name": "Wafer.ai",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "opencode-go",
+      "name": "OpenCode Go",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "neuralwatt",
+      "name": "NeuralWatt",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "kilo",
+      "name": "Kilo Code",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "zenmux",
+      "name": "ZenMux",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
+      "id": "xai",
+      "name": "xAI",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    }
+  ],
+  "aliases": [
+    {
+      "id": "openai",
+      "alias_of": "codex",
+      "kind": "credential-alias",
+      "surfaces": {
+        "web": false,
+        "vscode_dispatch": false,
+        "vscode_configured": false,
+        "ui_catalog": false,
+        "ui_union": true,
+        "docs": false
+      },
+      "note": "A credentialAliases entry of codex in the web registry (credential aliases: openai, codex, chatgpt), not a provider: providers/openai.js is an internal-only module and is not registered for dispatcher routing. It currently sits in the UI type union as if it were a provider, against contract rule 3; removing it from the union is a behaviour-adjacent change that is NOT part of phase 1 (#1809) and stays an open note on this row."
+    }
+  ]
+}

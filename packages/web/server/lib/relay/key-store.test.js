@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -126,6 +127,58 @@ describe('relay key store', () => {
 
     expect(generations).toBe(1);
     expect(second).toEqual(first);
+  });
+
+  it('refuses an oversized identity file without treating it as a first run', async () => {
+    const maxBytes = 1024 * 1024;
+    fs.writeFileSync(identityPath(), Buffer.alloc(maxBytes + 1, 0x20));
+    let generated = false;
+
+    await expect(makeStore().getOrCreate('signing', async () => {
+      generated = true;
+      return makePair();
+    })).rejects.toMatchObject({
+      message: expect.stringContaining('Relay identity file is corrupt'),
+      cause: expect.objectContaining({ reason: 'too-large', limit: maxBytes }),
+    });
+    expect(generated).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a FIFO promptly without minting a new identity', () => {
+    execFileSync('mkfifo', [identityPath()]);
+    const moduleUrl = new URL('./key-store.js', import.meta.url).href;
+    const script = `
+      import fsPromises from 'node:fs/promises';
+      import path from 'node:path';
+      import { createRelayKeyStore } from ${JSON.stringify(moduleUrl)};
+
+      const store = createRelayKeyStore({
+        fsPromises,
+        path,
+        dataDir: process.argv[1],
+        readSettingsFromDiskMigrated: async () => ({}),
+        readSettingsStrict: async () => ({}),
+        writeSettingsToDisk: async () => {},
+      });
+
+      try {
+        await store.getOrCreate('signing', async () => { throw new Error('unexpected mint'); });
+        console.log(JSON.stringify({ message: 'unexpected mint' }));
+      } catch (error) {
+        console.log(JSON.stringify({ message: error.message, cause: error.cause }));
+      }
+    `;
+    const child = spawnSync('node', ['--input-type=module', '-e', script, dataDir], {
+      encoding: 'utf8',
+      timeout: 3000,
+    });
+
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(0);
+    expect(JSON.parse(child.stdout.trim())).toMatchObject({
+      message: expect.stringContaining('Relay identity file is corrupt'),
+      cause: { reason: 'not-regular' },
+    });
   });
 
   it('refuses to mint over a corrupt identity file', async () => {

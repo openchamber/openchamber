@@ -166,6 +166,10 @@ stored next to `useDefaults` is kept only for when the task is pinned again.
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
+  - The max-run watchdog cancels the run it times out: a per-run abort
+    signal reaches the run's scoped client (composed with any request
+    signal) and the dispatch steps check it before sending, so a timed-out
+    run is inert — not still executing — when its slot is released
   - Emits OpenChamber task-run events
 
 - `packages/web/server/lib/scheduled-tasks/loops.js`
@@ -269,6 +273,43 @@ project write lock on every `syncProject` when the project path is known:
   The general task deletion API still rejects loop-sourced tasks while their
   file exists; once the file is gone, deleting an orphan task is allowed.
 
+## Run history
+
+Every run event the runtime emits is also persisted by
+`createScheduledTaskRunHistory` (`run-history.js`) into an append-only
+JSONL file, `scheduled-task-run-history.jsonl` in the OpenChamber data
+directory — before this, the events existed only on the live SSE stream
+and the task records kept only latest-run fields, so no per-run outcome
+dataset existed (developing-today/code#2174, Gap 1).
+
+- A `running` event opens a run; the matching terminal event
+  (`success` | `error`) appends exactly one row. A duplicate terminal
+  event appends nothing. A terminal event with no observed start (the
+  server restarted mid-run) still appends its row, with
+  `startedAt: null`. Non-terminal statuses (`queued`) are not run
+  boundaries.
+- Row shape: `{ projectId, taskId, taskName, startedAt, finishedAt,
+  outcome, sessionId, tokens }`. `projectId` is the public id the event
+  stream carries. `tokens` stays `null` until the token exporter
+  (developing-today/code#2072) can supply usage; `sessionId` is the
+  join key.
+- Recording never throws into the run path: a failed append is logged
+  and the run proceeds. Malformed lines are skipped at load.
+- Retention bound (#2116): at most 5,000 rows are kept — the newest
+  (`MAX_RUN_HISTORY_ROWS`). An append that crosses the cap rewrites
+  the file from the retained rows, so the JSONL on disk is bounded by
+  the same cap. Startup reads at most the last 8 MiB of the file
+  (`MAX_RUN_HISTORY_LOAD_BYTES`, the tracked-items bounded-read cap),
+  dropping a partial first line, and keeps only the newest 5,000
+  valid rows — a file grown large before the bound existed still
+  loads bounded. Dedupe covers retained rows only: a duplicate
+  terminal event for a row already aged out is not recognised.
+- Read path: `GET /api/projects/:projectId/scheduled-tasks/run-history`
+  with optional `taskId`, `since`, `until` (epoch ms or any
+  `Date.parse`-able string), and `limit` (default 200, max 1000)
+  returns `{ runs }`, newest first — the input the #2174 comparison
+  and the Gap 3 watchdog consume.
+
 ## Public exports (runtime.js)
 
 - `createScheduledTasksRuntime(dependencies)`
@@ -290,6 +331,7 @@ project write lock on every `syncProject` when the project path is known:
   - `PATCH /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
   - `DELETE /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
   - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
+  - `GET /api/projects/:projectId/scheduled-tasks/run-history`
   - `GET /api/openchamber/scheduled-tasks/status`
   - `GET /api/openchamber/events`
 

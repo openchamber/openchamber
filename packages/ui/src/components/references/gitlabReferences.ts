@@ -42,7 +42,16 @@ const sourceRepo = (project: Project) => ({ owner: project.owner, repo: project.
 
 const body = (text: string | undefined) => {
     const value = text ?? '';
-    return { body: value.slice(0, BODY_LIMIT), bodyTruncated: value.length > BODY_LIMIT };
+    if (value.length <= BODY_LIMIT) {
+        return { body: value, bodyTruncated: false };
+    }
+    // The cut must not split a surrogate pair: a cut right after a high
+    // surrogate drops that half so the preview never ends in a lone
+    // surrogate (which renders as U+FFFD) — same guard as the server
+    // previewBody in reference-search.js (#1957).
+    const cut = value.slice(0, BODY_LIMIT);
+    const last = cut.charCodeAt(cut.length - 1);
+    return { body: last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut, bodyTruncated: true };
 };
 
 const toIssueReference = (issue: Issue): GitHubIssueReference => ({
@@ -235,7 +244,7 @@ export const fetchGitLabReferenceDetail = async (
     return {
         number: reference.number,
         comments: comments.slice(-50),
-        commentTotal: changeRequestContext.issueComments.length,
+        commentTotal: comments.length,
         pull: pullDetail(changeRequestContext),
     };
 };

@@ -20,6 +20,13 @@ describe('OpenCode compatibility', () => {
     expect(await readOpenCodeInfo(Response.json({ version: '2.0.19' }))).toEqual({ version: '2.0.19' });
   });
 
+  it('does not accept an oversized fixed-shape version document', async () => {
+    const response = new Response(new ReadableStream({}), {
+      headers: { 'content-length': String(64 * 1024 + 1) },
+    });
+    expect(await readOpenCodeInfo(response)).toBeNull();
+  });
+
   it('identifies external v1 through its legacy health contract', async () => {
     const requests = [];
     const fetchImpl = async (url) => {
@@ -35,6 +42,13 @@ describe('OpenCode compatibility', () => {
       if (url.pathname === '/api/info') throw new DOMException('The operation timed out.', 'TimeoutError');
       return Response.json({ healthy: true, version: '1.18.32' });
     };
+    expect(await readExternalOpenCodeVersion('http://localhost:4096', {}, fetchImpl)).toBe('1.18.32');
+  });
+
+  it('falls through to legacy health when the /api/info body exceeds its cap', async () => {
+    const fetchImpl = async (url) => (url.pathname === '/api/info'
+      ? new Response(new ReadableStream({}), { headers: { 'content-length': String(64 * 1024 + 1) } })
+      : Response.json({ healthy: true, version: '1.18.32' }));
     expect(await readExternalOpenCodeVersion('http://localhost:4096', {}, fetchImpl)).toBe('1.18.32');
   });
 

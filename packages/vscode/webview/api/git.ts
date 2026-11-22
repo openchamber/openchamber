@@ -369,7 +369,7 @@ const runCompatibilityOperation = async (entry: CompatibilityOperation): Promise
 // `src/gitPathDiff.ts`.
 const unavailablePathSchema = z.object({
   kind: z.literal('unavailable'),
-  reason: z.enum(['path_not_found', 'nested_repository']),
+  reason: z.enum(['path_not_found', 'nested_repository', 'file_too_large']),
   message: z.string(),
 });
 const pathDiffBridgeSchema = z.discriminatedUnion('kind', [

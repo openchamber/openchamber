@@ -1,9 +1,12 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from './installed-sources.js';
+import { appendInstalledSources, INSTALLED_SOURCES_MAX_BYTES, isInstalledFromSource, readInstalledSources, removeInstalledSources } from './installed-sources.js';
+
+const isWindows = process.platform === 'win32';
 
 let dataDir;
 let previousDataDir;
@@ -60,6 +63,42 @@ describe('installed skill provenance registry', () => {
     expect(readInstalledSources().size).toBe(0);
   });
 
+  it('refuses to overwrite a malformed file on append and leaves it byte-identical', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    const corrupt = '{"version":1,"entries":[{"skillName":"skill-a"';
+    fs.writeFileSync(file, corrupt);
+
+    expect(() => appendInstalledSources([entry()])).toThrow(/malformed.*refusing to overwrite/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(corrupt);
+  });
+
+  it('refuses to overwrite a malformed file on remove and leaves it byte-identical', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    const corrupt = '{broken';
+    fs.writeFileSync(file, corrupt);
+
+    expect(() => removeInstalledSources('skill-creator')).toThrow(/malformed.*refusing to overwrite/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(corrupt);
+  });
+
+  it('refuses to overwrite a file with an unrecognized shape on append', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    const unrecognizedFileContents = JSON.stringify({ version: 99, entries: [entry()] });
+    fs.writeFileSync(file, unrecognizedFileContents);
+
+    expect(() => appendInstalledSources([entry({ skillName: 'other' })])).toThrow(/malformed/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(unrecognizedFileContents);
+  });
+
+  it('creates the file on append when it is missing', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    expect(fs.existsSync(file)).toBe(false);
+
+    appendInstalledSources([entry()]);
+
+    expect(readInstalledSources().get('skill-creator')).toHaveLength(1);
+  });
+
   it('ignores entries that are missing their identity', () => {
     appendInstalledSources([entry({ sourceId: '' }), { skillName: '', skillDir: 'x', sourceId: 'a' }, entry({ skillDir: '' })]);
 
@@ -90,5 +129,25 @@ describe('installed skill provenance registry', () => {
     expect(isInstalledFromSource(byName, 'skill-creator', 'acme', 'skills/skill-creator')).toBe(true);
     expect(isInstalledFromSource(byName, 'skill-creator', 'other', 'skills/skill-creator')).toBe(false);
     expect(isInstalledFromSource(byName, 'unrecorded', 'any', 'skills/unrecorded')).toBe(true);
+  });
+
+  it('treats an over-cap file as no provenance and refuses to overwrite it on append', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    // Valid JSON whose size crosses the cap: rejection must come from the
+    // bounded read, not from a parse failure.
+    const oversized = JSON.stringify({ version: 1, entries: [entry({ skillName: 'x'.repeat(INSTALLED_SOURCES_MAX_BYTES) })] });
+    fs.writeFileSync(file, oversized);
+
+    expect(readInstalledSources().size).toBe(0);
+    expect(() => appendInstalledSources([entry()])).toThrow(/malformed.*refusing to overwrite/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(oversized);
+  });
+
+  it.skipIf(isWindows)('refuses a FIFO at the provenance path in bounded time instead of blocking', () => {
+    const file = path.join(dataDir, 'skills-installed-sources.json');
+    execFileSync('mkfifo', [file]);
+
+    expect(readInstalledSources().size).toBe(0);
+    expect(() => appendInstalledSources([entry()])).toThrow(/malformed.*refusing to overwrite/);
   });
 });

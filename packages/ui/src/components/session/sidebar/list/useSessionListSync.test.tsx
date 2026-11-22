@@ -1,8 +1,14 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { installHookTestDom } from '../test-utils/testDom';
+import { restoreModuleMock } from '../test-utils/moduleMocks';
+import * as syncContextModule from '@/sync/sync-context';
+import * as syncRefsModule from '@/sync/sync-refs';
+import * as globalSessionsModule from '@/stores/useGlobalSessionsStore';
+import * as openchamberEventsModule from '@/lib/openchamberEvents';
+import * as authoritativeCleanupModule from './useAuthoritativeSessionCleanup';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -41,6 +47,12 @@ const childStores = {
 type GlobalSessionsState = { activeSessions: never[]; archivedSessions: never[]; status: 'ready' };
 const globalSessions: GlobalSessionsState = { activeSessions: [], archivedSessions: [], status: 'ready' };
 
+const realSyncContext = { ...syncContextModule };
+const realSyncRefs = { ...syncRefsModule };
+const realGlobalSessions = { ...globalSessionsModule };
+const realOpenchamberEvents = { ...openchamberEventsModule };
+const realAuthoritativeCleanup = { ...authoritativeCleanupModule };
+
 mock.module('@/sync/sync-context', () => ({
   useChildStoreManager: () => childStores,
 }));
@@ -70,6 +82,13 @@ mock.module('./useAuthoritativeSessionCleanup', () => ({
     });
   },
 }));
+afterAll(async () => {
+  await restoreModuleMock('@/sync/sync-context', realSyncContext, () => import('@/sync/sync-context'));
+  await restoreModuleMock('@/sync/sync-refs', realSyncRefs, () => import('@/sync/sync-refs'));
+  await restoreModuleMock('@/stores/useGlobalSessionsStore', realGlobalSessions, () => import('@/stores/useGlobalSessionsStore'));
+  await restoreModuleMock('@/lib/openchamberEvents', realOpenchamberEvents, () => import('@/lib/openchamberEvents'));
+  await restoreModuleMock('@/components/session/sidebar/list/useAuthoritativeSessionCleanup', realAuthoritativeCleanup, () => import('./useAuthoritativeSessionCleanup'));
+});
 
 const { useSessionListSync } = await import('./useSessionListSync');
 

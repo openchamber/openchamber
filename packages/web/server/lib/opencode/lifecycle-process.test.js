@@ -63,7 +63,10 @@ describe('managed process lifecycle with real children', () => {
         } else if (failure === 'shutdown-during-startup') {
           const starting = runtime.startOpenCode();
           const rejected = expect(starting).rejects.toThrow('exited before serving');
-          await expect.poll(async () => (await fs.readFile(marker, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).length).toBe(2);
+          // Both real processes must have started before shutdown begins. Starting
+          // two Node processes took over a second under load (2 of 5 runs failed
+          // with 24 busy loops on 12 cores at the 1 s default), so wait up to 10 s.
+          await expect.poll(async () => (await fs.readFile(marker, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).length, { timeout: 10_000 }).toBe(2);
           state.isShuttingDown = true;
           await state.openCodeProcess.close();
           await rejected;

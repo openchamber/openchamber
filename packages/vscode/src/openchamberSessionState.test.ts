@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
+import fs from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -28,20 +30,31 @@ const createFakeOpenCode = (records: Record<string, SessionMetadata> = {}) => {
 
 /** The store joins its file names with the platform separator. */
 const dataFile = (name: string) => path.join('/data', name);
+// Independent oracle for the shared web durable JSON cap.
+const TEST_MAX_SESSION_STATE_FILE_BYTES = 32 * 1024 * 1024;
 
 /** In-memory file system: the store must read before every write and rename atomically. */
 const createMemoryFs = (initial: Record<string, string> = {}) => {
   const files = new Map(Object.entries(initial));
   const writes: string[] = [];
   const fsPromises: SessionStateFs = {
-    readFile: async (filePath) => {
+    open: async (filePath) => {
       const content = files.get(filePath);
       if (content === undefined) {
         const error = new Error('missing') as Error & { code?: string };
         error.code = 'ENOENT';
         throw error;
       }
-      return content;
+      const bytes = Buffer.from(content, 'utf8');
+      return {
+        stat: async () => ({ isFile: () => true, size: bytes.length }),
+        read: async (buffer, offset, length, position) => {
+          const bytesRead = Math.max(0, Math.min(length, bytes.length - position));
+          bytes.copy(buffer, offset, position, position + bytesRead);
+          return { bytesRead };
+        },
+        close: async () => undefined,
+      };
     },
     writeFile: async (filePath, data) => {
       files.set(filePath, data);
@@ -91,12 +104,89 @@ describe('openchamber session state store', () => {
 
   it('reports every id as failed when the archive file cannot be read', async () => {
     const memory = createMemoryFs();
-    memory.fsPromises.readFile = async () => { throw new Error('EACCES'); };
+    memory.fsPromises.open = async () => { throw new Error('EACCES'); };
     const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises });
+    const { openCode, sessions } = createFakeOpenCode({ ses_a: { kind: 'review' } });
 
     assert.deepEqual(await store.archive(['ses_a']), { archived: [], failedIds: ['ses_a'] });
+    await assert.rejects(store.setMetadata('ses_a', { pinned: true }, openCode), /session metadata is unavailable/);
     assert.equal(await store.readArchived(), null);
+    assert.deepEqual(sessions.get('ses_a'), { kind: 'review' });
     assert.deepEqual(memory.writes, []);
+  });
+
+  it('refuses over-cap files without reading or moving them aside', async () => {
+    const original = '{"ses_a":1000}';
+    const memory = createMemoryFs({ [dataFile('sessions-archive.json')]: original });
+    let readCalls = 0;
+    let closed = false;
+    memory.fsPromises.open = async () => ({
+      stat: async () => ({ isFile: () => true, size: TEST_MAX_SESSION_STATE_FILE_BYTES + 1 }),
+      read: async () => {
+        readCalls += 1;
+        return { bytesRead: 0 };
+      },
+      close: async () => { closed = true; },
+    });
+    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises });
+
+    assert.equal(await store.readArchived(), null);
+    assert.equal(readCalls, 0);
+    assert.equal(closed, true);
+    assert.equal(memory.files.get(store.archivePath), original);
+    assert.equal([...memory.files.keys()].some((filePath) => filePath.includes('.corrupt-')), false);
+  });
+
+  it('caps bytes read when a regular file grows after its handle is judged', async () => {
+    const memory = createMemoryFs();
+    let bytesRead = 0;
+    let readCalls = 0;
+    memory.fsPromises.open = async () => ({
+      stat: async () => ({ isFile: () => true, size: 0 }),
+      read: async (buffer, offset, length, position) => {
+        readCalls += 1;
+        const count = Math.min(length, TEST_MAX_SESSION_STATE_FILE_BYTES + 1 - position);
+        buffer.fill(0x78, offset, offset + count);
+        bytesRead += count;
+        return { bytesRead: count };
+      },
+      close: async () => undefined,
+    });
+    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises });
+
+    assert.equal(await store.readMetadata(), null);
+    assert.equal(bytesRead, TEST_MAX_SESSION_STATE_FILE_BYTES + 1);
+    assert.equal(readCalls, Math.ceil((TEST_MAX_SESSION_STATE_FILE_BYTES + 1) / (64 * 1024)));
+  });
+
+  it('treats a non-regular file as unknown without reading or renaming it', async () => {
+    const original = '{}';
+    const memory = createMemoryFs({ [dataFile('sessions-archive.json')]: original });
+    let readCalls = 0;
+    let closeCalls = 0;
+    let openFlags: string | number | undefined;
+    memory.fsPromises.open = async (_filePath, flags) => {
+      openFlags = flags;
+      return {
+        stat: async () => ({ isFile: () => false, size: 0 }),
+        read: async () => {
+          readCalls += 1;
+          return { bytesRead: 0 };
+        },
+        close: async () => { closeCalls += 1; },
+      };
+    };
+    const store = createSessionStateStore({ dataDir: '/data', fsPromises: memory.fsPromises });
+
+    assert.equal(await store.readArchived(), null);
+    assert.equal(
+      openFlags,
+      process.platform === 'win32' ? 'r' : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK,
+    );
+    assert.equal(readCalls, 0);
+    assert.equal(closeCalls, 1);
+    assert.equal(memory.files.get(store.archivePath), original);
+    assert.equal([...memory.files.keys()].some((filePath) => filePath.includes('.corrupt-')), false);
   });
 
   it('moves an unreadable file aside instead of overwriting it', async () => {

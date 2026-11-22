@@ -366,6 +366,59 @@ describe('runtimeFetch read coalescing', () => {
     }
   });
 
+  test('keeps overlapping reads with different Authorization headers separate', async () => {
+    const previous = getRuntimeUrlResolver();
+    const seen: string[] = [];
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const authorization = new Headers(init?.headers).get('authorization') ?? '';
+        seen.push(authorization);
+        await new Promise((r) => setTimeout(r, 20));
+        return new Response(JSON.stringify({ authorization }), { status: 200, headers: { 'content-type': 'application/json' } });
+      });
+
+      const [a, b] = await Promise.all([
+        runtimeFetch('/api/config/providers', { headers: { Authorization: 'Bearer token-A' } }),
+        runtimeFetch('/api/config/providers', { headers: { Authorization: 'Bearer token-B' } }),
+      ]);
+
+      expect(seen).toEqual(['Bearer token-A', 'Bearer token-B']);
+      expect(await a.json()).toEqual({ authorization: 'Bearer token-A' });
+      expect(await b.json()).toEqual({ authorization: 'Bearer token-B' });
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('coalesces overlapping reads with the same Authorization header', async () => {
+    const previous = getRuntimeUrlResolver();
+    let calls = 0;
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
+      globalThis.fetch = (async () => {
+        calls += 1;
+        await new Promise((r) => setTimeout(r, 20));
+        return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
+      });
+
+      const [a, b] = await Promise.all([
+        runtimeFetch('/api/config/providers', { headers: { Authorization: 'Bearer same-token' } }),
+        runtimeFetch('/api/config/providers', { headers: { Authorization: 'Bearer same-token' } }),
+      ]);
+
+      expect(calls).toBe(1);
+      expect(await a.json()).toEqual({ ok: true });
+      expect(await b.json()).toEqual({ ok: true });
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
   test('keeps reads for different directories apart', async () => {
     const previous = getRuntimeUrlResolver();
     const seen: string[] = [];

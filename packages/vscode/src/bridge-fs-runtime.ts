@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import { StringDecoder } from 'node:string_decoder';
 import type { BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -45,17 +46,51 @@ type FsExecCommandResult = {
   error?: string;
 };
 
-const createGitReadCacheTtlMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
+// An env value is judged by its whole text, not by what `Number(...)` can
+// reinterpret: '' or ' ' must not read as 0, and '1e3', '0x10' or '5.9' must
+// not become a number the user never wrote. The web copies of these readers
+// judge the same variables this way (`packages/web/server/lib/fs/routes.js`).
+const parsePlainDecimalInt = (raw: string | undefined): number | null => {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+};
+
+export const createGitReadCacheTtlMs = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
+  if (raw !== null && raw >= 0) return raw;
   return 30 * 1000;
 };
 
-const createGitCheckIgnoreTimeoutMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
+export const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
+  // instead, so a larger configured timeout falls back to the default
+  // rather than killing every check-ignore child immediately.
+  if (raw !== null && raw >= 0 && raw <= 2_147_483_647) return raw;
   return 2500;
 };
+
+// Byte cap for the api:fs:read handler, matching the web twin
+// (MAX_READ_BYTES in packages/web/server/lib/fs/routes.js) and the local-fs
+// proxy twin (LOCAL_FS_READ_MAX_BYTES in bridge-localfs-proxy-runtime.ts).
+export const FS_READ_MAX_BYTES = 16 * 1024 * 1024;
+
+export const FS_EXEC_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
+
+// Per-stream byte cap for api:fs:exec command output, the same cap and env
+// var as the web twin in packages/web/server/lib/fs/routes.js. A verbose
+// command otherwise grows extension-host memory for the full timeout.
+export const createFsExecOutputMaxBytes = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES);
+  if (raw !== null && raw > 0) return raw;
+  return FS_EXEC_OUTPUT_MAX_BYTES;
+};
+
+const FS_EXEC_OUTPUT_LIMIT_BYTES = createFsExecOutputMaxBytes();
 
 const normalizeCommand = (command: unknown): string =>
   typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
@@ -265,7 +300,30 @@ export async function handleFsBridgeMessage(
       }
 
       try {
-        const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
+        const stats = await fs.promises.stat(resolution.resolvedPath);
+        if (stats.size > FS_READ_MAX_BYTES) {
+          return { id, type, success: false, error: `File exceeds maximum size of ${FS_READ_MAX_BYTES} bytes` };
+        }
+        // Read at most one byte past the cap, so a file that grows between
+        // the stat and the read is refused from a bounded buffer instead of
+        // being buffered whole.
+        const handle = await fs.promises.open(resolution.resolvedPath, 'r');
+        let content: string;
+        try {
+          const buffer = Buffer.alloc(FS_READ_MAX_BYTES + 1);
+          let bytesRead = 0;
+          while (bytesRead < buffer.length) {
+            const { bytesRead: chunk } = await handle.read(buffer, bytesRead, buffer.length - bytesRead, null);
+            if (chunk === 0) break;
+            bytesRead += chunk;
+          }
+          if (bytesRead > FS_READ_MAX_BYTES) {
+            return { id, type, success: false, error: `File exceeds maximum size of ${FS_READ_MAX_BYTES} bytes` };
+          }
+          content = buffer.toString('utf8', 0, bytesRead);
+        } finally {
+          await handle.close();
+        }
         return { id, type, success: true, data: { content, path: deps.normalizeFsPath(resolution.resolvedPath) } };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to read file';
@@ -383,9 +441,7 @@ export async function handleFsBridgeMessage(
       try {
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
         const resolvedCwd = deps.resolveUserPath(cwd, workspaceRoot);
-        const { exec } = await import('child_process');
-        const { promisify } = await import('util');
-        const execAsync = promisify(exec);
+        const { spawn } = await import('child_process');
         const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');
         const shellFlag = process.platform === 'win32' ? '/c' : '-c';
 
@@ -394,33 +450,185 @@ export async function handleFsBridgeMessage(
           PATH: process.env.PATH,
         };
 
-        const runCommand = async (cmd: string): Promise<FsExecCommandResult> => {
-          try {
-            const { stdout, stderr } = await execAsync(`${shell} ${shellFlag} "${cmd.replace(/"/g, '\\"')}"`, {
-              cwd: resolvedCwd,
-              env: augmentedEnv,
-              windowsHide: true,
-              timeout: 300000,
+        // Launch through argv spawn, the same form the web server uses
+        // (packages/web/server/lib/fs/routes.js, runCommandInDirectory): the
+        // command reaches the shell as a single argv entry and is parsed
+        // exactly once. Interpolating it into an exec string instead let an
+        // outer shell expand $VAR and $(...) inside the caller's quoting
+        // before the intended shell ever ran. On Windows this is
+        // spawn('cmd.exe', ['/c', cmd]): cmd.exe still receives the command
+        // as one argument and there is no outer shell there either. The
+        // timeout and the output cap kill the shell's whole process tree
+        // (see killCommandTree below), so no grandchild can outlive it
+        // while holding the result's pipes open.
+        const runCommand = (cmd: string): Promise<FsExecCommandResult> =>
+          new Promise((resolve) => {
+            let stdout = '';
+            let stderr = '';
+            let stdoutBytes = 0;
+            let stderrBytes = 0;
+            let timedOut = false;
+            let outputTooLarge = false;
+            let stdoutTruncated = false;
+            let stderrTruncated = false;
+            // Decode incrementally per stream: a multi-byte character split
+            // across pipe chunks has to survive, and chunk.toString() would
+            // turn each half into U+FFFD in the returned output (#1590).
+            // Mirrors the web twin in packages/web/server/lib/fs/routes.js
+            // (runCommandInDirectory).
+            const stdoutDecoder = new StringDecoder('utf8');
+            const stderrDecoder = new StringDecoder('utf8');
+
+            const killForOutputLimit = () => {
+              if (outputTooLarge) return;
+              outputTooLarge = true;
+              killCommandTree();
+            };
+
+            // Overflow and timeout must end the whole command, not just
+            // the shell: a descendant that inherited the pipes keeps them
+            // open after the shell dies, and the result resolves on
+            // 'close', which waits for pipe EOF -- so a shell-only kill
+            // can leave the result unsettled until the descendant exits
+            // on its own. The child is spawned detached (its own POSIX
+            // process group, the owned-process.ts pattern) and the group
+            // is signalled; on Windows taskkill /T ends the tree.
+            // Destroying the pipes afterwards settles 'close' promptly
+            // even if a descendant escaped the group while holding them.
+            const killCommandTree = () => {
+              const pid = child.pid;
+              // A pid that is not an integer greater than 1 is never
+              // group-signalled: kill(-1) would hit every process we
+              // may signal, and pid 0 is our own process group.
+              const treePid = pid !== undefined && Number.isInteger(pid) && pid > 1 ? pid : null;
+              if (process.platform === 'win32') {
+                if (treePid !== null) {
+                  try {
+                    const killer = spawn('taskkill.exe', ['/T', '/F', '/PID', String(treePid)], {
+                      windowsHide: true,
+                      stdio: 'ignore',
+                    });
+                    killer.once?.('error', () => {
+                      try { child.kill('SIGKILL'); } catch { /* already exited */ }
+                    });
+                  } catch {
+                    try { child.kill('SIGKILL'); } catch { /* already exited */ }
+                  }
+                } else {
+                  try { child.kill('SIGKILL'); } catch { /* already exited */ }
+                }
+              } else if (treePid !== null) {
+                try {
+                  process.kill(-treePid, 'SIGKILL');
+                } catch {
+                  try { child.kill('SIGKILL'); } catch { /* already exited */ }
+                }
+              } else {
+                try { child.kill('SIGKILL'); } catch { /* already exited */ }
+              }
+              try { child.stdout?.destroy?.(); } catch { /* no pipes to destroy */ }
+              try { child.stderr?.destroy?.(); } catch { /* no pipes to destroy */ }
+            };
+
+            // Append at most the bytes left under the cap and report
+            // overflow, so a capped stream stops at the cap. Bytes go to
+            // the stream decoder, which holds a split character until the
+            // rest arrives; on truncation the held tail is dropped rather
+            // than flushed as a replacement character the cap did not ask
+            // for.
+            const appendCapped = (current: string, currentBytes: number, chunk: Buffer, decoder: StringDecoder) => {
+              const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+              if (currentBytes >= FS_EXEC_OUTPUT_LIMIT_BYTES) {
+                return { value: current, bytes: currentBytes, exceeded: true };
+              }
+              const remaining = FS_EXEC_OUTPUT_LIMIT_BYTES - currentBytes;
+              if (buffer.length <= remaining) {
+                return { value: current + decoder.write(buffer), bytes: currentBytes + buffer.length, exceeded: false };
+              }
+              return { value: current + decoder.write(buffer.subarray(0, remaining)), bytes: FS_EXEC_OUTPUT_LIMIT_BYTES, exceeded: true };
+            };
+
+            // A stream that ended on its own flushes the decoder tail; a
+            // truncated one keeps its last whole character and drops the
+            // cut sequence.
+            const flushDecoded = (value: string, decoder: StringDecoder, truncated: boolean) =>
+              truncated ? value : value + decoder.end();
+
+            let child: ReturnType<typeof spawn>;
+            try {
+              child = spawn(shell, [shellFlag, cmd], {
+                cwd: resolvedCwd,
+                env: augmentedEnv,
+                windowsHide: true,
+                // Own process group so killCommandTree can signal the
+                // tree; never on Windows (owned-process.ts pattern).
+                detached: process.platform !== 'win32',
+                stdio: ['ignore', 'pipe', 'pipe'],
+              });
+            } catch (error) {
+              resolve({
+                command: cmd,
+                success: false,
+                stdout: '',
+                stderr: '',
+                error: error instanceof Error ? error.message : 'Command execution failed',
+              });
+              return;
+            }
+
+            const timeout = setTimeout(() => {
+              timedOut = true;
+              killCommandTree();
+            }, 300000);
+
+            child.stdout?.on('data', (chunk) => {
+              if (outputTooLarge) return;
+              const appended = appendCapped(stdout, stdoutBytes, chunk, stdoutDecoder);
+              stdout = appended.value;
+              stdoutBytes = appended.bytes;
+              stdoutTruncated = stdoutTruncated || appended.exceeded;
+              if (appended.exceeded) killForOutputLimit();
             });
-            return {
-              command: cmd,
-              success: true,
-              exitCode: 0,
-              stdout: (stdout || '').trim(),
-              stderr: (stderr || '').trim(),
-            };
-          } catch (execError) {
-            const err = execError as { code?: number; stdout?: string; stderr?: string; message?: string };
-            return {
-              command: cmd,
-              success: false,
-              exitCode: typeof err.code === 'number' ? err.code : 1,
-              stdout: (err.stdout || '').trim(),
-              stderr: (err.stderr || '').trim(),
-              error: err.message,
-            };
-          }
-        };
+            child.stderr?.on('data', (chunk) => {
+              if (outputTooLarge) return;
+              const appended = appendCapped(stderr, stderrBytes, chunk, stderrDecoder);
+              stderr = appended.value;
+              stderrBytes = appended.bytes;
+              stderrTruncated = stderrTruncated || appended.exceeded;
+              if (appended.exceeded) killForOutputLimit();
+            });
+
+            child.on('error', (error) => {
+              clearTimeout(timeout);
+              resolve({
+                command: cmd,
+                success: false,
+                stdout: flushDecoded(stdout, stdoutDecoder, stdoutTruncated).trim(),
+                stderr: flushDecoded(stderr, stderrDecoder, stderrTruncated).trim(),
+                error: error.message || 'Command execution failed',
+              });
+            });
+
+            child.on('close', (code, signal) => {
+              clearTimeout(timeout);
+              const result: FsExecCommandResult = {
+                command: cmd,
+                success: code === 0 && !timedOut,
+                stdout: flushDecoded(stdout, stdoutDecoder, stdoutTruncated).trim(),
+                stderr: flushDecoded(stderr, stderrDecoder, stderrTruncated).trim(),
+              };
+              if (typeof code === 'number') {
+                result.exitCode = code;
+              }
+              if (outputTooLarge) {
+                result.success = false;
+                result.error = `Command output exceeded the ${FS_EXEC_OUTPUT_LIMIT_BYTES} byte limit (output-too-large)`;
+              } else if (timedOut) {
+                result.error = `Command timed out after 300000ms` + (signal ? ` (${signal})` : '');
+              }
+              resolve(result);
+            });
+          });
 
         const runCommandWithGitReadCache = async (cmd: string): Promise<FsExecCommandResult> => {
           const cacheable = GIT_READ_CACHE_TTL_MS > 0 && isCacheableGitReadCommand(cmd);

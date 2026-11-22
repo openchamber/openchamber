@@ -1,0 +1,171 @@
+# Vendored from developing-today/code .github/actions/pm-dispatch-queue/action.yml @ 2194bd4c2d40cd10ab8b17b0dbaf98961d35a30b
+# (2026-11-03, openchamber#805): referencing the whole code repo as an
+# action repository fails in runner setup (archive staging), so the two
+# small composite actions are vendored here byte-identical below this
+# header. Re-sync from upstream when updating.
+name: pm-dispatch-queue
+description: >-
+  Enqueue work via pm-dispatch (POST /v1/tasks), optionally tracked by a
+  GitHub issue. The calling job MUST grant `permissions: id-token: write` —
+  this action mints a GitHub Actions OIDC token (audience pm-dispatch) to
+  authenticate.
+inputs:
+  repo:
+    description: "Target repo (owner/name). Any allowlisted repo may target any allowlisted repo."
+    required: false
+    default: ${{ github.repository }}
+  title:
+    description: "Queue task title."
+    required: true
+  prompt:
+    description: "The work text (sent as the task prompt/body). One of prompt, prompt-file, or prompt-url must yield non-empty text (see the resolution order below)."
+    required: false
+    default: ""
+  prompt-file:
+    description: "Optional path to a file containing the prompt, relative to the caller's workspace (the caller must check out its repo first). Takes precedence over prompt-url and prompt; a missing or empty file fails the step."
+    required: false
+    default: ""
+  prompt-url:
+    description: "Optional https URL the prompt is fetched from (curl -fsS). Takes precedence over prompt, but not prompt-file; a fetch error or empty body fails the step."
+    required: false
+    default: ""
+  model:
+    description: 'Optional model hint, "provider/model" (stored as the payload model hint only).'
+    required: false
+    default: ""
+  priority:
+    description: "Optional priority: 10-90 or critical|high|normal|low."
+    required: false
+    default: ""
+  kind:
+    description: "Optional task kind: triage|small_fix|pr_shepherd|ci_investigation."
+    required: false
+    default: ""
+  issue:
+    description: '"true" to create a tracking issue in the target repo (ignored when issue_number is set).'
+    required: false
+    default: "true"
+  issue_number:
+    description: "Optional existing issue number in the target repo to attach to instead of creating an issue. Takes precedence over issue."
+    required: false
+    default: ""
+outputs:
+  task_id:
+    description: "pm-dispatch queue task id."
+    value: ${{ steps.dispatch.outputs.task_id }}
+  issue_number:
+    description: "Tracking/attached issue number (empty when no issue is involved)."
+    value: ${{ steps.dispatch.outputs.issue_number }}
+  issue_url:
+    description: "Issue URL (empty when no issue is involved)."
+    value: ${{ steps.dispatch.outputs.issue_url }}
+runs:
+  using: composite
+  steps:
+    - name: Enqueue work via pm-dispatch
+      id: dispatch
+      shell: bash
+      env:
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_TITLE: ${{ inputs.title }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_PROMPT_FILE: ${{ inputs['prompt-file'] }}
+        INPUT_PROMPT_URL: ${{ inputs['prompt-url'] }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_PRIORITY: ${{ inputs.priority }}
+        INPUT_KIND: ${{ inputs.kind }}
+        INPUT_ISSUE: ${{ inputs.issue }}
+        INPUT_ISSUE_NUMBER: ${{ inputs.issue_number }}
+      run: |
+        set -euo pipefail
+        # Resolve the prompt text. Resolution order: (1) prompt-file,
+        # (2) prompt-url, (3) the inline prompt input. A source that is
+        # selected but missing/empty/unfetchable fails loudly rather than
+        # falling through to a lower-priority source.
+        resolved_prompt=""
+        if [ -n "$INPUT_PROMPT_FILE" ]; then
+          case "$INPUT_PROMPT_FILE" in
+            /*) prompt_path="$INPUT_PROMPT_FILE" ;;
+            *) prompt_path="${GITHUB_WORKSPACE:-$PWD}/$INPUT_PROMPT_FILE" ;;
+          esac
+          if [ ! -f "$prompt_path" ]; then
+            echo "::error::pm-dispatch-queue: prompt-file not found: $INPUT_PROMPT_FILE (looked for $prompt_path; prompt-file is relative to the caller's workspace, and the caller must check out first)" >&2
+            exit 1
+          fi
+          resolved_prompt="$(cat "$prompt_path")"
+          if [ -z "$resolved_prompt" ]; then
+            echo "::error::pm-dispatch-queue: prompt-file is empty: $INPUT_PROMPT_FILE" >&2
+            exit 1
+          fi
+        elif [ -n "$INPUT_PROMPT_URL" ]; then
+          case "$INPUT_PROMPT_URL" in
+            https://*) ;;
+            *) echo "::error::pm-dispatch-queue: prompt-url must be an https URL, got: $INPUT_PROMPT_URL" >&2; exit 1 ;;
+          esac
+          if ! resolved_prompt="$(curl -fsS "$INPUT_PROMPT_URL")"; then
+            echo "::error::pm-dispatch-queue: failed to fetch prompt-url: $INPUT_PROMPT_URL" >&2
+            exit 1
+          fi
+          if [ -z "$resolved_prompt" ]; then
+            echo "::error::pm-dispatch-queue: prompt-url returned an empty body: $INPUT_PROMPT_URL" >&2
+            exit 1
+          fi
+        else
+          resolved_prompt="$INPUT_PROMPT"
+        fi
+        if [ -z "$resolved_prompt" ]; then
+          echo "::error::pm-dispatch-queue: no prompt supplied: set one of the prompt, prompt-file, or prompt-url inputs (prompt-file takes precedence over prompt-url, which takes precedence over prompt)." >&2
+          exit 1
+        fi
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::error::pm-dispatch-queue: ACTIONS_ID_TOKEN_REQUEST_URL / ACTIONS_ID_TOKEN_REQUEST_TOKEN are not set. The calling job must grant 'permissions: id-token: write' so this action can mint an OIDC token." >&2
+          exit 1
+        fi
+        case "$INPUT_ISSUE" in
+          true|false) ;;
+          *) echo "::error::pm-dispatch-queue: issue must be \"true\" or \"false\", got: $INPUT_ISSUE" >&2; exit 1 ;;
+        esac
+        oidc_token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pm-dispatch" | jq -r '.value // empty')"
+        if [ -z "$oidc_token" ]; then
+          echo "::error::pm-dispatch-queue: failed to mint a GitHub Actions OIDC token (audience pm-dispatch)." >&2
+          exit 1
+        fi
+        payload="$(jq -n \
+          --arg repo "$INPUT_REPO" \
+          --arg title "$INPUT_TITLE" \
+          --arg prompt "$resolved_prompt" \
+          --arg model "$INPUT_MODEL" \
+          --arg priority "$INPUT_PRIORITY" \
+          --arg kind "$INPUT_KIND" \
+          --argjson issue "$INPUT_ISSUE" \
+          '{repo: $repo, title: $title, prompt: $prompt, issue: $issue}
+           + (if $model != "" then {model: $model} else {} end)
+           + (if $priority != "" then {priority: $priority} else {} end)
+           + (if $kind != "" then {kind: $kind} else {} end)')"
+        if [ -n "$INPUT_ISSUE_NUMBER" ]; then
+          payload="$(printf '%s' "$payload" | jq --argjson issue_number "$INPUT_ISSUE_NUMBER" '. + {issue_number: $issue_number}')"
+        fi
+        response="$(curl -sS -w $'\n%{http_code}' -X POST "https://dispatch.security.cab/v1/tasks" \
+          -H "Authorization: Bearer $oidc_token" \
+          -H "Content-Type: application/json" \
+          -d "$payload")"
+        http_code="${response##*$'\n'}"
+        body="${response%$'\n'*}"
+        if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+          echo "::error::pm-dispatch-queue: pm-dispatch POST /v1/tasks failed (HTTP $http_code):" >&2
+          echo "$body" >&2
+          exit 1
+        fi
+        echo "$body"
+        task_id="$(printf '%s' "$body" | jq -r '.task_id // empty')"
+        issue_number="$(printf '%s' "$body" | jq -r '.issue_number // empty')"
+        issue_url="$(printf '%s' "$body" | jq -r '.issue_url // empty')"
+        if [ -z "$issue_url" ] && [ -n "$issue_number" ]; then
+          issue_url="https://github.com/${INPUT_REPO}/issues/${issue_number}"
+        fi
+        {
+          echo "task_id=$task_id"
+          echo "issue_number=$issue_number"
+          echo "issue_url=$issue_url"
+        } >> "$GITHUB_OUTPUT"

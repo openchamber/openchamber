@@ -57,7 +57,13 @@ export const recordVisit = (
   if (!url) return entries as BrowserHistoryEntry[];
 
   const previous = entries.find((entry) => entry.url === url);
-  const title = String(visit.title ?? '').trim().slice(0, MAX_TITLE_LENGTH) || previous?.title || '';
+  const clamped = String(visit.title ?? '').trim().slice(0, MAX_TITLE_LENGTH);
+  // Do not split a surrogate pair (emoji, rare CJK) in half: a stored title
+  // ending in a lone high surrogate renders as U+FFFD once encoded, and the
+  // title is persisted (browser-history store) and reused as search text —
+  // same guard as longErrorPreview (#2028/#2035).
+  const lastUnit = clamped.charCodeAt(clamped.length - 1);
+  const title = (lastUnit >= 0xd800 && lastUnit <= 0xdbff ? clamped.slice(0, -1) : clamped) || previous?.title || '';
   const next: BrowserHistoryEntry = { url, title, lastVisitedAt: visit.at };
 
   return [next, ...entries.filter((entry) => entry.url !== url)].slice(0, MAX_HISTORY_ENTRIES);

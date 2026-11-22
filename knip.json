@@ -4,6 +4,7 @@
     "packages/mobile/android/app/src/main/assets/public/**",
     "packages/mobile/ios/App/App/public/**",
     "packages/sdk/examples/**",
+    "fixtures/knip-class-members/**",
   ],
   "workspaces": {
     ".": {
@@ -27,6 +28,39 @@
       ],
       "project": [
         "src/**/*.{ts,tsx}"
+      ],
+      "ignoreMembers": [
+        "getDerivedStateFromError",
+        "componentDidCatch",
+        "componentDidUpdate",
+        "render",
+        "code",
+        "status",
+        "remoteName",
+        "reason",
+        "operation",
+        "getDictationId",
+        "getFinalSeq",
+        "hasSegments",
+        "clearAll",
+        "enqueueSegment",
+        "finish",
+        "cancel",
+        "resetAndWrite",
+        "setTheme",
+        "setFont",
+        "pasteFromClipboard",
+        "refresh",
+        "scrollLines",
+        "selectWordAt",
+        "extendSelectionTo", "getSelectionPosition",
+        "getActivePrefixTarget",
+        "apply",
+        "clearBootstrapDemand",
+        "subscribeAll",
+        "configure",
+        "subscribe",
+        "invalidateDirectory"
       ]
     },
     "packages/web": {
@@ -44,6 +78,15 @@
         "bin/**/*.js",
         "server/**/*.{js,mjs,cjs}",
         "src/**/*.{ts,tsx}"
+      ],
+      "ignoreMembers": [
+        "appendPcm16",
+        "commit",
+        "clear",
+        "close",
+        "free",
+        "synthesize",
+        "processChunk"
       ]
     },
     "packages/electron": {

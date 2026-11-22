@@ -11,6 +11,20 @@ Explica y ordena. No juzga tu código ni emite veredictos — para eso está [Re
 
 Ábrelo con el icono **Recorrido** en la barra derecha, o con el botón **Recorrido con IA** en los paneles de cambios y de pull request. Ambos solo abren el panel; no se genera nada hasta que pulsas **Generar recorrido**.
 
+## Cómo se marca una parada
+
+Cada parada nombra de qué trata, lo explica en una o dos frases, y después muestra exactamente el código que describe. Algunas paradas llevan una pequeña etiqueta junto al título:
+
+| Etiqueta | Qué significa |
+| --- | --- |
+| **Cambio clave** | Esta parada impulsa el resto del cambio, o conlleva la mayor parte de su riesgo. Léela con atención y léela primero. |
+| **Contexto** | Un cambio de apoyo, incluido para que el resto tenga sentido. Se puede ojear. |
+| *(sin etiqueta)* | Un paso ordinario en el orden de lectura. |
+
+La etiqueta trata de **dónde gastar tu atención**, no de la calidad del código. Una parada nunca se marca porque se haya encontrado algo mal en ella: el recorrido no reporta hallazgos, ni severidades, ni veredictos. Si quieres que el código sea juzgado, esa es la acción **Review** en [Git & GitHub](/git/).
+
+Las únicas marcas que sí reportan un problema son **Desactualizado** y **No cubierto**, y ambas tratan de que el propio recorrido se quede desactualizado, no de tu código: ver más abajo.
+
 ## Qué puede recorrer
 
 | Ámbito | Qué incluye |

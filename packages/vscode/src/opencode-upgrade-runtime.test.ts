@@ -1,6 +1,7 @@
-import { afterEach, describe, mock, test } from 'node:test';
+import { afterEach, beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode, type OpenCodeUpgradeManager } from './opencode-upgrade-runtime';
+import { getOpenCodeUpgradeStatus, setInfoProbeDeadlineForTest, upgradeManagedOpenCode, type OpenCodeUpgradeManager } from './opencode-upgrade-runtime';
+import { OPENCODE_INFO_RESPONSE_MAX_BYTES } from './bounded-response-body';
 
 const originalFetch = globalThis.fetch;
 const originalLowerRegistry = process.env.npm_config_registry;
@@ -15,6 +16,18 @@ afterEach(() => {
   else process.env.NPM_CONFIG_REGISTRY = originalRegistry;
   if (originalUserConfig === undefined) delete process.env.npm_config_userconfig;
   else process.env.npm_config_userconfig = originalUserConfig;
+});
+
+// #2308 (twin of #1289): every test in this file must resolve the npm
+// registry deterministically. Pin npm_config_userconfig to a missing
+// file and clear any inherited registry override before each test, so
+// the machine's ~/.npmrc (e.g. a registry mirror) can never leak into
+// a test that did not pin it itself; tests 1-2 above override these
+// values with their own pins. afterEach restores the originals.
+beforeEach(() => {
+  process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
+  delete process.env.npm_config_registry;
+  delete process.env.NPM_CONFIG_REGISTRY;
 });
 
 const createManager = (mode: 'managed' | 'external' = 'managed'): OpenCodeUpgradeManager => ({
@@ -152,4 +165,124 @@ describe('VS Code OpenCode upgrades', () => {
     assert.equal((await upgradeManagedOpenCode()).status, 409);
   });
 
+});
+
+describe('VS Code OpenCode upgrade status probe deadline (#789)', () => {
+  test('settles as unavailable when /api/info never answers', async () => {
+    setInfoProbeDeadlineForTest(50);
+    // SAFETY: the stub answers the registry route at once and stalls only the
+    // local /api/info probe, rejecting when its signal aborts.
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      if (String(input).endsWith('/api/info')) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+      }
+      return Response.json({ version: '2.0.22' });
+    }) as typeof fetch;
+    try {
+      const started = Date.now();
+      const status = await getOpenCodeUpgradeStatus(createManager());
+      assert.ok(Date.now() - started < 5_000, 'status must settle near the deadline, not hang');
+      assert.equal(status.available, null);
+      assert.ok(String(status.error ?? '').length > 0);
+    } finally {
+      setInfoProbeDeadlineForTest();
+    }
+  });
+});
+
+describe('VS Code OpenCode upgrade status registry body cap (#1051)', () => {
+  const streamBody = (totalBytes: number, state: { pulledBytes: number; cancelled: boolean }) => new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (state.pulledBytes >= totalBytes) { controller.close(); return; }
+      const size = Math.min(64 * 1024, totalBytes - state.pulledBytes);
+      controller.enqueue(new Uint8Array(size).fill(0x20));
+      state.pulledBytes += size;
+    },
+    cancel() { state.cancelled = true; },
+  });
+
+  test('fails as an error instead of buffering a streamed registry body over the 1 MiB cap', async () => {
+    const state = { pulledBytes: 0, cancelled: false };
+    // SAFETY: the stub answers /api/info at once and streams only the
+    // registry route, with no content-length, like a chunked packument.
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/api/info')) return Response.json({ version: '2.0.1', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+      return new Response(streamBody(2 * 1024 * 1024, state), { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    const status = await getOpenCodeUpgradeStatus(createManager());
+    assert.equal(status.available, null);
+    assert.match(String(status.error ?? ''), /exceeds 1048576 bytes/);
+    assert.equal(state.cancelled, true);
+    assert.ok(state.pulledBytes < 2 * 1024 * 1024, 'stream must be cancelled, not drained');
+  });
+
+  test('accepts a registry body at exactly the 1 MiB cap', async () => {
+    const prefix = JSON.stringify({ version: '2.0.23' });
+    const body = prefix + ' '.repeat(1024 * 1024 - prefix.length);
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/api/info')) return Response.json({ version: '2.0.1', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+      return new Response(body, { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    const status = await getOpenCodeUpgradeStatus(createManager());
+    assert.equal(status.latestVersion, '2.0.23');
+    assert.equal(status.available, true);
+  });
+
+  test('accepts a registry body with a leading UTF-8 BOM, as response.json() did', async () => {
+    const body = '\uFEFF' + JSON.stringify({ version: '2.0.23' });
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/api/info')) return Response.json({ version: '2.0.1', pid: 1, urls: [], paths: { tmp: '/tmp' } });
+      return new Response(body, { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    const status = await getOpenCodeUpgradeStatus(createManager());
+    assert.equal(status.latestVersion, '2.0.23');
+    assert.equal(status.available, true);
+  });
+});
+
+describe('VS Code OpenCode upgrade status /api/info body cap', () => {
+  const streamBody = (totalBytes: number, state: { pulledBytes: number; cancelled: boolean }) => new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (state.pulledBytes >= totalBytes) { controller.close(); return; }
+      const size = Math.min(64 * 1024, totalBytes - state.pulledBytes);
+      controller.enqueue(new Uint8Array(size).fill(0x20));
+      state.pulledBytes += size;
+    },
+    cancel() { state.cancelled = true; },
+  });
+
+  test('returns an unavailable error instead of draining an oversized /api/info response', async () => {
+    const state = { pulledBytes: 0, cancelled: false };
+    globalThis.fetch = async (input: Parameters<typeof fetch>[0]) => String(input).endsWith('/api/info')
+      ? new Response(streamBody(2 * OPENCODE_INFO_RESPONSE_MAX_BYTES, state), { headers: { 'content-type': 'application/json' } })
+      : Response.json({ version: '2.0.32' });
+
+    const status = await getOpenCodeUpgradeStatus(createManager());
+
+    assert.equal(status.available, null);
+    assert.match(String(status.error ?? ''), /exceeded the 1 MiB limit/);
+    assert.equal(state.cancelled, true);
+    assert.ok(state.pulledBytes < 2 * OPENCODE_INFO_RESPONSE_MAX_BYTES);
+  });
+
+  test('accepts /api/info at exactly 1 MiB', async () => {
+    const prefix = JSON.stringify({ version: '2.0.1' });
+    const body = prefix + ' '.repeat(OPENCODE_INFO_RESPONSE_MAX_BYTES - Buffer.byteLength(prefix));
+    globalThis.fetch = async (input: Parameters<typeof fetch>[0]) => String(input).endsWith('/api/info')
+      ? new Response(body)
+      : Response.json({ version: '2.0.2' });
+
+    const status = await getOpenCodeUpgradeStatus(createManager());
+
+    assert.equal(status.currentVersion, '2.0.1');
+    assert.equal(status.available, true);
+  });
 });

@@ -37,3 +37,39 @@ describe('text summarization stubs', () => {
     });
   });
 });
+
+describe('summarization fallback surrogate-pair boundary (#1932)', () => {
+  const EMOJI = '\u{1F600}';
+
+  it('notification fallback never splits a pair at the clip', async () => {
+    const result = await summarizeText({
+      text: `${'a'.repeat(98)}${EMOJI}${'b'.repeat(200)}`,
+      threshold: 0,
+      maxLength: 100,
+      mode: 'notification',
+    });
+    expect(result.summary).toBe(`${'a'.repeat(98)}…`);
+    expect(Buffer.from(result.summary, 'utf8').toString('utf8')).toBe(result.summary);
+  });
+
+  it('note fallback never splits a pair at the clip', async () => {
+    const result = await summarizeText({
+      text: `${'a'.repeat(148)}${EMOJI}${'b'.repeat(250)}`,
+      threshold: 0,
+      maxLength: 150,
+      mode: 'note',
+    });
+    expect(result.summary).toBe(`${'a'.repeat(148)}…`);
+    expect(Buffer.from(result.summary, 'utf8').toString('utf8')).toBe(result.summary);
+  });
+
+  it('keeps a pair that fits whole inside the clip', async () => {
+    const result = await summarizeText({
+      text: `${'a'.repeat(97)}${EMOJI}${'b'.repeat(200)}`,
+      threshold: 0,
+      maxLength: 100,
+      mode: 'notification',
+    });
+    expect(result.summary).toBe(`${'a'.repeat(97)}${EMOJI}…`);
+  });
+});

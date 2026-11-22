@@ -12,6 +12,7 @@ type ModelPrefsPayload = {
   recentAgents: string[];
   favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
+  modelDefaultVariants: Record<string, string>;
   customProviderIcons: Record<string, CustomProviderIcon>;
 };
 
@@ -57,6 +58,7 @@ const snapshotModelPrefs = (): ModelPrefsPayload => {
     recentAgents: state.recentAgents,
     favoriteAgents: state.favoriteAgents,
     recentEfforts: state.recentEfforts,
+    modelDefaultVariants: state.modelDefaultVariants,
     customProviderIcons: state.customProviderIcons,
   };
 };
@@ -69,6 +71,10 @@ const modelPrefsEqual = (a: ModelPrefsPayload, b: ModelPrefsPayload): boolean =>
   stringsEqual(a.recentAgents, b.recentAgents) &&
   stringsEqual(a.favoriteAgents, b.favoriteAgents) &&
   recentEffortsEqual(a.recentEfforts, b.recentEfforts) &&
+  (a.modelDefaultVariants === b.modelDefaultVariants || (
+    Object.keys(a.modelDefaultVariants).length === Object.keys(b.modelDefaultVariants).length
+    && Object.entries(a.modelDefaultVariants).every(([key, value]) => b.modelDefaultVariants[key] === value)
+  )) &&
   customProviderIconsEqual(a.customProviderIcons, b.customProviderIcons)
 );
 
@@ -80,6 +86,7 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   recentAgents: prefs.recentAgents.slice(),
   favoriteAgents: prefs.favoriteAgents.slice(),
   recentEfforts: Object.fromEntries(Object.entries(prefs.recentEfforts).map(([key, variants]) => [key, variants.slice()])),
+  modelDefaultVariants: { ...prefs.modelDefaultVariants },
   customProviderIcons: { ...prefs.customProviderIcons },
 });
 
@@ -115,6 +122,7 @@ export const startModelPrefsAutoSave = () => {
       recentAgents: state.recentAgents,
       favoriteAgents: state.favoriteAgents,
       recentEfforts: state.recentEfforts,
+      modelDefaultVariants: state.modelDefaultVariants,
       customProviderIcons: state.customProviderIcons,
     };
     const prev = {
@@ -125,6 +133,7 @@ export const startModelPrefsAutoSave = () => {
       recentAgents: prevState.recentAgents,
       favoriteAgents: prevState.favoriteAgents,
       recentEfforts: prevState.recentEfforts,
+      modelDefaultVariants: prevState.modelDefaultVariants,
       customProviderIcons: prevState.customProviderIcons,
     };
     if (modelPrefsEqual(next, prev)) {

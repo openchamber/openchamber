@@ -1,6 +1,13 @@
+import { readBoundedResponseText } from '../shared/response-body.js';
+
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 8000;
+
+// The models.dev catalog is several megabytes; the cap is generous on purpose
+// (16 MiB): the deadline bounds time, the cap bounds memory, and an over-cap
+// body throws like a fetch failure so the stale-cache fallback applies.
+export const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
 
 // Shared in-process cache of the models.dev catalog. Used by the
 // /api/openchamber/models-metadata route and the small-model resolver so the
@@ -17,7 +24,16 @@ const fetchCatalog = async (url, timeoutMs) => {
   if (!response.ok) {
     throw new Error(`models.dev responded with status ${response.status}`);
   }
-  const metadata = await response.json();
+  const bounded = await readBoundedResponseText(response, MODELS_DEV_CATALOG_MAX_BYTES);
+  if (bounded.tooLarge) {
+    throw new Error('models.dev response exceeded size limit');
+  }
+  let metadata;
+  try {
+    metadata = JSON.parse(bounded.text);
+  } catch {
+    throw new Error('models.dev returned invalid JSON');
+  }
   if (!metadata || typeof metadata !== 'object') {
     throw new Error('models.dev returned an unexpected payload');
   }
@@ -56,6 +72,16 @@ export async function getModelsMetadata({
     }
     throw error;
   }
+}
+
+/**
+ * The catalog this process already holds (fresh or stale), or null when it
+ * has not fetched one yet. Never fetches and never waits: latency-critical
+ * readers (the provider off-state route, which provider loading awaits)
+ * enrich from this copy only, so models.dev availability cannot stall them.
+ */
+export function peekModelsMetadata() {
+  return cachedMetadata;
 }
 
 // The model fields the UI reads (packages/ui stores/useConfigStore.ts,

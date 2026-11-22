@@ -5,7 +5,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-type QuotaCredentialProviderId = 'exe-dev' | 'cursor' | 'zenmux';
+type QuotaCredentialProviderId = 'exe-dev' | 'cursor' | 'zenmux' | 'opendesign';
 
 type Status = { configured: boolean; secretMasked?: string };
 type CredentialPayload = {
@@ -13,6 +13,8 @@ type CredentialPayload = {
   accessToken?: string;
   refreshToken?: string;
   platformApiKey?: string;
+  cookie?: string;
+  workspaceId?: string;
 };
 const EXE_DEV_TOKEN_COMMAND = `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`;
 
@@ -39,7 +41,7 @@ export const QuotaCredentials: React.FC<{ providerId: QuotaCredentialProviderId;
     } catch (error) { toast.error(error instanceof Error && error.message ? error.message : t('settings.providers.page.openCodeGo.saveFailed')); }
     finally { setBusy(false); }
   };
-  const field = (name: keyof CredentialPayload, label: string, placeholder: string) => <label className="block typography-ui-label text-foreground">{label}<Input className="mt-1 h-7 font-mono text-xs" type="password" autoComplete="off" value={values[name] ?? ''} onChange={(event) => setValues((current) => ({ ...current, [name]: event.target.value }))} placeholder={status?.secretMasked ?? placeholder} /></label>;
+  const field = (name: keyof CredentialPayload, label: string, placeholder: string, secret = true) => <label className="block typography-ui-label text-foreground">{label}<Input className="mt-1 h-7 font-mono text-xs" type={secret ? 'password' : 'text'} autoComplete="off" value={values[name] ?? ''} onChange={(event) => setValues((current) => ({ ...current, [name]: event.target.value }))} placeholder={secret ? (status?.secretMasked ?? placeholder) : placeholder} /></label>;
   return <div data-settings-item={`usage.${providerId}-credentials`} className="mb-8">
     <div className="mb-1 px-1"><h3 className="typography-ui-header font-medium text-foreground">{providerName}</h3></div>
     <section className="space-y-3 px-2 pb-2 pt-0">
@@ -50,8 +52,13 @@ export const QuotaCredentials: React.FC<{ providerId: QuotaCredentialProviderId;
       {providerId === 'zenmux' && (
         <p className="typography-meta text-muted-foreground">{t('settings.providers.page.quotaCredentials.zenmuxInstructions')}</p>
       )}
+      {providerId === 'opendesign' && (
+        <p className="typography-meta text-muted-foreground">{t('settings.providers.page.quotaCredentials.opendesignInstructions')}</p>
+      )}
       {providerId === 'exe-dev' && field('usageToken', t('settings.providers.page.quotaCredentials.usageToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'zenmux' && field('platformApiKey', t('settings.providers.page.quotaCredentials.platformApiKey'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
+      {providerId === 'opendesign' && field('cookie', t('settings.providers.page.quotaCredentials.sessionCookie'), t('settings.providers.page.quotaCredentials.cookiePlaceholder'))}
+      {providerId === 'opendesign' && field('workspaceId', t('settings.providers.page.quotaCredentials.workspaceId'), t('settings.providers.page.quotaCredentials.workspaceIdPlaceholder'), false)}
       {providerId === 'cursor' && field('accessToken', t('settings.providers.page.quotaCredentials.accessToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       {providerId === 'cursor' && field('refreshToken', t('settings.providers.page.quotaCredentials.refreshToken'), t('settings.providers.page.quotaCredentials.tokenPlaceholder'))}
       <div className="flex flex-wrap gap-2">

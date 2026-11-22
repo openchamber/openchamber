@@ -6,7 +6,7 @@
 
 ## Protocol
 
-`/api/terminal/ws` is the only terminal data transport. It uses v3 binary JSON control frames and is opened through `openRuntimeWebSocket`, preserving direct, Electron proxy, URL-token authentication, and private-relay routing.
+`/api/terminal/ws` is the only terminal data transport. It uses v3 binary JSON control frames and is opened through `openRuntimeWebSocket`, preserving direct, Electron proxy, URL-token authentication, and private-relay routing. Inbound frames are capped at `TERMINAL_WS_MAX_PAYLOAD_BYTES` (64 KiB), passed as `maxPayload` to the WS server and checked again by the connection's `message` handler: Node's `ws` enforces `maxPayload` while parsing, but Bun may not, so the handler closes an over-cap frame with 1009 before it is decoded. The handler cannot prevent the first over-cap allocation under Bun.
 
 - `attach` registers a connection for one terminal. One socket may attach to many terminals.
 - Every attach and reconnect begins with an authoritative `snapshot` containing bounded history, the current sequence, and the PTY `cols`/`rows` the history was drawn for. The client replays the history at that size before fitting its viewport; replaying shell output at another width leaves stray fragments that the shell's own SIGWINCH redraw never clears.

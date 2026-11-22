@@ -9,6 +9,7 @@ import {
   parseMdFile,
   parseMdFileAsync,
   writeMdFile,
+  assertMdFileWithinCap,
   readConfigLayers,
   readConfig,
   walkSkillMdFiles,
@@ -17,6 +18,7 @@ import {
   listSkillSupportingFiles,
   readSkillSupportingFile,
   writeSkillSupportingFile,
+  assertSkillSupportingFileWithinCap,
   deleteSkillSupportingFile,
   getAncestors,
   findWorktreeRoot,
@@ -471,7 +473,11 @@ async function getSkillSources(skillName, workingDirectory, discoveredSkill = nu
     }
   }
   if (includeSupportingFiles) {
-    sources.md.supportingFiles = mdExists && mdDir ? await listSkillSupportingFiles(mdDir) : [];
+    const listing = mdExists && mdDir
+      ? await listSkillSupportingFiles(mdDir)
+      : { files: [], truncated: false };
+    sources.md.supportingFiles = listing.files;
+    sources.md.supportingFilesTruncated = listing.truncated;
   }
 
   return sources;
@@ -541,8 +547,6 @@ async function createSkillNow(skillName, config, workingDirectory, scope) {
     targetScope = SKILL_SCOPE.USER;
   }
 
-  fs.mkdirSync(targetDir, { recursive: true });
-
   const {
     instructions,
     scope: _scopeFromConfig,
@@ -563,6 +567,22 @@ async function createSkillNow(skillName, config, workingDirectory, scope) {
   if (disableModelInvocation === true) {
     applyModelInvocation(frontmatter, true);
   }
+
+  // Refuse an over-cap supporting file before anything is written, so a
+  // failed create leaves no partial skill behind (#1444, Codex review).
+  if (supportingFiles && Array.isArray(supportingFiles)) {
+    for (const file of supportingFiles) {
+      if (file.path && file.content !== undefined) {
+        assertSkillSupportingFileWithinCap(file.path, file.content);
+      }
+    }
+  }
+
+  // Every refusal above (missing description, over-cap Markdown, over-cap
+  // supporting file) happens before the directory exists, so a failed create
+  // leaves nothing behind (CodeRabbit review, #1444).
+  assertMdFileWithinCap(targetPath, frontmatter, instructions || '');
+  fs.mkdirSync(targetDir, { recursive: true });
 
   // `wx` fails if SKILL.md appeared since the check above, from another
   // process or a client racing this one, instead of overwriting it.
@@ -614,7 +634,22 @@ async function updateSkillNow(skillName, updates, workingDirectory, targetPath =
     throw new Error(`Skill "${skillName}" does not match ${mdPath}`);
   }
 
+  // Refuse an over-cap supporting file before any field is applied, so a
+  // failed update leaves the skill exactly as it was (#1444).
+  if (Array.isArray(updates.supportingFiles)) {
+    for (const file of updates.supportingFiles) {
+      if (!file.delete && file.path && file.content !== undefined) {
+        assertSkillSupportingFileWithinCap(file.path, file.content);
+      }
+    }
+  }
+
   let mdModified = false;
+  // Supporting-file changes are collected, not applied, during the field
+  // loop: the serialized Markdown is validated against its cap before
+  // anything on disk changes, so a refused Markdown cannot leave writes
+  // or deletions behind (#1444, Codex review).
+  const supportingOps = [];
 
   for (const [field, value] of Object.entries(updates)) {
     if (field === 'scope' || field === 'source' || field === 'targetPath' || field === 'renameTo') {
@@ -632,9 +667,12 @@ async function updateSkillNow(skillName, updates, workingDirectory, targetPath =
       if (Array.isArray(value)) {
         for (const file of value) {
           if (file.delete && file.path) {
-            deleteSkillSupportingFile(mdDir, file.path);
+            const target = file.path;
+            supportingOps.push(() => deleteSkillSupportingFile(mdDir, target));
           } else if (file.path && file.content !== undefined) {
-            writeSkillSupportingFile(mdDir, file.path, file.content);
+            const target = file.path;
+            const content = file.content;
+            supportingOps.push(() => writeSkillSupportingFile(mdDir, target, content));
           }
         }
       }
@@ -653,6 +691,10 @@ async function updateSkillNow(skillName, updates, workingDirectory, targetPath =
     mdModified = true;
   }
 
+  if (mdModified) {
+    assertMdFileWithinCap(mdPath, mdData.frontmatter, mdData.body);
+  }
+  for (const op of supportingOps) op();
   if (mdModified) {
     writeMdFile(mdPath, mdData.frontmatter, mdData.body);
   }

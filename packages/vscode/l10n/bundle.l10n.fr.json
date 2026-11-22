@@ -6,6 +6,7 @@
   "OpenChamber: Failed to restart API - {0}": "OpenChamber : impossible de redémarrer l’API — {0}",
   "OpenChamber [Add to Context]: No active editor": "OpenChamber [Ajouter au contexte] : aucun éditeur actif",
   "OpenChamber [Add to Context]: No text selected": "OpenChamber [Ajouter au contexte] : aucun texte sélectionné",
+  "OpenChamber [Add to Context]: Selection exceeds the {0} MiB limit": "OpenChamber [Ajouter au contexte] : la sélection dépasse la limite de {0} Mio",
   "OpenChamber: No file selected to mention": "OpenChamber : aucun fichier sélectionné à mentionner",
   "OpenChamber: Some selected entries were skipped (folders or unsupported resources)": "OpenChamber : certaines entrées sélectionnées ont été ignorées (dossiers ou ressources non prises en charge)",
   "OpenChamber [Explain]: No active editor": "OpenChamber [Expliquer] : aucun éditeur actif",

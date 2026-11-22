@@ -4,7 +4,9 @@ import {
   GOAL_SPEC_SYSTEM_PROMPT,
   buildGoalSpecPrompt,
   normalizeGoalSpec,
+  parseGoalSpecSections,
   resolveGoalWriterModel,
+  spliceGoalSpecSection,
   writeGoalSpec,
 } from './spec-writer.js';
 
@@ -43,6 +45,19 @@ describe('normalizeGoalSpec', () => {
 
     const oneLine = 'y'.repeat(6000);
     expect(normalizeGoalSpec(oneLine)).toBe('y'.repeat(5000));
+  });
+
+  it('never clips between the halves of a surrogate pair', () => {
+    // 499 BMP chars + an astral emoji at the 500 cut: the plain slice would
+    // end on the emoji's high surrogate and encode as U+FFFD downstream.
+    const text = 'a'.repeat(499) + String.fromCodePoint(0x1f600) + 'b'.repeat(2000);
+    const clamped = normalizeGoalSpec(text, 500);
+    expect(clamped).toBe('a'.repeat(499));
+    expect(clamped.length).toBeLessThanOrEqual(500);
+
+    // A pair that fits whole inside the limit survives intact.
+    const fits = 'a'.repeat(498) + String.fromCodePoint(0x1f600) + 'b'.repeat(2000);
+    expect(normalizeGoalSpec(fits, 500)).toBe('a'.repeat(498) + String.fromCodePoint(0x1f600));
   });
 
   it('returns an empty string when nothing usable came back', () => {
@@ -131,6 +146,50 @@ describe('writeGoalSpec', () => {
     const generate = vi.fn();
     await expect(writeGoalSpec({ request: '   ', settings, generate }))
       .rejects.toMatchObject({ statusCode: 400, code: 'goal-spec-request-required' });
+    expect(generate).not.toHaveBeenCalled();
+  });
+});
+
+describe('goal spec sections (#1829)', () => {
+  const spec = '## Objective\nShip it.\n\n## Requirements\n1. One\n2. Two\n\n## Done when\nTests pass.';
+
+  it('parses the fixed shape into headed sections', () => {
+    expect(parseGoalSpecSections(spec).map((entry) => entry.heading)).toEqual(['Objective', 'Requirements', 'Done when']);
+    expect(parseGoalSpecSections('no headings')).toEqual([]);
+  });
+
+  it('splices a headed replacement, leaving every other section byte-identical', () => {
+    const spliced = spliceGoalSpecSection(spec, 'Requirements', '## Requirements\n1. Uno\n2. Dos\n3. Tres');
+    expect(spliced).toBe('## Objective\nShip it.\n\n## Requirements\n1. Uno\n2. Dos\n3. Tres\n\n## Done when\nTests pass.');
+  });
+
+  it('accepts a bare body and a whole-spec reply, taking only the target section', () => {
+    expect(spliceGoalSpecSection(spec, 'Objective', 'Ship it well.'))
+      .toBe('## Objective\nShip it well.\n\n## Requirements\n1. One\n2. Two\n\n## Done when\nTests pass.');
+    expect(spliceGoalSpecSection(spec, 'Done when', '## Objective\nChanged\n\n## Done when\nAll green.'))
+      .toBe('## Objective\nShip it.\n\n## Requirements\n1. One\n2. Two\n\n## Done when\nAll green.');
+  });
+
+  it('refuses an unknown section, an empty replacement, and a reply without the target', () => {
+    expect(spliceGoalSpecSection(spec, 'Nope', 'text')).toBeNull();
+    expect(spliceGoalSpecSection(spec, 'Objective', '  ')).toBeNull();
+    expect(spliceGoalSpecSection(spec, 'Objective', '## Requirements\n1. One')).toBeNull();
+  });
+
+  it('writeGoalSpec with a section splices the reply into the current spec', async () => {
+    const generate = vi.fn(async () => ({ text: '## Requirements\n1. Uno', providerID: 'openai', modelID: 'gpt-5.5' }));
+    const result = await writeGoalSpec({ request: 'Ship it', section: 'Requirements', currentSpec: spec, settings, generate });
+    expect(result.spec).toBe('## Objective\nShip it.\n\n## Requirements\n1. Uno\n\n## Done when\nTests pass.');
+    const call = generate.mock.calls[0][0];
+    expect(call.prompt).toContain('<target_section>\nRequirements\n</target_section>');
+    expect(call.prompt).toContain(spec.replace(/</g, '&lt;'));
+    expect(call.system).toContain('Rewrite ONLY the section headed "## Requirements"');
+  });
+
+  it('writeGoalSpec refuses a section the current spec does not have, without calling the model', async () => {
+    const generate = vi.fn();
+    await expect(writeGoalSpec({ request: 'Ship it', section: 'Nope', currentSpec: spec, settings, generate }))
+      .rejects.toMatchObject({ statusCode: 400, code: 'goal-spec-section-not-found' });
     expect(generate).not.toHaveBeenCalled();
   });
 });

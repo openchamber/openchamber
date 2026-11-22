@@ -971,14 +971,6 @@ export class ChildStoreManager {
   }
 
   /** Apply a state mutation to a directory's store */
-  update(directory: string, fn: (state: State) => Partial<State>) {
-    const store = this.children.get(directory)
-    if (!store) return
-    const current = store.getState()
-    const patch = fn(current)
-    store.setState(patch)
-  }
-
   /** Get current state of a directory store (snapshot) */
   getState(directory: string): State | undefined {
     return this.children.get(directory)?.getState()

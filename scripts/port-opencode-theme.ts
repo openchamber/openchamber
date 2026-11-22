@@ -6,14 +6,20 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
-import { resolveThemeVariant } from '../../opencode/packages/ui/src/theme/resolve';
-import { resolveThemeVariantV2 } from '../../opencode/packages/ui/src/theme/v2/resolve';
 import { importVSCodeTheme } from '../packages/ui/src/lib/theme/vscode/import';
 import { compactTheme, requireTheme, type ThemeDefinition } from '../packages/ui/src/lib/theme/definition';
 import { mixColor, onColor, readableText } from '../packages/ui/src/lib/theme/color';
 
-// The source checkout must be installed beside OpenChamber. It is read-only.
-const sourceRoot = resolve(import.meta.dirname, '../../opencode/packages/ui/src');
+// The source checkout must be installed beside OpenChamber (a directory
+// named `opencode` next to this repository), or OPENCHAMBER_OPENCODE_DIR
+// must name its path instead. It is read-only. The resolver imports are
+// dynamic so they follow the same sibling resolution as sourceRoot.
+const siblingCheckout = process.env.OPENCHAMBER_OPENCODE_DIR
+  ? resolve(process.env.OPENCHAMBER_OPENCODE_DIR)
+  : resolve(import.meta.dirname, '../../opencode');
+const { resolveThemeVariant } = await import(join(siblingCheckout, 'packages/ui/src/theme/resolve.ts'));
+const { resolveThemeVariantV2 } = await import(join(siblingCheckout, 'packages/ui/src/theme/v2/resolve.ts'));
+const sourceRoot = join(siblingCheckout, 'packages/ui/src');
 const sourceDirectory = join(sourceRoot, 'theme/themes');
 const defaultOutput = join(homedir(), '.config/openchamber/themes');
 const primitiveCss = readFileSync(join(sourceRoot, 'styles/tokens/colors.css'), 'utf8');
@@ -206,7 +212,7 @@ bun run themes:port:opencode [options]
   --list           List available theme IDs
   --help           Show this help
 
-Requires an installed OpenCode checkout at ../opencode beside OpenChamber.
+Requires an installed OpenCode checkout at ../opencode beside OpenChamber, or OPENCHAMBER_OPENCODE_DIR set to its path.
 Existing identical files are skipped. Different files are never overwritten.`);
     return;
   }

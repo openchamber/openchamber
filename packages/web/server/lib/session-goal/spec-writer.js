@@ -41,8 +41,14 @@ const GOAL_SPEC_INSTRUCTIONS = [
  * of any length when it is null. The model is asked for 90% of the limit, so
  * the clamp in `normalizeGoalSpec` rarely has to cut.
  */
-const buildGoalSpecSystemPrompt = (charLimit) => [
+const buildGoalSpecSystemPrompt = (charLimit, section) => [
   ...GOAL_SPEC_INSTRUCTIONS,
+  ...(section
+    ? [
+      `Rewrite ONLY the section headed "## ${section}" of the current spec given in <current_spec>.`,
+      `Return ONLY that rewritten section, starting with the line "## ${section}". Do not return any other section.`,
+    ]
+    : []),
   charLimit
     ? `Stay under ${Math.floor(charLimit * 0.9)} characters. Write in the language of the request.`
     : 'Write in the language of the request.',
@@ -61,13 +67,79 @@ const nonEmpty = (value) => textSchema.parse(value).trim();
 
 // Conversation goes last: generate clips an oversized prompt at the tail, and
 // the background context is the part the spec can best do without.
-export const buildGoalSpecPrompt = ({ request, conversation, openItems }) => {
+export const buildGoalSpecPrompt = ({ request, conversation, openItems, section, currentSpec }) => {
   const blocks = [`<request>\n${escapeXmlText(nonEmpty(request))}\n</request>`];
   const items = nonEmpty(openItems);
   if (items) blocks.push(`<open_items>\n${escapeXmlText(items)}\n</open_items>`);
+  const target = nonEmpty(section);
+  const current = textSchema.parse(currentSpec);
+  if (target && current) {
+    blocks.push(`<current_spec>\n${escapeXmlText(current)}\n</current_spec>`);
+    blocks.push(`<target_section>\n${escapeXmlText(target)}\n</target_section>`);
+  }
   const context = nonEmpty(conversation);
   if (context) blocks.push(`<conversation>\n${escapeXmlText(context)}\n</conversation>`);
   return blocks.join('\n\n');
+};
+
+const SECTION_HEADING = /^##[ \t]+(.+?)[ \t]*$/gm;
+
+/**
+ * The `## heading` sections of a spec, in order, with the exact span of each
+ * section's segment. A segment runs from its heading line to just before the
+ * next heading (or the end of the spec); its trailing newlines are the blank
+ * line separating it from the next section.
+ */
+export const parseGoalSpecSections = (spec) => {
+  const text = textSchema.parse(spec);
+  const sections = [];
+  SECTION_HEADING.lastIndex = 0;
+  let match;
+  while ((match = SECTION_HEADING.exec(text)) !== null) {
+    if (sections.length) sections[sections.length - 1].end = match.index;
+    sections.push({ heading: match[1], start: match.index, end: text.length });
+  }
+  return sections;
+};
+
+const sectionBody = (text, section, sections, index) => {
+  const headingEnd = text.indexOf('\n', section.start);
+  const bodyStart = headingEnd === -1 ? text.length : headingEnd + 1;
+  const bodyEnd = index + 1 < sections.length ? sections[index + 1].start : text.length;
+  return text.slice(bodyStart, bodyEnd).trim();
+};
+
+/**
+ * Replace one `## heading` section of `spec` with `replacement` and return
+ * the spliced spec, or null when the section cannot be replaced. Everything
+ * outside the targeted section — including the blank lines around it — stays
+ * byte-identical. The replacement may be the section on its own (with or
+ * without its heading line) or a whole spec, in which case only its matching
+ * section is taken.
+ */
+export const spliceGoalSpecSection = (spec, heading, replacement) => {
+  const text = textSchema.parse(spec);
+  const target = nonEmpty(heading);
+  if (!target) return null;
+  const sections = parseGoalSpecSections(text);
+  const index = sections.findIndex((entry) => entry.heading === target);
+  if (index === -1) return null;
+  const incoming = textSchema.parse(replacement).trim();
+  if (!incoming) return null;
+  const incomingSections = parseGoalSpecSections(incoming);
+  let body;
+  if (incomingSections.length) {
+    const incomingIndex = incomingSections.findIndex((entry) => entry.heading === target);
+    if (incomingIndex === -1) return null;
+    body = sectionBody(incoming, incomingSections[incomingIndex], incomingSections, incomingIndex);
+  } else {
+    body = incoming;
+  }
+  if (!body) return null;
+  const section = sections[index];
+  const segment = text.slice(section.start, section.end);
+  const separator = segment.match(/\n*$/)[0];
+  return `${text.slice(0, section.start)}## ${target}\n${body}${separator}${text.slice(section.end)}`;
 };
 
 const THINK_BLOCK = /<think>[\s\S]*?<\/think>/gi;
@@ -83,7 +155,11 @@ export const normalizeGoalSpec = (text, charLimit = goalObjectiveLimits(null).ob
   // it when the line break is not so early that most of the spec is lost.
   const lastNewline = clipped.lastIndexOf('\n');
   const cut = lastNewline >= charLimit * 0.8 ? clipped.slice(0, lastNewline) : clipped;
-  return cut.trim();
+  // A plain slice can land between the halves of a surrogate pair, leaving a
+  // lone high surrogate at the tail that encodes as U+FFFD downstream; move
+  // the cut back to the pair boundary instead.
+  const last = cut.charCodeAt(cut.length - 1);
+  return (last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut).trim();
 };
 
 /**
@@ -120,6 +196,8 @@ export const writeGoalSpec = async ({
   request,
   conversation,
   openItems,
+  section,
+  currentSpec,
   directory,
   providerID,
   modelID,
@@ -137,6 +215,16 @@ export const writeGoalSpec = async ({
       code: 'goal-spec-request-required',
     });
   }
+  // A section rewrite (#1829) splices the model's reply into the current
+  // spec; the target must name a section the current spec actually has.
+  const targetSection = nonEmpty(section);
+  const current = textSchema.parse(currentSpec);
+  if (targetSection && !parseGoalSpecSections(current).some((entry) => entry.heading === targetSection)) {
+    throw Object.assign(new Error(`the current spec has no section "${targetSection}" to rewrite`), {
+      statusCode: 400,
+      code: 'goal-spec-section-not-found',
+    });
+  }
   const charLimit = ignoreLimit ? null : (settings?.charLimit ?? goalObjectiveLimits(null).objective);
   const writer = resolveGoalWriterModel({
     picked: { providerID: writerProviderID, modelID: writerModelID, variant: writerVariant },
@@ -146,8 +234,8 @@ export const writeGoalSpec = async ({
     modelID,
   });
   const generated = await generate({
-    prompt: buildGoalSpecPrompt({ request, conversation, openItems }),
-    system: buildGoalSpecSystemPrompt(charLimit),
+    prompt: buildGoalSpecPrompt({ request, conversation, openItems, section: targetSection || undefined, currentSpec: current || undefined }),
+    system: buildGoalSpecSystemPrompt(charLimit, targetSection || undefined),
     model: writer.model,
     variant: writer.variant,
     directory,
@@ -159,6 +247,21 @@ export const writeGoalSpec = async ({
     timeoutMs: 120_000,
     signal,
   });
+  if (targetSection) {
+    // The reply is normalized without the whole-spec clamp: clamping the
+    // spliced spec could cut an untouched section, and the byte-identical
+    // guarantee for the sections the user did not ask to change wins. The
+    // system prompt still asks for the whole spec to stay under the limit.
+    const rewritten = normalizeGoalSpec(generated?.text, GOAL_OBJECTIVE_HARD_CAP);
+    const spec = rewritten ? spliceGoalSpecSection(current, targetSection, rewritten) : null;
+    if (!spec) {
+      throw Object.assign(new Error('the goal writer returned no usable section'), {
+        statusCode: 502,
+        code: 'goal-spec-section-empty',
+      });
+    }
+    return { spec, providerID: generated.providerID, modelID: generated.modelID, variant: writer.variant ?? null };
+  }
   const spec = normalizeGoalSpec(generated?.text, charLimit ?? GOAL_OBJECTIVE_HARD_CAP);
   if (!spec) {
     throw Object.assign(new Error('the goal writer returned no spec'), {

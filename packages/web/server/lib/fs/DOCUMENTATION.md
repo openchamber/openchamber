@@ -25,7 +25,9 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/preview/:grant/:path(*)`
     - `POST /api/fs/write`
     - `POST /api/fs/upload`
-    - `POST /api/fs/delete`
+    - `POST /api/fs/delete` — rejects workspace and managed roots, including
+      nested chats roots, and checks the canonical parent before recursively
+      deleting a target.
     - `POST /api/fs/rename` — renames or moves within one workspace root and
       never replaces an existing destination: it returns `409` with
       `reason: 'already-exists'`, except for a case-only rename where the
@@ -50,13 +52,14 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
       symlinked directories are followed, each real directory walked once,
       and repositories are reported under the link path)
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
+  - Exec command output is capped per stream at `OPENCHAMBER_FS_EXEC_OUTPUT_MAX_BYTES` (default 4 MiB, `createExecOutputMaxBytes`). A command that exceeds the cap is killed and its result resolves with `success: false` and an `output-too-large` error, with each stream truncated to the cap. Results under the cap keep the usual shape. Each stream is decoded incrementally with a `StringDecoder`, so a multi-byte character split across pipe chunks survives; a stream cut at the cap ends on its last whole character rather than emitting a replacement character.
   - Exec commands run with the terminal's PATH plus the user's and the project's environment variables for their directory (`environmentRuntime`, see `../environment`).
   - Enforces workspace boundary checks with active project + worktree fallback support.
   - The active project directory is validated with `fs.realpath`, so when the project root is itself a symlink the workspace base no longer matches the paths the client sends. Workspace resolution therefore retries against the raw directory the client requested (`requestedDirectory` from `resolveProjectDirectory`) before falling back to worktree roots. Symlinks are still resolved afterwards, and write/exec routes keep their canonical containment check against the resolved base.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
-  - An empty query stops at `limit` candidates. A query walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`): weak shallow matches would otherwise exhaust a candidate budget before exact deeper matches are ever visited. The ceiling mirrors `packages/vscode/src/bridge-fs-helpers-runtime.ts`, and both suites pin the two runtimes' agreement.
+  - An empty query stops at `limit` candidates. A query walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`): weak shallow matches would otherwise exhaust a candidate budget before exact deeper matches are ever visited. At most 50,000 directories are ever enqueued to be visited (`FILE_SEARCH_MAX_VISITED_DIRS`, root included): the visited set holds every directory that will be read, so refusing enqueues at that ceiling bounds the walk, the queue, and the set for directory-heavy trees, while directories already queued are still read and the candidates collected from them are returned. The ceilings mirror `packages/vscode/src/bridge-fs-helpers-runtime.ts`, and both suites pin the two runtimes' agreement.
 
 ### Find in files
 
@@ -81,6 +84,11 @@ canonical project directory, but `path` is built under the directory the client
 requested (`requestedDirectory`), so a project opened through a symlink gets the
 same paths as its file tree. Matches are sorted by path,
 then line.
+
+One ripgrep line is accumulated whole before it can be parsed, so a single
+line is capped at `CONTENT_SEARCH_MAX_LINE_BYTES` (1 MiB): a line past the cap
+is skipped — its pieces are dropped as they arrive and the search resumes at
+the next newline — which is not an error and does not set `stopped`.
 
 `limit` defaults to 200 and is capped at 500; when it is reached the process
 is killed and `stopped` is `'limit'`. A search running for 30 seconds is killed
@@ -129,6 +137,7 @@ The Git service validates a selected commit identity before planning or spawning
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.
 - Keep Git process, transport, credential, cancellation, and clone cleanup policy in the Git network operation service. The legacy clone handler may resolve its compatibility target and map the service result, but must not spawn Git.
 - Workspace checks accept, besides the active workspace and its worktrees, the **managed roots**: the OpenChamber config root and the managed chats root (`managedChatsRoot` dependency; `OPENCHAMBER_CHATS_DIR` upstream, default `<config root>/chats`). Chat worktrees may legitimately live outside every project workspace. With no project directory resolved, only the chats roots are accepted: the managed chats root and `<config root>/chats`, each also by its canonical path. A first chat then works on an install with no project; the rest of the config root still needs a resolved project.
+- Delete rejects the active authorization base, every managed and chats root, and any directory that contains one of them, by canonical path. This keeps a nested chats root protected when the config root is the selected authorization base, while still allowing deletion of files and folders inside the chats root.
 - `GET /api/fs/home` preserves `{ home, chatsRoot }` and adds `canonicalChatsRoot` and `canonicalLegacyChatsRoot`, resolved by the server's filesystem. If a root does not exist yet, it resolves the nearest existing ancestor and appends the missing segments, without creating directories. Errors resolving the configured root fail the request. A failed legacy lookup warns and omits only that optional alias, retaining exact legacy matching without blocking an accessible relocated root. Clients use confirmed aliases for exact membership while keeping the original roots as folder/scope identities. `chatsRoot` is the server-resolved managed chats root; clients must use it instead of joining `home` + the well-known segment (a relocated root does not contain that segment).
 - The server creates the managed chats root at startup (`ensureChatsDir` in `lib/data-dir-migration.js`, called from `main`). The UI reads that folder as soon as a new chat opens, and OpenCode fails every read of a missing folder, so on a fresh install the sidebar used to report "Could not initialize workspace" until the first chat created it. A root that cannot be created only logs a warning.
 - Workspace authorization accepts both the configured managed paths and their filesystem-confirmed canonical roots. Canonical lookup runs only when lexical workspace/managed-root checks fail. One failed managed-root lookup cannot reject an independently authorized root or worktree. Path comparisons remain case-sensitive on POSIX: distinct Linux directories named `chats` and `Chats` never become aliases through string folding. Shared UI keeps exact root membership for classification and directory cleanup.

@@ -27,6 +27,18 @@ Abra **Settings → Projects** para dar a um projeto um nome, cor ou ícone pers
 
 > No VS Code, o OpenChamber sempre usa a pasta que você tem aberta como o único projeto, então não há nada para adicionar ou trocar. A página de configurações de Projects fica oculta lá.
 
+## Agrupar sessões em pastas
+
+Na visualização **Tree** da barra lateral, clique com o botão direito em uma sessão e escolha **Move to folder** para colocá-la em uma pasta, ou **New folder...** para criar uma. Uma pasta pertence à raiz do projeto ou a um worktree, e a linha da pasta tem botões para renomeá-la ou excluí-la. Excluir uma pasta mantém suas sessões; elas voltam para o projeto.
+
+As pastas ficam salvas no servidor do OpenChamber, então tudo que está conectado ao mesmo servidor mostra as mesmas: outro computador conectado a ele, o aplicativo web e o celular. Uma mudança em um aparece nos outros em um segundo, sem recarregar. Cada servidor tem suas próprias pastas. Quais pastas estão recolhidas fica em cada dispositivo.
+
+O celular mostra as pastas na visualização Tree, mas não pode alterá-las. Mova as sessões no desktop ou no aplicativo web.
+
+Quando um dispositivo se conecta pela primeira vez após atualizar de uma versão que mantinha as pastas em cada dispositivo, suas pastas são adicionadas às do servidor. Uma pasta com o mesmo nome e no mesmo lugar que outra que o servidor já tem se junta a ela, e suas sessões vão junto; nada é descartado. Uma sessão que o servidor já classificou permanece na pasta do servidor.
+
+Excluir uma sessão a tira de sua pasta, e fechar um projeto remove suas pastas. No VS Code, as pastas ficam na extensão e não são compartilhadas.
+
 ## Ambiente do projeto
 
 Quando as ferramentas de um projeto vêm do direnv, do devenv ou de um shell Nix, os hooks do Git, o terminal e as [ações de projeto](/pt-br/project-actions/) não as encontram sozinhos. Abra **Configurações → Projetos**, escolha o projeto e, em **Ambiente**:

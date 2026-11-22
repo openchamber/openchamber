@@ -70,6 +70,7 @@ import { Binary } from "./binary"
 import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./reconnect-recovery"
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
+import { SESSION_LIST_MAX_LIMIT } from "@/lib/opencode/sessionListLimit"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
 import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
@@ -89,7 +90,7 @@ import { useMcpStore } from "@/stores/useMcpStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useMessagingStore } from "@/stores/useMessagingStore"
 import { isMessagingSession, type MessagingCreated } from "@/lib/opencode/messaging"
-import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
+import { isSpaceDirectory, spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { isDirectoryOfKnownSpace, isSpaceDirectoryStopped, isSpaceStopped, knownSpaceIds, refreshSpacesJourney, spaceIdsGone, spacesRuntimeGeneration, useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
@@ -100,9 +101,11 @@ import {
   applyGlobalSessionStatusEvents,
   applyGlobalSessionStatusSnapshot,
   getDirectoryOwnedSessionIds,
+  reconcileGlobalSessionStatusWithActive,
   setSessionParentResolver,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
+import { recordSessionTimestampEvents } from "./session-activity-timestamps"
 import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
 import { applyPersistentPtyEvents } from "./persistent-ptys"
@@ -296,6 +299,7 @@ const getDirectoryEventState = (
 const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
   applySessionEventsToGlobalSessions(batch.globalSessionEvents)
   for (const [directory, events] of batch.globalStatusEventsByDirectory) {
+    recordSessionTimestampEvents(events)
     // Before statuses: an idle that follows a command's start in the same
     // flush must see the command.
     applyBackgroundShellEvents(directory, events)
@@ -381,6 +385,7 @@ const ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS = 5_000
 const ACTIVE_SESSION_STALE_EVENT_MS = 20_000
 const ACTIVE_SESSION_FULL_RESYNC_COOLDOWN_MS = 15_000
 const CHILD_SESSION_DISCOVERY_INTERVAL_MS = 15_000
+const GLOBAL_STATUS_RECONCILE_INTERVAL_MS = 15_000
 
 // Active-session watchdog network calls run under the shared
 // background-network gate (see lib/background-network.ts). The watchdog walks
@@ -1592,14 +1597,52 @@ async function resyncDirectoryAfterReconnect(
 }
 
 /**
+ * The sessions OpenCode's running list says are running, or null when the
+ * list cannot settle anything: a read failed, the runtime changed meanwhile,
+ * or a replaced OpenCode is still draining (it runs the turns busy at its
+ * handoff, which this list does not name). The host's list never covers a
+ * session inside an isolated space.
+ */
+async function settlingActiveSessionIds(
+  activeRead: ReturnType<typeof opencodeClient.getActiveSessionStatuses>,
+  runtime: CatalogRuntime,
+): Promise<ReadonlySet<string> | null> {
+  const active = await activeRead
+  if (!active || !isCatalogRuntimeCurrent(runtime)) return null
+  // Read the handoff state after the active list: a drain may have started
+  // while OpenCode was answering, and that makes its missing entries inconclusive.
+  const host = await opencodeClient.getHostSessionStatusSnapshot()
+  if (!host || host.openCodeDraining === true || !isCatalogRuntimeCurrent(runtime)) return null
+  return new Set(Object.keys(active))
+}
+
+const currentCatalogRuntime = (): CatalogRuntime => ({ key: getRuntimeKey(), sdk: opencodeClient.getSdkClient() })
+
+const readSettlingActiveSessionIds = (): Promise<ReadonlySet<string> | null> => {
+  const runtime = currentCatalogRuntime()
+  return settlingActiveSessionIds(opencodeClient.getActiveSessionStatuses(), runtime)
+}
+
+/** Sessions the host's active list speaks for (see `reconcileGlobalSessionStatusWithActive`). */
+const isCoveredByHostActiveList = (sessionId: string, directory: string): boolean => (
+  !isSpaceDirectory(directory) && !hasPromptInFlight(sessionId)
+)
+
+/**
  * A deferred store that looked idle before a stream gap may own a session
  * that started a turn, or asked a permission or form, during it. OpenCode's
  * active-session list is global, so one read finds those stores without
- * reading any directory. A failed read leaves them deferred as before.
+ * reading any directory, and settles the cross-directory status of sessions
+ * whose end fell into the gap. A failed read leaves both as before.
  */
 async function refreshStoresActiveAfterGap(childStores: ChildStoreManager): Promise<void> {
-  const runtime = { key: getRuntimeKey(), sdk: opencodeClient.getSdkClient() }
-  const active = await opencodeClient.getActiveSessionStatuses()
+  const runtime = currentCatalogRuntime()
+  const activeRead = opencodeClient.getActiveSessionStatuses()
+  await reconcileGlobalSessionStatusWithActive(
+    () => settlingActiveSessionIds(activeRead, runtime),
+    isCoveredByHostActiveList,
+  )
+  const active = await activeRead
   if (!active || !isCatalogRuntimeCurrent(runtime)) return
   childStores.refreshStaleDirectoriesWithActiveSessions(new Set(Object.keys(active)))
 }
@@ -2126,6 +2169,7 @@ export function handleEvent(
       applyBackgroundShellEvents(directory, [payload])
       applyPersistentPtyEvents(directory, [payload])
       applyGlobalSessionStatusEvent(directory, payload)
+      recordSessionTimestampEvents([payload])
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
     }
   }
@@ -2935,7 +2979,7 @@ export function SyncProvider(props: {
               const { active } = splitGlobalSessionsByArchived(
                 await listGlobalSessionPages(listSessionPage, {
                   directory: dir,
-                  pageSize: 500,
+                  pageSize: SESSION_LIST_MAX_LIMIT,
                   onPage: (page) => {
                     if (!isCurrent()) return
                     const { active } = splitGlobalSessionsByArchived(page)
@@ -3250,6 +3294,7 @@ export function SyncProvider(props: {
   useEffect(() => {
     let stopped = false
     let running = false
+    let lastGlobalStatusReconcileAt = 0
 
     const discoverChildSessions = async (
       directory: string,
@@ -3264,7 +3309,7 @@ export function SyncProvider(props: {
         // discovered; a single 200-record page silently truncated the list and
         // left subagent children beyond it undiscovered.
         const { active: allSessions } = splitGlobalSessionsByArchived(
-          await listGlobalSessionPages(listSessionPage, { directory, pageSize: 200 }),
+          await listGlobalSessionPages(listSessionPage, { directory, pageSize: SESSION_LIST_MAX_LIMIT }),
         )
         const state = store.getState()
         const globalEntities = useGlobalSessionsStore.getState().entityById
@@ -3360,6 +3405,18 @@ export function SyncProvider(props: {
               lastChildDiscoveryAtByDirectoryRef.current.set(directory, now)
               void discoverChildSessions(directory, store, liveSessionIds)
             }
+          }
+
+          // Directory polls settle only what their own stores show running;
+          // a session the cross-directory index alone still holds as running
+          // is checked against OpenCode's list here.
+          const holdsActiveSessions = useGlobalSessionStatusStore.getState().activeSessionIds.size > 0
+          if (holdsActiveSessions && now - lastGlobalStatusReconcileAt >= GLOBAL_STATUS_RECONCILE_INTERVAL_MS) {
+            lastGlobalStatusReconcileAt = now
+            void runBackgroundNetworkTask(
+              () => reconcileGlobalSessionStatusWithActive(readSettlingActiveSessionIds, isCoveredByHostActiveList),
+              "active-session",
+            ).catch(() => undefined)
           }
         })
         .finally(() => {

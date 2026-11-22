@@ -18,6 +18,18 @@ const pickMergedColor = (theme: Theme): string => {
   return theme.metadata.variant === 'dark' ? DEFAULT_MERGED_DARK : DEFAULT_MERGED_LIGHT;
 };
 
+/** The pull request colours the stylesheet paints: the theme's own, else the colour each state stands for. */
+export const resolvePrColors = (theme: Theme): NonNullable<Theme['colors']['pr']> => {
+  const pr = theme.colors.pr;
+  return {
+    open: pr?.open || theme.colors.status.success,
+    draft: pr?.draft || theme.colors.surface.mutedForeground,
+    blocked: pr?.blocked || theme.colors.status.warning,
+    merged: pr?.merged || (theme.metadata.variant === 'dark' ? DEFAULT_MERGED_DARK : DEFAULT_MERGED_LIGHT),
+    closed: pr?.closed || theme.colors.status.error,
+  };
+};
+
 export const withPrColors = (theme: Theme): Theme => {
   if (theme.colors.pr) {
     return theme;

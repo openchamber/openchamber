@@ -1,5 +1,9 @@
 import type { Theme } from '../../types/theme';
 import { mixColor, readableText } from './color';
+import { resolvePrColors } from './themes/prColors';
+
+/** Fill behind a pull request state pill: its colour at this share over the page. */
+export const PR_PILL_TINT = 0.18;
 
 /** Host-owned text colors shared by app CSS and extension snapshots. */
 export function getReadableThemeColors(theme: Theme) {
@@ -26,6 +30,10 @@ export function getReadableThemeColors(theme: Theme) {
       success: readableText(status.success, status.successBackground, surface.background),
       info: readableText(status.info, status.infoBackground, surface.background),
     },
+    // Pull request state pills; the app paints them, extensions do not.
+    pr: Object.fromEntries(
+      Object.entries(resolvePrColors(theme)).map(([state, color]) => [state, tintedText(color, PR_PILL_TINT)]),
+    ),
     selectionForeground: readableText(interactive.selectionForeground, interactive.selection, surface.background),
   };
 }

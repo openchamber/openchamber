@@ -1,0 +1,181 @@
+name: Branch cleanup
+
+"on":
+  schedule:
+    - cron: "27 14 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report only; delete nothing"
+        required: false
+        default: true
+        type: boolean
+      inactive_days:
+        description: "Days a branch's newest commit must exceed before it is eligible"
+        required: false
+        default: 14
+        type: number
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: true
+
+jobs:
+  cleanup:
+    name: Remove stale branches solely behind the default branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Delete stale branches solely behind the default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          LIVE_VAR: ${{ vars.BRANCH_CLEANUP_LIVE }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          INACTIVE_DAYS_INPUT: ${{ inputs.inactive_days }}
+        run: |
+          set -euo pipefail
+
+          # Safety latch: scheduled runs stay in dry-run unless the repo
+          # variable BRANCH_CLEANUP_LIVE is set to "true". Manual runs use
+          # the dry_run input instead.
+          dry_run="true"
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            if [[ "$LIVE_VAR" == "true" ]]; then
+              dry_run="false"
+            fi
+          elif [[ "$DRY_RUN_INPUT" == "false" ]]; then
+            dry_run="false"
+          fi
+
+          inactive_days="${INACTIVE_DAYS_INPUT:-14}"
+          max_deletions=50
+          cutoff=$(( $(date +%s) - inactive_days * 86400 ))
+
+          if [[ "$dry_run" == "true" ]]; then
+            mode="dry-run"
+          else
+            mode="LIVE"
+          fi
+          echo "Branch cleanup: mode=$mode inactive_days=$inactive_days default_branch=$DEFAULT_BRANCH"
+
+          git fetch --prune origin "+refs/heads/*:refs/remotes/origin/*"
+
+          # Fail the run (before any deletion) if the open-PR list cannot
+          # be read: those heads and bases are part of the protected set.
+          # Bases are protected because GitHub closes an open PR whose
+          # base branch is deleted (stacked PRs, #629).
+          gh pr list --state open --limit 1000 --json headRefName,baseRefName --jq ".[].headRefName" > open-pr-heads.txt
+          mapfile -t open_pr_heads < open-pr-heads.txt
+          rm -f open-pr-heads.txt
+          gh pr list --state open --limit 1000 --json headRefName,baseRefName --jq ".[].baseRefName" > open-pr-bases.txt
+          mapfile -t open_pr_bases < open-pr-bases.txt
+          rm -f open-pr-bases.txt
+          is_open_pr_head() {
+            local candidate="$1"
+            local head
+            for head in "${open_pr_heads[@]:-}"; do
+              if [[ "$head" == "$candidate" ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+          is_open_pr_base() {
+            local candidate="$1"
+            local base
+            for base in "${open_pr_bases[@]:-}"; do
+              if [[ "$base" == "$candidate" ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          candidates=()
+          while IFS= read -r ref; do
+            branch="${ref#origin/}"
+            if [[ "$branch" == "$DEFAULT_BRANCH" || "$branch" == "HEAD" ]]; then
+              continue
+            fi
+            if is_open_pr_head "$branch"; then
+              echo "SKIP open-pr-head: $branch"
+              continue
+            fi
+            if is_open_pr_base "$branch"; then
+              echo "SKIP open-pr-base: $branch"
+              continue
+            fi
+            newest="$(git log -1 --format=%ct "origin/$branch")"
+            if (( newest >= cutoff )); then
+              echo "SKIP active: $branch"
+              continue
+            fi
+            if git merge-base --is-ancestor "origin/$branch" "origin/$DEFAULT_BRANCH"; then
+              candidates+=("$branch")
+            else
+              echo "SKIP unique-commits: $branch"
+            fi
+          done < <(git for-each-ref --format="%(refname:short)" "refs/remotes/origin")
+
+          count="${#candidates[@]}"
+          echo "Stale branches solely behind $DEFAULT_BRANCH and inactive for ${inactive_days}d: $count"
+
+          {
+            echo "## Branch cleanup ($mode)"
+            echo ""
+            echo "Default branch: \`$DEFAULT_BRANCH\`; inactivity window: ${inactive_days} days; candidates: $count."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if (( count > max_deletions )); then
+            echo "Candidate count $count exceeds the per-run cap of $max_deletions; deleting nothing."
+            echo "Candidate count $count exceeds the per-run cap of $max_deletions; nothing was deleted." >> "$GITHUB_STEP_SUMMARY"
+            for branch in "${candidates[@]}"; do
+              echo "CANDIDATE: $branch"
+              echo "- \`$branch\`" >> "$GITHUB_STEP_SUMMARY"
+            done
+            exit 0
+          fi
+
+          deleted=0
+          failed=()
+          for branch in "${candidates[@]}"; do
+            if [[ "$dry_run" == "true" ]]; then
+              echo "WOULD-DELETE: $branch"
+              echo "- would delete \`$branch\`" >> "$GITHUB_STEP_SUMMARY"
+            elif git push origin --delete "$branch"; then
+              deleted=$((deleted + 1))
+              echo "DELETED: $branch"
+              echo "- deleted \`$branch\`" >> "$GITHUB_STEP_SUMMARY"
+            else
+              # One failed deletion must not abort the run
+              # (developing-today/code#1615; shape ported from the
+              # dezren39/nix fix, nix#1004): record it, keep going,
+              # and fail visibly at the end.
+              failed+=("$branch")
+              echo "FAILED: $branch"
+              echo "- FAILED to delete \`$branch\`" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          if [[ "$dry_run" != "true" ]]; then
+            echo "Deleted: $deleted; failed: ${#failed[@]}." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "Branch cleanup finished: $count candidate(s), mode=$mode."
+
+          if (( ${#failed[@]} > 0 )); then
+            echo "Branch cleanup: ${#failed[@]} deletion(s) failed: ${failed[*]}"
+            exit 1
+          fi

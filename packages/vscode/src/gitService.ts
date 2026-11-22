@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
+import { spawnOwnedProcess } from './owned-process';
 import { readConfig } from './opencodeConfig';
 import { readProjectStartCommand } from '../../web/server/lib/opencode/project-start-command.js';
 import { resolveWorktreeDirectory } from './worktree-directory';
@@ -120,6 +121,11 @@ const waitForActiveWorktreeBootstrap = async (directory: string): Promise<void> 
 
 const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
+// A gpgconf that never answers (a locked gpg-agent, a smartcard prompt)
+// must not wedge every Git command: buildGitEnv resolves the SSH socket
+// per command, before Git's own probe timeouts can apply (#862).
+const GPGCONF_TIMEOUT_MS = 5_000;
+const GPGCONF_MAX_BUFFER = 1024 * 1024;
 
 async function isSocketPath(candidate: string): Promise<boolean> {
   if (!candidate) {
@@ -151,7 +157,7 @@ async function resolveSshAuthSock(): Promise<string | undefined> {
   const runGpgconf = async (args: string[]): Promise<string> => {
     for (const candidate of gpgconfCandidates) {
       try {
-        const { stdout } = await execFileAsync(candidate, args);
+        const { stdout } = await execFileAsync(candidate, args, { timeout: GPGCONF_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: GPGCONF_MAX_BUFFER });
         return String(stdout || '');
       } catch {
         continue;
@@ -319,6 +325,12 @@ async function execGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Pr
 
 function isValidCommitHash(hash: string): boolean {
   return /^[0-9a-fA-F]{7,40}$/.test(hash);
+}
+
+function assertNotOptionLikeRef(value: string, label: string): void {
+  if (typeof value === 'string' && value.startsWith('-')) {
+    throw new Error(`Invalid ${label}: option-like values starting with '-' are not allowed: ${value}`);
+  }
 }
 
 function extractGitStatusPath(status: string, pathPart: string): string {
@@ -510,6 +522,28 @@ export async function getGitStatus(directory: string, options?: GitStatusOptions
 }
 
 /**
+ * Resolve the real git directory for a working tree through git itself.
+ * In a linked worktree `<directory>/.git` is a file pointing at
+ * `<main>/.git/worktrees/<name>`, so assuming it is a directory makes
+ * every git-internal read (MERGE_HEAD, rebase-merge, ...) fail silently.
+ * `git rev-parse --git-dir` returns the per-worktree git dir (relative
+ * to `directory` or absolute); fall back to the classic path when git
+ * cannot answer (e.g. not a repository).
+ */
+async function resolveGitDir(directory: string): Promise<string> {
+  try {
+    const result = await execGit(['rev-parse', '--git-dir'], directory);
+    const resolved = result.stdout.trim();
+    if (result.exitCode === 0 && resolved) {
+      return path.resolve(directory, resolved);
+    }
+  } catch {
+    // ignore — fall through to the classic path
+  }
+  return path.join(directory, '.git');
+}
+
+/**
  * Check for in-progress merge/rebase operations
  */
 async function checkInProgressOperations(directory: string): Promise<{
@@ -521,7 +555,7 @@ async function checkInProgressOperations(directory: string): Promise<{
     rebaseInProgress?: GitRebaseInProgress | null;
   } = {};
 
-  const gitDir = path.join(directory, '.git');
+  const gitDir = await resolveGitDir(directory);
 
   try {
     // Check MERGE_HEAD for merge in progress
@@ -584,14 +618,13 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
   const statusResult = await execGit(['--no-optional-locks', 'status', '--porcelain=v1', '-b', '-uall'], directory);
   
   if (statusResult.exitCode !== 0) {
-    return {
-      current: '',
-      tracking: null,
-      ahead: 0,
-      behind: 0,
-      files: [],
-      isClean: true,
-    };
+    // A failed status read is not a clean repository: surface git's error
+    // instead of fabricating an empty success. For a directory that is not
+    // a git repository, git's stderr is the plain
+    // `fatal: not a git repository (or any of the parent directories): .git`
+    // message consumers match on — the same contract the web readStatus
+    // throws with.
+    throw new Error(statusResult.stderr.trim() || `git status failed with exit code ${statusResult.exitCode}`);
   }
 
   const lines = statusResult.stdout.trim().split('\n').filter(Boolean);
@@ -740,7 +773,13 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
   const result = await execGit(['branch', '-a', '-v', '--format=%(refname:short)|%(objectname:short)|%(upstream:short)|%(HEAD)'], directory);
   
   if (result.exitCode !== 0) {
-    return { all: [], current: '', branches: {} };
+    // A failed branch read is not a repository with no branches: surface
+    // git's error instead of fabricating an empty success. For a directory
+    // that is not a git repository, git's stderr is the plain
+    // `fatal: not a git repository (or any of the parent directories): .git`
+    // message consumers match on. That is the contract getGitStatusRaw
+    // throws with after #650, and the web getBranches throws with.
+    throw new Error(result.stderr.trim() || `git branch failed with exit code ${result.exitCode}`);
   }
 
   const lines = result.stdout.trim().split('\n').filter(Boolean);
@@ -772,6 +811,7 @@ async function getGitBranchesRaw(directory: string): Promise<GitBranchResult> {
  * Checkout a branch
  */
 export async function checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }> {
+  assertNotOptionLikeRef(branch, 'branch');
   const repo = await getRepository(directory);
 
   if (repo) {
@@ -792,6 +832,8 @@ export async function checkoutBranch(directory: string, branch: string): Promise
  * Create a new branch
  */
 export async function createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }> {
+  assertNotOptionLikeRef(name, 'branch name');
+  if (startPoint) assertNotOptionLikeRef(startPoint, 'start point');
   const repo = await getRepository(directory);
   
   if (repo) {
@@ -814,6 +856,7 @@ export async function createBranch(directory: string, name: string, startPoint?:
  * Delete a local branch
  */
 export async function deleteGitBranch(directory: string, branch: string, force = false): Promise<{ success: boolean }> {
+  assertNotOptionLikeRef(branch, 'branch');
   const repo = await getRepository(directory);
   
   if (repo) {
@@ -1271,9 +1314,15 @@ const runPostCheckoutHook = async (directory: string): Promise<void> => {
   }
 };
 
-const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string> => {
-  const gitDir = path.join(primaryWorktree, '.git');
-  const idFile = path.join(gitDir, 'opencode');
+export const ensureOpenCodeProjectId = async (primaryWorktree: string, commonDir: string): Promise<string> => {
+  // The ID file lives in the repository's real git common dir, which the
+  // caller has already resolved with git rev-parse --git-common-dir: for
+  // a plain checkout that is the .git directory under the root, for a bare
+  // repository it is the bare directory itself, and for a separate-git-dir
+  // layout it is that directory. Assuming the worktree's .git entry
+  // instead would create a stray .git inside a bare repository and never
+  // cache through a .git pointer file in the other layouts.
+  const idFile = path.join(commonDir, 'opencode');
   const existing = await fs.promises.readFile(idFile, 'utf8').then((value) => value.trim()).catch(() => '');
   if (existing) {
     return existing;
@@ -1296,8 +1345,17 @@ const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string>
     throw new Error('Failed to derive OpenCode project ID');
   }
 
-  await fs.promises.mkdir(gitDir, { recursive: true }).catch(() => undefined);
-  await fs.promises.writeFile(idFile, projectId, 'utf8').catch(() => undefined);
+  try {
+    await fs.promises.writeFile(idFile, projectId, 'utf8');
+  } catch (error) {
+    // Caching the ID is an optimisation, so a failed write must not fail
+    // the call — but it must not be silent either: until a write lands,
+    // the ID is re-derived on every call.
+    console.warn(
+      `[GitService] Failed to persist OpenCode project ID to ${idFile}:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
   return projectId;
 };
 
@@ -1341,7 +1399,7 @@ const resolveWorktreeProjectContext = async (
   // repository, a separate git dir) has no primary worktree, and the sandbox
   // directory is the closest thing to one.
   const primaryWorktree = primaryWorktreeRootFromGitDir(commonDir) || sandbox;
-  const projectID = await ensureOpenCodeProjectId(primaryWorktree);
+  const projectID = await ensureOpenCodeProjectId(primaryWorktree, commonDir);
   // OpenCode's `worktree.directory` is read from the canonical checkout so a
   // linked worktree still sees the project's saved configuration. When unset,
   // worktrees keep landing in the data-dir folder keyed by project ID.
@@ -1488,48 +1546,122 @@ const findBranchInUse = async (primaryWorktree: string, localBranchName: string)
   }) || null;
 };
 
+// Start commands legitimately run installs for minutes, so the bound is
+// generous; without one a hanging command wedges the worktree bootstrap at
+// git-ready forever (#861). The env override exists so tests can run the
+// hang case in seconds.
+const WORKTREE_START_COMMAND_TIMEOUT_MS = 600_000;
+const worktreeStartCommandTimeoutMs = (): number => {
+  const raw = String(process.env.OPENCHAMBER_WORKTREE_START_COMMAND_TIMEOUT_MS || '').trim();
+  if (!/^\d+$/.test(raw)) {
+    return WORKTREE_START_COMMAND_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  // The value feeds a raw setTimeout in runWorktreeStartCommand, which
+  // cannot honour more than 2^31-1 ms: a larger delay overflows Node's
+  // timer to ~1 ms and kills every start command instantly, so fall back
+  // to the default instead (the web reader in
+  // packages/web/server/lib/git/service.js is bounded the same way, #884).
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : WORKTREE_START_COMMAND_TIMEOUT_MS;
+};
+
 const runWorktreeStartCommand = async (directory: string, command: string): Promise<{ success: boolean; message?: string; stdout?: string; stderr?: string }> => {
   const text = String(command || '').trim();
   if (!text) {
     return { success: true };
   }
-
+  const timeoutMs = worktreeStartCommandTimeoutMs();
   const env = await buildGitEnv();
-  if (process.platform === 'win32') {
-    try {
-      const { stdout, stderr } = await execFileAsync('cmd', ['/c', text], {
-        cwd: directory,
-        env,
-        maxBuffer: 20 * 1024 * 1024,
-      });
-      return { success: true, stdout: String(stdout || ''), stderr: String(stderr || '') };
-    } catch (error) {
-      const err = error as { stdout?: string; stderr?: string; message?: string };
-      return {
-        success: false,
-        stdout: err.stdout,
-        stderr: err.stderr,
-        message: String(err.message || err.stderr || err.stdout || 'Failed to run start command').trim(),
-      };
+
+  // The command runs as an owned process (its own POSIX group, taskkill tree
+  // on Windows) so a timeout ends the whole tree: killing only the shell left
+  // the command's descendants running after the bootstrap moved on (#868).
+  // Termination is awaited, so the failure result returns only once the tree
+  // is gone.
+  const { child, closed, terminate } = process.platform === 'win32'
+    ? spawnOwnedProcess('cmd', ['/c', text], { cwd: directory, env })
+    : spawnOwnedProcess('bash', ['-lc', text], { cwd: directory, env });
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  const MAX_BUFFER = 20 * 1024 * 1024;
+  child.stdout?.on('data', (chunk: Buffer) => {
+    if (stdoutBytes < MAX_BUFFER) {
+      stdoutChunks.push(chunk);
+      stdoutBytes += chunk.length;
+    }
+  });
+  child.stderr?.on('data', (chunk: Buffer) => {
+    if (stderrBytes < MAX_BUFFER) {
+      stderrChunks.push(chunk);
+      stderrBytes += chunk.length;
+    }
+  });
+
+  let timedOut = false;
+  let termination: Promise<void> | null = null;
+  let signalTimeout: (() => void) | undefined;
+  const timeoutFired = new Promise<void>((resolve) => { signalTimeout = resolve; });
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    termination = terminate().catch(() => {});
+    signalTimeout?.();
+  }, timeoutMs);
+  timeoutTimer.unref?.();
+  let exit = await Promise.race([
+    closed,
+    timeoutFired.then(() => null),
+  ]);
+  if (timedOut) {
+    // Termination completes the group escalation (SIGTERM, then SIGKILL)
+    // before this result returns, so bootstrap never advances while a
+    // SIGTERM-ignoring descendant may still be alive.
+    await termination;
+    if (!exit) {
+      // Bounded cleanup path: on Windows a descendant that outlived the
+      // shell can hold its pipes forever, leaving `closed` pending even
+      // after termination gave up (#868, Codex on PR #880). Give `closed`
+      // a short grace, then return the timeout result regardless instead
+      // of wedging bootstrap at git-ready.
+      exit = await Promise.race([
+        closed,
+        new Promise<null>((resolve) => {
+          const grace = setTimeout(() => resolve(null), 1000);
+          grace.unref?.();
+        }),
+      ]);
+      if (!exit) {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        exit = { code: null, signal: null, error: null };
+      }
     }
   }
-
-  try {
-    const { stdout, stderr } = await execFileAsync('bash', ['-lc', text], {
-      cwd: directory,
-      env,
-      maxBuffer: 20 * 1024 * 1024,
-    });
-    return { success: true, stdout: String(stdout || ''), stderr: String(stderr || '') };
-  } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; message?: string };
-    return {
-      success: false,
-      stdout: err.stdout,
-      stderr: err.stderr,
-      message: String(err.message || err.stderr || err.stdout || 'Failed to run start command').trim(),
-    };
+  if (!exit) {
+    // Unreachable in practice: the race above resolves null only once the
+    // timeout has fired, and the timeout branch then synthesises an exit.
+    // Stated explicitly so the invariant is visible (and type-checks).
+    exit = { code: null, signal: null, error: null };
   }
+  clearTimeout(timeoutTimer);
+  const { code, error } = exit;
+  const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+  const stderr = Buffer.concat(stderrChunks).toString('utf8');
+
+  if (!timedOut && !error && code === 0) {
+    return { success: true, stdout, stderr };
+  }
+  return {
+    success: false,
+    stdout,
+    stderr,
+    message: timedOut
+      ? `Worktree start command timed out after ${timeoutMs}ms and was killed: ${text}`
+      : String(error?.message || stderr || stdout || 'Failed to run start command').trim(),
+  };
 };
 
 // OpenCode owns its own project/sandbox registry and records a worktree as a
@@ -1767,8 +1899,15 @@ export async function listGitWorktrees(directory: string): Promise<GitWorktreeIn
         path: entry.worktree,
       }));
   } catch (error) {
-    console.warn('[GitService] Failed to list worktrees, returning empty list:', error instanceof Error ? error.message : String(error));
-    return [];
+    // Only a directory that is not a repository authoritatively has no
+    // worktrees - the same distinction the web getWorktrees and this
+    // module's getRemotes make. Any other failure (corrupt config,
+    // dubious ownership) must surface with git's stderr instead of
+    // reading as a repository with no worktrees.
+    if (/not a git repository/i.test(error instanceof Error ? error.message : String(error))) {
+      return [];
+    }
+    throw error;
   }
 }
 
@@ -2541,6 +2680,18 @@ export async function snapshotWorktree(directory: string, input: { ref?: string 
   }
 }
 
+// Only a non-negative integer is a valid unified-context count. Anything
+// else takes the default of 3: a fractional value reaching git as -U2.5
+// (or NaN as -UNaN) is rejected, which made getGitDiff throw and
+// getGitRangeDiff silently return an empty diff (#640). Normalizing here,
+// in the service, mirrors the web git service (#578).
+const normalizeContextLines = (contextLines?: number): number => {
+  if (contextLines === undefined || !Number.isInteger(contextLines) || contextLines < 0) {
+    return 3;
+  }
+  return contextLines;
+};
+
 // ============== Diff Operations ==============
 
 /**
@@ -2558,7 +2709,7 @@ export async function getGitDiff(
 
   const args = ['diff'];
   if (staged) args.push('--cached');
-  if (typeof contextLines === 'number') args.push(`-U${contextLines}`);
+  args.push(`-U${normalizeContextLines(contextLines)}`);
   args.push('--', target.repoPath);
 
   const result = await execGit(args, directory);
@@ -2582,7 +2733,7 @@ export async function getGitRangeDiff(
   const baseRef = (base || '').trim();
   const headRef = (head || '').trim();
   if (!baseRef || !headRef) {
-    return { diff: '' };
+    throw new Error('base and head are required');
   }
 
   let resolvedBase = baseRef;
@@ -2595,8 +2746,11 @@ export async function getGitRangeDiff(
     // ignore
   }
 
-  const args = ['diff', '--no-color', `-U${Math.max(0, contextLines)}`, `${resolvedBase}...${headRef}`, '--', filePath];
+  const args = ['diff', '--no-color', `-U${normalizeContextLines(contextLines)}`, `${resolvedBase}...${headRef}`, '--', filePath];
   const result = await execGit(args, directory);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Failed to get Git range diff');
+  }
   return { diff: result.stdout };
 }
 
@@ -2611,7 +2765,7 @@ export async function getGitRangeFiles(
   const baseRef = (base || '').trim();
   const headRef = (head || '').trim();
   if (!baseRef || !headRef) {
-    return [];
+    throw new Error('base and head are required');
   }
 
   let resolvedBase = baseRef;
@@ -2626,12 +2780,27 @@ export async function getGitRangeFiles(
 
   const args = ['diff', '--name-only', `${resolvedBase}...${headRef}`];
   const result = await execGit(args, directory);
-  if (result.exitCode !== 0) return [];
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || 'Failed to get Git range files');
+  }
   return String(result.stdout || '')
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean);
 }
+
+// Working-tree reads for a file diff are capped at 20 MiB, the same limit
+// the git-show sides of this function already carry through the bridge git
+// exec runtime (GIT_EXEC_DEFAULT_MAX_OUTPUT_BYTES). An over-cap file answers
+// with the unavailable shape below; the webview turns it into a
+// GitPathUnavailableError and DiffView shows the too-large message.
+export const MAX_FILE_DIFF_WORKING_TREE_BYTES = 20 * 1024 * 1024;
+
+const fileDiffTooLarge = (filePath: string): GitPathUnavailable => ({
+  kind: 'unavailable',
+  reason: 'file_too_large',
+  message: `File is too large to diff: ${filePath} exceeds the 20 MiB working-tree limit for file diffs`,
+});
 
 /**
  * Get file diff with original and modified content
@@ -2656,16 +2825,65 @@ export async function getGitFileDiff(
     };
   }
 
+  if (!staged) {
+    // The size gate runs ahead of the repository gate and any repo.show
+    // reads: for an untracked file repo.show throws before the in-repo
+    // gate below can run, and with no repository there is no gate at
+    // all, so an oversized file on either path used to fall through to
+    // the silent empty-diff fallback (#1065). A stat failure (e.g. a
+    // deleted file) falls through to the existing handling.
+    try {
+      const earlyStat = await vscode.workspace.fs.stat(vscode.Uri.file(path.join(directory, filePath)));
+      if (earlyStat.size > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+        return fileDiffTooLarge(filePath);
+      }
+    } catch {
+      // Fall through: the repo path and fallback decide the answer.
+    }
+  }
+
   const repo = await getRepository(directory);
-  
+
   if (repo) {
     try {
       // For staged files, get content from HEAD
       // For unstaged files, get content from index (staged) or HEAD
+      // The repo.show originals below buffer the whole committed/index
+      // blob, so gate them on the blob's cat-file size first (a missing
+      // object falls through to the existing show/fallback flow), and
+      // re-check the returned content in case it grew past the cap.
+      const gitBlobSize = async (spec: string): Promise<number | null> => {
+        try {
+          const sized = await execGit(['cat-file', '-s', spec], directory);
+          if (sized.exitCode !== 0) return null;
+          const size = Number.parseInt(String(sized.stdout).trim(), 10);
+          return Number.isFinite(size) ? size : null;
+        } catch {
+          return null;
+        }
+      };
       let original: string;
       if (staged) {
+        const headSize = await gitBlobSize(`HEAD:${filePath}`);
+        if (headSize !== null && headSize > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+          return fileDiffTooLarge(filePath);
+        }
         original = await repo.show('HEAD', filePath);
       } else {
+        // Unstaged originals come from the index, falling back to HEAD
+        // only when the file has no index entry — gate whichever blob
+        // will actually be read.
+        const indexSize = await gitBlobSize(`:${filePath}`);
+        if (indexSize !== null) {
+          if (indexSize > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+            return fileDiffTooLarge(filePath);
+          }
+        } else {
+          const headSize = await gitBlobSize(`HEAD:${filePath}`);
+          if (headSize !== null && headSize > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+            return fileDiffTooLarge(filePath);
+          }
+        }
         try {
           // Try to get from index first
           original = await repo.show(':0:' + filePath, filePath);
@@ -2674,6 +2892,9 @@ export async function getGitFileDiff(
           original = await repo.show('HEAD', filePath);
         }
       }
+      if (Buffer.byteLength(original, 'utf8') > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+        return fileDiffTooLarge(filePath);
+      }
       
       let modified: string;
       if (staged) {
@@ -2681,7 +2902,16 @@ export async function getGitFileDiff(
         modified = stagedResult.exitCode === 0 ? stagedResult.stdout : '';
       } else {
         const fileUri = vscode.Uri.file(path.join(directory, filePath));
+        const fileStat = await vscode.workspace.fs.stat(fileUri);
+        if (fileStat.size > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+          return fileDiffTooLarge(filePath);
+        }
         const modifiedBytes = await vscode.workspace.fs.readFile(fileUri);
+        // The file can grow between the stat and the read; never hand back
+        // more than the cap even when the stat said it fit.
+        if (modifiedBytes.byteLength > MAX_FILE_DIFF_WORKING_TREE_BYTES) {
+          return fileDiffTooLarge(filePath);
+        }
         modified = Buffer.from(modifiedBytes).toString('utf8');
       }
       
@@ -2704,15 +2934,45 @@ export async function revertGitFile(
   options: { scope?: 'all' | 'working' } = {},
 ): Promise<void> {
   const scope = options.scope === 'working' ? 'working' : 'all';
+  // Validate the repository and the target before anything can delete.
+  // Without this, an `ls-files` failure for a directory that is not a
+  // repository at all fell through to the recursive `fs.rm` fallback
+  // below and deleted ordinary files - or the whole directory for `.`.
+  const repoRootResult = await execGit(['rev-parse', '--show-toplevel'], directory);
+  if (repoRootResult.exitCode !== 0) {
+    throw new Error(repoRootResult.stderr.trim() || `Not a git repository: ${directory}`);
+  }
+  const repoRoot = await canonicalizePath(repoRootResult.stdout.trim());
+  const directoryRoot = await canonicalizePath(directory);
+  // Containment is checked on the canonicalized parent plus the entry
+  // name, without following a final symlink. A tracked symlink may
+  // legitimately point outside the repository -- its target is data git
+  // restores, not a path this function writes through -- while a parent
+  // directory that resolves outside the repository still fails the
+  // containment check below, and the removal path below deletes the
+  // entry at this path, never whatever a symlink there points at.
+  const resolvedTarget = path.resolve(directory, filePath);
+  const target = path.join(
+    await canonicalizePath(path.dirname(resolvedTarget)),
+    path.basename(resolvedTarget),
+  );
+  if (target === repoRoot || target === directoryRoot) {
+    throw new Error(`Cannot revert the repository root: ${filePath}`);
+  }
+  if (!target.startsWith(repoRoot + path.sep)) {
+    throw new Error(`Path is outside repository: ${filePath}`);
+  }
   const tracked = await execGit(['ls-files', '--error-unmatch', '--', filePath], directory);
   if (tracked.exitCode !== 0) {
+    // Only a path git affirmatively lists as untracked may be removed.
+    // Any other answer here (the path does not exist, git could not
+    // tell) is ambiguous, and an ambiguous answer deletes nothing.
+    const untracked = await execGit(['ls-files', '--others', '--error-unmatch', '--', filePath], directory);
+    if (untracked.exitCode !== 0) {
+      throw new Error(tracked.stderr.trim() || `Cannot confirm untracked status for: ${filePath}`);
+    }
     const clean = await execGit(['clean', '-f', '-d', '--', filePath], directory);
     if (clean.exitCode !== 0) {
-      const root = path.resolve(directory);
-      const target = path.resolve(directory, filePath);
-      if (target !== root && !target.startsWith(root + path.sep)) {
-        throw new Error(`Path is outside repository: ${filePath}`);
-      }
       await fs.promises.rm(target, { recursive: true, force: true });
     }
     return;
@@ -2922,6 +3182,17 @@ export interface GitCommitResult {
   };
 }
 
+function assertGitCommandSucceeded(
+  result: { stdout: string; stderr: string; exitCode: number },
+  action: string,
+): void {
+  if (result.exitCode === 0) {
+    return;
+  }
+  const detail = result.stderr.trim() || result.stdout.trim();
+  throw new Error(detail ? `${action}: ${detail}` : action);
+}
+
 /**
  * Create a git commit
  */
@@ -2933,6 +3204,7 @@ export async function createGitCommit(
   if (options?.files?.length && options.stageFiles) {
     const selectedFiles = new Set(options.files);
     const stagedResult = await execGit(['diff', '--cached', '--name-only'], directory);
+    assertGitCommandSucceeded(stagedResult, 'Failed to read staged files');
     const temporarilyUnstagedFiles = stagedResult.stdout
       .split('\n')
       .map((line) => line.trim())
@@ -2940,10 +3212,12 @@ export async function createGitCommit(
 
     try {
       if (temporarilyUnstagedFiles.length > 0) {
-        await execGit(['restore', '--staged', '--', ...temporarilyUnstagedFiles], directory);
+        const unstageResult = await execGit(['restore', '--staged', '--', ...temporarilyUnstagedFiles], directory);
+        assertGitCommandSucceeded(unstageResult, 'Failed to unstage files outside the selection');
       }
       if (options.stageFiles.length > 0) {
-        await execGit(['add', '--', ...options.stageFiles], directory);
+        const stageResult = await execGit(['add', '--', ...options.stageFiles], directory);
+        assertGitCommandSucceeded(stageResult, 'Failed to stage selected files');
       }
 
       const result = await execGit(['commit', '-m', message], directory);
@@ -2966,7 +3240,13 @@ export async function createGitCommit(
       };
     } finally {
       if (temporarilyUnstagedFiles.length > 0) {
-        await execGit(['add', '--', ...temporarilyUnstagedFiles], directory);
+        const restoreResult = await execGit(['add', '--', ...temporarilyUnstagedFiles], directory);
+        if (restoreResult.exitCode !== 0) {
+          console.error(
+            '[GitService] Failed to restore temporarily unstaged files:',
+            restoreResult.stderr.trim() || restoreResult.stdout.trim() || `git add exited with code ${restoreResult.exitCode}`,
+          );
+        }
       }
     }
   }
@@ -3000,11 +3280,11 @@ export async function createGitCommit(
 
   // Fallback to raw git
   if (options?.addAll) {
-    await execGit(['add', '-A'], directory);
+    assertGitCommandSucceeded(await execGit(['add', '-A'], directory), 'Failed to stage all changes');
   } else if (options?.files?.length) {
     const filesToStage = options.stageFiles ?? options.files;
     if (filesToStage.length > 0) {
-      await execGit(['add', ...filesToStage], directory);
+      assertGitCommandSucceeded(await execGit(['add', '--', ...filesToStage], directory), 'Failed to stage selected files');
     }
   }
 
@@ -3285,6 +3565,7 @@ export async function listGitStashes(directory: string): Promise<Array<{ ref: st
 
 export async function countGitStashFiles(directory: string, refs: string[]): Promise<Record<string, number>> {
   const uniqueRefs = Array.from(new Set(refs.map((ref) => String(ref || '').trim()).filter(Boolean)));
+  for (const ref of uniqueRefs) assertNotOptionLikeRef(ref, 'stash ref');
   const counts: Record<string, number> = {};
   const concurrency = 4;
   let cursor = 0;
@@ -3312,6 +3593,7 @@ export async function stashGitChanges(directory: string, options: { message?: st
 
 export async function applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const ref = options.ref || 'stash@{0}';
+  assertNotOptionLikeRef(ref, 'stash ref');
   // Prefer --index so the staged/unstaged split captured in the stash is restored
   // faithfully. Fall back to a plain apply when the index can't be reinstated
   // cleanly (e.g. conflicts), which is the prior behavior.
@@ -3326,6 +3608,7 @@ export async function applyGitStash(directory: string, options: { ref: string })
 
 export async function dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const ref = options.ref || 'stash@{0}';
+  assertNotOptionLikeRef(ref, 'stash ref');
   const result = await execGit(['stash', 'drop', ref], directory);
   if (result.exitCode !== 0) throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to drop stash');
   return { success: true, ref };
@@ -3333,6 +3616,7 @@ export async function dropGitStash(directory: string, options: { ref: string }):
 
 export async function popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }> {
   const ref = options.ref || 'stash@{0}';
+  assertNotOptionLikeRef(ref, 'stash ref');
   await applyGitStash(directory, { ref });
   await dropGitStash(directory, { ref });
   return { success: true, ref };
@@ -3409,6 +3693,26 @@ async function resolveBaseRefForLog(
   return normalized;
 }
 
+// Only a positive integer caps the history. Anything else takes the
+// default of 50: a negative reaching git as --max-count=-5 means
+// unlimited, and a fractional value is rejected as not-an-integer, so an
+// invalid value must never pass through (#641). Normalizing here, in the
+// service, mirrors the web git service (#463).
+//
+// A huge FINITE value needs a ceiling too (#1121): it is a valid integer,
+// so the #641 guard passed it straight to --max-count and the extension
+// host buffered the repository's entire history whole for one bridge
+// call. Legitimate callers ask for at most 100 (the UI's LOG_SIZE_OPTIONS
+// plus load-more steps), so 10,000 is generous headroom. Keep this value
+// in lockstep with the web log route's ceiling (#1120).
+export const MAX_LOG_COUNT = 10_000;
+export const normalizeMaxCount = (maxCount?: number): number => {
+  if (maxCount === undefined || !Number.isInteger(maxCount) || maxCount <= 0) {
+    return 50;
+  }
+  return Math.min(maxCount, MAX_LOG_COUNT);
+};
+
 /**
  * Get git log
  */
@@ -3416,7 +3720,7 @@ export async function getGitLog(
   directory: string,
   options?: { maxCount?: number; from?: string; to?: string; file?: string; all?: boolean }
 ): Promise<{ all: GitLogEntry[]; latest: GitLogEntry | null; total: number }> {
-  const maxCount = options?.maxCount || 50;
+  const maxCount = normalizeMaxCount(options?.maxCount);
 
   if (options?.all) {
     const logArgs = [
@@ -3588,10 +3892,14 @@ export async function getCommitFiles(
   directory: string,
   hash: string
 ): Promise<{ files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> }> {
+  if (!hash || !hash.trim()) {
+    throw new Error('A commit hash is required');
+  }
+
   const numstatResult = await execGit(['show', '--numstat', '--format=', hash], directory);
 
   if (numstatResult.exitCode !== 0) {
-    return { files: [] };
+    throw new Error(numstatResult.stderr.trim() || `Failed to get files for commit ${hash}`);
   }
 
   const files: Array<{ path: string; insertions: number; deletions: number; isBinary: boolean; changeType: string }> = [];
@@ -3786,16 +4094,29 @@ export async function setGitIdentity(
     }
   }
 
-  // Fallback to raw git
-  await execGit(['config', 'user.name', userName], directory);
-  await execGit(['config', 'user.email', userEmail], directory);
+  // Fallback to raw git. Every write is checked: `git config` exits non-zero
+  // when it cannot write (not a repository, a locked config file), and the
+  // caller must not receive an identity the repository does not have.
+  const writeConfig = async (key: string, value: string): Promise<void> => {
+    const result = await execGit(['config', key, value], directory);
+    if (result.exitCode !== 0) {
+      throw new Error(
+        result.stderr.trim()
+          || result.stdout.trim()
+          || `git config ${key} failed with exit code ${result.exitCode}`,
+      );
+    }
+  };
+
+  await writeConfig('user.name', userName);
+  await writeConfig('user.email', userEmail);
   if (sshCommand) {
-    await execGit(['config', 'core.sshCommand', sshCommand], directory);
+    await writeConfig('core.sshCommand', sshCommand);
   }
   if (shouldSignCommits) {
-    await execGit(['config', 'gpg.format', 'ssh'], directory);
-    await execGit(['config', 'user.signingkey', signingKey.trim()], directory);
-    await execGit(['config', 'commit.gpgsign', 'true'], directory);
+    await writeConfig('gpg.format', 'ssh');
+    await writeConfig('user.signingkey', signingKey.trim());
+    await writeConfig('commit.gpgsign', 'true');
   }
 
   return { success: true };
@@ -3809,7 +4130,14 @@ export async function setGitIdentity(
 export async function getRemotes(directory: string): Promise<GitRemote[]> {
   const result = await execGit(['remote', '-v'], directory);
   if (result.exitCode !== 0) {
-    return [];
+    // Only a directory that is not a repository authoritatively has no
+    // remotes - the same distinction the web getRemotes makes. Any other
+    // failure (corrupt config, dubious ownership) must surface with git's
+    // stderr instead of reading as a repository with no remotes.
+    if (/not a git repository/i.test(result.stderr || result.stdout)) {
+      return [];
+    }
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `git remote failed with exit code ${result.exitCode}`);
   }
   return parseGitRemoteListing(result.stdout);
 }
@@ -3852,6 +4180,7 @@ export async function rebase(
   directory: string,
   options: { onto: string }
 ): Promise<GitRebaseResult> {
+  assertNotOptionLikeRef(options.onto, 'rebase target');
   const result = await execGit(['rebase', options.onto], directory);
 
   if (result.exitCode === 0) {
@@ -3892,6 +4221,7 @@ export async function merge(
   directory: string,
   options: { branch: string }
 ): Promise<GitMergeResult> {
+  assertNotOptionLikeRef(options.branch, 'merge branch');
   const result = await execGit(['merge', options.branch], directory);
 
   if (result.exitCode === 0) {
@@ -4064,6 +4394,13 @@ export async function resetToCommit(
   }
   if (mode === 'hard' && !force) {
     const statusResult = await execGit(['status', '--porcelain'], directory);
+    if (statusResult.exitCode !== 0) {
+      // Fail closed: a failed status read is not a clean tree. Surfacing
+      // git's error keeps the hard reset from discarding uncommitted work
+      // the guard could not see - the web resetToCommit fails closed the
+      // same way, because its status read rejects on failure.
+      throw new Error(statusResult.stderr.trim() || statusResult.stdout.trim() || `git status failed with exit code ${statusResult.exitCode}`);
+    }
     const isDirty = statusResult.stdout.trim().length > 0;
     if (isDirty) {
       throw new Error('Cannot hard reset: uncommitted changes in working tree. Stash or commit first, or use force.');
@@ -4224,13 +4561,17 @@ export async function canonicalizeWorktreeState(
       attentionReason = 'merge';
     } else {
       const fsp = fs.promises;
-      const rebaseMerge = await fsp.stat(path.join(directoryPath, '.git', 'rebase-merge')).then(() => true).catch(() => false);
-      const rebaseApply = await fsp.stat(path.join(directoryPath, '.git', 'rebase-apply')).then(() => true).catch(() => false);
+      // In a linked worktree `.git` is a file, not a directory, so resolve
+      // the real per-worktree git dir through git itself (as
+      // checkInProgressOperations does) instead of joining `.git` here.
+      const gitDir = await resolveGitDir(directoryPath);
+      const rebaseMerge = await fsp.stat(path.join(gitDir, 'rebase-merge')).then(() => true).catch(() => false);
+      const rebaseApply = await fsp.stat(path.join(gitDir, 'rebase-apply')).then(() => true).catch(() => false);
       if (rebaseMerge || rebaseApply) {
         attentionReason = 'rebase';
       } else {
-        const cherryPickHead = await fsp.stat(path.join(directoryPath, '.git', 'CHERRY_PICK_HEAD')).then(() => true).catch(() => false);
-        const revertHead = await fsp.stat(path.join(directoryPath, '.git', 'REVERT_HEAD')).then(() => true).catch(() => false);
+        const cherryPickHead = await fsp.stat(path.join(gitDir, 'CHERRY_PICK_HEAD')).then(() => true).catch(() => false);
+        const revertHead = await fsp.stat(path.join(gitDir, 'REVERT_HEAD')).then(() => true).catch(() => false);
         if (cherryPickHead) attentionReason = 'cherry-pick';
         else if (revertHead) attentionReason = 'revert';
       }

@@ -2,6 +2,24 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { readBoundedFileSync } from '../../server/lib/shared/bounded-file-read.js';
+
+// CLI state files are small JSON documents the CLI itself writes; 1 MiB is
+// far above any legitimate settings/state payload. Readers go through the
+// shared bounded reader (#1706, design #1655): a FIFO or other non-regular
+// file at a state path is refused promptly instead of blocking the CLI in
+// open(), and an over-cap file yields the caller's default, never a parse.
+const MAX_SETTINGS_BYTES = 1024 * 1024;
+const MAX_TUNNEL_CLI_STATE_BYTES = 1024 * 1024;
+
+function readBoundedJsonSync(filePath, maxBytes) {
+  const result = readBoundedFileSync(filePath, maxBytes);
+  if (!result.ok) {
+    return undefined;
+  }
+  return JSON.parse(result.buffer.toString('utf8'));
+}
+
 const TUNNEL_PROFILES_FILE_NAME = 'tunnel-profiles.json';
 const LEGACY_CLOUDFLARE_MANAGED_REMOTE_FILE_NAME = 'cloudflare-managed-remote-tunnels.json';
 const TUNNEL_CLI_STATE_FILE_NAME = 'tunnel-cli-state.json';
@@ -23,8 +41,7 @@ function getSettingsFilePath() {
 
 function readDesktopLocalPortFromSettings() {
   try {
-    const raw = fs.readFileSync(getSettingsFilePath(), 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = readBoundedJsonSync(getSettingsFilePath(), MAX_SETTINGS_BYTES);
     const value = parsed?.desktopLocalPort;
     if (Number.isFinite(value) && value > 0 && value <= 65535) {
       return value;
@@ -37,8 +54,7 @@ function readDesktopLocalPortFromSettings() {
 
 function readDesktopLocalClientTokenFromSettings() {
   try {
-    const raw = fs.readFileSync(getSettingsFilePath(), 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = readBoundedJsonSync(getSettingsFilePath(), MAX_SETTINGS_BYTES);
     const value = parsed?.desktopLocalClientToken;
     return typeof value === 'string' && value.trim().length > 0 ? value.trim() : '';
   } catch {
@@ -69,8 +85,7 @@ function getTunnelCliStateFilePath() {
 function readTunnelCliState() {
   const filePath = getTunnelCliStateFilePath();
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = readBoundedJsonSync(filePath, MAX_TUNNEL_CLI_STATE_BYTES);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return {};
     }

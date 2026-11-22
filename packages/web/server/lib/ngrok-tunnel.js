@@ -5,14 +5,38 @@ import {
 } from './tunnels/executable-search.js';
 import { getTunnelDependencyInstallInfo } from './tunnels/install-help.js';
 import { TUNNEL_PROVIDER_NGROK } from './tunnels/types.js';
+import { readBoundedResponseJson } from './shared/response-body.js';
+import { createBoundedOutputAccumulator } from './shared/bounded-output-accumulator.js';
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
+// spawnSync blocks the whole server event loop while it waits, so a hung
+// ngrok binary must be bounded: probe timeouts elsewhere in the tree use
+// 5-10 s (package-manager) and this matches the 5 s reachability deadline
+// used by checkNgrokApiReachability below.
+const AVAILABILITY_CHECK_TIMEOUT_MS = 5000;
 const NGROK_API_URL = 'http://127.0.0.1:4040/api/tunnels';
+// The agent API is on localhost and answers in milliseconds when healthy,
+// so its readiness-poll deadline is far shorter than the 5 s internet
+// reachability check above and far under the 30 s startup timeout.
+const NGROK_POLL_TIMEOUT_MS = 2000;
+const NGROK_POLL_INTERVAL_MS = 250;
+// A tunnels listing is a handful of small entries (name, proto,
+// public_url, config), so the 64 KiB cap that bounds version answers
+// in opencode/compatibility.js is generous headroom for a healthy
+// answer while still refusing to buffer an unbounded body from a
+// fast loopback source on every poll.
+const NGROK_TUNNELS_RESPONSE_MAX_BYTES = 64 * 1024;
 const NGROK_PUBLIC_URL_REGEX = /https:\/\/[^\s"']+/i;
+// ngrok writes its tunnel URL and log lines with no regard for pipe chunk
+// boundaries, so output is matched over the shared bounded accumulator
+// (lib/shared/bounded-output-accumulator.js, #1705) over complete lines,
+// never per chunk: a URL fragment at the end of a chunk would otherwise
+// be accepted as the tunnel URL and settle startup with a truncated
+// address.
 const NGROK_AUTHTOKEN_HELP = 'Run: ngrok config add-authtoken <your-ngrok-token>';
 const getNgrokInstallInfo = () => getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_NGROK);
 
-export async function checkNgrokAvailable() {
+export async function checkNgrokAvailable({ timeoutMs = AVAILABILITY_CHECK_TIMEOUT_MS } = {}) {
   const target = resolveExecutableLaunchTarget('ngrok');
   if (target) {
     try {
@@ -21,6 +45,7 @@ export async function checkNgrokAvailable() {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         env: target.env,
+        timeout: timeoutMs,
       });
       if (result.status === 0) {
         return { available: true, path: target.command, version: result.stdout.trim() || result.stderr.trim() };
@@ -32,7 +57,7 @@ export async function checkNgrokAvailable() {
   return { available: false, path: null, version: null };
 }
 
-export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
+export async function checkNgrokAuthtokenConfigured(ngrokPath = null, { timeoutMs = AVAILABILITY_CHECK_TIMEOUT_MS } = {}) {
   if (typeof process.env.NGROK_AUTHTOKEN === 'string' && process.env.NGROK_AUTHTOKEN.trim().length > 0) {
     return { configured: true, detail: 'NGROK_AUTHTOKEN is set.' };
   }
@@ -50,6 +75,7 @@ export async function checkNgrokAuthtokenConfigured(ngrokPath = null) {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       env: target.env,
+      timeout: timeoutMs,
     });
     const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
     if (result.status === 0) {
@@ -223,23 +249,90 @@ const appendNgrokOutputSummary = (message, lines) => {
   return summary ? `${message}: ${summary}` : message;
 };
 
-async function fetchNgrokPublicUrl(fetchImpl = globalThis.fetch) {
+export async function fetchNgrokPublicUrl({ fetchImpl = globalThis.fetch, timeoutMs = NGROK_POLL_TIMEOUT_MS, signal } = {}) {
   if (typeof fetchImpl !== 'function') {
     return null;
   }
+  // One controller carries both the deadline and the caller's signal, so
+  // either aborts the fetch -- including a bounded body read that
+  // is still in flight when the deadline (or the caller) fires. The timer
+  // is only cleared after the body read settles, in finally.
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+  if (signal?.aborted) {
+    controller.abort();
+  } else if (signal) {
+    signal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(NGROK_API_URL, { method: 'GET' });
+    const response = await fetchImpl(NGROK_API_URL, { method: 'GET', signal: controller.signal });
     if (!response.ok) {
       return null;
     }
-    const payload = await response.json();
+    const payload = await readBoundedResponseJson(response, NGROK_TUNNELS_RESPONSE_MAX_BYTES);
     const tunnels = Array.isArray(payload?.tunnels) ? payload.tunnels : [];
     const httpsTunnel = tunnels.find((entry) => entry?.proto === 'https' && normalizeNgrokPublicUrl(entry?.public_url));
     const fallbackTunnel = tunnels.find((entry) => normalizeNgrokPublicUrl(entry?.public_url));
     return normalizeNgrokPublicUrl(httpsTunnel?.public_url) || normalizeNgrokPublicUrl(fallbackTunnel?.public_url);
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
+    if (signal) {
+      signal.removeEventListener('abort', onExternalAbort);
+    }
   }
+}
+
+export function pollNgrokPublicUrl({ fetchImpl, timeoutMs = NGROK_POLL_TIMEOUT_MS, intervalMs = NGROK_POLL_INTERVAL_MS, getPublicUrl, onPublicUrl } = {}) {
+  let stopped = false;
+  let inFlight = false;
+  let currentController = null;
+
+  const tick = async () => {
+    if (stopped) {
+      return;
+    }
+    // Check the captured URL before the in-flight guard: child output can
+    // supply the URL while a poll fetch is stalled, and it must resolve
+    // startup promptly instead of waiting out that attempt (or the 30 s
+    // startup timeout firing first).
+    const existing = typeof getPublicUrl === 'function' ? getPublicUrl() : null;
+    if (existing) {
+      onPublicUrl?.(existing);
+      return;
+    }
+    if (inFlight) {
+      return;
+    }
+    inFlight = true;
+    const controller = new AbortController();
+    currentController = controller;
+    try {
+      const fetched = await fetchNgrokPublicUrl({ fetchImpl, timeoutMs, signal: controller.signal });
+      const resolved = (typeof getPublicUrl === 'function' ? getPublicUrl() : null) || fetched;
+      if (resolved && !stopped) {
+        onPublicUrl?.(resolved);
+      }
+    } catch {
+      // fetchNgrokPublicUrl already settles failures as null; defensive only.
+    } finally {
+      inFlight = false;
+      if (currentController === controller) {
+        currentController = null;
+      }
+    }
+  };
+
+  const timer = setInterval(tick, intervalMs);
+  return {
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+      currentController?.abort();
+    },
+  };
 }
 
 export async function startNgrokQuickTunnel({ port }) {
@@ -261,14 +354,17 @@ export async function startNgrokQuickTunnel({ port }) {
   let publicUrl = null;
   const recentOutput = [];
 
-  const captureOutput = (chunk) => {
-    const text = chunk.toString('utf8');
-    const parsedUrl = extractNgrokPublicUrlFromText(text);
+  // Extraction and diagnostics run over complete lines only: a chunk that
+  // ends mid-URL or mid-log-line contributes nothing until the rest of the
+  // line arrives, so a fragment can never be captured as the tunnel URL or
+  // stored as a diagnostics line.
+  const captureLines = (lines) => {
+    const parsedUrl = extractNgrokPublicUrlFromText(lines.join('\n'));
     if (parsedUrl) {
       publicUrl = parsedUrl;
     }
 
-    for (const line of text.split(/\r?\n/)) {
+    for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) {
         continue;
@@ -278,27 +374,39 @@ export async function startNgrokQuickTunnel({ port }) {
         recentOutput.shift();
       }
     }
-    return text;
   };
 
+  const stdoutAccumulator = createBoundedOutputAccumulator();
+  const stderrAccumulator = createBoundedOutputAccumulator();
+
   child.stdout.on('data', (chunk) => {
-    captureOutput(chunk);
+    captureLines(stdoutAccumulator.push(chunk).lines);
+  });
+  child.stdout.on('end', () => {
+    captureLines(stdoutAccumulator.flush());
   });
 
   child.stderr.on('data', (chunk) => {
-    const text = captureOutput(chunk);
-    process.stderr.write(text);
+    const { decoded, lines } = stderrAccumulator.push(chunk);
+    captureLines(lines);
+    process.stderr.write(decoded);
+  });
+  child.stderr.on('end', () => {
+    captureLines(stderrAccumulator.flush());
   });
 
   await new Promise((resolve, reject) => {
     let settled = false;
+    let poller = null;
     const finish = (handler, value) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(timeout);
-      clearInterval(checkReady);
+      // Abort (not just stop polling) so no poll fetch stays pending
+      // after the startup promise settles for any reason.
+      poller?.stop();
       child.off('error', onError);
       child.off('exit', onExit);
       handler(value);
@@ -309,18 +417,26 @@ export async function startNgrokQuickTunnel({ port }) {
       finish(reject, new Error(appendNgrokOutputSummary('Ngrok tunnel URL not received within 30 seconds', recentOutput)));
     }, DEFAULT_STARTUP_TIMEOUT_MS);
 
-    const checkReady = setInterval(async () => {
-      publicUrl = publicUrl || await fetchNgrokPublicUrl();
-      if (publicUrl) {
+    poller = pollNgrokPublicUrl({
+      getPublicUrl: () => publicUrl,
+      onPublicUrl: (url) => {
+        publicUrl = url;
         finish(resolve, null);
-      }
-    }, 250);
+      },
+    });
 
     const onError = (error) => {
       finish(reject, new Error(`Ngrok failed to start: ${error.message}`));
     };
 
     const onExit = (code) => {
+      // 'exit' can fire before stdout/stderr emit 'end', so flush both
+      // held final unterminated lines here; ngrok logs to stdout
+      // (--log=stdout), so that line is its diagnostic record. flush()
+      // clears each accumulator, so the later 'end' handlers cannot
+      // capture a line a second time (#1767 stdout; #1693 stderr).
+      captureLines(stdoutAccumulator.flush());
+      captureLines(stderrAccumulator.flush());
       finish(reject, new Error(appendNgrokOutputSummary(`Ngrok exited while starting (code ${code ?? 'unknown'})`, recentOutput)));
     };
 

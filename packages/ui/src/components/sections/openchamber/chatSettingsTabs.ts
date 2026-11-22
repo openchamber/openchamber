@@ -41,12 +41,15 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.enter-to-send', 'composer'],
   ['chat.follow-up-behavior', 'composer'],
   ['chat.large-text-paste', 'composer'],
+  ['chat.active-run-model-change', 'composer'],
   ['chat.subagent-read-only-banner', 'composer'],
   ['chat.save-pasted-images', 'composer'],
   ['chat.persist-drafts', 'composer'],
   ['chat.spellcheck', 'composer'],
   ['chat.input-history-scope', 'composer'],
   ['chat.input-history-limit', 'composer'],
+  ['chat.question-timeout', 'composer'],
+  ['chat.questions-in-background', 'composer'],
   ['chat.session-assistance', 'assistance'],
   ['chat.draft-starters-visible', 'assistance'],
   ['chat.session-recap', 'assistance'],
@@ -65,6 +68,8 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.session-goal-writer-send-mode', 'assistance'],
   ['chat.session-goal-rewrite-all', 'assistance'],
   ['chat.session-goal-auto-create', 'assistance'],
+  ['chat.model-choices', 'assistance'],
+  ['chat.model-choice-recording', 'assistance'],
 ]);
 
 export const chatSettingsTabForSearchTarget = (id: string): ChatSettingsTab | null => SEARCH_TARGET_TABS.get(id) ?? null;

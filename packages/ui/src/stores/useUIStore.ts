@@ -13,12 +13,14 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOpt
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
 import type { PermissionMode } from './utils/permissionAutoAccept';
+import { CONTINUE_WORK_MODES, type ContinueWorkMode } from '@/lib/opencode/model-handoff';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
+import { clampQuestionTimeoutMinutes, QUESTION_TIMEOUT_MINUTES_DEFAULT } from '@/lib/questionTimeout';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import { CONTEXT_SURFACE_WIDTHS } from '@/lib/surfaces/registry';
 import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
@@ -69,26 +71,55 @@ export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
 export type AgentTerminalsPlacement = 'terminal-panel' | 'sidebar';
 export type SessionGoalChecker = 'classifier' | 'small-model';
+/** How sessions enter In work: only by Track, on every sent message, or when Jev says work started. */
+export type SessionWorkEntry = 'off' | 'every-message' | 'jev';
 /** What an approved goal spec does on send: it rides along with the typed message, or it is the message. */
 export type SessionGoalWriterSendMode = 'with-message' | 'goal-as-message';
 /** Whether a session without a goal turns the next message into one: never, after review, or straight away. */
 export type SessionGoalAutoCreate = 'off' | 'review' | 'auto';
+export type ActiveRunModelChangeBehavior = 'next-message' | 'restart';
 
 const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 const DEFAULT_AGENT_TERMINALS_PLACEMENT: AgentTerminalsPlacement = 'terminal-panel';
+const DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR: ActiveRunModelChangeBehavior = 'next-message';
 
-const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
+/**
+ * One field of a persisted UI-store document: values are JSON-shaped, and
+ * each normalizer/sanitizer below narrows the field it owns. Typed store
+ * values (enums, tab records, template records) also satisfy this contract.
+ */
+type PersistedUIFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | PersistedUIFieldValue[]
+  | { [key: string]: PersistedUIFieldValue };
+
+type PersistedUIStateRecord = Record<string, PersistedUIFieldValue>;
+
+type ContextPanelByDirectory = Record<string, ContextPanelDirectoryState>;
+
+const normalizeLargeTextPasteBehavior = (value: PersistedUIFieldValue): LargeTextPasteBehavior => {
   if (value === 'attach' || value === 'inline' || value === 'ask' || value === 'inline-double-paste') {
     return value;
   }
   return DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR;
 };
 
-const normalizeAgentTerminalsPlacement = (value: unknown): AgentTerminalsPlacement => (
+const normalizeAgentTerminalsPlacement = (value: PersistedUIFieldValue): AgentTerminalsPlacement => (
   value === 'sidebar' ? 'sidebar' : DEFAULT_AGENT_TERMINALS_PLACEMENT
 );
 
-function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
+/** Stopping everything is the default; keeping work running is the choice a user makes. */
+const continueWithModelModeSchema = z.enum(CONTINUE_WORK_MODES).catch('stop');
+
+const normalizeActiveRunModelChangeBehavior = (value: PersistedUIFieldValue): ActiveRunModelChangeBehavior => (
+  value === 'restart' ? 'restart' : DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR
+);
+
+function normalizeFileEditorKeymap(value: PersistedUIFieldValue): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
 }
 
@@ -181,7 +212,7 @@ const isSameTemplateValue = (
   return a.title === b.title && a.message === b.message;
 };
 
-const isLegacyDefaultTemplates = (value: unknown): boolean => {
+const isLegacyDefaultTemplates = (value: PersistedUIFieldValue): boolean => {
   if (!value || typeof value !== 'object') {
     return false;
   }
@@ -205,6 +236,17 @@ const CONTEXT_PANEL_MAX_PERSISTED_WIDTH = 10000;
 /** Per surface, not per panel: see clampContextPanelTabs. */
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
+
+// A plain slice at a cap can land between the halves of a surrogate pair
+// and persist a value whose last code unit is a lone high surrogate
+// (U+FFFD once encoded); drop the partial character so the stored value
+// ends on a pair boundary. Same pattern as the PWA clips (#2029/#2031)
+// and the server settings-helpers clips (#2028).
+const clipPairSafe = (text: string, limit: number): string => {
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
 const LEFT_SIDEBAR_DEFAULT_WIDTH = 280;
 /** Separates browser tabs opened in the same millisecond. */
 let browserTabSequence = 0;
@@ -298,12 +340,10 @@ const normalizeContextTabLabel = (value: string | null | undefined): string | nu
     return null;
   }
 
-  return trimmed.length > CONTEXT_PANEL_MAX_LABEL_LENGTH
-    ? trimmed.slice(0, CONTEXT_PANEL_MAX_LABEL_LENGTH)
-    : trimmed;
+  return clipPairSafe(trimmed, CONTEXT_PANEL_MAX_LABEL_LENGTH);
 };
 
-const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
+const normalizePendingDiffScope = (value: PersistedUIFieldValue): PendingDiffScope | null => {
   return value === 'working' || value === 'staged' || value === 'turn' || value === 'branch' || value === 'commit' || value === 'pr' ? value : null;
 };
 
@@ -406,7 +446,7 @@ const clampContextPanelTabs = (
   return removeSet.size === 0 ? tabs : tabs.filter((tab) => !removeSet.has(tab.id));
 };
 
-const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
+const sanitizeContextPanelTabs = (tabs: PersistedUIFieldValue): ContextPanelTab[] => {
   if (!Array.isArray(tabs)) {
     return [];
   }
@@ -421,18 +461,18 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     }
 
     const candidate = entry as {
-      mode?: unknown;
-      targetPath?: unknown;
+      mode?: PersistedUIFieldValue;
+      targetPath?: PersistedUIFieldValue;
       targetDirectory?: string | null;
-      dedupeKey?: unknown;
-      label?: unknown;
-      sessionTitleFallback?: unknown;
-      readOnly?: unknown;
-      stagedDiff?: unknown;
-      diffScope?: unknown;
-      preview?: unknown;
-      ownerSessionId?: unknown;
-      touchedAt?: unknown;
+      dedupeKey?: PersistedUIFieldValue;
+      label?: PersistedUIFieldValue;
+      sessionTitleFallback?: PersistedUIFieldValue;
+      readOnly?: PersistedUIFieldValue;
+      stagedDiff?: PersistedUIFieldValue;
+      diffScope?: PersistedUIFieldValue;
+      preview?: PersistedUIFieldValue;
+      ownerSessionId?: PersistedUIFieldValue;
+      touchedAt?: PersistedUIFieldValue;
     };
 
     // Legacy 'preview' tabs are converted to 'browser' by the v14 migration;
@@ -753,35 +793,33 @@ const withoutForeignComparisons = (
     : panel]));
 };
 
-const sanitizeContextPanelByDirectory = (
-  value: unknown,
-): Record<string, ContextPanelDirectoryState> => {
-  if (!value || typeof value !== 'object') {
+const sanitizeContextPanelByDirectory = (value: PersistedUIFieldValue) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {};
   }
 
-  const source = value as Record<string, unknown>;
-  const next: Record<string, ContextPanelDirectoryState> = {};
+  const source: PersistedUIStateRecord = value;
+  const next: ContextPanelByDirectory = {};
 
   for (const [rawDirectory, rawState] of Object.entries(source)) {
     const directory = normalizeDirectoryPath(rawDirectory);
-    if (!directory || !rawState || typeof rawState !== 'object') {
+    if (!directory || !rawState || typeof rawState !== 'object' || Array.isArray(rawState)) {
       continue;
     }
 
     const candidate = rawState as {
-      isOpen?: unknown;
-      expanded?: unknown;
-      zones?: unknown;
-      tabs?: unknown;
-      activeTabId?: unknown;
-      widthByMode?: unknown;
-      touchedAt?: unknown;
-      mode?: unknown;
-      targetPath?: unknown;
+      isOpen?: PersistedUIFieldValue;
+      expanded?: PersistedUIFieldValue;
+      zones?: PersistedUIFieldValue;
+      tabs?: PersistedUIFieldValue;
+      activeTabId?: PersistedUIFieldValue;
+      widthByMode?: PersistedUIFieldValue;
+      touchedAt?: PersistedUIFieldValue;
+      mode?: PersistedUIFieldValue;
+      targetPath?: PersistedUIFieldValue;
       targetDirectory?: string | null;
-      dedupeKey?: unknown;
-      label?: unknown;
+      dedupeKey?: PersistedUIFieldValue;
+      label?: PersistedUIFieldValue;
     };
 
     let tabs = sanitizeContextPanelTabs(candidate.tabs);
@@ -840,17 +878,14 @@ const sanitizeContextPanelByDirectory = (
   return next;
 };
 
-const clampContextPanelRoots = (
-  byDirectory: Record<string, ContextPanelDirectoryState>,
-  maxRoots: number
-): Record<string, ContextPanelDirectoryState> => {
+const clampContextPanelRoots = (byDirectory: ContextPanelByDirectory, maxRoots: number) => {
   const entries = Object.entries(byDirectory);
   if (entries.length <= maxRoots) {
     return byDirectory;
   }
 
   entries.sort((a, b) => (b[1]?.touchedAt ?? 0) - (a[1]?.touchedAt ?? 0));
-  const next: Record<string, ContextPanelDirectoryState> = {};
+  const next: ContextPanelByDirectory = {};
   for (const [directory, state] of entries.slice(0, maxRoots)) {
     next[directory] = state;
   }
@@ -974,8 +1009,23 @@ interface UIStore {
   settingsProvidersConnectRequested: boolean;
   /** Set by links elsewhere in Settings; the Providers page opens Classification providers once and clears it. */
   settingsProvidersClassificationRequested: boolean;
+  /**
+   * One-shot request from settings search to open Settings -> Providers in
+   * custom-provider create mode (#1765): the anchored field lives only
+   * inside CustomProviderForm, which renders only in that mode. The page
+   * consumes and clears it.
+   */
+  settingsProvidersCustomRequested: boolean;
   /** A provider another Settings page asked the Providers page to open; the page opens it once and clears it. */
   settingsProvidersOpenRequested: string | null;
+  /**
+   * One-shot VIEW-ONLY request from settings search for the Tunnel page to
+   * reveal a managed mode section (#1764): the managed mode to display, or
+   * null. The Tunnel page consumes and clears it; revealing never persists
+   * a mode change — the saved tunnel mode is untouched until the user
+   * picks a mode in the selector themselves.
+   */
+  settingsTunnelModeRequested: string | null;
   /**
    * A link inside Settings asking to open another page and, optionally, scroll
    * to one of its items the way a search result does. SettingsView consumes it.
@@ -988,8 +1038,12 @@ interface UIStore {
   streamingAutoFollowEnabled: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
-  /** The "In work" sidebar block, the Track / Done actions, and sessions going in on a sent message. */
+  /** The "In work" sidebar block and the Track / Done actions. */
   sessionWorkEnabled: boolean;
+  /** What "Continue with another model" does by default with the session's running shell commands and subagents. */
+  continueWithModelMode: ContinueWorkMode;
+  /** How sessions enter In work besides Track; the server acts on it. */
+  sessionWorkEntry: SessionWorkEntry;
   /** Let Jev offer an AI review or a walkthrough after a turn that changed the project. */
   sessionReviewOfferEnabled: boolean;
   sessionGoalEnabled: boolean;
@@ -1006,6 +1060,8 @@ interface UIStore {
   sessionGoalWriterSendMode: SessionGoalWriterSendMode;
   /** Every goal objective, from any entry point, goes through the goal writer. */
   sessionGoalRewriteAll: boolean;
+  /** Whether a model pick during a run waits for the next prompt or restarts the current one. */
+  activeRunModelChangeBehavior: ActiveRunModelChangeBehavior;
   sessionGoalAutoCreate: SessionGoalAutoCreate;
   /** The most characters a goal objective keeps; a longer one is condensed when saved. */
   sessionGoalObjectiveCharLimit: number;
@@ -1034,6 +1090,10 @@ interface UIStore {
   liveBrowserTabLimit: number;
   /** Plain clicks on issue, PR and Linear links in chat open them on the issues and PRs board. */
   openTrackerLinksOnBoard: boolean;
+  /** Minutes an agent's question waits before it closes unanswered; 0 never closes it. */
+  questionTimeoutMinutes: number;
+  /** An agent's question closes as soon as it is asked, so the agent goes on; the user answers it later from the chat. */
+  questionsInBackground: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   sessionRetentionOnlyArchived: boolean;
@@ -1071,6 +1131,8 @@ interface UIStore {
   /** Agents starred in the agent menu. While any of them is available, agent cycling (Tab) goes through those only. */
   favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
+  /** Per-model baseline effort. An absent key sends no effort unless another explicit default applies. */
+  modelDefaultVariants: Record<string, string>;
 
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
@@ -1124,6 +1186,8 @@ interface UIStore {
   messageSearchEnabled: boolean;
   /** Also index the agent's reasoning. Opt-in: it can make the index much bigger. */
   messageSearchReasoningEnabled: boolean;
+  /** Keep a local history of manual model and effort choices, for notes and Settings suggestions. On by default. */
+  modelChoiceRecordingEnabled: boolean;
   /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
   browserProvider: string;
   agentMemoryToolEnabled: boolean;
@@ -1146,6 +1210,11 @@ interface UIStore {
    * for the same reason as the memory flag.
    */
   routingFeatureAvailable: boolean;
+  /**
+   * Whether OpenChamber's tool switches reach the running OpenCode without a
+   * restart. Server-owned and not persisted, like the flags above.
+   */
+  managedToolsApplyLive: boolean;
   /**
    * When the user last looked at each memory scope, keyed by scope. Drives the
    * new/changed badges; there is no stored review state.
@@ -1295,7 +1364,9 @@ interface UIStore {
   setSettingsProjectPath: (path: string | null) => void;
   setSettingsProvidersConnectRequested: (requested: boolean) => void;
   setSettingsProvidersClassificationRequested: (requested: boolean) => void;
+  setSettingsProvidersCustomRequested: (requested: boolean) => void;
   setSettingsProvidersOpenRequested: (providerId: string | null) => void;
+  setSettingsTunnelModeRequested: (mode: string | null) => void;
   requestSettingsJump: (page: string, itemId?: string | null) => void;
   clearSettingsJumpRequest: () => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
@@ -1305,6 +1376,8 @@ interface UIStore {
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionWorkEnabled: (value: boolean) => void;
+  setContinueWithModelMode: (value: ContinueWorkMode) => void;
+  setSessionWorkEntry: (value: SessionWorkEntry) => void;
   setSessionReviewOfferEnabled: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalChecker: (value: SessionGoalChecker) => void;
@@ -1315,6 +1388,7 @@ interface UIStore {
   setSessionGoalWriterReview: (value: boolean) => void;
   setSessionGoalWriterSendMode: (value: SessionGoalWriterSendMode) => void;
   setSessionGoalRewriteAll: (value: boolean) => void;
+  setActiveRunModelChangeBehavior: (value: ActiveRunModelChangeBehavior) => void;
   setSessionGoalAutoCreate: (value: SessionGoalAutoCreate) => void;
   setSessionGoalObjectiveCharLimit: (value: number) => void;
   setSessionGoalCheckObjectiveCharLimit: (value: number) => void;
@@ -1331,6 +1405,8 @@ interface UIStore {
   setOpenLinksInBrowserPanel: (value: boolean) => void;
   setLiveBrowserTabLimit: (value: number) => void;
   setOpenTrackerLinksOnBoard: (value: boolean) => void;
+  setQuestionTimeoutMinutes: (value: number) => void;
+  setQuestionsInBackground: (value: boolean) => void;
   setFileTreeSide: (side: 'left' | 'right') => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
@@ -1375,6 +1451,7 @@ interface UIStore {
   addRecentAgent: (agentName: string) => void;
   toggleFavoriteAgent: (agentName: string) => void;
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
+  setModelDefaultVariant: (providerID: string, modelID: string, variant: string | undefined) => void;
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   /** The layout setting for every diff, dropping the per-file choices (the Changes header toggle). */
   setDiffLayoutForAllFiles: (mode: 'inline' | 'side-by-side') => void;
@@ -1415,6 +1492,7 @@ interface UIStore {
   setAgentWebToolEnabled: (value: boolean) => void;
   setMessageSearchEnabled: (value: boolean) => void;
   setMessageSearchReasoningEnabled: (value: boolean) => void;
+  setModelChoiceRecordingEnabled: (value: boolean) => void;
   setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setAgentKnowledgeToolEnabled: (value: boolean) => void;
@@ -1425,6 +1503,7 @@ interface UIStore {
   setPermissionDefaultMode: (value: PermissionMode) => void;
   setAgentMemoryFeatureAvailable: (value: boolean) => void;
   setRoutingFeatureAvailable: (value: boolean) => void;
+  setManagedToolsApplyLive: (value: boolean) => void;
   markAgentMemoryViewed: (key: string, viewedAt: number) => void;
   setProjectContextTab: (value: string) => void;
   openProjectKnowledgePlan: (directory: string, projectContextId: string, planId: string) => void;
@@ -1547,7 +1626,9 @@ export const useUIStore = create<UIStore>()(
         settingsProjectPath: null,
         settingsProvidersConnectRequested: false,
         settingsProvidersClassificationRequested: false,
+        settingsProvidersCustomRequested: false,
         settingsProvidersOpenRequested: null,
+        settingsTunnelModeRequested: null,
         settingsJumpRequest: null,
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
@@ -1557,6 +1638,8 @@ export const useUIStore = create<UIStore>()(
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         sessionWorkEnabled: true,
+        continueWithModelMode: 'stop',
+        sessionWorkEntry: 'off',
         sessionReviewOfferEnabled: false,
         sessionGoalEnabled: true,
         sessionGoalChecker: 'small-model',
@@ -1567,6 +1650,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalWriterReview: true,
         sessionGoalWriterSendMode: 'with-message',
         sessionGoalRewriteAll: false,
+        activeRunModelChangeBehavior: DEFAULT_ACTIVE_RUN_MODEL_CHANGE_BEHAVIOR,
         sessionGoalAutoCreate: 'off',
         sessionGoalObjectiveCharLimit: DEFAULT_SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
         sessionGoalCheckObjectiveCharLimit: DEFAULT_SESSION_GOAL_CHECK_OBJECTIVE_CHAR_LIMIT,
@@ -1582,6 +1666,8 @@ export const useUIStore = create<UIStore>()(
         openLinksInBrowserPanel: false,
         liveBrowserTabLimit: LIVE_BROWSER_TABS_DEFAULT,
         openTrackerLinksOnBoard: true,
+        questionTimeoutMinutes: QUESTION_TIMEOUT_MINUTES_DEFAULT,
+        questionsInBackground: false,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         sessionRetentionOnlyArchived: false,
@@ -1612,6 +1698,7 @@ export const useUIStore = create<UIStore>()(
         recentAgents: [],
         favoriteAgents: [],
         recentEfforts: {},
+        modelDefaultVariants: {},
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
@@ -1656,6 +1743,7 @@ export const useUIStore = create<UIStore>()(
         agentWebToolEnabled: true,
         messageSearchEnabled: false,
         messageSearchReasoningEnabled: false,
+        modelChoiceRecordingEnabled: true,
         browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
         agentKnowledgeToolEnabled: true,
@@ -1666,6 +1754,7 @@ export const useUIStore = create<UIStore>()(
         permissionDefaultMode: 'ask',
         agentMemoryFeatureAvailable: false,
         routingFeatureAvailable: false,
+        managedToolsApplyLive: false,
         agentMemoryViewedAt: {},
         projectContextTab: 'notes',
         projectKnowledgePlanRequest: null,
@@ -2598,8 +2687,14 @@ export const useUIStore = create<UIStore>()(
         setSettingsProvidersClassificationRequested: (requested) => {
           set({ settingsProvidersClassificationRequested: requested });
         },
+        setSettingsProvidersCustomRequested: (requested) => {
+          set({ settingsProvidersCustomRequested: requested });
+        },
         setSettingsProvidersOpenRequested: (providerId) => {
           set({ settingsProvidersOpenRequested: providerId });
+        },
+        setSettingsTunnelModeRequested: (mode) => {
+          set({ settingsTunnelModeRequested: mode });
         },
         requestSettingsJump: (page, itemId = null) => {
           set({ settingsJumpRequest: { page, itemId } });
@@ -2651,6 +2746,14 @@ export const useUIStore = create<UIStore>()(
           set({ sessionWorkEnabled: value });
         },
 
+        setContinueWithModelMode: (value) => {
+          set({ continueWithModelMode: value });
+        },
+
+        setSessionWorkEntry: (value) => {
+          set({ sessionWorkEntry: value });
+        },
+
         setSessionReviewOfferEnabled: (value) => {
           set({ sessionReviewOfferEnabled: value });
         },
@@ -2690,6 +2793,10 @@ export const useUIStore = create<UIStore>()(
 
         setSessionGoalRewriteAll: (value) => {
           set({ sessionGoalRewriteAll: value });
+        },
+
+        setActiveRunModelChangeBehavior: (value) => {
+          set({ activeRunModelChangeBehavior: normalizeActiveRunModelChangeBehavior(value) });
         },
 
         setSessionGoalAutoCreate: (value) => {
@@ -2756,6 +2863,14 @@ export const useUIStore = create<UIStore>()(
 
         setOpenTrackerLinksOnBoard: (value) => {
           set({ openTrackerLinksOnBoard: value });
+        },
+
+        setQuestionTimeoutMinutes: (value) => {
+          set({ questionTimeoutMinutes: clampQuestionTimeoutMinutes(value) });
+        },
+
+        setQuestionsInBackground: (value) => {
+          set({ questionsInBackground: value });
         },
 
         setFileTreeSide: (side) => {
@@ -2831,11 +2946,11 @@ export const useUIStore = create<UIStore>()(
         },
 
         setCustomUiFont: (family) => {
-          set({ customUiFont: family.slice(0, 100) });
+          set({ customUiFont: clipPairSafe(family, 100) });
         },
 
         setCustomMonoFont: (family) => {
-          set({ customMonoFont: family.slice(0, 100) });
+          set({ customMonoFont: clipPairSafe(family, 100) });
         },
 
         setPadding: (size) => {
@@ -3164,6 +3279,16 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setModelDefaultVariant: (providerID, modelID, variant) => {
+          const key = `${providerID}/${modelID}`;
+          set((state) => {
+            const next = { ...state.modelDefaultVariants };
+            if (variant) next[key] = variant;
+            else delete next[key];
+            return { modelDefaultVariants: next };
+          });
+        },
+
         addRecentEffort: (providerID, modelID, variant) => {
           const provider = typeof providerID === 'string' ? providerID.trim() : '';
           const model = typeof modelID === 'string' ? modelID.trim() : '';
@@ -3299,6 +3424,9 @@ export const useUIStore = create<UIStore>()(
         setMessageSearchReasoningEnabled: (value) => {
           set({ messageSearchReasoningEnabled: value });
         },
+        setModelChoiceRecordingEnabled: (value) => {
+          set({ modelChoiceRecordingEnabled: value });
+        },
         setBrowserProvider: (value) => {
           set({ browserProvider: value });
         },
@@ -3328,6 +3456,9 @@ export const useUIStore = create<UIStore>()(
         },
         setRoutingFeatureAvailable: (value) => {
           set({ routingFeatureAvailable: value });
+        },
+        setManagedToolsApplyLive: (value) => {
+          set({ managedToolsApplyLive: value });
         },
         markAgentMemoryViewed: (key, viewedAt) => {
           set((state) => ({
@@ -3464,7 +3595,7 @@ export const useUIStore = create<UIStore>()(
 
         setFileEditorVimMappings: (value) => {
           // Same cap as the settings registry field.
-          set({ fileEditorVimMappings: value.slice(0, 10_000) });
+          set({ fileEditorVimMappings: clipPairSafe(value, 10_000) });
         },
 
         toggleExpandedInput: () => {
@@ -3483,7 +3614,7 @@ export const useUIStore = create<UIStore>()(
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
-          const state = persistedState as Record<string, unknown>;
+          const state = persistedState as PersistedUIStateRecord;
 
           // v22 -> v23: table cell wrap is on by default. The local copy only
           // ever held the old default; a choice the user made is restored from
@@ -3530,14 +3661,14 @@ export const useUIStore = create<UIStore>()(
           // user has not already sized the browser surface.
           if (version < 14) {
             const byDirectory = state.contextPanelByDirectory;
-            if (byDirectory && typeof byDirectory === 'object') {
-              for (const directoryState of Object.values(byDirectory as Record<string, unknown>)) {
-                if (!directoryState || typeof directoryState !== 'object') continue;
-                const entry = directoryState as Record<string, unknown>;
+            if (byDirectory && typeof byDirectory === 'object' && !Array.isArray(byDirectory)) {
+              for (const directoryState of Object.values(byDirectory)) {
+                if (!directoryState || typeof directoryState !== 'object' || Array.isArray(directoryState)) continue;
+                const entry: PersistedUIStateRecord = directoryState;
 
                 const widths = entry.widthByMode;
-                if (widths && typeof widths === 'object') {
-                  const widthRecord = widths as Record<string, unknown>;
+                if (widths && typeof widths === 'object' && !Array.isArray(widths)) {
+                  const widthRecord: PersistedUIStateRecord = widths;
                   if (widthRecord.preview !== undefined) {
                     if (widthRecord.browser === undefined) widthRecord.browser = widthRecord.preview;
                     delete widthRecord.preview;
@@ -3546,10 +3677,14 @@ export const useUIStore = create<UIStore>()(
 
                 if (!Array.isArray(entry.tabs)) continue;
                 const seenIds = new Set<string>();
-                const migrated: Array<Record<string, unknown>> = [];
-                for (const rawTab of entry.tabs as Array<unknown>) {
+                const migrated: PersistedUIFieldValue[] = [];
+                for (const rawTab of entry.tabs) {
                   if (!rawTab || typeof rawTab !== 'object') continue;
-                  const tab = rawTab as Record<string, unknown>;
+                  if (Array.isArray(rawTab)) {
+                    migrated.push(rawTab);
+                    continue;
+                  }
+                  const tab: PersistedUIStateRecord = rawTab;
                   if (tab.mode !== 'preview') {
                     if (typeof tab.id === 'string') seenIds.add(tab.id);
                     migrated.push(tab);
@@ -3570,8 +3705,14 @@ export const useUIStore = create<UIStore>()(
                 entry.tabs = migrated;
 
                 if (typeof entry.activeTabId === 'string' && entry.activeTabId.startsWith('preview')) {
-                  const nextActive = migrated.find((tab) => typeof tab.id === 'string');
-                  entry.activeTabId = nextActive && typeof nextActive.id === 'string' ? nextActive.id : null;
+                  let nextActiveId: string | null = null;
+                  for (const tab of migrated) {
+                    if (typeof tab === 'object' && tab !== null && !Array.isArray(tab) && typeof tab.id === 'string') {
+                      nextActiveId = tab.id;
+                      break;
+                    }
+                  }
+                  entry.activeTabId = nextActiveId;
                 }
               }
             }
@@ -3674,7 +3815,7 @@ export const useUIStore = create<UIStore>()(
             if (!state.shortcutOverrides || typeof state.shortcutOverrides !== 'object') {
               state.shortcutOverrides = {};
             } else {
-              const overrides = state.shortcutOverrides as Record<string, unknown>;
+              const overrides = state.shortcutOverrides;
               const cleaned: Record<string, string> = {};
               for (const [key, value] of Object.entries(overrides)) {
                 if (typeof key === 'string' && typeof value === 'string') {
@@ -3710,6 +3851,8 @@ export const useUIStore = create<UIStore>()(
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
           state.agentTerminalsPlacement = normalizeAgentTerminalsPlacement(state.agentTerminalsPlacement);
+          state.continueWithModelMode = continueWithModelModeSchema.parse(state.continueWithModelMode);
+          state.activeRunModelChangeBehavior = normalizeActiveRunModelChangeBehavior(state.activeRunModelChangeBehavior);
 
           if (state.toolJsonViewMode !== 'summary'
             && state.toolJsonViewMode !== 'formatted'
@@ -3772,6 +3915,8 @@ export const useUIStore = create<UIStore>()(
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionWorkEnabled: state.sessionWorkEnabled,
+          continueWithModelMode: state.continueWithModelMode,
+          sessionWorkEntry: state.sessionWorkEntry,
           sessionReviewOfferEnabled: state.sessionReviewOfferEnabled,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalChecker: state.sessionGoalChecker,
@@ -3782,6 +3927,7 @@ export const useUIStore = create<UIStore>()(
           sessionGoalWriterReview: state.sessionGoalWriterReview,
           sessionGoalWriterSendMode: state.sessionGoalWriterSendMode,
           sessionGoalRewriteAll: state.sessionGoalRewriteAll,
+          activeRunModelChangeBehavior: state.activeRunModelChangeBehavior,
           sessionGoalAutoCreate: state.sessionGoalAutoCreate,
           sessionGoalObjectiveCharLimit: state.sessionGoalObjectiveCharLimit,
           sessionGoalCheckObjectiveCharLimit: state.sessionGoalCheckObjectiveCharLimit,
@@ -3797,6 +3943,8 @@ export const useUIStore = create<UIStore>()(
           openLinksInBrowserPanel: state.openLinksInBrowserPanel,
           liveBrowserTabLimit: state.liveBrowserTabLimit,
           openTrackerLinksOnBoard: state.openTrackerLinksOnBoard,
+          questionTimeoutMinutes: state.questionTimeoutMinutes,
+          questionsInBackground: state.questionsInBackground,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           sessionRetentionOnlyArchived: state.sessionRetentionOnlyArchived,
@@ -3825,6 +3973,7 @@ export const useUIStore = create<UIStore>()(
           recentAgents: state.recentAgents,
           favoriteAgents: state.favoriteAgents,
           recentEfforts: state.recentEfforts,
+          modelDefaultVariants: state.modelDefaultVariants,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
           diffHideWhitespace: state.diffHideWhitespace,
@@ -3855,6 +4004,7 @@ export const useUIStore = create<UIStore>()(
           agentWebToolEnabled: state.agentWebToolEnabled,
           messageSearchEnabled: state.messageSearchEnabled,
           messageSearchReasoningEnabled: state.messageSearchReasoningEnabled,
+          modelChoiceRecordingEnabled: state.modelChoiceRecordingEnabled,
           browserProvider: state.browserProvider,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
           agentKnowledgeToolEnabled: state.agentKnowledgeToolEnabled,

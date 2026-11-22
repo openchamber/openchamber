@@ -67,6 +67,9 @@ on:
 # keeps its own run_id group, as before.
 concurrency:
   group: mobile-release-${{ inputs.release_tag != '' && inputs.release_tag || github.run_id }}-${{ inputs.version_name }}-${{ inputs.build_number }}-${{ inputs.build_android }}-${{ inputs.build_ios }}-${{ inputs.upload_github_release }}
+  # queue: max forbids cancel-in-progress: true (GitHub validation rejects
+  # the combination and the workflow dies at startup with zero jobs, #1341).
+  # Keep the literal false so every run queues, per the note above.
   cancel-in-progress: false
   queue: max
 
@@ -76,10 +79,25 @@ env:
   ANDROID_PROJECT_DIR: packages/mobile/android
 
 jobs:
+  require-main-gate:
+    name: Require successful main gate
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/require-main-gate.yml
+    # No timeout-minutes here: GitHub rejects it on reusable-workflow jobs
+    # and the whole workflow dies at startup with zero jobs (#1398, added
+    # by #1396). The called workflow sets its own job timeouts.
+    with:
+      release_sha: ${{ github.sha }}
+
   resolve-version:
+    needs: require-main-gate
     timeout-minutes: 10
     name: Resolve mobile version
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       version_name: ${{ steps.version.outputs.version_name }}
       build_number: ${{ steps.version.outputs.build_number }}
@@ -184,8 +202,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          cp app/build/outputs/bundle/release/*.aab "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.aab"
-          cp app/build/outputs/apk/release/*.apk "release-assets/OpenChamber-${VERSION_NAME}-${BUILD_NUMBER}-android.apk"
+          cp app/build/outputs/bundle/release/*.aab "release-assets/OC-${VERSION_NAME}-${BUILD_NUMBER}-android.aab"
+          cp app/build/outputs/apk/release/*.apk "release-assets/OC-${VERSION_NAME}-${BUILD_NUMBER}-android.apk"
           files=(
             app/build/outputs/bundle/release/*.aab
             app/build/outputs/apk/release/*.apk

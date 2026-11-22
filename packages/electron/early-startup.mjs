@@ -25,6 +25,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createShellEnvironmentLoader } from './shell-environment.mjs';
+import { SW_VERS_SPAWN_TIMEOUT_MS } from './spawn-sync-timeouts.mjs';
 import { isSplashColor } from './remote-page-policy.mjs';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
 
@@ -215,7 +216,7 @@ const clampWindowBoundsToVisibleWorkArea = (bounds) => {
 
 export const macosMajorVersion = () => {
   if (process.platform !== 'darwin') return 0;
-  const result = spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8' });
+  const result = spawnSync('/usr/bin/sw_vers', ['-productVersion'], { encoding: 'utf8', timeout: SW_VERS_SPAWN_TIMEOUT_MS });
   const raw = (result.stdout || '').trim();
   const [majorRaw, minorRaw] = raw.split('.');
   const major = Number.parseInt(majorRaw || '0', 10);

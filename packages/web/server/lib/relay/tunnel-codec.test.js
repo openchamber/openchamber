@@ -55,4 +55,37 @@ describe('relay tunnel codec', () => {
       assembler.push({ frameType: TunnelFrameType.WsText, streamId: 1, payload: chunk, hasMoreFragments: true }),
     ).toThrow(TunnelCodecError);
   });
+
+  it('bounds aggregate pending bytes across distinct streams (#1024)', () => {
+    // Per-message cap 100, aggregate cap 10: two 6-byte partials cannot both park.
+    const assembler = createFragmentAssembler(100, 10);
+    const fragment = (streamId, bytes, hasMoreFragments) => ({
+      frameType: TunnelFrameType.WsText,
+      streamId,
+      payload: new Uint8Array(bytes),
+      hasMoreFragments,
+    });
+    expect(assembler.push(fragment(1, 6, true))).toBeNull();
+    expect(() => assembler.push(fragment(2, 6, true))).toThrow('fragmented messages exceed aggregate maximum size');
+    // The offending key was discarded, not parked: its terminal fragment stands alone.
+    expect(assembler.push(fragment(2, 3, false))).toEqual(new Uint8Array(3));
+    // The surviving partial still completes at exactly the aggregate cap.
+    expect(assembler.push(fragment(1, 4, false))).toEqual(new Uint8Array(10));
+  });
+
+  it('bounds the number of pending fragment keys (#1024)', () => {
+    const assembler = createFragmentAssembler(100, 1000, 2);
+    const fragment = (streamId, hasMoreFragments) => ({
+      frameType: TunnelFrameType.WsText,
+      streamId,
+      payload: new Uint8Array([1]),
+      hasMoreFragments,
+    });
+    expect(assembler.push(fragment(1, true))).toBeNull();
+    expect(assembler.push(fragment(2, true))).toBeNull();
+    expect(() => assembler.push(fragment(3, true))).toThrow('too many pending fragmented messages');
+    // Existing keys are unaffected: one completes, freeing a key slot.
+    expect(assembler.push(fragment(1, false))).toEqual(new Uint8Array([1, 1]));
+    expect(assembler.push(fragment(3, true))).toBeNull();
+  });
 });

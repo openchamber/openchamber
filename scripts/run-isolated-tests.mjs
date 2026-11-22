@@ -21,7 +21,11 @@ import path from 'node:path';
 
 import { resolveBunExecutable } from './lib/bun-executable.mjs';
 
-const TEST_FILE = /\.(test|spec)\.(js|cjs|mjs|jsx|ts|tsx)$/;
+// `.integration.` suites are collected too: each one carries an external
+// precondition (for the theme porter suite, a sibling OpenCode checkout)
+// and must report an explicit skip when that precondition is absent, so
+// collecting it never turns a missing sibling into a failure here.
+const TEST_FILE = /\.(test|spec|integration)\.(js|cjs|mjs|jsx|ts|tsx)$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-bundle', 'build', 'out', '.git', 'ios', 'android']);
 const MAX_PARALLEL = 4;
 const bunExecutable = resolveBunExecutable();

@@ -25,8 +25,10 @@ const pick = (body, keys) =>
 const invalid = (message, code) => Object.assign(new Error(message), { status: 400, code });
 
 const clampLimit = (value) => {
-  const number = Number.parseInt(typeof value === 'string' ? value : '', 10);
-  return Number.isFinite(number) ? Math.min(Math.max(number, 1), 500) : 50;
+  const text = typeof value === 'string' ? value : '';
+  if (!/^[1-9]\d*$/.test(text)) return 50;
+  const number = Number(text);
+  return Number.isSafeInteger(number) ? Math.min(number, 500) : 50;
 };
 
 /**

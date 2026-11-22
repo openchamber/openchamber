@@ -15,7 +15,7 @@
  * silently reset the user's categories.
  */
 import fs from 'node:fs/promises';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import {
@@ -29,6 +29,45 @@ import {
 } from './defaults.js';
 import { CLASSIFIER_SOURCES, parseCustomEndpointUrl } from './classifier.js';
 import { renameWithRetry, renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile, readBoundedFileSync } from '../shared/bounded-file-read.js';
+
+/**
+ * Maximum read bytes for routing.json.
+ * The effective config caps categories at 32 (effectiveConfigSchema .max(32)).
+ * Each category name is <= 60 chars, description <= 2,000 chars, model <= 200 + 200 chars,
+ * variant/agent <= 80 chars. A legitimate file is <= 90 KB in ASCII and under 400 KiB
+ * with four-byte UTF-8 characters. 1 MiB gives at least 2.5x headroom over that worst case.
+ */
+export const ROUTING_CONFIG_MAX_BYTES = 1024 * 1024; // 1 MiB
+
+/**
+ * Maximum read bytes for routing-auth.json.
+ * Holds { token } with token <= 4,000 chars (authSchema). A legitimate file is <= 16.1 KiB
+ * with four-byte UTF-8 characters. 64 KiB gives ~4x headroom.
+ */
+export const ROUTING_AUTH_MAX_BYTES = 64 * 1024; // 64 KiB
+
+/**
+ * Maximum read bytes for classification.json.
+ * Holds { version: 1, source } where source is an enum (classifierSchema).
+ * A legitimate file is a few dozen bytes. 64 KiB leaves generous headroom.
+ */
+export const CLASSIFIER_SOURCE_MAX_BYTES = 64 * 1024; // 64 KiB
+
+/**
+ * Maximum read bytes for classifier-endpoint.json.
+ * Holds URL <= 2,000 chars, model <= 200 chars, key <= 4,000 chars (customEndpointSchema).
+ * A legitimate file is <= 25 KiB with four-byte UTF-8 characters. 64 KiB leaves over 2x headroom.
+ */
+export const CUSTOM_ENDPOINT_MAX_BYTES = 64 * 1024; // 64 KiB
+
+/**
+ * Maximum read bytes for auto-sessions.json.
+ * Capped at 1,000 sessions (AUTO_SESSION_LIMIT = 1000). Each entry has sessionId <= 200 chars,
+ * directory <= 4,000 chars, and timestamp. At four bytes per character, a pathological worst
+ * case is under 17 MiB. 32 MiB leaves ~2x headroom while keeping synchronous startup bounded.
+ */
+export const AUTO_SESSIONS_MAX_BYTES = 32 * 1024 * 1024; // 32 MiB
 
 const FILE_VERSION = 1;
 const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -144,15 +183,16 @@ const classifierPath = (dataDir) => path.join(dataDir, 'classification.json');
 const customEndpointPath = (dataDir) => path.join(dataDir, 'classifier-endpoint.json');
 const autoSessionsPath = (dataDir) => path.join(dataDir, 'auto-sessions.json');
 
-const readJsonFile = async (file, schema) => {
-  let raw;
-  try {
-    raw = await fs.readFile(file, 'utf8');
-  } catch (error) {
-    if (error?.code === 'ENOENT') return null;
-    throw error;
+const readJsonFile = async (file, schema, maxBytes) => {
+  const result = await readBoundedFile(file, maxBytes);
+  if (!result.ok) {
+    if (result.reason === 'missing') return null;
+    if (result.reason === 'too-large') {
+      throw new Error(`Invalid ${path.basename(file)}: exceeds ${maxBytes} byte limit`);
+    }
+    throw new Error(`Invalid ${path.basename(file)}: not a regular file`);
   }
-  const text = raw.replace(/^﻿/, '').trim();
+  const text = result.buffer.toString('utf8').replace(/^﻿/, '').trim();
   if (text === '') return null;
   const parsed = schema.safeParse(JSON.parse(text));
   if (!parsed.success) throw new Error(`Invalid ${path.basename(file)}: ${parsed.error.issues[0]?.message ?? 'schema mismatch'}`);
@@ -168,15 +208,16 @@ const writeJsonFile = async (file, value, mode) => {
 };
 
 /** The synchronous twin of `readJsonFile`, for the one file read before the server takes requests. */
-const readJsonFileSync = (file, schema) => {
-  let raw;
-  try {
-    raw = readFileSync(file, 'utf8');
-  } catch (error) {
-    if (error?.code === 'ENOENT') return null;
-    throw error;
+const readJsonFileSync = (file, schema, maxBytes) => {
+  const result = readBoundedFileSync(file, maxBytes);
+  if (!result.ok) {
+    if (result.reason === 'missing') return null;
+    if (result.reason === 'too-large') {
+      throw new Error(`Invalid ${path.basename(file)}: exceeds ${maxBytes} byte limit`);
+    }
+    throw new Error(`Invalid ${path.basename(file)}: not a regular file`);
   }
-  const text = raw.replace(/^﻿/, '').trim();
+  const text = result.buffer.toString('utf8').replace(/^﻿/, '').trim();
   if (text === '') return null;
   const parsed = schema.safeParse(JSON.parse(text));
   if (!parsed.success) throw new Error(`Invalid ${path.basename(file)}: ${parsed.error.issues[0]?.message ?? 'schema mismatch'}`);
@@ -320,14 +361,14 @@ export const createRoutingStore = ({ dataDir }) => {
 
   return {
     /** Effective config; a missing file is the defaults, a broken file throws. */
-    readConfig: async () => resolveEffectiveConfig(await readJsonFile(configFile, fileSchema)),
+    readConfig: async () => resolveEffectiveConfig(await readJsonFile(configFile, fileSchema, ROUTING_CONFIG_MAX_BYTES)),
     writeConfig: (config) => serialize(async () => {
       await writeJsonFile(configFile, toStoredConfig(config));
       return config;
     }),
     readToken: async () => {
       try {
-        return (await readJsonFile(authFile, authSchema))?.token ?? null;
+        return (await readJsonFile(authFile, authSchema, ROUTING_AUTH_MAX_BYTES))?.token ?? null;
       } catch (error) {
         console.warn('[routing] routing-auth.json is unreadable:', error?.message ?? error);
         return null;
@@ -344,7 +385,7 @@ export const createRoutingStore = ({ dataDir }) => {
      */
     readClassifierSource: async () => {
       try {
-        return (await readJsonFile(classifierFile, classifierSchema))?.source ?? null;
+        return (await readJsonFile(classifierFile, classifierSchema, CLASSIFIER_SOURCE_MAX_BYTES))?.source ?? null;
       } catch (error) {
         console.warn('[routing] classification.json is unreadable:', error?.message ?? error);
         return null;
@@ -354,7 +395,7 @@ export const createRoutingStore = ({ dataDir }) => {
     /** The custom endpoint, or null when none is saved. Unreadable reads as none, like the key file. */
     readCustomEndpoint: async () => {
       try {
-        return (await readJsonFile(customEndpointFile, customEndpointFileSchema))?.endpoint ?? null;
+        return (await readJsonFile(customEndpointFile, customEndpointFileSchema, CUSTOM_ENDPOINT_MAX_BYTES))?.endpoint ?? null;
       } catch (error) {
         // V8 quotes the broken text in a JSON syntax error, and this file holds a key.
         const reason = error instanceof SyntaxError ? 'malformed JSON' : error?.message ?? error;
@@ -373,7 +414,7 @@ export const createRoutingStore = ({ dataDir }) => {
      */
     readAutoSessions: () => {
       try {
-        return readJsonFileSync(autoSessionsFile, autoSessionsFileSchema)?.sessions ?? [];
+        return readJsonFileSync(autoSessionsFile, autoSessionsFileSchema, AUTO_SESSIONS_MAX_BYTES)?.sessions ?? [];
       } catch (error) {
         console.warn('[routing] auto-sessions.json is unreadable:', error?.message ?? error);
         return [];

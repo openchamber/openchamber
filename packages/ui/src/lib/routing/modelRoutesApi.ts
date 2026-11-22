@@ -6,18 +6,26 @@
  */
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { storedSchedulesSchema, type ScheduleListValue } from '@/lib/routing/scheduleSchema';
 
 export const AUTONOMY_LEVELS = ['fixed', 'rules', 'adaptive', 'predictive', 'agent'] as const;
 export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number];
 
+const variantMapSchema = z.record(z.string(), z.union([z.string(), z.literal(false)]));
+const contextLimitSchema = z.object({ context: z.number().int().positive() });
+const windowRefSchema = z.union([z.string(), z.object({ name: z.string(), invert: z.boolean().optional() })]);
 const targetSchema = z.union([
   z.string().min(1),
   z.object({
     model: z.string().min(1),
     defaultVariant: z.string().optional(),
-    variants: z.record(z.string(), z.string()).optional(),
+    variants: variantMapSchema.optional(),
     until: z.number().int().positive().optional(),
-  }),
+    exclude: z.array(z.string()).optional(),
+    limit: contextLimitSchema.optional(),
+    cache_format: z.enum(['anthropic', 'alibaba']).optional(),
+    window: windowRefSchema.optional(),
+  }).passthrough(),
 ]);
 
 const healthSchema = z
@@ -42,10 +50,35 @@ const budgetSchema = z
   })
   .passthrough();
 
-const modelRouteSchema = z
+
+// The server's limits on a pool's own text (`validateModelRoute` in
+// packages/web/server/lib/routing/model-routes.js); a guard test there keeps
+// the two equal.
+export const POOL_DESCRIPTION_MAX_LENGTH = 200;
+export const POOL_DETAILS_MAX_LENGTH = 2000;
+
+export const modelRouteSchema = z
   .object({
     name: z.string().optional(),
-    targets: z.array(targetSchema),
+    // OpenChamber's own keys: what the pool is for, read by Jev when a routing
+    // category runs on the pool. OpenCode ignores them. Every save sends the
+    // whole route map, so a hand-edited value the server would refuse (a wrong
+    // type, a line break in the description, text over the limits) reads as
+    // absent; otherwise one such value would block saving any pool.
+    description: z.string().max(POOL_DESCRIPTION_MAX_LENGTH).regex(/^[^\r\n]*$/).optional().catch(undefined),
+    details: z.string().max(POOL_DETAILS_MAX_LENGTH).optional().catch(undefined),
+    targets: z.array(targetSchema).optional(),
+    system: z.string().optional(),
+    include: z.array(z.string()).optional(),
+    exclude: z.array(z.string()).optional(),
+    contains: z.array(z.string()).optional(),
+    notContains: z.array(z.string()).optional(),
+    match: z.string().optional(),
+    levels: z.array(z.string()).optional(),
+    variantRules: z.array(z.object({ match: z.string(), map: variantMapSchema })).optional(),
+    cache_format: z.enum(['anthropic', 'alibaba']).optional(),
+    limit: contextLimitSchema.optional(),
+    nestedTimeout: z.enum(['longest', 'shortest']).optional(),
     autonomy: z.enum(AUTONOMY_LEVELS).optional(),
     selection: z.enum(['ordered', 'round-robin', 'weighted']).optional(),
     weights: z.record(z.string(), z.number()).optional(),
@@ -53,6 +86,7 @@ const modelRouteSchema = z
     hedgeAfterMs: z.number().optional(),
     health: healthSchema.optional(),
     budgets: z.record(z.string(), budgetSchema).optional(),
+    schedules: storedSchedulesSchema.optional(),
   })
   .passthrough();
 
@@ -72,15 +106,31 @@ export type ModelRouteTuning = z.infer<typeof modelRouteTuningSchema>;
 const modelRoutesStateSchema = z.object({
   routes: z.record(z.string(), modelRouteSchema),
   tuning: modelRouteTuningSchema.nullable().optional(),
+  schedules: storedSchedulesSchema.nullable().optional(),
+  otherRoutes: z.array(z.object({ path: z.string(), routes: z.record(z.string(), modelRouteSchema) })).optional(),
+  otherSchedules: z.array(z.object({ path: z.string(), schedules: storedSchedulesSchema })).optional(),
   path: z.string().optional(),
+  timeouts: z.record(z.string(), z.object({
+    applied: z.union([z.number(), z.literal(false)]),
+    longest: z.union([z.number(), z.literal(false)]),
+    shortest: z.union([z.number(), z.literal(false)]),
+    nested: z.array(z.string()),
+  })).optional(),
 });
 
 type ModelRoutesState = z.infer<typeof modelRoutesStateSchema> & { available: boolean };
+/** The server's account of one pool's first-output wait: what OpenCode applies now, and what longest or shortest would pick from the pools it contains. */
+export type PoolTimeoutSummary = NonNullable<ModelRoutesState['timeouts']>[string];
 
 const errorPayloadSchema = z.object({ error: z.string().min(1) });
 
-export const fetchModelRoutes = async (): Promise<ModelRoutesState> => {
-  const response = await runtimeFetch('/api/model-routes');
+// The project directory lets the server list the project's own pools and
+// cross-pool schedules (read-only); tuning reads the same with or without it.
+const withDirectory = (path: string, directory?: string | null) =>
+  directory ? `${path}?directory=${encodeURIComponent(directory)}` : path;
+
+export const fetchModelRoutes = async (directory?: string | null): Promise<ModelRoutesState> => {
+  const response = await runtimeFetch(withDirectory('/api/model-routes', directory));
   if (response.status === 404) return { routes: {}, available: false };
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
@@ -90,8 +140,12 @@ export const fetchModelRoutes = async (): Promise<ModelRoutesState> => {
   return { ...modelRoutesStateSchema.parse(payload), available: true };
 };
 
-const putModelRoutes = async (body: { routes?: Record<string, ModelRoute>; tuning?: ModelRouteTuning | null }): Promise<ModelRoutesState> => {
-  const response = await runtimeFetch('/api/model-routes', {
+const putModelRoutes = async (body: {
+  routes?: Record<string, ModelRoute>;
+  tuning?: ModelRouteTuning | null;
+  schedules?: ScheduleListValue | null;
+}, directory?: string | null): Promise<ModelRoutesState> => {
+  const response = await runtimeFetch(withDirectory('/api/model-routes', directory), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -108,6 +162,10 @@ export const saveModelRoutes = (routes: Record<string, ModelRoute>): Promise<Mod
 
 /** Saves the automatic-review settings; null removes them so OpenCode's defaults apply. */
 export const saveModelRouteTuning = (tuning: ModelRouteTuning | null): Promise<ModelRoutesState> => putModelRoutes({ tuning });
+
+/** Saves the schedules that apply across pools; null removes the list from the config. */
+export const saveModelRouteSchedules = (schedules: ScheduleListValue | null, directory?: string | null): Promise<ModelRoutesState> =>
+  putModelRoutes({ schedules }, directory);
 
 const routeTargetStatsSchema = z.object({
   providerID: z.string(),

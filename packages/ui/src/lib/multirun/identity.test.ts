@@ -97,6 +97,22 @@ describe('multi-run identity', () => {
     expect(sameMultiRunIdentity(session('s1'), marked)).toBe(false);
   });
 
+  test('parent roles, saved guidance, and per-pass provenance survive metadata serialization', () => {
+    const receipt = { passID: group.id, baseCommit: 'original-base', sources: [
+      { sessionID: 'source-a', directory: '/repo/a', snapshotRef: 'refs/openchamber/runs/pass-a', snapshotCommit: 'commit-a' },
+      { sessionID: 'source-b', directory: '/repo/b' },
+    ] };
+    for (const role of ['run', 'fusion', 'parent'] as const) {
+      const fields: MultiRunMembership = { ...membership('s1'), role, guidance: 'Keep api_v2\n日本語', fusion: role === 'fusion' ? receipt : undefined };
+      const bound = session('s1', fields);
+      const reread = getMultiRunIdentity(JSON.parse(JSON.stringify(bound)));
+      expect(reread?.role).toBe(role);
+      expect(reread?.guidance).toBe(fields.guidance);
+      expect(reread?.fusion).toEqual(fields.fusion);
+      expect(sameMultiRunIdentity(bound, session('s1', { ...fields, guidance: 'Changed source preference' }))).toBe(false);
+    }
+  });
+
   test('preserves unrelated metadata and invalidates row memoization only for relevant changes', () => {
     const original = session('s1');
     const changed = session('s1', { ...membership('s1'), role: 'fusion' });

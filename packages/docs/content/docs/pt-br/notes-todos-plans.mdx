@@ -31,6 +31,17 @@ Um lugar para manter planos mais longos como arquivos salvos. Você pode:
 
 Você deve voltar à aba Context com sua nota salva, sua tarefa marcada ou seu plano listado — é assim que você sabe que deu certo.
 
+## Excluir e desfazer
+
+Excluir uma nota, um plano ou uma memória salva mostra um aviso com **Desfazer** por alguns segundos. O item só é removido de vez quando esse tempo acaba.
+
+## Agentes
+
+Os agentes leem e atualizam as mesmas notas, tarefas e planos pela ferramenta de conhecimento do projeto. Peça a um agente para anotar uma decisão, adicionar uma tarefa, marcar uma como concluída ou manter um plano atualizado, e a mudança aparece no painel assim que acontece. As notas que um agente cria são marcadas como vindas de um agente. Quando um agente escreve um plano para você, ele pode abri-lo na sua frente, onde você o lê, comenta nas linhas e o envia para uma sessão. Os planos são arquivos Markdown simples, então os agentes os leem e editam como qualquer outro arquivo. Eles começam um plano com uma lista curta de seus passos e marcam cada um conforme o implementam, e um plano aberto capta as mudanças em poucos segundos, de modo que a prévia mostra o quanto o trabalho avançou.
+
+Um agente trabalha no projeto ao qual sua sessão pertence, worktrees incluídos. Se um agente alterar uma nota ou um plano enquanto você digita nele, o que você digita é salvo por cima da mudança do agente. Os agentes são orientados a enviar o texto que leram junto de qualquer nota ou plano que substituam por inteiro; se ele tiver mudado desde então, a escrita é recusada e o agente o lê de novo.
+
+A ferramenta vem ativada por padrão. Desative-a em **Settings → General → OpenChamber Tools** com **Project knowledge tool**. Como as outras ferramentas do OpenChamber, ela só está presente quando o OpenChamber executa seu próprio servidor OpenCode, portanto não com um servidor externo nem na extensão do VS Code.
 ## Relacionado
 
 - [Sessões de Worktree](/pt-br/worktrees/) — execute uma tarefa em seu próprio branch

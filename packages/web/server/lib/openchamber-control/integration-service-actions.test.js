@@ -20,7 +20,7 @@ const expectError = async (promise, status, pattern) => {
 
 /** Operations shaped like the route modules return them; every answer carries the seeded token under secret-named keys. */
 const makeOperations = () => {
-  const leak = { accessToken: SEED, refreshToken: SEED, token: SEED, clientSecret: SEED, password: SEED, apiKey: SEED, api_key: SEED, cookie: SEED, authorization: SEED };
+  const leak = { accessToken: SEED, refreshToken: SEED, token: SEED, clientSecret: SEED, password: SEED, apiKey: SEED, api_key: SEED, cookie: SEED, authorization: SEED, authorizations: SEED, privateKey: SEED, accessKey: SEED, sshKey: SEED, licenseKey: SEED, private_key: SEED, key: SEED, privateKeys: SEED, accessKeys: SEED, apiKeys: SEED, tokens: SEED, secrets: SEED, passwords: SEED, keys: SEED, cookies: SEED };
   const ok = (body) => ({ status: 200, body: { ...body, ...leak } });
   const guest = {
     id: 'acme', name: 'Acme', version: '1.0.0', source: 'git', enabled: true,
@@ -30,7 +30,7 @@ const makeOperations = () => {
   };
   return {
     github: {
-      status: vi.fn(async () => ({ connected: true, accounts: [{ id: 'occred:v1:github:a', current: true, ...leak }], ghCli: { available: true, token: SEED } })),
+      status: vi.fn(async () => ({ connected: true, tokenType: 'bearer', scope: 'repo', accounts: [{ id: 'occred:v1:github:a', current: true, ...leak }], ghCli: { available: true, token: SEED } })),
       activate: vi.fn(async (accountId) => (accountId === 'missing' ? { status: 404, body: { error: 'GitHub account not found' } } : ok({ connected: true }))),
       addFromVault: vi.fn(async (reference) => ok({ connected: true, accounts: [{ id: 'occred:v1:github:b', tokenReference: reference }] })),
       remove: vi.fn(async () => ok({ success: true, removed: true })),
@@ -119,6 +119,47 @@ describe('integration service action contract', () => {
     }
   });
 
+  it('names every field the binding operations consume in the bindingIntent schema', () => {
+    // The binding service (source-control/binding-service.js) validates each
+    // operation's intent by exact key set; a field missing here is a field a
+    // model cannot learn from the schema, and a field named here that no
+    // operation takes is refused as an extra key.
+    const intent = INTEGRATION_SERVICE_PARAMETERS.bindingIntent;
+    const fields = [
+      'directory', 'expectedRepositoryId', 'expectedRevision', 'expectedConfigRevision',
+      'operation', 'target', 'provider', 'remote', 'transport',
+      'expectedFetchFingerprint', 'expectedPushFingerprint', 'unverifiedConfirmed',
+      'credentialAccount', 'sshCredentialId', 'parentRemote', 'expectedParentFingerprint',
+      'kind', 'path', 'expectedEndpointFingerprint', 'confirmed',
+    ];
+    for (const name of fields) expect(intent.properties).toHaveProperty(name);
+    expect(Object.keys(intent.properties).sort()).toEqual([...fields].sort());
+    // Only the revisions every operation takes are unconditionally required:
+    // provider rejects expectedConfigRevision as an extra key.
+    expect(intent.required).toEqual(['expectedRepositoryId', 'expectedRevision']);
+    expect(intent.properties.expectedRevision.type).toBe('integer');
+    expect(intent.properties.transport.enum).toEqual(['system', 'https', 'ssh', 'anonymous']);
+    expect(intent.properties.kind.enum).toEqual(['submodule', 'lfs']);
+    expect(intent.properties.operation.enum).toEqual(['add', 'replace', 'remove', 'configure']);
+    for (const nested of ['target', 'provider', 'credentialAccount']) {
+      expect(Object.keys(intent.properties[nested].properties).sort())
+        .toContain('provider');
+    }
+    expect(Object.keys(intent.properties.credentialAccount.properties).sort())
+      .toEqual(['accountId', 'instance', 'provider']);
+    expect(Object.keys(intent.properties.target.properties).sort())
+      .toEqual(['accountId', 'instance', 'primaryRemote', 'provider']);
+    expect(Object.keys(intent.properties.provider.properties).sort())
+      .toEqual(['accountId', 'instance', 'primaryRemote', 'provider', 'repository']);
+  });
+
+  it('rejects prototype-named actions instead of dispatching inherited members', async () => {
+    const { run } = setup();
+    for (const action of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+      await expectError(run(action), 400, /Unsupported integration action/);
+    }
+  });
+
   it('answers 503 before the routes are registered', async () => {
     const actions = createIntegrationServiceActions({ getIntegrationOperations: () => null });
     await expectError(actions.execute('github.status', {}, {}), 503, /finished starting/);
@@ -143,10 +184,28 @@ describe('secrets never leave', () => {
     const { ops, run } = setup();
     await expectError(run('binding.set', { bindingOperation: 'provider', bindingIntent: { account: { accessToken: 'x' } } }), 400, /bindingIntent\.account\.accessToken looks like a secret/);
     await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { apiToken: 'x' } }), 400, /looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { privateKey: 'x' } }), 400, /extensionSettings\.privateKey looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { access_key: 'x' } }), 400, /looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { privateKeys: 'x' } }), 400, /extensionSettings\.privateKeys looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { tokens: 'x' } }), 400, /looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { apiKeys: 'x' } }), 400, /looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { passwords: 'x' } }), 400, /looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { keys: 'x' } }), 400, /looks like a secret/);
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { authorizations: 'x' } }), 400, /extensionSettings\.authorizations looks like a secret/);
+    // `monkey` ends in `key`; both guards treat it as a secret, fail-closed.
+    await expectError(run('extensions.settings', { extensionId: 'acme', extensionSettings: { monkey: 'x' } }), 400, /looks like a secret/);
     await expectError(run('linear.mapping', { linearMapping: { clientSecret: 'x' } }), 400, /looks like a secret/);
     expect(ops.bindings.setProvider).not.toHaveBeenCalled();
     expect(ops.extensions.saveSettings).not.toHaveBeenCalled();
     expect(ops.linear.writeMapping).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-secret names that only resemble secret names', async () => {
+    const { run } = setup();
+    const answer = await run('github.status');
+    expect(answer.tokenType).toBe('bearer');
+    expect(answer.scope).toBe('repo');
+    await expect(run('extensions.settings', { extensionId: 'acme', extensionSettings: { tokenType: 'bearer', scope: 'repo' } })).resolves.toBeTruthy();
   });
 
   it('returns no token from a real GitLab account store', async () => {

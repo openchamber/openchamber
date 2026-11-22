@@ -1,7 +1,7 @@
 import React from 'react';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language';
 import { EditorState, RangeSetBuilder, type Range } from '@codemirror/state';
 import {
   Decoration,
@@ -59,6 +59,12 @@ const codeBlockLine = Decoration.line({ class: 'cm-note-codeblock' });
 const quoteLine = Decoration.line({ class: 'cm-note-quote' });
 const inlineCode = Decoration.mark({ class: 'cm-note-inline-code' });
 
+/**
+ * Parsing budget for one decoration pass. A note is capped at 3000 characters,
+ * so finishing the parse here is cheap and keeps the first paint formatted.
+ */
+const PARSE_TIMEOUT_MS = 200;
+
 /** Line numbers the selection touches; their markers stay visible. */
 const activeLines = (view: EditorView): Set<number> => {
   const lines = new Set<number>();
@@ -78,8 +84,14 @@ const buildDecorations = (view: EditorView): DecorationSet => {
   const marks: Range<Decoration>[] = [];
   const lineClasses = new Map<number, Decoration>();
 
+  // The state's tree only reaches as far as the background parser has run.
+  // Decorating from it leaves the markers on the tail of the note visible, so
+  // finish the parse first and fall back to the partial tree only if it runs
+  // out of budget; the plugin rebuilds when the tree changes.
+  const tree = ensureSyntaxTree(state, state.doc.length, PARSE_TIMEOUT_MS) ?? syntaxTree(state);
+
   for (const { from, to } of view.visibleRanges) {
-    syntaxTree(state).iterate({
+    tree.iterate({
       from,
       to,
       enter: (node) => {
@@ -135,7 +147,15 @@ const livePreview = ViewPlugin.fromClass(class {
   }
 
   update(update: ViewUpdate) {
-    if (update.docChanged || update.viewportChanged || update.selectionSet || update.focusChanged) {
+    if (
+      update.docChanged
+      || update.viewportChanged
+      || update.selectionSet
+      || update.focusChanged
+      // The background parser publishes a finished tree as a state change, not
+      // a document change; rebuild when it does.
+      || syntaxTree(update.state) !== syntaxTree(update.startState)
+    ) {
       this.decorations = buildDecorations(update.view);
     }
   }

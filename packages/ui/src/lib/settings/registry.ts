@@ -28,6 +28,7 @@ import { LOCALES } from '@/lib/i18n/runtime';
 import { useI18nStore } from '@/lib/i18n/store';
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
 import { LIVE_BROWSER_TABS_MAX, LIVE_BROWSER_TABS_MIN } from '@/lib/browser/liveTabs';
+import { QUESTION_TIMEOUT_MINUTES_MAX, QUESTION_TIMEOUT_MINUTES_MIN } from '@/lib/questionTimeout';
 import { normalizeMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isTerminalShell } from '@/lib/terminalShell';
 import {
@@ -40,11 +41,12 @@ import { isBranchTemplate } from '@/lib/worktrees/branchNameTemplate';
 import { sanitizeWorkStatusHiddenSections, sanitizeWorkStatusSectionOrder } from '@/components/chat/work-status/sections';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionDisplayStore, sessionRowDisplaySchema } from '@/stores/useSessionDisplayStore';
 import { sidebarLayoutSchema } from '@/stores/sidebarLayout';
-import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior, type SessionWorkEntry } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
+import { CONTINUE_WORK_MODES } from '@/lib/opencode/model-handoff';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -61,6 +63,7 @@ import {
   parseManagedRemoteTunnelPresetTokens,
   parseManagedRemoteTunnelPresets,
   parseModelRefs,
+  parseModelDefaultVariants,
   parseNonEmptyString,
   parseNonEmptyTrimmedString,
   parseNotificationTemplates,
@@ -208,6 +211,7 @@ const parseWorkStatusHiddenSections: SettingsParser<string[]> = mapParser(fromSc
 const parseLargeTextPasteBehavior: SettingsParser<LargeTextPasteBehavior> = parseOneOf(['ask', 'attach', 'inline', 'inline-double-paste']);
 const parseAgentTerminalsPlacement: SettingsParser<AgentTerminalsPlacement> = parseOneOf(['terminal-panel', 'sidebar']);
 const parseFileEditorKeymap: SettingsParser<FileEditorKeymap> = parseOneOf(['default', 'vim']);
+const parseSessionWorkEntry: SettingsParser<SessionWorkEntry> = parseOneOf(['off', 'every-message', 'jev']);
 
 /**
  * Removing a built-in starter must stay a durable choice, so the list is only
@@ -304,6 +308,14 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('messageSearchReasoningEnabled', (v) => useUIStore.getState().setMessageSearchReasoningEnabled(v)),
   }),
+  // The server records manual model choices only while this is on (absent
+  // reads as on); VS Code has no OpenChamber server to keep them.
+  modelChoiceRecordingEnabled: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('modelChoiceRecordingEnabled', (v) => useUIStore.getState().setModelChoiceRecordingEnabled(v)),
+  }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentScheduleToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentScheduleToolEnabled', (v) => useUIStore.getState().setAgentScheduleToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
@@ -341,6 +353,13 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('routingFeatureAvailable', (v) => useUIStore.getState().setRoutingFeatureAvailable(v), { autoSave: false }),
   }),
+  // Server-owned: whether the Tools page switches reach the running OpenCode live.
+  managedToolsApplyLive: field({
+    scope: 'instance',
+    computed: true,
+    parse: parseBoolean,
+    ui: uiStore('managedToolsApplyLive', (v) => useUIStore.getState().setManagedToolsApplyLive(v), { autoSave: false }),
+  }),
   openCodeUpdateToastDismissedVersion: field({ scope: 'instance', parse: parseTrimmedStringUpTo(128) }),
   autoDeleteEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('autoDeleteEnabled', (v) => useUIStore.getState().setAutoDeleteEnabled(v)) }),
   autoDeleteAfterDays: field({ scope: 'instance', parse: parseIntegerInRange(1, 365), ui: uiStore('autoDeleteAfterDays', (v) => useUIStore.getState().setAutoDeleteAfterDays(v)) }),
@@ -351,6 +370,10 @@ export const SETTINGS_REGISTRY = {
   terminalShell: field({ scope: 'instance', parse: parseTerminalShell, ui: uiStore('terminalShell', (v) => useUIStore.getState().setTerminalShell(v)) }),
   terminalLoginShells: field({ scope: 'instance', parse: parseTerminalShells(isTerminalShell), ui: uiStore('terminalLoginShells', (v) => useUIStore.getState().setTerminalLoginShells(v)) }),
   openInAppId: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
+  // Server-wide scheduled-task run limit (ms) from #765: the scheduled-tasks
+  // runtime reads it from the instance settings; a task may override it with
+  // its own maxRunDurationMs. Registered so the settings API persists it.
+  scheduledTasksMaxRunDurationMs: field({ scope: 'instance', parse: parseFiniteNumber }),
   dictationEnabled: field({ scope: 'profile', parse: parseBoolean, ui: configField('dictationEnabled') }),
   sttProvider: field({ scope: 'instance', parse: parseSttProvider, ui: configField('sttProvider') }),
   sttServerUrl: field({ scope: 'instance', parse: parseTrimmedStringUpTo(2048), ui: configField('sttServerUrl') }),
@@ -384,7 +407,13 @@ export const SETTINGS_REGISTRY = {
   sidebarShowChatsSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showChatsSection') }),
   sidebarShowWorkSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showWorkSection') }),
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
-  sidebarDetailedZoneRows: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('detailedZoneRows') }),
+  // Headerless list (issue #21): the same order with no headers. Per surface
+  // so the phone keeps its own choice.
+  sidebarHeaderless: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('headerlessSidebar') }),
+  // Tree zone row lines and optional row elements, as one value:
+  // `stores/useSessionDisplayStore.ts` completes a stored one with the
+  // defaults, field by field.
+  sidebarSessionRowDisplay: field({ scope: 'profile', perSurface: true, parse: fromSchema(sessionRowDisplaySchema), ui: sessionDisplayField('sessionRowDisplay') }),
   // Section order, attention sections, the open session's hold and the List
   // layout, as one value: `stores/sidebarLayout.ts` completes a stored one
   // with the defaults, field by field.
@@ -472,6 +501,8 @@ export const SETTINGS_REGISTRY = {
   openLinksInBrowserPanel: field({ scope: 'profile', surfaces: ['desktop'], parse: parseBoolean, ui: uiStore('openLinksInBrowserPanel', (v) => useUIStore.getState().setOpenLinksInBrowserPanel(v)) }),
   liveBrowserTabLimit: field({ scope: 'profile', surfaces: ['desktop'], parse: parseIntegerInRange(LIVE_BROWSER_TABS_MIN, LIVE_BROWSER_TABS_MAX), ui: uiStore('liveBrowserTabLimit', (v) => useUIStore.getState().setLiveBrowserTabLimit(v)) }),
   openTrackerLinksOnBoard: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('openTrackerLinksOnBoard', (v) => useUIStore.getState().setOpenTrackerLinksOnBoard(v)) }),
+  questionTimeoutMinutes: field({ scope: 'profile', parse: parseIntegerInRange(QUESTION_TIMEOUT_MINUTES_MIN, QUESTION_TIMEOUT_MINUTES_MAX), ui: uiStore('questionTimeoutMinutes', (v) => useUIStore.getState().setQuestionTimeoutMinutes(v)) }),
+  questionsInBackground: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('questionsInBackground', (v) => useUIStore.getState().setQuestionsInBackground(v)) }),
   autoCreateWorktree: field({ scope: 'profile', parse: parseBoolean, ui: configField('settingsAutoCreateWorktree') }),
   worktreeStartFrom: field({ scope: 'profile', parse: parseOneOf(WORKTREE_START_FROM_OPTIONS), ui: configField('settingsWorktreeStartFrom') }),
   worktreeStartFromOverrides: field({ scope: 'profile', parse: parseWorktreeStartFromOverrides, ui: configField('settingsWorktreeStartFromOverrides') }),
@@ -548,7 +579,7 @@ export const SETTINGS_REGISTRY = {
   smallModelOverride: field({ scope: 'profile', parse: parseNonEmptyString }),
   walkthroughModelOverride: field({ scope: 'profile', parse: parseNonEmptyString }),
   zenModel: field({ scope: 'profile', parse: parseNonEmptyTrimmedString }),
-  // The model-prefs auto-save owns these six with its own debounce.
+  // Model preference writes share the debounce in modelPrefsAutoSave.
   favoriteModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(64), ui: uiStore('favoriteModels', setUi('favoriteModels'), { autoSave: false }) }),
   hiddenModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(1024), ui: uiStore('hiddenModels', setUi('hiddenModels'), { autoSave: false }) }),
   collapsedModelProviders: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('collapsedModelProviders', setUi('collapsedModelProviders'), { autoSave: false }) }),
@@ -558,13 +589,28 @@ export const SETTINGS_REGISTRY = {
   recentAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('recentAgents', setUi('recentAgents'), { autoSave: false }) }),
   favoriteAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('favoriteAgents', setUi('favoriteAgents'), { autoSave: false }) }),
   recentEfforts: field({ scope: 'profile', parse: parseRecentEfforts, ui: uiStore('recentEfforts', setUi('recentEfforts'), { autoSave: false }) }),
+  modelDefaultVariants: field({ scope: 'profile', parse: parseModelDefaultVariants, ui: uiStore('modelDefaultVariants', setUi('modelDefaultVariants'), { autoSave: false }) }),
   providerOrder: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('providerOrder', (v) => useUIStore.getState().setProviderOrder(v)) }),
 
   // ── Sessions and summaries (profile) ──
   sessionRecapEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionRecapEnabled', (v) => useUIStore.getState().setSessionRecapEnabled(v)) }),
   sessionSuggestionEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionSuggestionEnabled', (v) => useUIStore.getState().setSessionSuggestionEnabled(v)) }),
   sessionWorkEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionWorkEnabled', (v) => useUIStore.getState().setSessionWorkEnabled(v)) }),
+  continueWithModelMode: field({ scope: 'profile', parse: parseOneOf(CONTINUE_WORK_MODES), ui: uiStore('continueWithModelMode', (v) => useUIStore.getState().setContinueWithModelMode(v)) }),
+  // How sessions enter In work. The OpenChamber server opens them, which VS
+  // Code does not have.
+  sessionWorkEntry: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseSessionWorkEntry,
+    ui: uiStore('sessionWorkEntry', (v) => useUIStore.getState().setSessionWorkEntry(v)),
+  }),
   sessionReviewOfferEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('sessionReviewOfferEnabled', (v) => useUIStore.getState().setSessionReviewOfferEnabled(v)) }),
+  activeRunModelChangeBehavior: field({
+    scope: 'profile',
+    parse: parseOneOf(['next-message', 'restart'] as const),
+    ui: uiStore('activeRunModelChangeBehavior', (v) => useUIStore.getState().setActiveRunModelChangeBehavior(v)),
+  }),
   sessionGoalEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalEnabled', (v) => useUIStore.getState().setSessionGoalEnabled(v)) }),
   // Who checks goal progress. The goal loop runs on the OpenChamber server,
   // which VS Code does not have.

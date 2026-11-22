@@ -1,11 +1,11 @@
 <!--
-  developing-today/openchamber fork notice:
+  developing-today-forks/openchamber fork notice:
   This fork tracks upstream openchamber/openchamber (branch main).
   Latest upstream commit merged: 2b94db8470ca77d946917e937e3b04d7b0b678bc (feat(render): let agents ask the user to choose on a page, Fri Oct 16 03:45:18 2026 +0300) via merge commit 8f9956331.
 -->
 
 > [!NOTE]
-> **Fork Information (`developing-today/openchamber`):**
+> **Fork Information (`developing-today-forks/openchamber`):**
 > This repository is a fork of [OpenChamber](https://github.com/openchamber/openchamber) tracking upstream `main`.
 > - **Latest upstream commit merged**: `2b94db8470ca77d946917e937e3b04d7b0b678bc` (Fri Oct 16 2026, merged via `8f9956331`).
 >
@@ -16,7 +16,7 @@
 > - **Review & Update Action Buttons**: Direct launcher buttons with configurable trigger mode (prefill in composer vs. auto-send immediately) for `/routing-review` and `/plan-update`.
 > - **Control & Workspace Enhancements**: Worktree-by-default sessions, project control actions (`projects.add`/`projects.remove`), and fork-specific release update resolution.
 > - **MCPX Secret Management**: Native UI prompts for JIT secrets required by MCP servers across desktop, web, VS Code, and mobile.
-> - **Inter-session Messaging**: A Messages surface (inbox of messages agents send you, topics with threads, hide and restore history, soft write limits, meaning-based search, session chains and logs), chat rows for delivered messages, toasts for messages to you, and Settings → Messaging for the local embedding model, remote embeddings, delivery, presets and variables. Needs an OpenCode build with messaging (developing-today/opencode).
+> - **Inter-session Messaging**: A Messages surface (inbox of messages agents send you, topics with threads, hide and restore history, soft write limits, meaning-based search, session chains and logs), chat rows for delivered messages, toasts for messages to you, and Settings → Messaging for the local embedding model, remote embeddings, delivery, presets and variables. Needs an OpenCode build with messaging (developing-today-forks/opencode).
 
 # <picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/openchamber-logo-dark.svg"><img src="docs/references/badges/openchamber-logo-light.svg" width="32" height="32" align="absmiddle" /></picture> OpenChamber
 

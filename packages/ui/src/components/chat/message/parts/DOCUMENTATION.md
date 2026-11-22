@@ -89,6 +89,26 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
+### Question rows after the call ended
+
+`QuestionToolDetails` shows an agent's `question` call with every question
+and option however the call ended. Once it has ended, Answer (Answer again,
+or Answer anyway for a timed-out call) opens the questions as a form whose
+answers reach the agent as a new message. Every such answer is late, so the
+form also asks how the agent should use it (`LateAnswerMode` in
+`lib/questionTimeout.ts`: do exactly this, FYI what I would have done, or
+consider them if not done yet; the last is the default) and takes an
+optional note; both go into the message after the answers
+(`formatQuestionAnswers`). A call that `sync/question-timeouts.ts` closed on
+its timeout is drawn greyed out with "Timed out" in its row header and its
+expanded body; one left to answer later says the agent went on, not greyed.
+Either replaces the result text, which is the message OpenChamber closed it
+with. A dismissed call keeps "Not answered" with OpenCode's reason, and any
+call without returned answers offers Answer anyway. Copy questions and
+answers puts every question, its options and the answer shown (or the picks
+kept from the dock) on the clipboard as Markdown
+(`formatQuestionsAsMarkdown`).
+
 ### Bidirectional prose
 
 Shared chat CSS applies `unicode-bidi: plaintext` to prose blocks, including
@@ -253,12 +273,14 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   file's token gets its span and link a moment after the message shows.
 - A long message lexes in time proportional to its length in every engine.
   marked runs its `^`-anchored block rules on the rest of the message at each
-  block; JavaScriptCore (Safari, the iOS app's WebView, Bun tests) retried a
-  failed `^` match at every later position, so 16,000 short paragraphs cost
-  about a minute there and milliseconds in V8. `markedAnchoredRules.ts` makes
-  those rules sticky once at module load, with `exec` resetting `lastIndex`, so
-  matches are unchanged; `markedAnchoredRules.test.ts` checks the tokens and
-  that four times the paragraphs takes under eight times as long.
+  block; older JavaScriptCore (Bun 1.3.11, and Safari and iOS WebKit before
+  the release in macOS 27.0.1) retried a failed `^` match at every later
+  position, so 16,000 short paragraphs cost about a minute there and
+  milliseconds in V8. `markedAnchoredRules.ts` makes those rules sticky once at
+  module load, with `exec` resetting `lastIndex`, so matches are unchanged;
+  `markedAnchoredRules.test.ts` checks the tokens and that the rules are
+  pinned. There is no timing test: the engines CI and current Safari run are
+  fast either way, so one could only fail on noise.
 - Assistant images appear where the text puts them. The Markdown renderer
   draws assistant image syntax as a label, the shared image icon and the file
   name, and never loads an image itself (`label` mode in `markdownCore.ts`);
@@ -282,13 +304,14 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   In server-backed runtimes, the first label of a part to near the viewport
   prepares all of that part's local images (at most 12) in one request to the
   grant route, then loads them through the authenticated `/api/fs/raw` asset
-  route; the preview prepares again, so an expired grant is renewed. Embedded
+  route; the preview prepares again rather than reusing the cached result. Embedded
   images are validated in the browser and limited to 10 MiB. VS Code loads
   workspace-contained images through its local filesystem bridge and never
   calls the grant route; images outside the workspace stay labels there.
-  Workspace-external images, wherever they are on the machine, receive the
-  existing path-bound `outsideFileGrant` only when the server verifies the
-  exact source in the owning assistant message and the file's signature.
+  Workspace-external images, wherever they are on the machine, are read under
+  normal server authentication and OS permissions (a91777602) once the server
+  verifies the exact source in the owning assistant message and the file's
+  signature.
 - `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.
@@ -316,7 +339,7 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
 - A `subagent` call that went to the background (`background: true`, or moved there with `session.background`) settles at once with `metadata.status: "running"` and the child in `metadata.sessionID`. `SubagentToolPartContent` rebuilds it from the child (`backgroundSubagentPart.ts`): running while the child session is active in `global-session-status`, then finished, failed or stopped from the report OpenCode appends (`findSubagentRun`), with the `in background` header label while it runs, `stopped` after a cancel, and the stop action described for subagent rows above. `ChatContainer` drops that report from the timeline (`keepCommandSubagentReports`), so the subagent stays where it was started instead of reappearing as a new turn at the end. Only reports of `subagent: true` commands, which have no call row, still render as their own `TimelineNotice` turn, and only when the child started inside the loaded history; any other report (a call not loaded yet, an unknown child) stays out of the chat and is reachable from the session's subagent list, so loading older history never makes the chat shift.
 - The result of a session the agent dispatched with `returnResult` arrives as a `synthetic` message with `source: "openchamber-session"` (`@/lib/opencode/dispatched-session`, delivered by the server's `lib/dispatch-results`). It is a background report like a subagent run (`isBackgroundReportEntry`): it opens a turn, so the woken agent's reply renders below it, and a fork after an answer cuts before it. `TimelineNotice` renders it as one collapsed row, `Session finished: <title>` (failed / stopped variants carry the status icon), that opens to the answer as Markdown with an `Open session` action going through `openSessionLink`.
 - A message another session or the person sent this one through OpenCode messaging arrives as a `synthetic` message with `source: "messaging"` (`@/lib/opencode/messaging`, `readMessagingNotice`). It is a background report too: it opens a turn, so the woken agent's reply renders below it. `TimelineNotice` renders one collapsed row naming the sender and the topic (session IDs in the topic name read as session titles), opening to the body as Markdown, with `Open sender` and, on desktop and web, `Open in Messages`, which opens the topic at that message in the Messages surface. A message a session sent up to the person (`type: "user"`) opens by default, and when its metadata says `audience: "user"` the row says the agent does not see it.
-- A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn.
+- A session notice is a labelled message OpenCode, a plugin or OpenChamber puts into a session: a `synthetic` message with a `description`, or the `system` message OpenCode writes when the session's instructions change. `@/lib/opencode/session-notices` decides which ones the timeline shows (plugin notices, a restart, a `!command` that could not start, a move to another folder), and its header lists every kind, shown and hidden, with the reason; change that list there when a kind turns out to be noise. The rest about the session's instructions (skills, MCP servers, instruction files, "Loaded AGENTS.md") stays hidden as noise. The live `session.instructions.updated` event gets the `instructionSources` metadata OpenCode stores, so a live move reads like one loaded from history. A shown notice draws through `SessionNoticeBlock` as one folded row with an info icon (a `!command` that could not start takes the error icon) that opens to the text the model received. `attachSyntheticContext` places it: a notice that lands while a step runs becomes a row of that step, the final step included after it answers (the notice came before the step's `time.completed`) and also when a prompt was queued behind the running step; one that lands before the run's first step joins that step, and until the step exists turn projection keeps it in the prompt's turn (`TurnRecord.waitingNotices`, drawn by `TurnItem`), so it shows even when the run fails or is stopped before its first token and the turn stays the live tail. The row is a tool part only OpenChamber makes (`SESSION_NOTICE_TOOL`) that records whether it sits before or after the step's own parts, so Activity counts and trims it with the step's other rows and `MessageBody` draws it as a notice; `streamingTailEntry` puts these rows back before or after the step's live parts, and a turn whose only row is a notice gets no Activity fold (`hasLiveActivity`). A notice after an answer stays its own entry between turns; when a step follows, the last such notice opens that step's turn, as a hidden one did before, and a notice the answer took moves out of it to open that turn. A handoff note ("Continued with <model>", `@/lib/opencode/model-handoff`) has a rule of its own. The continue sequence stops the run before it admits the note, so the note never joins that run's last step, even one this client closed with a clock that reads later than the note's. It goes on with the "Continue" prompt that follows it and joins the new run's first step like a notice that came after the prompt, so it renders below the model-changed divider and above the new model's reply. Left where OpenCode stores it, before the prompt, it would sit between the turns, above the divider for the switch it belongs to.
 - Reasoning streaming presentation derives from the live stream phase (`streaming`/`cooldown`), never from missing persisted timing: a cached part without `time.end` is not live, and a part whose `time.end` is set never streams (issue #2020).
 - Text that draws nothing takes no space (#5215). Some models send text parts holding only a zero-width space between steps, and `trim()` keeps those characters, so each became a blank line in Activity. `lib/invisibleText.ts` (`isInvisibleText`: whitespace plus Unicode's default-ignorable characters) is the one test for "empty" text: `isEmptyTextPart`, the assistant text, reasoning and user text renderers, turn projection, the turn summary and the live turn's final-answer check all use it, and the markdown splitter (`markdown/markdownCore.ts`) drops a top-level block whose source is only such characters. Only a whole part or block counts, so a ZWJ inside an emoji or a ZWNJ inside a Persian word stays. A CSS rule cannot do this: `:empty` does not match an element holding a zero-width character.
 - Assistant text parts carry the same part-finalization gate (`assistantTextVisibility.ts`): the block-level reveal (`lib/streamTextCommit.ts`) holds a still-growing part's unfinished block, and the reply takes new text at most every 400 ms, while a part sealed with `time.end` renders in full immediately — including while the turn stays blocked on a pending question or permission ask (#3277).

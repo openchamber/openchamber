@@ -11,8 +11,17 @@ const stripIpv6Brackets = (value) => {
 
 const normalizeIpv4MappedAddress = (host) => {
   const normalized = stripIpv6Brackets(host);
-  const match = normalized.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-  return match ? match[1] : normalized;
+  const dotted = normalized.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted) return dotted[1];
+  // URL parsing rewrites a mapped address to hex groups
+  // (::ffff:127.0.0.2 becomes ::ffff:7f00:2); decode that form too.
+  const hex = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = Number.parseInt(hex[1], 16);
+    const lo = Number.parseInt(hex[2], 16);
+    return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+  }
+  return normalized;
 };
 
 const isLoopbackIpv4 = (host) => {
@@ -24,9 +33,25 @@ const isLoopbackIpv4 = (host) => {
 export const isLoopbackBindHost = (host) => {
   const normalized = normalizeIpv4MappedAddress(host);
   if (!normalized) return false;
-  if (normalized === 'localhost') return true;
+  if (normalized === 'localhost' || normalized.endsWith('.localhost')) return true;
   if (isLoopbackIpv4(normalized)) return true;
   return net.isIP(normalized) === 6 && normalized === '::1';
+};
+
+// Loopback judgement for a full URL: parse it and range-test the parsed
+// hostname, never the raw string — a prefix test judges
+// http://localhost.evil.example and http://localhost@evil.example as
+// loopback, and an exact-match list misses the rest of 127/8 and
+// ::ffff:-mapped forms. Unparseable values are not loopback.
+export const isLoopbackUrl = (raw) => {
+  if (typeof raw !== 'string') return false;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  return isLoopbackBindHost(url.hostname);
 };
 
 export const isNetworkExposedBindHost = (host) => !isLoopbackBindHost(host);

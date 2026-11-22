@@ -9,6 +9,7 @@ import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
 import './lib/debug'
 import { initializeAppearancePreferences } from './lib/persistence'
+import { startDeviceSettingsReport } from './lib/settings/deviceSettingsReport'
 import { startAppearanceAutoSave } from './lib/appearanceAutoSave'
 import { applyPersistedDirectoryPreferences } from './lib/directoryPersistence'
 import { preloadMarkdownRenderer } from './components/chat/markdownRendererLoader'
@@ -51,6 +52,7 @@ void initializeAppearancePreferences().then(() => {
   startAppearanceAutoSave();
   startModelPrefsAutoSave();
   startTypographyWatcher();
+  startDeviceSettingsReport();
 }).catch((err) => {
   console.error('[main] appearance init failed:', err);
 });

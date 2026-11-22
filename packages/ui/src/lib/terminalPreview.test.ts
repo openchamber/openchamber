@@ -45,6 +45,39 @@ describe('announced preview url', () => {
   test('ignores a routing-table line, which announces nothing', () => {
     expect(extractTerminalPreviewUrl('[gateway] - analytics -> http://127.0.0.1:4323')).toBeNull();
   });
+
+  test('rejects an announced port above 65535 instead of returning an invalid URL', () => {
+    expect(extractAnnouncedUrls('Local: http://localhost:99999/')).toEqual([]);
+    expect(extractAnnouncedUrls('Local: http://localhost:65536/')).toEqual([]);
+  });
+
+  test('never truncates a 6-digit port into a different server', () => {
+    expect(extractAnnouncedUrls('Local: http://localhost:123456/')).toEqual([]);
+  });
+
+  test('keeps a 1-digit port instead of dropping it to port 80', () => {
+    expect(extractTerminalPreviewUrl('Local: http://localhost:8/')).toBe('http://localhost:8/');
+  });
+
+  test('rejects an out-of-range Python server port reached through the URL on the same line', () => {
+    expect(extractAnnouncedUrls('Serving HTTP on 0.0.0.0 port 99999 (http://0.0.0.0:99999/) ...')).toEqual([]);
+  });
+
+  test('rejects an announced port of 0, which no server can be listening on', () => {
+    expect(extractAnnouncedUrls('Local: http://localhost:0/')).toEqual([]);
+    expect(extractAnnouncedUrls('Local: http://localhost:0000/')).toEqual([]);
+    expect(extractTerminalPreviewUrl('Local: http://localhost:0/')).toBeNull();
+  });
+
+  test('keeps a valid address sharing a line with a port-0 address', () => {
+    expect(extractAnnouncedUrls('Local: http://localhost:0/ http://localhost:5173/')).toEqual(['http://localhost:5173/']);
+    expect(extractAnnouncedUrls('Local: http://localhost:0000/ http://localhost:5173/')).toEqual(['http://localhost:5173/']);
+    expect(extractAnnouncedUrls('Local: http://localhost/ http://localhost:0/')).toEqual(['http://localhost/']);
+  });
+
+  test('rejects a Python server port of 0 reached through the URL on the same line', () => {
+    expect(extractAnnouncedUrls('Serving HTTP on 0.0.0.0 port 0 (http://0.0.0.0:0/) ...')).toEqual([]);
+  });
 });
 
 describe('project action url', () => {
@@ -65,6 +98,10 @@ describe('project action url', () => {
   test('prefers a loopback candidate over a public one', () => {
     const output = 'see https://example.com:8443/app and http://127.0.0.1:5173/ui';
     expect(extractProjectActionUrl(output)).toBe('http://127.0.0.1:5173/ui');
+  });
+
+  test('never opens a port-0 address from unannounced output', () => {
+    expect(extractProjectActionUrl('see http://localhost:0/ here')).toBeNull();
   });
 
   test('returns nothing when the output has no url with a port', () => {
@@ -169,6 +206,10 @@ describe('portless', () => {
     expect(proxied).toEqual([4123]);
     expect(extractAnnouncedUrls(second, { proxiedPorts: proxied })).toEqual([]);
     expect(extractProjectActionUrl(second, { proxiedPorts: proxied })).toBeNull();
+  });
+
+  test('remembers a 1-digit proxied port', () => {
+    expect(extractProxiedPorts('-- Using port 8')).toEqual([8]);
   });
 
   test('keeps other servers of the same run', () => {

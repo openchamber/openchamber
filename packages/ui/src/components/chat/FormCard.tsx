@@ -16,6 +16,8 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentCard } from './WebSearchConsent';
+import { answersFromFormValues, rememberPendingQuestionAnswers } from './questionAnswers';
+import { questionCallKey, questionFormCall } from '@/lib/opencode/question';
 import {
     type FormValues,
     buildFormAnswer,
@@ -70,6 +72,14 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
         setShowErrors(false);
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [fieldsSignature, form.id]);
+
+    // An agent's question keeps its answers with its call, so its transcript
+    // row can offer them again if the form ends unanswered (see FormDock).
+    const questionCall = React.useMemo(() => questionFormCall(form), [form]);
+    React.useEffect(() => {
+        if (!questionCall) return;
+        rememberPendingQuestionAnswers(questionCallKey(questionCall), answersFromFormValues(fields, values));
+    }, [fields, questionCall, values]);
 
     const shown = React.useMemo(() => visibleFields(fields, values), [fields, values]);
     const missing = React.useMemo(() => missingRequiredKeys(fields, values), [fields, values]);

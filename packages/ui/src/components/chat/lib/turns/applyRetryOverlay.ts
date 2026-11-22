@@ -1,5 +1,6 @@
-import type { Message } from '@/lib/opencode/model';
+import { getLastConversationRecord, type Message } from '@/lib/opencode/model';
 
+import { scheduledRetryOf } from '../../sessionErrorNoticeState';
 import type { ChatMessageEntry } from './types';
 
 const resolveMessageRole = (message: ChatMessageEntry): string | null => {
@@ -21,6 +22,13 @@ export const applyRetryOverlay = (
     input: RetryOverlayInput,
 ): ChatMessageEntry[] => {
     if (!input.sessionId) {
+        return messages;
+    }
+
+    // OpenCode 2.x records the retry on the step it will retry, and the retry
+    // notice under the transcript (`SessionRetryNotice`) shows it with the
+    // same reason. The box is for a retry status that comes without one.
+    if (scheduledRetryOf(getLastConversationRecord(messages)?.info)) {
         return messages;
     }
 

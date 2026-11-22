@@ -556,6 +556,20 @@ describe('core-routes', () => {
     ]);
   });
 
+  it('skips a 127/8 request origin as the fallback candidate', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '127.0.0.2:2606')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+    ]);
+  });
+
   it('folds in a relay candidate when the host relay is enabled', async () => {
     const relayCandidate = {
       type: 'relay',

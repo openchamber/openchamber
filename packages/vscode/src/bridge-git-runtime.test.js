@@ -11,6 +11,7 @@ const gitService = {
   getWorktreeBootstrapStatus: mock(),
   removeWorktree: mock(),
   resolveRepositoryPrefix: mock(),
+  setGitIdentity: mock(),
 };
 
 // OpenCode answers the location list with no running locations and every eviction with 204.
@@ -304,5 +305,41 @@ describe('bridge git runtime index mutations', () => {
     const disposeInstance = gitService.removeWorktree.mock.calls[0][1].disposeInstance;
     await expect(disposeInstance('/repo/wt')).rejects.toThrow('OpenCode API URL is not available');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('bridge git runtime identity', () => {
+  const identityRequest = {
+    id: 'identity',
+    type: 'api:git/identity',
+    payload: { directory: '/repo', method: 'POST', userName: 'Alice', userEmail: 'alice@example.com' },
+  };
+
+  it('does not answer success for an identity write the service reported as failed', async () => {
+    gitService.setGitIdentity.mockReset();
+    gitService.setGitIdentity.mockResolvedValue({ success: false });
+
+    const response = await handleStandardGitBridgeMessage(identityRequest);
+
+    expect(response).toEqual({
+      id: 'identity',
+      type: 'api:git/identity',
+      success: false,
+      data: { success: false },
+    });
+  });
+
+  it('answers success for an applied identity', async () => {
+    gitService.setGitIdentity.mockReset();
+    gitService.setGitIdentity.mockResolvedValue({ success: true });
+
+    const response = await handleStandardGitBridgeMessage(identityRequest);
+
+    expect(response).toEqual({
+      id: 'identity',
+      type: 'api:git/identity',
+      success: true,
+      data: { success: true },
+    });
   });
 });

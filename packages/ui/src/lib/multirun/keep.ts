@@ -1,4 +1,5 @@
 import { opencodeClient } from '@/lib/opencode/client';
+import { SESSION_LIST_MAX_LIMIT } from '@/lib/opencode/sessionListLimit';
 import type { Session } from '@/lib/opencode/model';
 import { normalizePath } from '@/lib/pathNormalization';
 import { snapshotGitWorktree } from '@/lib/gitApi';
@@ -25,8 +26,8 @@ export type KeepRunResult = {
 };
 
 /** Private ref that preserves a lane's complete work before its worktree is removed. */
-export const runSnapshotRef = (run: Pick<MultiRunSummary, 'key' | 'groupSlug' | 'lanes' | 'fusions'>, sessionId: string): string => {
-  const member = [...run.lanes, ...run.fusions].find((entry) => entry.sessionId === sessionId);
+export const runSnapshotRef = (run: Pick<MultiRunSummary, 'key' | 'groupSlug' | 'lanes' | 'fusions' | 'parents'>, sessionId: string): string => {
+  const member = [...run.lanes, ...run.fusions, ...run.parents].find((entry) => entry.sessionId === sessionId);
   const group = member?.identity.group;
   const groupPart = group?.kind === 'id' ? group.id : run.groupSlug.replace(/[^A-Za-z0-9._-]+/g, '-') || 'legacy';
   return `refs/openchamber/runs/${groupPart}/${sessionId.replace(/[^A-Za-z0-9._-]+/g, '-')}`;
@@ -44,7 +45,7 @@ const projectRefFor = (path: string): ProjectRef => {
 export async function resolveRunMemberLocation(session: Session, run: MultiRunSummary): Promise<RunMemberLocation | null> {
   const directory = normalizePath(session.directory);
   if (!directory) return null;
-  const member = [...run.lanes, ...run.fusions].find((entry) => entry.sessionId === session.id);
+  const member = [...run.lanes, ...run.fusions, ...run.parents].find((entry) => entry.sessionId === session.id);
   return locateRunMember(directory, {
     projectPaths: useProjectsStore.getState().projects
       .map((project) => normalizePath(project.path))
@@ -126,7 +127,7 @@ export async function keepRunMember(
       // checkout (`<worktree>/ai`) is asked too.
       const directories = [...new Set([worktree.path, current.directory].map((entry) => normalizePath(entry) ?? entry))];
       const remaining = (await Promise.all(directories.map((directory) => (
-        listGlobalSessionPages(listSessionPage, { directory, pageSize: 500 })
+        listGlobalSessionPages(listSessionPage, { directory, pageSize: SESSION_LIST_MAX_LIMIT })
       )))).flat();
       assertCurrent();
       if (remaining.some((session) => session.id !== sessionId && !session.time?.archived)) {

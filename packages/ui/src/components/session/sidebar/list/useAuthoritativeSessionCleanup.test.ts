@@ -1,9 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { Session } from '@/lib/opencode/model';
+import * as runtimeSwitchModule from '@/lib/runtime-switch';
+import * as sessionActionsModule from '@/sync/session-actions';
 import { installHookTestDom } from '../test-utils/testDom';
+import { restoreModuleMock } from '../test-utils/moduleMocks';
 import {
   buildAuthoritativeSessionIdentityMap,
   findRemovedAuthoritativeSessions,
@@ -13,12 +16,18 @@ import {
 const session = (id: string, directory = '/repo'): Session => ({ id, directory }) as Session;
 
 const cleanups: Array<{ runtimeKey: string; directory: string; sessionId: string }> = [];
+const realRuntimeSwitch = { ...runtimeSwitchModule };
+const realSessionActions = { ...sessionActionsModule };
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'runtime' }));
 mock.module('@/sync/session-actions', () => ({
   reconcileExternallyDeletedSession: (identity: { runtimeKey: string; directory: string; sessionId: string }) => {
     cleanups.push(identity);
   },
 }));
+afterAll(async () => {
+  await restoreModuleMock('@/lib/runtime-switch', realRuntimeSwitch, () => import('@/lib/runtime-switch'));
+  await restoreModuleMock('@/sync/session-actions', realSessionActions, () => import('@/sync/session-actions'));
+});
 const { useAuthoritativeSessionCleanup } = await import('./useAuthoritativeSessionCleanup');
 const { useSpacesStore } = await import('@/lib/spaces/spaces-store');
 

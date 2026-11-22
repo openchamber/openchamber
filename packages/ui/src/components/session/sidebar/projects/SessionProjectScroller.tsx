@@ -304,6 +304,11 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   }, [childStores, t]);
 
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
+    if (row.kind === 'section-divider') {
+      // Headerless lists keep the sections' order and mark their boundaries
+      // with a thin line: `my-1` (8px) plus the 1px border matches its estimate.
+      return <div role="separator" className="mx-2 my-1 border-t border-border/50" />;
+    }
     if (row.kind === 'activity-header') {
       return <SortableGroupItem id={sectionDragId(row.activityKey)} disabled={!model.sectionDragEnabled || row.forceExpanded || model.state.editingId !== null}>
         {(dragHandleProps) => <CrossfadeZoneHeader

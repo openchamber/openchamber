@@ -14,7 +14,7 @@ import { createSettingsNormalizationRuntime } from './settings-normalization-run
 const testFilePath = fileURLToPath(import.meta.url);
 const packagesWebDir = join(dirname(testFilePath), '..', '..', '..');
 
-const createTestHelpers = () => createSettingsHelpers({
+const createTestHelpers = (extra = {}) => createSettingsHelpers({
   normalizePathForPersistence: (value) => value,
   normalizeDirectoryPath: (value) => value,
   normalizeTunnelBootstrapTtlMs: (value) => value,
@@ -30,6 +30,7 @@ const createTestHelpers = () => createSettingsHelpers({
   sanitizeModelRefs: () => undefined,
   sanitizeSkillCatalogs: () => undefined,
   sanitizeProjects: () => undefined,
+  ...extra,
 });
 
 const createTestHelpersWithRealSanitizers = () => {
@@ -74,6 +75,75 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: ' client-id ' })).toEqual({ gitlabClientId: 'client-id' });
     expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: '' })).toEqual({});
     expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: 42 })).toEqual({});
+  });
+
+  it('never splits a surrogate pair at the PWA app-name cap (oracle: astral char straddling offset 64)', () => {
+    const helpers = createTestHelpers();
+    const name = 'a'.repeat(63) + '😀' + 'tail';
+    const sanitized = helpers.sanitizeSettingsUpdate({ pwaAppName: name });
+    expect(sanitized.pwaAppName).toBe('a'.repeat(63));
+    expect(helpers.normalizePwaAppName(name, undefined)).toBe('a'.repeat(63));
+    // A lone surrogate would encode as U+FFFD and not round-trip.
+    expect(new TextDecoder().decode(new TextEncoder().encode(sanitized.pwaAppName))).toBe(sanitized.pwaAppName);
+  });
+
+  it('never splits a grapheme cluster at the PWA app-name cap (oracle: UAX #29 extended grapheme clusters, cap 64)', () => {
+    const helpers = createTestHelpers();
+    // 'e' + U+0301 is one cluster of 2 code units: 63 + 2 straddles the
+    // cap, so the cluster drops whole instead of leaving a bare 'e'.
+    const combining = 'a'.repeat(63) + 'e\u0301' + 'tail';
+    expect(helpers.normalizePwaAppName(combining, undefined)).toBe('a'.repeat(63));
+    expect(helpers.sanitizeSettingsUpdate({ pwaAppName: combining }).pwaAppName).toBe('a'.repeat(63));
+    // Exact fit: 62 + 2 = 64 keeps the complete accented cluster.
+    expect(helpers.normalizePwaAppName('a'.repeat(62) + 'e\u0301', undefined)).toBe('a'.repeat(62) + 'e\u0301');
+    // A joined ZWJ family sequence straddling the cap drops whole: no
+    // lone first emoji and no dangling ZWJ.
+    const family = '\u{1F469}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}';
+    const joined = helpers.normalizePwaAppName('a'.repeat(62) + family + 'tail', undefined);
+    expect(joined).toBe('a'.repeat(62));
+    expect(joined.endsWith('\u200D')).toBe(false);
+  });
+
+  it('still cuts an over-cap ASCII PWA app name at exactly 64 code units', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ pwaAppName: 'a'.repeat(80) }).pwaAppName).toBe('a'.repeat(64));
+  });
+
+  it('never splits a surrogate pair at the settings sanitizer clamps (oracle: astral char straddling each cap drops its high half, ASCII controls cut at exactly the cap)', () => {
+    const helpers = createTestHelpers();
+    const emoji = '\u{1F600}';
+    const clean = (value) => new TextDecoder().decode(new TextEncoder().encode(value));
+    // Fonts at 100.
+    expect(helpers.sanitizeSettingsUpdate({ customUiFont: 'a'.repeat(99) + emoji + 'tail' }).customUiFont).toBe('a'.repeat(99));
+    expect(helpers.sanitizeSettingsUpdate({ customMonoFont: 'b'.repeat(99) + emoji + 'tail' }).customMonoFont).toBe('b'.repeat(99));
+    expect(helpers.sanitizeSettingsUpdate({ customUiFont: 'a'.repeat(150) }).customUiFont).toBe('a'.repeat(100));
+    // Vim mappings at 10,000.
+    const vim = helpers.sanitizeSettingsUpdate({ fileEditorVimMappings: 'a'.repeat(9_999) + emoji + 'tail' }).fileEditorVimMappings;
+    expect(vim).toBe('a'.repeat(9_999));
+    expect(helpers.sanitizeSettingsUpdate({ fileEditorVimMappings: 'a'.repeat(12_000) }).fileEditorVimMappings).toBe('a'.repeat(10_000));
+    // Shortcut override key and value at 128.
+    const overrides = helpers.sanitizeSettingsUpdate({ shortcutOverrides: { ['k'.repeat(127) + emoji + 'tail']: 'v'.repeat(127) + emoji + 'tail' } }).shortcutOverrides;
+    expect(Object.keys(overrides)).toEqual(['k'.repeat(127)]);
+    expect(Object.values(overrides)).toEqual(['v'.repeat(127)]);
+    // Usage model groups: id at 64, label and renamed label at 128.
+    const groups = helpers.sanitizeSettingsUpdate({
+      usageModelGroups: {
+        prov: {
+          customGroups: [{ id: 'g'.repeat(63) + emoji + 'tail', label: 'l'.repeat(127) + emoji + 'tail', models: [] }],
+          renamedGroups: { gid: 'r'.repeat(127) + emoji + 'tail' },
+        },
+      },
+    }).usageModelGroups;
+    expect(groups.prov.customGroups[0].id).toBe('g'.repeat(63));
+    expect(groups.prov.customGroups[0].label).toBe('l'.repeat(127));
+    expect(groups.prov.renamedGroups.gid).toBe('r'.repeat(127));
+    // Dismissed update version at 128.
+    const version = helpers.sanitizeSettingsUpdate({ openCodeUpdateToastDismissedVersion: 'v'.repeat(127) + emoji + 'tail' }).openCodeUpdateToastDismissedVersion;
+    expect(version).toBe('v'.repeat(127));
+    // Nothing persisted ends in a lone surrogate: every value round-trips clean.
+    for (const value of [vim, version, groups.prov.customGroups[0].id, groups.prov.customGroups[0].label]) {
+      expect(clean(value)).toBe(value);
+    }
   });
 
   it('keeps the machine of the Docker over SSH place as an SSH destination, and takes it away with an empty string', () => {
@@ -207,6 +277,16 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: true })).toEqual({ draftStartersVisible: true });
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: false })).toEqual({ draftStartersVisible: false });
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
+  });
+
+  it('keeps a known In work entry mode through a save and drops anything else', () => {
+    const helpers = createTestHelpers();
+
+    for (const sessionWorkEntry of ['off', 'every-message', 'jev']) {
+      expect(helpers.sanitizeSettingsUpdate({ sessionWorkEntry })).toEqual({ sessionWorkEntry });
+    }
+    expect(helpers.sanitizeSettingsUpdate({ sessionWorkEntry: 'always' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ sessionWorkEntry: true })).toEqual({});
   });
 
   it('sanitizes both Enter settings independently', () => {
@@ -438,6 +518,36 @@ describe('settings helpers', () => {
     });
     expect(helpers.formatSettingsResponse({ desktopMacMenuBarEnabled: false })).toMatchObject({
       desktopMacMenuBarEnabled: false,
+    });
+  });
+
+  it('maps legacy sidebarDetailedZoneRows into sidebarSessionRowDisplay.zoneLines', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ sidebarDetailedZoneRows: true })).toEqual({
+      sidebarSessionRowDisplay: { zoneLines: 'two' },
+    });
+    expect(helpers.sanitizeSettingsUpdate({ sidebarDetailedZoneRows: false })).toEqual({
+      sidebarSessionRowDisplay: { zoneLines: 'one' },
+    });
+    // The new key wins when both are present.
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarDetailedZoneRows: true,
+      sidebarSessionRowDisplay: { zoneLines: 'one' },
+    })).toEqual({
+      sidebarSessionRowDisplay: { zoneLines: 'one' },
+    });
+    // A new-key display without zoneLines still takes the legacy value.
+    expect(helpers.sanitizeSettingsUpdate({
+      sidebarDetailedZoneRows: true,
+      sidebarSessionRowDisplay: { showBranch: false },
+    })).toEqual({
+      sidebarSessionRowDisplay: { showBranch: false, zoneLines: 'two' },
+    });
+    expect(helpers.sanitizeSettingsUpdate({ sidebarDetailedZoneRows: 'yes' })).toEqual({});
+    // A profile holding only the old key round-trips through the response.
+    expect(helpers.formatSettingsResponse({ sidebarDetailedZoneRows: true })).toMatchObject({
+      sidebarSessionRowDisplay: { zoneLines: 'two' },
     });
   });
 
@@ -844,13 +954,13 @@ describe('settings registry gate', () => {
     lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode',
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
-    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarLayout: { sectionOrder: ['projects', 'chats'], attention: 'blocked', holdOpenSession: false, chatsGroupIndex: 2 },
+    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarHeaderless: true, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarSessionRowDisplay: { zoneLines: 'two', showBranch: false, showPrBadge: true, showProviderLogo: true, showProjectIcon: true, showGoal: true, showTime: true }, sidebarLayout: { sectionOrder: ['projects', 'chats'], attention: 'blocked', holdOpenSession: false, chatsGroupIndex: 2 },
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
-    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
+    defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true, modelChoiceRecordingEnabled: false,
     agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentToolsCodeMode: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionOnlyArchived: false, sessionRetentionAction: 'archive', mergedWorktreeCleanupEnabled: true, terminalShell: 'zsh', terminalLoginShells: ['zsh'],
     openInAppId: 'vscode', dictationEnabled: true, sttProvider: 'local', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', sttLocalModel: 'm', sttLanguage: 'en',
-    tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
+    tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, scheduledTasksMaxRunDurationMs: 3600000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
     sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarProjectSortOrder: 'manual', sidebarWorktreeSortOrder: 'recent',
@@ -861,17 +971,17 @@ describe('settings registry gate', () => {
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
-    fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, worktreeStartFrom: 'remote-default', worktreeStartFromOverrides: { quick: 'project-root' }, pullRequestWorktree: 'branch-off', worktreeBranchTemplate: 'dp/{name}', pullRequestBranchTemplate: '{name}-from-pr-{pr}', sessionTabsEnabled: true,
+    fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, questionTimeoutMinutes: 15, questionsInBackground: true, fileTreeSide: 'left', autoCreateWorktree: true, worktreeStartFrom: 'remote-default', worktreeStartFromOverrides: { quick: 'project-root' }, pullRequestWorktree: 'branch-off', worktreeBranchTemplate: 'dp/{name}', pullRequestBranchTemplate: '{name}-from-pr-{pr}', sessionTabsEnabled: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, persistChatDraft: true,
-    largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, agentTerminalsPlacement: 'sidebar', followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
+    largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, agentTerminalsPlacement: 'sidebar', followUpBehavior: 'steer', activeRunModelChangeBehavior: 'next-message', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     fontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', padding: 100, cornerRadius: 8,
     shortcutOverrides: { 'chat.send': 'mod+enter' },
     defaultModel: 'anthropic/claude', defaultVariant: 'high', defaultAgent: 'build', smallModelUseDefault: false, smallModelOverride: 'anthropic/haiku',
     walkthroughModelOverride: 'anthropic/claude', zenModel: 'zen/model',
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
-    recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
-    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, modelDefaultVariants: { 'anthropic/claude': 'high' }, providerOrder: ['anthropic'],
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionWorkEntry: 'jev', continueWithModelMode: 'keep', sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     sessionGoalWriterEnabled: true, sessionGoalWriterModel: 'anthropic/claude', sessionGoalWriterReview: true, sessionGoalWriterSendMode: 'goal-as-message', sessionGoalRewriteAll: true, sessionGoalAutoCreate: 'review',
     sessionGoalWriterVariant: 'low', sessionGoalWriterRememberChoice: true, sessionGoalObjectiveCharLimit: 12_000, sessionGoalCheckObjectiveCharLimit: 30_000,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
@@ -933,6 +1043,15 @@ describe('settings registry gate', () => {
     })).toEqual({});
   });
 
+  // Server-owned and read-only: the Tools page gates its prompt cache note on it, and
+  // a client must never be able to write it back.
+  it('reports whether managed tool switches apply live, and never accepts it as an update', () => {
+    expect(createTestHelpers().formatSettingsResponse({}).managedToolsApplyLive).toBe(false);
+    expect(createTestHelpers({ areManagedToolsLive: () => true }).formatSettingsResponse({}).managedToolsApplyLive).toBe(true);
+    expect(createTestHelpers({ areManagedToolsLive: () => false }).formatSettingsResponse({}).managedToolsApplyLive).toBe(false);
+    expect(createTestHelpers().sanitizeSettingsUpdate({ managedToolsApplyLive: true })).toEqual({});
+  });
+
   it('never returns secret keys from a formatted response', () => {
     const helpers = createTestHelpers();
     const secretKeys = Object.entries(registry.fields).filter(([, field]) => field.secret).map(([key]) => key);
@@ -982,5 +1101,21 @@ describe('settings registry gate', () => {
       autoSaveEnabled: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+
+  it('keeps the default for running work when continuing with another model through a save', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    for (const mode of ['stop', 'keep']) {
+      const accepted = helpers.sanitizeSettingsUpdate({ continueWithModelMode: mode });
+      expect(accepted).toEqual({ continueWithModelMode: mode });
+      const saved = helpers.mergePersistedSettings({ continueWithModelMode: mode === 'stop' ? 'keep' : 'stop' }, accepted);
+      expect(helpers.formatSettingsResponse(saved)).toMatchObject({ continueWithModelMode: mode });
+    }
+    for (const invalid of ['pause', '', 'KEEP', true, 1, null]) {
+      expect(helpers.sanitizeSettingsUpdate({ continueWithModelMode: invalid })).toEqual({});
+    }
+    // A save without the key leaves the stored choice alone.
+    const stored = helpers.mergePersistedSettings({ continueWithModelMode: 'keep' }, helpers.sanitizeSettingsUpdate({ sessionWorkEnabled: false }));
+    expect(helpers.formatSettingsResponse(stored)).toMatchObject({ continueWithModelMode: 'keep', sessionWorkEnabled: false });
   });
 });

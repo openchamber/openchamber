@@ -30,6 +30,7 @@ import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
 import { FormCard } from '../FormCard';
 import { SessionErrorNotice } from '../SessionErrorNotice';
+import { ContinueWithModelContext } from '../continueWithModelContext';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
@@ -469,8 +470,12 @@ const BtwMessages: React.FC<{
                 ) : null}
                 {/* A turn OpenCode stops before any reply exists (an unusable
                     model, a provider that fails to load) leaves only the
-                    question here; the same notice as the main chat says why. */}
-                <SessionErrorNotice sessionId={sessionRef.btwSessionId} directory={sessionRef.directory} />
+                    question here; the same notice as the main chat says why.
+                    The chat's "Continue with another model" is about the chat's
+                    session, not this side question, so it is not offered here. */}
+                <ContinueWithModelContext.Provider value={null}>
+                    <SessionErrorNotice sessionId={sessionRef.btwSessionId} directory={sessionRef.directory} />
+                </ContinueWithModelContext.Provider>
                 {/* Always reserve this row so the content does not shift down
                     by a line when the indicator disappears. */}
                 <div

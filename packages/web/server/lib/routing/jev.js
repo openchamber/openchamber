@@ -9,10 +9,49 @@ import {
   SAFETY_INSTRUCTIONS,
   SAFETY_KINDS,
 } from './defaults.js';
+import { MAX_DESCRIPTION_LENGTH, MAX_DETAILS_LENGTH } from './model-routes.js';
+import { readBoundedResponseText } from '../guests/response-body.js';
 
-export const buildRoutingRequest = ({ categories, history, request }) => {
+// A Jev answer is a small { answers } object, so 1 MiB is ample. The endpoint
+// can be one the user picked in Settings or an admin pinned, so its body is
+// untrusted input: ask() reads it through the bounded reader instead of
+// buffering it whole, the same contract as the guests and model-discovery
+// reads.
+export const JEV_MAX_RESPONSE_BYTES = 1024 * 1024;
+
+// A category whose model is a pool (`opencode-route/<id>`) runs on whatever
+// that pool picks; the pool's own description says what it is for.
+const ROUTE_PROVIDER_ID = 'opencode-route';
+// The pool keys Jev reads. `model-routes.js` validates them on save, but the
+// config file can be edited by hand, so each value is held to the same rules
+// here and one that breaks them reads as absent, as the Routing page reads it.
+const poolTextSchema = z.object({
+  description: z.string().max(MAX_DESCRIPTION_LENGTH).regex(/^[^\r\n]*$/).optional().catch(undefined),
+  details: z.string().max(MAX_DETAILS_LENGTH).optional().catch(undefined),
+});
+
+/**
+ * The criteria text of one category: its description, plus the description and
+ * details of the model pool it runs on, when it runs on one that has them.
+ * Jev's request keeps one string per category (`ROUTING_INSTRUCTIONS` note in
+ * DOCUMENTATION.md).
+ */
+const categoryCriteria = (category, pools) => {
+  if (category.model?.providerID !== ROUTE_PROVIDER_ID) return category.description;
+  const poolID = category.model.modelID;
+  const pool = poolTextSchema.safeParse(Object.hasOwn(pools, poolID) ? pools[poolID] : null);
+  if (!pool.success) return category.description;
+  const notes = [pool.data.description, pool.data.details]
+    .map((text) => text?.trim())
+    .filter(Boolean);
+  if (notes.length === 0) return category.description;
+  return `${category.description}\n\nRuns on the model pool "${poolID}": ${notes.join('\n')}`;
+};
+
+/** `pools` is the `experimental.model_routes` map (`model-routes.js` `readModelRoutes`). */
+export const buildRoutingRequest = ({ categories, history, request, pools = {} }) => {
   const criteria = {};
-  for (const category of categories) criteria[category.id] = category.description;
+  for (const category of categories) criteria[category.id] = categoryCriteria(category, pools);
   return {
     state: { history, request },
     questions: { category: { type: 'choice', instructions: ROUTING_INSTRUCTIONS, criteria } },
@@ -92,7 +131,8 @@ const responseSchema = z.union([directAnswersSchema, wrappedAnswersSchema]);
 export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS } = {}) => ({
   /**
    * `endpoint` comes from `classifierEndpoint`. Resolves to the parsed answers;
-   * throws with `status` on an HTTP error and `code: 'timeout'` on abort.
+   * throws with `status` on an HTTP error, `code: 'timeout'` on abort, and
+   * `code: 'response_too_large'` when the body crosses JEV_MAX_RESPONSE_BYTES.
    */
   ask: async (request, endpoint) => {
     const abort = new AbortController();
@@ -105,10 +145,17 @@ export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS 
         body: JSON.stringify({ ...request, model: endpoint.model }),
         signal: abort.signal,
       });
-      const text = await response.text();
+      const bounded = await readBoundedResponseText(response, JEV_MAX_RESPONSE_BYTES);
       if (!response.ok) {
         throw Object.assign(new Error(`Jev responded ${response.status}`), { status: response.status });
       }
+      if (bounded.tooLarge) {
+        throw Object.assign(new Error(`Jev response exceeded ${JEV_MAX_RESPONSE_BYTES} bytes`), { code: 'response_too_large' });
+      }
+      // Response.text() (the previous read) strips a leading UTF-8 BOM; the bounded
+      // reader's utf8 decode preserves it and JSON.parse rejects it, so strip it here
+      // to keep BOM-prefixed endpoint answers working.
+      const text = bounded.text.replace(/^\uFEFF/, '');
       const body = responseSchema.safeParse(JSON.parse(text));
       if (!body.success) throw new Error('Jev response has no answers');
       return { answers: body.data.answers, ms: Date.now() - started };

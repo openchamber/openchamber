@@ -165,6 +165,89 @@ describe('session assist runtime', () => {
     vi.unstubAllGlobals();
   });
 
+  it('never splits a surrogate pair at the recap/suggestion caps (oracle: astral chars straddling offsets 320/500)', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const persistSessionAssist = vi.fn(async () => undefined);
+    const records = [
+      { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
+      { id: 'msg_a', type: 'assistant', content: [{ type: 'text', text: 'All done.' }], finish: 'stop', time: { completed: 2 }, model: { providerID: 'p', id: 'm' } },
+      { id: 'msg_u', type: 'user', text: 'Do the thing' },
+    ];
+    const fetchMock = vi.fn(async (input) => {
+      const url = new URL(String(input));
+      let body;
+      if (url.pathname === '/api/session/ses_1') body = { data: { id: 'ses_1', location: { directory: '/repo' } } };
+      else if (url.pathname === '/api/session/ses_1/message') body = { data: records.slice(0, Number(url.searchParams.get('limit'))), cursor: {} };
+      else throw new Error(`unexpected ${url.pathname}`);
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const recap = 'a'.repeat(319) + '😀' + 'tail';
+    const suggestion = 'b'.repeat(499) + '😀' + 'tail';
+    const { runtime } = makeRuntime({
+      persistSessionAssist,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      isSessionArchived: async () => false,
+      getSmallModelService: async () => ({
+        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        generateSmallModelText: async () => ({ text: JSON.stringify({ recap, suggestion }) }),
+      }),
+    });
+
+    runtime.processPayload(idle());
+    for (let i = 0; i < 20 && persistSessionAssist.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(persistSessionAssist).toHaveBeenCalledTimes(1);
+    const saved = persistSessionAssist.mock.calls[0][2];
+    expect(saved.recap).toBe('a'.repeat(319));
+    expect(saved.suggestion).toBe('b'.repeat(499));
+    // A lone surrogate would encode as U+FFFD and not round-trip.
+    expect(new TextDecoder().decode(new TextEncoder().encode(saved.recap))).toBe(saved.recap);
+    expect(new TextDecoder().decode(new TextEncoder().encode(saved.suggestion))).toBe(saved.suggestion);
+    vi.unstubAllGlobals();
+  });
+
+  it('still cuts over-cap ASCII recap/suggestion at exactly 320/500 code units', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const persistSessionAssist = vi.fn(async () => undefined);
+    const records = [
+      { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
+      { id: 'msg_a', type: 'assistant', content: [{ type: 'text', text: 'All done.' }], finish: 'stop', time: { completed: 2 }, model: { providerID: 'p', id: 'm' } },
+      { id: 'msg_u', type: 'user', text: 'Do the thing' },
+    ];
+    const fetchMock = vi.fn(async (input) => {
+      const url = new URL(String(input));
+      let body;
+      if (url.pathname === '/api/session/ses_1') body = { data: { id: 'ses_1', location: { directory: '/repo' } } };
+      else if (url.pathname === '/api/session/ses_1/message') body = { data: records.slice(0, Number(url.searchParams.get('limit'))), cursor: {} };
+      else throw new Error(`unexpected ${url.pathname}`);
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { runtime } = makeRuntime({
+      persistSessionAssist,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      isSessionArchived: async () => false,
+      getSmallModelService: async () => ({
+        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        generateSmallModelText: async () => ({ text: JSON.stringify({ recap: 'a'.repeat(400), suggestion: 'b'.repeat(600) }) }),
+      }),
+    });
+
+    runtime.processPayload(idle());
+    for (let i = 0; i < 20 && persistSessionAssist.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(persistSessionAssist).toHaveBeenCalledTimes(1);
+    const saved = persistSessionAssist.mock.calls[0][2];
+    expect(saved.recap).toBe('a'.repeat(320));
+    expect(saved.suggestion).toBe('b'.repeat(500));
+    vi.unstubAllGlobals();
+  });
+
   // A client keeps a left chat's OpenCode location until its assist is done:
   // the assist reads the session's directory, which would start it again.
   describe('pending announcements', () => {

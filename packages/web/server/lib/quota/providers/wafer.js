@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -12,20 +13,21 @@ import {
 
 export const providerId = 'wafer';
 export const providerName = 'Wafer.ai';
-const aliases = ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'];
+export const aliases = ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'];
 
 const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
 const WAFER_WINDOW_SECONDS = 5 * 3600;
 
-export const isConfigured = (auth) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 };
+
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
 export const fetchQuota = async () => {
   const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+  const apiKey = getApiKey(auth);
 
   if (!apiKey) {
     return buildResult({
@@ -59,7 +61,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     const remaining = toNumber(payload?.remaining_included_requests);
     const limit = toNumber(payload?.included_request_limit);
     const overage = toNumber(payload?.overage_request_count);
@@ -79,9 +81,18 @@ export const fetchQuota = async () => {
     }
 
     const hasOverage = overage !== null && overage > 0;
-    const usedPercent = hasOverage
-      ? Math.max(0, usedPercentRaw ?? 0)
-      : Math.max(0, Math.min(100, usedPercentRaw ?? 0));
+    // A present percent keeps the deliberate overage behaviour (no 100 clamp
+    // when overage is present). An absent percent must not be fabricated as
+    // 0: derive it from the remaining/limit counts in the same payload when
+    // both are present, and report null when there is nothing to derive from.
+    let usedPercent = null;
+    if (usedPercentRaw !== null) {
+      usedPercent = hasOverage
+        ? Math.max(0, usedPercentRaw)
+        : Math.max(0, Math.min(100, usedPercentRaw));
+    } else if (remaining !== null && limit !== null && limit > 0) {
+      usedPercent = Math.max(0, Math.min(100, ((limit - remaining) / limit) * 100));
+    }
 
     const windowSeconds = windowStart !== null && windowEnd !== null
       ? Math.round((windowEnd - windowStart) / 1000)

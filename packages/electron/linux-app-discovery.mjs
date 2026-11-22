@@ -5,6 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 const DEFAULT_XDG_DATA_DIRS = ['/usr/local/share', '/usr/share'];
+
+// .desktop entries are a few-KiB stubs: 512 KiB matches MAX_FAVICON_BYTES in
+// main.mjs (#817) and MAX_INSTALLED_APP_ICON_BYTES (#1257) — keep the 512 KiB
+// caps in sync, including the copy of this cap in linux-desktop-entry.mjs.
+// Scanned entry files live in user-writable directories, so the read in
+// readLinuxDesktopEntries is stat-gated before the file is buffered whole.
+export const MAX_DESKTOP_ENTRY_BYTES = 512 * 1024;
+
 const TARGET_FIELD_CODES = new Set(['f', 'F', 'u', 'U']);
 const TERMINAL_APP_IDS = new Set(['terminal', 'iterm2', 'ghostty']);
 
@@ -132,6 +140,7 @@ export const readLinuxDesktopEntries = async (options = {}) => {
   const entries = [];
   for (const filePath of files) {
     try {
+      if ((await fsp.stat(filePath)).size > MAX_DESKTOP_ENTRY_BYTES) continue;
       const parsed = parseDesktopEntry(await fsp.readFile(filePath, 'utf8'), filePath);
       if (!parsed || seen.has(parsed.id)) continue;
       seen.add(parsed.id);
@@ -460,9 +469,16 @@ export const findLinuxFileManagerEntry = (entries, options = {}) => {
   }) || null;
 };
 
-const iconFileToDataUrl = (filePath) => {
+// Icons are display thumbnails: 512 KiB matches MAX_FAVICON_BYTES in
+// main.mjs (#817) — keep the two in sync. A .desktop Icon= path is
+// package-controlled content, so the read is stat-gated before the file
+// is buffered whole into a base64 string.
+export const MAX_INSTALLED_APP_ICON_BYTES = 512 * 1024;
+
+export const iconFileToDataUrl = (filePath) => {
   if (!filePath || !/\.png$/i.test(filePath)) return null;
   try {
+    if (fs.statSync(filePath).size > MAX_INSTALLED_APP_ICON_BYTES) return null;
     return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
   } catch {
     return null;

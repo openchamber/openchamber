@@ -71,6 +71,12 @@ and what made it fragile per framework.
   WebSocket handshake. While it is pending the local socket is paused and its
   buffered bytes are capped, so a local process writing into a stalled
   handshake cannot grow the desktop app's memory.
+- Piping is back-pressured in every direction after connect, so a fast
+  producer cannot buffer a whole stream in either process's memory: the
+  producer is paused at a bounded run-ahead and resumed on drain, or — where
+  the transport cannot be paused — bytes are held only up to a bounded cap
+  and the connection is dropped past it. The pre-connect cap above is the
+  same rule applied to the handshake.
 - A tunnel that cannot be opened is reported to the panel, never replaced by the
   plain loopback URL. On a remote instance that substitution would change which
   machine answers and show local content under a remote address.

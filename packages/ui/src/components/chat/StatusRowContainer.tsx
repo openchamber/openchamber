@@ -6,6 +6,7 @@ import { useKeybind } from '@/hooks/useKeybind';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { StatusRow } from './StatusRow';
+import { useContinueWithModelAction } from './continueWithModelContext';
 
 /**
  * Status row wrapper.
@@ -17,6 +18,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const providers = useConfigStore((state) => state.providers);
     const backgroundWork = useBackgroundSessionWork();
+    const continueWithModel = useContinueWithModelAction();
 
     // The shortcut lives with the status that knows whether anything can go
     // to the background; otherwise it yields the key.
@@ -47,6 +49,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             modelName={modelDisplayName}
             providerId={activeModel?.providerId ?? null}
             onBackground={working.canBackground ? backgroundWork : undefined}
+            onContinueWithModel={continueWithModel ?? undefined}
         />
     );
 });

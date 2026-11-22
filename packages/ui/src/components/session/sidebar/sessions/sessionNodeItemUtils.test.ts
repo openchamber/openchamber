@@ -1,4 +1,4 @@
-import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { ensureChatsRootDirectory, resetChatsRootCacheForTests } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
@@ -254,5 +254,6 @@ describe('resolveSessionPrLookup', () => {
 
 const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
 opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/test' });
+resetChatsRootCacheForTests();
 await ensureChatsRootDirectory();
 opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

@@ -22,6 +22,48 @@ Du kannst jede Aufgabe sofort mit **run now** ausführen, um zu prüfen, ob sie 
 
 Aktiviere **Run as goal**, damit der Lauf seinen Prompt bis zum Abschluss verfolgt, statt nach einer Antwort zu stoppen — siehe [Session Goals](/session-goals/).
 
+## Loops: Geplante Aufgaben als Markdown-Dateien
+
+Ein **Loop** ist eine geplante Aufgabe, die als portable Markdown-Datei definiert ist und die du in dein Repo einchecken kannst. Lege eine Datei in `.agents/loops/` und öffne die Liste der geplanten Aufgaben, um sie zu synchronisieren — kein Serverneustart nötig:
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Wo Dateien liegen
+
+- **Projektbereich** — `.agents/loops/*.md` im Projektverzeichnis oder einem übergeordneten Verzeichnis bis hinauf zur Wurzel des Git-Worktrees.
+- **Benutzerbereich** — `~/.agents/loops/*.md` gilt für jedes Projekt, das du öffnest.
+
+Wenn ein Projekt-Loop und ein Benutzer-Loop denselben Namen tragen, gewinnt der Projekt-Loop.
+
+### Felder
+
+| Feld | Bedeutung |
+|---|---|
+| `name` | Aufgabenname (erforderlich, max. 80 Zeichen). |
+| `schedule` | Cron-Ausdruck (erforderlich) — Loop-Dateien sind nur Cron. |
+| `enabled` | Auf `true` setzen, um auszuführen. Loops sind **standardmäßig aus**, sodass das Einchecken einer Datei nie von selbst eine Aufgabe startet. Ein Loop, der mit einem Repository kam, wartet außerdem, bis du ihn auf deinem Rechner in den geplanten Aufgaben einschaltest, und erneut nach einer Änderung an Zeitplan, Modell oder Prompt. Loops in `~/.agents/loops` laufen allein mit `true`. |
+| `model` | `provider/model` (erforderlich), z. B. `anthropic/claude-sonnet-4-5`. |
+| `agent` | Zu verwendender Agent (optional). |
+| `timezone` | IANA-Zeitzone (optional, Standard ist die Serverzone). |
+| Textkörper | Der Ausführungsprompt (erforderlich). Kann ein Slash-Befehl sein, wie `/review src/`. |
+
+### Wie Loops sich verhalten
+
+- Die **Datei ist maßgeblich**, solange sie existiert. **Bearbeiten** öffnet sie im eingebauten Dateieditor, der Aktivierungsschalter aktualisiert ihr Frontmatter, und das Löschen der Aufgabe löscht nach Bestätigung die Markdown-Datei. **Jetzt ausführen** bleibt verfügbar.
+- Laufzeitdaten (letzter Lauf, nächster Lauf, Status) liegen in der Projektkonfiguration und werden nie in die Markdown-Datei zurückgeschrieben.
+- Das Umbenennen des `name`-Felds benennt die Aufgabe an Ort und Stelle um. Wenn eine Loop-Datei vorübergehend nicht geparst werden kann (während der Bearbeitung, bei einem Merge-Konflikt), bleibt ihre Aufgabe mit der letzten guten Definition bestehen, bis die Datei repariert ist.
+- `daily`/`weekly`/`once`-Zeitpläne und Zieleinstellungen bleiben nur in der UI; Loop-Dateien sind immer Cron.
+
 ## Woran du Erfolg erkennst
 
 Nach einem Lauf zeigt die Aufgabe, wann sie zuletzt gelaufen ist, ob sie erfolgreich war und einen Link zur Session, die sie erstellt hat. Wenn ein Lauf fehlschlägt, wird dort auch der Fehler angezeigt.

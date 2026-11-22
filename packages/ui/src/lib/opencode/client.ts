@@ -14,6 +14,7 @@
  */
 
 import { ClientError, OpenCode, type OpenCodeClient, type PersistentPtyInfo, type PersistentPtySnapshot } from "@opencode/client"
+import { SESSION_LIST_MAX_LIMIT } from "./sessionListLimit"
 import type {
   FileDiffInfo,
   SessionDiffInput,
@@ -41,7 +42,7 @@ import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess
 import { normalizePath } from "@/lib/pathNormalization"
 import { PART_SHELLS_HEADER, PART_SHELLS_VERSION } from "./toolContentShells"
 import { isAutoModel } from "@/lib/routing/autoModel"
-import { activeSessionSnapshotSchema, hostSessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status"
+import { activeSessionSnapshotSchema, hostSessionStatusSnapshotSchema, sessionActivityV1SnapshotSchema, type HostSessionStatusSnapshot, type SessionActivityV1Entry } from "./session-status"
 import {
   compact,
   type Agent,
@@ -61,6 +62,7 @@ import {
   type Session,
   type SessionStatus,
   type Skill,
+  type SubagentPolicy,
   type SyntheticMessage,
   type UserMessage,
   type Vcs,
@@ -82,6 +84,7 @@ import {
   projectVcs,
   readIntegrationPolicies,
   type IntegrationPolicy,
+  type SessionInfoWithSubagentPolicy,
 } from "./projection"
 
 export type { OpenCodeClient }
@@ -158,6 +161,16 @@ export class OpencodeApiError extends Error {
 }
 
 const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optional(), ref: z.string().optional() })
+
+/** Error body of a raw session request (see `sessionPolicyRequest`). */
+const sessionPolicyErrorBodySchema = z.object({
+  _tag: z.string().optional(),
+  message: z.string().optional(),
+  ref: z.string().optional(),
+})
+
+/** Every session create/update answer wraps the record in `{ data }`. */
+const sessionInfoEnvelopeSchema = z.object({ data: z.unknown() })
 
 /**
  * Turns whatever the generated client threw into an `OpencodeApiError` with a
@@ -718,6 +731,49 @@ class OpencodeService {
     return resolved ? this.getScopedSdkClient(resolved) : this.client
   }
 
+  /**
+   * One raw session request carrying a `subagentPolicy`. The generated
+   * client builds the create and update bodies field by field from the
+   * fields it knows, so a policy handed to it never reaches the wire; until
+   * the regenerated client ships the field, a create or update that carries
+   * one goes through `runtimeFetch` like the other SDK gaps (see
+   * `./messaging`), with the same directory scoping the generated client
+   * gets from its client-level header.
+   */
+  private async sessionPolicyRequest<TBody>(
+    operation: "session.create" | "session.update",
+    method: "POST" | "PATCH",
+    path: string,
+    body: TBody,
+    directory?: string | null,
+  ): Promise<Response> {
+    const requestDirectory = this.resolveDirectory(directory)
+    const headers = new Headers({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    })
+    if (requestDirectory) headers.set(OPENCODE_DIRECTORY_HEADER, encodeURIComponent(requestDirectory))
+    let response: Response
+    try {
+      response = validateRuntimeResponse(
+        await runtimeFetch(`${this.baseUrl}${path}`, {
+          method,
+          headers,
+          body: JSON.stringify(body),
+        }),
+      )
+    } catch (error) {
+      throw normalizeOpencodeError(operation, error)
+    }
+    if (response.ok) return response
+    const errorBody = sessionPolicyErrorBodySchema.safeParse(await response.json().catch(() => null))
+    throw new OpencodeApiError(operation, errorBody.data?.message ?? errorBody.data?._tag ?? `HTTP ${response.status}`, {
+      status: response.status,
+      tag: errorBody.data?._tag,
+      ref: errorBody.data?.ref,
+    })
+  }
+
   private resolveDirectory(directory?: string | null): string | undefined {
     return this.normalizeCandidatePath(directory) ?? this.currentDirectory
   }
@@ -954,7 +1010,8 @@ class OpencodeService {
     const response = await call("session.list", () =>
       client.session.list({
         directory,
-        limit: options.limit ?? DEFAULT_SESSION_PAGE_LIMIT,
+        // Clamped: an over-limit page size fails the whole list. Callers page by cursor, so a smaller page only costs requests.
+        limit: Math.min(options.limit ?? DEFAULT_SESSION_PAGE_LIMIT, SESSION_LIST_MAX_LIMIT),
         order: options.order,
         search: options.search,
         cursor: options.cursor,
@@ -976,24 +1033,51 @@ class OpencodeService {
   }
 
   async createSession(
-    params?: { id?: string; title?: string; agent?: string; model?: ModelSelection; metadata?: Metadata },
+    params?: {
+      id?: string
+      title?: string
+      agent?: string
+      model?: ModelSelection
+      metadata?: Metadata
+      subagentPolicy?: SubagentPolicy
+    },
     directory?: string | null,
   ): Promise<Session> {
     const requestDirectory = this.resolveDirectory(directory)
-    const info = await call("session.create", () =>
-      this.clientFor(directory).session.create({
-        id: params?.id,
-        title: params?.title,
-        agent: params?.agent,
-        // Auto is OpenChamber's sentinel, not a model OpenCode can start a
-        // session on; the first send puts the session on Auto through the
-        // model switch the server intercepts.
-        model: !params?.model || isAutoModel(params.model.providerID, params.model.id) ? undefined : toModelRef(params.model),
-        location: requestDirectory ? { directory: requestDirectory } : undefined,
-        metadata: params?.metadata,
-      }),
+    const createInput = {
+      id: params?.id,
+      title: params?.title,
+      agent: params?.agent,
+      // Auto is OpenChamber's sentinel, not a model OpenCode can start a
+      // session on; the first send puts the session on Auto through the
+      // model switch the server intercepts.
+      model: !params?.model || isAutoModel(params.model.providerID, params.model.id) ? undefined : toModelRef(params.model),
+      location: requestDirectory ? { directory: requestDirectory } : undefined,
+      metadata: params?.metadata,
+    }
+    if (params?.subagentPolicy === undefined) {
+      const info = await call("session.create", () => this.clientFor(directory).session.create(createInput))
+      return projectSession(info)
+    }
+    // The generated client's create body is built from the fields it knows
+    // and would drop `subagentPolicy` (see `SubagentPolicy` in `./model`),
+    // so a create carrying one takes the raw path.
+    const response = await this.sessionPolicyRequest(
+      "session.create",
+      "POST",
+      "/session",
+      { ...createInput, subagentPolicy: params.subagentPolicy },
+      directory,
     )
-    return projectSession(info)
+    const envelope = sessionInfoEnvelopeSchema.safeParse(await response.json().catch(() => null))
+    if (!envelope.success) {
+      throw new OpencodeApiError("session.create", "OpenCode answered in a form this version does not read", {
+        status: response.status,
+      })
+    }
+    // SAFETY: the answer is the session record the generated client would
+    // have returned for the same call; only the transport differs.
+    return projectSession(envelope.data.data as SessionInfoWithSubagentPolicy)
   }
 
   async getSession(id: string, directory?: string | null): Promise<Session> {
@@ -1012,6 +1096,23 @@ class OpencodeService {
    */
   async renameSession(id: string, title: string, directory?: string | null): Promise<void> {
     await call("session.update", () => this.clientFor(directory).session.update({ sessionID: id, title }))
+  }
+
+  /**
+   * Replaces the session's subsession model policy. The whole policy is
+   * sent, and the change applies to subsessions started after it. The
+   * generated client's update body holds only the fields it knows (title,
+   * metadata, permissions) and would drop `subagentPolicy`, so the update
+   * takes the raw path, like a create that carries a policy.
+   */
+  async updateSessionSubagentPolicy(id: string, subagentPolicy: SubagentPolicy, directory?: string | null): Promise<void> {
+    await this.sessionPolicyRequest(
+      "session.update",
+      "PATCH",
+      `/session/${encodeURIComponent(id)}`,
+      { subagentPolicy },
+      directory,
+    )
   }
 
   async moveSession(id: string, toDirectory: string, options?: { delivery?: SessionInboxDelivery }): Promise<void> {
@@ -1580,8 +1681,10 @@ class OpencodeService {
    * Get session activity from web server's in-memory tracking.
    * This is more reliable than the OpenCode active list on visibility restore
    * because the web server tracks activity even when UI is not listening to SSE.
+   * `null` means the fetch failed or the payload was not a valid v1
+   * envelope; callers must preserve their current state.
    */
-  async getWebServerSessionActivity(): Promise<Record<string, { type: string }> | null> {
+  async getWebServerSessionActivity(): Promise<Record<string, SessionActivityV1Entry> | null> {
     try {
       const response = await runtimeFetch("/api/session-activity", {
         method: "GET",
@@ -1594,12 +1697,12 @@ class OpencodeService {
         return null
       }
 
-      const data = await response.json().catch(() => null)
-      if (!data || typeof data !== "object") {
-        return null
-      }
-
-      return data as Record<string, { type: string }>
+      // The endpoint answers with the session-activity v1 envelope
+      // ({ version, serverTime, watcherReady, sessions }); only the
+      // per-session entries are the caller's map. A malformed payload
+      // (including a pre-v1 bare map) reads as null, like a failed fetch.
+      const parsed = sessionActivityV1SnapshotSchema.safeParse(await response.json().catch(() => null))
+      return parsed.success ? parsed.data.sessions : null
     } catch {
       return null
     }
@@ -1701,8 +1804,15 @@ class OpencodeService {
     return true
   }
 
-  async cancelForm(sessionID: string, formID: string, directory?: string | null): Promise<boolean> {
-    await call("session.form.cancel", () => this.clientFor(directory).session.form.cancel({ sessionID, formID }))
+  /**
+   * Without a message the agent's step ends, as when the user dismisses a
+   * question; with one, the agent reads the message as the tool's result and
+   * goes on.
+   */
+  async cancelForm(sessionID: string, formID: string, directory?: string | null, message?: string): Promise<boolean> {
+    await call("session.form.cancel", () => this.clientFor(directory).session.form.cancel(
+      message === undefined ? { sessionID, formID } : { sessionID, formID, message },
+    ))
     return true
   }
 
@@ -1856,6 +1966,28 @@ class OpencodeService {
       }),
     )
     await this.abortSession(params.childSessionID, params.directory)
+  }
+
+  /**
+   * Adds a note for the agent without waking the session: a synthetic message
+   * the next turn reads first. The id is minted here, before the prompt that
+   * follows it, so the transcript keeps the order the two were admitted in.
+   */
+  async admitSessionNote(params: {
+    sessionID: string
+    directory?: string | null
+    note: { text: string; description: string; metadata: Metadata }
+  }): Promise<void> {
+    await call("session.synthetic", () =>
+      this.clientFor(params.directory).session.synthetic({
+        sessionID: params.sessionID,
+        id: ascendingId("msg"),
+        text: params.note.text,
+        description: params.note.description,
+        metadata: params.note.metadata,
+        resume: false,
+      }),
+    )
   }
 
   /** Global pending items when requested, then each distinct directory. */

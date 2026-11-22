@@ -9,8 +9,20 @@ import {
 } from '@openchamber/sdk';
 
 import { dropGuestTokens, getGuestAuth, patchGuestAuth } from './auth-store.js';
+import { readBoundedResponseText } from './response-body.js';
 
 const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
+
+/**
+ * The most a guest-declared OAuth answer (a token response, or the account
+ * probe that only yields one label) may weigh. Token answers are a few
+ * hundred bytes and an account label is one short string, so the cap follows
+ * the 64 KiB token-answer precedent in spaces/login-keeper.js (#842): the
+ * bounded reader enforces it while the answer streams in, so a chunked body
+ * with no declared length cannot grow server memory past it before being
+ * refused.
+ */
+export const GUEST_OAUTH_RESPONSE_MAX = 64 * 1024;
 
 const pendingByState = new Map();
 const pendingByGuestId = new Map();
@@ -117,6 +129,28 @@ const readTokenError = (payload, status) => {
   return description || `Token request failed (${status})`;
 };
 
+/**
+ * Reads a token-endpoint answer through the bounded reader and parses it,
+ * preserving the old bare response.json() semantics for in-cap bodies: an
+ * unparseable body is a null payload, never a throw. An over-cap body is
+ * refused with RESPONSE_TOO_LARGE instead, so it can never fall through as
+ * a silent null payload / empty-token error.
+ */
+const readBoundedJsonPayload = async (response) => {
+  const body = await readBoundedResponseText(response, GUEST_OAUTH_RESPONSE_MAX);
+  if (body.tooLarge) {
+    throw new GuestOAuthError(
+      `The token endpoint answered with more than ${GUEST_OAUTH_RESPONSE_MAX} bytes.`,
+      'RESPONSE_TOO_LARGE',
+    );
+  }
+  try {
+    return JSON.parse(body.text);
+  } catch {
+    return null;
+  }
+};
+
 const postForm = async (url, body) => {
   const response = await fetch(url, {
     method: 'POST',
@@ -127,7 +161,7 @@ const postForm = async (url, body) => {
     body: new URLSearchParams(body).toString(),
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
   });
-  const payload = await response.json().catch(() => null);
+  const payload = await readBoundedJsonPayload(response);
   if (!response.ok) {
     throw new GuestOAuthError(readTokenError(payload, response.status));
   }
@@ -144,7 +178,7 @@ const postJson = async (url, body) => {
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
   });
-  const payload = await response.json().catch(() => null);
+  const payload = await readBoundedJsonPayload(response);
   if (!response.ok) {
     throw new GuestOAuthError(readTokenError(payload, response.status));
   }
@@ -187,6 +221,19 @@ export const toPublicGuestAuth = (entry, integration) => ({
   settings: entry?.settings && typeof entry.settings === 'object' ? { ...entry.settings } : {},
 });
 
+// A plain slice at the cap can land between the halves of a surrogate pair,
+// leaving a lone high surrogate that encodes as U+FFFD when the account is
+// persisted and shown in the Integrations card. Both account cuts go through
+// this, so a cut inside a pair moves back to the pair boundary.
+const clipAccount = (text) => {
+  if (text.length <= GUEST_ACCOUNT_MAX) {
+    return text;
+  }
+  const clipped = text.slice(0, GUEST_ACCOUNT_MAX);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
+
 const readAccountLabel = (payload, name) => {
   if (!isPlainObject(payload) || typeof name !== 'string' || name === '') {
     return '';
@@ -198,7 +245,7 @@ const readAccountLabel = (payload, name) => {
     }
     current = current[part];
   }
-  return typeof current === 'string' ? current.trim().slice(0, GUEST_ACCOUNT_MAX) : '';
+  return typeof current === 'string' ? clipAccount(current.trim()) : '';
 };
 
 const fetchAccountLabel = async (api, accessToken) => {
@@ -222,7 +269,16 @@ const fetchAccountLabel = async (api, accessToken) => {
   if (!response.ok) {
     return { ok: false, account: '' };
   }
-  const payload = await response.json().catch(() => null);
+  const body = await readBoundedResponseText(response, GUEST_OAUTH_RESPONSE_MAX);
+  if (body.tooLarge) {
+    return { ok: false, account: '' };
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(body.text);
+  } catch {
+    payload = null;
+  }
   return { ok: true, account: readAccountLabel(payload, api.account.name) };
 };
 
@@ -337,7 +393,7 @@ export const saveGuestAccessToken = async ({ guest, persistPath, token, username
   if (api.account && !probed.ok) {
     throw new GuestOAuthError('That API token was refused.', 'TOKEN_INVALID');
   }
-  const account = probed.account || (api.authorization === 'basic' ? pastedUsername.slice(0, GUEST_ACCOUNT_MAX) : '');
+  const account = probed.account || (api.authorization === 'basic' ? clipAccount(pastedUsername) : '');
   await patchGuestAuth(guest.id, {
     accessToken,
     refreshToken: null,

@@ -84,7 +84,7 @@ export const applyFolderChange = (map: SessionFoldersMap, change: FolderChange):
   switch (change.type) {
     case 'create': {
       const folders = map[change.scopeKey] ?? [];
-      if (folders.some((folder) => folder.id === change.folder.id)) return map;
+      if (Object.values(map).some((scopeFolders) => scopeFolders.some((folder) => folder.id === change.folder.id))) return map;
       const parentId = change.folder.parentId && folders.some((folder) => folder.id === change.folder.parentId) ? change.folder.parentId : null;
       // Field order matches a parsed server answer, so laying this over one compares equal.
       const { id, name, createdAt } = change.folder;

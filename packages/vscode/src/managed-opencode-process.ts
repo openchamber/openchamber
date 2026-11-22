@@ -1,3 +1,4 @@
+import { StringDecoder } from 'node:string_decoder';
 import { spawnOwnedProcess } from './owned-process';
 import { registerManagedProcess, unregisterManagedProcess } from './opencodeProcessRegistry';
 
@@ -25,10 +26,27 @@ export function spawnManagedOpenCodeProcess(
     let stdout = '';
     let output = '';
     let settled = false;
-    const capture = (chunk: Buffer) => { output = (output + chunk.toString()).slice(-32 * 1024); };
+    // Decode per stream through StringDecoder: a multi-byte UTF-8 character
+    // split across pipe chunks must survive intact in the line buffer and in
+    // the captured output startupError quotes (per-chunk chunk.toString()
+    // silently corrupts the split character to U+FFFD).
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
+    let decodersFlushed = false;
+    const captureText = (text: string) => { output = (output + text).slice(-32 * 1024); };
+    const capture = (chunk: Buffer) => captureText(stderrDecoder.write(chunk));
+    const flushDecoders = () => {
+      if (decodersFlushed) return;
+      decodersFlushed = true;
+      captureText(stderrDecoder.end());
+      const tail = stdoutDecoder.end();
+      captureText(tail);
+      stdout += tail;
+    };
     const startupError = (message: string) => new Error(`${message} Binary used: ${options.sourceBinary}.${options.appBundleHint} Output: ${output.trim() || '(none)'}`);
     const finish = (error?: Error) => {
       if (settled) return;
+      flushDecoders();
       settled = true;
       clearTimeout(timer);
       options.signal.removeEventListener('abort', onAbort);
@@ -42,8 +60,9 @@ export function spawnManagedOpenCodeProcess(
     };
     const onAbort = () => finish(new Error('OpenCode startup cancelled'));
     const onStdout = (chunk: Buffer) => {
-      capture(chunk);
-      stdout += chunk.toString();
+      const text = stdoutDecoder.write(chunk);
+      captureText(text);
+      stdout += text;
       const lines = stdout.split('\n');
       stdout = (lines.pop() ?? '').slice(-32 * 1024);
       for (const line of lines) {
@@ -58,10 +77,10 @@ export function spawnManagedOpenCodeProcess(
         return;
       }
     };
-    const timer = setTimeout(() => finish(startupError(`Timeout waiting for server to start after ${options.timeoutMs}ms.`)), options.timeoutMs);
+    const timer = setTimeout(() => { flushDecoders(); finish(startupError(`Timeout waiting for server to start after ${options.timeoutMs}ms.`)); }, options.timeoutMs);
     owned.child.stdout.on('data', onStdout);
     owned.child.stderr.on('data', capture);
-    void owned.closed.then((exit) => finish(exit.error ?? startupError(`OpenCode process exited before serving with code ${exit.code}, signal ${exit.signal}.`)));
+    void owned.closed.then((exit) => { flushDecoders(); finish(exit.error ?? startupError(`OpenCode process exited before serving with code ${exit.code}, signal ${exit.signal}.`)); });
     options.signal.addEventListener('abort', onAbort, { once: true });
     if (options.signal.aborted) onAbort();
   }).catch(async (error) => {

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -38,6 +39,34 @@ const fixture = async (inventoryOptions = {}) => {
 };
 
 describe('connected-server managed SSH inventory', () => {
+  it.skipIf(process.platform === 'win32')('does not block when a managed snapshot is replaced by a FIFO before copying', async () => {
+    const { store, snapshotRoot, discoveryRoot, managedKeyRoot } = await fixture();
+    let replacedSnapshot = false;
+    let copyOpenFlags;
+    const fsImpl = {
+      ...fs,
+      open: async (filePath, flags, ...options) => {
+        if (!replacedSnapshot
+          && filePath.startsWith(`${snapshotRoot}${path.sep}`)
+          && path.basename(filePath).startsWith('import_')
+          && (flags & 3) === fsConstants.O_RDONLY) {
+          replacedSnapshot = true;
+          copyOpenFlags = flags;
+          await fs.rm(filePath, { force: true });
+          await run('mkfifo', [filePath]);
+        }
+        return fs.open(filePath, flags, ...options);
+      },
+    };
+    const inventory = createManagedSshInventory({ store, snapshotRoot, discoveryRoot, managedKeyRoot, fsImpl });
+    const candidate = (await inventory.discover()).candidates[0];
+
+    await expect(inventory.import({ operation: 'import', candidateId: candidate.candidateId,
+      expectedFingerprint: candidate.fingerprint, confirmed: true })).rejects.toThrow();
+    expect(replacedSnapshot).toBe(true);
+    expect(copyOpenFlags & fsConstants.O_NONBLOCK).not.toBe(0);
+  });
+
   it('discovers keys on a runtime whose directory close returns no promise', async () => {
     // Bun's Dir.close() returns undefined where Node returns a promise, and the
     // async iterator has already closed the directory. Assuming a promise threw

@@ -3,28 +3,28 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
+import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SubagentPolicy, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
 import { Binary } from "./binary"
-import { useSessionUIStore } from "./session-ui-store"
+import { expandSlashCommandGoalObjective, materializeOpenDraftSession, resolveVariantToRecord, routeMessage, useSessionUIStore, type NewSessionDraftState } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { blockingRequestLineage, computeSubtreeIds, type SessionLookup } from "./scoped-blocking-requests"
 import { sessionRecordLookup } from "./blocking-request-root"
-import { opencodeClient, type SyntheticContextInput } from "@/lib/opencode/client"
+import { opencodeClient, type SkillMentions, type SyntheticContextInput } from "@/lib/opencode/client"
 import { toJsonRecord } from "@/lib/opencode/json"
 import { ascendingId } from "@/lib/opencode/ids"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
 import { useConfigStore } from "@/stores/useConfigStore"
-import { waitForOpenCodeStartup } from "./opencode-startup-gate"
+import { runAfterOpenCodeStartup, waitForOpenCodeStartup } from "./opencode-startup-gate"
 import { registerSessionDirectory } from "./sync-refs"
 import { useGlobalSessionStatusStore } from "./global-session-status"
 import { recordSendFailure } from "./send-failure-log"
-import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
+import { draftFromContextPayload, readContextPart, type ContextCarrierPart, type ContextPartMetadata } from "@/lib/messages/contextParts"
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
 import { materializeSessionSnapshots } from "./materialization"
 import { sessionEvents } from "@/lib/sessionEvents"
@@ -46,6 +46,21 @@ import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
 import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { runtimeFetch } from "@/lib/runtime-fetch"
+import type { AttachedFile } from "@/stores/types/sessionTypes"
+import type { QueuedMessageGoal } from "@/stores/messageQueueStore"
+import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { useUIStore } from "@/stores/useUIStore"
+import { selectCommandsForDirectory, useCommandsStore } from "@/stores/useCommandsStore"
+import { setSessionGoal } from "@/lib/sessionGoalActions"
+import { buildGoalIntroReminder, type BackgroundGoalOutcome } from "@/lib/goalWriter"
+import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
+import { createInputHistoryIdentity, useInputHistoryStore, type InputHistorySubmission } from "@/stores/useInputHistoryStore"
+import { useSessionTabsStore } from "@/stores/useSessionTabsStore"
+import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
+import { prepareUserMessageResume } from "./user-message-resume"
+import { useSelectionStore } from "./selection-store"
+import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { getStaleRunningToolMessageID } from "./materialization"
@@ -525,15 +540,22 @@ async function fetchSessionMessages(sessionId: string, directory?: string | null
  * history runs out. The local store holds only the newest page, so a revert
  * target older than that must be searched for across pages, not assumed gone.
  */
+// Pathology guard, not a product limit: 500 pages of history is far above
+// any real revert search, while an ever-new cursor stream still terminates.
+const FIND_MESSAGE_MAX_PAGES = 500
+
 async function findSessionMessageById(sessionId: string, messageId: string, directory?: string | null): Promise<Message | null> {
   const seenCursors = new Set<string>()
   let cursor: string | undefined
+  let pagesFetched = 0
   for (;;) {
     const page = await opencodeClient.getSessionMessages(sessionId, cursor ? { cursor } : undefined, directory)
+    pagesFetched += 1
     const found = page.items.map(({ info }) => info).find((message) => message.id === messageId)
     if (found) return found
     const next = page.cursor.next
     if (!next || seenCursors.has(next)) return null
+    if (pagesFetched >= FIND_MESSAGE_MAX_PAGES) return null
     seenCursors.add(next)
     cursor = next
   }
@@ -998,7 +1020,12 @@ function getRequestReplyDirectory(
  * what the first turn will run on pass it here, so the session is created on
  * that selection and the first prompt needs no switch at all.
  */
-export type SessionCreateSelection = { model?: ModelSelection; agent?: string }
+export type SessionCreateSelection = {
+  model?: ModelSelection
+  agent?: string
+  /** Models the new session's subsessions may run; sent on create when set. */
+  subagentPolicy?: SubagentPolicy
+}
 
 export async function createSession(
   title?: string,
@@ -1018,7 +1045,7 @@ export async function createSession(
     // wrong project (closes #1637, #2270).
     const effectiveDirectory = directoryOverride ?? dir()
     const session = await opencodeClient.createSession(
-      { title, metadata, model: selection?.model, agent: selection?.agent },
+      { title, metadata, model: selection?.model, agent: selection?.agent, subagentPolicy: selection?.subagentPolicy },
       effectiveDirectory,
     )
 
@@ -2009,6 +2036,25 @@ export async function updateSessionTitle(
   mirrorSessionIntoLiveStores(session, sessionDirectory)
 }
 
+/**
+ * Replaces a session's subsession model policy. The caller sends the whole
+ * policy (the picker preserves `excludedModels` and `agentOverrides` as
+ * loaded), and the saved state comes back from a re-read of the session
+ * record, the way `updateSessionTitle` settles a rename.
+ */
+export async function updateSessionSubagentPolicy(
+  sessionId: string,
+  directory: string | null | undefined,
+  subagentPolicy: SubagentPolicy,
+): Promise<Session> {
+  const sessionDirectory = directory ?? getSessionDirectory(sessionId)
+  await opencodeClient.updateSessionSubagentPolicy(sessionId, subagentPolicy, sessionDirectory)
+  const session = await opencodeClient.getSession(sessionId, sessionDirectory)
+  useGlobalSessionsStore.getState().upsertSession(session)
+  mirrorSessionIntoLiveStores(session, sessionDirectory)
+  return session
+}
+
 // ---------------------------------------------------------------------------
 // Optimistic message send — insert user message before API call, rollback on error
 // ---------------------------------------------------------------------------
@@ -2019,6 +2065,365 @@ export async function updateSessionTitle(
  * into the store AND registered in the shadow Map. mergeOptimisticPage
  * handles deduplication when the server echoes back the real message.
  */
+export type CapturedSendTarget = {
+  runtimeKey: string
+  sessionId: string
+  directory: string
+}
+
+export type SendMessageOptions = {
+  /** Runtime captured before a background wait or draft materialization. */
+  runtimeKey?: string
+  /** Explicit composer intent; automated continuations must not restore archives. */
+  userInitiated?: boolean
+  target?: CapturedSendTarget
+  sessionId?: string
+  directory?: string
+  historySubmissions?: InputHistorySubmission[]
+  /** Immutable copy of the new-session draft at submit time; used instead of the live draft. */
+  draftSnapshot?: NewSessionDraftState
+  delivery?: 'steer'
+  /** Skills named inline, attached to the prompt once the session exists. */
+  skills?: SkillMentions
+  /**
+   * A queued message carries its own goal intent. Set (a goal or `null`), it
+   * replaces the composer's armed goal, which belongs to the composer text.
+   */
+  queuedGoal?: QueuedMessageGoal | null
+  /**
+   * A goal still being written ("Send when ready"). The message waits for it
+   * and goes out with it; a draft creates its session first. When it rejects,
+   * nothing is sent.
+   */
+  pendingGoal?: Promise<BackgroundGoalOutcome>
+  /** Called once a draft send has created its session. */
+  onSessionCreated?: (sessionId: string, directory: string | null) => void
+}
+
+function notifyMessageSent(sessionId: string): void {
+  runtimeFetch(`/api/sessions/${sessionId}/message-sent`, { method: "POST" })
+    .catch(() => { /* ignore */ })
+}
+
+// ---------------------------------------------------------------------------
+// sendMessage — calls SDK, reads domain data from sync
+// ---------------------------------------------------------------------------
+// Armed goal (composer target button): the sent prompt becomes the goal
+// objective; budget comes from the global default setting. Fire-and-forget —
+// a failed metadata patch must not fail the send.
+export async function sendMessage(
+  content: string,
+  providerID: string,
+  modelID: string,
+  agent?: string,
+  attachments?: AttachedFile[],
+  agentMentionName?: string,
+  additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }>,
+  /** `null` is an explicit `Default` thinking level. */
+  variant?: string | null,
+  inputMode?: "normal" | "shell",
+  options?: SendMessageOptions,
+): Promise<void> {
+  const capturedTarget = options?.target
+  const capturedRuntimeKey = capturedTarget?.runtimeKey ?? options?.runtimeKey ?? getRuntimeKey()
+  const assertRuntimeUnchanged = () => {
+    if (capturedRuntimeKey !== getRuntimeKey()) throw new Error("Message was not sent because the runtime changed.")
+  }
+  assertRuntimeUnchanged()
+  const capturedDraft = options?.draftSnapshot ?? useSessionUIStore.getState().newSessionDraft
+  const pendingGoal = options?.pendingGoal
+  if (pendingGoal) {
+    // Attach rejection handling before worktree creation can yield. Otherwise
+    // a writer failure during setup is temporarily an unhandled rejection.
+    const goalResult = pendingGoal.then(
+      (value) => ({ ok: true as const, value }),
+      (error: Error) => ({ ok: false as const, error }),
+    )
+    const isDraftSend = !capturedTarget && !options?.sessionId && capturedDraft?.open
+    const created = isDraftSend
+      ? await runAfterOpenCodeStartup(async () => {
+          assertRuntimeUnchanged()
+          return materializeOpenDraftSession({ providerID, modelID, agent, variant }, capturedDraft, { keepUserPlace: true })
+        })
+      : null
+    if (isDraftSend && !created) throw new Error("Failed to create session")
+    if (created) options?.onSessionCreated?.(created.sessionId, created.directory ?? null)
+    // Goal generation stays outside the startup send queue, so it never
+    // prevents a later task from being handed to OpenCode.
+    const settled = await goalResult
+    if (!settled.ok) throw settled.error
+    assertRuntimeUnchanged()
+    const ready = settled.value
+    return sendMessage(ready.content ?? content, providerID, modelID, created?.agent ?? agent, attachments, agentMentionName,
+      created ? [...(additionalParts ?? []), ...(created.syntheticParts ?? [])] : additionalParts,
+      variant, inputMode, {
+        ...options,
+        runtimeKey: capturedRuntimeKey,
+        sessionId: created?.sessionId ?? options?.sessionId,
+        directory: created?.directory ?? options?.directory,
+        pendingGoal: undefined,
+        queuedGoal: ready.goal,
+      })
+  }
+  // A message sent while OpenCode is still starting waits for it here, ahead
+  // of session creation, commands and shell, all of which need OpenCode.
+  // Held sends go out one after another, in the order they were made.
+  return runAfterOpenCodeStartup(async () => {
+    assertRuntimeUnchanged()
+    const draft = options?.draftSnapshot ?? useSessionUIStore.getState().newSessionDraft
+    const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
+
+    const queuedGoal = options?.queuedGoal
+    const goalArm = inputMode === "shell" || content.trim().length === 0
+      ? { armed: false, objectiveOverride: null, settled: false, briefAgent: false, ignoreLimit: false }
+      : queuedGoal !== undefined
+        ? {
+          armed: queuedGoal !== null,
+          objectiveOverride: queuedGoal?.objective ?? null,
+          settled: queuedGoal?.settled === true,
+          briefAgent: queuedGoal?.briefAgent === true,
+          ignoreLimit: queuedGoal?.ignoreLimit === true,
+        }
+        : useSessionGoalArmStore.getState().consume()
+    // Creates the armed goal and returns its goal-mode reminder, which
+    // teaches the agent the goal protocol from turn one (without it the agent
+    // only learns about goal mode from the first server continuation). It is
+    // built after the goal is saved so it names the objective that was
+    // saved: a spec the writer produced carries that spec to the agent.
+    const applyArmedGoal = async (goalSessionId: string, goalDirectory: string | null | undefined) => {
+      if (!goalArm.armed) return null
+      const uiState = useUIStore.getState()
+      // A queued goal keeps the budget it was queued with.
+      const tokenBudget = queuedGoal
+        ? queuedGoal.tokenBudget
+        : (uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null)
+      let objective = goalArm.objectiveOverride?.trim() || content
+      if (!goalArm.objectiveOverride && content.startsWith("/")) {
+        // Same directory-scoped resolution as routeMessage: the objective must
+        // come from this directory's command, not a same-named one elsewhere.
+        // OpenCode 2.x serves commands without their templates, so an unknown
+        // command's raw invocation stays the objective.
+        const knownCommands = selectCommandsForDirectory(useCommandsStore.getState(), goalDirectory)
+        objective = expandSlashCommandGoalObjective(content, knownCommands)
+      }
+      // "Rewrite every goal" covers the run-as-goal flows too; the writer
+      // falls back to the model this message is sent with.
+      const rewrite = uiState.sessionGoalRewriteAll && !goalArm.settled
+        ? { providerID, modelID }
+        : null
+      let rewrittenSpec: string | null
+      try {
+        // A new goal (no `existing`) is always saved.
+        const saved = await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget, rewrite, ignoreLimit: goalArm.ignoreLimit }, null)
+        rewrittenSpec = saved.outcome === 'saved' ? saved.rewrittenSpec : null
+      } catch (error) {
+        // A queued message keeps its goal for the retry; only the composer's arm comes back.
+        if (queuedGoal === undefined) {
+          useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride, {
+            settled: goalArm.settled,
+            briefAgent: goalArm.briefAgent,
+            ignoreLimit: goalArm.ignoreLimit,
+          })
+        }
+        throw error
+      }
+      const briefing = goalArm.briefAgent ? goalArm.objectiveOverride : rewrittenSpec
+      return { text: buildGoalIntroReminder(tokenBudget, briefing), synthetic: true }
+    }
+
+    // ---- New session from draft ----
+    if (!capturedTarget && !options?.sessionId && draft?.open) {
+      const createdDraftSession = await materializeOpenDraftSession({
+        providerID,
+        modelID,
+        agent: trimmedAgent,
+        variant,
+      }, options?.draftSnapshot)
+      if (!createdDraftSession) throw new Error("Failed to create session")
+      options?.onSessionCreated?.(createdDraftSession.sessionId, createdDraftSession.directory ?? null)
+
+      // The server writes the project knowledge into the new session while
+      // the message is already on screen: only the prompt request waits.
+      const draftKnowledgeSync = inputMode === "shell"
+        ? undefined
+        : syncSessionKnowledge(createdDraftSession.directory, createdDraftSession.sessionId)
+      const historyIdentity = createInputHistoryIdentity(
+        capturedRuntimeKey,
+        createdDraftSession.directory ?? '',
+        createdDraftSession.sessionId,
+      )
+      const historySubmissions = options?.historySubmissions
+      const appendSubmissions = historyIdentity && historySubmissions?.length
+        ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
+        : undefined
+
+      notifyMessageSent(createdDraftSession.sessionId)
+      // Sending a message means working in the session: its tab stays.
+      useSessionTabsStore.getState().pinTab(createdDraftSession.sessionId)
+
+      markPendingUserSendAnimation(createdDraftSession.sessionId)
+
+      const files = attachments?.map((a) => ({
+        type: "file" as const,
+        mime: a.mimeType,
+        url: a.dataUrl,
+        filename: a.filename,
+      }))
+
+      const draftGoalIntro = await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
+      const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> = [
+        ...(additionalParts ?? []),
+        ...(draftGoalIntro ? [draftGoalIntro] : []),
+        ...(createdDraftSession.syntheticParts ?? []),
+      ]
+      await routeMessage({
+        runtimeKey: capturedRuntimeKey,
+        sessionId: createdDraftSession.sessionId,
+        directory: createdDraftSession.directory,
+        content,
+        providerID,
+        modelID,
+        agent: createdDraftSession.agent,
+        agentMentionName,
+        variant,
+        inputMode,
+        files,
+        appendSubmissions,
+        delivery: options?.delivery,
+        skills: options?.skills,
+        knowledgeSync: draftKnowledgeSync,
+        additionalParts: draftParts.map((p) => ({
+          text: p.text,
+          synthetic: p.synthetic,
+          metadata: p.metadata,
+          files: p.attachments?.map((a: AttachedFile) => ({
+            type: "file" as const,
+            mime: a.mimeType,
+            url: a.dataUrl,
+            filename: a.filename,
+          })),
+        })),
+      })
+      return
+    }
+
+    // ---- Existing session ----
+    const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? useSessionUIStore.getState().currentSessionId
+    const resumeAfterSend = options?.userInitiated && inputMode !== 'shell' && targetSessionId
+      ? prepareUserMessageResume(targetSessionId, capturedRuntimeKey)
+      : undefined
+    const sessionAgentSelection = targetSessionId
+      ? useSelectionStore.getState().getSessionAgentSelection(targetSessionId)
+      : null
+    const configAgentName = useConfigStore.getState().currentAgentName
+    const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
+
+    if (targetSessionId) {
+      useSelectionStore.getState().saveSessionModelSelection(targetSessionId, providerID, modelID)
+    }
+
+    if (targetSessionId && effectiveAgent) {
+      useSelectionStore.getState().saveSessionAgentSelection(targetSessionId, effectiveAgent)
+      useSelectionStore.getState().saveAgentModelVariantForSession(
+        targetSessionId,
+        effectiveAgent,
+        providerID,
+        modelID,
+        resolveVariantToRecord(effectiveAgent, providerID, modelID, variant),
+      )
+    }
+
+    if (targetSessionId) {
+      const viewportState = useViewportStore.getState()
+      const memState = getViewportSessionMemory(targetSessionId)
+      if (!memState || !memState.lastUserMessageAt) {
+        const newMemState = new Map(viewportState.sessionMemoryState)
+        newMemState.set(viewportSessionKey(targetSessionId), {
+          viewportAnchor: 0,
+          isStreaming: false,
+          lastAccessedAt: Date.now(),
+          backgroundMessageCount: 0,
+          ...memState,
+          lastUserMessageAt: Date.now(),
+        })
+        useViewportStore.setState({ sessionMemoryState: newMemState })
+      }
+    }
+
+    const currentSessionDirectory = targetSessionId
+      ? normalizePath(capturedTarget?.directory ?? options?.directory ?? useSessionUIStore.getState().getDirectoryForSession(targetSessionId))
+      : null
+    if (targetSessionId) {
+      notifyMessageSent(targetSessionId)
+      useSessionTabsStore.getState().pinTab(targetSessionId)
+    }
+
+    if (targetSessionId) {
+      markPendingUserSendAnimation(targetSessionId)
+    }
+
+    const files = attachments?.map((a) => ({
+      type: "file" as const,
+      mime: a.mimeType,
+      url: a.dataUrl,
+      filename: a.filename,
+    }))
+
+    // Standing project context (pinned notes and plans, the memory index),
+    // written into the session alongside the goal write and while the
+    // optimistic message is already on screen: only the prompt request
+    // waits for it.
+    const knowledgeSync = inputMode === "shell"
+      ? undefined
+      : syncSessionKnowledge(currentSessionDirectory, targetSessionId)
+
+    if (targetSessionId) {
+      const goalIntro = await applyArmedGoal(targetSessionId, currentSessionDirectory)
+      if (goalIntro) additionalParts = [...(additionalParts ?? []), goalIntro]
+    }
+    const historyIdentity = createInputHistoryIdentity(
+      capturedRuntimeKey,
+      currentSessionDirectory ?? '',
+      targetSessionId || '',
+    )
+    const historySubmissions = options?.historySubmissions
+    const appendSubmissions = historyIdentity && historySubmissions?.length
+      ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
+      : undefined
+
+    await routeMessage({
+      runtimeKey: capturedRuntimeKey,
+      sessionId: targetSessionId || "",
+      directory: currentSessionDirectory,
+      content,
+      providerID,
+      modelID,
+      agent: effectiveAgent,
+      agentMentionName,
+      variant,
+      inputMode,
+      files,
+      appendSubmissions,
+      delivery: options?.delivery,
+      skills: options?.skills,
+      knowledgeSync,
+      additionalParts: additionalParts?.map((p) => ({
+        text: p.text,
+        synthetic: p.synthetic,
+        metadata: p.metadata,
+        files: p.attachments?.map((a) => ({
+          type: "file" as const,
+          mime: a.mimeType,
+          url: a.dataUrl,
+          filename: a.filename,
+        })),
+      })),
+    })
+    // Keep restore failures outside the send promise and its retry path.
+    void resumeAfterSend?.().catch(console.warn)
+  })
+}
+
 export async function optimisticSend(input: {
   runtimeKey?: string
   sessionId: string
@@ -2427,7 +2832,7 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
   const stores = _childStores
   if (!stores) return false
 
-  const toDismiss: Array<{ store: DirectoryStoreApi; sessionId: string; permission: PermissionRequest }> = []
+  const toDismiss: PermissionToDismiss[] = []
   const lookup = sessionRecordLookup()
   for (const [, store] of stores.children) {
     const state = store.getState()
@@ -2440,9 +2845,18 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
   }
 
   if (toDismiss.length === 0) return false
+  await dismissPermissionEntries(toDismiss)
+  return true
+}
 
-  // Optimistically clear the permissions from the local store so the prompt
-  // disappears immediately, before the reject round-trip.
+type PermissionToDismiss = { store: DirectoryStoreApi; sessionId: string; permission: PermissionRequest }
+
+/**
+ * Removes the cards at once, then rejects each request. A not-found answer
+ * keeps a card removed; any other failure puts it back, because the agent is
+ * still waiting on it and no event will bring it back.
+ */
+async function dismissPermissionEntries(toDismiss: readonly PermissionToDismiss[]): Promise<void> {
   for (const { sessionId: scopedSessionId, permission } of toDismiss) {
     removePermissionRequestFromChildStores(scopedSessionId, permission.id)
   }
@@ -2453,14 +2867,36 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
         await dismissPermission(scopedSessionId, permission.id)
       } catch (error) {
         if (isPermissionRequestNotFoundError(error)) return
-        // Swallow: a failed dismissal must not block the send. The permission
-        // is still pending server-side, so it goes back where it was.
-        console.error("[session-actions] Failed to dismiss open permission on send:", error)
+        console.error("[session-actions] Failed to dismiss open permission:", error)
         restorePermissionRequest(store, scopedSessionId, permission)
       }
     }),
   )
-  return true
+}
+
+/**
+ * Clears the permission cards an interrupt left behind. OpenCode drops the
+ * pending request of a call it interrupts without publishing anything (core
+ * `permission.ts`), so the card would stay up and answer not-found later.
+ * Rejecting it through the usual dismissal confirms that with the server: a
+ * not-found answer removes the card, and a request the interrupt has not
+ * reached yet is settled. `session` covers the session's own requests;
+ * `tree` adds its subagents' and every request its dock shows.
+ */
+export async function dismissPermissionsAfterInterrupt(sessionId: string, scope: "session" | "tree"): Promise<void> {
+  if (scope === "tree") {
+    await dismissOpenPermissionsForSession(sessionId)
+    return
+  }
+  const stores = _childStores
+  if (!sessionId || !stores) return
+  const toDismiss: PermissionToDismiss[] = []
+  for (const [, store] of stores.children) {
+    for (const permission of store.getState().permission?.[sessionId] ?? []) {
+      toDismiss.push({ store, sessionId, permission })
+    }
+  }
+  await dismissPermissionEntries(toDismiss)
 }
 
 // ---------------------------------------------------------------------------
@@ -2498,11 +2934,12 @@ export async function replyToForm(
   }
 }
 
-export async function cancelForm(sessionId: string, formId: string): Promise<void> {
+/** `message` reaches the agent as the question's result and lets it go on; see `opencodeClient.cancelForm`. */
+export async function cancelForm(sessionId: string, formId: string, message?: string): Promise<void> {
   await waitForConnectionOrThrow()
   const directory = getRequestReplyDirectory("form", sessionId, formId)
   try {
-    if (await opencodeClient.cancelForm(sessionId, formId, directory) !== true) {
+    if (await opencodeClient.cancelForm(sessionId, formId, directory, message) !== true) {
       throw new Error("Form cancellation failed")
     }
     // A successful cancellation is authoritative; see replyToForm for the
@@ -2515,6 +2952,20 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
     }
     throw error
   }
+}
+
+/** Every form the open directory stores hold, each with the session it waits in. */
+export function listPendingForms(): Array<{ sessionId: string; form: FormRequest }> {
+  const stores = _childStores
+  if (!stores) return []
+  const pending: Array<{ sessionId: string; form: FormRequest }> = []
+  for (const [, store] of stores.children) {
+    const formsBySession: Record<string, FormRequest[]> = store.getState().form ?? {}
+    for (const [sessionId, forms] of Object.entries(formsBySession)) {
+      for (const form of forms) pending.push({ sessionId, form })
+    }
+  }
+  return pending
 }
 
 /**
@@ -2594,7 +3045,11 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
  * 4. Call the runtime revert endpoint and merge returned session
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
-export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
+export async function revertToMessage(
+  sessionId: string,
+  messageId: string,
+  options: { restorePromptToComposer?: boolean } = {},
+): Promise<void> {
   const { store, directory } = dirStoreForSession(sessionId)
   const state = store.getState()
 
@@ -2649,8 +3104,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     store.setState({ session: sessions })
   }
 
-  // Save input store state before mutations — if the API fails we need to
-  // roll back both text and attachments to their previous values.
+  // Recovery replays the captured message directly and must leave the user's
+  // current composer draft alone. Ordinary reverts restore the prompt to the
+  // composer and roll it back if staging fails.
+  const restorePromptToComposer = options.restorePromptToComposer !== false
   const prevInputAttachments = [...useInputStore.getState().attachedFiles]
   const prevInputText = useInputStore.getState().pendingInputText
   const prevInputMode = useInputStore.getState().pendingInputMode
@@ -2660,7 +3117,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const prevDrafts = draftTarget ? useInlineCommentDraftStore.getState().getDrafts(draftTarget) : []
 
   // Restore reverted message text and file attachments to input
-  if (messageText) {
+  if (restorePromptToComposer && messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
@@ -2672,7 +3129,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // must not carry over, even when the current message has no files.
   // Only a prompt goes back to the composer: reverting a subagent run report
   // leaves whatever the user is typing alone.
-  if (targetMsg?.role === "user") {
+  if (restorePromptToComposer && targetMsg?.role === "user") {
     restoreFilePartsToInput(submittedFileParts)
     if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
   }
@@ -2708,15 +3165,17 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     store.setState({
       session: rollback,
     })
-    // Rollback input store: restore previous text and attachments
-    useInputStore.setState({
-      pendingInputText: prevInputText,
-      pendingInputMode: prevInputMode,
-      attachedFiles: prevInputAttachments,
-    })
-    if (draftTarget) {
-      useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
-      useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
+    if (restorePromptToComposer) {
+      // Rollback input store: restore previous text and attachments
+      useInputStore.setState({
+        pendingInputText: prevInputText,
+        pendingInputMode: prevInputMode,
+        attachedFiles: prevInputAttachments,
+      })
+      if (draftTarget) {
+        useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
+        useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
+      }
     }
     throw err
   }

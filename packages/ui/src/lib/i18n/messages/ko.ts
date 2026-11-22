@@ -1,22 +1,28 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './ko.settings';
+import { multirunWorkflowI18n } from './multirun-workflow.i18n';
 import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { continueWithModelI18n } from './continue-with-model.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
@@ -28,7 +34,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode는 OpenChamber에 포함되어 있습니다. OpenCode v2를 사용하려면 OpenChamber를 업데이트하세요.",
@@ -77,6 +85,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '하위 에이전트 {count}개 사용',
   'sessions.sidebar.projectAction.active': '프로젝트 작업 실행 중',
   ...settingsDict,
+  ...multirunWorkflowI18n.ko,
   ...messagingI18n.ko,
   'gitView.operation.title': 'Git 작업',
   'gitView.operation.recovery.storage': 'OpenChamber가 여기에 Git 전송 상태를 저장할 수 없습니다. 사이트 저장소를 허용하고 새로 고치세요. 그때까지 push와 pull은 일시 중지됩니다.',
@@ -142,19 +151,24 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ko,
   ...referencePickerI18n.ko,
   ...sessionMenuHintsI18n.ko,
+  ...sessionErrorRecoveryI18n.ko,
   ...sidebarLayoutI18n.ko,
+  ...activityTimesI18n.ko,
   ...projectKnowledgeI18n.ko,
   ...linearPanelI18n.ko,
   ...routingI18n.ko,
+  ...poolSettingsI18n.ko,
   ...pluginPanelI18n.ko,
   ...surfacePanelI18n.ko,
   ...fileArtifactsI18n.ko,
   ...fileContentSearchI18n.ko,
   ...htmlRenderI18n.ko,
+  ...sessionLocationI18n.ko,
   ...sessionNoticesI18n.ko,
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
   ...sessionWarmingI18n.ko,
+  ...continueWithModelI18n.ko,
   ...isolatedSpacesI18n.ko,
   ...sourceBoardI18n.ko,
   ...projectActionsI18n.ko,
@@ -166,7 +180,9 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ko,
   ...integrationsCatalogI18n['ko'],
   ...sessionGoalWriterI18n['ko'],
+  ...subsessionModelsI18n['ko'],
   ...diffFindI18n['ko'],
+  ...questionAnswersI18n['ko'],
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',
   'terminalView.toast.selectionCopied': '출력을 복사했습니다',
@@ -476,6 +492,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': '전송됨',
   'sessions.scheduledTasks.dialog.status.skipped': '건너뜀',
   'sessions.scheduledTasks.dialog.status.cancelled': '취소됨',
+  'sessions.scheduledTasks.dialog.status.timeout': '시간 초과',
   'sessions.scheduledTasks.dialog.nextRun.label': '다음',
   'sessions.scheduledTasks.dialog.lastRun.label': '마지막 실행',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': '지금 실행 중',
@@ -593,6 +610,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showWork': '작업 중 섹션 표시',
   'sessions.sidebar.header.displayMode.showPinned': '고정됨 섹션 표시',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '자세한 행',
+  'sessions.sidebar.header.displayMode.sidebarRows': '사이드바 행…',
   'sessions.sidebar.activity.pinnedTitle': '고정됨',
   'sessions.sidebar.header.displayMode.showArchived': '보관된 세션 표시',
   'sessions.sidebar.header.displayMode.collapseAll': '모두 접기',
@@ -621,6 +639,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '보기',
   'sessions.sidebar.header.viewMode.projects': '트리',
   'sessions.sidebar.header.viewMode.timeline': '목록',
+  'sessions.sidebar.header.viewMode.headerless': '섹션 헤더 숨기기',
   'sessions.sidebar.activity.chatsEmpty': '아직 채팅이 없습니다.',
   'chat.chatInput.chooseProject': '프로젝트 선택',
   'sessions.archivePage.allDirectories': '모든 디렉터리',
@@ -953,7 +972,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.actions.deleteLocalBranch': '로컬 브랜치 삭제',
   'sessions.sidebar.sessionDialogs.actions.deleting': '삭제 중…',
   'sessions.sidebar.sessionDialogs.actions.deleteWorktree': '워크트리 삭제',
-  'gitView.branch.branchToMergeInto': '병합 대상 브랜치',
+  'gitView.branch.branchToMergeInto': '{branch}에 병합할 브랜치',
   'gitView.branch.branchToRebaseOnto': '리베이스 대상 브랜치',
   'gitView.branch.create': '새 브랜치 생성...',
   'gitView.branch.currentBadge': '현재',
@@ -992,8 +1011,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.branch.updateTitle': '브랜치 업데이트',
   'gitView.changes.changedFilesAria': '변경된 파일',
   'gitView.changes.clearSelectionAria': '파일 선택 해제',
-  'gitView.changes.collapseDirectoryAria': '디렉터리 접기',
-  'gitView.changes.expandDirectoryAria': '디렉터리 펼치기',
+  'gitView.changes.collapseDirectoryAria': '디렉터리 {path} 접기',
+  'gitView.changes.expandDirectoryAria': '디렉터리 {path} 펼치기',
   'gitView.changes.revertAll': '모두 되돌리기',
   'gitView.changes.revertAllDescriptionPlural': '선택한 파일 {count}개의 변경 사항을 되돌립니다.',
   'gitView.changes.revertAllDescriptionSingle': '선택한 파일 {count}개의 변경 사항을 되돌립니다.',
@@ -1004,18 +1023,18 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertDirectoryDescriptionSingle': '{path} 아래 파일 {count}개의 로컬 변경 사항을 버립니다.',
   'gitView.changes.revertDirectoryDialogTitle': '폴더 변경 사항을 되돌릴까요?',
   'gitView.changes.revertDirectoryTooltip': '폴더 변경 사항 되돌리기',
-  'gitView.changes.revertFileAria': '파일 변경 사항 되돌리기',
+  'gitView.changes.revertFileAria': '{path}의 변경 사항 되돌리기',
   'gitView.changes.revertFileTooltip': '변경 사항 되돌리기',
   'gitView.changes.reverting': '되돌리는 중…',
   'gitView.changes.selectAllAria': '모든 파일 선택',
-  'gitView.changes.selectFileAria': '파일 선택',
+  'gitView.changes.selectFileAria': '{path} 선택',
   'gitView.changes.stagedTitle': '스테이징됨',
   'gitView.changes.resizeSplitAria': '스테이징 및 미스테이징 변경사항 크기 조정',
   'gitView.changes.stageAllAria': '모든 변경사항 스테이징',
   'gitView.changes.stageDirectoryAria': '{path}의 모든 변경사항 스테이징',
   'gitView.changes.stageFileAria': '{path} 스테이징',
   'gitView.changes.title': '변경사항',
-  'gitView.changes.toggleDirectorySelectionAria': '디렉터리 선택 전환',
+  'gitView.changes.toggleDirectorySelectionAria': '{path} 선택 전환',
   'gitView.changes.unstageAllAria': '모든 변경사항 스테이징 해제',
   'gitView.changes.unstageDirectoryAria': '{path}의 모든 변경사항 스테이징 해제',
   'gitView.changes.unstageFileAria': '{path} 스테이징 해제',
@@ -1054,12 +1073,12 @@ export const dict: Record<I18nKey, string> = {
   'gitView.common.done': '완료',
   'gitView.common.processing': '처리 중…',
   'gitView.common.reset': '초기화',
-  'gitView.conflict.abortOperation': '작업 중단',
+  'gitView.conflict.abortOperation': '{operation} 중단',
   'gitView.conflict.conflictedFiles': '충돌한 파일:',
   'gitView.conflict.continueLater': '나중에 계속',
-  'gitView.conflict.detectedDescription': '병합 또는 리베이스 중 해결이 필요한 충돌이 발견되었습니다.',
-  'gitView.conflict.detectedTitle': '충돌 발견됨',
-  'gitView.conflict.errorLoadingDetails': '상세 정보 로드 오류',
+  'gitView.conflict.detectedDescription': '계속하려면 {operation} 충돌을 해결하세요.',
+  'gitView.conflict.detectedTitle': '{operation} 충돌 발견됨',
+  'gitView.conflict.errorLoadingDetails': '충돌 상세 정보 로드 실패: {message}',
   'gitView.conflict.headInfo': 'HEAD 정보:',
   'gitView.conflict.loadFailed': '로드 실패',
   'gitView.conflict.loading': '충돌 상세 정보를 로드하는 중…',
@@ -1088,8 +1107,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.updateBranch': '브랜치 업데이트',
   'gitView.header.openPullRequest': '풀 리퀘스트 열기',
   'gitView.header.openRepository': '{provider}에서 저장소 보기',
-  'gitView.header.removeRemoteAria': '리모트 제거',
-  'gitView.header.removeRemoteTitle': '리모트 제거',
+  'gitView.header.removeRemoteAria': '리모트 {name} 제거',
+  'gitView.header.removeRemoteTitle': '리모트 {name} 제거',
   'gitView.header.upstreamSynced': '동기화됨',
   'gitView.header.upstreamTooltip': '{target}와 비교됨.',
   'gitView.header.upstreamTooltipTracking': '{target}와 비교됨. 기본 동기화 배지는 계속 {tracking}을 반영합니다.',
@@ -1147,15 +1166,15 @@ export const dict: Record<I18nKey, string> = {
   'gitView.integrate.cherryPickConflictToast': 'Cherry-pick 충돌이 발생했습니다',
   'gitView.integrate.cherryPickContinueFailedToast': 'Cherry-pick을 계속하지 못했습니다',
   'gitView.integrate.cherryPickFinishedToast': 'Cherry-pick이 완료되었습니다',
-  'gitView.integrate.commitsMovedDescriptionPlural': '커밋 {count}개를 새 세션으로 이동했습니다.',
-  'gitView.integrate.commitsMovedDescriptionSingle': '커밋 {count}개를 새 세션으로 이동했습니다.',
+  'gitView.integrate.commitsMovedDescriptionPlural': '커밋 {count}개를 {branch}로 이동했습니다.',
+  'gitView.integrate.commitsMovedDescriptionSingle': '커밋 {count}개를 {branch}로 이동했습니다.',
   'gitView.integrate.commitsMovedToast': '커밋을 이동했습니다',
   'gitView.integrate.commitsToMove': '이동할 커밋',
-  'gitView.integrate.conflictsInFiles': '파일 충돌',
+  'gitView.integrate.conflictsInFiles': '{count}개 파일의 충돌',
   'gitView.integrate.currentCommit': '현재 커밋',
   'gitView.integrate.currentSession': '현재 세션',
   'gitView.integrate.failedToMoveToast': '커밋을 이동하지 못했습니다',
-  'gitView.integrate.moreFiles': '파일 더 보기',
+  'gitView.integrate.moreFiles': '파일 {count}개 더 보기',
   'gitView.integrate.move': '이동',
   'gitView.integrate.moveCommits': '커밋 이동',
   'gitView.integrate.moving': '이동 중…',
@@ -1167,10 +1186,10 @@ export const dict: Record<I18nKey, string> = {
   'gitView.integrate.previewUnavailable': '미리보기를 사용할 수 없음',
   'gitView.integrate.showAll': '모두 보기',
   'gitView.integrate.showLess': '간단히 보기',
-  'gitView.integrate.showingFirstCommits': '처음 커밋부터 표시',
+  'gitView.integrate.showingFirstCommits': '처음 {count}개 커밋 표시 중',
   'gitView.integrate.target': '대상',
   'gitView.integrate.title': '커밋 다시 통합',
-  'gitView.integrate.toMoveCount': '이동할 커밋 수',
+  'gitView.integrate.toMoveCount': '이동할 커밋 {count}개',
   'gitView.operation.abort': '중단',
   'gitView.operation.continue': '계속',
   'gitView.operation.inProgressTitle': '{operation} 진행 중',
@@ -1185,11 +1204,11 @@ export const dict: Record<I18nKey, string> = {
   'gitView.operation.readyToContinueHint': '모든 충돌이 해결되었습니다. 계속하여 작업을 완료하세요.',
   'gitView.operation.resolveConflictsHint': '충돌을 해결한 뒤 작업을 계속하세요.',
   'gitView.operation.resolveWithAi': 'AI로 해결',
-  'gitView.stash.confirmButton': '확인',
-  'gitView.stash.description': '설명',
+  'gitView.stash.confirmButton': '{operation}',
+  'gitView.stash.description': '{operation}을 시작하기 전에 로컬 변경 사항을 스태시하세요.',
   'gitView.stash.mergeWith': '다음과 병합',
   'gitView.stash.rebaseOnto': '다음 위로 리베이스',
-  'gitView.stash.restoreAfterOperation': '작업 후 복원',
+  'gitView.stash.restoreAfterOperation': '{operation} 후 스태시한 변경 사항 복원',
   'gitView.stash.restoreAria': 'stash 복원',
   'gitView.stash.stepRestore': 'stash한 변경 사항 복원',
   'gitView.stash.stepStash': '커밋하지 않은 변경 사항 stash',
@@ -1292,6 +1311,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.checks.openRun': '열기',
   'gitView.pr.checks.failedAnnotations': '실패한 주석',
   'gitView.pr.checks.failedAnnotationsShown': '실패한 주석 ({total}개 중 {shown}개 표시)',
+  'gitView.pr.checks.annotationsTruncated': '주석이 불완전합니다 — 이 실행에는 로드할 수 있었던 것보다 많은 주석이 있습니다.',
   'gitView.pr.field.baseBranch': '기본 브랜치',
   'gitView.pr.field.description': '설명',
   'gitView.pr.field.title': '제목',
@@ -1904,6 +1924,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': '이 저장소에 변경사항이 없습니다',
   'diffView.unavailable.untrackedDirectoryTitle': '새 파일 폴더',
   'diffView.unavailable.untrackedDirectoryDescription': '이 폴더에는 새 파일이 너무 많아 하나씩 나열할 수 없습니다. 스테이지하거나, 저장소에 포함되지 않아야 한다면 .gitignore에 추가하세요.',
+  'diffView.unavailable.tooLargeTitle': '파일이 너무 커서 diff를 표시할 수 없습니다',
+  'diffView.unavailable.tooLargeDescription': '파일 diff 제한인 20MiB를 초과합니다.',
   'diffView.submodule.title': '서브모듈',
   'diffView.submodule.commitChanged': '커밋 {from} → {to}',
   'diffView.submodule.commitUnchanged': '여전히 커밋 {commit}',
@@ -2604,6 +2626,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': '장애 조치 출처',
   'chat.messageBody.modelChanged.notice': '모델 변경됨: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': '모델 변경됨: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': '이전 모델 선호',
+  'chat.messageBody.modelChanged.preferPreviousTitle': '모델 풀이 하루 동안 {model}을(를) 우선하도록 설정',
+  'chat.currentModel.label': '현재 모델: {model}',
+  'chat.currentModel.labelWithPool': '현재 모델: {model} (풀 {pool})',
+  'chat.currentModel.menu.openHint': '클릭하여 모델 선택',
+  'chat.currentModel.menu.timing': '전환',
+  'chat.currentModel.menu.directPickHelp': '직접 선택하면 풀로 돌아갈 때까지 풀의 자동 대체 모델 전환이 중지됩니다.',
+  'chat.currentModel.timing.immediately': '지금 (진행 중인 응답을 다시 시작)',
+  'chat.currentModel.timing.nextStep': '다음 단계에서',
+  'chat.currentModel.timing.nextInput': '다음 메시지부터',
+  'chat.currentModel.menu.members': '풀 {pool}의 모델',
+  'chat.currentModel.menu.returnToPool': '풀 {pool}(으)로 돌아가기',
+  'chat.currentModel.toast.failed': '모델을 전환하지 못했습니다',
   'chat.generatedResult.actions.copy': '복사',
   'chat.generatedResult.actions.copied': '복사됨',
   'chat.generatedResult.commit.title': '생성된 커밋 메시지',
@@ -3092,6 +3127,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '인증 필요',
   'mcpDropdown.status.needsRegistration': '등록 필요: {error}',
   'mcpDropdown.empty.configureInConfig': '설정에서 MCP 서버를 구성하세요.',
+  "mcpDropdown.cacheNote": "Code Mode가 꺼진 서버를 켜거나 끄면 실행 중인 세션의 다음 턴은 프롬프트 캐시를 사용하지 않습니다.",
   'sessionAuth.error.rateLimitTitle': '시도가 너무 많습니다',
   'sessionAuth.error.networkTitle': '서버에 연결할 수 없습니다',
   'sessionAuth.error.rateLimitDescriptionSingle': '{minutes}분 후 다시 시도하세요.',
@@ -3849,8 +3885,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': '이것 남기기',
   'multirun.overview.addModel.action': '모델 추가',
   'multirun.overview.addModel.hint': '이 실행에서 같은 프롬프트를 모델 하나에 더 보냅니다',
-  'chat.parallel.settings.whereShared': '프로젝트 디렉터리',
-  'chat.parallel.settings.whereSharedHint': '모든 실행이 작업 사본에서 동작합니다. 질문과 조사에 가장 적합합니다.',
+  'chat.parallel.settings.whereShared': '공유 디렉터리',
+  'chat.parallel.settings.whereSharedHint': '모든 실행이 이 초안에 지정된 디렉터리에서 동작합니다. 질문과 조사에 가장 적합합니다.',
   'chat.parallel.settings.whereWorktrees': '개별 워크트리',
   'chat.parallel.settings.whereWorktreesHint': '실행마다 자체 브랜치를 사용해 코드 변경이 충돌하지 않습니다. 가장 좋은 것을 남기세요.',
   'chat.parallel.settings.baseBranchTitle': '기준 브랜치',

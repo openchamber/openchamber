@@ -1,12 +1,20 @@
 import fs from 'fs';
 import path from 'path';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { getLinearAuth, getLinearAuthFilePath, getLinearSessionCommentsEnabled } from './auth.js';
 import { createLinearIssueComment } from './issues.js';
 import { isPlainObject, readTrimmedString } from './parse.js';
 
 const LINEAR_SESSION_STATUS_KINDS = ['started', 'completed', 'failure'];
 const MAX_SESSION_STATUS_RECORDS = 500;
+
+// Records are pruned to MAX_SESSION_STATUS_RECORDS = 500 on every write,
+// each a few dozen bytes, so 1 MiB is more than 10x headroom while
+// refusing an oversized or non-regular file (e.g. a FIFO, which would
+// otherwise block the synchronous read and freeze the server) instead
+// of buffering it whole.
+const MAX_LINEAR_SESSION_STATUS_BYTES = 1 * 1024 * 1024;
 
 export class LinearSessionStatusError extends Error {
   constructor(message, code) {
@@ -146,16 +154,22 @@ function readRecord(value) {
 
 function readRecords() {
   const filePath = statusFile();
-  if (!fs.existsSync(filePath)) {
+  // Bounded read: missing and empty files answer {} as before, while
+  // malformed JSON, an over-cap file, and a non-regular file all throw
+  // the existing MALFORMED error; unexpected I/O errors propagate.
+  const result = readBoundedFileSync(filePath, MAX_LINEAR_SESSION_STATUS_BYTES);
+  if (!result.ok) {
+    if (result.reason === 'missing') {
+      return {};
+    }
+    throw new LinearSessionStatusError('Linear session status file is malformed', 'MALFORMED');
+  }
+  const trimmed = result.buffer.toString('utf8').trim();
+  if (!trimmed) {
     return {};
   }
   let parsed;
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const trimmed = raw.trim();
-    if (!trimmed) {
-      return {};
-    }
     parsed = JSON.parse(trimmed);
   } catch {
     throw new LinearSessionStatusError('Linear session status file is malformed', 'MALFORMED');

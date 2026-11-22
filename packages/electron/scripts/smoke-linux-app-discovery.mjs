@@ -7,9 +7,12 @@ import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
   fetchLinuxAppIcons,
+  iconFileToDataUrl,
+  MAX_INSTALLED_APP_ICON_BYTES,
   filterLinuxInstalledApps,
   findLinuxFileManagerEntry,
   linuxApplicationDirs,
+  MAX_DESKTOP_ENTRY_BYTES,
   parseDesktopEntry,
   readLinuxDesktopEntries,
   resolveLinuxIconFile,
@@ -103,6 +106,25 @@ try {
   assert(!entries.some((entry) => entry.name === 'No Display App'), 'NoDisplay=true entry should be skipped');
   assert(!entries.some((entry) => entry.name === 'Missing Exec'), 'missing Exec entry should be skipped');
 
+  // Bounded .desktop entry reads (#1261): the stat gate skips an over-cap
+  // entry before it is buffered, exactly like an unreadable file, while an
+  // at-cap entry parses normally and siblings in the same directory are
+  // still returned.
+  const capApps = path.join(tempRoot, 'cap-apps');
+  await fs.mkdir(capApps, { recursive: true });
+  const padEntry = (name, exec, totalBytes) => {
+    const head = '[Desktop Entry]\nType=Application\nName=' + name + '\nExec=' + exec + ' %f\n# ';
+    return head + 'x'.repeat(totalBytes - head.length - 1) + '\n';
+  };
+  await fs.writeFile(path.join(capApps, 'over-cap.desktop'), padEntry('Over Cap App', 'over-cap', MAX_DESKTOP_ENTRY_BYTES + 1), 'utf8');
+  await fs.writeFile(path.join(capApps, 'at-cap.desktop'), padEntry('At Cap App', 'at-cap', MAX_DESKTOP_ENTRY_BYTES), 'utf8');
+  await fs.writeFile(path.join(capApps, 'sibling.desktop'), '[Desktop Entry]\nType=Application\nName=Sibling App\nExec=sibling %f\n', 'utf8');
+  const capEntries = await readLinuxDesktopEntries({ applicationDirs: [capApps], env, homeDir: tempRoot });
+  assert(capEntries.length === 2, 'over-cap entry must be skipped while at-cap and sibling entries return, got ' + capEntries.length);
+  assert(!capEntries.some((entry) => entry.name === 'Over Cap App'), 'over-cap entry must not appear in results');
+  assert(capEntries.some((entry) => entry.name === 'At Cap App'), 'at-cap entry must parse normally');
+  assert(capEntries.some((entry) => entry.name === 'Sibling App'), 'sibling entry must still be returned');
+
   const codeEntry = parseDesktopEntry(await fs.readFile(codeDesktopPath, 'utf8'), codeDesktopPath);
   assert(codeEntry?.name === 'Visual Studio Code', 'parser should read Name');
   assert(codeEntry?.icon === 'code', 'parser should read Icon');
@@ -182,6 +204,20 @@ try {
   });
   assert(fetchedIcons.length === 2, 'fetchLinuxAppIcons should return resolved icons');
   assert(fetchedIcons.every((entry) => entry.data_url?.startsWith('data:image/png;base64,')), 'fetched icons should be PNG data URLs');
+
+  // Bounded icon reads (#1257): the stat gate refuses an over-cap icon
+  // before it is read, so the caller falls back to no icon; an at-cap
+  // icon returns its byte-identical data URL; missing and non-PNG
+  // behaviour is unchanged.
+  const overCapIcon = path.join(tempRoot, 'over-cap.png');
+  await fs.writeFile(overCapIcon, Buffer.alloc(MAX_INSTALLED_APP_ICON_BYTES + 1, 1));
+  assert(iconFileToDataUrl(overCapIcon) === null, 'over-cap icon must be refused, not read whole');
+  const atCapBytes = Buffer.alloc(MAX_INSTALLED_APP_ICON_BYTES, 2);
+  const atCapIcon = path.join(tempRoot, 'at-cap.png');
+  await fs.writeFile(atCapIcon, atCapBytes);
+  assert(iconFileToDataUrl(atCapIcon) === `data:image/png;base64,${atCapBytes.toString('base64')}`, 'at-cap icon must return its byte-identical data URL');
+  assert(iconFileToDataUrl(path.join(tempRoot, 'missing.png')) === null, 'missing icon stays null');
+  assert(iconFileToDataUrl(path.join(tempRoot, 'not-an-icon.svg')) === null, 'non-PNG icon stays null');
 
   const specs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'vscode', appName: 'Visual Studio Code', targetKind: 'project', entries, env });
   assert(specs.length === 1, 'desktop entry should provide an opener when CLI is absent');

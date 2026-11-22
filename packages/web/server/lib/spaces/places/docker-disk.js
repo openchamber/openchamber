@@ -20,6 +20,14 @@ const IN_USE = /\bis in use\b|\bbeing used by\b|\bmust be forced\b|\bcontainer i
 // Colima names its Docker machine `colima`, or `colima-<profile>` for another profile.
 const COLIMA_MACHINE = /^colima(?:-([A-Za-z0-9._-]+))?$/;
 
+// A tail cut can land between the halves of a surrogate pair, leaving the
+// kept text starting with a lone low surrogate that re-encodes as U+FFFD;
+// drop that leading half so the kept tail starts on a character boundary.
+const dropSplitTailHead = (text) => {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+};
+
 /** Bytes from a size as `docker system df` prints it; anything else, `N/A` among it, counts as 0. */
 export const parseDockerSize = (text) => {
   const match = /^(\d+(?:\.\d+)?)\s*(B|kB|KB|MB|GB|TB|PB)$/.exec(String(text ?? '').trim());
@@ -129,7 +137,7 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
       const match = info.code === 0 ? COLIMA_MACHINE.exec(String(parseJson(info.stdout))) : null;
       if (!match) return { state: 'skipped' };
       const result = await runCommand(colimaPath, ['ssh', '--profile', match[1] ?? 'default', '--', 'sudo', '-n', 'fstrim', '--all'], { timeoutMs: TRIM_TIMEOUT_MS });
-      return result.code === 0 ? { state: 'trimmed' } : { state: 'failed', message: result.stderr.trim().slice(-500) || `exit code ${result.code}` };
+      return result.code === 0 ? { state: 'trimmed' } : { state: 'failed', message: dropSplitTailHead(result.stderr.trim().slice(-500)) || `exit code ${result.code}` };
     } catch (error) {
       return { state: 'failed', message: error?.message ?? String(error) };
     }

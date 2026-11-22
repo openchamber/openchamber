@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +11,7 @@ import {
   guestAuthPersistPath,
   patchGuestAuth,
   readGuestAuthStore,
+  GUEST_AUTH_STORE_READ_MAX_BYTES,
 } from './auth-store.js';
 
 describe('guestAuthPersistPath', () => {
@@ -69,6 +71,31 @@ describe('guest auth store', () => {
     await fs.promises.writeFile(file, '\uFEFF\n', 'utf8');
     expect(await readGuestAuthStore(file)).toEqual({ guests: {} });
     await fs.promises.rm(dir, { recursive: true, force: true });
+  });
+
+  test('refuses an oversized store through the Invalid path without parsing it whole', async () => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'oc-guest-auth-'));
+    const file = guestAuthPersistPath(dir);
+    try {
+      // Schema-valid shape padded past the read cap: the bounded read
+      // refuses it before any parse, so it must land on the Invalid
+      // throw and never read as the empty store.
+      await fs.promises.writeFile(file, `{"guests":{},"pad":"${'x'.repeat(GUEST_AUTH_STORE_READ_MAX_BYTES)}"}`, 'utf8');
+      await expect(readGuestAuthStore(file)).rejects.toThrow('Invalid guest auth store');
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(process.platform === 'win32')('refuses a FIFO at the store path promptly without blocking', async () => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'oc-guest-auth-'));
+    const file = guestAuthPersistPath(dir);
+    try {
+      execFileSync('mkfifo', [file]);
+      await expect(readGuestAuthStore(file)).rejects.toThrow('Invalid guest auth store');
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
   });
 
   test('refuses a corrupt store', async () => {

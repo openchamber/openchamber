@@ -30,6 +30,7 @@ import { OpenChamberControlError } from './error.js';
 
 export const SESSION_EXTRA_ACTION_DEFINITIONS = Object.freeze([
   { action: 'session.rename', title: 'Rename a session', description: 'Set the title of sessionId (defaults to the current session); an empty title asks OpenCode to generate one from the conversation' },
+  { action: 'session.subagentPolicy', title: 'Set a session\'s subsession model policy', description: 'Replace the subagentPolicy of sessionId (defaults to the current session): { models, excludedModels, agentOverrides } limits the models its subsessions may run. The whole policy is replaced, and the change applies to subsessions started after it. Use only when the user asks' },
   { action: 'session.model', title: 'Change a session\'s model or effort', description: 'Switch sessionId (defaults to the current session) to model (provider/model) and/or variant, the model\'s effort or thinking level. variant alone keeps the current model; model without variant uses the model\'s default effort. Takes effect from the next turn. Use only when the user asks' },
   { action: 'session.agent', title: 'Change a session\'s agent', description: 'Switch sessionId (defaults to the current session) to the primary agent named by agent; takes effect from the next turn. Use only when the user asks' },
   { action: 'session.goal', title: 'Manage a session\'s goal', description: 'Goal Mode for sessionId (defaults to the current session), chosen by goalAction: get shows the goal and its objective; set starts a goal from objective, or rewrites the objective of the current one keeping its progress (goalTokenBudget optional); pause stops the goal and the running turn; resume restarts it with a fresh turn allowance; complete marks it done; clear removes it and stops the running turn. The goal of the session you are running in is settled by its progress check or by the user: pause, complete and clear are refused there' },
@@ -39,6 +40,15 @@ export const SESSION_EXTRA_ACTION_DEFINITIONS = Object.freeze([
 ]);
 
 export const SESSION_EXTRA_PARAMETERS = {
+  subagentPolicy: {
+    type: 'object',
+    description: 'session.subagentPolicy: the whole policy, { models, excludedModels, agentOverrides }; models and excludedModels are model selectors such as provider/model or provider/*',
+    properties: {
+      models: { type: 'array', items: { type: 'string' } },
+      excludedModels: { type: 'array', items: { type: 'string' } },
+      agentOverrides: { type: 'object' },
+    },
+  },
   goalAction: { type: 'string', enum: ['get', 'set', 'pause', 'resume', 'complete', 'clear'], description: 'session.goal: what to do with the goal' },
   objective: { type: 'string', description: 'session.goal set: what the goal must achieve, written as completion criteria; text over the goal length limit in Settings (5000 characters unless changed) is condensed' },
   pinned: { type: 'boolean', description: 'session.pin: false unpins; default true' },
@@ -130,7 +140,7 @@ export const createSessionExtraActions = (deps) => {
 
   const isActive = async (client, sessionID) => {
     const statuses = await client.session.active();
-    return Boolean(isRecord(statuses) && statuses[sessionID]);
+    return Boolean(isRecord(statuses) && Object.hasOwn(statuses, sessionID) && statuses[sessionID]);
   };
 
   const interrupt = async (client, sessionID) => {
@@ -149,6 +159,15 @@ export const createSessionExtraActions = (deps) => {
     const title = asNonEmptyString(input.title) ?? '';
     await client.session.update({ sessionID, title });
     return title ? { sessionId: sessionID, title } : { sessionId: sessionID, title: null, regenerating: true };
+  };
+
+  const setSubagentPolicy = async ({ client, sessionID, input }) => {
+    if (!isRecord(input.subagentPolicy)) {
+      throw new OpenChamberControlError('subagentPolicy must be an object with models, excludedModels, or agentOverrides', 400);
+    }
+    // Forwarded unchanged: OpenCode owns the policy shape and its checks.
+    await client.session.update({ sessionID, subagentPolicy: input.subagentPolicy });
+    return { sessionId: sessionID, subagentPolicy: input.subagentPolicy };
   };
 
   const switchModel = async ({ client, sessionID, input }) => {
@@ -400,6 +419,7 @@ export const createSessionExtraActions = (deps) => {
 
   const handlers = {
     'session.rename': rename,
+    'session.subagentPolicy': setSubagentPolicy,
     'session.model': switchModel,
     'session.agent': switchAgent,
     'session.goal': goal,

@@ -34,11 +34,14 @@ comes from the agent tool (`contextSessionId`).
 `{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId? }` in
 `<data-dir>/dispatch-results.json`, written atomically through a serialized
 write chain, owner-readable only. `register` resolves once the entry is on
-disk, so a restart right after the tool answers still delivers. A missing file
-is nothing pending; a malformed file is moved aside as
-`dispatch-results.json.corrupt-<timestamp>`; a failed read keeps writes off
-until a load succeeds; one malformed entry is dropped alone. At most 200
-entries, oldest dropped with a warning.
+disk, so a restart right after the tool answers still delivers. Persistence
+rides the shared durable-store primitive (`../shared/durable-json-store.js`,
+#978): a missing or empty file is nothing pending; a malformed file
+(unparseable bytes, or a value that is not an object with an entries array)
+is preserved aside as `dispatch-results.json.corrupt-<timestamp>-<pid>-<random>`
+before any write can replace it, and a failed preservation refuses the
+write; a failed read keeps writes off until a load succeeds; one malformed
+entry is dropped alone. At most 200 entries, oldest dropped with a warning.
 
 Timers, retry counts and the in-flight guard are memory only: after a restart
 `start()` re-arms every watched session from a fresh tick.

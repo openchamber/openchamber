@@ -1,6 +1,5 @@
 import React from 'react';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDirectorySync, useSessionMessageRecords, useSyncDirectory, useSyncRuntime } from '@/sync/sync-context';
 import { normalizePath } from '@/lib/pathNormalization';
 import {
@@ -24,17 +23,16 @@ type Props = {
 
 /** One hover/focus target covers both the label and its value. */
 const TelemetryRow: React.FC<{ label: string; description: string; value: React.ReactNode }> = ({ label, description, value }) => (
-  <Tooltip delayDuration={300}>
-    <TooltipTrigger asChild>
-      <div tabIndex={0} className="min-w-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <WorkStatusRow label={label} value={value} />
-      </div>
-    </TooltipTrigger>
-    <TooltipContent side="top" sideOffset={4} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
-      <p className="font-medium">{label}</p>
-      <p>{description}</p>
-    </TooltipContent>
-  </Tooltip>
+  <WorkStatusRow
+    label={label}
+    value={value}
+    tooltip={(
+      <>
+        <p className="font-medium">{label}</p>
+        <p>{description}</p>
+      </>
+    )}
+  />
 );
 
 export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directory }) => {

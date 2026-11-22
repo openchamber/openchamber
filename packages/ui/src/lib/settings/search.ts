@@ -132,6 +132,37 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['spinner', 'animation', 'session', 'activity', 'motion', 'running', 'indicator'],
   },
   {
+    id: 'appearance.sidebar-rows',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.section.sidebarRows',
+    descriptionKey: 'settings.openchamber.visual.field.sidebarRowsInfo',
+    keywords: ['sidebar', 'session row', 'rows', 'lines', 'one line', 'two lines', 'branch', 'badge', 'provider', 'logo', 'project icon', 'goal', 'detailed rows'],
+  },
+  {
+    id: 'appearance.sidebar-rows-lines',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.zoneLines',
+    keywords: ['sidebar', 'rows', 'lines', 'one line', 'two lines', 'detailed rows', 'zone'],
+  },
+  {
+    id: 'appearance.sidebar-rows-list-lines',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.listLines',
+    keywords: ['sidebar', 'rows', 'lines', 'one line', 'two lines', 'list', 'compact rows'],
+  },
+  {
+    id: 'appearance.sidebar-rows-chats-lines',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.chatsLines',
+    keywords: ['sidebar', 'rows', 'lines', 'one line', 'two lines', 'chats'],
+  },
+  {
+    id: 'appearance.sidebar-rows-project-lines',
+    page: 'appearance',
+    titleKey: 'settings.openchamber.visual.field.projectLines',
+    keywords: ['sidebar', 'rows', 'lines', 'one line', 'two lines', 'tree', 'project'],
+  },
+  {
     id: 'appearance.interface-font-size',
     page: 'appearance',
     titleKey: 'settings.openchamber.visual.field.interfaceFontSize',
@@ -568,6 +599,35 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['history limit', 'prompt recall', 'remember prompts', 'composer history', 'submitted prompts', 'trim history'],
   },
   {
+    id: 'chat.question-timeout',
+    page: 'chat',
+    titleKey: 'settings.chat.questionTimeout.field',
+    descriptionKey: 'settings.chat.questionTimeout.info',
+    keywords: ['question', 'timeout', 'expire', 'agent question', 'unanswered', 'close question', 'dismiss'],
+  },
+  {
+    id: 'chat.questions-in-background',
+    page: 'chat',
+    titleKey: 'settings.chat.questionsInBackground.field',
+    descriptionKey: 'settings.chat.questionsInBackground.info',
+    keywords: ['question', 'background', 'answer later', 'keep working', 'non-blocking', 'agent question'],
+  },
+  {
+    id: 'chat.model-choices',
+    page: 'chat',
+    titleKey: 'settings.openchamber.modelChoices.title',
+    keywords: ['model', 'effort', 'choices', 'history', 'learn', 'suggestions', 'privacy'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.model-choice-recording',
+    page: 'chat',
+    titleKey: 'settings.openchamber.modelChoices.field.enabled',
+    descriptionKey: 'settings.openchamber.modelChoices.field.enabledInfo',
+    keywords: ['model', 'effort', 'record', 'history', 'learn', 'notes', 'privacy'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.message-search',
     page: 'chat',
     titleKey: 'settings.openchamber.messageSearch.title',
@@ -613,6 +673,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.visual.field.largeTextPaste',
     descriptionKey: 'settings.openchamber.visual.field.largeTextPasteHint',
     keywords: ['paste', 'clipboard', 'attachment', 'large', 'text', 'file', 'double paste', 'ctrl v', 'cmd v'],
+  },
+  {
+    id: 'chat.active-run-model-change',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.activeRunModelChange',
+    descriptionKey: 'settings.openchamber.visual.field.activeRunModelChangeInfo',
+    keywords: ['model', 'switch', 'running', 'run', 'stop', 'restart', 'next message'],
   },
   {
     id: 'chat.enter-to-send',
@@ -671,6 +738,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.continue-with-model',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.field.continueWithModel',
+    descriptionKey: 'settings.openchamber.defaults.field.continueWithModelInfo',
+    keywords: ['switch model', 'another model', 'continue', 'retry', 'provider down', 'outage', 'background', 'shell', 'subagent', 'stop', 'handoff'],
+  },
+  {
     id: 'sessions.show-chats',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.showChats',
@@ -689,6 +763,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionWork.field.enabled',
     keywords: ['in work', 'in progress', 'track', 'done', 'sidebar'],
+  },
+  {
+    id: 'sessions.work-entry',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.sessionWork.entry.label',
+    descriptionKey: 'settings.openchamber.sessionWork.entry.info',
+    keywords: ['in work', 'automatic', 'every message', 'jev', 'classification', 'track'],
+    // Sessions enter on their own through the OpenChamber server; VS Code has only Track.
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'sessions.small-model',
@@ -1014,7 +1097,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'routing.token',
-    page: 'routing',
+    page: 'providers',
     titleKey: 'settings.routing.token.label',
     descriptionKey: 'settings.routing.token.info',
     keywords: ['jev', 'typesafe', 'api key', 'token', 'routing'],
@@ -1063,17 +1146,17 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'routing.pools-advanced',
     page: 'routing',
-    titleKey: 'settings.pools.advanced.selection',
-    descriptionKey: 'settings.pools.advanced.selectionInfo',
-    keywords: ['pool', 'selection', 'round robin', 'weighted', 'attempts', 'hedge', 'health', 'cooldown', 'budget', 'quota', 'soft limit', 'routing'],
+    titleKey: 'settings.pools.timeout.label',
+    descriptionKey: 'settings.pools.timeout.info',
+    keywords: ['pool', 'timeout', 'first token', 'first output', 'wait', 'slow', 'failover', 'fallback', 'attempts', 'retry', 'hedge', 'selection', 'round robin', 'weighted', 'health', 'cooldown', 'budget', 'quota', 'soft limit', 'routing'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {
     id: 'routing.pools-targets',
     page: 'routing',
-    titleKey: 'settings.pools.target.options',
-    descriptionKey: 'settings.pools.target.remapsInfo',
-    keywords: ['pool', 'target', 'variant', 'remap', 'default variant', 'until', 'expiry', 'expire', 'nested pool', 'display name', 'first token'],
+    titleKey: 'settings.pools.member.byLevel',
+    descriptionKey: 'settings.pools.member.lockInfo',
+    keywords: ['pool', 'model', 'effort', 'variant', 'lock', 'default effort', 'remap', 'skip level', 'until', 'expiry', 'nested pool', 'hide', 'picker', 'reorder', 'order', 'display name', 'category'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {
@@ -1082,6 +1165,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.pools.tuning.enabled',
     descriptionKey: 'settings.pools.tuning.info',
     keywords: ['automatic review', 'tuning', 'review', 'history', 'schedule', 'routing'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
+  },
+  {
+    id: 'routing.pools-schedules',
+    page: 'routing',
+    titleKey: 'settings.pools.schedules.globalTitle',
+    descriptionKey: 'settings.pools.schedules.globalInfo',
+    keywords: ['schedule', 'schedules', 'peak hours', 'weekdays', 'weekends', 'timezone', 'weight', 'pool', 'routing'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
+  },
+  {
+    id: 'routing.pools-rotation',
+    page: 'routing',
+    titleKey: 'settings.pools.rotation.enable',
+    descriptionKey: 'settings.pools.rotation.description',
+    keywords: ['pool', 'rotation', 'stagger', 'cache', 'quota', 'plan', 'subagent', 'move sessions', 'routing'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {
@@ -1145,6 +1244,21 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectThinking',
     keywords: ['thinking', 'variant', 'reasoning', 'effort', 'model', 'project metadata'],
+  },
+  {
+    id: 'projects.sidebar.work',
+    page: 'projects',
+    titleKey: 'settings.projects.sidebar.showInWork',
+    keywords: ['work', 'hide', 'visibility', 'sidebar', 'project metadata'],
+    // ProjectGeneralTab leaves both visibility switches out in VS Code.
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'projects.sidebar.all',
+    page: 'projects',
+    titleKey: 'settings.projects.sidebar.showInAllSessions',
+    keywords: ['all sessions', 'hide', 'visibility', 'sidebar', 'project metadata'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'projects.icon',
@@ -1433,6 +1547,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
   },
   {
+    // Opens the custom-provider create form (SettingsView sets the request).
     id: 'providers.custom',
     page: 'providers',
     titleKey: 'settings.providers.page.custom.title',

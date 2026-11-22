@@ -29,6 +29,9 @@ import { registerModelRouteRoutes } from '../routing/model-routes.js';
 import { registerModelRouteStatsRoutes } from '../routing/model-route-stats.js';
 import { registerMessageModelAttributionRoutes } from '../routing/message-model-attribution.js';
 import { registerPlanRoutes } from '../routing/plan-routes.js';
+import { registerPoolPlanLinkRoutes } from '../routing/pool-plan-links.js';
+import { isLocalOpenCode, registerPoolHealthRoutes } from '../routing/pool-health.js';
+import { registerPoolRotation } from '../routing/pool-rotation.js';
 import { registerRouteRulesRoutes } from '../routing/route-rules-routes.js';
 import { createJevClient } from '../routing/jev.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
@@ -36,6 +39,7 @@ import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
+import { createScheduledTaskRunHistory } from '../scheduled-tasks/run-history.js';
 import { createTrackedItemsService } from '../tracked-items/service.js';
 import { createProviderReadCache } from '../provider-read-cache/index.js';
 import { createTrackedItemReaders } from '../tracked-items/readers.js';
@@ -43,10 +47,12 @@ import { createTrackedItemsPersistence } from '../tracked-items/persistence.js';
 import { registerTrackedItemsRoutes } from '../tracked-items/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
+import { registerDeviceSettingsRoutes } from '../device-settings/routes.js';
+import { registerModelChoiceRoutes } from '../model-choices/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
-import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
+import { getNpmInfo } from './npm-registry.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
 import { registerOpenCodeRoutes } from './routes.js';
 import { getProviderSources, removeProviderConfig, upsertProviderConfig } from './providers.js';
@@ -67,7 +73,7 @@ import {
   encodePluginId,
   decodePluginId,
 } from './plugins.js';
-import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile, readConfigLayers, getConfigForPath, writeConfig, CONFIG_FILE } from './shared.js';
+import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile, readConfigLayers, readConfigSources, getConfigForPath, writeConfig, CONFIG_FILE } from './shared.js';
 import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from './skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
 import { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
@@ -102,14 +108,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     platform: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'desktop' : 'web',
   });
 
-  let quotaProviders = null;
-  const getQuotaProviders = async () => {
-    if (!quotaProviders) {
-      quotaProviders = await import('../quota/index.js');
-    }
-    return quotaProviders;
-  };
-
   let smallModelService = null;
   const getSmallModelService = async () => {
     if (!smallModelService) {
@@ -124,6 +122,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   let networkOperations = null;
   let gitWorktreeCreation = null;
   let guestOperations = null;
+  let scheduledTaskRunHistory = null;
   let linearOperations = null;
   const getWalkthroughService = async () => {
     if (!walkthroughService) {
@@ -278,6 +277,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       scheduledTaskService,
       openChamberSessionService,
       openChamberControlService,
+      deviceSettingsStore,
+      modelChoiceService,
       waitForOpenCodeReady,
       getOpenChamberEventClients,
       writeSseEvent,
@@ -308,10 +309,24 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       CONFIG_FILE,
       isEnterpriseMode,
       refreshOpenCodeAfterConfigChange,
+      resolveOptionalProjectDirectory,
+      readConfigSources,
     });
-    registerModelRouteStatsRoutes(app);
-    registerMessageModelAttributionRoutes(app);
+    registerModelRouteStatsRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
+    registerMessageModelAttributionRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
     registerPlanRoutes(app);
+    registerPoolPlanLinkRoutes(app, { openchamberDataDir });
+    const isOpenCodeLocal = () => isLocalOpenCode(buildOpenCodeUrl);
+    registerPoolHealthRoutes(app, { readConfigLayers, openchamberDataDir, isOpenCodeLocal });
+    registerPoolRotation(app, {
+      readConfigLayers,
+      readConfigSources,
+      openchamberDataDir,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      isAutoSession: routingRuntime.isAutoSession,
+      isOpenCodeLocal,
+    });
     registerRouteRulesRoutes(app, { routingRuntime, jev: createJevClient() });
     // Before the generic OpenCode proxy: swallows the `openchamber/auto` model
     // switch and routes the sends that follow it.
@@ -350,12 +365,19 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitBinaryForSpawn,
     });
 
+    if (!scheduledTaskRunHistory) {
+      scheduledTaskRunHistory = createScheduledTaskRunHistory({
+        filePath: path.join(openchamberDataDir, 'scheduled-task-run-history.jsonl'),
+        logger: console,
+      });
+    }
     registerScheduledTaskRoutes(app, {
       readSettingsFromDiskMigrated,
       sanitizeProjects,
       projectConfigRuntime,
       scheduledTasksRuntime,
       scheduledTaskService,
+      scheduledTaskRunHistory,
       getOpenChamberEventClients,
       writeSseEvent,
     });
@@ -372,11 +394,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
 
     registerOpenChamberControlRoutes(app, { controlService: openChamberControlService });
+    if (deviceSettingsStore) registerDeviceSettingsRoutes(app, { store: deviceSettingsStore });
+    if (modelChoiceService) registerModelChoiceRoutes(app, { modelChoiceService });
 
     registerMarkdownImageGrantRoutes(app, {
       fsPromises,
       path,
-      crypto,
       validateDirectoryPath,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
@@ -435,7 +458,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');
 
-    registerQuotaRoutes(app, { getQuotaProviders });
+    registerQuotaRoutes(app);
     registerSmallModelRoutes(app, { getSmallModelService });
     registerSessionGoalRoutes(app);
     const gitBinary = resolveGitBinaryForSpawn();
@@ -804,5 +827,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       : null),
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
+    /** Records one scheduled-task run event into the durable run history (#2174 Gap 1); a no-op until the routes are registered. */
+    recordScheduledTaskRun: (event) => { scheduledTaskRunHistory?.recordEvent(event); },
   };
 };

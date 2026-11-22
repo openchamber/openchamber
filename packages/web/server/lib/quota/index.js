@@ -8,7 +8,9 @@
 /** @public */
 export {
   listConfiguredQuotaProviders,
+  listQuotaProviderCatalogue,
   fetchQuotaForProvider,
+  fetchQuotaForProviderInstances,
   fetchClaudeQuota,
   fetchOpenaiQuota,
   fetchGoogleQuota,
@@ -17,7 +19,6 @@ export {
   fetchDeepseekQuota,
   fetchHyperQuota,
   fetchCopilotQuota,
-  fetchCopilotAddonQuota,
   fetchKimiQuota,
   fetchOpenRouterQuota,
   fetchZaiQuota,

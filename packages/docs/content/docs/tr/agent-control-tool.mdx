@@ -23,9 +23,9 @@ Kontrol aracı projeleri ve model tercihlerini listeler, model kataloğunda aram
 ## Akılda tutun
 
 - Yeni oturum istemleri varsayılan olarak hemen döner. Oturumu OpenChamber'da takip edin ya da agent'tan sonra kontrol etmesini isteyin.
-- Ayrı bir worktree yalnızca siz istediğinizde oluşturulur. Mevcut worktree'nizdeki commit edilmemiş değişiklikler oraya kopyalanmaz.
+- Bir Git projesindeki yeni oturum, klasörün kendisinde çalışmasını istemediğiniz sürece yeni bir worktree'de çalışır; Git deposu olmayan bir klasör olduğu gibi kullanılır ve çatallanan bir oturum geldiği oturumun klasöründe kalır. Mevcut worktree'nizdeki commit edilmemiş değişiklikler yeni bir worktree'ye kopyalanmaz. Bir pull request için açılan oturum her zaman kendi worktree'sini alır.
 - Checkout meşgul göründüğünde, örneğin başka bir oturum aynı branch üzerinde çalışıyorsa, agent kendi oturumunu yeni bir worktree'ye taşımayı önerebilir. Onay verdikten sonra taşır ve yanına yalnızca kendi değiştirdiği dosyaları alır.
-- Araçlar oturumları ya da worktree'leri silemez, proje yolu kaydedemez, keyfi shell komutları çalıştıramaz ve keyfi URL'leri çağıramaz.
+- Araçlar oturumları ya da worktree'leri silemez, keyfi shell komutları çalıştıramaz ve keyfi URL'leri çağıramaz. Bir klasörü proje olarak ekleyebilir ve bir projeyi listeden çıkarabilirler; dosyaları olduğu gibi kalır.
 
 ## Araçları açma ve kapatma
 

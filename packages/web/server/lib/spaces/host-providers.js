@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { isRecord, readSectionEntry, toProviderEntity } from '../opencode/config-v2.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { HOST_NAME } from './hardening.js';
+import { isLoopbackBindHost } from '../security/bind-host.js';
 
 // The header the window sets for a provider, by the SDK its entry names: what that SDK's API
 // reads a key from. OpenCode's `aisdk:` prefix is the canonical spelling in a v2 entry.
@@ -29,7 +30,6 @@ export const headerOfPackage = (packageName) => HEADER_BY_PACKAGE.get(packageNam
 
 // "This machine" as a base URL names it: the Docker host, which the gatekeeper reaches under
 // `host.docker.internal`, while inside the gatekeeper these names would be the gatekeeper itself.
-const LOOPBACK_HOSTS = new Set(['localhost', '[::1]', '0.0.0.0']);
 
 /**
  * The address the window forwards a custom provider's requests to: the base URL as the user wrote
@@ -49,8 +49,18 @@ export const isLoopbackUrl = (baseURL) => {
   return url !== null && isLoopback(url);
 };
 
-// Any 127/8 address is this machine, as `localhost` is.
-const isLoopback = (url) => LOOPBACK_HOSTS.has(url.hostname.toLowerCase()) || /^127\./.test(url.hostname);
+// Loopback is judged by the shared bind-host judge (security/bind-host.js):
+// it parses and range-tests the hostname, so localhost and any *.localhost,
+// all of 127.0.0.0/8, ::1 and ::ffff:-mapped forms are this machine, while a
+// DNS name that merely starts with "127." (127.evil.example,
+// 127.0.0.1.evil.example) is not — the hand-rolled set + /^127\./ regex this
+// replaces judged those two loopback and missed myapp.localhost and the
+// mapped forms (#1657). One explicit local exception beside the shared call:
+// 0.0.0.0 stays loopback here. For a bind host 0.0.0.0 is the wildcard (the
+// shared judge's question), but as a base URL it names this machine (this
+// module's question), and the pinned rewrite of http://0.0.0.0 to the Docker
+// host must keep working.
+const isLoopback = (url) => url.hostname.toLowerCase() === '0.0.0.0' || isLoopbackBindHost(url.hostname);
 
 const httpUrlOf = (value) => {
   let url;

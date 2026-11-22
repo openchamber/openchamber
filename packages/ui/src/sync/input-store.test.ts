@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { strToU8, zipSync } from "fflate"
 import { useInputStore } from "./input-store"
+import { MAX_VSCODE_SELECTION_BYTES } from "./vscode-selection-size"
 import { getChatDraftIdentityKey } from "@/lib/chatDraftPersistence"
 
 class MockFileReader {
   result: string | ArrayBuffer | null = null
-  onload: ((this: FileReader, event: ProgressEvent<FileReader>) => unknown) | null = null
-  onerror: ((this: FileReader, event: ProgressEvent<FileReader>) => unknown) | null = null
-  onabort: ((this: FileReader, event: ProgressEvent<FileReader>) => unknown) | null = null
+  onload: ((this: MockFileReader, event: ProgressEvent<FileReader>) => void) | null = null
+  onerror: ((this: MockFileReader, event: ProgressEvent<FileReader>) => void) | null = null
+  onabort: ((this: MockFileReader, event: ProgressEvent<FileReader>) => void) | null = null
   error: DOMException | null = null
 
   readAsDataURL() {
@@ -17,6 +18,17 @@ class MockFileReader {
 
 const pendingReaders: MockFileReader[] = []
 const originalFileReader = globalThis.FileReader
+
+// The mock implements only the FileReader surface the input store uses
+// (readAsDataURL plus the load/error handlers), so it is installed by
+// property definition rather than by claiming the full constructor type.
+const installMockFileReader = () => {
+  Object.defineProperty(globalThis, "FileReader", {
+    value: MockFileReader,
+    configurable: true,
+    writable: true,
+  })
+}
 
 const restoreFileReader = () => {
   pendingReaders.length = 0
@@ -35,12 +47,12 @@ const testWithMockFileReader = (name: string, fn: () => Promise<void>) => {
 
 const resolveReader = (reader: MockFileReader, result: string) => {
   reader.result = result
-  reader.onload?.call(reader as unknown as FileReader, {} as ProgressEvent<FileReader>)
+  reader.onload?.call(reader, {} as ProgressEvent<FileReader>)
 }
 
 const rejectReader = (reader: MockFileReader) => {
   reader.error = new DOMException("read failed", "NotReadableError")
-  reader.onerror?.call(reader as unknown as FileReader, {} as ProgressEvent<FileReader>)
+  reader.onerror?.call(reader, {} as ProgressEvent<FileReader>)
 }
 
 const waitForReaderCount = async (count: number) => {
@@ -86,7 +98,7 @@ describe("input-store composer restore", () => {
 describe("input-store attachments", () => {
   beforeEach(() => {
     pendingReaders.length = 0
-    globalThis.FileReader = MockFileReader as unknown as typeof FileReader
+    installMockFileReader()
     useInputStore.setState({
       pendingInputText: null,
       pendingInputMode: "replace",
@@ -191,6 +203,25 @@ describe("input-store attachments", () => {
     await addPromise
 
     expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("rejects oversized VS Code selections before reading them", async () => {
+    await useInputStore.getState().addVSCodeSelectionAttachment(
+      "/workspace/large.txt",
+      new File([new Uint8Array(MAX_VSCODE_SELECTION_BYTES + 1)], "large.txt", { type: "text/plain" })
+    )
+
+    expect(pendingReaders).toHaveLength(0)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("accepts a VS Code selection exactly at the byte limit", async () => {
+    const file = new File([new Uint8Array(MAX_VSCODE_SELECTION_BYTES)], "selection.txt", { type: "text/plain" })
+    const addPromise = useInputStore.getState().addVSCodeSelectionAttachment("/workspace/selection.txt", file)
+    expect(pendingReaders).toHaveLength(1)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,AA==")
+    await addPromise
+    expect(useInputStore.getState().attachedFiles.map((attached) => attached.filename)).toEqual(["selection.txt"])
   })
 
   test("moves the selected draft's files onto another draft, merged with its own", () => {
@@ -617,5 +648,50 @@ describe("input-store draft submit", () => {
     useInputStore.getState().requestDraftSubmit(7, "Fix the build")
     expect(useInputStore.getState().consumePendingDraftSubmit(null)).toBeNull()
     expect(useInputStore.getState().pendingDraftSubmit).toBeNull()
+  })
+})
+
+describe("input-store session submit", () => {
+  beforeEach(() => {
+    useInputStore.setState({ pendingSessionSubmits: [] })
+  })
+
+  test("the composer it names takes the text once while it shows that session", () => {
+    useInputStore.getState().requestSessionSubmit({ target: null, sessionId: "ses_a", text: "My answers" })
+
+    expect(useInputStore.getState().consumePendingSessionSubmit(null, "ses_a")).toBe("My answers")
+    expect(useInputStore.getState().consumePendingSessionSubmit(null, "ses_a")).toBeNull()
+  })
+
+  test("another composer leaves it for the one it names", () => {
+    useInputStore.getState().requestSessionSubmit({ target: "ses_pinned", sessionId: "ses_pinned", text: "My answers" })
+
+    expect(useInputStore.getState().consumePendingSessionSubmit(null, "ses_pinned")).toBeNull()
+    expect(useInputStore.getState().pendingSessionSubmits).toHaveLength(1)
+    expect(useInputStore.getState().consumePendingSessionSubmit("ses_pinned", "ses_pinned")).toBe("My answers")
+  })
+
+  test("the composer it names drops it once that composer shows another session", () => {
+    useInputStore.getState().requestSessionSubmit({ target: null, sessionId: "ses_a", text: "My answers" })
+
+    expect(useInputStore.getState().consumePendingSessionSubmit(null, "ses_b")).toBeNull()
+    expect(useInputStore.getState().pendingSessionSubmits).toEqual([])
+  })
+})
+
+describe("input-store session submit queue", () => {
+  beforeEach(() => {
+    useInputStore.setState({ pendingSessionSubmits: [] })
+  })
+
+  test("a second submission waits behind the first instead of replacing it", () => {
+    useInputStore.getState().requestSessionSubmit({ target: null, sessionId: "ses_a", text: "First answers" })
+    useInputStore.getState().requestSessionSubmit({ target: null, sessionId: "ses_a", text: "Second answers" })
+    useInputStore.getState().requestSessionSubmit({ target: "ses_pinned", sessionId: "ses_pinned", text: "Pinned answers" })
+
+    expect(useInputStore.getState().consumePendingSessionSubmit(null, "ses_a")).toBe("First answers")
+    expect(useInputStore.getState().consumePendingSessionSubmit(null, "ses_a")).toBe("Second answers")
+    expect(useInputStore.getState().consumePendingSessionSubmit(null, "ses_a")).toBeNull()
+    expect(useInputStore.getState().consumePendingSessionSubmit("ses_pinned", "ses_pinned")).toBe("Pinned answers")
   })
 })

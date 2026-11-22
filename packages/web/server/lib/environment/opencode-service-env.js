@@ -1,9 +1,11 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { isVariableName } from './variables.js';
 
+// Service environment maps are normally small; 1 MiB leaves generous headroom.
+const MAX_SERVICE_FILE_BYTES = 1024 * 1024;
 /**
  * Variables stored with `opencode service set env NAME VALUE`. OpenCode keeps
  * them in `service.json` in its global config directory and gives them to the
@@ -20,7 +22,9 @@ const serviceFileSchema = z.object({
 export const readOpenCodeServiceEnv = (configDir) => {
   let raw;
   try {
-    raw = fs.readFileSync(path.join(configDir, 'service.json'), 'utf8');
+    const result = readBoundedFileSync(path.join(configDir, 'service.json'), MAX_SERVICE_FILE_BYTES);
+    if (!result.ok) return {};
+    raw = result.buffer.toString('utf8');
   } catch {
     return {};
   }

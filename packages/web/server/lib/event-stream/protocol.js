@@ -11,6 +11,13 @@ export const MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
 // proactively start shedding low-priority updates before the hard disconnect.
 export const MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES = 12 * 1024 * 1024;
 
+// Per-message inbound WS payload cap. This stream is receive-only: browser
+// clients send no frames the server reads, so anything that arrives is
+// discarded — but without maxPayload the ws layer first assembles a single
+// frame up to its 100 MiB default in server memory. 64 KiB matches the
+// terminal stream's cap and leaves ample room for any future control frame.
+export const MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES = 64 * 1024;
+
 /**
  * Parses one SSE block from OpenCode's `/api/event` stream.
  *

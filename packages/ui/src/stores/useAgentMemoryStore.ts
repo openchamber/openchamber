@@ -197,6 +197,11 @@ export const useAgentMemoryStore = create<AgentMemoryState>((set, get) => ({
   }),
 
   reset: () => {
+    // Invalidate any in-flight load (#2145): a read begun under the previous
+    // runtime must not apply its snapshot over the cleared state when it
+    // resolves, so advance the sequence its captured requestId is checked
+    // against before clearing.
+    loadSequence += 1;
     set({ ...EMPTY_STATE });
   },
 }));

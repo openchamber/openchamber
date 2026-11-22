@@ -110,6 +110,20 @@ describe('todo item routes', () => {
     await request(app).post(`${BASE}/todos`).send({ id: 3, text: 'C' }).expect(400);
   }));
 
+  it('rejects oversized todo ids on create and bulk save, keeping the context readable (#2113)', () => withRuntime(async ({ app }) => {
+    const oversizedId = 'x'.repeat(129);
+    await request(app).post(`${BASE}/todos`).send({ id: oversizedId, text: 'A' }).expect(400);
+    await request(app).put(`${BASE}/todos`).send({ todos: [{ id: oversizedId, text: 'A' }] }).expect(400);
+    // The #2113 repro: individually valid requests whose ids alone would
+    // push context.json past the 8 MiB read cap.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await request(app).post(`${BASE}/todos`).send({ id: 'y'.repeat(900_000), text: 'x' }).expect(400);
+    }
+    const created = await request(app).post(`${BASE}/todos`).send({ id: 'client-1', text: 'A' }).expect(201);
+    expect(created.body.todos.map((todo) => todo.id)).toEqual(['client-1']);
+    expect((await request(app).get(BASE).expect(200)).body.todos.map((todo) => todo.id)).toEqual(['client-1']);
+  }));
+
   it('answers a missing todo with 404 and malformed input with 400, writing nothing', () => withRuntime(async ({ app }) => {
     await request(app).delete(`${BASE}/todos/gone`).expect(404);
     await request(app).patch(`${BASE}/todos/gone`).send({ completed: true }).expect(404);
@@ -278,6 +292,15 @@ describe('project context routes over HTTP', () => {
   it('answers 400 when sharing without a shared plans folder', async () => {
     const { app } = createApp({ sharePlan: async () => { throw new Error('shared plans folder is required'); } });
     expect((await request(app).post('/api/project-context/proj/plans/p1/share')).status).toBe(400);
+  });
+
+  it('answers 413 when the runtime refuses an oversized plan', async () => {
+    const { app } = createApp({
+      readPlan: async () => {
+        throw Object.assign(new Error('Plan file is too large to read'), { status: 413 });
+      },
+    });
+    expect((await request(app).get(`${BASE}/plans/p1`)).status).toBe(413);
   });
 
   it('returns 404 for an unknown plan', async () => {

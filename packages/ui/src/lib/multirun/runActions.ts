@@ -15,6 +15,7 @@ import { resolveRunMemberLocation, runSnapshotRef } from './keep';
 import { loadLaneFirstPrompt } from './laneData';
 import { multiRunMembershipPatch, type MultiRunMembership } from './identity';
 import { multiRunVariantLabel, readMultiRunIdentity, type MultiRunSummary } from './runs';
+import { clampMultiRunTitle } from './title';
 import { generateUuid } from '@/lib/uuid';
 
 /**
@@ -22,7 +23,7 @@ import { generateUuid } from '@/lib/uuid';
  * alone; members whose write failed keep the old title and are returned.
  */
 export async function renameRun(run: MultiRunSummary, title: string, sessionById: ReadonlyMap<string, Session>): Promise<string[]> {
-  const nextTitle = title.trim().slice(0, 200);
+  const nextTitle = clampMultiRunTitle(title);
   if (!nextTitle) return [];
   const failed: string[] = [];
   await Promise.all(run.memberIds.map(async (sessionId) => {
@@ -39,21 +40,6 @@ export async function renameRun(run: MultiRunSummary, title: string, sessionById
     registerMultiRunSession({ ...session, metadata: result.metadata }, session.directory);
   }));
   return failed;
-}
-
-/**
- * Turns a member into an ordinary session, as if it never took part in the
- * run: its membership marker is deleted (a merge patch with `null`) and its
- * lane title ("Model · Run") becomes the run's title. It keeps its directory
- * or worktree. A run left with one member stops being a run by itself.
- */
-export async function detachFromRun(session: Session, runTitle: string): Promise<void> {
-  const result = await requestSessionMetadataUpdate(session.id, { openchamber: { multirun: null } }, session.directory);
-  if (result.outcome !== 'updated') throw new Error(`Multi-run membership was not removed: ${result.reason}`);
-  registerMultiRunSession({ ...session, metadata: result.metadata }, session.directory);
-  // Renaming also keeps an old slash-style lane title from reading as a legacy run.
-  const title = runTitle.trim();
-  if (title && title !== session.title) await useSessionUIStore.getState().updateSessionTitle(session.id, title);
 }
 
 /** Archives every member of the run. Worktrees stay; the chats move to the archive. */
@@ -86,7 +72,7 @@ export async function askOtherModels(input: {
   const modelID = session.model?.id;
   if (!providerID || !modelID) throw new Error('The chat has no model to compare against');
 
-  const title = (session.title || prompt.text.split('\n')[0] || 'Run').trim().slice(0, 200);
+  const title = clampMultiRunTitle(session.title || prompt.text.split('\n')[0] || 'Run');
   const membership: MultiRunMembership = {
     version: 1,
     sessionID: session.id,
@@ -110,6 +96,7 @@ export async function askOtherModels(input: {
     groupSlug: membership.groupSlug,
     lanes: [{ sessionId: session.id, identity }],
     fusions: [],
+    parents: [],
     memberIds: [session.id],
     providerIDs: [providerID],
     variants: [undefined],

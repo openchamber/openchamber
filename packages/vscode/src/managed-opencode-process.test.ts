@@ -72,3 +72,41 @@ for (const mode of ['timeout', 'malformed', 'abort', 'ready', 'ready-stdio']) {
     }
   });
 }
+
+for (const split of [1, 2]) {
+  test(`managed split multi-byte character (byte ${split} of 3) survives in captured startup output`, async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-vscode-managed-split-'));
+    const registry = path.join(cwd, 'registry');
+    const previous = process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
+    process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = registry;
+    // 'diag boot \u20ac ready\n' as bytes, split inside the 3-byte euro sign:
+    // the two writes land as separate pipe chunks, so a per-chunk
+    // chunk.toString() decode corrupts the character to U+FFFD. Oracle: the
+    // unsplit control string in the timeout error's quoted Output.
+    const payload = Buffer.from('diag boot \u20ac ready\n', 'utf8');
+    const cut = Buffer.from('diag boot ', 'utf8').length + split;
+    const script = `
+      process.stdout.write(Buffer.from([${[...payload.subarray(0, cut)].join(',')}]));
+      setTimeout(() => {
+        process.stdout.write(Buffer.from([${[...payload.subarray(cut)].join(',')}]));
+        setInterval(() => {}, 1000);
+      }, 100);
+    `;
+    const controller = new AbortController();
+    const server = spawnManagedOpenCodeProcess(process.execPath, ['-e', script], {
+      cwd, env: process.env, port: 45678, timeoutMs: 1500,
+      signal: controller.signal, sourceBinary: process.execPath, appBundleHint: '',
+    });
+    try {
+      const error = await server.ready.then(() => null, (caught: Error) => caught);
+      assert.ok(error);
+      assert.ok(error.message.includes('diag boot \u20ac ready'), `captured output must contain the intact character, got: ${error.message}`);
+      assert.ok(!error.message.includes('\ufffd'), `captured output must not contain U+FFFD, got: ${error.message}`);
+    } finally {
+      await server.close().catch(() => {});
+      if (previous === undefined) delete process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY;
+      else process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = previous;
+      await fs.rm(cwd, { recursive: true, force: true });
+    }
+  });
+}

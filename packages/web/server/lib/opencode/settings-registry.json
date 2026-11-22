@@ -150,6 +150,14 @@
         "mobile"
       ]
     },
+    "modelChoiceRecordingEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },
@@ -194,6 +202,10 @@
       "scope": "instance",
       "computed": true
     },
+    "managedToolsApplyLive": {
+      "scope": "instance",
+      "computed": true
+    },
     "openCodeUpdateToastDismissedVersion": {
       "scope": "instance"
     },
@@ -219,6 +231,9 @@
       "scope": "instance"
     },
     "openInAppId": {
+      "scope": "instance"
+    },
+    "scheduledTasksMaxRunDurationMs": {
       "scope": "instance"
     },
     "dictationEnabled": {
@@ -304,7 +319,11 @@
       "scope": "profile",
       "perSurface": true
     },
-    "sidebarDetailedZoneRows": {
+    "sidebarHeaderless": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "sidebarSessionRowDisplay": {
       "scope": "profile",
       "perSurface": true
     },
@@ -467,6 +486,12 @@
         "mobile"
       ]
     },
+    "questionTimeoutMinutes": {
+      "scope": "profile"
+    },
+    "questionsInBackground": {
+      "scope": "profile"
+    },
     "autoCreateWorktree": {
       "scope": "profile"
     },
@@ -624,6 +649,9 @@
     "recentEfforts": {
       "scope": "profile"
     },
+    "modelDefaultVariants": {
+      "scope": "profile"
+    },
     "providerOrder": {
       "scope": "profile"
     },
@@ -636,6 +664,17 @@
     "sessionWorkEnabled": {
       "scope": "profile"
     },
+    "continueWithModelMode": {
+      "scope": "profile"
+    },
+    "sessionWorkEntry": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "sessionReviewOfferEnabled": {
       "scope": "profile",
       "surfaces": [
@@ -643,6 +682,9 @@
         "desktop",
         "mobile"
       ]
+    },
+    "activeRunModelChangeBehavior": {
+      "scope": "profile"
     },
     "sessionGoalEnabled": {
       "scope": "profile"

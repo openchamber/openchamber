@@ -1,4 +1,5 @@
 import React from 'react';
+import { EntryTimes } from '../EntryTimes';
 import { animate, type AnimationPlaybackControls } from 'motion';
 import type { Part } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
@@ -544,6 +545,8 @@ const ReasoningPart = React.memo(({
     }
 
     return (
+        <>
+        <EntryTimes part={part} running={isStreaming} />
         <ReasoningTimelineBlock
             text={throttledText}
             blockId={part.id || `${messageId}-reasoning`}
@@ -553,6 +556,7 @@ const ReasoningPart = React.memo(({
             revealRequest={revealRequest}
             reasoningMessageId={messageId}
         />
+        </>
     );
 });
 

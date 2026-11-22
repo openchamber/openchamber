@@ -7,7 +7,7 @@ const browser = new Window({ url: 'http://localhost' });
 let root: Root;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 // React DOM detects input-event support when imported, so install the DOM first.
-for (const [key, value] of Object.entries({ window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage, Element: browser.Element, HTMLElement: browser.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) {
+for (const [key, value] of Object.entries({ window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage, Element: browser.Element, HTMLElement: browser.HTMLElement, Event: browser.Event, CustomEvent: browser.CustomEvent, MutationObserver: browser.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
   descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { value, configurable: true });
 }

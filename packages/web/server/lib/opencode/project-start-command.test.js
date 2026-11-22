@@ -8,10 +8,12 @@ describe('readProjectStartCommand from the running OpenCode', () => {
   let requests;
   let projects;
   let failing;
+  let stalling;
 
   beforeEach(async () => {
     requests = [];
     failing = false;
+    stalling = false;
     // OpenCode 2.x names the project by its origin remote, so the record the
     // checkout resolves to carries an ID unrelated to the root commit.
     projects = [
@@ -20,6 +22,11 @@ describe('readProjectStartCommand from the running OpenCode', () => {
     ];
     server = http.createServer((req, res) => {
       requests.push({ url: req.url, directory: req.headers['x-opencode-directory'] ?? null, authorization: req.headers.authorization });
+      if (stalling) {
+        // A stalled OpenCode: accepts the connection, never answers. The
+        // socket is torn down by the client deadline or by afterEach.
+        return;
+      }
       res.setHeader('content-type', 'application/json');
       if (failing) {
         res.statusCode = 500;
@@ -48,6 +55,7 @@ describe('readProjectStartCommand from the running OpenCode', () => {
   afterEach(async () => {
     configureProjectStartCommandSource(null);
     vi.restoreAllMocks();
+    server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   });
 
@@ -69,6 +77,23 @@ describe('readProjectStartCommand from the running OpenCode', () => {
     failing = true;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(readProjectStartCommand('/work/my repo')).resolves.toBe('');
+    expect(warn).toHaveBeenCalledWith('Failed to read the project start command from OpenCode:', expect.any(String));
+  });
+
+  it('runs nothing and logs when OpenCode accepts the connection but never answers', async () => {
+    stalling = true;
+    const nativeTimeout = AbortSignal.timeout;
+    const requested = [];
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      requested.push(milliseconds);
+      // Fire in 25 ms so the test proves the deadline path without waiting
+      // out the production value; the collected argument stays asserted.
+      return nativeTimeout(25);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(readProjectStartCommand('/work/my repo')).resolves.toBe('');
+    expect(requested).not.toEqual([]);
+    expect(requested.every((milliseconds) => milliseconds === 8_000)).toBe(true);
     expect(warn).toHaveBeenCalledWith('Failed to read the project start command from OpenCode:', expect.any(String));
   });
 

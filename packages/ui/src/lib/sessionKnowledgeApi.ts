@@ -12,6 +12,7 @@
  */
 
 import { runtimeFetch } from './runtime-fetch';
+import { getRuntimeKey } from './runtime-switch';
 import { z } from 'zod';
 
 /**
@@ -50,8 +51,12 @@ const EMPTY_SUMMARY: SessionKnowledgeSummary = { notes: [], plans: [], memory: {
 // a few seconds; local pin changes drop it immediately.
 const SUMMARY_FRESH_MS = 5_000;
 const summaryCache = new Map<string, { at: number; request: Promise<SessionKnowledgeSummary> }>();
+// Scoped to the active runtime (issue #2160): a summary fetched from one
+// runtime must never answer for another after a switch, so the runtime key
+// is part of the cache key, the same way getRuntimeKey keys the UI's other
+// caches and stores. Same-runtime callers still share one fresh request.
 const summaryCacheKey = (directory: string, sessionId: string | null | undefined): string => (
-  `${directory}\u0000${sessionId ?? ''}`
+  `${getRuntimeKey()}\u0000${directory}\u0000${sessionId ?? ''}`
 );
 
 const invalidateSummary = (directory: string, sessionId: string | null | undefined): void => {

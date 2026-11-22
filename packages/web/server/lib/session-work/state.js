@@ -6,16 +6,16 @@
  * when nothing changes, so the store can decide against the record as it is
  * at write time.
  *
- * The rule the patches keep: sending a message opens, the user alone closes.
- * A message reopens a session the user closed, but only one sent after the
- * user closed it.
+ * The rule the patches keep: a sent message (or Jev, reading one) opens, the
+ * user alone closes. A message reopens a session the user closed, but only one
+ * sent after the user closed it.
  */
 import { z } from 'zod';
 
 const workSchema = z.object({
   state: z.enum(['open', 'done']),
   openedAt: z.number().optional(),
-  // `jev` on records from before every sent message opened a session.
+  // `auto` for a sent message, `jev` when Jev decided, `user` for Track.
   openedBy: z.enum(['auto', 'jev', 'user']).optional(),
   doneAt: z.number().optional(),
   suggestDoneAt: z.number().optional(),
@@ -29,13 +29,13 @@ export const readWork = (metadata) => metadataSchema.safeParse(metadata).data?.o
 
 const patchOf = (work) => ({ openchamber: { work } });
 
-/** The user sent a message at `requestAt`. */
-export const openPatch = (metadata, { requestAt, now }) => {
+/** The user sent a message at `requestAt`; `by` is `jev` when Jev judged it. */
+export const openPatch = (metadata, { requestAt, now, by = 'auto' }) => {
   const work = readWork(metadata);
   if (work?.state === 'open') return null;
   // Closed after this message was sent: the user's decision stands.
   if (work?.state === 'done' && Number.isFinite(requestAt) && (work.doneAt ?? 0) >= requestAt) return null;
-  return patchOf({ state: 'open', openedAt: now, openedBy: 'auto', doneAt: null, suggestDoneAt: null });
+  return patchOf({ state: 'open', openedAt: now, openedBy: by, doneAt: null, suggestDoneAt: null });
 };
 
 /** The turn that just ended looks like the end of the work. */

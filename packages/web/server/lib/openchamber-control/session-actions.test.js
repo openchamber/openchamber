@@ -113,13 +113,33 @@ describe('session extra actions contract', () => {
     const { actions } = setup();
     expect(actions.actions).toEqual(SESSION_EXTRA_ACTION_DEFINITIONS.map((definition) => definition.action));
     expect(actions.actions).toEqual([
-      'session.rename', 'session.model', 'session.agent', 'session.goal', 'session.retry', 'session.pin', 'session.abort',
+      'session.rename', 'session.subagentPolicy', 'session.model', 'session.agent', 'session.goal', 'session.retry', 'session.pin', 'session.abort',
     ]);
     for (const definition of SESSION_EXTRA_ACTION_DEFINITIONS) {
       expect(definition.title).toBeTruthy();
       expect(definition.description).toBeTruthy();
     }
-    expect(Object.keys(SESSION_EXTRA_PARAMETERS).sort()).toEqual(['goalAction', 'objective', 'pinId', 'pinKind', 'pinned']);
+    expect(Object.keys(SESSION_EXTRA_PARAMETERS).sort()).toEqual(['goalAction', 'objective', 'pinId', 'pinKind', 'pinned', 'subagentPolicy']);
+  });
+
+  it('session.subagentPolicy PATCHes the whole policy through session.update', async () => {
+    const { run, client } = setup();
+    const subagentPolicy = {
+      models: ['anthropic/claude-haiku-5-5', 'opencode-go/*'],
+      excludedModels: ['openai/gpt-5'],
+      agentOverrides: { build: { force: true } },
+    };
+    await expect(run('session.subagentPolicy', { subagentPolicy })).resolves.toEqual({
+      sessionId: 'ses_target', subagentPolicy, directory: DIRECTORY,
+    });
+    expect(client.session.update).toHaveBeenCalledWith({ sessionID: 'ses_target', subagentPolicy });
+  });
+
+  it('session.subagentPolicy refuses a policy that is not an object', async () => {
+    const { run, client } = setup();
+    await expectControlError(run('session.subagentPolicy', { subagentPolicy: 'anthropic/claude' }), 400, /subagentPolicy/);
+    await expectControlError(run('session.subagentPolicy', {}), 400, /subagentPolicy/);
+    expect(client.session.update).not.toHaveBeenCalled();
   });
 
   it('rejects unknown actions', async () => {
@@ -400,6 +420,14 @@ describe('session.retry', () => {
     agents: [{ name: 'explore' }],
     skills: [{ id: 'sk', name: 'Skill' }],
   };
+
+  it('does not interrupt a prototype-named session that is not active (#2311)', async () => {
+    const { run, client } = setup();
+    client.message.list.mockResolvedValueOnce({ data: [userMessage] });
+    const result = await run('session.retry', { sessionId: 'constructor' });
+    expect(client.session.interrupt).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sessionId: 'constructor', interrupted: false });
+  });
 
   it('reverts to the last prompt and sends it again', async () => {
     const { run, client } = setup();

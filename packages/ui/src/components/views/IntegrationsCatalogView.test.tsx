@@ -18,6 +18,7 @@ for (const [key, value] of Object.entries({
   localStorage: browser.localStorage,
   Element: browser.Element,
   HTMLElement: browser.HTMLElement,
+  Event: browser.Event, CustomEvent: browser.CustomEvent, MutationObserver: browser.MutationObserver,
   IS_REACT_ACT_ENVIRONMENT: true,
   // happy-dom has no animation frame; base-ui's Collapsible mounts one per panel.
   requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),

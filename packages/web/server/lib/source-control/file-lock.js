@@ -72,6 +72,44 @@ const sleepSync = (milliseconds) => {
  * GUARD_STALE_MS was left by a waiter that died inside it and is removed.
  */
 const GUARD_STALE_MS = 10_000;
+
+// A lock owner record is one small JSON line (~200 bytes); anything past
+// this cap is not an owner record and is never buffered whole to judge it.
+const LOCK_CONTENT_MAX_BYTES = 4 * 1024;
+
+// Mirrors the bounded reader's open pattern (shared/bounded-file-read.js):
+// O_NONBLOCK on POSIX keeps open() from blocking on a FIFO with no writer
+// before the handle stat can refuse it as non-regular. Windows has no
+// O_NONBLOCK, and its open does not block on pipes this way.
+const reclaimOpenFlags = () => (process.platform === 'win32'
+  ? 'r'
+  : fsSync.constants.O_RDONLY | fsSync.constants.O_NONBLOCK);
+
+// Reads at most LOCK_CONTENT_MAX_BYTES + 1 bytes through the open handle:
+// the extra byte is how an over-cap file is told apart from one exactly at
+// the cap without trusting the earlier stat or buffering the file whole.
+// Returns null for over-cap content.
+const readLockContent = async (handle) => {
+  const buffer = Buffer.alloc(LOCK_CONTENT_MAX_BYTES + 1);
+  let total = 0;
+  while (total < buffer.length) {
+    const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+  }
+  return total > LOCK_CONTENT_MAX_BYTES ? null : buffer.toString('utf8', 0, total);
+};
+
+const readLockContentSync = (fsImpl, handle) => {
+  const buffer = Buffer.alloc(LOCK_CONTENT_MAX_BYTES + 1);
+  let total = 0;
+  while (total < buffer.length) {
+    const bytesRead = fsImpl.readSync(handle, buffer, total, buffer.length - total, total);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+  }
+  return total > LOCK_CONTENT_MAX_BYTES ? null : buffer.toString('utf8', 0, total);
+};
 const guardPath = (lockPath) => `${lockPath}.guard`;
 const sameFile = (left, right) => left.dev === right.dev && left.ino === right.ino;
 
@@ -135,11 +173,13 @@ function withReclaimGuardSync(fsImpl, lockPath, deadline, operation) {
 
 async function reclaimAbandoned(fsImpl, lockPath) {
   let handle;
-  try { handle = await fsImpl.open(lockPath, 'r'); } catch { return false; }
+  try { handle = await fsImpl.open(lockPath, reclaimOpenFlags()); } catch { return false; }
   try {
     const stats = await handle.stat({ bigint: true });
     if (!stats.isFile()) return false;
-    const content = await handle.readFile('utf8');
+    if (stats.size > BigInt(LOCK_CONTENT_MAX_BYTES)) return false;
+    const content = await readLockContent(handle);
+    if (content === null) return false;
     if (!isAbandoned(content, Number(stats.mtimeMs))) return false;
     const current = await fsImpl.lstat(lockPath, { bigint: true });
     if (!sameFile(current, stats)) return false;
@@ -155,11 +195,13 @@ async function reclaimAbandoned(fsImpl, lockPath) {
 
 function reclaimAbandonedSync(fsImpl, lockPath) {
   let handle;
-  try { handle = fsImpl.openSync(lockPath, 'r'); } catch { return false; }
+  try { handle = fsImpl.openSync(lockPath, reclaimOpenFlags()); } catch { return false; }
   try {
     const stats = fsImpl.fstatSync(handle, { bigint: true });
     if (!stats.isFile()) return false;
-    const content = fsImpl.readFileSync(handle, 'utf8');
+    if (stats.size > BigInt(LOCK_CONTENT_MAX_BYTES)) return false;
+    const content = readLockContentSync(fsImpl, handle);
+    if (content === null) return false;
     if (!isAbandoned(content, Number(stats.mtimeMs))) return false;
     const current = fsImpl.lstatSync(lockPath, { bigint: true });
     if (!sameFile(current, stats)) return false;

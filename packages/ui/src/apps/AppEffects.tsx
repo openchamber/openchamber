@@ -11,6 +11,9 @@ import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { isServerOwnedMessageQueue } from '@/stores/messageQueueStore';
+import { useQuestionTimeouts } from '@/sync/question-timeouts';
+import { toast } from '@/components/ui';
+import { useI18n } from '@/lib/i18n';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
 
@@ -74,6 +77,16 @@ export function SyncRuntimeEffects({ backgroundWorkEnabled }: {
   // delivers it with or without a UI; only VS Code still sends from the UI.
   useQueuedMessageAutoSend(backgroundWorkEnabled && !isServerOwnedMessageQueue());
   useMessageQueueHoldSync();
+  const { t } = useI18n();
+  useQuestionTimeouts({
+    enabled: backgroundWorkEnabled,
+    message: (reason, minutes) => (reason === 'timeout'
+      ? t('chat.questionTimeout.agentMessage.timeout', { minutes: String(minutes) })
+      : t('chat.questionTimeout.agentMessage.later')),
+    onClosed: (_form, reason) => (reason === 'timeout'
+      ? toast.info(t('chat.questionTimeout.toast'), { description: t('chat.questionTimeout.toastDescription') })
+      : toast.info(t('chat.questionTimeout.backgroundToast'), { description: t('chat.questionTimeout.backgroundToastDescription') })),
+  });
 
   return <SyncOptimisticBridge />;
 }

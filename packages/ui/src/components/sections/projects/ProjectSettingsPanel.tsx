@@ -84,7 +84,7 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   );
   const tabContent = (
     <>
-      {activeTab === 'general' ? <ProjectGeneralTab form={form} projectRef={projectRef} setupState={setupState} /> : null}
+      {activeTab === 'general' ? <ProjectGeneralTab form={form} project={project} projectRef={projectRef} setupState={setupState} /> : null}
       {activeTab === 'actions' ? <ProjectActionsTab setupState={setupState} /> : null}
       {activeTab === 'worktrees' ? <ProjectWorktreesTab projectRef={projectRef} setupState={setupState} onOpenWorktrees={onOpenWorktrees} /> : null}
       {activeTab === 'environment' ? <ProjectEnvironmentSection projectRef={projectRef} /> : null}

@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { EntryTimes } from '../EntryTimes';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
@@ -102,6 +103,9 @@ import {
     toolFileDiffs,
 } from '@/lib/opencode/tools';
 import { parseWebSearchOutput, webSearchProviderOf } from '@/lib/opencode/websearch';
+import { questionCallKey, questionRowContent } from '@/lib/opencode/question';
+import { useQuestionCloseReason } from '@/sync/question-timeouts';
+import { QuestionToolDetails } from './QuestionToolDetails';
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
@@ -413,27 +417,6 @@ const getToolDiagnosticSection = (
         diagnostics: visible,
         remaining: Math.max(0, diagnostics.length - visible.length),
     };
-};
-
-// Parse question tool output: "User has answered your questions: "Q1"="A1", "Q2"="A2". You can now..."
-const parseQuestionOutput = (output: string): Array<{ question: string; answer: string }> | null => {
-    const match = output.match(/^User has answered your questions:\s*(.+?)\.\s*You can now/s);
-    if (!match) return null;
-
-    const pairs: Array<{ question: string; answer: string }> = [];
-    const content = match[1];
-
-    // Match "question"="answer" pairs, handling multiline answers
-    const pairRegex = /"([^"]+)"="([^"]*(?:[^"\\]|\\.)*)"/g;
-    let pairMatch;
-    while ((pairMatch = pairRegex.exec(content)) !== null) {
-        pairs.push({
-            question: pairMatch[1],
-            answer: pairMatch[2],
-        });
-    }
-
-    return pairs.length > 0 ? pairs : null;
 };
 
 const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string | null => {
@@ -1279,26 +1262,38 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         }
 
-        // Question tool: show parsed Q&A summary or question content from input
+        // Question tool: every question with its options in any state, the
+        // answers once returned, and answering again after the call ended
+        // (`questionRowContent` decides which).
         if (isQuestionTool(part.tool)) {
-            if (state.status === 'completed' && hasStringOutput) {
-                const parsedQA = parseQuestionOutput(outputString);
-                if (parsedQA && parsedQA.length > 0) {
-                    return renderScrollableBlock(
-                        <div className="space-y-2">
-                            {parsedQA.map((qa, index) => (
-                                <div key={index} className="space-y-0.5">
-                                    <FormMarkdown content={qa.question} size="micro" className="text-muted-foreground" />
-                                    <div className="typography-meta text-foreground whitespace-pre-wrap">{qa.answer}</div>
-                                </div>
-                            ))}
-                        </div>,
-                        { maxHeightClass: 'max-h-[40vh]' }
-                    );
-                }
+            const content = questionRowContent(state, hasStringOutput ? outputString : '');
+            if (content.kind === 'legacy') {
+                return renderScrollableBlock(
+                    <div className="space-y-2">
+                        {content.pairs.map((qa, index) => (
+                            <div key={index} className="space-y-0.5">
+                                <FormMarkdown content={qa.question} size="micro" className="text-muted-foreground" />
+                                <div className="typography-meta text-foreground whitespace-pre-wrap">{qa.answer}</div>
+                            </div>
+                        ))}
+                    </div>,
+                    { maxHeightClass: 'max-h-[40vh]' }
+                );
             }
 
-            if (state.status === 'error' && 'error' in state) {
+            if (content.kind === 'questions') {
+                // Only the questions go in the box. The view puts its buttons
+                // under it, so they stay in reach however long the questions are.
+                return (
+                    <QuestionToolDetails
+                        part={part}
+                        state={state}
+                        renderScrollBox={(questions) => renderScrollableBlock(questions, { maxHeightClass: 'max-h-[60vh]' })}
+                    />
+                );
+            }
+
+            if (content.kind === 'error') {
                 return (
                     <div>
                         <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
@@ -1306,38 +1301,9 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             backgroundColor: 'var(--status-error-background)',
                             color: 'var(--status-error)',
                         }}>
-                            {coerceToText(state.error)}
+                            {coerceToText(content.message)}
                         </div>
                     </div>
-                );
-            }
-
-            // Show question content from input whenever available, whether the tool is
-            // pending/running or completed without parseable output. This ensures question
-            // text persists across refreshes even if the QuestionCard store data is lost.
-            const questionInput = input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
-            if (questionInput?.questions && Array.isArray(questionInput.questions) && questionInput.questions.length > 0) {
-                return renderScrollableBlock(
-                    <div className="space-y-2">
-                        {questionInput.questions.map((q, index) => (
-                            <div key={index} className="space-y-0.5">
-                                {q.header ? (
-                                    <div className="typography-micro text-muted-foreground">{coerceToText(q.header)}</div>
-                                ) : null}
-                                <FormMarkdown content={coerceToText(q.question)} size="meta" className="text-foreground" />
-                                {Array.isArray(q.options) && q.options.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1 mt-0.5">
-                                        {q.options.map((opt) => (
-                                            <span key={coerceToText(opt.label)} className="typography-micro px-1.5 py-0.5 rounded oc-tile-inset text-muted-foreground">
-                                                {coerceToText(opt.label)}
-                                            </span>
-                                        ))}
-                                    </div>
-                                ) : null}
-                            </div>
-                        ))}
-                    </div>,
-                    { maxHeightClass: 'max-h-[40vh]' }
                 );
             }
 
@@ -1530,6 +1496,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {shouldRenderResult && (
                         <div>
+                            <EntryTimes part={part} />
                             {isFileChangeTool(part.tool) && hasVisualDiffEntry ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
                                     <DiffViewToggle
@@ -1745,7 +1712,15 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         () => (presentation ? renderGuestToolHeader(presentation, { input, output: stateOutput, metadata }) : null),
         [input, metadata, presentation, stateOutput],
     );
-    const description = guestHeader?.subtitle ?? builtInDescription;
+    // A question OpenChamber closed unanswered says why on its row, which stays folded.
+    const questionCloseReason = useQuestionCloseReason(
+        isQuestionTool(part.tool) ? questionCallKey({ messageID: part.messageID, callID: part.callID }) : null,
+    );
+    const questionCloseLabel = questionCloseReason === 'timeout'
+        ? t('chat.questionAnswers.timedOutSummary')
+        : questionCloseReason === 'later' ? t('chat.questionAnswers.answerLaterSummary') : null;
+    const description = guestHeader?.subtitle
+        ?? (questionCloseLabel ? `${questionCloseLabel} · ${builtInDescription}` : builtInDescription);
     const displayName = guestHeader?.title ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
     
     // Tool title/description — shown inline as context. A subtitle the
@@ -1914,7 +1889,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
 
     return (
         <div ref={rowRef}>
-            {}
+            <EntryTimes part={part} />
             <div
                 className={cn(
                     'group/tool flex gap-1.5 pe-2 ps-px py-1.5 rounded-xl',

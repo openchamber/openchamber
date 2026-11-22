@@ -16,6 +16,7 @@
  *
  * `data.level` is the plan tier (for example "lite") and becomes `planLabel`.
  */
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
 import {
@@ -33,7 +34,7 @@ import {
 
 export const providerId = 'zhipuai-coding-plan';
 export const providerName = 'Zhipu AI Coding Plan';
-const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
+export const aliases = ['zhipuai-coding-plan', 'zhipuai', 'zhipu'];
 
 // Mirrors the Z.ai credit label (same monitor API family): `usage` is the
 // total, `currentValue` the consumed amount.
@@ -49,17 +50,23 @@ const formatCreditValueLabel = (limit) => {
   return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
 };
 
+// The monitor API can report percentages outside [0, 100]; clamp at the
+// read site. Non-finite or non-number input stays null. (No clamp inside
+// toUsageWindow: wafer's overage branch deliberately exceeds 100.)
+const clampUsedPercent = (value) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+
 // `percentage` is the used percent; when the API omits it, derive it from
 // currentValue/usage (observed percentages are integers).
 const resolveUsedPercent = (limit) => {
   const percentage = toNumber(limit?.percentage);
   if (percentage !== null) {
-    return percentage;
+    return clampUsedPercent(percentage);
   }
   const used = toNumber(limit?.currentValue);
   const total = toNumber(limit?.usage);
   if (used === null || total === null || total <= 0) return null;
-  return Math.round((used / total) * 100);
+  return clampUsedPercent(Math.round((used / total) * 100));
 };
 
 /** A business failure reported inside an HTTP 200 body; shared with the z.ai provider (same monitor API). */
@@ -74,7 +81,7 @@ export const envelopeError = (payload) => {
 
 function getApiKey(auth) {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKeyFromAuth = entry?.key ?? entry?.token;
+  const apiKeyFromAuth = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 
   if (apiKeyFromAuth) {
     return apiKeyFromAuth;
@@ -100,8 +107,8 @@ export const isConfigured = (auth) => {
   return Boolean(getApiKey(auth));
 };
 
-export const fetchQuota = async () => {
-  const apiKey = getApiKey(await readOpenCodeCredentials());
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -113,13 +120,16 @@ export const fetchQuota = async () => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const response = await fetch('https://open.bigmodel.cn/api/monitor/usage/quota/limit', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -132,7 +142,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
 
     const failure = envelopeError(payload);
     if (failure) {
@@ -171,7 +181,7 @@ export const fetchQuota = async () => {
       // TIME_LIMIT unit=5 means 1 month (30 days)
       const monthSeconds = 30 * 24 * 60 * 60;
       const resetAt = mcpToolsTimeLimit?.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null;
-      const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? mcpToolsTimeLimit.percentage : null;
+      const usedPercent = clampUsedPercent(mcpToolsTimeLimit?.percentage);
 
       windows['MCP Tools'] = toUsageWindow({
         usedPercent,
@@ -189,12 +199,17 @@ export const fetchQuota = async () => {
       planLabel: asNonEmptyString(payload?.data?.level)
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };

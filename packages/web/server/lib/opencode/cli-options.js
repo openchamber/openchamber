@@ -58,8 +58,9 @@ export const parseServeCliOptions = ({
     if (optionName === 'port' || optionName === 'p') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
-      const parsedPort = parseInt(value ?? '', 10);
-      options.port = Number.isFinite(parsedPort) ? parsedPort : defaultPort;
+      const rawPort = String(value ?? '').trim();
+      const parsedPort = /^\d+$/.test(rawPort) ? parseInt(rawPort, 10) : Number.NaN;
+      options.port = Number.isInteger(parsedPort) && parsedPort >= 1 && parsedPort <= 65535 ? parsedPort : defaultPort;
       continue;
     }
 

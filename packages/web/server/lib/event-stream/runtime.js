@@ -6,7 +6,9 @@ import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,
   MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS,
+  MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES,
   serializeMessageStreamWsEvent,
+  sendMessageStreamWsFrame,
   sendSerializedMessageStreamWsFrame,
 } from './protocol.js';
 import { createGlobalMessageStreamHub, parseGlobalBlock } from './global-hub.js';
@@ -17,6 +19,16 @@ import {
   DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
 } from './upstream-reader.js';
+
+function messageStreamPayloadByteLength(data) {
+  if (typeof data === 'string') {
+    return Buffer.byteLength(data);
+  }
+  if (Array.isArray(data)) {
+    return data.reduce((total, chunk) => total + chunk.byteLength, 0);
+  }
+  return data?.byteLength ?? Number.POSITIVE_INFINITY;
+}
 
 export function createGlobalUiEventBroadcaster({
   sseClients,
@@ -73,6 +85,7 @@ export function createMessageStreamWsRuntime({
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
+    maxPayload: MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES,
   });
 
   // Directory-scoped streams create one upstream reader per client
@@ -100,12 +113,39 @@ export function createMessageStreamWsRuntime({
   });
 
   wsServer.on('connection', (socket, req) => {
+    socket.on('message', (data) => {
+      if (messageStreamPayloadByteLength(data) <= MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES) {
+        return;
+      }
+
+      try {
+        socket.close(1009, 'Message stream frame too large');
+      } catch {
+      }
+    });
+
     const rawUrl = typeof req?.url === 'string' ? req.url : MESSAGE_STREAM_GLOBAL_WS_PATH;
     const pathname = parseRequestPathname(rawUrl);
     const requestUrl = new URL(rawUrl, 'http://127.0.0.1');
     const isGlobalStream = pathname === MESSAGE_STREAM_GLOBAL_WS_PATH;
     const requestedLastEventId = requestUrl.searchParams.get('lastEventId')?.trim() || '';
     const requestedDirectory = requestUrl.searchParams.get('directory')?.trim() || '';
+
+    // A repeated scope parameter is ambiguous: never silently stream under
+    // its first value (issue #2315). The sibling directory-scoped HTTP
+    // surfaces reject the same input with a 400; this socket is already
+    // upgraded, so refuse with an error frame and a policy close instead.
+    if (requestUrl.searchParams.getAll('directory').length > 1 || requestUrl.searchParams.getAll('lastEventId').length > 1) {
+      sendMessageStreamWsFrame(socket, {
+        type: 'error',
+        message: 'Ambiguous message stream parameters: directory and lastEventId may each appear at most once',
+      });
+      try {
+        socket.close(1008, 'Ambiguous message stream parameters');
+      } catch {
+      }
+      return;
+    }
 
     if (isGlobalStream) {
       globalBridge.accept(socket, {

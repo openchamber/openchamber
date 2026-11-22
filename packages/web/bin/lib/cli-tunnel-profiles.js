@@ -5,9 +5,25 @@ import {
   getTunnelProfilesFilePath,
   getLegacyCloudflareManagedRemoteFilePath,
 } from './cli-paths.js';
+import { readBoundedFileSync } from '../../server/lib/shared/bounded-file-read.js';
 
 const TUNNEL_PROFILES_VERSION = 1;
 const MAX_TOKEN_FILE_BYTES = 8 * 1024;
+// Profile and legacy tunnel files are small JSON documents (they carry
+// tunnel tokens); 1 MiB is far above any legitimate payload. Reads go
+// through the shared bounded reader (#1706): a FIFO at either path is
+// refused promptly instead of hanging the CLI, and an over-cap file yields
+// the empty default below, never a whole-file parse.
+const MAX_TUNNEL_PROFILES_BYTES = 1024 * 1024;
+const MAX_LEGACY_MANAGED_REMOTE_BYTES = 1024 * 1024;
+
+function readBoundedJsonSync(filePath, maxBytes) {
+  const result = readBoundedFileSync(filePath, maxBytes);
+  if (!result.ok) {
+    return undefined;
+  }
+  return JSON.parse(result.buffer.toString('utf8'));
+}
 
 function normalizeProfileProvider(value) {
   if (typeof value !== 'string') return '';
@@ -217,8 +233,7 @@ function readTunnelProfilesFromDisk(options = {}) {
   const filePath = getTunnelProfilesFilePath();
   try {
     warnIfUnsafeFilePermissions(filePath, options);
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return sanitizeTunnelProfilesData(JSON.parse(raw));
+    return sanitizeTunnelProfilesData(readBoundedJsonSync(filePath, MAX_TUNNEL_PROFILES_BYTES));
   } catch {
     return { version: TUNNEL_PROFILES_VERSION, profiles: [] };
   }
@@ -251,8 +266,7 @@ function writeManagedRemotePairsToDiskFromProfiles(profilesData) {
 
 function readLegacyManagedRemoteEntries() {
   try {
-    const raw = fs.readFileSync(getLegacyCloudflareManagedRemoteFilePath(), 'utf8');
-    const parsed = JSON.parse(raw);
+    const parsed = readBoundedJsonSync(getLegacyCloudflareManagedRemoteFilePath(), MAX_LEGACY_MANAGED_REMOTE_BYTES);
     const tunnels = Array.isArray(parsed?.tunnels) ? parsed.tunnels : [];
     return tunnels
       .map((entry) => {

@@ -23,6 +23,8 @@ import type { ChangeRequest } from '@/lib/source-control/types';
 export const WORKTREE_START_FROM_OPTIONS = ['project-root', 'remote-default'] as const;
 export type WorktreeStartFrom = (typeof WORKTREE_START_FROM_OPTIONS)[number];
 export const DEFAULT_WORKTREE_START_FROM = 'remote-default' satisfies WorktreeStartFrom;
+/** Auto-create worktree until the user turns it off: every new session gets a worktree of its own. */
+export const DEFAULT_AUTO_CREATE_WORKTREE = true;
 
 /** The places that make a worktree, each of which can override the default start. */
 export const WORKTREE_START_PLACES = ['autoCreate', 'quick', 'dialog', 'parallel', 'handoff', 'agent'] as const;

@@ -401,7 +401,6 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           label={renderLinkedLabel(entry)}
           // The title truncates in a narrow panel; the full one shows on hover.
           tooltip={entry.title ? renderLinkedLabel(entry) : undefined}
-          muted
           // In the Tracker, read through this session's project; Cmd or Ctrl,
           // and anything the app cannot show, opens the link.
           onClick={(event) => openTrackerItem(entry.url, directory, event)}
@@ -439,7 +438,6 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       {visibleKnowledge.notes.map((note) => (
         <WorkStatusRow
           key={note.id}
-          muted
           leading={(
             <button
               type="button"
@@ -461,7 +459,6 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       {visibleKnowledge.plans.map((plan) => (
         <WorkStatusRow
           key={plan.id}
-          muted
           leading={(
             <button
               type="button"
@@ -482,19 +479,16 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       ))}
       {memoryCount > 0 ? (
         <WorkStatusRow
-          muted
           label={t('chat.workStatus.breakdown.memory')}
           value={<WorkStatusValue>{memoryCount}</WorkStatusValue>}
         />
       ) : null}
 
       <WorkStatusRow
-        muted
         label={t('chat.workStatus.breakdown.skills')}
         value={<WorkStatusValue>{skills.length}</WorkStatusValue>}
       />
       <WorkStatusRow
-        muted
         label={t('chat.workStatus.breakdown.mcp')}
         value={<WorkStatusValue>{mcpCount}</WorkStatusValue>}
       />

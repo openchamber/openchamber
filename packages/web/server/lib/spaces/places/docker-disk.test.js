@@ -235,6 +235,15 @@ describe('clean-up of the Docker place', () => {
     expect((await makePlace(desktop, { colimaPath: '/opt/homebrew/bin/colima' }).cleanUpDisk()).machine).toEqual({ state: 'skipped' });
   });
 
+  it('keeps a failed trim message tail on a character boundary (#2041)', async () => {
+    // stderr is 502 chars, so the 500-char message tail cut lands between
+    // the halves of the astral character: the partial character is dropped.
+    const stderr = `x\u{1F600}${'y'.repeat(499)}`;
+    const fake = createFakeDocker({ engineName: 'colima', resources: [toolsVolume(OWNER, KEY)], colima: () => ({ code: 1, stdout: '', stderr }) });
+    const outcome = await makePlace(fake, { colimaPath: '/opt/homebrew/bin/colima' }).cleanUpDisk();
+    expect(outcome.machine).toEqual({ state: 'failed', message: 'y'.repeat(499) });
+  });
+
   it('a trim that fails or finds nothing to do never fails the clean-up', async () => {
     const fake = createFakeDocker({ engineName: 'colima', resources: [toolsVolume(OWNER, KEY)], colima: () => ({ code: 1, stdout: '', stderr: 'sudo: a password is required' }) });
     const outcome = await makePlace(fake, { colimaPath: '/opt/homebrew/bin/colima' }).cleanUpDisk();

@@ -1,11 +1,18 @@
+import { execFileSync } from 'node:child_process';
+import nodeFs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'bun:test';
 
-import { createRelayHostLock } from './host-lock.js';
+import { createRelayHostLock, RELAY_HOST_CLAIM_MAX_BYTES } from './host-lock.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 
 // In-memory fs standing in for the shared data dir.
 const makeFakeFs = () => {
   const files = new Map();
+  const fifoPaths = new Set();
   return {
+    constants: { O_WRONLY: 1, O_CREAT: 64, O_TRUNC: 512, O_NONBLOCK: 2048 },
     readFileSync: (p) => {
       if (!files.has(p)) {
         const error = new Error('ENOENT');
@@ -17,10 +24,25 @@ const makeFakeFs = () => {
     writeFileSync: (p, data) => {
       files.set(p, data);
     },
+    // Handle surface for writeClaim (#1823): fstatSync judges the path's
+    // CURRENT kind, so markFifo models a FIFO swapped in after the probe.
+    openSync: (p) => ({ path: p }),
+    fstatSync: (fd) => ({
+      isFile: () => !fifoPaths.has(fd.path),
+      isFIFO: () => fifoPaths.has(fd.path),
+    }),
+    writeSync: (fd, data) => {
+      files.set(fd.path, data);
+      return Buffer.byteLength(String(data));
+    },
+    closeSync: () => {},
     unlinkSync: (p) => {
       files.delete(p);
     },
     peek: (p) => files.get(p),
+    markFifo: (p) => {
+      fifoPaths.add(p);
+    },
   };
 };
 
@@ -40,8 +62,37 @@ const makeFakeProcess = (pid, alive = new Set([pid])) => ({
 const LOCK = '/data/relay-host.lock';
 const silentLogger = { warn: () => {} };
 
+// The bounded reader is the deliberate adaptation of the injected-fs seam
+// (#1739, following #1736): production uses the real readBoundedFileSync,
+// which judges the opened handle; the fake fs has no handles, so tests
+// adapt it to the bounded reader's result shape over the in-memory map
+// (contents here are always small regular files unless a test says
+// otherwise, so the adapter only needs missing / too-large / ok).
+const boundedReadSyncFor = (fakeFs) => (filePath, maxBytes) => {
+  let raw;
+  try {
+    raw = fakeFs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { ok: false, reason: 'missing', code: 'BOUNDED_FILE_MISSING', path: filePath };
+    throw error;
+  }
+  const buffer = Buffer.from(String(raw), 'utf8');
+  if (buffer.length > maxBytes) {
+    return { ok: false, reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', path: filePath, size: buffer.length, limit: maxBytes };
+  }
+  return { ok: true, buffer, size: buffer.length };
+};
+
 const makeLock = (fs, proc, extra = {}) =>
-  createRelayHostLock({ lockFilePath: LOCK, fs, process: proc, hostname: 'mac', logger: silentLogger, ...extra });
+  createRelayHostLock({
+    lockFilePath: LOCK,
+    fs,
+    process: proc,
+    hostname: 'mac',
+    logger: silentLogger,
+    boundedReadSync: boundedReadSyncFor(fs),
+    ...extra,
+  });
 
 describe('relay host lock', () => {
   it('claims a free lock and keeps it on the next check', () => {
@@ -203,5 +254,128 @@ describe('relay host lock', () => {
     const lock = makeLock(fs, makeFakeProcess(1));
 
     expect(lock.tryClaim()).toBe(true);
+  });
+});
+
+describe('bounded claim reads (#1739)', () => {
+  it('treats an over-cap claim file as no valid claim (fake fs, cap enforced by the adapter)', () => {
+    const fs = makeFakeFs();
+    const alive = new Set([100, 200]);
+    const padded = JSON.stringify({ pid: 200, instance: 'other', host: 'mac', refreshedAt: Date.now(), pad: 'x'.repeat(RELAY_HOST_CLAIM_MAX_BYTES) });
+    expect(Buffer.byteLength(padded)).toBeGreaterThan(RELAY_HOST_CLAIM_MAX_BYTES);
+    fs.writeFileSync(LOCK, padded);
+    const lock = makeLock(fs, makeFakeProcess(100, alive));
+
+    expect(lock.otherLiveClaimant()).toBe(null);
+    expect(lock.tryClaim()).toBe(true);
+    expect(JSON.parse(fs.peek(LOCK)).pid).toBe(100);
+  });
+
+  it('a FIFO at the claim path answers no claimant promptly against the real reader', () => {
+    const dir = nodeFs.mkdtempSync(path.join(os.tmpdir(), 'oc-hostlock-fifo-'));
+    try {
+      const lockPath = path.join(dir, 'relay-host.lock');
+      execFileSync('mkfifo', [lockPath]);
+      const lock = createRelayHostLock({ lockFilePath: lockPath, fs: nodeFs, process: makeFakeProcess(100), hostname: 'mac', logger: silentLogger });
+
+      expect(lock.otherLiveClaimant()).toBe(null);
+      // tryClaim and release must also return promptly: neither may open
+      // the FIFO (for read or for write) and block.
+      expect(lock.tryClaim()).toBe(true);
+      expect(() => lock.release()).not.toThrow();
+      expect(nodeFs.existsSync(lockPath)).toBe(true);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a FIFO swapped in after the probe is never written (fake fs, handle judged)', () => {
+    const fs = makeFakeFs();
+    const stale = JSON.stringify({ pid: 999, instance: 'gone', host: 'mac', refreshedAt: 0 });
+    fs.writeFileSync(LOCK, stale);
+    // The bounded-read adapter reads the map and reports a regular file;
+    // the handle open inside writeClaim sees the swapped-in FIFO instead.
+    fs.markFifo(LOCK);
+    const lock = makeLock(fs, makeFakeProcess(100));
+
+    expect(lock.tryClaim()).toBe(true);
+    expect(fs.peek(LOCK)).toBe(stale);
+  });
+
+  it('a FIFO swapped in after the probe answers promptly against the real fs', () => {
+    const dir = nodeFs.mkdtempSync(path.join(os.tmpdir(), 'oc-hostlock-swap-'));
+    try {
+      const lockPath = path.join(dir, 'relay-host.lock');
+      nodeFs.writeFileSync(lockPath, JSON.stringify({ pid: 999, instance: 'gone', host: 'mac', refreshedAt: 0 }));
+      let swapped = false;
+      // The real bounded reader judges the regular file ok; its caller then
+      // finds a FIFO where the file was — the swap the probe cannot see.
+      const swappingReader = (filePath, maxBytes) => {
+        const result = readBoundedFileSync(filePath, maxBytes);
+        if (!swapped && result.ok) {
+          swapped = true;
+          nodeFs.unlinkSync(filePath);
+          execFileSync('mkfifo', [filePath]);
+        }
+        return result;
+      };
+      const lock = createRelayHostLock({
+        lockFilePath: lockPath,
+        fs: nodeFs,
+        process: makeFakeProcess(100),
+        hostname: 'mac',
+        logger: silentLogger,
+        boundedReadSync: swappingReader,
+      });
+
+      // A by-path write open on the FIFO would block until a reader appears;
+      // returning at all is the assertion, and the FIFO must be untouched.
+      expect(lock.tryClaim()).toBe(true);
+      expect(nodeFs.lstatSync(lockPath).isFIFO()).toBe(true);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('an over-cap claim file answers no claimant against the real reader and is replaced by tryClaim', () => {
+    const dir = nodeFs.mkdtempSync(path.join(os.tmpdir(), 'oc-hostlock-cap-'));
+    try {
+      const lockPath = path.join(dir, 'relay-host.lock');
+      const padded = JSON.stringify({ pid: 200, instance: 'other', host: 'mac', refreshedAt: Date.now(), pad: 'x'.repeat(RELAY_HOST_CLAIM_MAX_BYTES) });
+      nodeFs.writeFileSync(lockPath, padded);
+      const lock = createRelayHostLock({
+        lockFilePath: lockPath,
+        fs: nodeFs,
+        process: makeFakeProcess(100, new Set([100, 200])),
+        hostname: 'mac',
+        logger: silentLogger,
+      });
+
+      expect(lock.otherLiveClaimant()).toBe(null);
+      expect(lock.tryClaim()).toBe(true);
+      expect(JSON.parse(nodeFs.readFileSync(lockPath, 'utf8')).pid).toBe(100);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a valid claim under the cap is still honoured against the real reader', () => {
+    const dir = nodeFs.mkdtempSync(path.join(os.tmpdir(), 'oc-hostlock-ok-'));
+    try {
+      const lockPath = path.join(dir, 'relay-host.lock');
+      nodeFs.writeFileSync(lockPath, JSON.stringify({ pid: 200, instance: 'other', host: 'mac', refreshedAt: Date.now() }));
+      const lock = createRelayHostLock({
+        lockFilePath: lockPath,
+        fs: nodeFs,
+        process: makeFakeProcess(100, new Set([100, 200])),
+        hostname: 'mac',
+        logger: silentLogger,
+      });
+
+      expect(lock.otherLiveClaimant()).toEqual({ pid: 200, host: 'mac' });
+      expect(lock.tryClaim()).toBe(false);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

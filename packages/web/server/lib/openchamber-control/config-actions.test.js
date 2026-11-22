@@ -268,6 +268,71 @@ describe('maskConfigSecrets', () => {
       mcp: { servers: { gh: { headers: { Authorization: '{env:GH_TOKEN}' }, environment: { GITHUB_TOKEN: '********' } } } },
     });
   });
+
+  it('masks values under bare-key names, nested and as a direct leaf', () => {
+    expect(maskConfigSecrets({
+      privateKey: '-----BEGIN', accessKey: 'AKIA123', sshKey: 'ssh-secret', encryptionKey: 'abc',
+      licenseKey: 'LIC-1', signingKey: 'sig', sessionKey: 'sess', private_key: 'pk', key: 'bare',
+      keybinds: 'ctrl+c', baseURL: 'https://x',
+      nested: { access_key: '{env:AK}' },
+    })).toEqual({
+      privateKey: '********', accessKey: '********', sshKey: '********', encryptionKey: '********',
+      licenseKey: '********', signingKey: '********', sessionKey: '********', private_key: '********', key: '********',
+      keybinds: 'ctrl+c', baseURL: 'https://x',
+      nested: { access_key: '{env:AK}' },
+    });
+    expect(maskConfigSecrets('-----BEGIN', 'privateKey')).toBe('********');
+    expect(maskConfigSecrets('{file:/keys/id}', 'sshKey')).toBe('{file:/keys/id}');
+  });
+
+  it('masks every string leaf under a secret-named key, through nested objects and arrays', () => {
+    expect(maskConfigSecrets({
+      privateKey: { material: 'LEAK', nested: { pem: 'LEAK2' } },
+      jwk: { privateKey: { kty: 'RSA', d: 'LEAK3' } },
+      provider: { apiKey: { value: 'LEAK4' } },
+      token: { value: 'LEAK5' },
+      wrapped: [{ privateKey: [{ material: 'LEAK7' }] }],
+      refs: { privateKey: { material: '{env:PK}', file: '{file:/keys/id}' } },
+      plain: { nested: { material: 'readable', count: 3 } },
+    })).toEqual({
+      privateKey: { material: '********', nested: { pem: '********' } },
+      jwk: { privateKey: { kty: '********', d: '********' } },
+      provider: { apiKey: { value: '********' } },
+      token: { value: '********' },
+      wrapped: [{ privateKey: [{ material: '********' }] }],
+      refs: { privateKey: { material: '{env:PK}', file: '{file:/keys/id}' } },
+      plain: { nested: { material: 'readable', count: 3 } },
+    });
+  });
+
+  it('masks passphrase values, as a leaf, in plural form and through a subtree', () => {
+    expect(maskConfigSecrets('LEAK', 'passphrase')).toBe('********');
+    expect(maskConfigSecrets('LEAK', 'passphrases')).toBe('********');
+    expect(maskConfigSecrets('LEAK', 'myPassphrase')).toBe('********');
+    expect(maskConfigSecrets({
+      passphrase: 'LEAK',
+      passphrases: ['LEAK2', { value: 'LEAK3' }],
+      nested: { passphrase: { material: 'LEAK4' } },
+      refs: { passphrase: '{env:PP}', keyPassphrase: '{file:/keys/id}' },
+    })).toEqual({
+      passphrase: '********',
+      passphrases: ['********', { value: '********' }],
+      nested: { passphrase: { material: '********' } },
+      refs: { passphrase: '{env:PP}', keyPassphrase: '{file:/keys/id}' },
+    });
+  });
+
+  it('masks plural secret names and pins the fail-closed bare-keys reading', () => {
+    expect(maskConfigSecrets({
+      privateKeys: 'LEAK', accessKeys: 'LEAK', apiKeys: 'LEAK', tokens: 'LEAK',
+      secrets: 'LEAK', passwords: 'LEAK', keys: 'LEAK', monkey: 'LEAK',
+      keybinds: 'ctrl+c',
+    })).toEqual({
+      privateKeys: '********', accessKeys: '********', apiKeys: '********', tokens: '********',
+      secrets: '********', passwords: '********', keys: '********', monkey: '********',
+      keybinds: 'ctrl+c',
+    });
+  });
 });
 
 describe('opencode.config.get', () => {
@@ -475,5 +540,21 @@ describe('openchamber.restart', () => {
       await expectError(actions.execute('openchamber.restart'), 501, pattern);
       expect(scheduled).toHaveLength(0);
     }
+  });
+});
+
+describe('settings.devices', () => {
+  it('returns what the windows reported, and says when none has', async () => {
+    const devices = [{ deviceId: 'device-aaaa', surface: 'web', values: { sidebarWidth: 280 }, updatedAt: 1 }];
+    const { actions } = createActions({ listDeviceSettings: () => devices });
+    await expect(actions.execute('settings.devices', {})).resolves.toMatchObject({ devices });
+
+    const empty = createActions({ listDeviceSettings: () => [] }).actions;
+    await expect(empty.execute('settings.devices', {})).resolves.toMatchObject({ devices: [], note: expect.stringMatching(/No window has reported/) });
+  });
+
+  it('answers 503 on a server without the store', async () => {
+    const { actions } = createActions();
+    await expectError(actions.execute('settings.devices', {}), 503, /not available/);
   });
 });

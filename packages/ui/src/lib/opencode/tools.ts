@@ -20,7 +20,7 @@
 
 import { z } from "zod"
 
-import type { JsonValue, Metadata, ToolInput, ToolState } from "./model"
+import type { JsonValue, Metadata, Part, ToolInput, ToolState } from "./model"
 
 /** Built-in tool names as the server reports them. */
 export const OPENCODE_TOOLS = {
@@ -269,6 +269,22 @@ export function executeHasBackgroundableWork(metadata: Metadata | undefined): bo
 }
 
 /**
+ * The turn waits on a job OpenCode can move to the background: a shell command
+ * or a subagent call that already runs. A pending call has not started yet (or
+ * waits for a permission), and a background call settles at once, so neither
+ * counts. A running Code Mode `execute` counts when a shell or subagent runs
+ * inside it.
+ */
+export function hasBackgroundableWork(parts: readonly Part[]): boolean {
+  return parts.some((part) => {
+    if (part.type !== "tool" || part.state.status !== "running") return false
+    if (isShellTool(part.tool) || isSubagentTool(part.tool)) return true
+    if (!isExecuteTool(part.tool)) return false
+    return executeHasBackgroundableWork(part.state.metadata)
+  })
+}
+
+/**
  * The tools an `execute` script called, in order. Entries without a tool name
  * are dropped rather than failing the list, so one malformed call cannot erase
  * the other calls of the same script.
@@ -343,10 +359,20 @@ const elementText = (html: string, pattern: RegExp): string => (pattern.exec(htm
   .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, entity: keyof typeof TITLE_ENTITIES) => TITLE_ENTITIES[entity])
   .replace(/\s+/g, " ")
   .trim()
-const pageTitleFromHtml = (html: string): string => (
-  elementText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
-  || elementText(html, /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)
-).slice(0, RENDER_PAGE_MAX_TITLE_LENGTH).trim()
+// Same pair-safe cap as the server's renderPageTitleFromHtml: a plain slice
+// at 120 can land between the halves of a surrogate pair and name the page
+// with a lone high surrogate (U+FFFD once encoded).
+const clipTitlePairSafe = (text: string): string => {
+  const clipped = text.slice(0, RENDER_PAGE_MAX_TITLE_LENGTH)
+  const last = clipped.charCodeAt(clipped.length - 1)
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped
+}
+
+const pageTitleFromHtml = (html: string): string => {
+  const title = elementText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
+    || elementText(html, /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)
+  return clipTitlePairSafe(title).trim()
+}
 
 /**
  * The page an `openchamber_render` call showed: present once OpenChamber
@@ -386,6 +412,11 @@ export function subagentAgent(input: ToolInput | undefined): string | undefined 
 /** The short label a `subagent` call gives its task (`input.description`). */
 export function subagentDescription(input: ToolInput | undefined): string | undefined {
   return readInput(input).description
+}
+
+/** The command line a `shell` call runs (`input.command`). */
+export function shellCommand(input: ToolInput | undefined): string | undefined {
+  return readInput(input).command
 }
 
 /** The child session a `subagent` call runs in (`metadata.sessionID`). */

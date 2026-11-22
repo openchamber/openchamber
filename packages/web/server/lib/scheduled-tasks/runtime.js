@@ -6,14 +6,29 @@ import { buildGoalIntroText, createSessionGoal as createSessionGoalDefault } fro
 import { discoverLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { createExistingSessionTasks } from './existing-session.js';
+import { combineAbortSignals } from '../shared/bounded-fetch.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
-const DEFAULT_MAX_RUN_MS = 30 * 60 * 1000;
+// Shipped posture (#765): no practical cap by default — a fleet queue-lane
+// run legitimately needs far longer than the old hard 30 minutes. A per-task
+// `maxRunDurationMs` or the server-wide `scheduledTasksMaxRunDurationMs`
+// setting can still bound a run where a bound is genuinely wanted.
+const DEFAULT_MAX_RUN_MS = 24 * 60 * 60 * 1000;
 const JITTER_MAX_MS = 2_000;
 const TASK_TITLE_MAX_LENGTH = 120;
 const TASK_DUE_SLACK_MS = 5_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+// Effective run limit for a task: its own `maxRunDurationMs` wins, then the
+// server-wide value, then the shipped default. Non-positive or non-finite
+// values mean "not set"; the result is clamped to the largest delay a timer
+// can hold.
+const resolveEffectiveMaxRunMs = (task, serverMaxRunMs) => {
+  const candidate = [task?.maxRunDurationMs, serverMaxRunMs, DEFAULT_MAX_RUN_MS]
+    .find((value) => Number.isFinite(value) && value > 0);
+  return Math.min(Math.floor(candidate), MAX_TIMER_DELAY_MS);
+};
+
 
 const buildTaskKey = (projectID, taskID) => `${projectID}:${taskID}`;
 
@@ -231,7 +246,17 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
   return null;
 };
 
-export const formatScheduledSessionTitle = (task, nowMs = Date.now()) => {
+// A plain slice at the cap can land between the halves of a surrogate pair,
+// leaving a lone high surrogate in the created session's title that encodes
+// as U+FFFD in the session list; move a cut that lands inside a pair back to
+// the pair boundary (same guard as projects/project-config.js clampLength).
+const clipPairSafe = (text, limit) => {
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
+
+export const formatScheduledSessionTitle = (task, nowMs) => {
   const timezone = typeof task?.schedule?.timezone === 'string' && task.schedule.timezone.trim().length > 0
     ? task.schedule.timezone.trim()
     : DateTime.local().zoneName;
@@ -242,7 +267,7 @@ export const formatScheduledSessionTitle = (task, nowMs = Date.now()) => {
   const suffix = ` ${stamp}`;
   const maxTaskNameLength = Math.max(1, TASK_TITLE_MAX_LENGTH - suffix.length);
   const trimmedName = taskName.length > maxTaskNameLength
-    ? taskName.slice(0, maxTaskNameLength)
+    ? clipPairSafe(taskName, maxTaskNameLength)
     : taskName;
   return `${trimmedName}${suffix}`;
 };
@@ -276,19 +301,46 @@ export const createScheduledTasksRuntime = (deps) => {
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
     maxRunDurationMs = DEFAULT_MAX_RUN_MS,
+    resolveServerMaxRunDurationMs = null,
   } = deps;
+
+  const resolveEffectiveMaxRunMsForTask = async (task) => {
+    let serverMaxRunMs = maxRunDurationMs;
+    if (resolveServerMaxRunDurationMs) {
+      try {
+        serverMaxRunMs = (await resolveServerMaxRunDurationMs(task)) ?? maxRunDurationMs;
+      } catch {
+        serverMaxRunMs = maxRunDurationMs;
+      }
+    }
+    return resolveEffectiveMaxRunMs(task, serverMaxRunMs);
+  };
 
   // Every OpenCode route lives under /api in v2 and the client appends it, so
   // the client only wants the origin. Directory scoping is a request header.
   const openCodeOrigin = () => new URL(buildOpenCodeUrl('/api/info', '')).origin;
-  const createScopedClient = (directory) => OpenCode.make({
+  const createScopedClient = (directory, runSignal = null) => OpenCode.make({
     baseUrl: openCodeOrigin(),
     headers: {
       ...getOpenCodeAuthHeaders(),
       ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
     },
-    fetch: async (...args) => {
-      const response = await fetch(...args);
+    // The run signal is composed with any signal the SDK put on the
+    // request, never replacing it: aborting the run (the watchdog) cancels
+    // whatever call is in flight.
+    fetch: async (input, init) => {
+      const requestSignal = init?.signal ?? ('signal' in Object(input) ? input.signal : null);
+      // Shared composition helper (#995): this call site keeps its old
+      // bare-signal semantics — no present signal means no signal, a
+      // single present signal passes through unchanged, and detach is
+      // deliberately not called (the old variant never removed its
+      // forwarding listeners, and the SDK may still be reading the
+      // response body after this fetch call returns).
+      const presentSignals = [runSignal, requestSignal].filter(Boolean);
+      const signal = presentSignals.length > 1 ? combineAbortSignals(presentSignals).signal : (presentSignals[0] ?? null);
+      const requestInit = { ...init };
+      if (signal) requestInit.signal = signal;
+      const response = await fetch(input, requestInit);
       assertOpenCodeApiResponse(response);
       return response;
     },
@@ -543,7 +595,7 @@ export const createScheduledTasksRuntime = (deps) => {
     ? sessionKnowledgeRuntime.sync(sessionID, projectPath)
     : Promise.resolve(false));
 
-  const runPrompt = async ({ client, sessionID, projectPath, task, goalSpec = null }) => {
+  const runPrompt = async ({ client, sessionID, projectPath, task, goalSpec = null, signal = null }) => {
     await syncKnowledge(sessionID, projectPath);
 
     // A v2 prompt carries a single authored text. The goal briefing therefore
@@ -552,9 +604,11 @@ export const createScheduledTasksRuntime = (deps) => {
     // execution unless `resume: false`: without it the model would start on
     // the briefing alone, before the task arrived.
     if (task.execution.goalEnabled) {
+      signal?.throwIfAborted();
       await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget, goalSpec), resume: false });
     }
 
+    signal?.throwIfAborted();
     await client.session.prompt({
       sessionID,
       text: expandSnippets(task.execution.prompt, projectPath),
@@ -582,16 +636,18 @@ export const createScheduledTasksRuntime = (deps) => {
     return command ? { ...parsed, template: command.template } : null;
   };
 
-  const runScheduledCommand = async ({ client, sessionID, projectPath, command, goalIntro = null }) => {
+  const runScheduledCommand = async ({ client, sessionID, projectPath, command, goalIntro = null, signal = null }) => {
     await syncKnowledge(sessionID, projectPath);
     // The command route takes no extra parts, so a goal objective the writer
     // rewrote, which is not the command's own text, goes in first as a
     // synthetic message that does not start execution.
     if (goalIntro) {
+      signal?.throwIfAborted();
       await client.session.synthetic({ sessionID, text: goalIntro, resume: false });
     }
     // Agent, model and variant are session properties in v2 and were already
     // set when the run created the session; the command body only carries text.
+    signal?.throwIfAborted();
     await client.session.command({
       sessionID,
       // OpenCode 2.0.8 renamed the command body field `command` to `name`.
@@ -600,7 +656,7 @@ export const createScheduledTasksRuntime = (deps) => {
     });
   };
 
-  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated) => {
+  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated, signal = null) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
@@ -620,13 +676,14 @@ export const createScheduledTasksRuntime = (deps) => {
 
     const baseUrl = openCodeOrigin();
     const authHeaders = getOpenCodeAuthHeaders();
-    const client = createScopedClient(directory);
+    const client = createScopedClient(directory, signal);
     const selection = await resolveRunSelection(projectID, task);
 
     // Agent, model and variant belong to the session in v2: a scheduled run
     // fixes them here instead of repeating them on every prompt.
     let sessionID;
     try {
+      signal?.throwIfAborted();
       const session = await client.session.create({
         title,
         location: { directory },
@@ -660,6 +717,7 @@ export const createScheduledTasksRuntime = (deps) => {
       emitTaskRunEvent?.({
         projectID,
         taskID: task.id,
+        taskName: task.name,
         ranAt: startedAt,
         status: 'running',
         sessionID,
@@ -706,9 +764,10 @@ export const createScheduledTasksRuntime = (deps) => {
         projectPath: directory,
         command: scheduledCommand,
         goalIntro: goalSpec ? buildGoalIntroText(task.execution.goalTokenBudget, goalSpec) : null,
+        signal,
       });
     } else {
-      await runPrompt({ client, sessionID, projectPath: directory, task, goalSpec });
+      await runPrompt({ client, sessionID, projectPath: directory, task, goalSpec, signal });
     }
 
     const finishedAt = Date.now();
@@ -988,18 +1047,34 @@ export const createScheduledTasksRuntime = (deps) => {
       };
 
       try {
-        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession);
+        // One controller per run: when the watchdog fires it aborts the
+        // run at the same moment it rejects the race, so the run is
+        // cancelled — its in-flight call aborts and no later step can
+        // dispatch — not merely disowned while it keeps executing.
+        const runController = new AbortController();
+        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession, runController.signal);
+        const effectiveMaxRunMs = await resolveEffectiveMaxRunMsForTask(task);
         let timeoutID;
         const timeoutPromise = new Promise((_, reject) => {
           timeoutID = setTimeout(() => {
-            reject(new Error('scheduled task run timed out'));
-          }, maxRunDurationMs);
+            const timeoutError = new Error(
+              `scheduled task run timed out: exceeded its configured limit of ${effectiveMaxRunMs} ms`,
+            );
+            timeoutError.code = 'SCHEDULED_TASK_RUN_TIMEOUT';
+            runController.abort(timeoutError);
+            reject(timeoutError);
+          }, effectiveMaxRunMs);
         });
 
         const result = await Promise.race([runPromise, timeoutPromise]).finally(() => {
           if (timeoutID) {
             clearTimeout(timeoutID);
           }
+          // The race has settled. A run that lost to the watchdog unwinds
+          // in the background on its aborted signal; its rejection is
+          // expected and must never surface, and terminal state stays
+          // recorded solely by this caller.
+          runPromise.catch(() => {});
         });
         sessionID = result.sessionID;
         sessionDirectory = result.directory;
@@ -1010,7 +1085,9 @@ export const createScheduledTasksRuntime = (deps) => {
           { projectID, taskID, status, reason, sessionID, durationMs }
         );
       } catch (error) {
-        status = 'error';
+        // A run stopped by its configured limit is not a failure: record it
+        // as 'timeout' so the watchdog can tell a capped run from a crash.
+        status = error?.code === 'SCHEDULED_TASK_RUN_TIMEOUT' ? 'timeout' : 'error';
         errorMessage = safeErrorMessage(error);
         logger.warn?.('[ScheduledTasks] run failed', {
           projectID,
@@ -1049,7 +1126,7 @@ export const createScheduledTasksRuntime = (deps) => {
       const statePatch = {
         lastStatus: status,
         lastDurationMs: durationMs,
-        lastError: status === 'error' ? errorMessage : undefined,
+        lastError: status === 'error' || status === 'timeout' ? errorMessage : undefined,
         lastSessionId: sessionID ?? createdSessionID,
         nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
         updatedAt: finishedAt,
@@ -1086,7 +1163,7 @@ export const createScheduledTasksRuntime = (deps) => {
             ...(latestTask.state || {}),
             lastStatus: status,
             lastDurationMs: durationMs,
-            lastError: status === 'error' ? errorMessage : undefined,
+            lastError: status === 'error' || status === 'timeout' ? errorMessage : undefined,
             lastSessionId: sessionID ?? createdSessionID,
             nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
             updatedAt: finishedAt,
@@ -1133,6 +1210,9 @@ export const createScheduledTasksRuntime = (deps) => {
         emitTaskRunEvent?.({
           projectID,
           taskID,
+          ...((stateResult.task?.name ?? recoveredTask?.name)
+            ? { taskName: stateResult.task?.name ?? recoveredTask?.name }
+            : {}),
           ranAt: finishedAt,
           status,
           ...(sessionID ? { sessionID } : {}),

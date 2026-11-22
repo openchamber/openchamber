@@ -31,7 +31,9 @@ import { useGoalEditStore, type GoalEditDelivery, type GoalEditDraft } from '@/s
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { resolveSessionWriterModel } from '@/components/chat/goalWriterContext';
 import { GoalWriterPicker } from '@/components/chat/GoalWriterPicker';
+import { recordGoalWriterChoice } from '@/lib/modelChoices';
 import { useGoalWriterDefault } from '@/hooks/useGoalWriterDefault';
+import { GoalVersionHistory } from '@/components/chat/GoalVersionHistory';
 
 interface SessionGoalDialogProps {
   open: boolean;
@@ -115,6 +117,9 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
   const [message, setMessage] = React.useState(() => seed?.message ?? '');
   const [delivery, setDelivery] = React.useState<GoalEditDelivery>(() => seed?.delivery ?? followUpBehavior);
   const [busyAction, setBusyAction] = React.useState(false);
+  // Prior spec versions (#1830): shown in place of the objective field, so the
+  // dialog keeps its size and the list mounts only while it is open.
+  const [showVersions, setShowVersions] = React.useState(false);
 
   // File-backed objectives fetch async — the content usually lands right
   // after the dialog opens. Late-seed the textarea only while it is still
@@ -144,6 +149,10 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
   // The save runs after the dialog closes; the card above the composer shows
   // it and can cancel it or bring the edit back here.
   const handleSave = () => {
+    // The pick only writes when the objective is rewritten.
+    if (rewrites && writer) {
+      recordGoalWriterChoice({ writer, writerDefault, sessionModel, inputLength: trimmedObjective.length });
+    }
     startGoalEdit({
       sessionId,
       directory,
@@ -156,8 +165,15 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
     onOpenChange(false);
   };
 
-  const handleClear = async () => {
-    setBusyAction(true);
+  // Restoring an older version puts its text in the objective field as an
+  // unsaved edit: the normal Save then records it as a new version, so the
+  // restore is reviewable and the past is never rewritten in place.
+  const handleRestore = (content: string) => {
+    setObjective(content);
+    setShowVersions(false);
+  };
+
+  const handleClear = async () => {    setBusyAction(true);
     try {
       await clearSessionGoal(sessionId, directory);
       onOpenChange(false);
@@ -212,6 +228,13 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
             <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words typography-meta text-muted-foreground">{objectiveContent ?? goal.objective}</p>
           ) : (
             <>
+              {showVersions ? (
+                <GoalVersionHistory
+                  sessionId={sessionId}
+                  currentObjective={savedObjective}
+                  onRestore={handleRestore}
+                />
+              ) : (
               <div className="flex min-h-0 flex-1 flex-col gap-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="typography-ui-label text-foreground">{t('chat.goal.dialog.objectiveLabel')}</span>
@@ -222,6 +245,16 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
                     >
                       {ignoreLimit ? objective.length : `${objective.length}/${charLimit}`}
                     </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 px-1.5"
+                      onClick={() => setShowVersions(true)}
+                    >
+                      <Icon name="history" className="size-3.5" aria-hidden="true" />
+                      {t('chat.goal.versions.open')}
+                    </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button type="button" variant="ghost" size="sm" className="h-6 w-6 px-0" aria-label={t('chat.goal.dialog.moreAria')}>
@@ -250,6 +283,7 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
                   {overLimit ? t('chat.goal.dialog.overLimit', { limit: charLimit }) : (ignoreLimit ? t('chat.goal.dialog.limitIgnored') : '')}
                 </p>
               </div>
+              )}
 
               {rewrites ? (
                 <div className="space-y-1">

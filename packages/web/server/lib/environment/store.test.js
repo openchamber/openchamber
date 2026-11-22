@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createEnvironmentStore, EnvironmentPatchError, EnvironmentStoreError } from './store.js';
+import { createEnvironmentStore, EnvironmentPatchError, EnvironmentStoreError, MAX_ENVIRONMENT_FILE_BYTES } from './store.js';
 
 describe('environment store', () => {
   let directory;
@@ -87,6 +88,47 @@ describe('environment store', () => {
     expect(() => store.userVariables()).toThrow(EnvironmentStoreError);
     await expect(store.updateUser({ variables: { A: '1' } })).rejects.toBeInstanceOf(EnvironmentStoreError);
     expect(fs.readFileSync(filePath, 'utf8')).toBe('{ broken');
+  });
+
+  it('reads a missing file as an empty version 1 store', () => {
+    const store = createEnvironmentStore({ filePath });
+    expect(store.userVariables()).toEqual({});
+    expect(store.hasProjectEntries()).toBe(false);
+  });
+
+  // The bounded-reader tests below name their oracle in each case: the file
+  // size against MAX_ENVIRONMENT_FILE_BYTES for over-cap and at-cap, and
+  // prompt completion for the FIFO (a blocking read would hang the suite).
+  it('refuses an oversized file as an error, never as an empty store, and retries the read', () => {
+    const document = JSON.stringify({ version: 1, user: { variables: { A: '1' } } });
+    fs.writeFileSync(filePath, document + ' '.repeat(MAX_ENVIRONMENT_FILE_BYTES + 1 - Buffer.byteLength(document)));
+    expect(fs.statSync(filePath).size).toBeGreaterThan(MAX_ENVIRONMENT_FILE_BYTES);
+    const store = createEnvironmentStore({ filePath });
+    expect(() => store.userVariables()).toThrow(EnvironmentStoreError);
+    // A failed read is not cached: the same store reads the fixed file.
+    fs.writeFileSync(filePath, document);
+    expect(store.userVariables()).toEqual({ A: '1' });
+  });
+
+  it('reads a file at exactly the cap', () => {
+    const document = JSON.stringify({ version: 1, user: { variables: { A: '1' } } });
+    // Trailing spaces are JSON whitespace, so the padded file is the same
+    // document at exactly the cap.
+    fs.writeFileSync(filePath, document + ' '.repeat(MAX_ENVIRONMENT_FILE_BYTES - Buffer.byteLength(document)));
+    expect(fs.statSync(filePath).size).toBe(MAX_ENVIRONMENT_FILE_BYTES);
+    const store = createEnvironmentStore({ filePath });
+    expect(store.userVariables()).toEqual({ A: '1' });
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a FIFO at the store path promptly, as an error', () => {
+    execFileSync('mkfifo', [filePath]);
+    const store = createEnvironmentStore({ filePath });
+    expect(() => store.userVariables()).toThrow(EnvironmentStoreError);
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a directory at the store path as an error', () => {
+    const store = createEnvironmentStore({ filePath: directory });
+    expect(() => store.userVariables()).toThrow(EnvironmentStoreError);
   });
 
   it('serializes concurrent writes so neither change is lost', async () => {

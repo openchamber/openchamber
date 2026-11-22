@@ -157,12 +157,33 @@ export const encodeFragmentedMessage = (frameType, streamId, payload) => {
   return chunks.map((chunk, index) => encodeTunnelFrame(frameType, streamId, chunk, index < chunks.length - 1));
 };
 
+// Aggregate reassembly bounds (#1024): the per-message cap alone let a peer
+// park just-under-the-cap partials on unlimited distinct streams. The total
+// pending bytes across ALL keys is therefore capped at the per-message cap
+// itself (one largest legitimate message, or equivalent partials), and the
+// number of pending keys is capped so tiny fragments cannot amplify into
+// unbounded Map overhead either.
+const MAX_PENDING_FRAGMENT_KEYS = 1024;
+
 /**
- * Reassembles fragmented messages per (streamId, frameType). Bounded to protect memory.
+ * Reassembles fragmented messages per (streamId, frameType). Bounded to protect memory:
+ * per message, in aggregate pending bytes, and in pending-key count.
  * @param {number} [maxMessageBytes]
+ * @param {number} [maxAggregateBytes]
+ * @param {number} [maxPendingKeys]
  */
-export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
+export const createFragmentAssembler = (
+  maxMessageBytes = 16 * 1024 * 1024,
+  maxAggregateBytes = maxMessageBytes,
+  maxPendingKeys = MAX_PENDING_FRAGMENT_KEYS,
+) => {
   const pending = new Map();
+  let pendingBytes = 0;
+  const discard = (key, entry) => {
+    if (!entry) return;
+    pendingBytes -= entry.totalBytes;
+    pending.delete(key);
+  };
   return {
     /**
      * Returns the complete message payload once all fragments arrived, or null
@@ -178,15 +199,23 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
       const chunks = entry?.chunks ?? [];
       const totalBytes = (entry?.totalBytes ?? 0) + frame.payload.length;
       if (totalBytes > maxMessageBytes) {
-        pending.delete(key);
+        discard(key, entry);
         throw new TunnelCodecError('fragmented message exceeds maximum size');
+      }
+      if (!entry && pending.size >= maxPendingKeys) {
+        throw new TunnelCodecError('too many pending fragmented messages');
+      }
+      if (pendingBytes - (entry?.totalBytes ?? 0) + totalBytes > maxAggregateBytes) {
+        discard(key, entry);
+        throw new TunnelCodecError('fragmented messages exceed aggregate maximum size');
       }
       chunks.push(frame.payload);
       if (frame.hasMoreFragments) {
+        pendingBytes += frame.payload.length;
         pending.set(key, { chunks, totalBytes });
         return null;
       }
-      pending.delete(key);
+      discard(key, entry);
       const message = new Uint8Array(totalBytes);
       let offset = 0;
       for (const chunk of chunks) {
@@ -197,8 +226,8 @@ export const createFragmentAssembler = (maxMessageBytes = 16 * 1024 * 1024) => {
     },
     /** @param {number} streamId */
     dropStream(streamId) {
-      for (const key of pending.keys()) {
-        if (key.startsWith(`${streamId}:`)) pending.delete(key);
+      for (const [key, entry] of pending.entries()) {
+        if (key.startsWith(`${streamId}:`)) discard(key, entry);
       }
     },
   };
