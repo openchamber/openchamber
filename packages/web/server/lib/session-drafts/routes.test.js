@@ -42,13 +42,13 @@ const setup = () => {
 const png = `data:image/png;base64,${Buffer.from('png-bytes').toString('base64')}`;
 
 describe('session drafts', () => {
-  it('round trips a folder target and accepts older drafts without one', async () => {
+  it('round trips a folder target and the lead kind, and accepts older drafts without them', async () => {
     const { call } = setup();
     const saved = await call('PUT', '/api/session-drafts/:id', {
-      params: { id: 'folder-draft' }, body: { directory: '/repo', text: 'hello', targetFolderId: 'folder-1' },
+      params: { id: 'folder-draft' }, body: { directory: '/repo', text: 'hello', targetFolderId: 'folder-1', lead: true },
     });
-    expect(saved.body.draft.targetFolderId).toBe('folder-1');
-    expect((await call('GET', '/api/session-drafts')).body.drafts[0].targetFolderId).toBe('folder-1');
+    expect(saved.body.draft).toMatchObject({ targetFolderId: 'folder-1', lead: true });
+    expect((await call('GET', '/api/session-drafts')).body.drafts[0]).toMatchObject({ targetFolderId: 'folder-1', lead: true });
     const old = await call('PUT', '/api/session-drafts/:id', {
       params: { id: 'old-draft' }, body: { directory: '/repo', text: 'old' },
     });

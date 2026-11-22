@@ -26,10 +26,16 @@ export async function setSessionLead(
   }
 }
 
+export function setDraftLead(lead: boolean): void {
+  const { newSessionDraft } = useSessionUIStore.getState()
+  if (!newSessionDraft.open || (newSessionDraft.lead === true) === lead) return
+  useSessionUIStore.setState({ newSessionDraft: { ...newSessionDraft, lead: lead ? true : undefined } })
+}
+
 export function openOrToggleLeadDraft(options?: { directoryOverride?: string | null }): void {
   const { currentSessionId, newSessionDraft, openNewSessionDraft } = useSessionUIStore.getState()
   if (!currentSessionId && newSessionDraft.open) {
-    useSessionUIStore.setState({ newSessionDraft: { ...newSessionDraft, lead: newSessionDraft.lead ? undefined : true } })
+    setDraftLead(newSessionDraft.lead !== true)
     return
   }
   openNewSessionDraft({ ...options, lead: true })

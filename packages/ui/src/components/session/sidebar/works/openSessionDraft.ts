@@ -17,6 +17,7 @@ export async function openSessionDraft(draft: SessionDraft): Promise<boolean> {
     directoryOverride: draft.directory,
     workDraftId: draft.id,
     targetFolderId: draft.targetFolderId,
+    lead: draft.lead === true,
   });
   if (hasUnsyncedSessionDraft(draft.id)) return true;
   const target = createChatDraftIdentity(getRuntimeKey(), draft.directory, workDraftComposerKey(draft.id));

@@ -19,6 +19,7 @@ const draftSchema = z.object({
   directory: z.string().min(1),
   projectId: z.string().nullable(),
   targetFolderId: z.string().min(1).optional(),
+  lead: z.boolean().optional(),
   text: z.string(),
   mentions: z.array(z.string()),
   attachments: z.array(attachmentSchema),
@@ -36,6 +37,7 @@ type SessionDraftContent = {
   directory: string;
   projectId: string | null;
   targetFolderId?: string;
+  lead?: boolean;
   text: string;
   mentions: readonly string[];
   attachments: readonly AttachedFile[];
@@ -131,6 +133,7 @@ export const useSessionDraftsStore = create<SessionDraftsState & SessionDraftsAc
           directory: content.directory,
           projectId: content.projectId,
           targetFolderId: content.targetFolderId,
+          lead: content.lead === true ? true : undefined,
           text: content.text,
           mentions: [...content.mentions],
           attachments,
