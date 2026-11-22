@@ -103,7 +103,8 @@ import {
     toolFileDiffs,
 } from '@/lib/opencode/tools';
 import { parseWebSearchOutput, webSearchProviderOf } from '@/lib/opencode/websearch';
-import { questionRowContent } from '@/lib/opencode/question';
+import { questionCallKey, questionRowContent } from '@/lib/opencode/question';
+import { useQuestionCloseReason } from '@/sync/question-timeouts';
 import { QuestionToolDetails } from './QuestionToolDetails';
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
@@ -1711,7 +1712,15 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         () => (presentation ? renderGuestToolHeader(presentation, { input, output: stateOutput, metadata }) : null),
         [input, metadata, presentation, stateOutput],
     );
-    const description = guestHeader?.subtitle ?? builtInDescription;
+    // A question OpenChamber closed unanswered says why on its row, which stays folded.
+    const questionCloseReason = useQuestionCloseReason(
+        isQuestionTool(part.tool) ? questionCallKey({ messageID: part.messageID, callID: part.callID }) : null,
+    );
+    const questionCloseLabel = questionCloseReason === 'timeout'
+        ? t('chat.questionAnswers.timedOutSummary')
+        : questionCloseReason === 'later' ? t('chat.questionAnswers.answerLaterSummary') : null;
+    const description = guestHeader?.subtitle
+        ?? (questionCloseLabel ? `${questionCloseLabel} · ${builtInDescription}` : builtInDescription);
     const displayName = guestHeader?.title ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
     
     // Tool title/description — shown inline as context. A subtitle the

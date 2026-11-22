@@ -1,10 +1,14 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Radio } from '@/components/ui/radio';
+import { Textarea } from '@/components/ui/textarea';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { useI18n } from '@/lib/i18n';
 import { type QuestionAnswer, type QuestionPrompt, questionFormFields } from '@/lib/opencode/question';
+import type { QuestionCloseReason } from '@/sync/question-timeouts';
+import { DEFAULT_LATE_ANSWER_MODE, LATE_ANSWER_MODES, type LateAnswerMode } from '@/lib/questionTimeout';
 import { FormFieldControl } from '../../FormFieldControl';
 import { FormMarkdown } from '../../FormMarkdown';
 import { isRecommendedOption, stripRecommendedMarker } from '../../formSerializers';
@@ -21,11 +25,19 @@ export interface QuestionToolDetailsViewProps {
     /** Why the call ended without answers, as OpenCode reported it. */
     errorText: string | null;
     canAnswer: boolean;
+    /**
+     * Why OpenChamber closed the question unanswered: a timed-out one is drawn
+     * greyed out, one left to answer later says the agent went on. Null when
+     * the user answered or dismissed it, or the turn ended.
+     */
+    closeReason: QuestionCloseReason | null;
+    /** Copies every question with the answers the row shows, or the picks kept for it. */
+    onCopy: () => void;
     /** The answers the form opens with, read each time it opens: the last ones given here, else the call's. */
     startingAnswers: () => readonly QuestionAnswer[] | null;
     /** Called with the form's answers when it closes without sending. */
     onKeep: (answers: QuestionAnswer[]) => void;
-    onSend: (answers: QuestionAnswer[]) => void;
+    onSend: (answers: QuestionAnswer[], late: LateAnswer) => void;
     /** Enter sends from a text box only off mobile, where it starts a new line instead. */
     isMobile: boolean;
     /** Wraps the questions in the row's scroll box, which stops growing at a share of the window's height. */
@@ -37,7 +49,17 @@ export interface QuestionToolDetailsViewProps {
 // here lines the buttons up with the questions above them.
 const BUTTON_ROW_CLASS = 'px-2 pb-2';
 
-export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer, startingAnswers, onKeep, onSend, isMobile, renderScrollBox }: QuestionToolDetailsViewProps) {
+/** How answers given after the call ended reach the agent: what they mean for its work, and the user's note. */
+export type LateAnswer = { mode: LateAnswerMode; note: string };
+
+const LATE_ANSWER_MODE_LABEL_KEYS = {
+    consider: 'chat.questionAnswers.steer.consider',
+    exact: 'chat.questionAnswers.steer.exact',
+    fyi: 'chat.questionAnswers.steer.fyi',
+} as const satisfies Record<LateAnswerMode, string>;
+
+export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer, closeReason, onCopy, startingAnswers, onKeep, onSend, isMobile, renderScrollBox }: QuestionToolDetailsViewProps) {
+    const timedOut = closeReason === 'timeout';
     const { t } = useI18n();
     // The answers the open form started from, null while it is closed. The
     // click that opens it reads them, since the React Compiler caches a call
@@ -56,8 +78,8 @@ export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer
                     onKeep(kept);
                     setOpened(null);
                 }}
-                onSend={(sent) => {
-                    onSend(sent);
+                onSend={(sent, late) => {
+                    onSend(sent, late);
                     setOpened(null);
                 }}
             />
@@ -65,29 +87,47 @@ export function QuestionToolDetailsView({ prompts, answers, errorText, canAnswer
     }
 
     return (
-        <div>
+        <div data-question-timed-out={timedOut ? '' : undefined}>
             {renderScrollBox(
                 <div className="space-y-2">
-                    <ol className="space-y-3">
+                    {/* A timed-out question is greyed as a whole, so it never reads as one still waiting. */}
+                    <ol className={cn('space-y-3', timedOut ? 'opacity-50 grayscale' : null)}>
                         {prompts.map((prompt, index) => (
                             <QuestionSummary key={index} prompt={prompt} answer={answers ? answers[index] ?? [] : null} />
                         ))}
                     </ol>
-                    {errorText ? (
+                    {/* The agent's own result text is the message OpenChamber closed it with, so each close says why in the user's words. */}
+                    {timedOut ? (
+                        <p className="typography-micro flex items-center gap-1 text-muted-foreground">
+                            <Icon name="time" className="size-3.5 shrink-0" aria-hidden="true" />
+                            {t('chat.questionAnswers.timedOut')}
+                        </p>
+                    ) : closeReason === 'later' ? (
+                        <p className="typography-micro flex items-center gap-1 text-muted-foreground">
+                            <Icon name="time" className="size-3.5 shrink-0" aria-hidden="true" />
+                            {t('chat.questionAnswers.answerLater')}
+                        </p>
+                    ) : errorText ? (
                         <p className="typography-micro text-muted-foreground">
                             {t('chat.questionAnswers.notAnswered')} · {errorText}
                         </p>
                     ) : null}
                 </div>,
             )}
-            {canAnswer ? (
-                <div className={BUTTON_ROW_CLASS}>
+            <div className={cn('flex items-center gap-1.5', BUTTON_ROW_CLASS)}>
+                {canAnswer ? (
                     <Button variant="outline" size="xs" onClick={() => setOpened({ starting: startingAnswers() })}>
                         <Icon name="question" className="size-3.5" />
-                        {answers ? t('chat.questionAnswers.answerAgain') : t('chat.questionAnswers.answer')}
+                        {answers
+                            ? t('chat.questionAnswers.answerAgain')
+                            : closeReason === 'later' ? t('chat.questionAnswers.answer') : t('chat.questionAnswers.answerAnyway')}
                     </Button>
-                </div>
-            ) : null}
+                ) : null}
+                <Button variant="ghost" size="xs" onClick={onCopy}>
+                    <Icon name="file-copy" className="size-3.5" />
+                    {t('chat.questionAnswers.copy')}
+                </Button>
+            </div>
         </div>
     );
 }
@@ -155,7 +195,7 @@ export function QuestionAnswerForm({
     isMobile: boolean;
     renderScrollBox: QuestionToolDetailsViewProps['renderScrollBox'];
     onCancel: (kept: QuestionAnswer[]) => void;
-    onSend: (sent: QuestionAnswer[]) => void;
+    onSend: (sent: QuestionAnswer[], late: LateAnswer) => void;
 }) {
     const { t } = useI18n();
     const fields = React.useMemo(() => questionFormFields(prompts), [prompts]);
@@ -165,13 +205,17 @@ export function QuestionAnswerForm({
     const shown = React.useMemo(() => visibleFields(fields, values), [fields, values]);
     const answers = React.useMemo(() => answersFromFormValues(fields, values), [fields, values]);
     const anyAnswered = answers.some((answer) => answer.length > 0);
+    // The call has ended by the time this form opens, so every answer from
+    // it is late: the user says how it weighs against what the agent did meanwhile.
+    const [mode, setMode] = React.useState<LateAnswerMode>(DEFAULT_LATE_ANSWER_MODE);
+    const [note, setNote] = React.useState('');
 
     const updateValue = React.useCallback((key: string, patch: Partial<FormValues[string]>) => {
         setValues((previous) => ({ ...previous, [key]: { ...valueOf(previous, key), ...patch } }));
     }, []);
 
     const send = () => {
-        if (anyAnswered) onSend(answers);
+        if (anyAnswered) onSend(answers, { mode, note: note.trim() });
     };
 
     // Same keys as the inline form card: Enter sends from a text box on
@@ -202,6 +246,28 @@ export function QuestionAnswerForm({
                             />
                         ))}
                     </div>
+                    <div role="radiogroup" aria-label={t('chat.questionAnswers.steer.title')} className="space-y-1 px-1.5">
+                        <div className="typography-micro text-muted-foreground">{t('chat.questionAnswers.steer.title')}</div>
+                        {LATE_ANSWER_MODES.map((option) => (
+                            <label key={option} className="flex cursor-pointer items-center gap-2">
+                                <Radio
+                                    checked={mode === option}
+                                    onChange={() => setMode(option)}
+                                    ariaLabel={t(LATE_ANSWER_MODE_LABEL_KEYS[option])}
+                                />
+                                <span className="typography-meta text-foreground">{t(LATE_ANSWER_MODE_LABEL_KEYS[option])}</span>
+                            </label>
+                        ))}
+                    </div>
+                    <label className="block space-y-1 px-1.5">
+                        <span className="typography-micro text-muted-foreground">{t('chat.questionAnswers.note.label')}</span>
+                        <Textarea
+                            value={note}
+                            onChange={(event) => setNote(event.target.value)}
+                            rows={2}
+                            className="min-h-[48px] typography-meta"
+                        />
+                    </label>
                     <p className="typography-micro text-muted-foreground">{t('chat.questionAnswers.sendHint')}</p>
                 </div>,
             )}

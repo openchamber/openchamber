@@ -10,7 +10,7 @@ import {
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Textarea } from '@/components/ui/textarea';
 import { Icon } from '@/components/icon/Icon';
-import type { GoalSpecResult, GoalSubmitChoice, GoalWriterChoice, GoalWriterTrigger } from '@/lib/goalWriter';
+import type { BackgroundGoalSpec, GoalSpecResult, GoalSubmitChoice, GoalWriterChoice, GoalWriterTrigger } from '@/lib/goalWriter';
 import { GoalWriterPicker } from '@/components/chat/GoalWriterPicker';
 import { useGoalWriterDefault } from '@/hooks/useGoalWriterDefault';
 import { recordGoalWriterChoice } from '@/lib/modelChoices';
@@ -40,6 +40,8 @@ interface GoalSpecDialogProps {
   request: GoalSpecDialogRequest | null;
   onCancel: () => void;
   onSubmit: (choice: GoalSubmitChoice) => void;
+  /** "Send when ready": the run in progress goes on without the window and its spec is sent as written. */
+  onBackground: (pending: BackgroundGoalSpec) => void;
 }
 
 type WriterState =
@@ -90,19 +92,20 @@ function GoalSpecDiff({ previous, next }: { previous: string; next: string }) {
  * The goal writer's step between pressing send and the message going out:
  * the spec is written, shown for approval (or sent at once when review is
  * off), and sent with the typed message or in its place. The composer keeps
- * the message until a choice is made, so closing the dialog loses nothing.
+ * the message until a choice is made, so cancelling loses nothing. "Send when
+ * ready" hands the run in progress to the composer, which sends once it is
+ * written; closing a window that already sends when written does the same.
  */
-export function GoalSpecDialog({ request, onCancel, onSubmit }: GoalSpecDialogProps) {
+export function GoalSpecDialog({ request, onCancel, onSubmit, onBackground }: GoalSpecDialogProps) {
   const isMobile = useUIStore((state) => state.isMobile);
   if (!request) return null;
-  const body = <GoalSpecDialogBody key={request.id} request={request} mobile={isMobile} onCancel={onCancel} onSubmit={onSubmit} />;
-  if (isMobile) return body;
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
-      {/* Resizes from its corner, like the goal editor; see SessionGoalDialog. */}
-      <DialogContent className="w-[36rem] max-w-[calc(100vw-2rem)] min-w-[20rem] min-h-[16rem] resize transition-[opacity,transform,filter]">{body}</DialogContent>
-    </Dialog>
-  );
+  return <GoalSpecDialogBody key={request.id} request={request} mobile={isMobile} onCancel={onCancel} onSubmit={onSubmit} onBackground={onBackground} />;
+}
+
+interface WritingRun {
+  result: Promise<GoalSpecResult>;
+  controller: AbortController;
+  ignoreLimit: boolean;
 }
 
 function GoalSpecDialogBody({
@@ -110,7 +113,8 @@ function GoalSpecDialogBody({
   mobile,
   onCancel,
   onSubmit,
-}: { request: GoalSpecDialogRequest; mobile: boolean; onCancel: () => void; onSubmit: (choice: GoalSubmitChoice) => void }) {
+  onBackground,
+}: { request: GoalSpecDialogRequest; mobile: boolean; onCancel: () => void; onSubmit: (choice: GoalSubmitChoice) => void; onBackground: (pending: BackgroundGoalSpec) => void }) {
   const { t } = useI18n();
   const [state, setState] = React.useState<WriterState>({ status: 'writing' });
   const [spec, setSpec] = React.useState('');
@@ -126,8 +130,9 @@ function GoalSpecDialogBody({
   specRef.current = spec;
   const onSubmitRef = React.useRef(onSubmit);
   onSubmitRef.current = onSubmit;
-  // A writing run reads the picks made when it starts; changing them asks for
-  // another run ("Write again"), never a silent restart.
+  // A writing run reads the picks made when it starts. Picking another writer
+  // model starts a new run for it (see handleWriterChange); the other options
+  // wait for "Write again".
   const writeOptionsRef = React.useRef({ writer, ignoreLimit, sectionTarget });
   writeOptionsRef.current = { writer, ignoreLimit, sectionTarget };
   const writerDefault = useGoalWriterDefault();
@@ -135,54 +140,80 @@ function GoalSpecDialogBody({
   writerDefaultRef.current = writerDefault;
   // "Write again" with the same pick is one choice, recorded once.
   const recordedWriterRef = React.useRef<string | null>(null);
+  // The latest run; only its result can be handed off or shown.
+  const runRef = React.useRef<WritingRun | null>(null);
+  // Set once the latest run went to the composer: closing the window must not stop it.
+  const handedOffRef = React.useRef(false);
 
   React.useEffect(() => {
     const controller = new AbortController();
     setState({ status: 'writing' });
-    const run = async () => {
-      const priorSpec = specRef.current;
-      const { writer: picked, ignoreLimit: runIgnoreLimit, sectionTarget: runSection } = writeOptionsRef.current;
-      // A section pick applies to this one run; the next "Write again" is a whole-spec rewrite.
-      if (runSection) setSectionTarget(null);
-      const pickedKey = picked ? `${picked.providerID}/${picked.modelID}:${picked.variant ?? ''}` : null;
-      if (picked && pickedKey !== recordedWriterRef.current) {
-        recordedWriterRef.current = pickedKey;
-        recordGoalWriterChoice({
-          writer: picked,
-          writerDefault: writerDefaultRef.current,
-          sessionModel: request.sessionModel,
-          inputLength: request.inputLength,
-        });
-      }
-      let result: GoalSpecResult;
+    const priorSpec = specRef.current;
+    const { writer: picked, ignoreLimit: runIgnoreLimit, sectionTarget: runSection } = writeOptionsRef.current;
+    // A section pick applies to this one run; the next "Write again" is a whole-spec rewrite.
+    if (runSection) setSectionTarget(null);
+    const pickedKey = picked ? `${picked.providerID}/${picked.modelID}:${picked.variant ?? ''}` : null;
+    if (picked && pickedKey !== recordedWriterRef.current) {
+      recordedWriterRef.current = pickedKey;
+      recordGoalWriterChoice({
+        writer: picked,
+        writerDefault: writerDefaultRef.current,
+        sessionModel: request.sessionModel,
+        inputLength: request.inputLength,
+      });
+    }
+    const result = (async (): Promise<GoalSpecResult> => {
       try {
-        result = await request.write(controller.signal, {
+        return await request.write(controller.signal, {
           writer: picked,
           ignoreLimit: runIgnoreLimit,
           section: runSection ?? undefined,
           currentSpec: runSection ? priorSpec : undefined,
         });
       } catch (error) {
-        result = { ok: false, message: error instanceof Error ? error.message : String(error) };
+        return { ok: false, message: error instanceof Error ? error.message : String(error) };
       }
-      if (controller.signal.aborted) return;
-      if (!result.ok) {
-        setState({ status: 'failed', reason: result.message });
+    })();
+    runRef.current = { result, controller, ignoreLimit: runIgnoreLimit };
+    void result.then((outcome) => {
+      // A run replaced by a newer one (another model, "Write again") or
+      // handed to the composer is never shown or sent from here.
+      if (controller.signal.aborted || handedOffRef.current) return;
+      if (!outcome.ok) {
+        setState({ status: 'failed', reason: outcome.message });
         return;
       }
       if (!request.review) {
-        onSubmitRef.current({ kind: 'spec', spec: result.spec, sendMode: request.defaultSendMode, ignoreLimit: writeOptionsRef.current.ignoreLimit });
+        onSubmitRef.current({ kind: 'spec', spec: outcome.spec, sendMode: request.defaultSendMode, ignoreLimit: runIgnoreLimit });
         return;
       }
       // A rewrite shows what changed; the first write (nothing prior) and an
       // unchanged rewrite show no diff at all.
-      setPreviousSpec(priorSpec.trim() && priorSpec.trim() !== result.spec.trim() ? priorSpec : null);
-      setSpec(result.spec);
-      setState({ status: 'ready', model: `${result.providerID}/${result.modelID}${result.variant ? ` · ${result.variant}` : ''}` });
+      setPreviousSpec(priorSpec.trim() && priorSpec.trim() !== outcome.spec.trim() ? priorSpec : null);
+      setSpec(outcome.spec);
+      setState({ status: 'ready', model: `${outcome.providerID}/${outcome.modelID}${outcome.variant ? ` · ${outcome.variant}` : ''}` });
+    });
+    return () => {
+      if (!handedOffRef.current) controller.abort();
     };
-    void run();
-    return () => controller.abort();
   }, [attempt, request]);
+
+  const handleWriterChange = (next: GoalWriterChoice | null) => {
+    setWriter(next);
+    setAttempt((value) => value + 1);
+  };
+
+  const sendWhenReady = () => {
+    const run = runRef.current;
+    if (!run || handedOffRef.current) return;
+    handedOffRef.current = true;
+    onBackground({ result: run.result, controller: run.controller, sendMode: request.defaultSendMode, ignoreLimit: run.ignoreLimit });
+  };
+  const dismiss = () => {
+    // This window already sends the spec when it is written, so closing it keeps that going.
+    if (state.status === 'writing' && !request.review) sendWhenReady();
+    else onCancel();
+  };
 
   const trimmedSpec = spec.trim();
   const skip: GoalSubmitChoice = request.trigger === 'armed' ? { kind: 'unchanged' } : { kind: 'none' };
@@ -201,9 +232,9 @@ function GoalSpecDialogBody({
           <Icon name="loader-4" className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
           <div className="space-y-1">
             <p className="typography-ui-label text-foreground">{t('chat.goal.writer.dialog.writing')}</p>
-            {request.review ? null : (
-              <p className="typography-meta text-muted-foreground">{t('chat.goal.writer.dialog.sendsWhenWritten')}</p>
-            )}
+            <p className="typography-meta text-muted-foreground">
+              {t(request.review ? 'chat.goal.writer.dialog.sendWhenReadyHint' : 'chat.goal.writer.dialog.sendsWhenWritten')}
+            </p>
           </div>
         </div>
       ) : null}
@@ -220,8 +251,7 @@ function GoalSpecDialogBody({
           directory={request.directory}
           sessionModel={request.sessionModel}
           value={writer}
-          onChange={setWriter}
-          disabled={state.status === 'writing'}
+          onChange={handleWriterChange}
         />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -319,9 +349,16 @@ function GoalSpecDialogBody({
               </Button>
             </>
           ) : (
-            <Button variant="outline" size="sm" onClick={onCancel}>
-              {t('chat.goal.action.cancel')}
-            </Button>
+            <>
+              <Button variant="outline" size="sm" onClick={onCancel}>
+                {t('chat.goal.action.cancel')}
+              </Button>
+              {state.status === 'writing' ? (
+                <Button size="sm" onClick={sendWhenReady}>
+                  {t('chat.goal.writer.action.sendWhenReady')}
+                </Button>
+              ) : null}
+            </>
           )}
         </div>
       </div>
@@ -330,18 +367,21 @@ function GoalSpecDialogBody({
 
   if (mobile) {
     return (
-      <MobileOverlayPanel open title={title} onClose={onCancel}>
+      <MobileOverlayPanel open title={title} onClose={dismiss}>
         <div className="px-3 pb-4 pt-1">{content}</div>
       </MobileOverlayPanel>
     );
   }
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{title}</DialogTitle>
-      </DialogHeader>
-      {content}
-    </>
+    <Dialog open onOpenChange={(open) => { if (!open) dismiss(); }}>
+      {/* Resizes from its corner, like the goal editor; see SessionGoalDialog. */}
+      <DialogContent className="w-[36rem] max-w-[calc(100vw-2rem)] min-w-[20rem] min-h-[16rem] resize transition-[opacity,transform,filter]">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        {content}
+      </DialogContent>
+    </Dialog>
   );
 }

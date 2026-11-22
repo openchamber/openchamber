@@ -191,7 +191,7 @@ export const useMenuActions = (
             const sessionState = useSessionUIStore.getState();
             const directory = useDirectoryStore.getState().currentDirectory;
             openNewSessionDraft(sessionState.currentSessionId && directory
-              ? { directoryOverride: directory }
+              ? { directoryOverride: directory, inheritedDirectory: true }
               : undefined);
           }
           break;

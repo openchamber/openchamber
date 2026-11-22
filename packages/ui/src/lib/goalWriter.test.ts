@@ -2,11 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage, Message, Part, TextPart } from '@/lib/opencode/model';
 import { configureRuntimeUrlResolver } from './runtime-url';
 import {
+  BackgroundGoalError,
   buildGoalIntroReminder,
   formatGoalWriterConversation,
   formatGoalWriterOpenItems,
   planGoalWriter,
   requestGoalSpec,
+  settleBackgroundGoal,
+  type BackgroundGoalSpec,
+  type GoalSpecResult,
 } from './goalWriter';
 
 type RecordEntry = { info: Message; parts: Part[] };
@@ -205,5 +209,48 @@ describe('requestGoalSpec', () => {
       globalThis.fetch = originalFetch;
       configureRuntimeUrlResolver({ apiBaseUrl: '' });
     }
+  });
+});
+
+// Oracle: applyGoalChoice for the same spec choice (useSessionGoalArmStore.test
+// pins it). A background goal must carry exactly the arm a "send" click on the
+// written spec would, and never settle into a goal without a spec.
+describe('settleBackgroundGoal', () => {
+  const written: GoalSpecResult = { ok: true, spec: '## Objective\nShip it', providerID: 'p', modelID: 'm', variant: null };
+  const pending = (result: GoalSpecResult, overrides: Partial<BackgroundGoalSpec> = {}): BackgroundGoalSpec => ({
+    result: Promise.resolve(result),
+    controller: new AbortController(),
+    sendMode: 'with-message',
+    ignoreLimit: false,
+    ...overrides,
+  });
+
+  test('a spec sent with the message briefs the agent and keeps the message', async () => {
+    expect(await settleBackgroundGoal(pending(written, { ignoreLimit: true }), 5000)).toEqual({
+      goal: { objective: '## Objective\nShip it', tokenBudget: 5000, settled: true, briefAgent: true, ignoreLimit: true },
+      content: null,
+    });
+  });
+
+  test('a spec sent as the message replaces the message and needs no briefing', async () => {
+    expect(await settleBackgroundGoal(pending(written, { sendMode: 'goal-as-message' }), null)).toEqual({
+      goal: { objective: '## Objective\nShip it', tokenBudget: null, settled: true },
+      content: '## Objective\nShip it',
+    });
+  });
+
+  test('a failed write rejects with its reason', async () => {
+    const settled = settleBackgroundGoal(pending({ ok: false, message: 'No small model available' }), null);
+    await expect(settled).rejects.toThrow('No small model available');
+    const reason = await settled.catch((caught: Error) => caught);
+    expect(reason instanceof BackgroundGoalError && !reason.cancelled).toBe(true);
+  });
+
+  test('a cancelled run rejects as cancelled, even when a spec came back', async () => {
+    const run = pending(written);
+    run.controller.abort();
+    const settled = settleBackgroundGoal(run, null);
+    const reason = await settled.catch((caught: Error) => caught);
+    expect(reason instanceof BackgroundGoalError && reason.cancelled).toBe(true);
   });
 });

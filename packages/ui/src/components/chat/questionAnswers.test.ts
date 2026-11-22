@@ -4,6 +4,7 @@ import {
     answersFromFormValues,
     formValuesFromAnswers,
     formatQuestionAnswers,
+    formatQuestionsAsMarkdown,
     rememberPendingQuestionAnswers,
     rememberQuestionAnswers,
     startingQuestionAnswers,
@@ -45,6 +46,15 @@ describe('question answers', () => {
             .toBe('My answers:\n- "Which mode?"="Fast"\n- "Which checks?"="Types, Lint"');
     });
 
+    test('a late answer carries how to use it and the note after the answers, and leaves both out when absent', () => {
+        const labels = { intro: 'My answers:', unanswered: '-' };
+
+        expect(formatQuestionAnswers(prompts, [['Careful'], ['Lint']], { ...labels, guidance: 'Follow these exactly.', note: 'Note: ship today' }))
+            .toBe('My answers:\n- "Which mode?"="Careful"\n- "Which checks?"="Lint"\nFollow these exactly.\nNote: ship today');
+        expect(formatQuestionAnswers(prompts, [['Careful'], ['Lint']], { ...labels, guidance: 'Follow these exactly.' }))
+            .toBe('My answers:\n- "Which mode?"="Careful"\n- "Which checks?"="Lint"\nFollow these exactly.');
+    });
+
     test('remembered answers are found by their call, the newest kept when the list is full', () => {
         rememberQuestionAnswers('msg_0:call_0', [['Fast']]);
         rememberQuestionAnswers('msg_0:call_0', [['Careful']]);
@@ -73,5 +83,16 @@ describe('question answers', () => {
         rememberPendingQuestionAnswers('msg_r:call', [['Fast'], []]);
         rememberQuestionAnswers('msg_r:call', [['Careful'], ['Lint']]);
         expect(startingQuestionAnswers('msg_r:call', [['Fast'], ['Types']])).toEqual([['Careful'], ['Lint']]);
+    });
+
+    test('copy writes every question with its options and the answer under it', () => {
+        const labels = { answer: 'Your answer', unanswered: 'Unanswered' };
+        const withDescriptions = questionPrompts({
+            questions: [{ header: 'Mode', question: 'Which mode?', multiple: false, options: [{ label: 'Fast', description: 'One call' }, { label: 'Careful', description: '' }] }],
+        });
+
+        expect(formatQuestionsAsMarkdown(withDescriptions, [['Careful']], labels))
+            .toBe('## Mode\n\nWhich mode?\n\n- Fast: One call\n- Careful\n\n**Your answer:** Careful');
+        expect(formatQuestionsAsMarkdown(prompts, null, labels).split('**Your answer:** Unanswered').length - 1).toBe(2);
     });
 });

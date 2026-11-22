@@ -1861,8 +1861,34 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.rm(resolved.resolved, { recursive: true, force: true });
-      return res.json({ success: true, path: resolved.resolved });
+      const canonicalBase = await canonicalDirectoryPath(resolved.base, fsPromises, path).catch(() => path.resolve(resolved.base));
+      if (
+        path.resolve(resolved.resolved) === path.resolve(resolved.base)
+        || path.resolve(resolved.resolved) === canonicalBase
+      ) {
+        return res.status(400).json({ error: 'Cannot delete a workspace or managed root' });
+      }
+
+      const canonicalParent = await fsPromises.realpath(path.dirname(resolved.resolved));
+      if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const deletePath = path.join(canonicalParent, path.basename(resolved.resolved));
+      const canonicalTarget = await fsPromises.realpath(deletePath).catch(() => deletePath);
+      const protectedRoots = [...new Set([resolved.base, ...managedRoots, ...chatsRoots])];
+      const canonicalProtectedRoots = await Promise.all(protectedRoots.map((root) => (
+        canonicalDirectoryPath(root, fsPromises, path).catch(() => path.resolve(root))
+      )));
+      // A recursive delete of a directory that contains a protected root
+      // (for example a relocated chats root under the config root) would
+      // remove that root too.
+      if (canonicalProtectedRoots.some((root) => isPathWithinRoot(root, canonicalTarget, path, os))) {
+        return res.status(400).json({ error: 'Cannot delete a workspace or managed root' });
+      }
+
+      await fsPromises.rm(deletePath, { recursive: true, force: true });
+      return res.json({ success: true, path: deletePath });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {

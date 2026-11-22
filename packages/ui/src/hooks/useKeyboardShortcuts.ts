@@ -224,7 +224,7 @@ export const useKeyboardShortcuts = () => {
     new_chat: () => {
       useUIStore.getState().setSessionSwitcherOpen(false);
       openNewSessionDraft(currentSessionId && currentDirectory
-        ? { directoryOverride: currentDirectory }
+        ? { directoryOverride: currentDirectory, inheritedDirectory: true }
         : undefined);
     },
     new_chat_worktree: () => {
