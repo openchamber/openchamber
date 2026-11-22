@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { devtools, persist, type StorageValue } from 'zustand/middleware';
 import { z } from 'zod';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { createInputHistoryIdentity, createInputHistorySubmission, useInputHistoryStore } from './useInputHistoryStore';
@@ -361,6 +361,55 @@ export const migrateMessageQueueState = (persistedState: unknown, version: numbe
     };
 };
 
+type PersistedQueueStore = Pick<MessageQueueState, 'queuedMessages' | 'quarantinedLegacyMessages' | 'followUpBehavior'>;
+
+const storedQueueEnvelopeSchema = z.object({ state: z.unknown(), version: z.number().optional() });
+
+let flushedQueues: Record<string, QueuedMessage[]> = {};
+const clearedQueueKeys = new Set<string>();
+
+const readStoredQueues = (stored: string | null): Record<string, QueuedMessage[]> | null => {
+    if (stored === null) return {};
+    let json: unknown;
+    try {
+        json = JSON.parse(stored);
+    } catch {
+        return null;
+    }
+    const envelope = storedQueueEnvelopeSchema.safeParse(json);
+    if (!envelope.success) return null;
+    try {
+        return migrateMessageQueueState(envelope.data.state, envelope.data.version ?? 0).queuedMessages ?? {};
+    } catch {
+        return null;
+    }
+};
+
+const mergeQueuesWithStored = (
+    pending: StorageValue<PersistedQueueStore>,
+    stored: string | null,
+): StorageValue<PersistedQueueStore> => {
+    const ours = pending.state.queuedMessages;
+    const previous = flushedQueues;
+    flushedQueues = ours;
+    const cleared = [...clearedQueueKeys];
+    clearedQueueKeys.clear();
+    if (isServerOwnedMessageQueue()) return pending;
+    const storedQueues = readStoredQueues(stored);
+    if (!storedQueues) return pending;
+    const queuedMessages = { ...storedQueues };
+    for (const key of cleared) {
+        if (!ours[key]) delete queuedMessages[key];
+    }
+    for (const key of new Set([...Object.keys(previous), ...Object.keys(ours)])) {
+        if (ours[key] === previous[key]) continue;
+        const queue = ours[key];
+        if (queue) queuedMessages[key] = queue;
+        else delete queuedMessages[key];
+    }
+    return { ...pending, state: { ...pending.state, queuedMessages } };
+};
+
 const withoutKey = <T,>(record: Record<string, T>, key: string): Record<string, T> => {
     const { [key]: _removed, ...rest } = record;
     void _removed;
@@ -648,6 +697,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             if (retained.length > 0) {
                                 return { queuedMessages: { ...state.queuedMessages, [key]: retained } };
                             }
+                            clearedQueueKeys.add(key);
                             return { queuedMessages: withoutKey(state.queuedMessages, key) };
                         });
                         if (isServerOwnedMessageQueue()) {
@@ -658,6 +708,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     forgetQueue: (target) => {
                         const key = getMessageQueueKey(target);
                         appliedRevisions.delete(key);
+                        clearedQueueKeys.add(key);
                         set((state) => ({
                             queuedMessages: withoutKey(state.queuedMessages, key),
                             sendingIds: withoutKey(state.sendingIds, key),
@@ -855,8 +906,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             {
                 name: 'message-queue-store',
                 version: 3,
-                storage: createDeferredSafeJSONStorage(),
-                partialize: (state) => ({
+                storage: createDeferredSafeJSONStorage<PersistedQueueStore>({ mergeWithStored: mergeQueuesWithStored }),
+                partialize: (state): PersistedQueueStore => ({
                     queuedMessages: Object.fromEntries(
                         Object.entries(state.queuedMessages).filter(([key]) => {
                             const runtimeKey = parseMessageQueueKey(key)?.runtimeKey;
@@ -874,6 +925,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
         }
     )
 );
+
+flushedQueues = useMessageQueueStore.getState().queuedMessages;
 
 export const messageQueueUpdatedEventSchema = z.object({
     type: z.literal('openchamber:message-queue.updated'),
