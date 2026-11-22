@@ -28,22 +28,38 @@ const nestedPoolIds = (routes, id) => {
   }).filter((candidate) => candidate !== undefined && candidate !== id))];
 };
 
-/** An explicit child wait terminates inheritance. Cycles use the bounded default. */
+/**
+ * The wait a pool applies to the models it does not hand to a nested pool: its
+ * own value, kept under `own`; for a pool that nests pools, the longest of their
+ * waits (also when the pool names none) or the shortest; else 30 seconds. The
+ * same rules as OpenCode's `firstTokenTimeout` (config/plugin/model-routes.ts),
+ * which applies them itself from developing-today-forks/opencode#2674 on.
+ * A pool met again on its own way in contributes the default.
+ */
 export const resolvePoolTimeout = (routes, id, mode, trail = new Set()) => {
   if (trail.has(id)) return DEFAULT_FIRST_OUTPUT_TIMEOUT_MS;
   const route = routes[id];
   if (!route) return DEFAULT_FIRST_OUTPUT_TIMEOUT_MS;
   const own = route.health?.firstTokenTimeoutMs;
   const policy = mode ?? route.nestedTimeout;
+  if (policy === 'own') return own ?? DEFAULT_FIRST_OUTPUT_TIMEOUT_MS;
   if (own !== undefined && policy === undefined) return own;
   const nested = nestedPoolIds(routes, id);
   if (nested.length === 0) return own ?? DEFAULT_FIRST_OUTPUT_TIMEOUT_MS;
   const nextTrail = new Set([...trail, id]);
-  const values = nested.map((child) => resolvePoolTimeout(routes, child, undefined, nextTrail));
+  const values = nested.flatMap((child) => waitsOf(routes, child, nextTrail));
   const rank = (value) => value === false ? Number.POSITIVE_INFINITY : value;
   return values.reduce((best, value) => ((policy ?? 'longest') === 'shortest'
     ? rank(value) < rank(best)
     : rank(value) > rank(best)) ? value : best);
+};
+
+/** Every wait a pool applies to the models it reaches: one, or under `own` its own and each nested pool's. */
+const waitsOf = (routes, id, trail) => {
+  const wait = resolvePoolTimeout(routes, id, undefined, trail);
+  if (routes[id]?.nestedTimeout !== 'own' || trail.has(id)) return [wait];
+  const next = new Set([...trail, id]);
+  return [wait, ...nestedPoolIds(routes, id).flatMap((child) => waitsOf(routes, child, next))];
 };
 
 /** Keep the policy after materializing its value so a later child edit updates the parent. */

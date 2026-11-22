@@ -660,13 +660,20 @@ An effort belongs to the model it was set for (issue #4601). A configured
 effort is inherited only by the model configured next to it:
 `getDefaultVariantForModel` returns the project effort for the project model,
 the settings effort for the settings model, and otherwise the model's own
-default effort from `modelDefaultVariants` (set in a pool member's options in
-Settings › Routing); a model with none gets no effort, so the provider's own
-default applies. The order is: the session's saved choice, the agent's effort
-on the agent's own model, the effort configured next to a default model, the
-model's own default, then none. The server applies the same last two steps when
-it starts a session (`openchamber-sessions/routes.js`,
-`scheduled-tasks/session-defaults.js`). An
+default effort from `modelDefaultVariants` (set in a model's options on
+Settings › Providers or in a pool member's options); a model with none gets no
+effort, so the provider's own default applies. The order is: the session's
+saved choice, the agent's effort on the agent's own model, the effort
+configured next to a default model, the model's own default, then none. A
+locked effort outranks all of them: `getLockedVariantForModel` returns the
+model's own default when `modelDefaultVariantLocks` lists it, else OpenCode's
+`lockVariant` default (read by `lib/opencodeModelSettings.ts`), and nothing
+when the model does not offer that effort. `resolveVariantSelectionForModel`,
+`setCurrentVariantOverride` and `cycleCurrentVariant` all yield it, and the
+composer sends it (`lib/modelEffortLock.ts`, read by `ChatInput` and shown
+fixed by `ModelControls`). The server applies the model's own default, and its
+lock over the request's effort, when it starts a session or sends
+(`openchamber-sessions/routes.js`, `scheduled-tasks/session-defaults.js`). An
 agent's effort applies only on the agent's own model. `setProvider` and
 `setModel` drop `currentVariantSelection` when the model changes, explicit
 `Default` included, so the composer resolves the new model's effort from this

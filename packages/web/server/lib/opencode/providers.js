@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   CONFIG_FILE,
   readConfigLayers,
@@ -476,7 +477,122 @@ function setProviderDisabled(providerId, disabled, workingDirectory) {
   return next;
 }
 
+// --- OpenCode's own per-model settings ----------------------------------------
+// `providers.<id>.models.<id>` in OpenCode's config can keep a model out of the
+// picker (`hidden`), name the effort it runs at (`defaultVariant`) and keep it
+// there (`lockVariant`). The catalog OpenChamber reads drops these fields, so
+// Settings reads them from the config files and writes them to the user file.
+
+const MODEL_SETTING_KEYS = ['hidden', 'defaultVariant', 'lockVariant'];
+const variantName = z.string().regex(/^\S+$/);
+// One model entry's settings as OpenCode reads them; a malformed value reads as unset.
+const storedModelSettingsSchema = z.object({
+  hidden: z.boolean().optional().catch(undefined),
+  defaultVariant: variantName.optional().catch(undefined),
+  lockVariant: z.boolean().optional().catch(undefined),
+});
+// A change from Settings: one model, only the three keys, each a value or `null` to clear.
+const modelSettingsRequestSchema = z.object({
+  providerID: z.string().min(1),
+  modelID: z.string().min(1),
+  settings: z.object({
+    hidden: z.boolean().nullable().optional(),
+    defaultVariant: variantName.nullable().optional(),
+    lockVariant: z.boolean().nullable().optional(),
+  }).strict(),
+});
+
+/** The three settings one model entry carries, as OpenCode would read them. */
+function pickModelSettings(entry) {
+  const parsed = storedModelSettingsSchema.parse(entry);
+  return Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined));
+}
+
+/** Model settings in one config file. A provider in both spellings counts once, as
+ * `providers`: OpenCode lets that entry replace the legacy `provider` one whole. */
+function modelSettingsIn(config, into) {
+  const native = isPlainObject(config?.providers) ? config.providers : {};
+  const legacy = isPlainObject(config?.provider) ? config.provider : {};
+  const entries = [
+    ...Object.entries(legacy).filter(([providerID]) => !Object.hasOwn(native, providerID)),
+    ...Object.entries(native),
+  ];
+  for (const [providerID, provider] of entries) {
+    if (!isPlainObject(provider?.models)) continue;
+    for (const [modelID, model] of Object.entries(provider.models)) {
+      if (!isPlainObject(model)) continue;
+      const picked = pickModelSettings(model);
+      if (Object.keys(picked).length === 0) continue;
+      const key = `${providerID}/${modelID}`;
+      into[key] = { ...into[key], ...picked };
+    }
+  }
+  return into;
+}
+
+/** Every model's settings across the files OpenCode reads, later files winning
+ * per key, and the user file a change from Settings is written to. */
+function readModelSettings(workingDirectory) {
+  const layers = readConfigLayers(workingDirectory);
+  const files = [
+    layers.userConfig,
+    layers.userOverrideConfig,
+    layers.projectConfig,
+    layers.customConfig,
+  ];
+  const models = files.reduce((merged, config) => modelSettingsIn(config, merged), {});
+  return { path: layers.paths.userPath || CONFIG_FILE, models };
+}
+
+/**
+ * Sets or clears model settings in the user config file. A `null` value removes
+ * the key. The entry is edited in the spelling the provider already uses in that
+ * file: a `providers` entry beside a legacy `provider` one would replace it whole
+ * and drop the rest of the user's provider definition.
+ */
+function writeModelSettings(providerID, modelID, patch, workingDirectory) {
+  const layers = readConfigLayers(workingDirectory);
+  const targetPath = layers.paths.userPath || CONFIG_FILE;
+  if (layers.layerErrors.some((entry) => entry.path === targetPath)) {
+    const error = new Error(`${targetPath} is not valid JSONC; fix it before changing it here`);
+    error.statusCode = 409;
+    throw error;
+  }
+  const config = getConfigForPath(layers, targetPath);
+  const sectionKey = readSectionEntry(config, 'providers', providerID).key ?? 'providers';
+  const section = isPlainObject(config[sectionKey]) ? config[sectionKey] : {};
+  const provider = isPlainObject(section[providerID]) ? section[providerID] : {};
+  const models = isPlainObject(provider.models) ? provider.models : {};
+  const entry = isPlainObject(models[modelID]) ? { ...models[modelID] } : {};
+  for (const key of MODEL_SETTING_KEYS) {
+    if (!Object.hasOwn(patch, key)) continue;
+    if (patch[key] === null) delete entry[key];
+    else entry[key] = patch[key];
+  }
+  if (Object.keys(entry).length > 0) models[modelID] = entry;
+  else delete models[modelID];
+  if (Object.keys(models).length > 0) provider.models = models;
+  else delete provider.models;
+  if (Object.keys(provider).length > 0) section[providerID] = provider;
+  else delete section[providerID];
+  if (Object.keys(section).length > 0) config[sectionKey] = section;
+  else delete config[sectionKey];
+  writeConfig(config, targetPath);
+  return readModelSettings(workingDirectory);
+}
+
+/** A change request from Settings, parsed, or the first reason it is refused. */
+function parseModelSettingsRequest(body) {
+  const parsed = modelSettingsRequestSchema.safeParse(body);
+  if (parsed.success) return { success: true, data: parsed.data };
+  const [issue] = parsed.error.issues;
+  return { success: false, error: `${issue.path.join('.') || 'body'}: ${issue.message}` };
+}
+
 export {
+  parseModelSettingsRequest,
+  readModelSettings,
+  writeModelSettings,
   getProviderSources,
   readDisabledProviders,
   readProviderOffState,

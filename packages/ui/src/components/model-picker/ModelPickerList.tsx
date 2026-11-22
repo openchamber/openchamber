@@ -1,3 +1,4 @@
+import { useLoadedOpenCodeModelSettings, useOpenCodeModelSettings } from '@/lib/opencodeModelSettings';
 import React from 'react';
 import {
   DndContext,
@@ -622,9 +623,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
   const providerById = React.useMemo(() => new Map(providers.map((provider) => [provider.id, provider])), [providers]);
 
+  // OpenCode's own `hidden` (its config) keeps a model out of every picker too, as OpenCode's do.
+  useLoadedOpenCodeModelSettings();
+  const openCodeSettings = useOpenCodeModelSettings((state) => state.models);
   const isHidden = React.useCallback((providerID: string, modelID: string) => {
-    return hiddenModels.some((hidden) => hidden.providerID === providerID && hidden.modelID === modelID);
-  }, [hiddenModels]);
+    return hiddenModels.some((hidden) => hidden.providerID === providerID && hidden.modelID === modelID)
+      || openCodeSettings[`${providerID}/${modelID}`]?.hidden === true;
+  }, [hiddenModels, openCodeSettings]);
 
   const matchesQuery = React.useCallback(
     (modelName: string, providerName: string, modelID?: string) =>

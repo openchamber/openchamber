@@ -28,4 +28,11 @@ describe('resolveSessionDefaults', () => {
     // An inherited name never counts as an entry.
     expect(resolveSessionDefaults({ settings: { defaultModel: 'openai/toString', modelDefaultVariants }, project: null }).variant).toBeNull();
   });
+
+  // Oracle: a locked default is what every message to the model runs at.
+  it('a locked model default beats the effort configured next to the default model', () => {
+    const settings = { defaultModel: 'openai/gpt-6', defaultVariant: 'high', modelDefaultVariants: { 'openai/gpt-6': 'low' } };
+    expect(resolveSessionDefaults({ settings: { ...settings, modelDefaultVariantLocks: ['openai/gpt-6'] }, project: null }).variant).toBe('low');
+    expect(resolveSessionDefaults({ settings: { ...settings, modelDefaultVariantLocks: ['openai/other'] }, project: null }).variant).toBe('high');
+  });
 });

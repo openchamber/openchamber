@@ -96,6 +96,14 @@ const findCatalogModel = (models, providerID, modelID) => models.find(
   (model) => model?.providerID === providerID && model?.modelID === modelID,
 ) || null;
 
+/** The effort a model's locked default (Settings) forces on every message to it, or undefined. */
+const lockedVariantFor = (settings, model) => {
+  const key = `${model.providerID}/${model.modelID}`;
+  const locks = Array.isArray(settings?.modelDefaultVariantLocks) ? settings.modelDefaultVariantLocks : [];
+  const defaults = settings?.modelDefaultVariants;
+  return locks.includes(key) && defaults && Object.hasOwn(defaults, key) ? defaults[key] : undefined;
+};
+
 const resolveVariant = (models, providerID, modelID, variant) => {
   const normalized = asNonEmptyString(variant);
   if (!normalized) return undefined;
@@ -877,6 +885,9 @@ export const createOpenChamberSessionService = (dependencies) => {
       return error;
     };
 
+    // A locked default outranks the request's effort and every configured one.
+    const lockedVariant = lockedVariantFor(await readSettingsFromDiskMigrated(), model);
+    if (lockedVariant !== undefined) variant = lockedVariant;
     try {
       await applySessionSelection({ client, sessionID, model, agent, variant });
     } catch (error) {

@@ -1,3 +1,4 @@
+import { useLoadedOpenCodeModelSettings, useOpenCodeModelSettings } from '@/lib/opencodeModelSettings';
 import React from 'react';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -24,9 +25,13 @@ export const useModelLists = (directory?: string) => {
   const recentModels = useUIStore((state) => state.recentModels);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
 
+  // OpenCode's own `hidden` (its config) keeps a model out of every picker too.
+  useLoadedOpenCodeModelSettings();
+  const openCodeSettings = useOpenCodeModelSettings((state) => state.models);
   const isHidden = React.useCallback((providerID: string, modelID: string) => {
-    return hiddenModels.some((item) => item.providerID === providerID && item.modelID === modelID);
-  }, [hiddenModels]);
+    return hiddenModels.some((item) => item.providerID === providerID && item.modelID === modelID)
+      || openCodeSettings[`${providerID}/${modelID}`]?.hidden === true;
+  }, [hiddenModels, openCodeSettings]);
 
   const favoriteModelsList = React.useMemo(() => {
     return favoriteModels

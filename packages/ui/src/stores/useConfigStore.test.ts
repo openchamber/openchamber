@@ -1201,6 +1201,50 @@ describe('useConfigStore provider persistence', () => {
     expect(state.getDefaultVariantForModel('openai', 'gpt-5.5')).toBe(undefined);
   });
 
+  // Oracle: the stated precedence; a locked model default (Settings, or OpenCode's
+  // lockVariant) outranks every pick, the session's saved one and cycling included.
+  test('a locked model default is the effort the composer sends, whatever is picked', async () => {
+    const { useOpenCodeModelSettings } = await import('@/lib/opencodeModelSettings');
+    const sessionId = 'ses_locked_default';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useSelectionStore.getState().saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+    useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, 'plan', 'openai', 'gpt-5.5', 'high');
+    useUIStore.setState({ modelDefaultVariants: { 'openai/gpt-5.5': 'low' }, modelDefaultVariantLocks: ['openai/gpt-5.5'] });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('plan')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      settingsDefaultVariant: 'high',
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    try {
+      useConfigStore.getState().setAgent('plan');
+      expect(useConfigStore.getState().currentVariant).toBe('low');
+      useConfigStore.getState().setCurrentVariantOverride('high', undefined);
+      expect(useConfigStore.getState().currentVariant).toBe('low');
+      expect(useConfigStore.getState().cycleCurrentVariant()).toBe('low');
+      expect(useConfigStore.getState().getDefaultVariantForModel('openai', 'gpt-5.5')).toBe('low');
+
+      // Unlocked, the same default yields to the effort configured next to the default model.
+      useUIStore.setState({ modelDefaultVariantLocks: [] });
+      expect(useConfigStore.getState().getDefaultVariantForModel('openai', 'gpt-5.5')).toBe('high');
+
+      // OpenCode's own lock counts too.
+      useOpenCodeModelSettings.setState({ models: { 'openai/gpt-5.5': { defaultVariant: 'high', lockVariant: true } } });
+      expect(useConfigStore.getState().getLockedVariantForModel('openai', 'gpt-5.5')).toBe('high');
+      // A lock on an effort the model does not offer is left out.
+      useOpenCodeModelSettings.setState({ models: { 'openai/gpt-5.5': { defaultVariant: 'max', lockVariant: true } } });
+      expect(useConfigStore.getState().getLockedVariantForModel('openai', 'gpt-5.5')).toBeUndefined();
+    } finally {
+      useUIStore.setState({ modelDefaultVariants: {}, modelDefaultVariantLocks: [] });
+      useOpenCodeModelSettings.setState({ models: {} });
+    }
+  });
+
   test('[issue-4601] an agent effort stays with the agent model', () => {
     const sessionId = 'ses_4601_agent_effort';
     useSessionUIStore.setState({ currentSessionId: sessionId });

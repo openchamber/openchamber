@@ -17,6 +17,7 @@ import { dict as arDict } from './messages/ar';
 import { dict as heDict } from './messages/he';
 import { routingI18n } from './messages/routing.i18n';
 import { poolSettingsI18n } from './messages/pool-settings.i18n';
+import { modelDefaultsI18n } from './messages/model-defaults.i18n';
 import { sessionErrorRecoveryI18n } from './messages/session-error-recovery.i18n';
 
 const localeDictionaries = {
@@ -124,6 +125,22 @@ describe('i18n dictionaries', () => {
         expect(text.trim()).toBeTruthy();
         expect(placeholders(text)).toEqual(placeholders(englishText));
         if (locale !== 'en' && !literal.has(key)) expect(`${locale} ${key} ${text}`).not.toBe(`${locale} ${key} ${englishText}`);
+      }
+    }
+  });
+
+  test('model defaults are translated in every locale and keep their placeholders', () => {
+    const placeholders = (text: string) => (text.match(/\{[a-zA-Z]+\}/g) ?? []).sort();
+    const english = Object.entries(modelDefaultsI18n.en);
+    expect(english.length).toBe(15);
+    for (const [locale, dictionary] of Object.entries(modelDefaultsI18n)) {
+      const entries = new Map<string, string>(Object.entries(dictionary));
+      expect([...entries.keys()].sort()).toEqual(english.map(([key]) => key).sort());
+      for (const [key, englishText] of english) {
+        const text = entries.get(key) ?? '';
+        expect(text.trim()).toBeTruthy();
+        expect(placeholders(text)).toEqual(placeholders(englishText));
+        if (locale !== 'en') expect(`${locale} ${key} ${text}`).not.toBe(`${locale} ${key} ${englishText}`);
       }
     }
   });

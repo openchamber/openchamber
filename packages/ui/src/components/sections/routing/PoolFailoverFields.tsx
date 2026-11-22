@@ -6,7 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import type { ModelRoute, PoolTimeoutSummary } from '@/lib/routing/modelRoutesApi';
 import { pruneEmpty, setRouteField, withOptional } from '@/lib/routing/poolAdvanced';
 
-type TimeoutChoice = 'default' | 'longest' | 'shortest' | 'custom' | 'none';
+type TimeoutChoice = 'default' | 'longest' | 'shortest' | 'own' | 'custom' | 'none';
 
 const SECOND = 1000;
 // The wait the server writes into a pool that names none
@@ -46,10 +46,11 @@ export const PoolFailoverFields: React.FC<{
 
   const pick = (next: TimeoutChoice) => {
     setCustomOpen(next === 'custom');
-    const base = setRouteField(route, 'nestedTimeout', next === 'longest' || next === 'shortest' ? next : undefined);
-    // The server derives the value for longest and shortest on save, from the
-    // pools this one contains; the other choices write the value directly.
-    if (next === 'longest' || next === 'shortest') onChange(withWait(base, undefined));
+    const derived = next === 'longest' || next === 'shortest' || next === 'own';
+    const base = setRouteField(route, 'nestedTimeout', derived ? next : undefined);
+    // The server writes the value on save: for longest and shortest from the
+    // pools this one contains, for own the 30-second default for its own models.
+    if (derived) onChange(withWait(base, undefined));
     else if (next === 'none') onChange(withWait(base, false));
     else if (next === 'default') onChange(withWait(base, DEFAULT_WAIT_MS));
     else onChange(withWait(base, wait === undefined || wait === false ? DEFAULT_WAIT_MS : wait));
@@ -60,6 +61,7 @@ export const PoolFailoverFields: React.FC<{
       ? [
         { value: 'longest' as const, label: withPick(t('settings.pools.timeout.longest'), summary?.longest) },
         { value: 'shortest' as const, label: withPick(t('settings.pools.timeout.shortest'), summary?.shortest) },
+        { value: 'own' as const, label: t('settings.pools.timeout.own') },
       ]
       : [{ value: 'default' as const, label: t('settings.pools.timeout.default') }]),
     { value: 'custom', label: t('settings.pools.timeout.custom') },

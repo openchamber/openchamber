@@ -20,6 +20,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useLockedVariant } from '@/lib/modelEffortLock';
 import { Icon } from "@/components/icon/Icon";
 import { Spinner } from "@/components/ui/spinner";
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
@@ -395,6 +396,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const toggleFavoriteAgent = useUIStore((state) => state.toggleFavoriteAgent);
     const currentProviderId = useConfigStore((state) => selection ? selection.model?.providerId ?? '' : state.currentProviderId);
     const currentModelId = useConfigStore((state) => selection ? selection.model?.modelId ?? '' : state.currentModelId);
+    // A locked effort is fixed for this model, so the picker shows it and offers nothing else.
+    const lockedVariant = useLockedVariant(currentProviderId, currentModelId);
     const effectiveCurrentVariant = useConfigStore((state) => state.currentVariant);
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
     // What the picker shows is what the next send carries: an explicit choice
@@ -3007,6 +3010,28 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const renderVariantSelector = () => {
         if (!isReady || !hasVariants || isAutoSelected) {
             return null;
+        }
+
+        if (lockedVariant !== undefined) {
+            const lockedText = t('settings.modelDefaults.lockedComposer', { variant: lockedVariant });
+            return (
+                <Tooltip delayDuration={600}>
+                    <TooltipTrigger asChild>
+                        <span
+                            className={cn('model-controls__variant-trigger flex items-center gap-1.5 min-w-0', buttonHeight)}
+                            aria-label={lockedText}
+                        >
+                            <Icon name="lock" className={cn(controlIconSize, 'flex-shrink-0 text-[color:var(--status-info)]')} />
+                            <span className={cn('model-controls__variant-label', controlTextSize, 'font-medium truncate min-w-0 text-[color:var(--status-info)]')}>
+                                {lockedVariant}
+                            </span>
+                        </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                        <p className="typography-meta">{lockedText}</p>
+                    </TooltipContent>
+                </Tooltip>
+            );
         }
 
         const displayVariant = currentVariant ?? t('chat.modelControls.default');

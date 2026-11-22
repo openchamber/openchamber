@@ -87,15 +87,19 @@ request OpenCode makes to the target, background ones such as titles included),
 and be tuned by the agent from its recorded history. These are OpenCode route
 options; see its configuration reference.
 
-OpenCode waits 10 seconds for a model's first output before it moves to the
-next one, which cuts off models that think for a while before they answer. When
-Settings saves your pools, it writes a 30-second wait into every pool that has
-none. A pool that contains other pools waits as long as the slowest pool inside
-it, because OpenCode applies only the wait of the pool you picked; you can
-choose the shortest instead, a number of your own, or no limit, on the pool's
-page under **Waiting and failover**. If a reply fails, **Try the next pool
-model** retries with the next model in the pool that has not failed for that
-message; once every model has failed, the reply lists the models it tried.
+OpenCode moves on to the next model when one produces no output within a set
+time. Older OpenCode versions wait 10 seconds, which cuts off models that think
+for a while before they answer, so when Settings saves your pools it writes a
+30-second wait into every pool that has none; a recent OpenCode waits 30
+seconds by default. OpenCode applies only the wait of the pool you picked, so a
+pool that contains other pools waits as long as the slowest pool inside it. On
+the pool's page, under **Waiting and failover**, you can choose the shortest
+instead, a number of your own, no limit, or **Each pool its own**: the pool's
+own models then wait 30 seconds and the models of each pool inside wait as long
+as that pool would, which needs a recent OpenCode. If a reply fails, **Try the
+next pool model** retries with the next model in the pool that has not failed
+for that message; once every model has failed, the reply lists the models it
+tried.
 
 Open a pool in **Settings → Routing → Model pools** to set each model's effort
 in its own row: the provider's default (no effort is sent), a default the
@@ -103,9 +107,22 @@ pool's effort level can override, or a locked effort, which OpenChamber saves
 as `provider/model#effort`. Under **Effort levels**, a pool can offer the levels
 its models share, no levels at all, or a list you choose. Drag pools to reorder
 them; the order is saved in `opencode.json`, and OpenCode and the model picker
-list pools in that order, except that OpenCode puts pools with a level list or
-a locked model after the others. The eye button hides a pool or a model from
-the picker without taking it out of any pool.
+list pools in that order, though older OpenCode versions put pools with a level
+list or a locked model after the others. The eye button hides a pool or a model
+from the picker without taking it out of any pool.
+
+A model also has defaults of its own, under the options button on its row in
+**Settings → Providers** and in a pool member's options. **Default effort when
+picked directly** is the effort OpenChamber sends when you pick the model
+itself, outside a pool, and nothing else sets one: your pick in the composer
+comes first, then the agent's effort, then the effort set next to the default
+model. With **Lock** on, every message to the model runs at that effort and the
+composer's effort picker is turned off. **In OpenCode's config** sets `hidden`,
+`defaultVariant` and `lockVariant` on the model in your user `opencode.json`,
+which every OpenCode client applies, the terminal included. A hidden model
+stays out of the pickers while pools and its exact name still use it. Older
+OpenCode versions apply only `hidden`, and only in a `providers` entry, though
+OpenChamber still sends a locked effort itself.
 
 Schedules change target weights on set days or hours, for example to send less
 traffic to a provider during its peak hours. A pool's own schedules sit under

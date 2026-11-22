@@ -17,6 +17,7 @@ import { filterVisibleAgents, isAgentHidden } from "./useAgentsStore";
 import { isPrimaryMode } from "@/components/chat/mobileControlsUtils";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { useSelectionStore } from "@/sync/selection-store";
+import { readLockedVariant } from '@/lib/modelEffortLock';
 import { useUIStore } from "@/stores/useUIStore";
 import { loadDesktopSettings, updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
@@ -1634,6 +1635,8 @@ interface ConfigStore {
     getCurrentModelVariants: () => string[];
     /** The effort the active project or Settings configures for this model; `undefined` for any model that is not a configured default. */
     getDefaultVariantForModel: (providerId: string, modelId: string) => string | undefined;
+    /** The effort every message to this model runs at, when it is locked (Settings or OpenCode's lockVariant). */
+    getLockedVariantForModel: (providerId: string, modelId: string) => string | undefined;
     /**
      * `keepModel` switches the agent alone. It is for following a switch the
      * session already made: OpenCode keeps a session on its own model when the
@@ -2688,7 +2691,14 @@ export const useConfigStore = create<ConfigStore>()(
                     get().setCurrentVariantOverride(undefined, variant);
                 },
 
-                setCurrentVariantOverride: (override, inherited) => {
+                setCurrentVariantOverride: (requestedOverride, requestedInherited) => {
+                    // A locked model runs at its locked effort whatever is picked or cycled to.
+                    const current = get();
+                    const locked = current.currentProviderId && current.currentModelId
+                        ? current.getLockedVariantForModel(current.currentProviderId, current.currentModelId)
+                        : undefined;
+                    const override = locked === undefined ? requestedOverride : undefined;
+                    const inherited = locked ?? requestedInherited;
                     set((state) => {
                         const currentVariant = resolveVariantFromSelection({ override, inherited });
                         if (
@@ -2740,7 +2750,14 @@ export const useConfigStore = create<ConfigStore>()(
                     };
                     const configured = resolveConfiguredDefaultVariant(defaults, providerId, modelId);
                     const personal = useUIStore.getState().modelDefaultVariants[`${providerId}/${modelId}`];
-                    return configured ?? personal;
+                    return get().getLockedVariantForModel(providerId, modelId) ?? configured ?? personal;
+                },
+
+                getLockedVariantForModel: (providerId: string, modelId: string) => {
+                    const locked = readLockedVariant(providerId, modelId);
+                    const model = findProviderModel(get().providers, providerId, modelId);
+                    // A lock on an effort the model no longer offers would fail every request; it is left out.
+                    return locked !== undefined && (!model || modelHasVariant(model, locked)) ? locked : undefined;
                 },
 
                 cycleCurrentVariant: () => {
@@ -2748,6 +2765,9 @@ export const useConfigStore = create<ConfigStore>()(
                     if (variantKeys.length === 0) {
                         return undefined;
                     }
+                    const { currentProviderId, currentModelId } = get();
+                    const locked = currentProviderId && currentModelId ? get().getLockedVariantForModel(currentProviderId, currentModelId) : undefined;
+                    if (locked !== undefined) return locked;
 
                     const state = get();
                     const currentOverride = state.currentVariantSelection.override;
@@ -3464,6 +3484,9 @@ export const useConfigStore = create<ConfigStore>()(
                         ): CurrentVariantSelection => {
                             const model = findProviderModel(providers, providerId, modelId);
                             if (model && modelVariantNames(model).length === 0) return { override: undefined, inherited: undefined };
+                            // A locked effort outranks every pick, the session's saved one included.
+                            const locked = get().getLockedVariantForModel(providerId, modelId);
+                            if (locked !== undefined) return { override: undefined, inherited: locked };
 
                             // A model the catalog does not list (Auto, or a stale
                             // selection) cannot rule a variant out, so inherited
