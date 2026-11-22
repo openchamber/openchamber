@@ -1861,8 +1861,22 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.rm(resolved.resolved, { recursive: true, force: true });
-      return res.json({ success: true, path: resolved.resolved });
+      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      if (
+        path.resolve(resolved.resolved) === path.resolve(resolved.base)
+        || path.resolve(resolved.resolved) === canonicalBase
+      ) {
+        return res.status(400).json({ error: 'Cannot delete the workspace root' });
+      }
+
+      const canonicalParent = await fsPromises.realpath(path.dirname(resolved.resolved));
+      if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const deletePath = path.join(canonicalParent, path.basename(resolved.resolved));
+      await fsPromises.rm(deletePath, { recursive: true, force: true });
+      return res.json({ success: true, path: deletePath });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {

@@ -2872,6 +2872,77 @@ describe('canonical managed roots with real filesystem aliases', () => {
   });
 });
 
+describe('fs delete workspace containment', () => {
+  const setup = async context => {
+    const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-fs-delete-containment-'));
+    context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
+    const workspace = path.join(root, 'workspace');
+    const managedRoot = path.join(root, 'config');
+    await nativeFs.mkdir(workspace);
+    await nativeFs.mkdir(managedRoot);
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => root },
+      path,
+      fsPromises: nativeFs,
+      normalizeDirectoryPath: value => value,
+      resolveProjectDirectory: async () => ({ directory: workspace }),
+      openchamberUserConfigRoot: managedRoot,
+    });
+    return { getRoute, root, workspace, managedRoot };
+  };
+
+  it('rejects deletion through an intermediate symlink that escapes the workspace', async context => {
+    const { getRoute, root, workspace } = await setup(context);
+    const outside = path.join(root, 'outside');
+    await nativeFs.mkdir(path.join(workspace, 'linked'));
+    await nativeFs.mkdir(outside);
+    const victim = path.join(outside, 'victim.txt');
+    await nativeFs.writeFile(victim, 'outside sentinel');
+    await nativeFs.symlink(outside, path.join(workspace, 'linked', 'jump'));
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({
+      body: { path: path.join(workspace, 'linked', 'jump', 'victim.txt') },
+    }, response);
+
+    expect(response.statusCode).toBe(403);
+    expect(await nativeFs.readFile(victim, 'utf8')).toBe('outside sentinel');
+  });
+
+  it('rejects deleting the workspace root and still deletes an ordinary child', async context => {
+    const { getRoute, workspace } = await setup(context);
+    const sentinel = path.join(workspace, 'keep.txt');
+    const deletable = path.join(workspace, 'remove.txt');
+    await nativeFs.writeFile(sentinel, 'workspace sentinel');
+    await nativeFs.writeFile(deletable, 'ordinary file');
+
+    const rootResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: workspace } }, rootResponse);
+
+    expect(rootResponse.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('workspace sentinel');
+
+    const childResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: deletable } }, childResponse);
+
+    expect(childResponse.statusCode).toBe(200);
+    await expect(nativeFs.stat(deletable)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects deleting a managed root', async context => {
+    const { getRoute, managedRoot } = await setup(context);
+    const sentinel = path.join(managedRoot, 'keep.txt');
+    await nativeFs.writeFile(sentinel, 'managed sentinel');
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: managedRoot } }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('managed sentinel');
+  });
+});
+
 describe('fs html preview grants', () => {
   const files = new Map([
     ['/workspace/site/index.html', '<img src="logo.png">'],

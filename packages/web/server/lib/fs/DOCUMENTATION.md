@@ -25,7 +25,8 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/preview/:grant/:path(*)`
     - `POST /api/fs/write`
     - `POST /api/fs/upload`
-    - `POST /api/fs/delete`
+    - `POST /api/fs/delete` — rejects workspace and managed roots, and checks
+      the canonical parent before recursively deleting a target.
     - `POST /api/fs/rename` — renames or moves within one workspace root and
       never replaces an existing destination: it returns `409` with
       `reason: 'already-exists'`, except for a case-only rename where the
