@@ -216,4 +216,30 @@ describe('ShortcutDispatcher', () => {
     expect(dispatcher.dispatch(key('f', { ctrlKey: true }))).toBe(true);
     expect(calls).toEqual(['files', 'changes']);
   });
+
+  test('prefers a Ctrl binding over a Cmd default that also matches Ctrl in a macOS browser', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)' },
+      configurable: true,
+    });
+    try {
+      const registry = new ShortcutRegistry();
+      const calls: string[] = [];
+      // Registered first, as the sidebar toggle is in the app.
+      registry.register('toggle_sidebar', () => { calls.push('sidebar'); });
+      registry.register('background_session_work', () => { calls.push('background'); });
+      const dispatcher = new ShortcutDispatcher({
+        registry,
+        getBinding: (id) => id === 'toggle_sidebar' ? 'mod+b' : 'ctrl+b',
+      });
+
+      expect(dispatcher.dispatch(key('b', { ctrlKey: true }))).toBe(true);
+      expect(dispatcher.dispatch(key('b', { metaKey: true }))).toBe(true);
+      expect(calls).toEqual(['background', 'sidebar']);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor);
+      else Reflect.deleteProperty(globalThis, 'navigator');
+    }
+  });
 });

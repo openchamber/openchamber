@@ -178,6 +178,7 @@ import {
     type ComposerSelection,
 } from './composer/editor/ComposerEditor';
 import { useComposerHeightLimit } from './composer/editor/useComposerHeightLimit';
+import { takeComposerApplicationShortcut } from './composer/editor/applicationShortcuts';
 import { usePendingComposerText } from './composer/state/usePendingComposerText';
 import { createComposerEditorViewStore } from './composer/editor/viewStore';
 import { composerAutoCorrect } from './composer/editor/autocorrect';
@@ -2847,6 +2848,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         if (largeTextPasteBehavior === 'inline-double-paste') largeTextPasteGesture.keyDown(e);
+
+        if (takeComposerApplicationShortcut(e, useUIStore.getState().shortcutOverrides)) return;
 
         // Enter shell mode before CodeMirror inserts the trigger. Keeping the
         // document unchanged also keeps the caret at the start for the first
