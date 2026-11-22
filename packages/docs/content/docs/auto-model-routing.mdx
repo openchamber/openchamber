@@ -92,8 +92,10 @@ time. Older OpenCode versions wait 10 seconds, which cuts off models that think
 for a while before they answer, so when Settings saves your pools it writes a
 30-second wait into every pool that has none; a recent OpenCode waits 30
 seconds by default. OpenCode applies only the wait of the pool you picked, so a
-pool that contains other pools waits as long as the slowest pool inside it. On
-the pool's page, under **Waiting and failover**, you can choose the shortest
+pool that contains other pools waits as long as the slowest pool inside it. The
+wait only moves a request on: with no model left to move to, a recent OpenCode
+keeps waiting for the last one, up to 15 minutes (`lastTargetTimeoutMs`),
+instead of failing. On the pool's page, under **Waiting and failover**, you can choose the shortest
 instead, a number of your own, no limit, or **Each pool its own**: the pool's
 own models then wait 30 seconds and the models of each pool inside wait as long
 as that pool would, which needs a recent OpenCode. If a reply fails, **Try the
