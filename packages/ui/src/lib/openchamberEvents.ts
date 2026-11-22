@@ -223,9 +223,7 @@ type OpenChamberEvent =
   | LaterPagesUpdatedEvent
   | PermissionPolicyEvent
   | ControlStreamSyncEnvelope
-  /** A goal writer job changed or left the server ("Send when ready"). */
   | { type: 'goal-spec-job'; update: z.infer<typeof goalSpecJobEventSchema> }
-  /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
   | { type: 'session-todos'; event: SessionTodosEvent }
   | { type: 'space-queue-stream'; spaceId: string }

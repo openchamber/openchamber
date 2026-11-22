@@ -9,7 +9,7 @@ import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { ownedOriginInstance } from '../source-control/origin-instance.js';
-import { createAddFromVault, vaultAccountProblem, withTokenReference } from './vault-accounts.js';
+import { createAddFromVault, isInvalidTokenFailure, vaultAccountProblem, withTokenReference, type VaultAccountStatusFields } from './vault-accounts.js';
 import type { SourceControlJson, SourceControlJsonObject, SourceControlMutationTarget } from '@openchamber/sdk';
 import type { AccountEvents, AccountIdentity, ProviderDescriptor, ProviderMutationContext, ProviderReadContext, ProviderSession } from '../source-control/provider-contract.js';
 import type { AuthCredential, createSourceControlAuthStore } from '../source-control/auth-storage.js';
@@ -105,7 +105,6 @@ type PatchRead = ReadInput & { number: number; sourceRepo?: { owner: string; rep
 type Failure = { status?: number; kind?: string; message?: unknown };
 
 const hasFailureFields = (value: unknown): value is Failure => value != null;
-const isInvalidTokenFailure = (error: unknown) => hasFailureFields(error) && error.kind === 'invalid-token';
 const isCreate = (step: ResolveInput): step is Extract<ResolveInput, { kind: 'change-request-create' }> => step.kind === 'change-request-create';
 const includes = <T extends SourceControlJson>(items: readonly T[], value: SourceControlJson | undefined): value is T => {
   const candidates: readonly (SourceControlJson | undefined)[] = items;
@@ -507,8 +506,7 @@ type StatusAccount = ReturnType<typeof accountView> | ReturnType<typeof cliAccou
 type AccountStatus = {
   provider: string; instance: string; status: string; connected: boolean;
   accounts: StatusAccount[]; cli?: StatusCli; user?: PresentedUser; scope?: string; reason?: string; message?: unknown;
-  tokenReadError?: string;
-};
+} & VaultAccountStatusFields;
 type CliState = { status: 'disabled' | 'gone' | 'unknown' } | { status: 'usable'; token: string; user: GitLabUser };
 
 export function createProvider(options: GitLabProviderOptions) {

@@ -110,11 +110,8 @@ import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession
 import { createSessionDraftId, useSessionDraftsStore } from "@/stores/useSessionDraftsStore"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
 import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
-import { getMultiRunIdentity } from "@/lib/multirun/identity"
-import { buildRunParentContext } from "@/lib/multirun/parentContext"
-import { loadLaneLastReply } from "@/lib/multirun/laneData"
-import { useGlobalSessionStatusStore } from "./global-session-status"
-import { useGlobalBlockingRequestsStore } from "./global-blocking-requests"
+import { readRunParentContext } from "./run-parent-context"
+import { isLinkedWorktreeOfProject } from "@/lib/worktrees/linkedWorktree"
 import {
   createInputHistoryIdentity,
   useInputHistoryStore,
@@ -200,20 +197,8 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
 
   const ownSession = getDirectoryState(requestDirectory)?.session.find((session) => session.id === params.sessionId)
     ?? useGlobalSessionsStore.getState().entityById.get(params.sessionId)
-  if (params.inputMode !== "shell" && ownSession && getMultiRunIdentity(ownSession)?.role === "parent") {
-    const sessions = new Map(useGlobalSessionsStore.getState().activeSessions.map((session) => [session.id, session]))
-    for (const session of getAllSyncSessions()) sessions.set(session.id, session)
-    const parentContext = await buildRunParentContext({ parent: ownSession, sessions: sessions.values() }, {
-      readSession: (id, directory) => opencodeClient.getSession(id, directory),
-      readReply: loadLaneLastReply,
-      isBusy: (id) => useGlobalSessionStatusStore.getState().activeSessionIds.has(id),
-      blocking: (id) => {
-        const requests = useGlobalBlockingRequestsStore.getState().bySession.get(id)
-        return requests?.permissions.length ? "permission" : requests?.forms.length || requests?.pages.length ? "question" : null
-      },
-    })
-    contextItems.push({ text: parentContext, metadata: undefined })
-  }
+  const parentContext = params.inputMode === "shell" ? null : await readRunParentContext(ownSession)
+  if (parentContext !== null) contextItems.push({ text: parentContext, metadata: undefined })
 
   if (params.inputMode === "shell") {
     await params.ready
@@ -557,22 +542,6 @@ const persistDraftTarget = (target: PersistedDraftTarget): void => {
 }
 
 const resolveDraftProjectForDirectory = resolveProjectForSessionDirectory
-
-/** Whether `directory` is one of the project's worktrees other than its root checkout. */
-const isLinkedWorktreeOfProject = (
-  availableWorktreesByProject: ReadonlyMap<string, readonly WorktreeMetadata[]>,
-  projectPath: string | null,
-  directory: string | null,
-): boolean => {
-  const root = normalizePath(projectPath)
-  const target = normalizePath(directory)
-  if (!root || !target || target === root) return false
-  for (const [key, worktrees] of availableWorktreesByProject) {
-    if (normalizePath(key) !== root) continue
-    return worktrees.some((worktree) => normalizePath(worktree.path) === target)
-  }
-  return false
-}
 
 const getAttachmentForSession = (sessionId: string | null | undefined): SessionWorktreeAttachment | undefined => {
   if (!sessionId) return undefined

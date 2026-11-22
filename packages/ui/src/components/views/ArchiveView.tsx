@@ -135,7 +135,6 @@ const groupByParent = (sessions: Session[]): Session[] => {
 export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   layout: 'page' | 'mobile';
   onLeave: () => void;
-  /** Fills the search box on open, for a search continued from the sidebar. */
   initialQuery?: string;
 }): React.ReactNode {
   const { t } = useI18n();
@@ -877,6 +876,5 @@ export function ArchiveView(): React.ReactNode {
   const setOpen = useUIStore((state) => state.setArchivePageOpen);
   const leave = React.useCallback(() => setOpen(false), [setOpen]);
   if (!open) return null;
-  // Keyed by open, so a handed-over query lands even while the page is already on screen.
   return <ArchiveSessionsView key={openCount} layout="page" onLeave={leave} initialQuery={initialQuery} />;
 }
