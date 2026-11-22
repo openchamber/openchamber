@@ -40,6 +40,9 @@ const isValidRow = (row) =>
   && typeof row.finishedAt === 'number'
   && TERMINAL_STATUSES.has(row.outcome);
 
+/**
+ * @param {{ filePath?: string, logger?: Pick<Console, 'warn' | 'error'>, maxRows?: number, maxLoadBytes?: number }} [options]
+ */
 export const createScheduledTaskRunHistory = ({
   filePath,
   logger = console,

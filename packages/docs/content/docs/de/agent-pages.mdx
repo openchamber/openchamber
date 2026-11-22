@@ -1,0 +1,84 @@
+---
+title: Agenten-Seiten
+description: Lass einen Agenten Diagramme und Mockups im Chat zeigen, dich auf einer Seite fragen und eine Seite an Kollegen schicken, die antworten sollen.
+---
+
+# Agenten-Seiten
+
+Ein Agent kann direkt im Chat eine Seite zeichnen: ein Diagramm, eine Tabelle, eine Grafik, ein Interface-Mockup oder ein kurzes Formular. Dort kann er dich eine Option wählen lassen, und wenn die Antwort von jemand anderem kommen muss, kann er dieselbe Seite per Link und PIN an Kollegen schicken.
+
+## Eine Seite anfragen
+
+Sprich einfach in natürlicher Sprache mit dem Agenten. Zum Beispiel:
+
+- „Zeig mir die drei Layout-Varianten als Mockups und lass mich eine wählen.“
+- „Stell die Testergebnisse in einem Diagramm dar.“
+- „Frag mich, welche dieser Migrationen zuerst laufen soll.“
+
+Die Seite erscheint im Chat, in einem Rahmen ohne Zugriff auf deine Dateien. **Im Vollbild öffnen** zeigt sie größer, und **Als HTML herunterladen** speichert eine Kopie.
+
+## Auf einer Seite antworten
+
+Wenn der Agent dich auf einer Seite etwas fragt, zeigt der Chat **Wartet auf deine Antwort auf der Seite**. Wähle eine Option oder fülle die Felder aus und drück dann den Senden-Knopf der Seite. Der Agent bekommt deine Antwort, und die Seite zeigt, was du gewählt hast.
+
+- **Ablehnen** sagt dem Agenten, dass du nicht wählen wirst. Er wählt nicht für dich.
+- Du kannst auch mit Worten antworten: Schreib in den Chat, und der Agent liest deine Nachricht.
+
+### Später antworten
+
+Der Agent muss nicht immer auf dich warten. Er kann eine Seite zeigen und weiterarbeiten. Die Seite bleibt offen, bis du antwortest, auch wenn der Zug des Agenten endet oder die App neu startet. Deine Antwort kommt als eigene Zeile in der Sitzung an und startet den Agenten wieder, falls er untätig war.
+
+## Eine Seite mit Kollegen teilen
+
+Wenn die Antwort von jemand anderem kommen muss, etwa von einer Kollegin oder einem Manager, bitte den Agenten, ihnen die Seite zu schicken:
+
+- „Frag Julia und Denis, welches der beiden Designs ihnen besser gefällt.“
+
+1. Der Agent erstellt einen Link pro Person. Eine Karte unter seiner Nachricht listet jeden Namen mit **Link kopieren** und **PIN kopieren** auf.
+2. Schick jeder Person ihren Link und PIN selbst, über einen beliebigen Messenger.
+3. Die Person öffnet den Link im Browser, gibt den PIN ein und antwortet auf der Seite. Dafür braucht sie kein OpenChamber.
+4. Ihre Antwort kommt in die Sitzung zurück, die gefragt hat, und du bekommst eine Benachrichtigung. Der Agent liest sie und macht weiter.
+
+Der Agent kann auch eine Seite teilen, die andere nur lesen, etwa einen Bericht mit Tabellen und Diagrammen. Sie hat kein Formular, und es kommt keine Antwort zurück.
+
+Die Karte zeigt, wann jede Person die Seite geöffnet und wann sie geantwortet hat. **Öffnen** in der Karte zeigt dir die Seite so, wie die anderen sie sehen, und dein eigener Blick zählt nicht als ihr Öffnen.
+
+### So funktionieren geteilte Links
+
+- Es gibt nichts einzuschalten: Eine Seite erreicht niemanden, bis du jemandem den Link schickst.
+- Jede Person antwortet einmal, und die Antwort ist endgültig.
+- Ein Link gilt bis zu zwei Werktage, Samstag und Sonntag zählen nicht mit. Wenn du eine kürzere Frist brauchst, bitte den Agenten darum.
+- **Link widerrufen** im Menü einer Person auf der Karte zieht ihren Link zurück.
+- Zu viele falsche PINs sperren den Link.
+- OpenChamber prüft nicht, wer antwortet: Jeder mit Link und PIN kann es. Der Name auf der Karte ist der, den du dem Agenten genannt hast.
+- Seite und Antwort werden verschlüsselt übertragen. Der Teilen-Dienst speichert nur die verschlüsselte Kopie und löscht sie, sobald die Antwort bei dir ankommt. Der Link ohne PIN öffnet nichts.
+- Seiten laufen über den Teilen-Dienst von OpenChamber oder über dein eigenes Relay, wenn du eines unter [Privates Relay](/de/private-relay/) eingerichtet hast.
+
+## Eine geteilte Seite öffnen
+
+Mit OpenChamber kannst du eine geteilte Seite in der App öffnen, damit dein eigener Agent sie lesen und dir bei der Entscheidung helfen kann:
+
+1. Füge den Link in das Chat-Eingabefeld ein. Er wird zu einem Chip mit einem PIN-Feld.
+2. Gib den PIN ein, schreib deine Frage und sende sie. Der Agent bekommt den Inhalt der Seite zusammen mit deiner Nachricht, markiert als Inhalt einer anderen Person.
+3. Unter deiner Nachricht zeigt **Öffnen** die Seite im Seitenpanel, auf dem Telefon im Vollbild. Antworte mit dem Senden-Knopf der Seite.
+
+Der Agent kann eine Antwort vorschlagen, aber senden kannst nur du. Link und PIN erreichen das Modell nie.
+
+**Geteilte Seiten** im Seitenpanel listet alle Seiten, die du bekommen hast, die neuesten zuerst, mit ihrem Status. Auf dem Telefon ist das ein Tab in der Arbeitsbereich-Schublade. **Zum Chat hinzufügen** auf einer offenen Seite hängt sie an die Nachricht an, die du gerade schreibst.
+
+## Ein- oder ausschalten
+
+Agenten-Seiten sind standardmäßig aktiv. Um sie auszuschalten, öffne **Einstellungen → Allgemein → OpenChamber-Werkzeuge** und schalte **Diagramme und Mockups** aus.
+
+## Beachten
+
+- Agenten-Seiten brauchen den eigenen OpenCode-Server von OpenChamber, genau wie das [Agenten-Steuerungswerkzeug](/de/agent-control-tool/).
+- In der VS-Code-Erweiterung bleiben geteilte Links reiner Text, und eine Seite, auf die der Agent dich später antworten lässt, erscheint ohne Antwort-Bedienelemente. Antworte in der Desktop- oder Web-App.
+- Im Enterprise-Modus funktioniert das Teilen nur über das eigene Relay deiner Organisation. Ohne eines wird dem Agenten das Teilen gar nicht angeboten. Siehe [Sicherheit](/de/security/).
+
+## Verwandt
+
+- [Agenten-Steuerungswerkzeug](/de/agent-control-tool/)
+- [Privates Relay](/de/private-relay/)
+- [Benachrichtigungen](/de/notifications/)
+- [Sicherheit](/de/security/)

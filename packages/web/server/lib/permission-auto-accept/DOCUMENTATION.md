@@ -4,9 +4,14 @@
 
 This module owns the authoritative per-session permission policy for web, desktop, and mobile runtimes. Policy is persisted in OpenChamber settings so permission handling survives UI disconnects and server restarts.
 
+## Invariants
+
+- A stored session entry that is neither a mode nor a pre-modes boolean is dropped on its own. One unreadable entry never discards the rest of the policy.
+- A partial `session.updated` keeps the parent and directory an earlier record established; a field the update does not name is not cleared.
+
 ## Policy
 
-Each session has a mode (`modes.js`):
+Each session has a mode (`modes.ts`, imported through `modes.js`):
 
 - `ask`: every request waits for the user.
 - `safety`: a request is accepted when the safety net (Jev, `../routing/DOCUMENTATION.md`) says the user need not decide; otherwise it waits. Without a usable classification provider, or when Jev fails, it waits.
@@ -14,15 +19,25 @@ Each session has a mode (`modes.js`):
 
 `permissionAutoAccept.sessions` maps session ids to modes. Inheritance uses the nearest explicit session value, so a child `ask` overrides a parent `auto`; descendants without an explicit value inherit from their nearest configured ancestor.
 
-Policies written before the modes stored booleans. The first read converts them and persists the result once: `false` becomes `ask`, `true` becomes `safety` when the old global safety-net switch in the routing config was on and `auto` otherwise (`resolveLegacyEnabledMode`). The settings sanitizer accepts both shapes so the converting write and older files pass.
+Policies written before the modes stored booleans. The first read converts them and persists the result once: `false` becomes `ask`, `true` becomes `safety` when the old global safety-net switch in the routing config was on and `auto` otherwise (`resolveLegacyEnabledMode`). The conversion is persisted at that first read because the old switch is gone once the routing config is next saved. The settings sanitizer accepts both shapes so the converting write and older files pass.
 
 ## Default mode
 
 `permissionDefaultMode` (Settings → Sessions) is written onto each new top-level session when `session.created` arrives, and only when no policy exists for it yet: a mode the creating flow already set wins, and changing the default never reaches back into older sessions. Subagents inherit instead. `ask` writes nothing. Mode resolution waits for pending writes, so a session's first permission request sees its default. The server inside an isolated space has no such setting; it reads the default from a file the host keeps current instead (`readDefaultMode`), see "Default permission mode" in `../spaces/DOCUMENTATION.md`. The UI also writes the default for a session it creates in a space from a draft or for a `/btw` fork, which covers a space still running an older server; a mode chosen there wins as on the host.
 
+## Fork inheritance
+
+On `session.forked`, the runtime copies the source session's effective mode into the fork's own policy, including an implicit `ask`. The Settings default applies to ordinary new sessions. A fork keeps its copied mode when the source changes, and an explicit policy already set on the fork wins. Duplicate events do not replace that policy. Permission resolution waits for pending inheritance, including when the source is itself a new fork.
+
+Source lookup or persistence failure leaves the fork unconfigured and logs the failure; unknown policy remains `ask`. Failed writes preserve the previous policy and do not block later writes. Existing forks are not backfilled.
+
+### Why fork permissions are copied rather than linked
+
+The fork event's `parentID` identifies the source transcript, not subagent lineage. Copying the effective mode gives the fork an independent policy and covers forks made by any connected client without relying on a `session.created` event, which OpenCode does not emit for forks.
+
 ## Runtime
 
-`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and when a session moves to `safety` or `auto`. It keeps handling requests without a connected UI. Startup and reconnect ask the pending list of each running session's directory (`/api/session/active`, then each session's record), never a list without a directory: OpenCode 2 answers that one for its own working directory only and starts that location, MCP servers included.
+`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and when a session moves to `safety` or `auto`. It keeps handling requests without a connected UI. Startup and reconnect ask the pending list of each running session's directory (`/api/session/active`, then each session's record); a pending request belongs to a turn that is still running, so its location is already started. Never a list without a directory: OpenCode 2 answers that one for its own working directory only and starts that location, MCP servers included.
 
 Lineage comes from session events and, when unknown, from the session record in OpenCode. Only `session.created` or a fetched record proves a session has no parent: a `session.updated` is partial (title, usage) and leaves the parent unknown, so the next lookup fetches the record. After a restart, a running subagent's first event is such an update. A failed lookup is retried like a failed reply and then leaves the request for the user.
 
@@ -36,10 +51,12 @@ Each request's outcome (`replied`, `held`, `ignored`, `failed`) is kept for a bo
 
 A `held` or `failed` outcome is broadcast as `openchamber:permission-auto-accept.left-for-user` (`permissionId`, `sessionId`, `directory`). Clients keep a `safety` or `auto` session's request out of sight until this arrives or the request is answered, so an accepted request never flashes a card; the broadcast is what puts a held one on screen. Reconnect reconciliation broadcasts again for a request still held, which a client that already shows it ignores.
 
+Both broadcasts (`updated` and `left-for-user`) go to the main WebSocket, the legacy notification stream (an isolated space's host reads it) and the control stream (`broadcastPermissionUiEvent` in `server/index.js`). A window whose main event stream runs over SSE, by setting or after a WebSocket fallback, reads only the control stream; without it, such a window hid a held request for good and kept a mode another window had changed.
+
 ## Routes
 
 - `GET /api/permission-auto-accept` answers `{ sessions, modes, revision }`. `modes` is the policy; `sessions` is its on/off view (`ask` is off) for clients from before the modes.
-- `PUT /api/permission-auto-accept/sessions/:sessionId` takes `{ mode, directory }`; a body with only `enabled` (older clients, VS Code's bridge shape) means `auto` or `ask`.
+- `PUT /api/permission-auto-accept/sessions/:sessionId` takes `{ mode, directory }`. A boolean is still accepted from callers that know only on/off: older clients and VS Code's bridge send `enabled`, and scheduled tasks pass `true` to the runtime directly. `true` is `auto`, `false` is `ask`.
 
 These are normal authenticated OpenChamber runtime routes. They must not be added to browser URL-token allowlists.
 
@@ -49,6 +66,39 @@ These are normal authenticated OpenChamber runtime routes. They must not be adde
 
 VS Code retains its foreground-only responder because it does not run the web server runtime. Its extension host persists and broadcasts an on/off policy across webviews, so VS Code has only `ask` and `auto` and no default mode. The active UI handles live events plus startup, reconnect, and enablement reconciliation. With all OpenChamber webviews closed or suspended, permissions are not auto-accepted; this is an intentional VS Code limitation.
 
+For forks initiated in the VS Code UI, the shared fork action refreshes the extension host's policy and saves the source mode onto the fork through the existing permission bridge. A fork policy already present is preserved. A failed read or write is logged and leaves the created fork usable at `ask`, while metadata cleanup and goal objective copying continue. Runtime changes stop subsequent inheritance work.
+
 ## Tests
 
-`runtime.test.js` covers restart persistence, on/off requests, the one-time conversion of pre-modes policies, the default mode on new sessions, nearest explicit subagent inheritance, missing-lineage lookup (including a subagent first seen through a partial update, and a failed lookup), retry/deduplication, reconnect reconciliation, the safety net's hold and accept, and which outcomes notifications may skip.
+`runtime.test.js` covers restart persistence, on/off requests, the one-time conversion of pre-modes policies, the default mode on new sessions, independent fork modes and nested forks, explicit fork choices during inheritance, failed fork reads and writes, nearest explicit subagent inheritance, missing-lineage lookup (including a subagent first seen through a partial update, and a failed lookup), retry/deduplication, reconnect reconciliation, the safety net's hold and accept, and which outcomes notifications may skip.
+
+`modes.test.js` covers the ordered vocabulary, invalid external values, legacy booleans and the modes that auto-answer.
+
+## TypeScript boundary
+
+`modes.ts` owns `PermissionMode`. `isPermissionMode` validates raw settings and file values; mode conversion accepts modes and legacy booleans, with null or absence producing no mode.
+
+### Runtime conversion contracts
+
+The event hub and translator are typed, and translated properties expose `info`,
+`directory` and `requestID`. Pending permissions also arrive directly from HTTP
+JSON. That path checks only that the list is an array and the request ids are
+truthy. `RoutingPermission` in `../routing/jev.ts` keeps these fields as JSON
+values because the safety net forwards `action`, `resources` and `metadata`
+unchanged. Its decision cache and broadcast contracts preserve non-string ids
+and directories too.
+
+`contracts.ts` owns policy snapshots, cached lineage and runtime dependencies.
+Settings and HTTP bodies retain their JSON types until the existing checks
+establish a mode, session id or directory. JSON property reads distinguish
+objects from primitives and arrays, whose decoded values have none of the
+named fields this runtime reads. URI components and policy keys retain
+JavaScript's string conversion; permission objects and cache keys retain their
+original values.
+
+Own-property checks remain necessary on policy dictionaries: `constructor`
+must not supply an inherited mode. String checks remain at the session, request
+and directory boundaries. Only the event hub's already-typed directory no
+longer needs a string check. OpenCode session records can put their directory
+on `location`; requests scope that directory through `x-opencode-directory`,
+and permission replies use the `decision` body field.

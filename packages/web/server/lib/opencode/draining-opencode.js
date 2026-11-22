@@ -16,6 +16,18 @@ export const resolveOpenCodeDrainGraceMs = (env) => {
 // request still answers from its port, and every session that was busy when it was
 // replaced has gone idle. A session with an unknown busy set (recovered after an
 // OpenChamber restart) is only released by the grace period.
+/**
+ * @typedef {{ pid: number, port: number, binary: string | null | undefined, drainStartedAt?: number }} DrainingOpenCodeRecord
+ * @param {{
+ *   graceMs: number,
+ *   countRequests: (port: number) => number,
+ *   listBusySessionIds?: () => unknown,
+ *   onChange?: (records: DrainingOpenCodeRecord[]) => void,
+ *   now?: () => number,
+ *   setIntervalImpl?: typeof setInterval,
+ *   clearIntervalImpl?: typeof clearInterval,
+ * }} options
+ */
 export const createDrainingOpenCodeRegistry = ({
   graceMs,
   countRequests,
@@ -71,6 +83,7 @@ export const createDrainingOpenCodeRegistry = ({
   };
 
   return {
+    /** @param {{ pid: number, port: number, binary: string | null | undefined, drainStartedAt?: number, busySessionIds?: string[] | null, close: () => Promise<void> | void }} entry */
     add({ pid, port, binary, drainStartedAt = now(), busySessionIds = null, close }) {
       if (entries.has(pid)) return;
       entries.set(pid, { pid, port, binary, drainStartedAt, busySessionIds, close });

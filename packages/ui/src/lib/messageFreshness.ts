@@ -71,11 +71,6 @@ export class MessageFreshnessDetector {
             message.time.created > sessionStartTime - FRESHNESS_WINDOW_MS &&
             message.time.created > Date.now() - FRESHNESS_WINDOW_MS;
 
-        // Record fresh messages too so they animate at most once per detector
-        // lifetime. The detector is a module singleton that outlives ChatViewport
-        // remounts; without this, switching away and back re-evaluates the same
-        // message against the stale session start time (recordSessionStart runs
-        // in an effect after the first render) and replays the entry animation.
         this.recordSeenMessage(message.id);
 
         return isFresh;

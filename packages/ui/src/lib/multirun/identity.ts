@@ -1,9 +1,15 @@
 import { z } from 'zod';
+import { parseMetadata } from '@/lib/metadataParse';
 import type { JsonValue, Metadata, Session } from '@/lib/opencode/model';
 import { normalizePath } from '@/lib/pathNormalization';
 import { parseMultiRunSessionTitle } from './title';
 
 const identifier = z.string().min(1).refine((value) => value === value.trim());
+const generationSessionSchema = z.object({
+  sessionID: identifier, directory: identifier, providerID: identifier, modelID: identifier,
+  variant: identifier.optional(),
+});
+export type PromptGenerationSession = z.infer<typeof generationSessionSchema>;
 // Source guidance travels on session metadata; cap it so one note cannot turn
 // every session-list event into an unbounded text transfer.
 export const RUN_GUIDANCE_LIMIT = 20_000;
@@ -16,7 +22,6 @@ const autoFusionSchema = z.object({
   modelID: identifier,
   variant: identifier.optional(),
   agent: identifier.optional(),
-  /** Page-lifetime id of the client that launched the run; only it starts the fusion. */
   launcherId: identifier,
 });
 const fusionReceiptSchema = z.object({
@@ -39,12 +44,13 @@ const membershipSchema = z.object({
   modelID: identifier,
   index: z.number().int().positive().safe().optional(),
   role: z.enum(['run', 'fusion', 'parent']),
-  // Optional fields added by the run overview redesign. Older markers lack them.
   title: z.string().trim().min(1).max(200).optional(),
   autoFusion: autoFusionSchema.optional(),
   guidance: z.string().max(RUN_GUIDANCE_LIMIT).optional(),
   fusion: fusionReceiptSchema.optional(),
-}).refine((value) => value.group.kind !== 'legacy' || value.role !== 'run');
+  // These are archived sources, never execution lanes or fusion inputs.
+  generationSessions: z.array(generationSessionSchema).optional(),
+});
 const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema)]),
 );
@@ -58,28 +64,36 @@ export const multiRunGroupKey = (group: MultiRunMembership['group'], groupSlug: 
   group.kind === 'id' ? JSON.stringify(['id', group.id]) : JSON.stringify(['legacy', group.scope, groupSlug]);
 
 export function getMultiRunMembership(session: Session): MultiRunMembership | null {
-  const envelope = membershipEnvelopeSchema.safeParse(session.metadata?.openchamber);
+  const envelope = parseMetadata(membershipEnvelopeSchema, session.metadata?.openchamber);
   return envelope.success && envelope.data.multirun.sessionID === session.id ? envelope.data.multirun : null;
 }
 
-/** A present marker is authoritative, even if pending, invalid, or inherited by a fork. */
 export function getMultiRunIdentity(session: Session, legacyDirectory = session.directory): MultiRunIdentity | null {
-  const parsedOpenchamber = openchamberSchema.safeParse(session.metadata?.openchamber);
+  return resolveMultiRunIdentity(session, () => legacyDirectory);
+}
+
+export function resolveMultiRunIdentity(
+  session: Session,
+  readLegacyDirectory: () => string | null | undefined,
+): MultiRunIdentity | null {
+  const parsedOpenchamber = parseMetadata(openchamberSchema, session.metadata?.openchamber);
   const openchamber = parsedOpenchamber.success ? parsedOpenchamber.data : null;
   if (openchamber?.multirunDetached === true) return null;
+  if (openchamber?.kind === 'prompt-generation') return null;
   if (openchamber && Object.hasOwn(openchamber, 'multirun')) {
     const membership = getMultiRunMembership(session);
     if (!membership) return null;
-    const { group, groupSlug, runGroup, providerID, modelID, index, role, title, autoFusion, guidance, fusion } = membership;
+    const { group, groupSlug, runGroup, providerID, modelID, index, role, title, autoFusion, guidance, fusion, generationSessions } = membership;
     return {
-      group, groupSlug, runGroup, providerID, modelID, index, role, title, autoFusion, guidance, fusion,
+      group, groupSlug, runGroup, providerID, modelID, index, role, title, autoFusion, guidance, fusion, generationSessions,
       key: multiRunGroupKey(group, groupSlug),
     };
   }
   if (session.parentID || openchamber?.kind === 'btw' || openchamber?.kind === 'review') return null;
   const title = parseMultiRunSessionTitle(session.title);
-  const scope = normalizePath(legacyDirectory);
-  if (!title || !scope) return null;
+  if (!title) return null;
+  const scope = normalizePath(readLegacyDirectory());
+  if (!scope) return null;
   const group: MultiRunMembership['group'] = { kind: 'legacy', scope };
   return {
     group, groupSlug: title.groupSlug, runGroup: title.runGroup,
@@ -89,11 +103,6 @@ export function getMultiRunIdentity(session: Session, legacyDirectory = session.
   };
 }
 
-/**
- * The marker as plain JSON. `Metadata` is `Record<string, JsonValue>` on v2, so
- * the optional fields are written only when they carry a value rather than
- * travelling as `undefined`.
- */
 const membershipMetadata = (membership: MultiRunMembership): Metadata => {
   const value = membershipSchema.parse(membership);
   const marker: Metadata = {
@@ -111,6 +120,11 @@ const membershipMetadata = (membership: MultiRunMembership): Metadata => {
   if (value.index !== undefined) marker.index = value.index;
   if (value.title !== undefined) marker.title = value.title;
   if (value.guidance !== undefined) marker.guidance = value.guidance;
+  if (value.generationSessions) marker.generationSessions = value.generationSessions.map((source) => {
+    const entry: Metadata = { sessionID: source.sessionID, directory: source.directory, providerID: source.providerID, modelID: source.modelID };
+    if (source.variant) entry.variant = source.variant;
+    return entry;
+  });
   if (value.fusion !== undefined) {
     const receipt: Metadata = { passID: value.fusion.passID, sources: value.fusion.sources.map((source) => {
       const entry: Metadata = { sessionID: source.sessionID, directory: source.directory };
@@ -141,16 +155,10 @@ export function withMultiRunMembership(session: Pick<Session, 'metadata'>, membe
   };
 }
 
-/**
- * The marker on its own, shaped as an RFC 7386 merge patch for
- * `/api/openchamber/sessions/:id/metadata`. Nested keys merge, so writing the
- * membership cannot erase what another feature stored under `openchamber`.
- */
 export const multiRunMembershipPatch = (membership: MultiRunMembership): Metadata => ({
   openchamber: { multirun: membershipMetadata(membership), multirunDetached: null },
 });
 
-/** Compare only the metadata this feature renders, without scanning other sessions. */
 export function sameMultiRunIdentity(a: Session, b: Session): boolean {
   if (a.id === b.id && a.metadata === b.metadata && a.title === b.title && a.directory === b.directory && a.parentID === b.parentID) return true;
   const left = getMultiRunIdentity(a);

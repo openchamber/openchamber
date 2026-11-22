@@ -1,28 +1,13 @@
-/**
- * Boundary parsers for settings values. Every value that arrives from the
- * server, the VS Code bridge, or browser storage passes through one of these
- * before it is trusted; `undefined` means "reject", never "default".
- *
- * These are the value-level rules the registry (`./registry.ts`) attaches to
- * each key. They are zod schemas wrapped into one function shape so the
- * registry can hold hand-written and schema-derived parsers alike, and so the
- * registry can be evaluated for its shape (the generated JSON snapshot)
- * without a browser.
- */
 import { z, type ZodType } from 'zod';
 
 import type { ProjectEntry } from '@/lib/api/types';
 import { isCustomProviderIcon, type CustomProviderIcon } from '@/lib/customProviderIcons';
+import { customProviderLogoSchema, type CustomProviderLogo } from '@/lib/customProviderLogos';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { normalizePath } from '@/lib/pathNormalization';
 
-/**
- * `raw` is the whole untrusted document, for the few legacy keys whose value
- * is derived from a sibling (`queueModeEnabled` → `followUpBehavior`).
- */
 export type SettingsParser<T> = (value: unknown, raw: SettingsRawDocument) => T | undefined;
 
-/** The untrusted document as received; only ever read through a parser. */
 export type SettingsRawDocument = Readonly<Record<string, unknown>>;
 
 export type ModelRef = { providerID: string; modelID: string };
@@ -50,7 +35,6 @@ export type SkillCatalogConfig = {
   gitIdentityId?: string;
 };
 
-/** Wrap a schema as a parser: success yields the parsed value, failure yields `undefined`. */
 export const fromSchema = <T>(schema: ZodType<T>): SettingsParser<T> => (value) => {
   const result = schema.safeParse(value);
   return result.success ? result.data : undefined;
@@ -63,16 +47,12 @@ const looseObject = z.record(z.string(), z.unknown());
 
 export const parseBoolean = fromSchema(z.boolean());
 
-/** A non-empty string, kept verbatim. */
 export const parseNonEmptyString = fromSchema(z.string().min(1));
 
-/** Any string, trimmed; empty stays empty (some keys use '' as "unset"). */
 export const parseTrimmedString = fromSchema(trimmed);
 
-/** A trimmed string that is only accepted when something is left after trimming. */
 export const parseNonEmptyTrimmedString = fromSchema(nonEmptyTrimmed);
 
-/** Free text with an upper bound, kept verbatim (whitespace is content here). */
 export const parseTextUpTo = (maxLength: number): SettingsParser<string> => fromSchema(z.string().max(maxLength));
 
 export const parseTrimmedStringUpTo = (maxLength: number): SettingsParser<string> => fromSchema(
@@ -95,10 +75,8 @@ export const parseIntegerAtLeast = (min: number): SettingsParser<number> => from
 
 export const parsePositiveInteger = fromSchema(finiteNumber.positive().transform(Math.floor));
 
-/** `null` clears the value; a finite number keeps it. */
 export const parseNullableFiniteNumber = fromSchema(z.union([z.null(), finiteNumber]));
 
-/** `null` clears the value; a non-empty trimmed string keeps it; '' becomes null. */
 export const parseNullableTrimmedPath = fromSchema(
   z.union([z.null(), trimmed.transform((value) => (value.length > 0 ? value : null))]),
 );
@@ -107,10 +85,8 @@ export const parseNullableTrimmedString = fromSchema(z.union([z.null(), trimmed]
 
 const stringEntries = z.array(z.unknown()).transform((entries) => entries.filter((entry) => z.string().min(1).safeParse(entry).success));
 
-/** Distinct non-empty strings, order preserved. */
 export const parseStringSet = fromSchema(stringEntries.transform((entries) => Array.from(new Set(entries.map(String)))));
 
-/** Non-empty strings, duplicates kept (order is the user's). */
 export const parseStringList = fromSchema(stringEntries.transform((entries) => entries.map(String)));
 
 const stringListRecord = looseObject.transform((record) => {
@@ -137,6 +113,16 @@ export const parseCustomProviderIcons: SettingsParser<Record<string, CustomProvi
   }
   return result;
 };
+
+export const parseCustomProviderLogos = fromSchema(looseObject.transform((record) => {
+  const result: Record<string, CustomProviderLogo> = {};
+  for (const [providerID, logo] of Object.entries(record)) {
+    const normalizedProviderID = providerID.trim();
+    const parsed = customProviderLogoSchema.safeParse(logo);
+    if (normalizedProviderID && parsed.success) result[normalizedProviderID] = parsed.data;
+  }
+  return result;
+}));
 
 const modelRefSchema = z.object({
   providerID: nonEmptyTrimmed,
@@ -166,6 +152,12 @@ export const parseModelDefaultVariants = fromSchema(
     .refine((entries) => Object.keys(entries).length <= 1024),
 );
 
+// The models whose own default effort is locked: every send runs at it. Keys only,
+// so a lock never outlives the default it locks (the store drops both together).
+export const parseModelDefaultVariantLocks = fromSchema(
+  z.array(z.string().regex(/^[^/#\s]+\/[^#\s]+$/)).max(1024),
+);
+
 export const parseRecentEfforts = fromSchema(
   looseObject.transform((record) => {
     const result: Record<string, string[]> = {};
@@ -175,6 +167,23 @@ export const parseRecentEfforts = fromSchema(
       if (!parsed.success) continue;
       const unique = Array.from(new Set(parsed.data.map(String)));
       if (unique.length > 0) result[key] = unique.slice(0, 5);
+    }
+    return result;
+  }).refine((record) => Object.keys(record).length > 0),
+);
+
+export const parseLastUsedEfforts = fromSchema(
+  looseObject.transform((record) => {
+    const result: Record<string, string | null> = {};
+    for (const [key, effort] of Object.entries(record)) {
+      const normalizedKey = key.trim();
+      if (!normalizedKey) continue;
+      if (effort === null) {
+        result[normalizedKey] = null;
+        continue;
+      }
+      const parsed = nonEmptyTrimmed.safeParse(effort);
+      if (parsed.success) result[normalizedKey] = parsed.data;
     }
     return result;
   }).refine((record) => Object.keys(record).length > 0),
@@ -331,6 +340,7 @@ const nonNegativeFinite = finiteNumber.nonnegative();
 const projectEntrySchema = z.object({
   path: nonEmptyTrimmed,
   label: nonEmptyTrimmed.optional().catch(undefined),
+  labelSource: z.enum(['auto', 'manual']).optional().catch(undefined),
   icon: nonEmptyTrimmed.optional().catch(undefined),
   iconImage: z.union([
     z.null(),
@@ -350,10 +360,7 @@ const projectEntrySchema = z.object({
   sidebarCollapsed: z.boolean().optional().catch(undefined),
   hiddenFromWork: z.boolean().optional().catch(undefined),
   hiddenFromAllSessions: z.boolean().optional().catch(undefined),
-  // Per-project model defaults. Leaving them out of the schema stripped them
-  // from every settings response, so the store saw a different project list
-  // after each save and replaced it, which reset the rename form mid-typing
-  // and dropped the defaults themselves (#3552).
+  // external: #3552 Per-project model defaults must stay in this schema; omitting them stripped them from every settings response, so the store replaced the project list and reset the rename form mid-typing.
   defaultModel: nonEmptyTrimmed.optional().catch(undefined),
   defaultAgent: nonEmptyTrimmed.optional().catch(undefined),
   defaultVariant: nonEmptyTrimmed.optional().catch(undefined),
@@ -376,6 +383,7 @@ export const parseProjects = fromSchema(
 
       const project: ProjectEntry = { id, path: normalizedPath };
       if (parsed.data.label) project.label = parsed.data.label;
+      if (parsed.data.label && parsed.data.labelSource) project.labelSource = parsed.data.labelSource;
       if (parsed.data.icon) project.icon = parsed.data.icon;
       if (parsed.data.iconImage !== undefined) project.iconImage = parsed.data.iconImage;
       if (parsed.data.color) project.color = parsed.data.color;
@@ -396,7 +404,6 @@ export const parseProjects = fromSchema(
 
 const followUpBehaviorSchema = z.enum(['steer', 'queue']);
 
-/** Legacy `queueModeEnabled` → `followUpBehavior`; 'immediate' collapses onto 'steer'. */
 export const parseFollowUpBehavior: SettingsParser<'steer' | 'queue'> = (value, raw) => {
   const direct = followUpBehaviorSchema.safeParse(value);
   if (direct.success) return direct.data;
@@ -406,20 +413,24 @@ export const parseFollowUpBehavior: SettingsParser<'steer' | 'queue'> = (value, 
   return legacy.data ? 'queue' : 'steer';
 };
 
-const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'summary']));
+const chatWidthSchema = z.enum(['default', 'wider', 'full']);
 
-/**
- * The removed Sorted chat mode (`chatRenderMode: 'sorted'`) showed only the
- * answers with the work folded away; Collapsed is its closest match, so it
- * wins over a stored mode until the user picks one (which retires the key).
- */
-export const parseActivityRenderMode: SettingsParser<'collapsed' | 'summary'> = (value, raw) => {
+export const parseChatWidth: SettingsParser<'default' | 'wider' | 'full'> = (value, raw) => {
+  const direct = chatWidthSchema.safeParse(value);
+  if (direct.success) return direct.data;
+  const legacy = z.boolean().safeParse(raw.wideChatLayoutEnabled);
+  if (!legacy.success) return undefined;
+  return legacy.data ? 'full' : 'default';
+};
+
+const activityRenderModeSchema = trimmed.pipe(z.enum(['collapsed', 'text', 'summary']));
+
+export const parseActivityRenderMode: SettingsParser<'collapsed' | 'text' | 'summary'> = (value, raw) => {
   if (raw.chatRenderMode === 'sorted') return 'collapsed';
   const direct = activityRenderModeSchema.safeParse(value);
   return direct.success ? direct.data : undefined;
 };
 
-/** Legacy provider names: 'server' was the OpenAI-compatible endpoint; 'browser'/'wasm' the local one. */
 export const parseSttProvider = fromSchema(
   trimmed.pipe(z.enum(['local', 'openai-compatible', 'server', 'browser', 'wasm'])).transform((provider): 'local' | 'openai-compatible' => {
     if (provider === 'server') return 'openai-compatible';
@@ -428,7 +439,6 @@ export const parseSttProvider = fromSchema(
   }),
 );
 
-/** Legacy 'auto' never read OS chrome config; it means right. */
 export const parseDesktopWindowControlsPosition = fromSchema(
   trimmed.pipe(z.enum(['left', 'right', 'auto'])).transform((mode): 'left' | 'right' => (mode === 'left' ? 'left' : 'right')),
 );
@@ -437,7 +447,6 @@ export const parsePwaAppName = fromSchema(
   trimmed.transform((value) => value.replace(/\s+/g, ' ').slice(0, 64)),
 );
 
-/** Lower-cased, deduplicated shells; unknown names are dropped. */
 export const parseTerminalShells = <T extends string>(isShell: (value: string) => value is T): SettingsParser<T[]> => fromSchema(
   z.array(z.unknown()).transform((entries) => {
     const shells: T[] = [];
@@ -449,12 +458,10 @@ export const parseTerminalShells = <T extends string>(isShell: (value: string) =
   }),
 );
 
-/** A value accepted by a domain type guard (`isTerminalShell`, `isUiFontOption`, …). */
 export const parseGuarded = <T>(isValid: (value: unknown) => value is T): SettingsParser<T> => fromSchema(
   z.custom<T>(isValid),
 );
 
-/** Map a parser's output; `undefined` from the mapper rejects the value. */
 export const mapParser = <A, B>(parser: SettingsParser<A>, map: (value: A) => B | undefined): SettingsParser<B> => (value, raw) => {
   const parsed = parser(value, raw);
   return parsed === undefined ? undefined : map(parsed);

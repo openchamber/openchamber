@@ -7,7 +7,6 @@ export type CheckboxProps = {
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
-  /** Muted line under the label. */
   description?: string;
 };
 

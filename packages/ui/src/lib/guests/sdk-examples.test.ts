@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { Window } from 'happy-dom';
 import { guestMessageSchema } from '@openchamber/sdk/schemas';
+import * as sdk from '@openchamber/sdk';
 import type { GuestMessage, HostMessage, HostReadyContext, HostResultPayload, GuestWorkspaceSnapshot } from '@openchamber/sdk';
+
+import { resolveGuestIconName } from './icon.ts';
 
 const examples = new URL('../../../../sdk/examples/', import.meta.url);
 const windows: Window[] = [];
@@ -307,11 +311,63 @@ describe('checked-in SDK examples', () => {
     expect(app.window.document.body.textContent).not.toContain('Branch A');
   });
 
+  test('a task link clicked in the chat opens that task, and an unknown one says the board has no such task', async () => {
+    const known = await load('tasks-demo', 'attach');
+    known.ready({ ...context, surface: 'dialog', item: { kind: 'link', identifier: 'DEMO-2', url: 'https://example.com/tasks/DEMO-2' } });
+    expect(known.window.document.body.textContent).toContain('Add dark mode to settings');
+    const unknown = await load('tasks-demo', 'attach');
+    unknown.ready({ ...context, surface: 'dialog', item: { kind: 'link', identifier: 'DEMO-404' } });
+    expect(unknown.window.document.body.textContent).toContain('This board has no task DEMO-404.');
+    unknown.button('Close');
+  });
+
   test('conversation previews never render message text as remote images', async () => {
     const app = await load('tasks-demo', 'attach');
     app.ready({ ...context, surface: 'dialog', item: { kind: 'session', action: 'summarize', sessionId: 's', sessionTitle: 'Example', directory: '/repo',
       messages: [{ id: 'm', role: 'assistant', text: '![private](https://example.com/image)', createdAt: 0 }] } });
     expect(app.window.document.body.textContent).toContain('![private](https://example.com/image)');
     expect(app.window.document.querySelector('img')).toBeNull();
+  });
+
+  test('the mark the agent desk sets names an icon the host draws', async () => {
+    type Request = { headers: { authorization: string }; url: string; on: (event: string, listener: (body?: string) => void) => void };
+    type Response = { writeHead: () => void; end: () => void; headersSent: boolean };
+    let handle: ((request: Request, response: Response) => void) | undefined;
+    let mark: { icon: string } | undefined;
+    let finishResponse: () => void = () => {};
+    const responded = new Promise<void>((resolve) => { finishResponse = resolve; });
+    const serviceHost = {
+      sessions: { start: async () => ({ sessionId: 'desk-session' }) },
+      setMark: async (_target: sdk.ServiceMarkTarget, value: { icon: string }) => { mark = value; },
+      setInstructions: async () => {},
+    };
+    const serviceHttp = {
+      createServer(listener: typeof handle) {
+        handle = listener;
+        return { listen: (_port: number, _address: string, ready: () => void) => ready() };
+      },
+    };
+    const source = execFileSync(process.execPath, ['build', new URL('agent-desk/service/main.ts', examples).pathname,
+      '--target=node', '--format=cjs', '--external=node:http', '--external=@openchamber/sdk'], { encoding: 'utf8' });
+    runInNewContext(source, {
+      process: { env: { OPENCHAMBER_SERVICE_PORT: '12345', OPENCHAMBER_SERVICE_TOKEN: 'fixture-token' } },
+      console,
+      require(name: string) {
+        if (name === 'node:http') return serviceHttp;
+        if (name === '@openchamber/sdk') return { ...sdk, createServiceHost: () => serviceHost };
+        throw new Error(`Unexpected service dependency: ${name}`);
+      },
+      URL,
+    });
+    if (!handle) throw new Error('Service did not register its request handler');
+    const events = new Map<string, (body?: string) => void>();
+    handle({ headers: { authorization: 'Bearer fixture-token' }, url: '/start', on: (event, listener) => { events.set(event, listener); } },
+      { writeHead: () => {}, end: finishResponse, headersSent: false });
+    events.get('data')?.(JSON.stringify({ directory: '/repo' }));
+    events.get('end')?.();
+    await responded;
+    if (!mark) throw new Error('Service did not publish its mark');
+    expect(mark.icon).toBe('robot-2');
+    expect(resolveGuestIconName(mark.icon)).toBe(mark.icon);
   });
 });

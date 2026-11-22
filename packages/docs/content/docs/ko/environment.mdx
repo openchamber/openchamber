@@ -60,6 +60,10 @@ OpenChamber 웹 서버가 바인딩할 주소입니다. 다른 컴퓨터에서 �
 
 자신의 페이지 안 프레임에 OpenChamber를 표시할 수 있는 origin을 공백으로 구분해 지정합니다. 예: `https://dash.example.com`. `*`는 모든 사이트를 허용합니다. 기본값에서는 OpenChamber 자신과 데스크톱·모바일 앱만 임베드할 수 있어, 다른 사이트가 버튼 위에 덮어씌울 수 없습니다.
 
+### `OPENCHAMBER_TRUSTED_PROXIES`
+
+다른 컴퓨터나 다른 컨테이너에서 실행되는 리버스 프록시의 주소를 쉼표로 구분해 지정합니다(예: `192.168.1.10`, `172.18.0.0/16`). OpenChamber는 실패한 로그인 시도를 클라이언트별로 제한하며, 요청이 이 컴퓨터나 여기에 적은 주소에서 올 때만 `X-Forwarded-For`에서 클라이언트 주소를 읽습니다. 목록에 없는 프록시는 클라이언트 하나로 계산되므로, 한 사람의 실패한 시도 때문에 그 뒤의 모든 사람이 한동안 로그인하지 못할 수 있습니다.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 OpenChamber 데이터 디렉터리를 바꿉니다. 기본값은 `~/.config/openchamber`입니다.
@@ -111,6 +115,22 @@ OpenCode server 포트를 설정합니다. managed OpenCode에서는 이 포트�
 ### `OPENCHAMBER_OPENCODE_HOSTNAME`
 
 OpenChamber가 관리하는 OpenCode server의 bind hostname입니다. 기본값은 `127.0.0.1`입니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+OpenCode 상태 확인의 제한 시간을 밀리초로 지정합니다. 기본값은 `5000`입니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+아직 실행 중인 관리형 OpenCode 프로세스를 다시 시작하기 전까지 집계할 연속 상태 확인 실패 횟수입니다. 기본값은 `20`입니다. 작업 중인 세션이 있으면 다시 시작이 지연될 수 있습니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+관리형 OpenCode의 상태 확인 간격을 밀리초로 덮어씁니다. 실패를 집계하는 최소 간격도 설정합니다. 기본값은 `0`이며 서버의 `15000`밀리초 간격을 유지합니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+OpenChamber가 관리형 OpenCode의 상태 확인 결과를 재사용하는 시간입니다. 단위는 밀리초이며 실패한 결과도 재사용합니다. 기본값은 `750`입니다.
 
 ### `OPENCODE_BINARY`
 

@@ -4,9 +4,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const iconName = 'AppIcon';
-const iconsDir = path.join(__dirname, '..', 'resources', 'icons');
+const iconsDir = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, '..', 'resources', 'icons');
 const sourceIconPath = path.join(iconsDir, `${iconName}.icon`);
 const outputAssetsPath = path.join(iconsDir, 'Assets.car');
+const outputIcnsPath = path.join(iconsDir, 'icon.icns');
 
 const resolveActool = () => {
   try {
@@ -41,6 +42,13 @@ try {
 
   fs.copyFileSync(generatedAssetsPath, outputAssetsPath);
   console.log(`Generated ${outputAssetsPath}`);
+
+  const generatedIcnsPath = path.join(tmpDir, `${iconName}.icns`);
+  if (!fs.existsSync(generatedIcnsPath)) {
+    throw new Error(`actool did not generate ${iconName}.icns at ${generatedIcnsPath}`);
+  }
+  fs.copyFileSync(generatedIcnsPath, outputIcnsPath);
+  console.log(`Generated ${outputIcnsPath}`);
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }

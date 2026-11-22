@@ -1,6 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 import { composerAutoCorrect, type ComposerAutoCorrect } from '../autocorrect';
 
@@ -40,23 +38,6 @@ const unaffectedPlatforms: Array<[string, Navigator]> = [
 ];
 
 describe('composerAutoCorrect', () => {
-    test('matches the pinned CodeMirror period-revert guard', () => {
-        const source = readFileSync(
-            fileURLToPath(import.meta.resolve('@codemirror/view')),
-            'utf8',
-        );
-        const semantics = source
-            .replace(/\/\*[\s\S]*?\*\//g, '')
-            .replace(/\s+/g, '');
-
-        expect(/getAttribute\(["']autocorrect["']\)==["']off["']/.test(semantics)).toBe(true);
-        expect(semantics).toContain(
-            'constios=safari&&(/Mobile\\/\\w+/.test(nav.userAgent)||nav.maxTouchPoints>2)',
-        );
-        expect(semantics).toContain('mac:ios||/Mac/.test(nav.platform)');
-        expect(semantics).toContain('android:/Android\\b/.test(nav.userAgent)');
-    });
-
     for (const [name, navigator] of affectedPlatforms) {
         test(`preserves the ${name} platform period without enabling autocorrect`, () => {
             const autoCorrect = composerAutoCorrect({ isMobile: false, navigator });

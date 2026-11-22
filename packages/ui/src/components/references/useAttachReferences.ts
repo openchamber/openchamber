@@ -6,29 +6,31 @@ import { useI18n } from '@/lib/i18n';
 
 import type { ReferencePickerConfirmFailure } from './ReferencePickerDialog';
 import type { ReferencePickerSelection } from './referencePickerItems';
-import { readLinearIssueDetail, useGitHubReadContext } from './referenceSources';
-import { resolveComposerReferences } from './resolveComposerReferences';
+import { readTrackerItemDetail, useRepositoryReadContext } from './referenceSources';
+import { resolveComposerReferences, resolveReferenceLink, type ReferenceLinkTarget, type ReferenceResolveDeps } from './resolveComposerReferences';
+import { readTrackerDescriptor } from '@/lib/trackers/registry';
 
-/**
- * The composer's confirm handler for the reference picker: resolve what was
- * chosen, hand every success to `onAttach`, and keep the picker open on the
- * ones that failed, with GitHub's or Linear's reason.
- */
+function useReferenceResolveDeps(directory: string | null): ReferenceResolveDeps {
+    const { sourceControl, trackers } = useRuntimeAPIs();
+    const repositoryContext = useRepositoryReadContext(directory);
+    return React.useMemo(() => ({
+        sourceControl,
+        context: repositoryContext && repositoryContext !== 'missing' ? repositoryContext : null,
+        readTrackerDetail: (provider, itemId) => (trackers
+            ? readTrackerItemDetail(trackers, provider, itemId)
+            : Promise.reject(new Error('Trackers are not available here'))),
+        trackerName: (provider) => readTrackerDescriptor(provider).name,
+    }), [repositoryContext, sourceControl, trackers]);
+}
+
 export function useAttachReferences(
     directory: string | null,
     onAttach: (references: ComposerReference[]) => void,
 ): (selections: ReferencePickerSelection[]) => Promise<ReferencePickerConfirmFailure | null> {
-    const { sourceControl, linear } = useRuntimeAPIs();
-    const githubContext = useGitHubReadContext(directory);
+    const deps = useReferenceResolveDeps(directory);
     const { t } = useI18n();
     return React.useCallback(async (selections) => {
-        const resolved = await resolveComposerReferences(selections, {
-            sourceControl,
-            context: githubContext && githubContext !== 'missing' ? githubContext : null,
-            readLinearDetail: (issueId) => (linear
-                ? readLinearIssueDetail(linear, issueId)
-                : Promise.reject(new Error('Linear is not available here'))),
-        });
+        const resolved = await resolveComposerReferences(selections, deps);
         if (resolved.references.length > 0) onAttach(resolved.references);
         if (resolved.failures.length === 0) return null;
         return {
@@ -38,5 +40,10 @@ export function useAttachReferences(
                 error: resolved.failures[0]?.error ?? '',
             }),
         };
-    }, [githubContext, linear, onAttach, sourceControl, t]);
+    }, [deps, onAttach, t]);
+}
+
+export function useReadReferenceLink(directory: string | null): (target: ReferenceLinkTarget) => Promise<ComposerReference | null> {
+    const deps = useReferenceResolveDeps(directory);
+    return React.useCallback((target) => resolveReferenceLink(target, deps), [deps]);
 }

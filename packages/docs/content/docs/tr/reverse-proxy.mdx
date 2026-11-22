@@ -35,6 +35,7 @@ OpenChamber'ı Nginx, Nginx Proxy Manager, Caddy, Cloudflare ya da başka bir re
 - OpenChamber yanıtları zaten sıkıştırıyorsa proxy'de gzip'i kapatın.
 - Sıkıştırmayı yalnızca bir katmanda açık bırakın.
 - `Host`, `X-Forwarded-For` ve `X-Forwarded-Proto` gibi normal proxy başlıklarını iletin.
+- Proxy başka bir makinede veya başka bir konteynerde çalışıyorsa adresini [`OPENCHAMBER_TRUSTED_PROXIES`](/tr/environment/#openchamber_trusted_proxies) değişkenine ekleyin. Aksi halde arkasındaki herkes başarısız giriş denemeleri için tek bir sınırı paylaşır.
 - Kullanıcılar dosya yüklüyorsa body boyutu sınırlarını artırın.
 
 ## Hızlı kontrol listesi
@@ -324,6 +325,21 @@ reverse_proxy 127.0.0.1:3000 {
 </details>
 
 Caddy, WebSocket yükseltmelerini otomatik olarak işler. Ek yapılandırma gerekmez. `flush_interval -1` yönergesi, SSE parçalarının buffer'lanmadan hemen iletilmesini sağlar.
+
+## Oturum açmalı proxy'ler (Authentik, Authelia, oauth2-proxy)
+
+Kullanıcılar OpenChamber'a ulaşmadan önce proxy'de oturum açıyorsa, eklenti panelleri için bir istisna gerekir. Panel yalıtılmış bir çerçevede çalışır ve tarayıcı proxy'nin oturum çerezini bu çerçevenin kendi isteklerine eklemez. Bu yüzden proxy panelin dosyalarını oturum açma sayfasına yönlendirir ve panel boş kalır.
+
+`/api/guest-files/` yolunu oturum açmadan geçirin. Bu yol yalnızca yüklediğiniz eklentilerin dosyalarını, o da yalnızca OpenChamber'ın oturum açmış bir kullanıcıya o panel için verdiği bağlantıyla sunar. Başka hiçbir şeyi açmaz. Nginx ve `auth_request` ile:
+
+```nginx
+location ^~ /api/guest-files/ {
+    auth_request off;
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+Diğer proxy'lerde aynı yol öneki için oturum açmayı atlayan bir kural ekleyin. `/api/guests/` yolunu muaf tutmayın: bu yol eklenti de yükler ve isteklerini işler; OpenChamber arayüz parolası yoksa herkes kullanabilir.
 
 ## CDN ve çift sıkıştırma uyarısı
 

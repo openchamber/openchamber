@@ -93,6 +93,12 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
     expect(delivered).toEqual(['Done']);
     useUIStore.setState({ nativeNotificationsEnabled: true });
 
+    // toastOnly on an answer to a shared page keeps the system notification
+    // away; its toast comes from the control stream sync (control-stream-sync.ts).
+    const answer = { title: 'Toast only', body: 'Picked B', kind: 'share-answer', tag: 'share-ses_1', sessionId: 'ses_1', directory: '/repo', requireHidden: true, toastOnly: true };
+    await act(async () => source.emit(answer));
+    expect(delivered).toEqual(['Done']);
+
     configureRuntimeUrlResolver({ apiBaseUrl: 'http://other-runtime.test', realtimeBaseUrl: 'http://other-runtime.test' });
     window.dispatchEvent(new CustomEvent('openchamber:runtime-endpoint-changed'));
     expect(source.readyState).toBe(EventSourceFixture.CLOSED);

@@ -97,14 +97,27 @@ public class OpenChamberWebView extends CapacitorWebView {
 
         @Override
         public boolean commitContent(InputContentInfo contentInfo, int flags, Bundle opts) {
-            forwardImage(contentInfo);
+            try {
+                forwardImage(contentInfo);
+            } catch (RuntimeException error) {
+                Log.w(TAG, "Could not accept the content the IME committed", error);
+            }
             // Delegating would ask the IME to retry against an editor that cannot accept it.
             return true;
         }
 
         private void forwardImage(InputContentInfo contentInfo) {
-            Uri contentUri = contentInfo.getContentUri();
-            contentInfo.requestPermission();
+            Uri contentUri = contentInfo == null ? null : contentInfo.getContentUri();
+            if (contentUri == null) {
+                Log.w(TAG, "The IME committed content without a readable URI");
+                return;
+            }
+            try {
+                contentInfo.requestPermission();
+            } catch (RuntimeException error) {
+                // The URI may already be readable without the temporary grant.
+                Log.w(TAG, "Could not take a permission on the committed content", error);
+            }
             imageReader.execute(() -> postToPage(readImage(contentUri, contentInfo)));
         }
 
@@ -135,11 +148,15 @@ public class OpenChamberWebView extends CapacitorWebView {
                 }
                 String data = Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP);
                 return "{\"ok\":true,\"mimeType\":\"" + mimeType + "\",\"data\":\"" + data + "\"}";
-            } catch (IOException | SecurityException error) {
+            } catch (IOException | RuntimeException error) {
                 Log.w(TAG, "Could not read the image the IME committed", error);
                 return failure("unreadable");
             } finally {
-                contentInfo.releasePermission();
+                try {
+                    contentInfo.releasePermission();
+                } catch (RuntimeException error) {
+                    Log.w(TAG, "Could not release the committed content permission", error);
+                }
             }
         }
 

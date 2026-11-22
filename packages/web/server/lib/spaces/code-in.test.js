@@ -929,12 +929,11 @@ describe.skipIf(WIN)('transfer into a local stand-in for a space', () => {
         return false;
       }
     };
-    for (let attempt = 0; attempt < 50 && alive(); attempt += 1) {
-      await new Promise((resolve) => { setTimeout(resolve, 100); });
+    try {
+      await expect.poll(alive, { timeout: 10_000 }).toBe(false);
+    } finally {
+      if (alive()) process.kill(pid, 'SIGKILL');
     }
-    const survived = alive();
-    if (survived) process.kill(pid, 'SIGKILL');
-    expect(survived).toBe(false);
     expect(g(['for-each-ref', 'refs/openchamber/'])).toBe('');
     expect(changedSince(before, repo)).toEqual([]);
   });

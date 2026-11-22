@@ -2,6 +2,7 @@ import React from 'react';
 import { toast } from 'sonner';
 
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';
+import type { ClipboardAPI } from '@/lib/api/types';
 import { copyTextToClipboard, readClipboardText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { loadMonoFont } from '@/lib/fontLoader';
@@ -14,13 +15,9 @@ import type { TerminalChunk } from '@/stores/useTerminalStore';
 
 import { selectTerminalChunkReplay } from './terminalChunkReplay';
 
-// The libghostty-vt adapter (WASM VT + canvas renderer) loads on demand so the
-// bottom dock can import TerminalView eagerly without pulling the emulator
-// into the startup graph before a terminal is actually mounted.
 type GhosttyTerminalSurface = import('@/lib/ghostty/surface').GhosttyTerminalSurface;
 type GhosttyTerminalSurfaceOptions = import('@/lib/ghostty/surface').GhosttyTerminalSurfaceOptions;
 
-/** The subset of the surface the viewport drives; tests inject a double. */
 export type TerminalSurface = Pick<
   GhosttyTerminalSurface,
   | 'write'
@@ -50,10 +47,6 @@ const createGhosttySurface: TerminalSurfaceFactory = async (mount, options) => {
   return GhosttyTerminalSurface.create(mount, options);
 };
 
-// The selected mono face loads from the app bundle, so this normally resolves
-// at once. A stalled fetch must not keep the terminal from opening: after the
-// bound the surface measures with whatever faces are available and refits
-// when the face arrives (document.fonts "loadingdone").
 const TERMINAL_FONT_WAIT_MS = 2000;
 const waitForMonoFont = (font: MonoFontOption): Promise<void> =>
   new Promise((resolve) => {
@@ -80,7 +73,6 @@ const getProvisionalTerminalSize = (
   const metrics = context.measureText('M');
   const cellWidth = metrics.width;
   const glyphHeight = (metrics.actualBoundingBoxAscent || fontSize * 0.8) + (metrics.actualBoundingBoxDescent || fontSize * 0.2);
-  // Mirrors measureGhosttyCell: the line height is the larger of 1.35em and the glyph box.
   const cellHeight = Math.max(1, Math.round(fontSize * 1.35), Math.ceil(glyphHeight));
   if (cellWidth < 1 || cellHeight < 1) return null;
 
@@ -94,7 +86,6 @@ export type TerminalController = {
   focus: () => void;
   fit: () => void;
   getSelection: () => { text: string; startLine: number; endLine: number } | null;
-  /** Reads the clipboard and sends it to the shell as a paste. Call it from the click itself. */
   pasteClipboard: () => Promise<void>;
 };
 
@@ -102,13 +93,7 @@ type Props = {
   sessionKey: string;
   chunks: TerminalChunk[];
   onInput: (data: string) => void;
-  /** Fitted size: the emulator has this size, so the PTY should follow. */
   onResize: (cols: number, rows: number) => void;
-  /**
-   * Size estimated from the container before Ghostty has measured anything.
-   * Good enough to spawn a shell early, not authoritative: an existing PTY
-   * must not be resized to it. Falls back to `onResize` when omitted.
-   */
   onProvisionalSize?: (cols: number, rows: number) => void;
   theme: TerminalTheme;
   monoFont: MonoFontOption;
@@ -118,13 +103,13 @@ type Props = {
   enableTouchScroll?: boolean;
   autoFocus?: boolean;
   isVisible?: boolean;
-  /** Surface construction, injectable for tests. */
+  clipboard?: ClipboardAPI;
   createSurface?: TerminalSurfaceFactory;
 };
 
 const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   sessionKey, chunks, onInput, onResize, onProvisionalSize, theme, monoFont, fontFamily, fontSize, className,
-  enableTouchScroll = false, autoFocus = true, isVisible = true, createSurface = createGhosttySurface,
+  enableTouchScroll = false, autoFocus = true, isVisible = true, clipboard, createSurface = createGhosttySurface,
 }, ref) => {
   const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -141,14 +126,64 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
   const restoreMenuFocusRef = React.useRef(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [menuSelection, setMenuSelection] = React.useState('');
+  const clipboardRef = React.useRef(clipboard);
+  const pasteFailedMessageRef = React.useRef('');
+  const pendingSelectionClipboardRef = React.useRef<string | null>(null);
+  const selectionClipboardWriteRef = React.useRef<Promise<void> | null>(null);
   inputRef.current = onInput;
   resizeRef.current = onResize;
   provisionalSizeCallbackRef.current = onProvisionalSize;
   visibleRef.current = isVisible;
+  clipboardRef.current = clipboard;
+  pasteFailedMessageRef.current = t('terminalView.toast.pasteFailed');
   labelsRef.current = {
     input: t('terminalView.viewport.inputAria'),
     scrollbar: t('terminalView.viewport.scrollbarAria'),
   };
+
+  const writeLatestSelectionClipboard = React.useCallback(() => {
+    const selectionClipboard = clipboardRef.current?.selection;
+    if (!selectionClipboard) return;
+    const selection = surfaceRef.current?.getSelection() ?? '';
+    if (selection.length === 0) return;
+    pendingSelectionClipboardRef.current = selection;
+    if (selectionClipboardWriteRef.current) return;
+
+    selectionClipboardWriteRef.current = (async () => {
+      while (pendingSelectionClipboardRef.current !== null) {
+        const text = pendingSelectionClipboardRef.current;
+        pendingSelectionClipboardRef.current = null;
+        await selectionClipboard.writeText(text).catch(() => undefined);
+      }
+      selectionClipboardWriteRef.current = null;
+    })();
+  }, []);
+
+  const pasteClipboard = React.useCallback(async (
+    failedMessage: string,
+    readText: () => Promise<string> = readClipboardText,
+  ) => {
+    const surface = surfaceRef.current;
+    if (!surface || !visibleRef.current) return;
+    const lifetime = clipboardLifetimeRef.current;
+    const isCurrent = () => surfaceRef.current === surface
+      && visibleRef.current && clipboardLifetimeRef.current === lifetime;
+    try {
+      await surface.pasteFromClipboard(readText, isCurrent);
+    } catch {
+      if (isCurrent()) toast.error(failedMessage);
+    }
+  }, []);
+
+  const pasteSelectionClipboard = React.useCallback(() => {
+    const selectionClipboard = clipboardRef.current?.selection;
+    if (!selectionClipboard) return;
+    const readText = async () => {
+      await selectionClipboardWriteRef.current;
+      return selectionClipboard.readText();
+    };
+    void pasteClipboard(pasteFailedMessageRef.current, readText);
+  }, [pasteClipboard]);
 
   React.useLayoutEffect(() => {
     const container = containerRef.current;
@@ -157,8 +192,6 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     if (size) (provisionalSizeCallbackRef.current ?? resizeRef.current)(size.cols, size.rows);
   }, [fontFamily, fontSize]);
 
-  // The surface lives for the whole mount. Theme and font changes are applied
-  // in place below; only the container identity and the factory can recreate it.
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -184,12 +217,12 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
           handleTouchPointer: ownsTouch,
           onData: (data) => inputRef.current(data),
           onResize: (cols, rows) => resizeRef.current(cols, rows),
+          onSelectionChange: clipboard?.selection ? writeLatestSelectionClipboard : undefined,
+          onMiddleClickPaste: clipboard?.selection ? pasteSelectionClipboard : undefined,
           onLinkActivate: (text) => {
             void openExternalUrl(text);
           },
           onContextMenu: (event) => {
-            // Only the surface can decide whether a terminal application owns
-            // this click. The React trigger must ignore all other events.
             allowedContextEventRef.current = event;
             setMenuSelection(surface?.getSelection() ?? '');
           },
@@ -210,10 +243,6 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
 
     return () => {
       disposed = true;
-      // Removing a focused editable mid-IME-composition wedges Android
-      // WebView's input dispatch (the whole app stops responding to touch).
-      // Blur first so the IME detaches cleanly, and hide the soft keyboard
-      // explicitly on Android before the terminal DOM is torn down.
       const active = document.activeElement;
       if (active instanceof HTMLElement && container.contains(active)) {
         active.blur();
@@ -230,7 +259,6 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       surfaceRef.current = null;
       lastChunkRef.current = null;
     };
-    // Theme, font and touch mode are applied to the live surface by the effects below.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [createSurface]);
 
@@ -263,26 +291,11 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     }
   };
 
-  const pasteClipboard = React.useCallback(async (failedMessage: string) => {
-    const surface = surfaceRef.current;
-    if (!surface || !visibleRef.current) return;
-    const lifetime = clipboardLifetimeRef.current;
-    const isCurrent = () => surfaceRef.current === surface
-      && visibleRef.current && clipboardLifetimeRef.current === lifetime;
-    try {
-      await surface.pasteFromClipboard(readClipboardText, isCurrent);
-    } catch {
-      if (isCurrent()) toast.error(failedMessage);
-    }
-  }, []);
-
   React.useEffect(() => {
     const surface = surfaceRef.current;
     if (!surface) return;
     const { reset, replay, pending } = selectTerminalChunkReplay(chunks, lastChunkRef.current);
     if (replay) {
-      // Snapshot history is laid out for the PTY size recorded on its chunk;
-      // the surface replays it at that size and reflows to the fitted grid.
       const [snapshot, ...live] = pending;
       surface.resetAndWrite(snapshot ? (snapshot.replayData ?? snapshot.data) : '', snapshot?.size);
       const liveData = live.map((chunk) => chunk.replayData ?? chunk.data).join('');
@@ -313,9 +326,7 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     let lastY = 0;
     let remainder = 0;
     const lineHeight = Math.max(12, Math.round(fontSize * 1.35));
-    // Android WebView only raises the soft keyboard for a native tap-focus; the
-    // pointer-captured, touch-action:none tap here focuses programmatically, so
-    // the IME must be summoned explicitly via the Capacitor Keyboard plugin.
+    // external: https://developer.android.com/develop/ui/views/touch-and-input/keyboard-input/visibility Programmatic focus on a captured touch tap needs an explicit Android soft-keyboard request.
     const showAndroidSoftKeyboard = () => {
       // SAFETY: the Capacitor bridge installs window.Capacitor with getPlatform() on native shells only.
       const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;
@@ -410,7 +421,6 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       if (!range || !text.trim()) return null;
       return { text, startLine: range.start.y + 1, endLine: range.end.y + 1 };
     },
-    // Touch hosts have no paste shortcut to fall back on, so their failure names none.
     pasteClipboard: () => pasteClipboard(t('terminalView.toast.pasteFailedTouch')),
   }), [pasteClipboard, t]);
 

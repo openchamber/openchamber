@@ -1,6 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import { mergeMetadataPatch } from './session-metadata-store.js';
 import { buildLinkEntry, buildLinkPatch, createSessionLinker } from './session-link.js';
+import { matchLinearUrl } from '../linear/tracker.js';
+
+const matchTrackerUrl = (url) => {
+  const identifier = matchLinearUrl(url);
+  return identifier ? { provider: 'linear', identifier } : null;
+};
+// A registry with Linear's own `matchUrl` and a tracker that fails to load.
+const trackers = {
+  list: () => ['linear', 'broken'],
+  implementation: async (id) => {
+    if (id === 'broken') throw new Error('load failed');
+    return { matchUrl: matchLinearUrl };
+  },
+};
 
 class TestError extends Error {
   constructor(message, status) {
@@ -12,6 +26,7 @@ class TestError extends Error {
 const createLinker = (metadata = {}) => {
   const store = { metadata, writes: 0 };
   const linker = createSessionLinker({
+    trackers,
     updateMetadata: async (_sessionId, decide) => {
       const patch = decide(store.metadata);
       if (!patch) return { metadata: store.metadata, changed: false };
@@ -33,10 +48,17 @@ describe('buildLinkEntry', () => {
     expect(buildLinkEntry({ url: 'https://github.com/acme/app/issues/12', title: 'Slow', kind: 'change' }, 1).entry.kind).toBe('issue');
   });
 
-  test('a Linear issue address becomes the Linear entry', () => {
-    expect(buildLinkEntry({ url: 'https://linear.app/acme/issue/eng-12/search', title: 'Search', kind: 'issue' }, 1).entry).toEqual({
-      id: 'linear:ENG-12', identifier: 'ENG-12', title: 'Search', url: 'https://linear.app/acme/issue/eng-12/search', kind: 'linear', linkedAt: 1,
+  test('a registered tracker\'s item address becomes a tracker entry under the same id as before', () => {
+    expect(buildLinkEntry({ url: 'https://linear.app/acme/issue/eng-12/search', title: 'Search', kind: 'issue' }, 1, { matchTrackerUrl }).entry).toEqual({
+      // Linear keeps the kind older bundled UIs know, with the provider beside it.
+      id: 'linear:ENG-12', kind: 'linear', provider: 'linear', identifier: 'ENG-12', title: 'Search', url: 'https://linear.app/acme/issue/eng-12/search', linkedAt: 1,
     });
+    // Any other tracker is a `tracker` entry.
+    const matchJira = () => ({ provider: 'jira', identifier: 'proj-4' });
+    expect(buildLinkEntry({ url: 'https://acme.atlassian.net/browse/PROJ-4', title: 'Bug', kind: 'issue' }, 1, { matchTrackerUrl: matchJira }).entry)
+      .toMatchObject({ id: 'jira:PROJ-4', kind: 'tracker', provider: 'jira', identifier: 'PROJ-4' });
+    // Without a tracker that claims it, the address is an external link.
+    expect(buildLinkEntry({ url: 'https://linear.app/acme/issue/eng-12/search', title: 'Search', kind: 'issue' }, 1).entry.kind).toBe('external');
   });
 
   test('any other service is stored as it was described', () => {
@@ -45,6 +67,15 @@ describe('buildLinkEntry', () => {
       title: 'Fix login', url: 'https://gitlab.com/acme/app/-/merge_requests/42', linkedAt: 1,
     });
     expect(buildLinkEntry({ url: 'https://www.jira.example/browse/OPS-7', title: 'Outage', kind: 'issue' }, 1).entry.identifier).toBe('jira.example');
+  });
+
+  test('a GitHub discussion is an external link under the id and number the UI gives one it links', () => {
+    expect(buildLinkEntry({ url: 'https://github.com/acme/app/discussions/5#discussioncomment-9', title: 'Idea', kind: 'issue' }, 1).entry).toEqual({
+      id: 'link:https://github.com/acme/app/discussions/5', kind: 'external', thread: 'issue', identifier: '#5',
+      title: 'Idea', url: 'https://github.com/acme/app/discussions/5', linkedAt: 1,
+    });
+    // Its address decides that it is no change, whatever kind the model gave.
+    expect(buildLinkEntry({ url: 'https://github.com/acme/app/discussions/5', title: 'Idea', kind: 'change' }, 1).entry.thread).toBe('issue');
   });
 
   test('a GitLab thread gets one id however its address was written', () => {
@@ -74,6 +105,24 @@ describe('buildLinkEntry', () => {
 
 describe('session.link', () => {
   const pull = { url: 'https://github.com/acme/app/pull/7', title: 'Add search', kind: 'change' };
+
+  test('links a tracker item through the registry, and a tracker that fails to load refuses nothing', async () => {
+    const { linker, store } = createLinker();
+    const result = await linker.link({ sessionId: 's1', link: { url: 'https://linear.app/acme/issue/ENG-3', title: 'T', kind: 'issue' } });
+    expect(result.linked).toMatchObject({ id: 'linear:ENG-3', kind: 'linear', provider: 'linear' });
+    expect(store.metadata.openchamber.linked_issues).toHaveLength(1);
+  });
+
+  test('re-linking an item stored as a legacy Linear entry refreshes it in place and keeps its kind', () => {
+    const legacy = { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Spec', url: 'https://linear.app/x/issue/ENG-1', kind: 'linear', linkedAt: 1 };
+    const same = buildLinkEntry({ url: 'https://linear.app/x/issue/ENG-1', title: 'Spec', kind: 'issue' }, 9, { matchTrackerUrl }).entry;
+    expect(buildLinkPatch({ openchamber: { linked_issues: [legacy] } }, same)).toBeNull();
+    // A renamed issue refreshes the snapshot; an older bundled UI still sees a `linear` entry.
+    const renamed = buildLinkEntry({ url: 'https://linear.app/x/issue/ENG-1', title: 'Spec v2', kind: 'issue' }, 9, { matchTrackerUrl }).entry;
+    expect(buildLinkPatch({ openchamber: { linked_issues: [legacy] } }, renamed).openchamber.linked_issues).toEqual([
+      { ...legacy, title: 'Spec v2', kind: 'linear', provider: 'linear' },
+    ]);
+  });
 
   test('appends to the links already there and keeps other metadata', async () => {
     const existing = { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Spec', url: 'https://linear.app/x', kind: 'linear', linkedAt: 1 };
@@ -134,5 +183,67 @@ describe('buildLinkEntry title cut surrogate-pair boundary (#1975)', () => {
 
   test('a plain over-limit title still cuts at exactly 300', () => {
     expect(entry('a'.repeat(400)).title).toBe('a'.repeat(300));
+  });
+});
+
+describe('session.unlink', () => {
+  // As the UI and earlier agent links stored them.
+  const pull = { id: 'acme/app#7', number: 7, title: 'Add search', url: 'https://github.com/acme/app/pull/7', kind: 'pull', author: 'dev', linkedAt: 1 };
+  const otherPull = { id: 'acme/web#7', number: 7, title: 'Fix nav', url: 'https://github.com/acme/web/pull/7', kind: 'pull', linkedAt: 2 };
+  const mr = { id: 'link:https://gitlab.com/a/b/-/merge_requests/600', kind: 'external', thread: 'change', identifier: '!600', title: 'MR', url: 'https://gitlab.com/a/b/-/merge_requests/600/diffs', linkedAt: 3 };
+  const linear = { id: 'linear:ENG-3', kind: 'linear', provider: 'linear', identifier: 'ENG-3', title: 'Spec', url: 'https://linear.app/acme/issue/ENG-3/spec', linkedAt: 4 };
+  const page = { id: 'link:https://docs.example.com/guide', kind: 'external', thread: 'issue', identifier: 'docs.example.com', title: 'Guide', url: 'https://docs.example.com/guide', linkedAt: 5 };
+  const all = [pull, otherPull, mr, linear, page];
+  const ids = (store) => store.metadata.openchamber.linked_issues.map((entry) => entry.id);
+
+  test('a url removes its thread however the address was written, and keeps everything else', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: all, goal: { text: 'g' } } });
+    const result = await linker.unlink({ sessionId: 's1', target: { url: 'https://github.com/acme/app/pull/7/files' } });
+    expect(result).toMatchObject({ changed: true, unlinked: [{ id: 'acme/app#7', title: 'Add search', url: pull.url, kind: 'pull', number: 7 }] });
+    expect(ids(store)).toEqual(['acme/web#7', mr.id, linear.id, page.id]);
+    expect(store.metadata.openchamber.goal).toEqual({ text: 'g' });
+
+    await linker.unlink({ sessionId: 's1', target: { url: 'https://gitlab.com/a/b/-/merge_requests/600' } });
+    await linker.unlink({ sessionId: 's1', target: { url: 'https://linear.app/acme/issue/eng-3' } });
+    await linker.unlink({ sessionId: 's1', target: { url: 'https://docs.example.com/guide/#intro' } });
+    expect(ids(store)).toEqual(['acme/web#7']);
+  });
+
+  test('an identifier removes the one link it names, in any case', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: all } });
+    await linker.unlink({ sessionId: 's1', target: { identifier: 'eng-3' } });
+    await linker.unlink({ sessionId: 's1', target: { identifier: '!600' } });
+    await linker.unlink({ sessionId: 's1', target: { identifier: 'acme/web#7' } });
+    expect(ids(store)).toEqual(['acme/app#7', page.id]);
+  });
+
+  test('an id-only stored link is reported without inventing fields or removing an unvalidated record', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: [{ id: 'legacy' }] } });
+    const result = await linker.unlink({ sessionId: 's1', target: { identifier: 'LEGACY' } });
+    expect(result).toMatchObject({ changed: false, unlinked: [{ id: 'legacy' }] });
+    expect(ids(store)).toEqual(['legacy']);
+  });
+
+  test('an identifier that names several links removes none and asks for the url', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: all } });
+    await expect(linker.unlink({ sessionId: 's1', target: { identifier: '#7' } })).rejects.toMatchObject({ status: 409 });
+    expect(store.writes).toBe(0);
+  });
+
+  test('#N names GitHub threads only, never a GitLab merge request the composer stored', async () => {
+    const gitlabMr = { id: 'gitlab.com:a/b#7', number: 7, title: 'MR', url: 'https://gitlab.com/a/b/-/merge_requests/7', kind: 'pull', linkedAt: 6 };
+    const { linker, store } = createLinker({ openchamber: { linked_issues: [pull, gitlabMr] } });
+    await linker.unlink({ sessionId: 's1', target: { identifier: '#7' } });
+    expect(ids(store)).toEqual(['gitlab.com:a/b#7']);
+  });
+
+  test('nothing to remove is an error that lists what is linked', async () => {
+    const { linker, store } = createLinker({ openchamber: { linked_issues: [pull] } });
+    const missing = linker.unlink({ sessionId: 's1', target: { url: 'https://github.com/acme/app/pull/8' } });
+    await expect(missing).rejects.toMatchObject({ status: 404 });
+    await expect(missing).rejects.toThrow(pull.url);
+    await expect(linker.unlink({ sessionId: 's1', target: {} })).rejects.toMatchObject({ status: 400 });
+    await expect(linker.unlink({ sessionId: null, target: { identifier: '#7' } })).rejects.toMatchObject({ status: 400 });
+    expect(store.writes).toBe(0);
   });
 });

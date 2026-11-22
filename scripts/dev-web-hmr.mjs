@@ -23,7 +23,7 @@ function run(label, command, args, env = {}, options = {}) {
     detached: useDetachedChildren,
     windowsHide: true,
   }).on('error', (error) => {
-    console.error(`[dev:web:hmr] Failed to start ${label}:`, error);
+    console.error(`[dev] Failed to start ${label}:`, error);
   });
 }
 
@@ -103,16 +103,16 @@ function getLanAddresses() {
   return addresses;
 }
 
-function clearViteCache() {
-  const cacheDirs = [
-    path.join(webRoot, 'node_modules/.vite'),
-    path.join(webRoot, 'node_modules/.vite-temp'),
-  ];
+// One dependency cache per UI port. Dev servers often run side by side (the
+// maintainer's own, agents' isolated instances), and with one shared cache a
+// newly started server re-optimizes it under the running ones: their next
+// lazy chunk answers 504 "Outdated Optimize Dep" and that part of the page
+// never loads.
+const viteCacheDir = path.join(webRoot, `node_modules/.vite-dev-${uiPort}`);
 
-  for (const cacheDir of cacheDirs) {
-    if (!existsSync(cacheDir)) continue;
-    rmSync(cacheDir, { recursive: true, force: true });
-  }
+function clearViteCache() {
+  if (!existsSync(viteCacheDir)) return;
+  rmSync(viteCacheDir, { recursive: true, force: true });
 }
 
 clearViteCache();
@@ -133,32 +133,68 @@ const api = run(
     OPENCHAMBER_RELAY_HOST: process.env.OPENCHAMBER_RELAY_HOST || 'off',
   },
 );
-const vite = run(
-  'vite',
-  bunExecutable,
-  ['x', 'vite', '--force', '--host', hmrHost, '--port', uiPort, '--strictPort'],
-  {
-    OPENCHAMBER_PORT: backendPort,
-    OPENCHAMBER_DISABLE_PWA_DEV: '1',
-  },
-  { cwd: webRoot },
-);
-
-console.log(`[dev:web:hmr] UI with HMR: http://127.0.0.1:${uiPort}`);
-if (hmrHost === '0.0.0.0' || hmrHost === '::') {
-  const lanAddresses = getLanAddresses();
-  if (lanAddresses.length > 0) {
-    for (const address of lanAddresses) {
-      console.log(`[dev:web:hmr] LAN/mobile UI: http://${address}:${uiPort}`);
-    }
-  } else {
-    console.log('[dev:web:hmr] LAN/mobile UI: no LAN IPv4 address found');
-  }
-}
-console.log(`[dev:web:hmr] API: http://127.0.0.1:${backendPort}`);
-console.log('[dev:web:hmr] IMPORTANT: open UI URL above for HMR; backend URL has no HMR');
-
+let vite = null;
 let shuttingDown = false;
+
+// How long the UI waits for the API before it starts anyway.
+const API_WAIT_MS = 120_000;
+
+/**
+ * The UI port opens only once the API answers. A page loaded in between (a
+ * browser tab or a project action opening the address the moment the server
+ * starts) got errors for every API call and stayed on an empty screen until
+ * reloaded; with the port still closed, the browser keeps waiting instead.
+ */
+async function waitForApi() {
+  const deadline = Date.now() + API_WAIT_MS;
+  while (!shuttingDown && Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${backendPort}/health`, { signal: AbortSignal.timeout(1000) });
+      if (response.ok) return;
+    } catch {
+      // Not listening yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  if (!shuttingDown) console.warn(`[dev] API did not answer within ${API_WAIT_MS / 1000}s; starting the UI anyway`);
+}
+
+function startVite() {
+  vite = run(
+    'vite',
+    bunExecutable,
+    ['x', 'vite', '--force', '--host', hmrHost, '--port', uiPort, '--strictPort'],
+    {
+      OPENCHAMBER_PORT: backendPort,
+      OPENCHAMBER_DISABLE_PWA_DEV: '1',
+      OPENCHAMBER_VITE_CACHE_DIR: viteCacheDir,
+    },
+    { cwd: webRoot },
+  );
+  vite.on('exit', onChildExit('vite'));
+  printAddresses();
+}
+
+// `localhost`, not 127.0.0.1: the desktop app lifts Chromium's connection cap
+// for 127.0.0.1 (its own server, packages/electron/entry.mjs), and its browser
+// panel then fetched the whole module graph at once and Vite reset
+// connections. Under `localhost` the panel keeps the cap, as any browser does.
+function printAddresses() {
+  console.log(`[dev] UI with HMR: http://localhost:${uiPort}`);
+  console.log(`[dev] Mobile UI with HMR: http://localhost:${uiPort}/mobile.html`);
+  if (hmrHost === '0.0.0.0' || hmrHost === '::') {
+    const lanAddresses = getLanAddresses();
+    if (lanAddresses.length > 0) {
+      for (const address of lanAddresses) {
+        console.log(`[dev] LAN/mobile UI: http://${address}:${uiPort}`);
+      }
+    } else {
+      console.log('[dev] LAN/mobile UI: no LAN IPv4 address found');
+    }
+  }
+  console.log(`[dev] API: http://127.0.0.1:${backendPort}`);
+  console.log('[dev] IMPORTANT: open UI URL above for HMR; backend URL has no HMR');
+}
 
 async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
@@ -172,7 +208,7 @@ function onChildExit(label) {
     if (shuttingDown) return;
 
     if (code !== 0 || signal) {
-      console.error(`[dev:web:hmr] ${label} exited unexpectedly (code=${code ?? 'null'} signal=${signal ?? 'none'})`);
+      console.error(`[dev] ${label} exited unexpectedly (code=${code ?? 'null'} signal=${signal ?? 'none'})`);
       shutdown(typeof code === 'number' ? code : 1).catch(() => process.exit(1));
       return;
     }
@@ -182,7 +218,9 @@ function onChildExit(label) {
 }
 
 api.on('exit', onChildExit('api'));
-vite.on('exit', onChildExit('vite'));
+void waitForApi().then(() => {
+  if (!shuttingDown) startVite();
+});
 
 process.on('SIGINT', () => {
   shutdown(130).catch(() => process.exit(130));

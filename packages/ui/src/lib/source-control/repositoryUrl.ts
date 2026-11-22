@@ -1,11 +1,16 @@
 import type { GitRemote, SourceControlIdentity, SourceControlProvider } from '@/lib/api/types';
 import { getSourceControlBaseUrl, resolveSourceControlIdentity } from './identity';
+import { unknownProviderDescriptor, type SourceControlProviderDescriptor } from './providers/descriptor';
 
 type RepositoryLink = { provider: SourceControlProvider; url: string };
 
-const repositoryLink = (endpoint: string, identities: readonly SourceControlIdentity[]): RepositoryLink | null => {
+const repositoryLink = (
+  endpoint: string,
+  identities: readonly SourceControlIdentity[],
+  descriptors: readonly SourceControlProviderDescriptor[],
+): RepositoryLink | null => {
   const value = endpoint.trim();
-  const identity = resolveSourceControlIdentity({ name: '', fetchUrl: value, pushUrl: value }, [...identities]);
+  const identity = resolveSourceControlIdentity({ name: '', fetchUrl: value, pushUrl: value }, identities);
   if (!identity) return null;
 
   let path: string;
@@ -28,7 +33,9 @@ const repositoryLink = (endpoint: string, identities: readonly SourceControlIden
   const prefix = base.pathname.replace(/^\/+|\/+$/g, '');
   if (prefix && path.startsWith(`${prefix}/`)) path = path.slice(prefix.length + 1);
   const segments = path.split('/');
-  if (segments.length < 2 || (identity.provider === 'github' && segments.length !== 2)) return null;
+  const descriptor = descriptors.find((entry) => entry.id === identity.provider) ?? unknownProviderDescriptor(identity.provider);
+  const fewest = descriptor.repository.pathStyle === 'path' ? 1 : 2;
+  if (segments.length < fewest || (!descriptor.repository.nestedNamespaces && segments.length !== 2)) return null;
   if (segments.some((segment) => !/^[a-zA-Z0-9_.-]+$/.test(segment) || ['.', '..', '-'].includes(segment))) return null;
 
   base.pathname = `/${prefix ? `${prefix}/` : ''}${path}`;
@@ -37,15 +44,15 @@ const repositoryLink = (endpoint: string, identities: readonly SourceControlIden
   return { provider: identity.provider, url: base.toString() };
 };
 
-/** Origin first, then the first recognized remote. Fetch identifies the checkout before push. */
 export const repositoryLinkFromRemotes = (
   remotes: readonly GitRemote[],
   identities: readonly SourceControlIdentity[],
+  descriptors: readonly SourceControlProviderDescriptor[],
 ): RepositoryLink | null => {
   const origin = remotes.find((remote) => remote.name === 'origin');
   const ordered = origin ? [origin, ...remotes.filter((remote) => remote !== origin)] : remotes;
   for (const remote of ordered) {
-    const link = repositoryLink(remote.fetchUrl, identities) ?? repositoryLink(remote.pushUrl, identities);
+    const link = repositoryLink(remote.fetchUrl, identities, descriptors) ?? repositoryLink(remote.pushUrl, identities, descriptors);
     if (link) return link;
   }
   return null;

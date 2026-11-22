@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { AGENT_SCOPE, getJsonWriteTarget, readConfigLayers, writeConfig } from './shared.js';
+import { AGENT_SCOPE, getJsonWriteTarget, readConfigLayers, writeConfig } from './config-files.js';
 import { findProjectConfigOverride } from './config-v2.js';
 import { readProjectConfigFiles } from './websearch-config.js';
 

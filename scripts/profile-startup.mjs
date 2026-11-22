@@ -63,6 +63,9 @@ Options:
                            (default). warm: one profile reused by every launch
   --chrome <path>          Web only. Chrome/Chromium executable
   --headed                 Web only. Show the browser (default: headless)
+  --transcript             The home restores a session on launch: also record
+                           when its messages are rendered and readable, and
+                           wait for that before a launch counts as done
   --model-label <text>     Record modelPickerShown: when the composer footer
                            first shows this model name
   --app <path>             Packaged app (.app bundle on macOS, executable elsewhere).
@@ -71,7 +74,7 @@ Options:
   --runs <n>               Measured launches per build (default: 5)
   --warmup <n>             Discarded launches per build before measuring (default: 1)
   --opencode cold|warm     cold: the app starts its own OpenCode on every launch
-                           (default). warm: one OpenCode from the bundled CLI is
+                           (default). warm: one OpenCode from the bundled server is
                            started before the runs and every launch attaches to it.
   --home <dir>             Isolated home directory (default: <tmp>/openchamber-bench-startup)
   --fresh                  Wipe the isolated home before every launch (first launch
@@ -115,6 +118,7 @@ const parseArgs = (argv) => {
     chrome: null,
     headed: false,
     modelLabel: null,
+    transcript: false,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
@@ -142,6 +146,7 @@ const parseArgs = (argv) => {
     else if (value === "--chrome") options.chrome = argv[++index]
     else if (value === "--headed") options.headed = true
     else if (value === "--model-label") options.modelLabel = argv[++index]
+    else if (value === "--transcript") options.transcript = true
     else throw new Error(`Unknown option: ${value}`)
   }
   if (!Number.isInteger(options.runs) || options.runs < 1) throw new Error("--runs must be a positive integer")
@@ -164,7 +169,16 @@ const defaultApp = () => {
   return join(repoRoot, "packages/electron/dist/win-unpacked/OpenChamber.exe")
 }
 
-// The executable to spawn and the bundled OpenCode CLI, per platform layout.
+// How a build runs its bundled OpenCode: the server script on the app's own executable, or, in builds
+// from before it, the OpenCode CLI binary. Either answers `--version` and `serve`.
+const bundledOpenCode = (executable, resources) => {
+  const server = join(resources, "opencode-server", "serve.mjs")
+  if (existsSync(server)) return { command: executable, args: [server], env: { ELECTRON_RUN_AS_NODE: "1" }, path: server }
+  const cli = join(resources, "opencode-cli", process.platform === "win32" ? "opencode.exe" : "opencode")
+  return { command: cli, args: [], env: {}, path: cli }
+}
+
+// The executable to spawn and its bundled OpenCode, per platform layout.
 const resolveBuild = (appPath, label) => {
   const app = resolve(appPath)
   if (!existsSync(app)) throw new Error(`Packaged app not found: ${app}. Run bun run electron:build or pass --app.`)
@@ -172,10 +186,9 @@ const resolveBuild = (appPath, label) => {
     const macos = join(app, "Contents", "MacOS")
     const executable = existsSync(macos) ? readdirSync(macos).map((name) => join(macos, name)).find((candidate) => existsSync(candidate)) : null
     if (!executable) throw new Error(`No executable inside ${app}`)
-    return { label, app, executable, opencodeCli: join(app, "Contents", "Resources", "opencode-cli", "opencode") }
+    return { label, app, executable, opencode: bundledOpenCode(executable, join(app, "Contents", "Resources")) }
   }
-  const resources = join(app, "..", "resources")
-  return { label, app, executable: app, opencodeCli: join(resources, "opencode-cli", process.platform === "win32" ? "opencode.exe" : "opencode") }
+  return { label, app, executable: app, opencode: bundledOpenCode(app, join(app, "..", "resources")) }
 }
 
 // Where the app writes inside the isolated home. Settings follow
@@ -293,7 +306,7 @@ const PROBE = `(() => ({
 }))()`
 
 // Recorder marks that are moments a user could feel, in the order reported.
-const RECORDER_MARKS = ["splashGone", "overlayGone", "composerHittable", "composerEditable", "usable", "modelPickerReady", "modelPickerShown", "sessionRows"]
+const RECORDER_MARKS = ["splashGone", "overlayGone", "composerHittable", "composerEditable", "usable", "modelPickerReady", "modelPickerShown", "sessionRows", "transcriptPresent", "transcriptShown"]
 
 // First occurrence of every startup trace mark, shifted onto the run's clock.
 const firstTraceMarks = (trace, shift) => {
@@ -469,6 +482,9 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
   const window = []
   let error = null
   let recorder = null
+  // One navigation start per application document: more than one means the
+  // window loaded the application again during startup.
+  const origins = new Set()
 
   try {
     while (Date.now() < deadline) {
@@ -484,10 +500,10 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
         await client.send("Performance.enable")
         // Applies to the next document in this target, which is the
         // application once the splash navigates; a launch whose application
-        // document was already running falls back to the polled fields.
+        // document was already running gets the recorder from the loop below.
         try {
           await client.send("Page.enable")
-          await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel }) })
+          await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel, transcript: options.transcript }) })
         } catch {
         }
         seen.rendererTarget = Date.now() - spawnAt
@@ -514,11 +530,21 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
       if (isApplication && probe.firstPaint !== null && seen.applicationFirstPaint === undefined) {
         seen.applicationFirstPaint = Math.round(probe.origin + probe.firstPaint - spawnAt)
       }
+      if (isApplication) origins.add(probe.origin)
+      // The application navigates before the debugging port answers, so the
+      // new-document script misses it: install the recorder into the running
+      // document. Marks before this moment come from the polled fields.
+      if (isApplication && !probe.recorder) {
+        try {
+          await sendBounded(client, "Runtime.evaluate", { expression: buildStartupProbeSource({ modelLabel: options.modelLabel, transcript: options.transcript }) })
+        } catch {
+        }
+      }
       if (isApplication && probe.recorder) {
         recorder = probe.recorder
         if (recorder.marks.reactMounted !== undefined) seen.reactMounted = Math.round(probe.origin + recorder.marks.reactMounted - spawnAt)
       }
-      const usable = recorder?.marks.usable !== undefined
+      const usable = recorder?.marks.usable !== undefined && (!options.transcript || recorder.marks.transcriptShown !== undefined)
 
       let metrics = []
       try {
@@ -589,6 +615,7 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
     finalUrl: last?.url ?? null,
     sessionRows: last?.sessionRows ?? null,
     recorderInstalled: recorder !== null,
+    applicationDocuments: origins.size,
     overlaySeen: recorder?.seen.overlay ?? null,
     targetId,
   }
@@ -620,7 +647,7 @@ const launchWebOnce = async ({ run, options, chrome, profileDir }) => {
     ])
     const recorderNetwork = createNetworkRecorder(client)
     await client.send("Emulation.setDeviceMetricsOverride", { width: WINDOW_WIDTH, height: WINDOW_HEIGHT, deviceScaleFactor: 1, mobile: false })
-    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel }) })
+    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel, transcript: options.transcript }) })
     const navigatedAt = Date.now()
     await client.send("Page.navigate", { url: options.url })
     const deadline = navigatedAt + options.timeoutMs
@@ -686,17 +713,18 @@ const launchWebOnce = async ({ run, options, chrome, profileDir }) => {
   }
 }
 
-// One OpenCode from the bundled CLI, shared by every launch of a warm run. The
-// compared builds must bundle the same CLI or the measurement would attach
+// One OpenCode from the bundled server, shared by every launch of a warm run. The
+// compared builds must bundle the same OpenCode or the measurement would attach
 // each build to a different OpenCode.
 const startWarmOpenCode = async (builds, env, port) => {
   const identities = builds.map((build) => {
-    if (!existsSync(build.opencodeCli)) throw new Error(`Bundled OpenCode CLI not found: ${build.opencodeCli}`)
-    const version = spawnSync(build.opencodeCli, ["--version"], { encoding: "utf8", env })
+    if (!existsSync(build.opencode.path)) throw new Error(`Bundled OpenCode not found: ${build.opencode.path}`)
+    const version = spawnSync(build.opencode.command, [...build.opencode.args, "--version"], { encoding: "utf8", env: { ...env, ...build.opencode.env } })
     return (version.stdout || "").trim()
   })
   if (new Set(identities).size > 1) throw new Error(`The compared builds bundle different OpenCode versions: ${identities.join(" vs ")}`)
-  const child = spawn(builds[0].opencodeCli, ["serve", "--port", String(port), "--hostname", "127.0.0.1"], { env, stdio: "ignore", detached: true })
+  const { command, args, env: launchEnv } = builds[0].opencode
+  const child = spawn(command, [...args, "serve", "--port", String(port), "--hostname", "127.0.0.1"], { env: { ...env, ...launchEnv }, stdio: "ignore", detached: true })
   child.unref()
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
@@ -756,6 +784,8 @@ const MILESTONES = [
   ["overlayGone", "startup overlay gone"],
   ["usable", "usable"],
   ["sessionRows", "session rows visible"],
+  ["transcriptPresent", "restored session rendered"],
+  ["transcriptShown", "restored session readable"],
   ["rendererIdle", "renderer idle"],
   ["screenPainted", "screen: first change"],
   ["screenSettled", "screen: settled"],

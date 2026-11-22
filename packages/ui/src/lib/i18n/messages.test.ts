@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { dict as enDict } from './messages/en';
+import { getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { dict as esDict } from './messages/es';
 import { dict as deDict } from './messages/de';
 import { dict as frDict } from './messages/fr';
@@ -17,6 +18,7 @@ import { dict as arDict } from './messages/ar';
 import { dict as heDict } from './messages/he';
 import { routingI18n } from './messages/routing.i18n';
 import { poolSettingsI18n } from './messages/pool-settings.i18n';
+import { modelDefaultsI18n } from './messages/model-defaults.i18n';
 import { sessionErrorRecoveryI18n } from './messages/session-error-recovery.i18n';
 
 const localeDictionaries = {
@@ -38,11 +40,85 @@ const localeDictionaries = {
 } as const;
 
 describe('i18n dictionaries', () => {
+  test('Zen labels are translated and preserve their value placeholders in every locale', () => {
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['quota.value.requests']).toContain('{count}');
+      expect(dictionary['quota.value.spent']).toContain('{spent}');
+      expect(dictionary['quota.family.zen']).toContain('Zen');
+      if (locale !== 'en') {
+        for (const key of ['quota.value.requests', 'quota.value.spent', 'quota.family.zen'] as const) {
+          expect(dictionary[key]).not.toBe(enDict[key]);
+        }
+      }
+    }
+  });
+
+  test('credits-used messages carry the amount and are translated in every locale', () => {
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['quota.value.creditsUsed']).toContain('{credits}');
+      if (locale !== 'en') {
+        expect(dictionary['quota.value.creditsUsed']).not.toBe(enDict['quota.value.creditsUsed']);
+      }
+    }
+  });
+
+  test('monthly spending labels and the unknown amount are translated in every locale', () => {
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['quota.window.monthlyTotal']).toBeTruthy();
+      expect(dictionary['quota.window.monthlyByok']).toContain('BYOK');
+      expect(dictionary['quota.value.unknown']).toBeTruthy();
+      if (locale !== 'en') {
+        expect(dictionary['quota.window.monthlyTotal']).not.toBe(enDict['quota.window.monthlyTotal']);
+        expect(dictionary['quota.window.monthlyByok']).not.toBe(enDict['quota.window.monthlyByok']);
+        expect(dictionary['quota.value.unknown']).not.toBe(enDict['quota.value.unknown']);
+      }
+    }
+  });
   test('repository links name either provider in every locale', () => {
     for (const dictionary of Object.values(localeDictionaries)) {
       expect(dictionary['gitView.header.openRepository']).toContain('{provider}');
     }
   });
+
+  // A review host's change carries the same provider-neutral wording as a pull
+  // or merge request: each `change` member names its host through `{provider}`.
+  test('change families name their provider in every locale', () => {
+    const changeKeys = [
+      'settings.sourceControl.provider.description.change',
+      'references.picker.empty.notConnected.change',
+      'chat.chatInput.actions.linkRepositoryItem.change',
+      'session.newWorktree.actions.startFromRepository.change',
+      'sourceBoard.list.repository.change',
+      'gitView.change.actions.openOnProviderAria',
+      'settings.sourceControl.field.username.info',
+      'settings.sourceControl.field.httpPassword.info',
+      'settings.sourceControl.field.httpPassword.rejected',
+    ] as const;
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      for (const key of changeKeys) {
+        expect(`${locale} ${key}: ${dictionary[key].includes('{provider}')}`).toBe(`${locale} ${key}: true`);
+        expect(`${locale} ${key}: ${/GitHub|GitLab|Gerrit|Linear/.test(dictionary[key])}`).toBe(`${locale} ${key}: false`);
+      }
+    }
+  });
+  // A sentence that names its provider through `{provider}` serves every
+  // provider; a literal product name would put GitHub's words on Gitea's card.
+  test('provider sentences keep {provider} and name no product in every locale', () => {
+    const english: Record<string, string> = enDict;
+    const providerKeys = Object.keys(english).filter((key) => english[key].includes('{provider}'));
+    expect(providerKeys.length).toBeGreaterThan(0);
+    expect(providerKeys).toContain('sourceBoard.list.repository.change');
+    expect(providerKeys).toContain('chat.chatInput.actions.linkRepositoryItem.change');
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      const translated: Record<string, string> = dictionary;
+      for (const key of providerKeys) {
+        const text = translated[key] ?? '';
+        expect(`${locale} ${key}: ${text.includes('{provider}')}`).toBe(`${locale} ${key}: true`);
+        expect(`${locale} ${key}: ${/GitHub|GitLab|Linear/.test(text)}`).toBe(`${locale} ${key}: false`);
+      }
+    }
+  });
+
   test('anonymous transport has a translated read-only label in every locale', () => {
     const key = 'settings.sourceControl.transport.anonymous';
     expect(enDict[key]).toBe('Anonymous HTTPS, read-only');
@@ -64,6 +140,13 @@ describe('i18n dictionaries', () => {
       }
     }
   });
+  test('every customizable shortcut has an English label', () => {
+    const missing = getCustomizableShortcutActions()
+      .map((action) => action.settingsLabelKey)
+      .filter((key) => !(key in enDict));
+    expect(missing).toEqual([]);
+  });
+
   test('all locales stay in key parity with english', () => {
     const englishKeys = Object.keys(enDict).sort();
 
@@ -124,6 +207,22 @@ describe('i18n dictionaries', () => {
         expect(text.trim()).toBeTruthy();
         expect(placeholders(text)).toEqual(placeholders(englishText));
         if (locale !== 'en' && !literal.has(key)) expect(`${locale} ${key} ${text}`).not.toBe(`${locale} ${key} ${englishText}`);
+      }
+    }
+  });
+
+  test('model defaults are translated in every locale and keep their placeholders', () => {
+    const placeholders = (text: string) => (text.match(/\{[a-zA-Z]+\}/g) ?? []).sort();
+    const english = Object.entries(modelDefaultsI18n.en);
+    expect(english.length).toBe(15);
+    for (const [locale, dictionary] of Object.entries(modelDefaultsI18n)) {
+      const entries = new Map<string, string>(Object.entries(dictionary));
+      expect([...entries.keys()].sort()).toEqual(english.map(([key]) => key).sort());
+      for (const [key, englishText] of english) {
+        const text = entries.get(key) ?? '';
+        expect(text.trim()).toBeTruthy();
+        expect(placeholders(text)).toEqual(placeholders(englishText));
+        if (locale !== 'en') expect(`${locale} ${key} ${text}`).not.toBe(`${locale} ${key} ${englishText}`);
       }
     }
   });

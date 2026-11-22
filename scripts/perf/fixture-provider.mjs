@@ -29,6 +29,9 @@
  * cost of re-rendering a whole turn per delta depends on. `agent-*reads-*`
  * reads large files instead, and `agent-100tools-x5-*` makes its calls five
  * at a time, so one step's message carries five tool parts.
+ * `agent-20tools-wait3000ms-300cps` waits three seconds before each step's
+ * first token, as a hosted model does: every step's assistant message then
+ * sits empty for that long, which the instant fixtures never show.
  * `unicode-300cps` streams prose with em dashes, curly quotes and Cyrillic
  * paragraphs and a 150-line TypeScript fence whose comments and strings carry
  * the same characters. A string with any character above Latin-1 is stored by
@@ -36,10 +39,19 @@
  * regex lexing and hashing cost; the ASCII documents never reach that path.
  * `stream-20000cps`, `code-20000cps`, `unicode-20000cps` and the
  * `agent-*tools-20000cps` models exist only to seed long sessions quickly.
+ *
+ * A prompt from `fixture-conversations.mjs` overrides all of the above: the
+ * request gets that conversation's scripted tool steps and answer at seeding
+ * speed, whatever the model, so design shots show a history that reads like
+ * real work. No perf scenario sends those prompts.
  */
 
 import { createServer } from "node:http"
+import { resolve } from "node:path"
 import process from "node:process"
+import { fileURLToPath } from "node:url"
+
+import { fixtureMessageText, planScriptedResponse } from "./fixture-conversations.mjs"
 
 const FIXTURE_PROVIDER_ID = "perf"
 const FIXTURE_RATES = [100, 300, 600, 1200]
@@ -216,22 +228,102 @@ const FIXTURE_UNICODE_DOCUMENT = [
   UNICODE_PROSE(3),
 ].join("\n")
 
+// Every Markdown construct the chat renders, for side-by-side visual checks
+// of two renderers rather than for timing.
+const FIXTURE_SHOWCASE_DOCUMENT = [
+  "# Showcase heading",
+  "",
+  "A paragraph with **bold**, *italic*, ~~struck~~, `inline code`, a [named link](https://example.com/page) and a bare https://example.com/docs URL.",
+  "",
+  "## Lists and tasks",
+  "",
+  "- First item",
+  "- Second item with a nested list",
+  "  - Nested one",
+  "  - Nested two",
+  "",
+  "1. Ordered one",
+  "2. Ordered two",
+  "",
+  "- [x] Done task",
+  "- [ ] Open task",
+  "",
+  "> A quote with **bold** text.",
+  ">",
+  "> A second quoted paragraph.",
+  "",
+  "## Table",
+  "",
+  "| Name | Value | Note |",
+  "| :--- | ---: | :---: |",
+  "| alpha | 1 | `code` |",
+  "| beta | 22 | a longer note that wraps when the column is narrow enough to need it |",
+  "",
+  "## Math",
+  "",
+  "Inline $E = mc^2$ and \\(a^2 + b^2 = c^2\\); currency stays text: $5 and $10.",
+  "",
+  "$$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$",
+  "",
+  "\\[",
+  "\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}",
+  "\\]",
+  "",
+  "## Disclosure",
+  "",
+  "<details><summary>Click to expand</summary>",
+  "",
+  "Hidden **content** with a list:",
+  "",
+  "- one",
+  "- two",
+  "",
+  "</details>",
+  "",
+  "## Diagram",
+  "",
+  `${FENCE}mermaid`,
+  "graph TD",
+  "  A[Start] --> B{Check}",
+  "  B -->|yes| C[Done]",
+  "  B -->|no| A",
+  FENCE,
+  "",
+  "## Code",
+  "",
+  `${FENCE}python`,
+  "def greet(name: str) -> str:",
+  '    return f"Hello, {name}!"',
+  FENCE,
+  "",
+  FENCE,
+  "plain fence without a language",
+  FENCE,
+  "",
+  "Raw HTML stays text: <div class=\"fixed\">inert</div>",
+  "",
+  "---",
+  "",
+  "Final line after a rule.",
+  "",
+].join("\n")
+
 const parseModel = (model) => {
   const think = /think-(\d+)s/.exec(String(model ?? ""))
   if (think) return { delayMs: Number(think[1]) * 1000, charactersPerSecond: 1200, document: THINK_ANSWER, toolSteps: 0 }
-  const agent = /agent-(\d+)(tools|reads)(?:-x(\d+))?-(\d+)cps/.exec(String(model ?? ""))
+  const agent = /agent-(\d+)(tools|reads)(?:-x(\d+))?(?:-wait(\d+)ms)?-(\d+)cps/.exec(String(model ?? ""))
   if (agent) {
     return {
-      delayMs: 0,
-      charactersPerSecond: Math.max(1, Number(agent[4])),
+      delayMs: Number(agent[4] ?? 0),
+      charactersPerSecond: Math.max(1, Number(agent[5])),
       document: FIXTURE_DOCUMENT,
       toolSteps: Number(agent[1]),
       reads: agent[2] === "reads",
       parallel: Math.max(1, Number(agent[3] ?? 1)),
     }
   }
-  const rate = /(stream|code|unicode)-(\d+)cps/.exec(String(model ?? ""))
-  const documents = { code: FIXTURE_CODE_DOCUMENT, unicode: FIXTURE_UNICODE_DOCUMENT }
+  const rate = /(stream|code|unicode|showcase)-(\d+)cps/.exec(String(model ?? ""))
+  const documents = { code: FIXTURE_CODE_DOCUMENT, unicode: FIXTURE_UNICODE_DOCUMENT, showcase: FIXTURE_SHOWCASE_DOCUMENT }
   return {
     delayMs: 0,
     charactersPerSecond: rate ? Math.max(1, Number(rate[2])) : 300,
@@ -248,8 +340,10 @@ const parseModel = (model) => {
  * long session agentic, not only the first.
  */
 const planResponse = (model, body) => {
-  const { delayMs, charactersPerSecond, document, toolSteps, reads, parallel = 1 } = parseModel(model)
   const messages = Array.isArray(body.messages) ? body.messages : []
+  const scripted = planScriptedResponse(messages)
+  if (scripted) return { delayMs: 0, charactersPerSecond: FIXTURE_SEED_RATE, ...scripted }
+  const { delayMs, charactersPerSecond, document, toolSteps, reads, parallel = 1 } = parseModel(model)
   const lastPrompt = messages.findLastIndex((message) => message?.role === "user")
   const toolResults = messages.slice(lastPrompt + 1).filter((message) => message?.role === "tool").length
   if (toolSteps > 0 && toolResults < toolSteps) {
@@ -293,7 +387,7 @@ const usageFor = (text) => ({ prompt_tokens: 1, completion_tokens: Math.ceil(tex
  * timer drift cannot change the delivered rate between runs. Resolves once the
  * whole text is out, or rejects when the client went away first.
  */
-const streamText = (response, model, text, { delayMs, charactersPerSecond }) => new Promise((resolveStream, reject) => {
+const streamText = (response, model, text, { delayMs, charactersPerSecond }, field = "content") => new Promise((resolveStream, reject) => {
   const startedAt = Date.now() + delayMs
   let sent = 0
   const timer = setInterval(() => {
@@ -301,7 +395,7 @@ const streamText = (response, model, text, { delayMs, charactersPerSecond }) => 
     const due = Math.min(text.length, Math.floor(elapsedSeconds * charactersPerSecond))
     while (sent < due) {
       const next = Math.min(due, sent + CHUNK_CHARACTERS)
-      response.write(sseFrame(chunkFrame(model, { content: text.slice(sent, next) })))
+      response.write(sseFrame(chunkFrame(model, { [field]: text.slice(sent, next) })))
       sent = next
     }
     if (sent < text.length) return
@@ -317,7 +411,12 @@ const streamText = (response, model, text, { delayMs, charactersPerSecond }) => 
 const streamCompletion = async (response, model, body) => {
   const plan = planResponse(model, body)
   response.write(sseFrame(chunkFrame(model, { role: "assistant", content: "" })))
+  // A Stop scenario owns completion; machine speed must not end its worker first.
+  if (model === "wait-for-stop") return
   try {
+    // A scripted step may think first: `reasoning_content` deltas, which the
+    // OpenAI-compatible provider turns into a reasoning part.
+    if (plan.reasoning) await streamText(response, model, plan.reasoning, plan, "reasoning_content")
     await streamText(response, model, plan.text, plan)
   } catch {
     return
@@ -337,8 +436,20 @@ const streamCompletion = async (response, model, body) => {
   response.end("data: [DONE]\n\n")
 }
 
-const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
+const startFixtureProvider = (port, { verifyControl = false } = {}) => new Promise((resolveServer, reject) => {
+  const activeRequests = verifyControl ? new Map() : null
   const server = createServer(async (request, response) => {
+    if (activeRequests && request.method === "GET") {
+      const url = new URL(request.url, "http://localhost")
+      if (url.pathname === "/__verify/active") {
+        const session = url.searchParams.get("session")
+        const prompt = url.searchParams.get("prompt")
+        const active = Boolean(session && prompt) && [...activeRequests.values()].some((entry) => entry.session === session && entry.prompt.includes(prompt))
+        response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" })
+        response.end(JSON.stringify({ active }))
+        return
+      }
+    }
     if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) {
       response.writeHead(404).end()
       return
@@ -356,6 +467,15 @@ const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
         usage: usageFor("Streaming capture"),
       }))
       return
+    }
+    if (activeRequests) {
+      const id = Symbol()
+      const messages = Array.isArray(body.messages) ? body.messages : []
+      activeRequests.set(id, {
+        session: String(request.headers["x-opencode-session-id"] ?? ""),
+        prompt: fixtureMessageText(messages.findLast((message) => message?.role === "user")?.content),
+      })
+      response.once("close", () => activeRequests.delete(id))
     }
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" })
     void streamCompletion(response, body.model, body)
@@ -375,8 +495,9 @@ export const fixtureProviderConfig = (port) => ({
         ...FIXTURE_RATES.map((rate) => [`stream-${rate}cps`, { name: `Fixture stream, ${rate} characters/s` }]),
         ...FIXTURE_CODE_RATES.map((rate) => [`code-${rate}cps`, { name: `Fixture code block, ${rate} characters/s` }]),
         ...FIXTURE_UNICODE_RATES.map((rate) => [`unicode-${rate}cps`, { name: `Fixture non-Latin prose and code, ${rate} characters/s` }]),
-        ...["stream", "code", "unicode"].map((kind) => [`${kind}-${FIXTURE_SEED_RATE}cps`, { name: `Fixture ${kind}, seeding speed` }]),
+        ...["stream", "code", "unicode", "showcase"].map((kind) => [`${kind}-${FIXTURE_SEED_RATE}cps`, { name: `Fixture ${kind}, seeding speed` }]),
         ...FIXTURE_THINK_SECONDS.map((seconds) => [`think-${seconds}s`, { name: `Fixture silence, ${seconds}s` }]),
+        ["wait-for-stop", { name: "Fixture waits until stopped" }],
         ...FIXTURE_AGENT_STEPS.flatMap((steps) => FIXTURE_AGENT_RATES.flatMap((rate) => [
           [`agent-${steps}tools-${rate}cps`, { name: `Fixture agent, ${steps} tool calls then ${rate} characters/s`, tool_call: true }],
           [`agent-${steps}reads-${rate}cps`, { name: `Fixture agent, ${steps} file reads then ${rate} characters/s`, tool_call: true }],
@@ -387,17 +508,21 @@ export const fixtureProviderConfig = (port) => ({
           `agent-${calls}tools-x${parallel}-${rate}cps`,
           { name: `Fixture agent, ${calls} tool calls ${parallel} at a time, then ${rate} characters/s`, tool_call: true },
         ])),
+        ["agent-20tools-wait3000ms-300cps", { name: "Fixture agent, 20 tool calls, 3 s to each step's first token, then 300 characters/s", tool_call: true }],
+        // OpenCode gives `patch` instead of `edit` and `write` to models named
+        // `gpt-*`; this one exists so a scripted turn can call `patch`.
+        ["gpt-5-scripted", { name: "Fixture GPT-style model, patch tool", tool_call: true }],
       ]),
     },
   },
 })
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const port = Number(process.argv[2] ?? 4601)
   if (process.argv.includes("--print-config")) {
     console.log(JSON.stringify(fixtureProviderConfig(port)))
   } else {
-    await startFixtureProvider(port)
+    await startFixtureProvider(port, { verifyControl: process.argv.includes("--verify-control") })
     console.log(`Fixture provider listening on http://127.0.0.1:${port}/v1 (${FIXTURE_DOCUMENT.length} characters per response)`)
     console.log(`Models: ${Object.keys(fixtureProviderConfig(port).provider[FIXTURE_PROVIDER_ID].models).map((id) => `${FIXTURE_PROVIDER_ID}/${id}`).join(", ")}`)
   }

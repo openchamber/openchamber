@@ -23,7 +23,9 @@ You can always type an address yourself. A bare `localhost:5173` is treated as `
 
 When OpenChamber runs on another machine, its dev server is on *that* machine — `localhost` on your laptop is somewhere else entirely. The desktop app handles this for you: it opens a local port that carries the connection through to the remote dev server, so the page loads normally, with working hot reload and developer tools. You keep typing the address you expect; the plumbing stays out of your way.
 
-This needs the desktop app. In a web browser tab, only dev servers on your own machine can be opened.
+The OpenChamber app for iOS and Android does the same: open the **Browser** tab in the workspace drawer, pick a running dev server, and the page loads on the phone with hot reload, also over a Relay connection. Back steps through the page's own history first, then returns to the list of servers. On the phone the page is for viewing: pointing at elements and drawing on it stay on desktop.
+
+In a web browser tab, only dev servers on your own machine can be opened. OpenChamber opened in a phone's browser has no Browser tab in the workspace drawer.
 
 ## Annotate the page
 

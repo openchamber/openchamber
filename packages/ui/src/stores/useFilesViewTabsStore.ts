@@ -22,10 +22,8 @@ type FilesViewTabsActions = {
   addOpenPath: (root: string, path: string, options?: { allowOutsideRoot?: boolean }) => void;
   removeOpenPath: (root: string, path: string) => void;
   removeOpenPathsByPrefix: (root: string, prefixPath: string) => void;
-  /** Drops a stale open path. The path on screen stays, so its tab keeps showing its own error. */
   removeUnselectedOpenPath: (root: string, path: string) => void;
   removeExpandedPathsByPrefix: (root: string, prefixPath: string) => void;
-  /** Points open, selected and expanded paths at or under `fromPath` at `toPath` after a move or rename. */
   movePaths: (root: string, fromPath: string, toPath: string) => void;
   setSelectedPath: (root: string, path: string | null, options?: { allowOutsideRoot?: boolean }) => void;
   ensureSelectedPath: (root: string) => void;
@@ -202,7 +200,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         addOpenPath: (root, path, options) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const normalizedPath = normalizePath((path || '').trim());
+          const normalizedPath = normalizePath(path || '');
           if (!normalizedRoot || !normalizedPath || (!options?.allowOutsideRoot && !isPathWithinRoot(normalizedPath, normalizedRoot))) {
             return;
           }
@@ -231,7 +229,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         removeOpenPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const normalizedPath = normalizePath((path || '').trim());
+          const normalizedPath = normalizePath(path || '');
           if (!normalizedRoot || !normalizedPath) {
             return;
           }
@@ -267,7 +265,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         removeOpenPathsByPrefix: (root, prefixPath) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const normalizedPrefix = normalizePath((prefixPath || '').trim());
+          const normalizedPrefix = normalizePath(prefixPath || '');
           if (!normalizedRoot || !normalizedPrefix) {
             return;
           }
@@ -309,12 +307,11 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         removeUnselectedOpenPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const comparablePath = toComparablePath(normalizePath((path || '').trim()));
+          const comparablePath = toComparablePath(normalizePath(path || ''));
           const current = get().byRoot[normalizedRoot];
           if (!comparablePath || !current) {
             return;
           }
-          // With nothing selected, the editor shows the first open path.
           const shownPath = current.selectedPath ?? current.openPaths[0] ?? null;
           if (shownPath && toComparablePath(shownPath) === comparablePath) {
             return;
@@ -324,7 +321,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         removeExpandedPathsByPrefix: (root, prefixPath) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const normalizedPrefix = normalizePath((prefixPath || '').trim());
+          const normalizedPrefix = normalizePath(prefixPath || '');
           if (!normalizedRoot || !normalizedPrefix) {
             return;
           }
@@ -361,8 +358,8 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         movePaths: (root, fromPath, toPath) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const normalizedFrom = normalizePath((fromPath || '').trim());
-          const normalizedTo = normalizePath((toPath || '').trim());
+          const normalizedFrom = normalizePath(fromPath || '');
+          const normalizedTo = normalizePath(toPath || '');
           if (!normalizedRoot || !normalizedFrom || !normalizedTo || normalizedFrom === normalizedTo) {
             return;
           }
@@ -403,7 +400,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         setSelectedPath: (root, path, options) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const normalizedPath = path ? normalizePath(path.trim()) : null;
+          const normalizedPath = path ? normalizePath(path) : null;
           if (!normalizedRoot || (normalizedPath && !options?.allowOutsideRoot && !isPathWithinRoot(normalizedPath, normalizedRoot))) {
             return;
           }
@@ -452,7 +449,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         toggleExpandedPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const normalizedPath = normalizePath((path || '').trim());
+          const normalizedPath = normalizePath(path || '');
           if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
             return;
           }
@@ -505,7 +502,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
 
         expandPath: (root, path) => {
           const normalizedRoot = normalizePath((root || '').trim());
-          const normalizedPath = normalizePath((path || '').trim());
+          const normalizedPath = normalizePath(path || '');
           if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
             return;
           }
@@ -537,7 +534,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
           }
 
           const normalizedPaths = paths
-            .map((p) => normalizePath((p || '').trim()))
+            .map((p) => normalizePath(p || ''))
             .filter((p) => p && isPathWithinRoot(p, normalizedRoot));
           if (normalizedPaths.length === 0) {
             return;

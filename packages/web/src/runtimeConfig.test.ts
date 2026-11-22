@@ -2,11 +2,13 @@ import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { createConfiguredWebAPIs, readRuntimeBootstrapConfig } from './runtimeConfig';
 import type { RuntimeConfigDeps } from './runtimeConfig';
+import type { RuntimeEndpointChangedDetail } from '@openchamber/ui/lib/runtime-switch';
 
 // Dependency seams: the side-effecting runtime collaborators are injected
 // into createConfiguredWebAPIs instead of mocked at the module boundary.
 // The URL resolver, boot-outcome reader, and Web API factory stay real.
 const initializeRuntimeEndpoint = vi.fn();
+const runtimeChangeSubscribers: Array<(detail: RuntimeEndpointChangedDetail) => void> = [];
 const restoreDesktopRelayRuntime = vi.fn(() => Promise.resolve());
 
 const testDeps: Partial<RuntimeConfigDeps> = {
@@ -20,6 +22,11 @@ const testDeps: Partial<RuntimeConfigDeps> = {
   warmDesktopHostStatuses: () => Promise.resolve(),
   restoreDesktopRelayRuntime,
   reconnectToRuntimeBaseUrl: () => {},
+  getRuntimeKey: () => 'local',
+  subscribeRuntimeEndpointChanged: (callback) => {
+    runtimeChangeSubscribers.push(callback);
+    return () => {};
+  },
 };
 
 
@@ -148,5 +155,31 @@ describe('createConfiguredWebAPIs', () => {
     createConfiguredWebAPIs(testDeps);
 
     expect(restoreDesktopRelayRuntime).toHaveBeenCalledWith();
+  });
+
+  test('reports the runtime key to the desktop shell at boot and on switch', async () => {
+    const invoke = vi.fn(() => Promise.resolve());
+    const current = makeWindow();
+    current.__OPENCHAMBER_API_BASE_URL__ = 'http://127.0.0.1:3901';
+    current.__OPENCHAMBER_LOCAL_ORIGIN__ = 'http://127.0.0.1:3902';
+    current.__OPENCHAMBER_DESKTOP__ = { invoke };
+    installWindow(current);
+
+    createConfiguredWebAPIs(testDeps);
+
+    expect(invoke).toHaveBeenCalledWith('desktop_set_window_runtime_key', { runtimeKey: 'local' });
+    runtimeChangeSubscribers.at(-1)?.({ apiBaseUrl: '', previousApiBaseUrl: '', runtimeKey: 'host:abc123', previousRuntimeKey: 'local' });
+    await vi.waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('desktop_set_window_runtime_key', { runtimeKey: 'host:abc123' });
+    });
+  });
+
+  test('skips the runtime key report when the desktop bridge is absent', () => {
+    const current = makeWindow();
+    current.__OPENCHAMBER_API_BASE_URL__ = 'http://127.0.0.1:3901';
+    current.__OPENCHAMBER_LOCAL_ORIGIN__ = 'http://127.0.0.1:3902';
+    installWindow(current);
+
+    expect(() => createConfiguredWebAPIs(testDeps)).not.toThrow();
   });
 });

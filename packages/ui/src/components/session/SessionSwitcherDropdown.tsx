@@ -13,14 +13,14 @@ import { Icon } from '@/components/icon/Icon';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useSessionMarkedUnread, useSessionUnread } from '@/sync/session-unread';
 import {
   findSwitcherItemAncestorIds,
   useSwitcherItems,
   type SwitcherItem,
 } from '@/components/session/sidebar/shell/useSwitcherItems';
 import { useUIStore } from '@/stores/useUIStore';
-import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { refreshGlobalSessions, refreshRecentGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { formatSessionCompactDateLabel } from './sidebar/utils';
 import type { SessionNode } from './sidebar/types';
 import { useI18n } from '@/lib/i18n';
@@ -31,12 +31,14 @@ type SecondaryMeta = SwitcherItem['secondaryMeta'];
 
 type SwitcherVariant = 'default' | 'compact';
 const NEW_SESSION_SWITCHER_TARGET = 'new-session';
+const RECENT_SESSIONS_LIMIT = 10;
 
 type SessionSwitcherDropdownProps = {
   children: React.ReactNode;
   variant?: SwitcherVariant;
   scopeProjectId?: string | null;
   align?: 'start' | 'center' | 'end';
+  recentOnly?: boolean;
 };
 
 export function SessionSwitcherDropdown({
@@ -44,6 +46,7 @@ export function SessionSwitcherDropdown({
   variant = 'default',
   scopeProjectId = null,
   align = 'start',
+  recentOnly = false,
 }: SessionSwitcherDropdownProps): React.ReactElement {
   const isOpen = useUIStore((state) => state.isSessionDropdownOpen);
   const setOpen = useUIStore((state) => state.setSessionDropdownOpen);
@@ -64,6 +67,7 @@ export function SessionSwitcherDropdown({
             onSelect={() => setOpen(false)}
             variant={variant}
             scopeProjectId={scopeProjectId}
+            recentOnly={recentOnly}
           />
         ) : null}
       </DropdownMenuContent>
@@ -75,12 +79,17 @@ type SwitcherContentProps = {
   onSelect: () => void;
   variant: SwitcherVariant;
   scopeProjectId: string | null;
+  recentOnly: boolean;
 };
 
-function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentProps): React.ReactElement {
+function SwitcherContent({ onSelect, variant, scopeProjectId, recentOnly }: SwitcherContentProps): React.ReactElement {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isNewSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft.open === true);
-  const items = useSwitcherItems(true, { scopeProjectId, currentSessionId });
+  const items = useSwitcherItems(true, { scopeProjectId, currentSessionId, maxParents: RECENT_SESSIONS_LIMIT, ignorePins: true });
+
+  React.useEffect(() => {
+    void (recentOnly ? refreshRecentGlobalSessions() : refreshGlobalSessions());
+  }, [recentOnly]);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const { t } = useI18n();
 
@@ -231,18 +240,16 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
 
-  const unseenCount = useSessionUnseenCount(session.id);
+  const isUnread = useSessionUnread(session.id);
+  const markedUnread = useSessionMarkedUnread(session.id);
 
   const isActive = currentSessionId === session.id;
   const sessionTitle = session.title?.trim() || t('sessions.sidebar.session.untitled');
-  const isSubtask = Boolean((session as Session & { parentID?: string | null }).parentID);
-  const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
   const runningBlink = useWaitingBlink(isStreaming);
-  const showUnreadDot = !isStreaming && needsAttention && !isActive;
+  const showUnreadDot = !isStreaming && isUnread && (!isActive || markedUnread);
 
   const timestamp = getSessionActivityTime(session) || Date.now();
   const timeLabel = formatSessionCompactDateLabel(timestamp);
@@ -291,7 +298,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
                 event.stopPropagation();
                 onToggleExpand?.();
               }}
-              className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+              className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
               aria-label={isExpanded ? t('sessions.sidebar.session.subsessions.collapse') : t('sessions.sidebar.session.subsessions.expand')}
             >
               {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
@@ -303,7 +310,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
         </div>
         {variant === 'default' ? (
           <div
-            className="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground/70 leading-tight"
+            className="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground leading-tight"
             style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}
           >
             {hasChildren ? (
@@ -316,7 +323,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
                   event.stopPropagation();
                   onToggleExpand?.();
                 }}
-                className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+                className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
                 aria-label={isExpanded ? t('sessions.sidebar.session.subsessions.collapse') : t('sessions.sidebar.session.subsessions.expand')}
               >
                 {isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}
@@ -326,7 +333,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
             {projectLabel ? <span className="truncate">{projectLabel}</span> : null}
             {branchLabel ? (
               <span className="inline-flex min-w-0 items-center gap-0.5">
-                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                 <span className="truncate">{branchLabel}</span>
               </span>
             ) : null}
@@ -341,6 +348,9 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
             runningClassName={cn('h-2 w-2', runningBlink)}
           />
         </span>
+      ) : null}
+      {variant === 'compact' ? (
+        <span className="shrink-0 self-center typography-micro text-muted-foreground tabular-nums">{timeLabel}</span>
       ) : null}
     </BaseMenu.Item>
   );

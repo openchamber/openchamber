@@ -1,13 +1,5 @@
 import type { GhosttyColor } from './core';
 
-/**
- * Procedural glyphs for the cell-filling symbols TUI apps draw borders and
- * bars with: Box Drawing (U+2500–U+257F), Block Elements (U+2580–U+259F) and
- * the Powerline arrows (U+E0B0–U+E0B3). A font draws these only as tall as
- * its own em box, so at the terminal's 1.35 em line height every border and
- * every logo built from block characters shows a strip of background between
- * rows. Native terminals draw them to the exact cell instead; so does this.
- */
 export interface BoxDrawingContext {
   fillStyle: string | CanvasGradient | CanvasPattern;
   strokeStyle: string | CanvasGradient | CanvasPattern;
@@ -37,29 +29,26 @@ const BLOCK_LAST = 0x259f;
 const POWERLINE_FIRST = 0xe0b0;
 const POWERLINE_LAST = 0xe0b3;
 
-/** Arm weights, one digit each for up, down, left, right; 0 is no arm. */
 const LIGHT = 1;
 const HEAVY = 2;
 const DOUBLE = 3;
 
-// Up/Down/Left/Right weights for U+2500..U+257F. Dashed, arc and diagonal
-// forms carry their solid equivalent here and are special-cased when drawn.
 const BOX_ARMS =
-  '0011 0022 1100 2200 0011 0022 1100 2200 0011 0022 1100 2200' + // 2500-250B lines and dashes
-  ' 0101 0102 0201 0202 0110 0120 0210 0220 1001 1002 2001 2002 1010 1020 2010 2020' + // 250C-251B corners
-  ' 1101 1102 2101 1201 2201 2102 1202 2202' + // 251C-2523 left tees
-  ' 1110 1120 2110 1210 2210 2120 1220 2220' + // 2524-252B right tees
-  ' 0111 0121 0112 0122 0211 0221 0212 0222' + // 252C-2533 top tees
-  ' 1011 1021 1012 1022 2011 2021 2012 2022' + // 2534-253B bottom tees
-  ' 1111 1121 1112 1122 2111 1211 2211 2121 2112 1221 1212 2122 1222 2221 2212 2222' + // 253C-254B crosses
-  ' 0011 0022 1100 2200' + // 254C-254F double dashes
-  ' 0033 3300' + // 2550-2551 double lines
-  ' 0103 0301 0303 0130 0310 0330 1003 3001 3003 1030 3010 3030' + // 2552-255D double corners
-  ' 1103 3301 3303 1130 3310 3330 0133 0311 0333 1033 3011 3033 1133 3311 3333' + // 255E-256C double tees and cross
-  ' 0101 0110 1010 1001' + // 256D-2570 arcs (drawn as curves)
-  ' 0000 0000 0000' + // 2571-2573 diagonals (drawn as lines)
-  ' 0010 1000 0001 0100 0020 2000 0002 0200' + // 2574-257B half lines
-  ' 0012 1200 0021 2100'; // 257C-257F mixed half lines
+  '0011 0022 1100 2200 0011 0022 1100 2200 0011 0022 1100 2200' +
+  ' 0101 0102 0201 0202 0110 0120 0210 0220 1001 1002 2001 2002 1010 1020 2010 2020' +
+  ' 1101 1102 2101 1201 2201 2102 1202 2202' +
+  ' 1110 1120 2110 1210 2210 2120 1220 2220' +
+  ' 0111 0121 0112 0122 0211 0221 0212 0222' +
+  ' 1011 1021 1012 1022 2011 2021 2012 2022' +
+  ' 1111 1121 1112 1122 2111 1211 2211 2121 2112 1221 1212 2122 1222 2221 2212 2222' +
+  ' 0011 0022 1100 2200' +
+  ' 0033 3300' +
+  ' 0103 0301 0303 0130 0310 0330 1003 3001 3003 1030 3010 3030' +
+  ' 1103 3301 3303 1130 3310 3330 0133 0311 0333 1033 3011 3033 1133 3311 3333' +
+  ' 0101 0110 1010 1001' +
+  ' 0000 0000 0000' +
+  ' 0010 1000 0001 0100 0020 2000 0002 0200' +
+  ' 0012 1200 0021 2100';
 
 const BOX_ARM_TABLE = BOX_ARMS.split(' ');
 
@@ -67,7 +56,6 @@ const TRIPLE_DASH = new Set([0x2504, 0x2505, 0x2506, 0x2507]);
 const QUAD_DASH = new Set([0x2508, 0x2509, 0x250a, 0x250b]);
 const DOUBLE_DASH = new Set([0x254c, 0x254d, 0x254e, 0x254f]);
 
-// Block elements as unit rectangles (left, top, width, height) of the cell.
 const BLOCK_RECTS = new Map<number, readonly (readonly [number, number, number, number])[]>([
   [0x2580, [[0, 0, 1, 1 / 2]]],
   [0x2581, [[0, 7 / 8, 1, 1 / 8]]],
@@ -102,7 +90,6 @@ const BLOCK_RECTS = new Map<number, readonly (readonly [number, number, number, 
 
 const SHADE_ALPHA = new Map([[0x2591, 0.25], [0x2592, 0.5], [0x2593, 0.75]]);
 
-/** Whether a cell's text is a single symbol this module draws instead of the font. */
 export function isBoxDrawingText(text: string): boolean {
   if (text.length === 0 || text.length > 2) return false;
   const code = text.codePointAt(0);
@@ -125,15 +112,10 @@ interface CellGeometry {
   readonly bottom: number;
   readonly centerX: number;
   readonly centerY: number;
-  /** Light stroke thickness. */
   readonly stroke: number;
-  /** Half-distance between the two lines of a double stroke. */
   readonly gap: number;
 }
 
-// Everything snaps to whole CSS pixels. Neighbouring cells round the same
-// shared edge to the same value, so borders meet without seams, and a whole
-// pixel stays crisp at every integer device pixel ratio.
 function cellGeometry(cell: BoxDrawingCell): CellGeometry {
   const left = Math.round(cell.x);
   const right = Math.round(cell.x + cell.width);
@@ -156,7 +138,6 @@ function armThickness(weight: number, stroke: number): number {
   return weight === HEAVY ? stroke * 3 : stroke;
 }
 
-/** Fill a horizontal band [x0, x1) centered on y with the given thickness. */
 function hBand(context: BoxDrawingContext, x0: number, x1: number, y: number, thickness: number): void {
   if (x1 <= x0) return;
   context.fillRect(x0, y - Math.floor(thickness / 2), x1 - x0, thickness);
@@ -195,9 +176,6 @@ function drawArms(context: BoxDrawingContext, geometry: CellGeometry, arms: stri
   const right = Number(arms[3]);
   const { centerX, centerY, stroke, gap } = geometry;
   const single = (weight: number) => weight === LIGHT || weight === HEAVY;
-  // A single-weight arm runs to the far edge of the thickest crossing arm's
-  // band, so corners and tees fill their junction square exactly, without a
-  // hole and without a stub past the perpendicular line.
   const crossV = Math.max(armThickness(up, stroke), armThickness(down, stroke), stroke);
   const crossH = Math.max(armThickness(left, stroke), armThickness(right, stroke), stroke);
   const bandLeft = centerX - Math.floor(crossV / 2);
@@ -220,10 +198,6 @@ function drawArms(context: BoxDrawingContext, geometry: CellGeometry, arms: stri
     vBand(context, horizontalDouble ? centerY + gap : bandTop, geometry.bottom, centerX, armThickness(down, stroke));
   }
 
-  // A double arm is two light lines. Where a line meets the perpendicular arm
-  // on its own side it stops at that arm's matching line (a double arm), at
-  // the center (a single arm), or crosses to the far line to close a corner
-  // or run straight through (no arm). `sign` is +1 toward the far side.
   const stopX = (perpendicular: number, sign: 1 | -1) =>
     perpendicular === DOUBLE ? centerX - sign * gap : single(perpendicular) ? centerX : centerX + sign * gap;
   const stopY = (perpendicular: number, sign: 1 | -1) =>
@@ -248,7 +222,6 @@ function drawArms(context: BoxDrawingContext, geometry: CellGeometry, arms: stri
 
 function drawArc(context: BoxDrawingContext, geometry: CellGeometry, code: number): void {
   const { centerX, centerY, stroke } = geometry;
-  // 256D ╭ down+right, 256E ╮ down+left, 256F ╯ up+left, 2570 ╰ up+right
   const toRight = code === 0x256d || code === 0x2570;
   const toDown = code === 0x256d || code === 0x256e;
   const endX = toRight ? geometry.right : geometry.left;
@@ -256,8 +229,6 @@ function drawArc(context: BoxDrawingContext, geometry: CellGeometry, code: numbe
   const radius = Math.min(Math.abs(endX - centerX), Math.abs(endY - centerY));
   const dirX = toRight ? 1 : -1;
   const dirY = toDown ? 1 : -1;
-  // An odd stroke sits on pixel centers, matching the fillRect bands of the
-  // straight forms so a curve continues a line without a half-pixel step.
   const align = (stroke % 2) / 2;
   const cx = centerX + align;
   const cy = centerY + align;
@@ -305,10 +276,6 @@ function drawPowerline(context: BoxDrawingContext, geometry: CellGeometry, code:
   context.stroke();
 }
 
-/**
- * Draw one symbol into its cell. Returns false when the code point is not a
- * symbol this module owns, so the caller falls back to the font.
- */
 export function drawBoxDrawingGlyph(
   context: BoxDrawingContext,
   text: string,
@@ -332,7 +299,6 @@ export function drawBoxDrawingGlyph(
     const width = geometry.right - geometry.left;
     const height = geometry.bottom - geometry.top;
     for (const [x, y, w, h] of BLOCK_RECTS.get(code) ?? []) {
-      // Edges of eighths snap independently so stacked bars still tile.
       const x0 = geometry.left + Math.round(x * width);
       const x1 = geometry.left + Math.round((x + w) * width);
       const y0 = geometry.top + Math.round(y * height);

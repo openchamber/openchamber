@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { isSpaceActionUnavailable, isSpaceApplicable, runSpaceAction, spaceConditionOf, spaceLineSaysState, spaceMenuActionsOf } from './space-repair';
+import { isSpaceActionUnavailable, isSpaceApplicable, runSpaceAction, spaceConditionOf, spaceMenuActionsOf } from './space-repair';
 import { getSharedTrustConfirmationSnapshot, settleSharedTrustConfirmation } from '@/lib/sharedTrustConfirmation';
 import type { SpaceEntry } from './spaces-api';
 import { useSpacesStore, type SpaceMark } from './spaces-store';
@@ -70,20 +70,6 @@ describe('the state of a space', () => {
     expect(spaceConditionOf(entry(), mark('partial'), undefined)).toBeNull();
   });
 
-  test('the group line speaks for every state but a running space whose list came back in part', () => {
-    // The stale mark beside the name shows only where this is false.
-    expect(spaceLineSaysState(entry({ state: 'exited', stoppedIdle: true }), mark('stale'), undefined)).toBe(true);
-    expect(spaceLineSaysState(entry({ state: 'unreachable', machine: 'box', failure: { code: 'place_unreachable', message: '' } }), mark('stale'), undefined)).toBe(true);
-    expect(spaceLineSaysState(entry({ state: 'preparing', step: 'creating' }), mark('unknown'), undefined)).toBe(true);
-    expect(spaceLineSaysState(entry({ state: 'failed' }), mark('unknown'), undefined)).toBe(true);
-    expect(spaceLineSaysState(entry(), mark('stale'), undefined)).toBe(true);
-    expect(spaceLineSaysState(entry(), mark('complete'), { kind: 'running', action: 'restart' })).toBe(true);
-    expect(spaceLineSaysState(entry(), mark('stale'), { kind: 'failed', action: 'restart', failure: { code: 'space_unreachable', message: 'no' } })).toBe(true);
-    expect(spaceLineSaysState(entry(), mark('partial'), undefined)).toBe(false);
-    expect(spaceLineSaysState(entry(), mark('complete'), undefined)).toBe(false);
-    expect(spaceLineSaysState(undefined, mark('stale'), undefined)).toBe(false);
-  });
-
   test('an action under way or failed in this window comes first', () => {
     expect(spaceConditionOf(entry({ state: 'exited' }), undefined, { kind: 'running', action: 'start' })).toEqual({ kind: 'busy', action: 'start' });
     const failure = { code: 'gatekeeper_missing', message: 'gone' };
@@ -149,8 +135,8 @@ describe('the actions of a space', () => {
       const run = runSpaceAction(ID, 'restart');
       expect(useSpacesStore.getState().actions.get(ID)).toEqual({ kind: 'running', action: 'restart' });
       await new Promise((resolve) => setTimeout(resolve, 30));
-      // The list read brings the project's own providers with it, for the composer's rule.
-      expect(requests).toEqual([`POST /api/openchamber/spaces/${ID}/restart`, 'GET /api/openchamber/spaces', 'GET /api/openchamber/spaces/custom-providers']);
+      // The list read brings the project's own and catalog providers with it, for the composer's rule.
+      expect(requests).toEqual([`POST /api/openchamber/spaces/${ID}/restart`, 'GET /api/openchamber/spaces', 'GET /api/openchamber/spaces/custom-providers', 'GET /api/openchamber/spaces/catalog-providers']);
       // The restart went through and the journey list came back; the line still says "restarting".
       expect(useSpacesStore.getState().journey?.get(ID)?.state).toBe('running');
       expect(useSpacesStore.getState().actions.get(ID)).toEqual({ kind: 'running', action: 'restart' });

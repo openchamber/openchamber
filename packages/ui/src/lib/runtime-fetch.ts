@@ -1,17 +1,13 @@
 import { getActiveRelayTunnel } from './relay/runtime-tunnel';
 import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
-import { buildRuntimeAuthHeaders } from './runtime-auth';
+import { buildRuntimeAuthHeaders, getRuntimeExtraHeadersSync } from './runtime-auth';
+import { isCapacitorApp } from './platform';
 import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
 import { spaceDirectoryHeaders } from './spaces/space-route';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
-  /**
-   * The directory the request is about, when the request does not name it in its query or
-   * its directory header. A directory inside an isolated space sends the request to that
-   * space; see `withSpaceDirectory`.
-   */
   directory?: string | null;
 }
 
@@ -54,25 +50,19 @@ export const addRuntimeProxyHeaders = (url: string, headers: Headers): Headers =
 
 const appendRuntimeQuery = (url: URL, query?: RuntimeUrlQuery): void => {
   if (!query) return;
-  const entries = query instanceof URLSearchParams ? Array.from(query.entries()) : Object.entries(query);
-  for (const [key, value] of entries) {
+  if (query instanceof URLSearchParams) {
+    for (const [key, value] of query) url.searchParams.append(key, value);
+    return;
+  }
+  for (const [key, value] of Object.entries(query)) {
     if (value === null || value === undefined) continue;
     url.searchParams.set(key, String(value));
   }
 };
 
-// ── Isolated spaces ────────────────────────────────────────────────────────
-// The server sends a request to an isolated space when the request names a directory inside
-// that space in its query or its `x-opencode-directory` header. A caller whose request names
-// its directory only in its body passes it as `directory`: a space's directory then travels
-// as that header, and a host directory adds nothing, so a host route reads the request as it
-// always did. A header the caller set itself is left as it is; a request that names two
-// different directories is the server's to refuse.
 const hasDirectoryHeader = (headers: HeadersInit | undefined): boolean => {
   if (!headers) return false;
   if (headers instanceof Headers) return headers.has('x-opencode-directory');
-  // Read without building a `Headers`: a caller's plain header may still hold characters the
-  // Headers API refuses, which `sanitizeHeadersForBrowser` encodes later on the way out.
   const entries: Iterable<[string, string]> = Array.isArray(headers) ? headers : Object.entries(headers);
   for (const [key] of entries) {
     if (key.toLowerCase() === 'x-opencode-directory') return true;
@@ -90,10 +80,6 @@ const withSpaceDirectory = (input: string | URL | Request, init: RequestInit, di
   return { ...init, headers: [...own, ...Object.entries(spaceHeaders)] };
 };
 
-/**
- * Where the active runtime lives: its origin plus any sub-path prefix the host
- * is served under (https://host/openchamber), or null for a same-origin runtime.
- */
 const activeRuntimeServiceRoot = (): string | null => {
   const apiBase = getRuntimeUrlResolver().api('/api');
   if (!/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return null;
@@ -101,7 +87,6 @@ const activeRuntimeServiceRoot = (): string | null => {
   return `${base.origin}${base.pathname.replace(/\/api$/, '')}`;
 };
 
-/** The service path of a URL on the active runtime, with the host's sub-path prefix removed. */
 const activeRuntimeServicePath = (url: URL): string | null => {
   try {
     const root = activeRuntimeServiceRoot();
@@ -169,12 +154,12 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
   }
 };
 
-// Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
-// characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
-// String contains non ISO-8859-1 code point." Encode those values so they round-trip
-// safely through the browser's Headers API. Directory hints get an explicit marker
-// only when encoded, so plain ASCII paths remain compatible with routes that read
-// the header directly.
+const mobileRedirectPolicy = (input: string | URL | Request, init?: RequestInit): RequestInit | undefined =>
+  Object.keys(getRuntimeExtraHeadersSync()).length > 0 && isCapacitorApp() && shouldAttachRuntimeAuth(input)
+    ? { ...init, redirect: 'error' }
+    : init;
+
+// external: https://fetch.spec.whatwg.org/#headers-class Headers values are ByteStrings; non-Latin-1 directory hints need marked encoding.
 export const isLatin1Safe = (value: string): boolean => {
   for (let i = 0; i < value.length; i += 1) {
     if (value.charCodeAt(i) > 0xFF) return false;
@@ -186,8 +171,6 @@ const shouldEncodeHeaderValue = (_key: string, value: string): boolean => !isLat
 
 export const sanitizeHeadersForBrowser = (init?: HeadersInit): [string, string][] | undefined => {
   if (!init) return undefined;
-  // Normalize any HeadersInit shape into a plain array of entries so we can
-  // safely inspect and re-encode non-Latin-1 values.
   const sourceEntries: [string, string][] = init instanceof Headers
     ? Array.from(init.entries())
     : Array.isArray(init)
@@ -223,13 +206,6 @@ const mergeHeaders = async (inputHeaders?: HeadersInit, initHeaders?: HeadersIni
   return buildRuntimeAuthHeaders(headers);
 };
 
-// ── Relay-mode routing ─────────────────────────────────────────────────────
-// When the active runtime is a private relay, runtime HTTP does not go to the
-// network: it rides the E2EE tunnel. We route exactly the same paths we would
-// resolve for a network runtime (/api, /auth, /health) and attach identical
-// auth headers; the bearer/url-token semantics are unchanged, only the
-// transport differs. Non-runtime requests (external URLs) fall through to the
-// real network fetch.
 const appendPathQuery = (path: string, query?: RuntimeUrlQuery): string => {
   if (!query) return path;
   const url = new URL(path, TUNNEL_PARSE_BASE);
@@ -265,9 +241,6 @@ const tryRelayFetch = async (
   const inputHeaders = input instanceof Request ? input.headers : undefined;
   const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
   if (input instanceof Request) {
-    // Forward the Request itself — the tunnel reads its method/body/signal
-    // natively (incl. stream bodies). Re-wrapping as `new Request(path, input)`
-    // throws on a stream body without duplex:'half'.
     return relay.fetch(input, { ...requestInit, headers });
   }
   return relay.fetch(path, { ...requestInit, headers });
@@ -332,15 +305,18 @@ const coalesceReadKey = async (method: string, url: string, hasSignal: boolean, 
   return `GET ${url}\u0000${headers.get('x-opencode-directory') ?? ''}\u0000${authorizationScope ?? ''}`;
 };
 
+type RuntimeRequestObserver = (request: { method: string; url: string; status: number | null; durationMs: number }) => void;
+let runtimeRequestObserver: RuntimeRequestObserver | null = null;
+
+export const setRuntimeRequestObserver = (observer: RuntimeRequestObserver | null): void => {
+  runtimeRequestObserver = observer;
+};
+
 export const runtimeFetch = async (rawInput: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
   const { query, directory, ...ownInit } = init;
-  // Before either transport: the relay and the network see the same headers.
   const input = rawInput;
   const requestInit = withSpaceDirectory(input, ownInit, directory);
 
-  // Resolve the transport once — relay tunnel or network — then apply the SAME
-  // read-coalescing to both. On a relay the tunnel is bandwidth/latency-bound, so
-  // deduping concurrent identical GETs matters there most.
   const relay = getActiveRelayTunnel();
   const relayPath = relay ? extractRelayPath(input, query) : null;
 
@@ -366,9 +342,10 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
       : resolvedInput instanceof URL ? resolvedInput.toString()
       : String(resolvedInput);
     addRuntimeProxyHeaders(resolvedUrl, headers);
+    const networkInit = mobileRedirectPolicy(resolvedInput, { ...requestInit, headers });
     doFetch = resolvedInput instanceof Request
-      ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
-      : () => fetch(resolvedInput, { ...requestInit, headers });
+      ? () => fetch(new Request(resolvedInput, networkInit))
+      : () => fetch(resolvedInput, networkInit);
     scopeHeaders = headers;
     url = resolvedUrl;
     method = String(
@@ -376,16 +353,21 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
     ).toUpperCase();
   }
 
-  // Session-expiry classification rides on responses that already flow
-  // through here; only the status is read, never the body.
   const rawFetch = doFetch;
-  doFetch = () => rawFetch().then((response) => {
-    observeRuntimeAuthResponse(url, response.status);
-    return response;
-  });
+  const observer = runtimeRequestObserver;
+  doFetch = async () => {
+    const startedAt = observer ? performance.now() : 0;
+    try {
+      const response = await rawFetch();
+      observeRuntimeAuthResponse(url, response.status);
+      observer?.({ method, url, status: response.status, durationMs: performance.now() - startedAt });
+      return response;
+    } catch (error) {
+      observer?.({ method, url, status: null, durationMs: performance.now() - startedAt });
+      throw error;
+    }
+  };
 
-  // A Request always carries a (possibly default) signal; treat any Request, or
-  // an explicit init.signal, as "has signal" and skip coalescing for safety.
   const hasSignal = requestInit.signal != null || input instanceof Request;
 
   const key = await coalesceReadKey(method, url, hasSignal, scopeHeaders);
@@ -404,12 +386,20 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
 };
 
 let runtimeFetchBridgeInstalled = false;
+let fetchBypassingRuntimeBridgeImpl: typeof fetch | null = null;
+
+export const fetchBypassingRuntimeBridge = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => (
+  (fetchBypassingRuntimeBridgeImpl ?? globalThis.fetch.bind(globalThis))(input, init)
+);
 
 export const installRuntimeFetchBridge = (): void => {
   if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
   runtimeFetchBridgeInstalled = true;
 
-  const nativeFetch = window.fetch.bind(window);
+  const originalFetch = window.fetch.bind(window);
+  fetchBypassingRuntimeBridgeImpl = originalFetch;
+  const nativeFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    originalFetch(input, mobileRedirectPolicy(input, init));
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const relayResponse = await tryRelayFetch(input, init ?? {});
     if (relayResponse) return relayResponse;

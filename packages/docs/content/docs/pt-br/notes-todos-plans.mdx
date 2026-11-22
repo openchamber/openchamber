@@ -42,6 +42,14 @@ Os agentes leem e atualizam as mesmas notas, tarefas e planos pela ferramenta de
 Um agente trabalha no projeto ao qual sua sessão pertence, worktrees incluídos. Se um agente alterar uma nota ou um plano enquanto você digita nele, o que você digita é salvo por cima da mudança do agente. Os agentes são orientados a enviar o texto que leram junto de qualquer nota ou plano que substituam por inteiro; se ele tiver mudado desde então, a escrita é recusada e o agente o lê de novo.
 
 A ferramenta vem ativada por padrão. Desative-a em **Settings → General → OpenChamber Tools** com **Project knowledge tool**. Como as outras ferramentas do OpenChamber, ela só está presente quando o OpenChamber executa seu próprio servidor OpenCode, portanto não com um servidor externo nem na extensão do VS Code.
+Um agente pode vincular uma nota ou tarefa a um plano e fazer uma tarefa depender de outras tarefas do mesmo plano; uma tarefa sem plano não tem dependências. Ele pode pedir as tarefas prontas, ou seja, as não concluídas cujas dependências estão todas concluídas. Excluir uma tarefa a remove das dependências das outras tarefas, e excluir um plano desvincula suas notas e tarefas. Um agente também pode definir ou remover a sessão vinculada a um plano.
+
+## Notas e tarefas no repositório
+
+Notas e tarefas são salvas nos dados do próprio OpenChamber nesta máquina. Para sincronizá-las pelo Git, abra **Settings → Projects**, escolha o projeto e ative **Manter notas e tarefas pendentes no repositório** na aba General. A partir daí elas são salvas em `.openchamber/notes-todos.json`; faça commit do arquivo como de qualquer outro. A opção vale só para esta máquina, então ative-a em cada máquina que deve usar o arquivo.
+
+Ativar a opção move suas notas e tarefas para o arquivo, depois das que já estão nele. Desativar copia as entradas do arquivo de volta para esta máquina, e o arquivo continua no repositório. Planos não fazem parte do arquivo; para compartilhar um plano, mova-o para a pasta de planos do repositório. Se o arquivo tiver um conflito do Git, o painel não consegue carregar nem salvar notas e tarefas até você corrigir o arquivo.
+
 ## Relacionado
 
 - [Sessões de Worktree](/pt-br/worktrees/) — execute uma tarefa em seu próprio branch

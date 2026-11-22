@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import type { Session } from '@/lib/opencode/model';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { applyGlobalBlockingRequestEvents, resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
-import { useNotificationStore } from '@/sync/notification-store';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useCollapsedSessionActivityState } from './collapsedActivityState';
 import type { SessionNode } from '../types';
 import { installHookTestDom } from '../test-utils/testDom';
@@ -12,15 +12,23 @@ import { installHookTestDom } from '../test-utils/testDom';
 // SAFETY: the fixture supplies the minimal SDK identity used by the selector.
 const node = (id: string): SessionNode => ({ session: { id } as Session, children: [], worktree: null });
 
+const record = (id: string, idle?: number): Session => {
+  const session: Session = {
+    id, title: id, directory: '/workspace', projectID: 'project', cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: idle ?? 1 },
+  };
+  if (idle !== undefined) session.time.idle = idle;
+  return session;
+};
+
 describe('collapsed activity scalar selector', () => {
   test('does not rerender for unrelated updates and rerenders for relevant scalar changes', async () => {
     const dom = installHookTestDom();
     const root = createRoot(dom.container);
     replaceGlobalSessionStatusById(new Map());
-    useNotificationStore.setState({
-      list: [],
-      index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
-    });
+    const originalSessions = useGlobalSessionsStore.getState();
+    useGlobalSessionsStore.getState().applySnapshot([record('relevant'), record('unrelated')], []);
     type ActivityCapture = { renders: number; state: string | null };
     const capture: ActivityCapture = { renders: 0, state: null };
     const Harness = () => {
@@ -32,14 +40,10 @@ describe('collapsed activity scalar selector', () => {
       await act(async () => root.render(React.createElement(Harness)));
       const initialRenders = capture.renders;
       await act(async () => replaceGlobalSessionStatusById(new Map([['unrelated', { status: { type: 'busy' }, directory: '/other' }]])));
-      await act(async () => useNotificationStore.getState().append({
-        type: 'turn-complete', session: 'unrelated', time: Date.now(), viewed: false,
-      }));
+      await act(async () => useGlobalSessionsStore.getState().upsertSession(record('unrelated', 2)));
       expect(capture.renders).toBe(initialRenders);
 
-      await act(async () => useNotificationStore.getState().append({
-        type: 'turn-complete', session: 'relevant', time: Date.now(), viewed: false,
-      }));
+      await act(async () => useGlobalSessionsStore.getState().upsertSession(record('relevant', 3)));
       expect(capture.state).toBe('unread');
       const unreadRenders = capture.renders;
       await act(async () => replaceGlobalSessionStatusById(new Map([['relevant', { status: { type: 'busy' }, directory: '/workspace' }]])));
@@ -71,10 +75,7 @@ describe('collapsed activity scalar selector', () => {
       await act(async () => root.unmount());
       replaceGlobalSessionStatusById(new Map());
       resetGlobalBlockingRequests();
-      useNotificationStore.setState({
-        list: [],
-        index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
-      });
+      useGlobalSessionsStore.setState(originalSessions);
       dom.restore();
     }
   });

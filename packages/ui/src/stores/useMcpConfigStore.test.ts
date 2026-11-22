@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { McpDraft } from './useMcpConfigStore';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
+
+const environment = directoryEnvironment({ home: '/workspace', fakeTimers: false });
 
 /** The parts of the MCP write body these tests make claims about. */
 type CapturedMcpBody = {
@@ -26,27 +29,14 @@ const runtimeFetchMock = async (url: string, init?: RequestInit) => {
   return new Response(JSON.stringify({}), { headers: { 'Content-Type': 'application/json' } });
 };
 
-mock.module('@/lib/runtime-fetch', () => ({ runtimeFetch: runtimeFetchMock }));
-
-mock.module('@/lib/opencode/client', () => ({
-  opencodeClient: { getDirectory: () => '/workspace/project' },
-}));
-
-mock.module('@/stores/useProjectsStore', () => ({
-  useProjectsStore: {
-    getState: () => ({ getActiveProject: () => ({ path: '/workspace/project' }) }),
-  },
-}));
-
-mock.module('@/lib/configUpdate', () => ({
-  startConfigUpdate: mock(() => undefined),
-  finishConfigUpdate: mock(() => undefined),
-  updateConfigUpdateMessage: mock(() => undefined),
-}));
-
-mock.module('@/stores/useAgentsStore', () => ({
-  refreshAfterOpenCodeRestart: mock(async () => undefined),
-}));
+environment.respond(async (url, init) => {
+  if (url.pathname.startsWith('/api/config/mcp')) return runtimeFetchMock(`${url.pathname}${url.search}`, init);
+  if (url.pathname === '/api/fs/home') return Response.json({ home: '/workspace', chatsRoot: '/workspace/chats' });
+  if (url.pathname === '/api/location' || url.pathname === '/api/session') return Response.json({}, { status: 401 });
+  throw new Error(`Unexpected request: ${url}`);
+});
+const { useProjectsStore } = await import('./useProjectsStore');
+useProjectsStore.setState({ projects: [{ id: 'project', path: '/workspace/project' }], activeProjectId: 'project' });
 
 const { useMcpConfigStore } = await import('./useMcpConfigStore');
 

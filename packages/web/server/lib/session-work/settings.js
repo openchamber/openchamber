@@ -8,6 +8,10 @@ const SESSION_WORK_ENTRY_VALUES = new Set(['off', 'every-message', 'jev']);
 
 const DEFAULT_SESSION_WORK_ENTRY = 'off';
 
+/**
+ * @param {unknown} value
+ * @returns {value is string}
+ */
 export const isSessionWorkEntry = (value) => SESSION_WORK_ENTRY_VALUES.has(value);
 
 /**

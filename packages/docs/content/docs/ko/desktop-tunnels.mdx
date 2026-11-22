@@ -1,11 +1,11 @@
 ---
 title: 데스크톱 터널
-description: 데스크톱 앱에서 Cloudflare 또는 Ngrok 터널을 만드세요.
+description: 데스크톱 앱에서 Cloudflare, Ngrok 또는 Tailscale 터널을 만드세요.
 ---
 
 # 데스크톱 터널
 
-데스크톱 앱은 **Settings → OpenChamber → Tunnel**에서 공개 터널을 만들 수 있습니다. 이 경로에서는 OpenChamber를 CLI로 시작할 필요가 없습니다.
+데스크톱 앱은 **Settings → OpenChamber → Tunnel**에서 터널을 만들 수 있습니다. 이 경로에서는 OpenChamber를 CLI로 시작할 필요가 없습니다.
 
 ## 공급자 설치
 
@@ -22,14 +22,16 @@ Cloudflare는 `cloudflared`를 사용합니다. Ngrok은 ngrok 계정과 ngrok �
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+Tailscale을 쓰려면 [Tailscale 앱](https://tailscale.com/download)을 설치하고 로그인하세요.
+
 ## 앱에서 시작
 
 1. **Settings → OpenChamber → Tunnel**을 엽니다.
-2. **Cloudflare** 또는 **Ngrok**을 선택합니다.
-3. quick tunnel을 시작합니다.
+2. **Cloudflare**, **Ngrok** 또는 **Tailscale**을 선택합니다.
+3. 터널 유형을 고르고 **터널 시작**을 선택합니다.
 4. 휴대폰에서 생성된 QR 코드를 스캔합니다.
 
-Ngrok은 현재 quick tunnels를 지원합니다. Cloudflare는 quick tunnels와 Cloudflare 관리형 모드를 지원합니다.
+Ngrok은 현재 quick tunnels를 지원합니다. Cloudflare는 quick tunnels와 Cloudflare 관리형 모드를 지원합니다. Tailscale은 tailnet 안의 기기만 열 수 있는 **Serve**와 인터넷의 누구나 열 수 있는 **Funnel**을 제공합니다. Tailscale에서 먼저 HTTPS나 Funnel을 켜야 하면 오류 옆에 **승인 페이지 열기** 버튼이 나타납니다. 거기서 승인한 뒤 다시 시작하세요.
 
 ## 접근 보호
 

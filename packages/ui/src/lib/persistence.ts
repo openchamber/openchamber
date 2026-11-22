@@ -33,16 +33,9 @@ export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void
 };
 
 const SETTINGS_MIRROR_INDEX_KEY = 'openchamber.settingsMirror.v2.index';
-// Set once a runtime's device fields have been read from the server document
-// (installs that predate the settings split still carry them there). After
-// that the local store is the only owner and the server copy is ignored.
 const DEVICE_SEED_KEY_PREFIX = 'openchamber.deviceSeeded.v1:';
 const getDeviceSeedStorageKey = (runtimeKey: string): string => `${DEVICE_SEED_KEY_PREFIX}${encodeURIComponent(runtimeKey)}`;
 
-/**
- * The part of a server document this window may apply: everything but device
- * fields, plus the device fields exactly once per runtime as a migration seed.
- */
 const withoutStaleDeviceFields = (settings: DesktopSettings, runtimeKey: string): DesktopSettings => {
   const seedKey = getDeviceSeedStorageKey(runtimeKey);
   let seedDevice = false;
@@ -75,9 +68,6 @@ const setOrRemoveLocalStorage = (key: string, value: string | null): void => {
 };
 
 const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: string): void => {
-  // Every user-owned field the server holds for this runtime, so a later
-  // phase can serve the profile from the mirror; secrets and computed flags
-  // never land in browser storage.
   const mirror: DesktopSettings = {};
   for (const key of MIRRORED_KEYS) {
     if (settings[key] !== undefined) Object.assign(mirror, { [key]: settings[key] });
@@ -182,31 +172,27 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('dictationEnabled');
   }
+  if (settings.dictationAutoSend !== undefined) {
+    localStorage.setItem('dictationAutoSend', String(settings.dictationAutoSend));
+  } else {
+    localStorage.removeItem('dictationAutoSend');
+  }
   if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   } else {
     localStorage.removeItem('sttProvider');
   }
   setOrRemoveLocalStorage('sttServerUrl', typeof settings.sttServerUrl === 'string' ? settings.sttServerUrl : null);
+  setOrRemoveLocalStorage('sttEndpointPath', settings.sttEndpointPath ?? null);
   setOrRemoveLocalStorage('sttModel', typeof settings.sttModel === 'string' ? settings.sttModel : null);
   setOrRemoveLocalStorage('sttLocalModel', typeof settings.sttLocalModel === 'string' ? settings.sttLocalModel : null);
   setOrRemoveLocalStorage('sttLanguage', typeof settings.sttLanguage === 'string' ? settings.sttLanguage : null);
+  setOrRemoveLocalStorage('sttCorrectTranscript', settings.sttCorrectTranscript === undefined ? null : String(settings.sttCorrectTranscript));
 };
 
 export interface SettingsSyncedDetail {
   settings: DesktopSettings;
-  /** Whether listeners may adopt authoritative state that this window owns a
-      live copy of (workspace pointers, theme). True only for a bootstrap-grade
-      sync: the settings document is shared by every window of this server, so
-      a mid-session reconciliation adopting them would hijack this window's
-      choices with another window's. Every settings save echoes the full
-      document back as a sync event with bootstrap=false — the echo itself is
-      not filtered; listeners gate their adoption on this flag and keep their
-      live state for the fields they own. */
   bootstrap: boolean;
-  /** Whether this sync may replace this window's theme preferences. VS Code
-      settings broadcasts remain bootstrap-grade for shared workspace pointers,
-      but must not copy one webview's theme into another webview. */
   adoptTheme: boolean;
 }
 
@@ -236,10 +222,6 @@ export const subscribeToSettingsSaveState = (listener: () => void): (() => void)
   return () => _settingsSaveStateListeners.delete(listener);
 };
 
-/**
- * Drive the shared settings save indicator from pages that persist through
- * their own APIs instead of updateDesktopSettings. 'error' resets to idle.
- */
 export const reportSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
   ensureSettingsRuntimeLifecycle();
   dispatchSettingsSaveState(state);
@@ -251,8 +233,6 @@ const dispatchSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void =>
     _settingsSaveStateResetTimer = null;
   }
 
-  // Quiet indicator: success is the normal case and renders nothing ('saved' → idle);
-  // only in-flight saves and failures surface in the UI.
   const nextState: SettingsSaveState = state === 'saved' ? 'idle' : state;
   if (nextState !== _settingsSaveState) {
     _settingsSaveState = nextState;
@@ -286,12 +266,10 @@ const getRuntimeSettingsAPI = () => getRegisteredRuntimeAPIs()?.settings ?? null
 
 const settingsEndpointForSurface = (): string => `/api/config/settings?${SETTINGS_SURFACE_QUERY}=${getSettingsSurface()}`;
 
-/** Copy a parsed snapshot into the live stores. Omitted keys stay as they are. */
 const applyDesktopUiPreferences = (settings: DesktopSettings): void => {
   applySettingsToStores(settings);
 };
 
-/** Parse an untrusted settings document at the boundary; `null` when it is not an object at all. */
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => parseSettingsDocument(payload);
 
 type SettingsRuntimeContext = { runtimeKey: string; generation: number };
@@ -299,7 +277,6 @@ type SettingsWrite = {
   context: SettingsRuntimeContext;
   changes: Partial<DesktopSettings>;
 };
-/** Whether a settings write reached its store. A no-op (nothing to send) counts as ok. */
 type SettingsWriteResult = { ok: boolean };
 type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
 type SettingsOperation = { revision: number };
@@ -313,7 +290,6 @@ class SettingsMutationTracker {
     this.revision += 1;
     if (this.operations.size > 0) {
       const latest = this.mutations.at(-1);
-      // A new segment is only needed when an operation started after the last one.
       const crossedOperationBoundary = latest
         ? [...this.operations].some((operation) => operation.revision >= latest.revision)
         : true;
@@ -358,19 +334,9 @@ class SettingsMutationTracker {
   }
 }
 
-// Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
 let _settingsRuntimeGeneration = 0;
 let _settingsCache: { value: DesktopSettings | null; at: number; context: SettingsRuntimeContext } | null = null;
-// The last value the server was seen holding for each key, for the current
-// runtime. A write whose value equals it is redundant and is dropped before it
-// reaches the wire — this is what turns "the store changed because we adopted
-// the server's value" into zero PUTs instead of an echo (appearanceAutoSave and
-// the model-prefs auto-save both subscribe to the store, not to intent).
 let _serverKnownSettings: Partial<DesktopSettings> = {};
-// True while server values are being copied into the stores. Store
-// subscribers that mirror changes back to the server (appearanceAutoSave,
-// modelPrefsAutoSave) read this to tell "a person changed it" from "we just
-// adopted it" — the second must never become a write.
 let _applyingServerSettings = false;
 
 export const isApplyingServerSettings = (): boolean => _applyingServerSettings;
@@ -392,7 +358,7 @@ let _settingsLifecycleInitialized = false;
 let _pendingSettingsRevision = 0;
 let _settingsWritesInFlight: SettingsWrite[] = [];
 const _settingsMutationTracker = new SettingsMutationTracker();
-const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
+const SETTINGS_CACHE_TTL = 2_000;
 const SETTINGS_DEBOUNCE_MS = 200;
 
 const captureSettingsRuntimeContext = (): SettingsRuntimeContext => ({
@@ -423,7 +389,6 @@ const forgetServerSettings = (keys: SettingsKey[]): void => {
   _serverKnownSettings = next;
 };
 
-/** Keys of `changes` whose value differs from what the server is known to hold. */
 const withoutRedundantSettings = (changes: Partial<DesktopSettings>): Partial<DesktopSettings> => {
   const next: Partial<DesktopSettings> = {};
   for (const key of settingsKeysOf(changes)) {
@@ -465,23 +430,12 @@ const isSettingsRuntimeContextCurrent = (context: SettingsRuntimeContext): boole
   context.generation === _settingsRuntimeGeneration && context.runtimeKey === getRuntimeKey()
 );
 
-// Best-effort flush of the pending debounced settings write at a lifecycle
-// boundary. Clearing the timer before flushing means the write happens exactly
-// once — the flush consumes the pending changes, so a timer that already fired
-// cannot double-write. A hard process kill (crash, task-manager kill) can
-// still lose the in-flight request; this narrows the loss window to the
-// request itself instead of the whole debounce interval (#2197).
 const flushPendingSettingsBeforeSuspend = (): void => {
   if (!_pendingSettingsChanges) return;
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);
     _settingsFlushTimer = null;
   }
-  // `keepalive` is what makes this flush actually land: a plain fetch started
-  // from pagehide/beforeunload is cancelled with the document. Settings payloads
-  // are a few KB, far under the 64 KB keepalive budget. `navigator.sendBeacon`
-  // is not an option here — it cannot carry the runtime bearer header, so the
-  // write would be rejected as unauthenticated.
   void _flushSettingsUpdate({ keepalive: true });
 };
 
@@ -509,9 +463,6 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     dispatchSettingsSaveState('saved');
   });
 
-  // Mirror the deferred safe-storage lifecycle: without these listeners, a
-  // settings change made within SETTINGS_DEBOUNCE_MS of closing the window is
-  // silently dropped, and the stale server snapshot wins on next startup.
   try {
     window.addEventListener('pagehide', flushPendingSettingsBeforeSuspend, { capture: true });
     window.addEventListener('beforeunload', flushPendingSettingsBeforeSuspend, { capture: true });
@@ -521,10 +472,6 @@ const ensureSettingsRuntimeLifecycle = (): void => {
       });
       document.addEventListener('freeze', flushPendingSettingsBeforeSuspend);
     }
-    // Capacitor: iOS/Android suspend the app without firing pagehide or
-    // beforeunload, and `visibilitychange` alone is not dependable in a
-    // WKWebView. `App.appStateChange` is the authoritative foreground signal on
-    // native (same source `usePushVisibilityBeacon` trusts), so flush there too.
     if (isCapacitorApp()) {
       void import('@capacitor/app')
         .then(({ App }) => App.addListener('appStateChange', ({ isActive }) => {
@@ -539,16 +486,12 @@ const ensureSettingsRuntimeLifecycle = (): void => {
 
 const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
   ensureSettingsRuntimeLifecycle();
-  // Return cached if fresh
   if (_settingsCache && isSameSettingsRuntimeContext(_settingsCache.context, context) && Date.now() - _settingsCache.at < SETTINGS_CACHE_TTL) {
     return reconcileSettingsRead(_settingsCache.value, context);
   }
 
-  // Dedup concurrent calls
   if (_settingsInflight && isSameSettingsRuntimeContext(_settingsInflight.context, context)) return _settingsInflight.promise;
 
-  // Keep overlapping intent alive until this read settles, even if its write
-  // has already completed. A late GET must not refill the cache with old data.
   const operation = _settingsMutationTracker.begin();
   const initialOverlay = getSettingsWriteOverlay(context);
   const commitRead = (settings: DesktopSettings | null): DesktopSettings | null => {
@@ -558,8 +501,6 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
       context,
     );
     _settingsCache = { value: reconciled, at: Date.now(), context };
-    // Do not undo knowledge from a completed save with an older GET either:
-    // that would incorrectly drop a later user change back to the old value.
     const unchanged: Partial<DesktopSettings> = {};
     for (const key of settingsKeysOf(settings)) {
       if (isSameSettingValue(settings[key], reconciled?.[key])) {
@@ -588,9 +529,6 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
 
       if (!isSettingsRuntimeContextCurrent(context)) return null;
       try {
-        // The surface kind travels as a query parameter, not a header: a header
-        // would turn the request into a CORS preflight, which older instances
-        // (and the packaged desktop's cross-origin shell) refuse.
         const response = await runtimeFetch(settingsEndpointForSurface(), {
           method: 'GET',
           headers: { Accept: 'application/json' },
@@ -619,8 +557,6 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   return inflight.promise;
 };
 
-/** Forget everything cached about the server document: the GET cache and the
- * last-known per-key values used to drop redundant writes. */
 export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
   _serverKnownSettings = {};
@@ -638,9 +574,6 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
 
   const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
-  // Wait for Zustand persist hydration before applying server settings.
-  // Otherwise `set()`-calls race with hydration: we set X, then hydration
-  // reads localStorage and overwrites back to the persisted value.
   const waitForPersistHydration = (persistApi: PersistApi | undefined): Promise<void> => {
     if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
       return Promise.resolve();
@@ -659,8 +592,6 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
         unsubscribe?.();
         finish();
       });
-      // Guard: hydration may have flipped to true between the hasHydrated
-      // check and the onFinishHydration subscription — resolve immediately.
       if (persistApi.hasHydrated?.()) finish();
     });
   };
@@ -668,13 +599,6 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
     persistApis.map(waitForPersistHydration),
   ).then(() => undefined);
 
-  // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
-  // a TypeError from writing to a contextBridge-protected global) doesn't
-  // prevent server settings from reaching the Zustand store.
-  // Local changes sitting in the debounce buffer are not yet tracked as
-  // mutations (record() only stores while a request is in flight), so a GET
-  // racing the debounce window would briefly revert them. Reapply the
-  // pending buffer over every reconciled result.
   const overlayPendingChanges = (settings: DesktopSettings): DesktopSettings => {
     if (!_pendingSettingsChanges || !_pendingSettingsContext) return settings;
     if (!isSettingsRuntimeContextCurrent(_pendingSettingsContext)) return settings;
@@ -690,10 +614,6 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
       overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation)),
       context.runtimeKey,
     );
-    // Keys the server omits are "unset", not "reset": this window keeps
-    // whatever it already holds for them and nothing is written back. A
-    // bootstrap therefore never seeds the server from local state — a write
-    // only ever carries a change a person made in this window.
     try {
       persistToLocalStorage(settings);
     } catch (error) {
@@ -723,9 +643,6 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   }
 };
 
-// Coalesce rapid updateDesktopSettings calls into a single PUT
-// `keepalive` is set only on the lifecycle-suspend path, where the document may
-// be torn down mid-request; the ordinary debounced write uses a plain fetch.
 async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
   let ok = false;
   const changes = _pendingSettingsChanges;
@@ -739,7 +656,6 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
   _settingsFlushWaiters = [];
   try {
     if (!changes || !context || Object.keys(changes).length === 0 || !isSettingsRuntimeContextCurrent(context)) {
-      // Nothing will be written — clear any pending "Saving…" indicator.
       ok = true;
       dispatchSettingsSaveState('saved');
       return;
@@ -747,8 +663,6 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
     const operation = _settingsMutationTracker.begin(revision);
     const inFlightWrite: SettingsWrite = { context, changes: { ...changes } };
     _settingsWritesInFlight.push(inFlightWrite);
-    // Assume the merge lands so a same-value write arriving mid-flight is not
-    // sent twice; a failed request forgets these keys so a retry goes through.
     rememberServerSettings(changes);
     const forgetSentSettings = () => forgetServerSettings(settingsKeysOf(changes));
 
@@ -756,9 +670,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
       const runtimeSettings = getRuntimeSettingsAPI();
       if (runtimeSettings) {
         try {
-          // The runtime API hands back whatever the bridge or server returned;
-          // it is parsed here like any other boundary payload.
-          const updated = sanitizeWebSettings(await runtimeSettings.save(changes));
+          const updated = sanitizeWebSettings(await runtimeSettings.save(changes, { keepalive }));
           if (!isSettingsRuntimeContextCurrent(context)) return;
           if (updated) {
             rememberServerSettings(updated);
@@ -806,7 +718,6 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
           dispatchSettingsSynced(reconciled, false);
           ok = true;
           dispatchSettingsSaveState('saved');
-          // Invalidate GET cache so next read sees the fresh data
           _settingsCache = null;
         } else {
           forgetSentSettings();
@@ -828,19 +739,8 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
   }
 }
 
-/**
- * Load the shared settings document for the current runtime (cached briefly
- * during startup bursts). Pages that need a field the stores do not carry read
- * it from here instead of fetching the endpoint themselves. `null` is a load
- * failure, never an empty document.
- */
 export const loadDesktopSettings = (): Promise<DesktopSettings | null> => fetchWebSettings();
 
-/**
- * Queue a change a person made in this window for the debounced write. Keys
- * whose value the server already holds are dropped; computed server flags are
- * never sent. Resolves once the write (or the decision not to write) settled.
- */
 export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<SettingsWriteResult> => {
   if (typeof window === 'undefined') {
     return { ok: false };
@@ -853,15 +753,10 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     void _flushSettingsUpdate();
   }
 
-  // Merge first, then drop keys that now equal the server: a toggle back to
-  // the server's value inside the debounce window cancels the pending write
-  // for that key instead of leaving the earlier value queued.
   const writable: Partial<DesktopSettings> = {};
   for (const key of settingsKeysOf(changes)) {
     if (isWritableSettingsKey(key)) Object.assign(writable, { [key]: changes[key] });
   }
-  // A toggle back cancels its pending PUT but is still newer intent for any
-  // read that captured the previous pending value.
   const revision = _settingsMutationTracker.record(writable);
   const pending = withoutRedundantSettings({ ...(_pendingSettingsChanges ?? {}), ...writable });
   if (Object.keys(pending).length === 0) {

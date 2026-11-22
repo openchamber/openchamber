@@ -29,6 +29,8 @@ import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 
 import { AddCatalogDialog } from './AddCatalogDialog';
 import { InstallSkillDialog } from './InstallSkillDialog';
+import { SkillsCatalogRows } from './SkillsCatalogRows';
+import { skillCatalogUrl } from './skillCatalogUrl';
 
 type SkillsMode = 'manual' | 'external';
 
@@ -37,25 +39,6 @@ interface SkillsCatalogPageProps {
   onModeChange: (mode: SkillsMode) => void;
   showModeTabs?: boolean;
 }
-
-const GITHUB_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-
-const getRepoUrl = (source: string): string | null => {
-  const trimmed = source.trim();
-  if (!GITHUB_REPO_PATTERN.test(trimmed)) {
-    return null;
-  }
-  return `https://github.com/${trimmed}`;
-};
-
-const getSkillUrl = (item: SkillsCatalogItem): string | null => {
-  const repoUrl = getRepoUrl(item.repoSource);
-  if (!repoUrl) {
-    return null;
-  }
-  const skillPath = [item.repoSubpath, item.skillDir].filter(Boolean).join('/');
-  return skillPath ? `${repoUrl}/tree/HEAD/${skillPath}` : repoUrl;
-};
 
 let cachedStarsFormatter: { locale: string; formatter: Intl.NumberFormat } | null = null;
 
@@ -208,7 +191,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     void loadCatalog();
   }, [loadCatalog]);
 
-  // Load every source in the background so global search covers all of them.
   React.useEffect(() => {
     const unloaded = sources.filter((src) => !loadedSourceIds[src.id]);
     if (unloaded.length === 0) {
@@ -354,8 +336,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     setIsRemovingCatalog(true);
     try {
       const settings = await loadDesktopSettings();
-      // A failed load is not an empty list: writing [] here would drop every
-      // other catalog along with the selected one.
       if (!settings) {
         toast.error(t('settings.skills.catalog.add.toast.saveFailed'));
         return;
@@ -383,8 +363,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     ? t('settings.skills.catalog.page.list.searchTitle')
     : (selectedSource?.label ?? '');
 
-  // The selected source has no items yet and a load is in flight — show the
-  // loading state instead of a stale list from the previously selected source.
   const isSelectedSourceLoading = !isSearching
     && selectedSourceId !== null
     && !loadedSourceIds[selectedSourceId]
@@ -395,6 +373,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
       <SettingsPageLayout
         title={t('settings.skills.catalog.page.title')}
         showSaveStatus={false}
+        namedBySidebar
       >
       {showModeTabs && (
             <div className="mb-4">
@@ -416,10 +395,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
               </div>
             </div>
           )}
-
-        <p className="typography-meta text-muted-foreground mb-4">
-          {t('settings.skills.catalog.page.subtitle')}
-        </p>
 
         <div data-settings-item="skills.catalog.search" className="mb-5">
           <div className="relative max-w-md">
@@ -449,7 +424,6 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
 
         <SettingsSection
           title={t('settings.skills.catalog.page.section.sources')}
-          divider={false}
           settingsItem="skills.catalog.source"
           contentClassName="space-y-0"
         >
@@ -482,7 +456,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 <span className="typography-ui-label text-muted-foreground block">
                   {t('settings.skills.catalog.page.source.addOwnTitle')}
                 </span>
-                <span className="typography-micro text-muted-foreground/70 block mt-0.5">
+                <span className="typography-micro text-muted-foreground block mt-0.5">
                   {t('settings.skills.catalog.page.source.addOwnDescription')}
                 </span>
               </span>
@@ -518,7 +492,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
               <span className="typography-micro font-medium uppercase tracking-wide text-muted-foreground truncate">
                 {listTitle}
               </span>
-              <span className="typography-micro text-muted-foreground/70 shrink-0">
+              <span className="typography-micro text-muted-foreground shrink-0">
                 {t('settings.skills.catalog.page.foundCount', { count: filtered.length })}
               </span>
             </div>
@@ -613,14 +587,16 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 <p className="typography-meta mt-1 opacity-75">{t('settings.skills.catalog.page.empty.noSkillsDescription')}</p>
               </div>
             ) : (
-              <div className="divide-y divide-[var(--surface-subtle)]">
-                {filtered.map((item) => {
+              <SkillsCatalogRows
+                items={filtered}
+                itemKey={itemKey}
+                renderRow={(item) => {
                   const installed = item.installed?.isInstalled;
                   const installedScope = item.installed?.scope;
-                  const skillUrl = getSkillUrl(item);
+                  const skillUrl = skillCatalogUrl(item);
 
                   return (
-                    <div key={`${item.sourceId}:${item.skillDir}`} className="py-2">
+                    <div className="py-2">
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
@@ -646,10 +622,10 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                           {item.description ? (
                             <div className="typography-meta text-muted-foreground mt-0.5 line-clamp-2">{item.description}</div>
                           ) : (
-                            <div className="typography-meta text-muted-foreground/50 mt-0.5 italic">{t('settings.skills.catalog.shared.noDescription')}</div>
+                            <div className="typography-meta text-muted-foreground mt-0.5 italic">{t('settings.skills.catalog.shared.noDescription')}</div>
                           )}
 
-                          <div className="typography-micro text-muted-foreground/80 mt-1 flex items-center gap-2 min-w-0">
+                          <div className="typography-micro text-muted-foreground mt-1 flex items-center gap-2 min-w-0">
                             {skillUrl ? (
                               <a
                                 href={skillUrl}
@@ -718,13 +694,12 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                       </div>
                     </div>
                   );
-                })}
-              </div>
+                }}
+              />
             )}
         </SettingsSection>
       </SettingsPageLayout>
 
-        {/* Dialogs */}
         <AddCatalogDialog open={catalogDialogOpen} onOpenChange={setCatalogDialogOpen} catalogId={editingCatalogId} />
         <InstallSkillDialog open={installDialogOpen} onOpenChange={setInstallDialogOpen} items={installItems} />
 

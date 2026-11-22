@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { consumeRelayProof, relayProofHeaders } from '../relay/provenance.js';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ui-auth-test-'));
 process.env.OPENCHAMBER_DATA_DIR = dataDir;
@@ -46,6 +47,33 @@ const createResponse = () => {
 };
 
 describe('ui auth client credential seam', () => {
+  it('preserves upgrade cookie handling with a null response', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth();
+    try {
+      const req = { headers: { host: 'localhost:3000', upgrade: 'websocket' } };
+      await expect(auth.ensureSessionToken(req, null)).rejects.toThrow("Cannot read properties of null (reading 'setHeader')");
+      req.headers.cookie = 'oc_ui_session_3000=existing';
+      expect(await auth.ensureSessionToken(req, null)).toBe('existing');
+    } finally {
+      auth.dispose();
+    }
+  });
+
+  it('accepts upgrade bearer credentials without a response', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({
+      clientAuthController: {
+        authenticateBearerToken: async () => ({ ok: true, clientId: 'device-1' }),
+      },
+    });
+    try {
+      expect(await auth.ensureSessionToken({ headers: { authorization: 'Bearer client-token', upgrade: 'websocket' } }, null)).toBe('client:device-1');
+    } finally {
+      auth.dispose();
+    }
+  });
+
   it('accepts bearer client credentials when UI password auth is enabled', async () => {
     const createUiAuth = await loadCreateUiAuth();
     const auth = createUiAuth({
@@ -170,6 +198,7 @@ describe('ui auth client credential seam', () => {
     expect(typeof mintRes.body.token).toBe('string');
     expect(mintRes.body.token.startsWith('oc_url_')).toBe(true);
     expect(mintRes.body.expiresAt).toBeGreaterThan(Date.now());
+    expect(mintRes.body.expiresIn).toBe(60_000);
     expect(mintRes.getHeader('cache-control')).toBe('no-store');
 
     const urlToken = mintRes.body.token;
@@ -240,6 +269,8 @@ describe('ui auth client credential seam', () => {
       { method: 'GET', path: '/api/event', url: `/api/event?oc_url_token=${encodeURIComponent(guestToken)}` },
       { method: 'GET', path: '/api/guests/other/panel/main.js', url: `/api/guests/other/panel/main.js?oc_url_token=${encodeURIComponent(guestToken)}` },
       { method: 'GET', path: '/api/guests', url: `/api/guests?oc_url_token=${encodeURIComponent(guestToken)}` },
+      // A route named like the guest (`/api/guests/marks` for a guest `marks`) is not one of its files.
+      { method: 'GET', path: '/api/guests/hello', url: `/api/guests/hello?oc_url_token=${encodeURIComponent(guestToken)}` },
     ]) {
       const forbiddenRes = createResponse();
       let forbiddenCalled = false;
@@ -307,6 +338,16 @@ describe('ui auth client credential seam', () => {
       url: `/api/spaces/a1b2c3d4e5f6/fs/raw?path=x.png&oc_url_token=${encodeURIComponent(urlToken)}`,
       headers: { accept: 'image/png' },
     }, null)).toBe('client:device-1');
+    // A provider's uploads take the URL token only where its descriptor says it serves uploads.
+    const uploadOf = (provider) => ({
+      method: 'GET',
+      path: `/api/source-control/${provider}/uploads/abc/clip.png`,
+      url: `/api/source-control/${provider}/uploads/abc/clip.png?owner=o&repo=r&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'image/png' },
+    });
+    expect(await auth.ensureSessionToken(uploadOf('gitlab'), null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken(uploadOf('github'), null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken(uploadOf('gitea'), null)).toBe(null);
     expect(await auth.ensureSessionToken({
       method: 'GET',
       path: '/api/spaces/a1b2c3d4e5f6/session',
@@ -519,6 +560,150 @@ describe('ui auth login rate limit', () => {
 
     expect(statuses.slice(0, 10)).toEqual(Array(10).fill(401));
     expect(statuses.slice(10)).toEqual([429, 429]);
+  });
+
+  it('keeps one budget per private LAN peer when X-Forwarded-For rotates', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const attempt = async (index) => {
+      const forwardedFor = `203.0.113.${index + 1}`;
+      const req = {
+        method: 'POST',
+        ip: forwardedFor,
+        socket: { remoteAddress: '::ffff:192.168.1.50' },
+        headers: { host: '127.0.0.1:3000', 'x-forwarded-for': forwardedFor },
+        body: { password: 'wrong' },
+      };
+      const res = createResponse();
+      await auth.handleSessionCreate(req, res);
+      return res.statusCode;
+    };
+
+    const statuses = [];
+    for (let index = 0; index < 12; index += 1) {
+      statuses.push(await attempt(index));
+    }
+
+    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(401));
+    expect(statuses.slice(10)).toEqual([429, 429]);
+  });
+
+  it('keeps separate budgets per forwarded client for a loopback peer', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const attempt = async (forwardedFor) => {
+      const req = {
+        method: 'POST',
+        ip: forwardedFor,
+        socket: { remoteAddress: '127.0.0.1' },
+        headers: { host: '127.0.0.1:3000', 'x-forwarded-for': forwardedFor },
+        body: { password: 'wrong' },
+      };
+      const res = createResponse();
+      await auth.handleSessionCreate(req, res);
+      return res;
+    };
+
+    for (let index = 0; index < 10; index += 1) {
+      expect((await attempt('203.0.113.201')).statusCode).toBe(401);
+    }
+    expect((await attempt('203.0.113.201')).statusCode).toBe(429);
+    expect((await attempt('203.0.113.202')).statusCode).toBe(401);
+  });
+
+  it('keeps one budget per direct link-local peer when X-Forwarded-For rotates', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const attempt = async (index) => {
+      const forwardedFor = `203.0.113.${index + 1}`;
+      const req = {
+        method: 'POST',
+        ip: forwardedFor,
+        socket: { remoteAddress: 'fe80::1' },
+        headers: { host: '127.0.0.1:3000', 'x-forwarded-for': forwardedFor },
+        body: { password: 'wrong' },
+      };
+      const res = createResponse();
+      await auth.handleSessionCreate(req, res);
+      return res.statusCode;
+    };
+
+    const statuses = [];
+    for (let index = 0; index < 11; index += 1) {
+      statuses.push(await attempt(index));
+    }
+
+    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(401));
+    expect(statuses[10]).toBe(429);
+  });
+
+  it('keeps one relay budget that forwarding headers cannot choose', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const attempt = async (headers) => {
+      const forwardedFor = headers['x-forwarded-for'];
+      const req = {
+        method: 'POST',
+        ip: forwardedFor ?? '127.0.0.1',
+        socket: { remoteAddress: '127.0.0.1' },
+        headers: { host: '127.0.0.1:3000', ...headers },
+        body: { password: 'wrong' },
+      };
+      consumeRelayProof(req);
+      const res = createResponse();
+      await auth.handleSessionCreate(req, res);
+      return res.statusCode;
+    };
+
+    const statuses = [];
+    for (let index = 0; index < 11; index += 1) {
+      statuses.push(await attempt({
+        'x-openchamber-relay-connection': `connection-${index}`,
+        'x-forwarded-for': `203.0.113.${index + 1}`,
+        ...relayProofHeaders(),
+      }));
+    }
+
+    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(401));
+    expect(statuses[10]).toBe(429);
+    expect(await attempt({})).toBe(401);
+    expect(await attempt({
+      'x-openchamber-relay-connection': 'connection-0',
+      'x-forwarded-for': '203.0.113.250',
+    })).toBe(401);
+  });
+
+  it('keeps separate budgets for clients behind a configured LAN proxy', async () => {
+    process.env.OPENCHAMBER_TRUSTED_PROXIES = '10.0.0.0/24, fd00::5';
+    try {
+      const createUiAuth = await loadCreateUiAuth();
+      const auth = createUiAuth({ password: 'secret' });
+      const attempt = async (peer, forwardedFor) => {
+        const req = {
+          method: 'POST',
+          ip: forwardedFor,
+          socket: { remoteAddress: peer },
+          headers: { host: '127.0.0.1:3000', 'x-forwarded-for': forwardedFor },
+          body: { password: 'wrong' },
+        };
+        const res = createResponse();
+        await auth.handleSessionCreate(req, res);
+        return res.statusCode;
+      };
+
+      for (let index = 0; index < 10; index += 1) {
+        expect(await attempt('::ffff:10.0.0.7', `198.51.100.${index}, 203.0.113.211`)).toBe(401);
+      }
+      expect(await attempt('::ffff:10.0.0.7', '203.0.113.211')).toBe(429);
+      expect(await attempt('::ffff:10.0.0.7', '203.0.113.212')).toBe(401);
+      expect(await attempt('fd00::5', '203.0.113.213')).toBe(401);
+      for (let index = 0; index < 10; index += 1) {
+        expect(await attempt('10.0.1.7', `203.0.113.${index}`)).toBe(401);
+      }
+      expect(await attempt('10.0.1.7', '203.0.113.99')).toBe(429);
+    } finally {
+      delete process.env.OPENCHAMBER_TRUSTED_PROXIES;
+    }
   });
 
   it('counts rejected passkey assertions against the same budget as passwords', async () => {

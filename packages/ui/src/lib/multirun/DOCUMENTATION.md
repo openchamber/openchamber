@@ -49,10 +49,10 @@ project IDs are not used as a cross-worktree ownership oracle. The picker uses
 registered project/worktree ownership and computes candidates only while open. It writes an
 ID-bound marker without moving files, restarting work, or renaming the
 conversation. The imported session gets its own prompt variant so the caption
-and fusion task keep its original prompt. Imports currently require an ID-bound
-target; legacy title-only runs expose a disabled import action. Their lanes can
-still be opened and removed with confirmation in the owning project scope.
-Saved source guidance is offered for ID-bound members and stored fusion results.
+and fusion task keep its original prompt. Title-only legacy targets retain their
+owning project scope and group key. Imported members get ID-bound markers in
+that existing group. Saving a legacy source note similarly binds its marker,
+without renaming its conversation or changing membership.
 
 Removal requires `confirmed: true`; cancellation performs no operation.
 Confirmed removal revalidates the expected run before writing. It removes only
@@ -80,6 +80,19 @@ session again without any stored "resolved" state. Parsed identities are cached
 per session object (records are replaced on update), so the index can be
 rebuilt on every session-list change. Lanes sort by variant then creation;
 fusions come first.
+
+### Why the index resolves the legacy scope lazily and keeps its last result
+
+`RunAutoFusion` rebuilds the index on every streamed step of any session,
+because each step changes the deferred spend and the live records. Resolving
+every session's project scope (a worktree lookup and a path normalization) per
+step cost more than the rest of the index together, and only a session whose
+title names a run without membership metadata reads that scope.
+`readMultiRunIdentityWith` therefore asks for the scope only in that case and
+caches whether the identity read it. The index itself reads only the sessions
+that carry an identity, so `buildMultiRunIndex` returns the index it built last
+when those members are the same records with the same identities in the same
+order.
 
 Consumers: the sidebar row model and mobile sheet (see the sidebar
 DOCUMENTATION), the overview (`useMultiRun`), the header title
@@ -111,6 +124,12 @@ Every newly created lane, parent and fusion checkout waits for Git readiness
 before a session is created there, even for a project at the repository root.
 The setup-command wait preference controls setup only; it cannot authorize a
 model to write into a checkout that is still being populated.
+
+With `goal` set, `dispatchRunPrompt` writes the lane's own goal before its
+prompt, the order of an ordinary send. A lane whose goal cannot be written is
+not sent and shows as not started. A rejected prompt clears the goal again: with
+no turn to audit the server would keep it active, and the lane would stay
+working and hold auto-fusion. "Ask another model" adds plain lanes.
 `runActions.askOtherModels` turns a chat into a run by writing membership onto
 it and adding lanes that re-send its first prompt; it refuses any turn but the
 first, because new lanes would start without the conversation that followed.
@@ -184,9 +203,27 @@ base commit, so a clean working index does not omit committed result changes.
 Fusion results keep the group identity with role `fusion`, so they join the run
 as its first card. `autoFusion.ts` starts the configured fusion exactly once, on
 the page that launched the run (`RUN_LAUNCHER_ID`), when every lane was seen
-running on this page and has since left the live busy set with an outcome.
+running on this page and has since left the live busy set with an outcome,
+with no running subagent below it and no active goal. An active goal idles
+between turns with an outcome already recorded, so only its settling (complete,
+blocked, paused, out of budget) ends the lane. The descendant check uses the same merged
+session map as run membership, so it covers nested children across directories.
+An idle lane with a running descendant must record a newer `time.idle` before
+it can finish, so a gap between the child settling and the parent resuming
+cannot start fusion with the earlier outcome. The completion timestamp also
+covers a parent resumption that starts and finishes within one UI update.
+The status reducer's synchronous transition subscription records a lane's wait
+before the next event in a batch can settle its child. A busy transition clears
+that wait for the resumed parent, even if its next completion shares the batch.
 Persisted history never counts as finished; another client, or the launcher
 after a reload, fuses from the overview instead.
+
+### Why automatic fusion waits for descendants
+
+A parent can report idle with an outcome while a background subagent still
+runs, then resume to incorporate its result. Checking the parent's status
+alone would send its preliminary answer to fusion. The shared live subagent
+check keeps automatic fusion pending through that pause.
 
 ### Why combining results creates another fusion session
 
@@ -222,36 +259,52 @@ session-registration store. Importing creation back into that store through
 message routing caused an import-order crash. Keeping the read module independent
 of registration makes initialization safe from either entry point.
 
-## Prompt-candidate runtime verification
+## Retained prompt generation
 
-The opt-in `promptCandidates.integration.test.ts` exercises stateless generation
-through real OpenCode and a loopback-only synthetic OpenAI-compatible provider.
-It observes selected model aliases and effort at the provider, validates partial
-success and explicit candidate selection, and checks that source artifacts stay
-unchanged. It configures synthetic models in the isolated server's global
-configuration and one additional project-only model, whose failure is explicit.
-It creates no generation sessions. Normal test runs
-report this case as skipped.
+Each selected generation model gets a session in the requested project with
+deny-all tool permissions. `session.generate` receives the complete request and
+returns candidate text without executing an agent turn. The session is archived
+through the existing runtime archive workflow and is never deleted. Its request
+and raw output are saved as `resume:false` synthetic records. Until a later turn
+admits them, those records remain in the durable inbox; the history viewer reads
+both message history and inbox without resuming execution.
 
-Run it with `MULTIRUN_TEST_URL` and `MULTIRUN_TEST_ROOT` pointing to a server
-started by `bun run profile:serve`. The test verifies that server's project scope
-before creating the synthetic provider. It uses no real provider credentials or
-paid model requests. The temporary global configuration is removed only if it
-still matches this test's write, and the provider is closed. Candidate quality
-still requires a real-model evaluation.
+The composer retains references to all generation sessions, including failed or
+unselected results. Launch copies them into `multirun.generationSessions` on the
+run members. Parents and subsequent fusion results carry those references too.
+The overview's history control shows the archived request and output, reading
+only the selected generation session while the dialog is open. These references
+are provenance, not execution membership or fusion inputs.
 
-### Why project-only models fail explicitly
+Unavailable models and malformed candidates remain explicit per-model failures.
+Successful candidates survive sibling failures. A failed record or archive write
+is a retention failure: usable candidates and session references stay available,
+and the UI reports the incomplete save. A failed first archive attempt is retried
+once after generation; nothing is removed to recover from failure.
 
-OpenCode's stateless Generate route deliberately uses `global.config`, even when
-the client sends a project directory. A model defined only in that project's
-configuration can appear in its picker but is unavailable to generation. The UI
-names the unavailable models and directs the user to configure them globally or
-choose other models; successful candidates remain selectable. Generation remains
-stateless. Retained generation sessions would be a separate product decision.
-`generatePromptCandidates` reports a per-model failure reason, distinguishing
-server-wide model unavailability from generation or candidate-format failure.
-The implementation options are tracked in
+### Why generation uses retained project sessions
+
+The stateless Generate route uses `global.config`, so project-only models selected
+from a project catalog could not generate candidates. The existing session API
+resolves the requested project and model. Retaining and archiving those sessions
+preserves the work and avoids sidebar clutter without an upstream API change or
+automatic cleanup. This is the data-preserving choice for
 [#2478](https://github.com/developing-today-forks/openchamber/issues/2478).
+
+### Why generation records and model input are separate
+
+An orphan `resume:false` synthetic record is queued, not part of the transient
+generation transcript. The complete prompt therefore goes directly to
+`session.generate`; saved records serve the retained history viewer. Resuming
+those records to make them visible would start work the user did not select.
+
+The opt-in `promptCandidates.integration.test.ts` uses real OpenCode and a
+loopback synthetic provider. It verifies project-only model selection, aliases,
+effort, no advertised tools, archived session stamps and readable retained
+records. Run it with `MULTIRUN_TEST_URL` and `MULTIRUN_TEST_ROOT` pointing to a
+server started by `bun run profile:serve`. Normal runs report this case skipped.
+It changes no global provider configuration and uses no paid credentials.
+Candidate quality still requires a real-model evaluation.
 
 ## Overview
 
@@ -275,11 +328,13 @@ title and makes detachment independent of a second write.
 
 Each card's state comes from `laneStatus.resolveLaneStatus`, over live and
 recorded facts only: a pending permission or question (the global blocking
-index) wins over busy, then the live busy set, then OpenCode's recorded outcome
+index) wins over busy, then the live busy set or an active goal, then OpenCode's recorded outcome
 (`failed`, `interrupted` as stopped), a lane that never ended a turn, and a
 normal end with or without answer text. A normal end is grey, never green: it
 says the turn ended, not that the work is good; an unread dot marks replies
-the user has not opened. A failed card shows the error recorded on the newest
+the user has not opened. A lane with a goal shows the sidebar's goal mark beside
+its name, coloured by the goal's status, so a blocked goal reads as blocked on a
+card whose turn ended normally. A failed card shows the error recorded on the newest
 assistant message (`laneData.loadLaneLastTurn`) or says to open the chat. The
 header counts lanes per state, and the bottom bar names lanes waiting for the
 user, because they block the run and auto-fusion. Each variant's prompt is one
@@ -311,3 +366,9 @@ Old titles ending in `/2` or `/fusion` are inherently ambiguous. Preserve their
 previous suffix interpretation; do not write guessed membership back to them.
 Legacy names can still collide or lose recognition after renaming. Only new
 ID-bound records provide exact membership.
+## Invariants
+
+- Fusion reads prompt overrides before creating worktrees so a failed read leaves no checkout behind. Each fusion has its own branch, and detaching also clears a legacy lane title so it cannot rejoin through title parsing.
+- Lane prompt lookup walks beyond a fixed oldest page because plumbing records can fill it without a user message. Summary caches use runtime, session and latest idle time, and request identity rejects stale reads while busy lanes retain previous results.
+- Lane creation never cleans up through a switched runtime, leaving an unbound marker ineligible. Membership serialization omits undefined optional values so the record remains plain JSON.
+- The launcher ID is page-local and tolerates insecure contexts because module initialization must not fail when `randomUUID` is absent. Legacy title parsing caches include project scope because title-only membership depends on it.

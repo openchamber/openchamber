@@ -1,0 +1,186 @@
+import type { RegisteredTrackerImplementation } from './registry.js';
+export type TrackerProviderId = string;
+export type TrackerStateCategory = 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done' | 'canceled';
+export type TrackerPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
+
+export type TrackerPerson = { name: string | null; avatarUrl: string | null };
+
+export type TrackerItemSummary = {
+  provider: TrackerProviderId;
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+  state: { id: string | null; name: string; category: TrackerStateCategory | null } | null;
+  priority?: TrackerPriority | null;
+  labels?: { id: string; name: string; color: string | null }[];
+  /** The labels are the first page only; more exist on the tracker. */
+  labelsMore?: boolean;
+  assignee?: TrackerPerson | null;
+  container?: { id: string; key: string | null; name: string } | null;
+  parent?: TrackerItemSummary | null;
+  progress?: { total: number; done: number; more: boolean } | null;
+  updatedAt?: string | null;
+};
+
+export type TrackerComment = { id: string; body: string; createdAt: string | null; author: TrackerPerson | null };
+
+export type TrackerItem = TrackerItemSummary & {
+  description?: string | null;
+  comments?: TrackerComment[];
+  children?: TrackerItemSummary[];
+  childrenMore?: boolean;
+  /** The comments are the first page only; more exist on the tracker. */
+  commentsMore?: boolean;
+};
+
+export type TrackerLiveSummary = { identifier: string; title: string; state: { name: string; category: TrackerStateCategory } };
+
+export type TrackerLiveSummaryWire = TrackerLiveSummary & { state: TrackerLiveSummary['state'] & { type?: string } };
+
+export type TrackerWorkflowState = { id: string; name: string; category: TrackerStateCategory | null; position: number };
+
+export type TrackerPeopleFilter = 'any' | 'me' | 'created';
+export type TrackerPriorityFilter = 'all' | TrackerPriority;
+
+export type TrackerListOptions = {
+  query?: string | undefined;
+  cursor?: string | undefined;
+  state?: string;
+  people?: TrackerPeopleFilter;
+  priority?: TrackerPriorityFilter;
+  containerId?: string | null;
+};
+
+export type TrackerAccount = {
+  id: string;
+  name: string | null;
+  user?: TrackerPerson | null;
+  current: boolean;
+  authorizedAt?: number | null;
+  status?: 'valid' | 'invalid';
+  invalidReason?: string;
+  method?: 'oauth' | 'token';
+};
+
+export type TrackerConnectInfo = {
+  instance: string | null;
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  hasClient: boolean;
+  redirectUri: string | null;
+};
+
+export type TrackerAuthStatus =
+  | { connected: false; accounts?: TrackerAccount[]; connect?: TrackerConnectInfo }
+  | { connected: true; account?: TrackerAccount | null; accounts?: TrackerAccount[]; connect?: TrackerConnectInfo };
+
+export type Connected<T> = { connected: false } | ({ connected: true } & T);
+
+export type TrackerAuthMethod = 'oauth' | 'token';
+
+export type TrackerDescriptor = {
+  id: TrackerProviderId;
+  name: string;
+  authMethods: readonly TrackerAuthMethod[];
+  capabilities: {
+    multipleAccounts: boolean;
+    stateUpdate: boolean;
+    children: boolean;
+    labels: boolean;
+    priority: boolean;
+    filters: { people: boolean; priority: boolean };
+    projectMapping: boolean;
+    sessionComments: boolean;
+    hostAccess: boolean;
+  };
+  stateFilters: readonly string[];
+  urlPatterns: readonly { host: string; path: string; query?: { name: string } }[];
+  identifierPattern: string;
+};
+
+export type TrackerMappingView = {
+  defaultProjectPath: string | null | undefined;
+  containers: { id: string; key: string | null; name: string; projectPath: string | object | null }[];
+};
+export type TrackerMappingRequest = { defaultProjectPath: unknown; containerProjectPaths: object };
+export type TrackerPreferences = { sessionComments: boolean };
+export type TrackerSessionStatusKind = 'started' | 'completed' | 'failure';
+export type TrackerSessionStatusInput = { kind: TrackerSessionStatusKind; sessionId: string; identifier?: string; sessionOrigin?: string };
+export type TrackerSessionStatusResult = Connected<{ posted?: boolean; skipped?: string; commentId?: string }>;
+
+export type TrackerRuntimeEvent = {
+  type: string;
+  properties?: {
+    [key: string]: unknown;
+    sessionID?: string;
+    info?: { [key: string]: unknown; sessionID?: string; type?: string };
+    status?: { [key: string]: unknown; type?: string };
+    error?: { [key: string]: unknown; name?: string };
+  };
+};
+
+export interface TrackerSessionStatusRuntime {
+  processPayload(payload: TrackerRuntimeEvent): void;
+  stop(): void;
+}
+
+export type TrackerAccountsView = {
+  instance: string | null;
+  accounts: Array<{ id: string; login: string | null; name?: string; avatarUrl?: string; connectedAt: number; status: 'valid' | 'invalid'; invalidReason?: string; method: 'oauth' | 'token' }>;
+  activeAccountId: string | null;
+  hasClient: boolean;
+};
+
+export interface TrackerImplementation {
+  auth: {
+    status(input?: { origin?: string | null }): Promise<TrackerAuthStatus>;
+    start(input?: { origin?: 'desktop' | 'web'; callbackOrigin?: string | null; instance?: string | undefined }): Promise<{ authorizationUrl: string; expiresIn: number }>;
+    disconnect(): Promise<{ removed: boolean }>;
+    activate(accountId: string): Promise<TrackerAuthStatus | null>;
+    connectToken?(input: { instance?: string | undefined; token: unknown; username?: string | undefined }): Promise<TrackerAccountsView>;
+    setOAuthClient?(input: { instance?: string | undefined; clientId: unknown; clientSecret?: unknown }): Promise<TrackerAccountsView>;
+    completeAuthorization?(input: { code: string; state: string; error: string; errorDescription: string }): Promise<TrackerAccountsView>;
+  };
+  list(options: TrackerListOptions): Promise<Connected<{ items: TrackerItemSummary[]; cursor: string | null; hasMore: boolean }>>;
+  get(id: string): Promise<Connected<{ item: TrackerItem | null }>>;
+  states(containerId: string): Promise<Connected<{ states: TrackerWorkflowState[] }>>;
+  updateState(input: { id: string; stateId: string }): Promise<Connected<{ item: TrackerItem | null }>>;
+  liveSummaries(identifiers: string[]): Promise<Connected<{ items: TrackerLiveSummaryWire[] }>>;
+  matchUrl(url: string): string | null;
+  mapping?: {
+    get(): Promise<Connected<TrackerMappingView>>;
+    set(input: TrackerMappingRequest): Promise<Connected<TrackerMappingView>>;
+  };
+  preferences?: {
+    get(): Promise<TrackerPreferences>;
+    set(input: TrackerPreferences): Promise<TrackerPreferences>;
+  };
+  sessionStatus?: {
+    post(input: TrackerSessionStatusInput): Promise<TrackerSessionStatusResult>;
+    createRuntime(): TrackerSessionStatusRuntime;
+  };
+  hostAccess?: {
+    apiOrigin: string;
+    account(): Promise<{ connected: boolean; label: string }>;
+    accessToken(): Promise<string | null>;
+    // The token with where it came from: a vault (apiKey) credential is sent
+    // bare, never through the integration's Bearer scheme (#304). Trackers
+    // without one send every token as accessToken() reads it.
+    authorization?(): Promise<{ token: string; source: 'vault' | 'oauth' } | null>;
+    start(): Promise<{ authorizationUrl: string; expiresIn: number }>;
+    disconnect(): Promise<void>;
+  };
+}
+
+export type TrackerEntry = {
+  descriptor: TrackerDescriptor;
+  load(): Promise<TrackerImplementation>;
+};
+
+export interface TrackerRegistry {
+  has(id: string): boolean;
+  descriptor(id: string): TrackerDescriptor | null;
+  descriptors(): readonly TrackerDescriptor[];
+  list(): readonly TrackerProviderId[];
+  implementation(id: string): Promise<RegisteredTrackerImplementation | null>;
+}

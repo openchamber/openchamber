@@ -4,19 +4,14 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { FILE_TREE_BASE_PADDING_PX, FILE_TREE_INDENT_PX, type FileTreeGitStatus } from './fileTreeRow';
 
-// Shared look of every file tree row (files sidebar, Files page, changes; the
-// JSON tree viewer takes the indent and guides and copies the chevron):
-// flat rows indented by depth, one faint guide per ancestor level, a chevron
-// on folders and a coloured git letter on the right.
 
-/** One guide per ancestor level, centred under that ancestor's chevron. */
 export const FileTreeIndentGuides: React.FC<{ depth: number }> = ({ depth }) => (
   <>
     {Array.from({ length: depth }, (_, level) => (
       <span
         key={level}
         aria-hidden
-        className="pointer-events-none absolute inset-y-0 w-px bg-border/50"
+        className="pointer-events-none absolute inset-y-0 w-px bg-edge"
         style={{ insetInlineStart: `${FILE_TREE_BASE_PADDING_PX + level * FILE_TREE_INDENT_PX + 7}px` }}
       />
     ))}
@@ -47,7 +42,6 @@ const GIT_STATUS_LETTERS = {
   'git-deleted': { code: 'D', color: 'var(--status-error)', labelKey: 'diffView.change.deleted' },
 } satisfies Record<FileTreeGitStatus, { code: string; color: string; labelKey: I18nKey }>;
 
-/** Right-hand markers of a file row: open in a tab (dot), then its git state. */
 export const FileTreeFileMarkers: React.FC<{ isOpen: boolean; status: FileTreeGitStatus | null | undefined }> = ({ isOpen, status }) => {
   const { t } = useI18n();
   const letter = status ? GIT_STATUS_LETTERS[status] : null;
@@ -59,9 +53,13 @@ export const FileTreeFileMarkers: React.FC<{ isOpen: boolean; status: FileTreeGi
   );
 };
 
+export const FileTreeRowEnd: React.FC<{ className?: string; children?: React.ReactNode }> = ({ className, children }) => (
+  <span className={cn('oc-file-tree-row-end -my-1 gap-1.5', className)}>{children}</span>
+);
+
 export const FileTreeFolderBadge: React.FC<{ badge: { modified: number; added: number } }> = ({ badge }) => (
-  <span className="ms-auto flex flex-shrink-0 items-center gap-1 typography-micro tabular-nums">
-    {badge.modified > 0 && <span className="text-[var(--status-warning)]">M{badge.modified}</span>}
-    {badge.added > 0 && <span className="text-[var(--status-success)]">+{badge.added}</span>}
+  <span className="flex flex-shrink-0 items-center gap-1 typography-micro tabular-nums">
+    {badge.modified > 0 && <span style={{ color: GIT_STATUS_LETTERS['git-modified'].color }}>{GIT_STATUS_LETTERS['git-modified'].code}{badge.modified}</span>}
+    {badge.added > 0 && <span style={{ color: GIT_STATUS_LETTERS['git-added'].color }}>{GIT_STATUS_LETTERS['git-added'].code}{badge.added}</span>}
   </span>
 );

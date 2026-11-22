@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import type { Root, RootContent } from 'mdast';
+import remarkParse from 'remark-parse';
+import { defaultRemarkPlugins } from 'streamdown';
+import { unified } from 'unified';
 
 import { buildSkillHref } from '@/lib/messages/inlineMessageLinks';
+import type { Part } from '@/lib/opencode/model';
+import { CONTEXT_METADATA_KEY } from '@/lib/messages/contextParts';
+import { sessionMentionChipsOf } from './sessionMentionChips';
 import { prepareUserMarkdownContent } from './userTextPartContent';
 
 describe('prepareUserMarkdownContent', () => {
@@ -16,16 +23,11 @@ describe('prepareUserMarkdownContent', () => {
         expect(content).not.toContain('-&gt;');
     });
 
-    test('escapes raw HTML outside fences so tags display as text', () => {
-        const content = prepareUserMarkdownContent({
-            textContent: 'Use <b>bold</b> and <script>alert("x")</script>',
-            skillNames: new Set(),
-        });
-
-        expect(content).toContain('&lt;b&gt;bold&lt;/b&gt;');
-        expect(content).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
-        expect(content).not.toContain('<b>bold</b>');
-        expect(content).not.toContain('<script>');
+    // The renderer keeps tags and entities as text (`literalText`, tested in
+    // streamdownPlugins.test.tsx); entities in the source showed inside code and formulas.
+    test('passes the text through without HTML entities', () => {
+        const textContent = 'Use <b>bold</b>, `a<b && c` and $USER "quoted"';
+        expect(prepareUserMarkdownContent({ textContent, skillNames: new Set() })).toBe(textContent);
     });
 
     test('links $skill and the older /skill form, leaving unknown names as text', () => {
@@ -36,6 +38,15 @@ describe('prepareUserMarkdownContent', () => {
 
         expect(content.split(`](${buildSkillHref('review')})`)).toHaveLength(3);
         expect(content).toContain('not $5 or $other');
+    });
+
+    test('links a skill typed with the sigils a CJK IME produces', () => {
+        const content = prepareUserMarkdownContent({
+            textContent: '¥review ￥review ＄review',
+            skillNames: new Set(['review']),
+        });
+
+        expect(content.split(`](${buildSkillHref('review')})`)).toHaveLength(4);
     });
 
     test('adds hard line breaks outside fences but not inside', () => {
@@ -97,5 +108,125 @@ describe('prepareUserMarkdownContent', () => {
         });
 
         expect(content).toContain('```\n[shot.png]\n```');
+    });
+
+    test('a mentioned session link becomes a link labelled with its chip; one not mentioned stays text', () => {
+        // SAFETY: the context parts a sent message carries; chips read their metadata only.
+        const parts = [
+            { id: 'p1', sessionID: 's', messageID: 'm', type: 'text', text: 'ctx', metadata: { [CONTEXT_METADATA_KEY]: { kind: 'session', sessionId: 'ses_a', title: 'Tweet *writing*' } } },
+            { id: 'p2', sessionID: 's', messageID: 'm', type: 'text', text: 'ctx', metadata: { [CONTEXT_METADATA_KEY]: { kind: 'session-message', sessionId: 'ses_a', messageId: 'msg_1', sessionTitle: 'T', excerpt: 'Draft three' } } },
+        ] as Part[];
+        const chips = sessionMentionChipsOf(parts);
+        const content = prepareUserMarkdownContent({
+            textContent: 'see openchamber://session/ses_a and https://chamber.example/?session=ses_a&message=msg_1, not openchamber://session/ses_b',
+            skillNames: new Set(),
+            sessionMentions: { chips, origins: ['https://chamber.example'] },
+        });
+        expect(content).toBe('see [Tweet \\*writing\\*](<openchamber://session/ses_a>) and [Draft three](<https://chamber.example/?session=ses_a&message=msg_1>)\u2060, not openchamber://session/ses_b');
+    });
+
+    test('a mentioned link the user already linked, or put in code, is left as written; a backslash cannot break out', () => {
+        // SAFETY: a context part a sent message carries; chips read its metadata only.
+        const parts = [{ id: 'p1', sessionID: 's', messageID: 'm', type: 'text', text: 'ctx', metadata: { [CONTEXT_METADATA_KEY]: { kind: 'session', sessionId: 'ses_a', title: 'A' } } }] as Part[];
+        const sessionMentions = { chips: sessionMentionChipsOf(parts), origins: ['https://own.example'] };
+        const content = prepareUserMarkdownContent({
+            textContent: '[this](https://own.example/?session=ses_a) and `openchamber://session/ses_a` and https://own.example/?session=ses_a&x=a\\',
+            skillNames: new Set(),
+            sessionMentions,
+        });
+        expect(content).toBe('[this](https://own.example/?session=ses_a) and `openchamber://session/ses_a` and [A](<https://own.example/?session=ses_a&x=a%5C>)');
+    });
+
+    test('a chip and the punctuation after it are joined, so the line never breaks between them', () => {
+        // SAFETY: a context part a sent message carries; chips read its metadata only.
+        const parts = [{ id: 'p1', sessionID: 's', messageID: 'm', type: 'text', text: 'ctx', metadata: { [CONTEXT_METADATA_KEY]: { kind: 'session', sessionId: 'ses_a', title: 'A' } } }] as Part[];
+        const content = prepareUserMarkdownContent({
+            textContent: 'see openchamber://session/ses_a, then openchamber://session/ses_a next',
+            skillNames: new Set(),
+            sessionMentions: { chips: sessionMentionChipsOf(parts), origins: [] },
+        });
+        expect(content).toBe('see [A](<openchamber://session/ses_a>)\u2060, then [A](<openchamber://session/ses_a>) next');
+    });
+
+    test('doubles backslashes before ASCII punctuation so the markdown renderer keeps them literal', () => {
+        // User types a Windows path; `\.` must render as `\.`, not `.`.
+        const content = prepareUserMarkdownContent({
+            textContent: 'C:\\Users\\myuser\\.unsloth',
+            skillNames: new Set(),
+        });
+        expect(content).toBe('C:\\Users\\myuser\\\\.unsloth');
+    });
+
+    test('leaves backslashes before letters untouched', () => {
+        const content = prepareUserMarkdownContent({
+            textContent: 'C:\\Users\\myuser\\.unsloth',
+            skillNames: new Set(),
+        });
+        expect(content).toContain('\\U');
+        expect(content).toContain('\\m');
+        expect(content).toContain('\\\\.');
+    });
+
+    test('doubles a backslash before punctuation mid-text', () => {
+        const content = prepareUserMarkdownContent({
+            textContent: 'a\\.b',
+            skillNames: new Set(),
+        });
+        expect(content).toBe('a\\\\.b');
+    });
+
+    test('does not double backslashes inside fenced code blocks', () => {
+        const content = prepareUserMarkdownContent({
+            textContent: '```\nC:\\Users\\.unsloth\n```',
+            skillNames: new Set(),
+        });
+        expect(content).toContain('C:\\Users\\.unsloth');
+    });
+
+    test('does not double backslashes inside inline code spans', () => {
+        const textContent = 'see `C:\\a\\.b` path';
+        expect(prepareUserMarkdownContent({ textContent, skillNames: new Set() })).toBe(textContent);
+    });
+
+    test('leaves intentional Markdown escapes, math, and emoji escapes alone', () => {
+        const prepare = (textContent: string) => prepareUserMarkdownContent({ textContent, skillNames: new Set() });
+
+        expect(prepare('\\*not emphasis\\*')).toBe('\\*not emphasis\\*');
+        expect(prepare('Area \\(\\pi r^2\\)')).toBe('Area \\(\\pi r^2\\)');
+        expect(prepare('$$x+y$$ and \\[x\\]')).toBe('$$x+y$$ and \\[x\\]');
+        expect(prepare('\\:tada\\: and \\!now')).toBe('\\:tada\\: and \\!now');
+        expect(prepare('[t \\[Bug\\] m](https://example.test/x)')).toBe('[t \\[Bug\\] m](https://example.test/x)');
+    });
+
+    test('doubles a whole run of backslashes before a dot, and leaves KaTeX spacing alone', () => {
+        expect(prepareUserMarkdownContent({ textContent: 'a\\\\.b', skillNames: new Set() })).toBe('a\\\\\\\\.b');
+        expect(prepareUserMarkdownContent({ textContent: '$$1\\,000$$ and c\\?d', skillNames: new Set() })).toBe('$$1\\,000$$ and c\\\\?d');
+    });
+
+    test('keeps link, image and definition targets as typed while the label stays prose', () => {
+        const targets = (markdown: string): string[] => {
+            const urls: string[] = [];
+            const walk = (node: Root | RootContent): void => {
+                if ('url' in node) urls.push(node.url);
+                if ('children' in node) node.children.forEach(walk);
+            };
+            walk(unified().use(remarkParse).use([defaultRemarkPlugins.gfm]).parse(markdown));
+            return urls;
+        };
+        for (const source of ['[f](https://example.test/a\\.txt)', '[f](./a\\.txt "t\\.")', '[f](./a\\?b)', '<https://example.test/a\\.txt>', 'https://example.test/a\\.txt', '![i](./a\\.png)', '[f]\n\n[f]: ./a\\.txt']) {
+            const prepared = prepareUserMarkdownContent({ textContent: `C:\\a\\.b ${source}`, skillNames: new Set() });
+            expect(targets(prepared)).toEqual(targets(source));
+            expect(prepared.startsWith('C:\\a\\\\.b ')).toBe(true);
+        }
+        expect(prepareUserMarkdownContent({ textContent: '[C:\\a\\.b](./a\\.txt)', skillNames: new Set() })).toBe('[C:\\a\\\\.b](./a\\.txt)');
+    });
+
+    test('leaves the source of math and indented code alone', () => {
+        const prepare = (textContent: string) => prepareUserMarkdownContent({ textContent, skillNames: new Set() });
+
+        expect(prepare('\\(\\text{\\.{z}}\\) at a\\.b')).toBe('\\(\\text{\\.{z}}\\) at a\\\\.b');
+        expect(prepare('$x\\.{z}$ and $$\\.{z}$$')).toBe('$x\\.{z}$ and $$\\.{z}$$');
+        expect(prepare('\\[\n\\.{z}\n\\]')).toBe('\\[  \n\\.{z}  \n\\]');
+        expect(prepare('text\n\n    a\\.b')).toBe('text  \n  \n    a\\.b');
     });
 });

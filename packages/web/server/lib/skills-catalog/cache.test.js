@@ -21,6 +21,23 @@ afterEach(() => {
 const flushDiskWrites = async () => new Promise((resolve) => setTimeout(resolve, 1200));
 
 describe('scanWithCache', () => {
+  it('retains loosely checked disk values without promising a scan shape', async () => {
+    const value = { ok: 'unchecked', items: 7 };
+    fs.writeFileSync(path.join(tempDataDir, 'skills-catalog-cache.json'), JSON.stringify({
+      loose: { expiresAt: Date.now() + 60_000, value },
+      array: { expiresAt: Date.now() + 60_000, value: [] },
+      expired: { expiresAt: 0, value: {} },
+      invalid: { expiresAt: Date.now() + 60_000, value: 'invalid' },
+    }));
+    vi.resetModules();
+    const freshCache = await import('./cache.js');
+
+    expect(freshCache.getCachedScan('loose')).toEqual(value);
+    expect(freshCache.getCachedScan('array')).toEqual([]);
+    expect(freshCache.getCachedScan('expired')).toBeNull();
+    expect(freshCache.getCachedScan('invalid')).toBeNull();
+  });
+
   it('deduplicates concurrent loaders for the same key', async () => {
     const loader = vi.fn(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));

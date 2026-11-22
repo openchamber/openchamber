@@ -1,13 +1,16 @@
-import { execFileSync } from 'child_process';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, describe, expect, it, afterEach, beforeEach, vi } from 'vitest';
+import fsp from 'node:fs/promises';
+
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objectives-'));
 process.env.OPENCHAMBER_DATA_DIR = dataDir;
 const {
   GOAL_OBJECTIVE_HARD_CAP,
+  deleteObjective,
   GOAL_OBJECTIVE_VERSION_CAP,
   appendObjectiveVersion,
   deleteObjectiveVersion,
@@ -255,5 +258,82 @@ describe('goal objective durable writes (#2330)', () => {
     await writeObjective('ses_atomic3', 'mode check');
     const stat = fs.statSync(path.join(goalsDir, 'ses_atomic3.md'));
     expect(stat.mode & 0o777).toBe(0o666 & ~process.umask());
+  });
+});
+
+// Upstream's suite runs with its own data dir per test, scoped here so its
+// hooks do not reach the fork's suite above.
+describe('upstream goal objective files', () => {
+
+  let upstreamDataDir;
+
+  beforeEach(async () => {
+    upstreamDataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-goals-'));
+    vi.stubEnv('OPENCHAMBER_DATA_DIR', upstreamDataDir);
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fsp.rm(upstreamDataDir, { recursive: true, force: true });
+  });
+
+  describe('goal objective files', () => {
+    // The store clamps at the hard cap; the Settings limit is applied by the caller.
+    it('trims, clamps and stores the objective under the session id', async () => {
+      const content = 'x'.repeat(GOAL_OBJECTIVE_HARD_CAP);
+      await expect(writeObjective('ses_123', `  ${content}extra  `)).resolves.toEqual({ content });
+      expect(await fsp.readFile(path.join(upstreamDataDir, 'goals', 'ses_123.md'), 'utf8')).toBe(content);
+      await expect(readObjective('ses_123')).resolves.toBe(content);
+    });
+
+    it.each([
+      [42, '42'],
+      [false, 'false'],
+      [['a', 'b'], 'a,b'],
+      [{ task: 'finish' }, '[object Object]'],
+    ])('preserves content coercion for %j', async (input, content) => {
+      await expect(writeObjective('ses_123', input)).resolves.toEqual({ content });
+    });
+
+    it.each([undefined, null, '', '   '])('rejects empty content %j', async (content) => {
+      await expect(writeObjective('ses_123', content)).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'objective content is required',
+      });
+    });
+
+    it.each([undefined, null, 1234, '../escape', 'abc', 'x'.repeat(129)])('rejects invalid session id %j before filesystem access', async (sessionId) => {
+      await expect(writeObjective(sessionId, 'task')).rejects.toMatchObject({
+        statusCode: 400,
+        message: 'invalid session id',
+      });
+      await expect(readObjective(sessionId)).resolves.toBeNull();
+      await expect(deleteObjective(sessionId)).resolves.toBeUndefined();
+      expect(await fsp.readdir(upstreamDataDir)).toEqual([]);
+    });
+
+    it('returns null for a missing file and deletes existing files best-effort', async () => {
+      await expect(readObjective('ses_123')).resolves.toBeNull();
+      await expect(deleteObjective('ses_123')).resolves.toBeUndefined();
+      await writeObjective('ses_123', 'task');
+      await deleteObjective('ses_123');
+      await expect(readObjective('ses_123')).resolves.toBeNull();
+    });
+
+    it('reads live edits and preserves an empty file as an empty string', async () => {
+      await writeObjective('ses_123', 'task');
+      const file = path.join(upstreamDataDir, 'goals', 'ses_123.md');
+      await fsp.writeFile(file, '  changed task  ');
+      await expect(readObjective('ses_123')).resolves.toBe('changed task');
+      await fsp.writeFile(file, '   ');
+      await expect(readObjective('ses_123')).resolves.toBe('');
+    });
+
+    it('propagates write failures and returns null for unreadable objective paths', async () => {
+      await fsp.writeFile(path.join(upstreamDataDir, 'goals'), 'not a directory');
+      await expect(writeObjective('ses_123', 'task')).rejects.toThrow();
+      await expect(readObjective('ses_123')).resolves.toBeNull();
+      await expect(deleteObjective('ses_123')).resolves.toBeUndefined();
+    });
   });
 });

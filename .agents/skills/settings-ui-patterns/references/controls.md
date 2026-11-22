@@ -118,6 +118,7 @@ directly only next to raw labels/headings. Never build info icons from raw
 - Place icon/color palettes beneath their label.
 - Keep option dimensions and gaps consistent.
 - Use stable border/ring/background selection; avoid scale transforms that shift layout.
+- A picker whose extra options come from extensions stays visible and disabled when none is installed: the row and its info hint are how users learn such extensions exist (Settings → OpenChamber Tools → Browser provider). Keep it when there is nothing to choose.
 
 ## Dialogs
 

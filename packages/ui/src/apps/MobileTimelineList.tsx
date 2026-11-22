@@ -8,7 +8,7 @@ import { SessionActivityDuration } from '@/components/session/SessionActivityDur
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useSessionUnread } from '@/sync/session-unread';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 
 import { MobileProjectIcon, type MobileProjectIconProject } from './MobileProjectIcon';
@@ -186,7 +186,8 @@ const MobileTimelineRow: React.FC<{
 
   // Live indicators, same conventions as the grouped rows: busy/retry →
   // running-kind icon; unseen activity on a non-active row → unread icon.
-  const unseenCount = useSessionUnseenCount(session.id);
+  // Unread (an unseen turn or a mark), as one count the row's dot reads.
+  const unseenCount = useSessionUnread(session.id) ? 1 : 0;
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;

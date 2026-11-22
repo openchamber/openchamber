@@ -3,11 +3,12 @@ import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { AboutLogo } from '@/components/ui/AboutLogo';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -25,7 +26,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
 }) => {
   const { t } = useI18n();
   const showDiagnostics = import.meta.env.DEV;
-  // undefined while the first lookup runs, null once it finished without a version.
   const [version, setVersion] = React.useState<string | null | undefined>(undefined);
   const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null | undefined>(undefined);
   const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
@@ -146,7 +146,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     };
   }, [open, showDiagnostics]);
 
-  // Both rows render from the first frame so the dialog height stays put while versions load.
   const renderVersionRow = (labelKey: 'aboutDialog.openChamberVersionLabel' | 'aboutDialog.openCodeVersionLabel', value: string | null | undefined) => {
     if (value !== undefined) {
       return <p>{t(labelKey, { version: value ?? t('settings.openchamber.about.state.unknown') })}</p>;
@@ -155,7 +154,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     return (
       <p className="flex items-center justify-center">
         <span className="whitespace-pre">{before}</span>
-        <Icon name="loader" className="size-3.5 animate-spin" />
+        <Spinner className="size-3.5" />
         <span className="whitespace-pre">{after}</span>
       </p>
     );
@@ -165,7 +164,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xs p-6">
         <div className="flex flex-col items-center text-center space-y-4">
-          <OpenChamberLogo width={64} height={64} />
+          <AboutLogo />
 
           <div className="space-y-1">
             <h2 className="text-lg font-semibold">OpenChamber</h2>
@@ -230,7 +229,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             </a>
           </div>
 
-          <p className="typography-meta text-muted-foreground/60 pt-2">
+          <p className="typography-meta text-muted-foreground pt-2">
             {t('aboutDialog.footerNote')}
           </p>
         </div>

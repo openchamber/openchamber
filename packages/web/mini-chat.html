@@ -6,8 +6,8 @@
     <title>OpenChamber Mini Chat</title>
 
     <script>
-      // Apply theme + splash colors before first paint so the window opens on a
-      // branded splash instead of flashing white while React/CSS load.
+      // Apply the theme and its backdrop colours before first paint. The window
+      // itself is already on screen in that colour (createMiniChatWindow).
       (function() {
         try {
           var themeMode = localStorage.getItem('themeMode');
@@ -40,6 +40,15 @@
           if (splashFgLight) document.documentElement.style.setProperty('--splash-stroke-light', splashFgLight);
           if (splashBgDark) document.documentElement.style.setProperty('--splash-background-dark', splashBgDark);
           if (splashFgDark) document.documentElement.style.setProperty('--splash-stroke-dark', splashFgDark);
+
+          // The document paints the theme colour itself until React applies
+          // the theme: `<body class="bg-background">` would otherwise show the
+          // stylesheet's default background in between, a different colour
+          // from the window's. Set on the root, as mobile.html does; the
+          // theme system's own variables take over once it runs.
+          var background = isDark ? (splashBgDark || '#151313') : (splashBgLight || '#FFFCF0');
+          document.documentElement.style.setProperty('--background', background);
+          document.documentElement.style.backgroundColor = background;
         } catch (error) {
           console.warn('Failed to apply theme:', error);
         }
@@ -47,10 +56,8 @@
     </script>
 
     <style>
-      /* A plain themed backdrop — no logo. The mini-chat content renders its
-         own (single) OpenChamber cube in its empty state, so a cube here would
-         briefly show a second, differently-sized one before handing off. The
-         backdrop matches bg-background, so fading it out is seamless. */
+      /* The backdrop colour of the screens shown before the theme has applied
+         (the sign-in check). */
       :root {
         --splash-background-dark: #151313;
         --splash-background-light: #FFFCF0;
@@ -58,41 +65,11 @@
       }
       html[data-splash-variant='light'] { --splash-background: var(--splash-background-light); }
       html[data-splash-variant='dark'] { --splash-background: var(--splash-background-dark); }
-
-      #initial-loading {
-        background-color: var(--splash-background);
-        height: 100vh;
-        width: 100%;
-        position: absolute;
-        inset: 0;
-        z-index: 9999;
-        transition: opacity 0.3s ease-out;
-      }
-      #initial-loading.fade-out {
-        opacity: 0;
-        pointer-events: none;
-      }
     </style>
 
     <script type="module" src="/src/mini-chat-main.tsx"></script>
   </head>
   <body class="h-full bg-background text-foreground">
-    <div id="root" class="h-full">
-      <!-- Themed backdrop until the mini-chat React app is ready (dismissed in
-           ElectronMiniChatApp). No logo here on purpose — the content renders
-           the single OpenChamber cube itself. -->
-      <div id="initial-loading"></div>
-    </div>
-
-    <script>
-      // Safety net: never let the splash hang if the app fails to dismiss it.
-      setTimeout(function() {
-        var loading = document.getElementById('initial-loading');
-        if (loading) {
-          loading.classList.add('fade-out');
-          setTimeout(function() { loading.remove(); }, 300);
-        }
-      }, 8000);
-    </script>
+    <div id="root" class="h-full"></div>
   </body>
 </html>

@@ -3,11 +3,12 @@
 import * as React from "react"
 import { Toaster as Sonner } from "sonner"
 import type { ToasterProps } from "sonner"
-import { getLocaleDirection, useI18nStore } from "@/lib/i18n"
+import { formatMessage, getLocaleDirection, useI18nStore } from "@/lib/i18n"
+import { buttonVariants } from "@/components/ui/button-variants"
+import { Spinner } from "@/components/ui/spinner"
 
 type ToastPosition = NonNullable<ToasterProps["position"]>
 
-// Corners mirror with the layout: a right-to-left app stacks toasts on the left.
 const MIRRORED_POSITION = {
   "top-left": "top-right",
   "top-right": "top-left",
@@ -42,18 +43,16 @@ function useIsDarkTheme() {
   return isDark
 }
 
-// Sonner makes each toast focusable (tabIndex=0) and defines a `:focus-visible`
-// box-shadow that erases our custom elevation on click. We pin every toast's
-// box-shadow as an !important inline style and strip tabIndex so the element
-// can't receive focus-induced style swaps.
-//
-// Only the toaster's own section is observed: toasts render inside it, and
-// observing the whole document ran a query on every DOM change in the app,
-// including every streamed token.
+// external: https://github.com/emilkowalski/sonner/blob/main/src/styles.css Sonner focus-visible shadows override app elevation; pin the shadow and remove toast focusability.
 function usePinnedToastStyles(container: HTMLElement | null, shadow: string) {
   React.useEffect(() => {
     if (!container) return
 
+    const probe = document.createElement("div").style
+    const pinned = ([["box-shadow", shadow], ["outline", "none"]] as const).map(([property, value]) => {
+      probe.setProperty(property, value)
+      return [property, probe.getPropertyValue(property) || value] as const
+    })
     const apply = (el: HTMLElement) => {
       // Skip the write when the pin already stands: this runs from a
       // MutationObserver that watches the style attribute, and a DOM
@@ -62,18 +61,18 @@ function usePinnedToastStyles(container: HTMLElement | null, shadow: string) {
       // forever on its own writes. The pin stands exactly when both
       // properties still carry the !important priority this function
       // sets (sonner resetting a toast's inline style drops it, which
-      // is what the re-pin exists for) and tabindex is already -1.
-      const pinned =
-        el.style.getPropertyPriority("box-shadow") === "important" &&
-        el.style.getPropertyPriority("outline") === "important" &&
-        el.getAttribute("tabindex") === "-1"
-      if (pinned) return
-      el.style.setProperty("box-shadow", shadow, "important")
-      el.style.setProperty("outline", "none", "important")
+      // is what the re-pin exists for) and tabindex is no longer 0.
+      const alreadyPinned =
+        pinned.every(([property, value]) => el.style.getPropertyValue(property) === value && el.style.getPropertyPriority(property) === "important") &&
+        el.getAttribute("tabindex") !== "0"
+      if (alreadyPinned) return
+      for (const [property, value] of pinned) {
+        if (el.style.getPropertyValue(property) === value && el.style.getPropertyPriority(property) === "important") continue
+        el.style.setProperty(property, value, "important")
+      }
       if (el.getAttribute("tabindex") === "0") el.setAttribute("tabindex", "-1")
     }
 
-    // Re-pins everything, in case sonner mutates style.cssText on interactions.
     const applyToAll = () => {
       container
         .querySelectorAll<HTMLElement>("[data-sonner-toast]")
@@ -95,14 +94,45 @@ function usePinnedToastStyles(container: HTMLElement | null, shadow: string) {
   }, [container, shadow])
 }
 
-const Toaster = ({ position = "bottom-right", ...props }: ToasterProps) => {
-  // Read from the store, so a Toaster rendered outside the provider still works.
+const ToastCloseMark = ({ large = false }: { large?: boolean }) => (
+  <span className={`oc-raised flex ${large ? "size-6" : "size-5"} items-center justify-center rounded-full bg-[var(--surface-background)] dark:bg-surface-elevated`}>
+    <svg viewBox="0 0 24 24" className={large ? "size-6" : "size-5"} aria-hidden="true">
+      <circle className="oc-toast-ring" cx="12" cy="12" r="10.5" pathLength="100" fill="none" stroke="currentColor" strokeWidth="1.5" transform="rotate(-90 12 12)" />
+      <path d="M8.5 8.5l7 7m0-7l-7 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  </span>
+)
+
+type ToastLayout = "corner" | "banner"
+
+const CORNER_CLASS_NAMES = {
+  closeButton:
+    "absolute top-1 start-1 z-[1] flex -translate-x-1/2 -translate-y-1/2 rtl:translate-x-1/2 items-center justify-center rounded-full !border-0 !bg-transparent p-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none",
+  toast:
+    "oc-surface-elevated group/toast toast flex w-[var(--width)] flex-wrap items-start gap-2 rounded-[var(--radius-xl)] px-3.5 py-3 text-foreground data-[expanded=false]:data-[front=false]:[&>*]:opacity-0 [&_[data-button]]:self-center [&_[data-button]]:ms-auto [&_[data-cancel]+[data-button]]:ms-0",
+  content: "flex min-w-0 flex-col [[data-icon]+&]:max-w-[calc(100%-1.875rem)] [[data-sonner-toast]:has([data-cancel])_&]:w-full",
+  title: "typography-ui-label font-medium text-foreground py-[calc((var(--toast-row)-1lh)/2)]",
+  icon: "relative me-0.5 flex h-[var(--toast-row)] w-5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-5",
+}
+
+const BANNER_CLASS_NAMES = {
+  closeButton:
+    "order-last !static -me-1 flex size-9 shrink-0 !transform-none items-center justify-center self-center rounded-full !border-0 !bg-transparent p-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none",
+  toast:
+    "oc-surface-elevated group/toast toast flex w-[var(--width)] items-start gap-2 rounded-[var(--radius-xl)] py-2.5 ps-3.5 pe-2 text-foreground data-[expanded=false]:data-[front=false]:[&>*]:opacity-0 [&_[data-button]]:shrink-0 [&_[data-button]]:self-center",
+  content: "flex min-w-0 flex-1 flex-col",
+  title: "typography-ui-label font-medium text-foreground py-[calc((2.25rem-1lh)/2)]",
+  icon: "relative me-0.5 flex h-9 w-5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-5",
+}
+
+const Toaster = ({ position = "bottom-right", layout = "corner", ...props }: ToasterProps & { layout?: ToastLayout }) => {
   const direction = getLocaleDirection(useI18nStore((state) => state.locale))
+  const closeLabel = formatMessage(useI18nStore((state) => state.dictionary), "dialog.common.actions.close")
   const isDark = useIsDarkTheme()
   const shadow = isDark ? SHADOW_DARK : SHADOW_LIGHT
-  // State, not a ref: the observer attaches once sonner's section mounts.
   const [container, setContainer] = React.useState<HTMLElement | null>(null)
   usePinnedToastStyles(container, shadow)
+  const layoutClassNames = layout === "banner" ? BANNER_CLASS_NAMES : CORNER_CLASS_NAMES
 
   return (
     <Sonner
@@ -110,21 +140,17 @@ const Toaster = ({ position = "bottom-right", ...props }: ToasterProps) => {
       theme={isDark ? "dark" : "light"}
       dir={direction}
       position={direction === "rtl" ? MIRRORED_POSITION[position] : position}
-      className="toaster group"
-      closeButton={false}
+      className="toaster group font-sans"
+      closeButton
+      icons={{ loading: <Spinner className="size-5" />, close: <ToastCloseMark large={layout === "banner"} /> }}
       toastOptions={{
+        unstyled: true,
+        closeButtonAriaLabel: closeLabel,
         classNames: {
-          toast:
-            "oc-surface-elevated group/toast toast !rounded-[var(--radius-xl)] !border-0 !px-3.5 !py-3 !gap-2.5 !text-foreground [&_[data-cancel]+[data-button]]:!ms-2",
-          title: "typography-ui-label !font-medium !text-foreground",
-          description: "typography-meta !text-muted-foreground !mt-0.5",
-          actionButton:
-            "!rounded-[var(--radius-md)] !bg-[var(--primary-base)] !text-[var(--primary-foreground)] hover:!opacity-85 !px-2 !py-1 typography-meta !font-medium transition-opacity",
-          cancelButton:
-            "!rounded-[var(--radius-md)] !bg-[var(--interactive-hover)] !text-foreground hover:!bg-[var(--interactive-active)] !px-2 !py-1 typography-meta !font-medium transition-colors",
-          closeButton:
-            "!rounded-[var(--radius-md)] !bg-[var(--interactive-hover)] !text-foreground hover:!bg-[var(--interactive-active)]",
-          icon: "!text-muted-foreground",
+          ...layoutClassNames,
+          description: "typography-meta !text-muted-foreground",
+          actionButton: buttonVariants({ size: "xs" }),
+          cancelButton: buttonVariants({ variant: "secondary", size: "xs" }),
           success: "[&_[data-icon]]:!text-[var(--status-success)]",
           error: "[&_[data-icon]]:!text-[var(--status-error)]",
           warning: "[&_[data-icon]]:!text-[var(--status-warning)]",
@@ -137,6 +163,8 @@ const Toaster = ({ position = "bottom-right", ...props }: ToasterProps) => {
       }}
       style={
         {
+          "--width": "min(22.25rem, calc(100vw - 48px))",
+          "--toast-row": "1.5rem",
           "--normal-bg": "var(--surface-elevated)",
           "--normal-text": "var(--foreground)",
           "--normal-border": "transparent",

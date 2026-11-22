@@ -1,0 +1,41 @@
+{
+  "name": "@openchamber/example-notification-webhook",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.5.3"
+    },
+    "contributes": {
+      "panel": {
+        "id": "notification-webhook",
+        "name": "Webhook Notifier",
+        "icon": "notification-3"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "provides": [
+          "notifications"
+        ]
+      },
+      "notifications": {
+        "label": "Webhook",
+        "instances": {
+          "kind": "user",
+          "label": "Receiver address",
+          "placeholder": "http://127.0.0.1:4567"
+        },
+        "token": {
+          "header": "authorization",
+          "scheme": "bearer"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

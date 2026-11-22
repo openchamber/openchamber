@@ -12,10 +12,6 @@ const WriteResponseSchema = z.object({
 // What an OpenChamber server from before the goal length setting keeps of an objective.
 const LEGACY_SERVER_OBJECTIVE_LIMIT = 5_000;
 
-// File-backed goal objectives: the text lives in a server-side file keyed by
-// the session id (one goal per session; a new goal overwrites the old file).
-// The metadata only carries an `objectiveFile: true` flag so it stays light
-// for session.updated fanout.
 
 const objectiveUrl = (sessionId: string): string =>
   `/api/goals/objective/${encodeURIComponent(sessionId)}`;
@@ -55,7 +51,6 @@ export async function deleteGoalObjectiveVersion(sessionId: string, versionId: s
     .catch(() => undefined);
 }
 
-/** Best-effort delete; a failure leaves an orphaned file the next goal overwrites. */
 export function deleteGoalObjectiveFile(sessionId: string): void {
   void runtimeFetch(objectiveUrl(sessionId), { method: 'DELETE' }).catch(() => undefined);
 }
@@ -84,7 +79,6 @@ export async function fetchGoalObjectiveSnapshot(sessionId: string): Promise<Goa
   }
 }
 
-/** Fetch the file-backed objective text; null when unavailable. */
 export async function fetchGoalObjectiveContent(sessionId: string): Promise<string | null> {
   const snapshot = await fetchGoalObjectiveSnapshot(sessionId);
   return snapshot.kind === 'content' ? snapshot.content : null;

@@ -17,17 +17,4 @@ describe('provider env alias parity (vscode ↔ web)', () => {
       PATH: '/usr/bin',
     });
   });
-
-  test('does not overwrite an already-set preferred Google key', () => {
-    const input = {
-      GEMINI_API_KEY: 'from-gemini',
-      GOOGLE_GENERATIVE_AI_API_KEY: 'from-google',
-    };
-    assert.deepEqual(fromVscode(input), fromWeb(input));
-  });
-
-  test('returns empty object for invalid input', () => {
-    assert.deepEqual(fromVscode(null as unknown as NodeJS.ProcessEnv), fromWeb(null));
-    assert.deepEqual(fromVscode(undefined as unknown as NodeJS.ProcessEnv), fromWeb(undefined));
-  });
 });

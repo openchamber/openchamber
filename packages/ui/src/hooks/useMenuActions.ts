@@ -1,11 +1,13 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getSyncSessions } from '@/sync/sync-refs';
+import { readOrderedActiveSessions, stepSession } from '@/lib/sessionListOrder';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
-import { getZoneView, resolveZoneActiveTabId, shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
+import { getZoneView, resolveZoneActiveTabId } from '@/lib/workspace/zones';
+import { toggleExpandedContextZone } from '@/lib/workspace/toggleExpandedZone';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -14,6 +16,8 @@ import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { useI18n } from '@/lib/i18n';
 import { addSelectionToChat } from '@/lib/addSelectionToChat';
 import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
+import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
+import { getNativeMenuShortcutCombos } from '@/lib/shortcuts';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -72,7 +76,7 @@ type MenuAction =
   | 'open-right-sidebar-git'
   | 'open-right-sidebar-files'
   | 'toggle-terminal'
-  | 'toggle-terminal-expanded'
+  | 'toggle-context-panel-expanded'
   | 'copy'
   | 'add-selection-to-chat'
   | 'theme-light'
@@ -104,6 +108,14 @@ export const useMenuActions = (
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const { setThemeMode } = useThemeSystem();
   const checkUpdatesInFlightRef = React.useRef(false);
+  const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
+
+  React.useEffect(() => {
+    if (!canUseElectronDesktopIPC()) return;
+    invokeDesktop('desktop_set_menu_shortcuts', { shortcuts: getNativeMenuShortcutCombos(shortcutOverrides) }).catch((error) => {
+      console.warn('[menu-actions] failed to update menu shortcuts', error);
+    });
+  }, [shortcutOverrides]);
 
   const handleCheckForUpdates = React.useCallback(() => {
     if (checkUpdatesInFlightRef.current) {
@@ -135,20 +147,12 @@ export const useMenuActions = (
   }, []);
 
   const navigateSession = React.useCallback((direction: -1 | 1) => {
-    const sessions = getSyncSessions();
-    if (sessions.length === 0) return;
-
     const currentSessionId = useSessionUIStore.getState().currentSessionId;
-    const currentIndex = sessions.findIndex((session) => session.id === currentSessionId);
-    let nextIndex = direction > 0 ? 0 : sessions.length - 1;
-    if (currentIndex >= 0) {
-      nextIndex = (currentIndex + direction + sessions.length) % sessions.length;
-    }
-    const nextSession = sessions[nextIndex];
+    const nextSession = stepSession(readOrderedActiveSessions(), currentSessionId, direction);
     if (!nextSession) return;
 
     setSessionSwitcherOpen(false);
-    useSessionUIStore.getState().setCurrentSession(nextSession.id);
+    useSessionUIStore.getState().setCurrentSession(nextSession.id, resolveGlobalSessionDirectory(nextSession));
   }, [setSessionSwitcherOpen]);
 
   const navigateProject = React.useCallback((direction: -1 | 1) => {
@@ -205,14 +209,11 @@ export const useMenuActions = (
           handleChangeWorkspace();
           break;
 
-        // Legacy right-sidebar menu items now target the context surfaces
-        // that replaced the sidebar's tabs.
         case 'toggle-right-sidebar': {
           const directory = useDirectoryStore.getState().currentDirectory;
           if (!directory) break;
           const uiState = useUIStore.getState();
           const directoryKey = normalizeContextPanelDirectoryKey(directory);
-          // The right zone only: it is the panel this menu item always meant.
           const panelState = uiState.contextPanelByDirectory[directoryKey];
           const rightTabId = panelState
             ? resolveZoneActiveTabId(panelState.tabs, uiState.contextSurfaceZones, 'right', getZoneView(panelState, 'right').activeTabId)
@@ -248,18 +249,9 @@ export const useMenuActions = (
           break;
         }
 
-        case 'toggle-terminal-expanded': {
-          const directory = useDirectoryStore.getState().currentDirectory;
-          if (!directory) break;
-          const key = normalizeContextPanelDirectoryKey(directory);
-          const uiState = useUIStore.getState();
-          const panel = uiState.contextPanelByDirectory[key];
-          if (!shownContextModes(panel, uiState.contextSurfaceZones).has('terminal')) {
-            uiState.openContextSurface(key, 'terminal');
-          }
-          uiState.toggleContextPanelExpanded(key, zoneOfMode(uiState.contextSurfaceZones, 'terminal'));
+        case 'toggle-context-panel-expanded':
+          toggleExpandedContextZone(useDirectoryStore.getState().currentDirectory);
           break;
-        }
 
         case 'copy': {
           const copyEvent = new Event('openchamber:copy', { cancelable: true });
@@ -294,8 +286,6 @@ export const useMenuActions = (
           onToggleMemoryDebug?.();
           break;
 
-        // Same history as the Back/Forward shortcuts, which this menu's
-        // accelerators shadow on Windows and Linux.
         case 'go-back':
           navigateSessionHistory(-1);
           break;

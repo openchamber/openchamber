@@ -1,36 +1,40 @@
-/**
- * Project knowledge for a session, as decided by the server.
- *
- * The client neither assembles this text nor tracks what the session was told.
- * Before a send it asks the server to write the knowledge into the session's
- * OpenCode instruction entries; OpenCode tells the agent what changed and keeps
- * it through compaction, revert and fork.
- *
- * Nothing here throws. A message must go out even when its background cannot
- * be written: sending without it costs the agent some context, failing the
- * send costs the user their message.
- */
 
-import { runtimeFetch } from './runtime-fetch';
+
 import { getRuntimeKey } from './runtime-switch';
 import { z } from 'zod';
 
-/**
- * Awaited before the prompt request, so the agent reads the knowledge with the
- * message. Goes to the server that owns the session, which for a session in an
- * isolated space is the one inside the space.
- */
+import { runtimeFetch } from './runtime-fetch';
+import { isVSCodeRuntime } from './desktop';
+import { opencodeClient } from './opencode/client';
+
+interface SessionKnowledgeSyncBody {
+  directory: string;
+  sessionId: string;
+  responseStyleInstruction?: string | null;
+}
+
 export const syncSessionKnowledge = async (
   directory: string | null | undefined,
   sessionId: string | null | undefined,
+  responseStyleInstruction?: string | null,
+  expectedRuntimeKey = getRuntimeKey(),
 ): Promise<void> => {
   if (!directory || !sessionId) return;
+  if (expectedRuntimeKey !== getRuntimeKey()) return;
   invalidateSummary(directory, sessionId);
   try {
+    if (isVSCodeRuntime()) {
+      if (responseStyleInstruction !== undefined) {
+        await opencodeClient.setResponseStyleInstruction(directory, sessionId, responseStyleInstruction);
+      }
+      return;
+    }
+    const body: SessionKnowledgeSyncBody = { directory, sessionId };
+    if (responseStyleInstruction !== undefined) body.responseStyleInstruction = responseStyleInstruction;
     await runtimeFetch('/api/session-knowledge/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory, sessionId }),
+      body: JSON.stringify(body),
       directory,
     });
   } catch {
@@ -46,9 +50,6 @@ export interface SessionKnowledgeSummary {
 
 const EMPTY_SUMMARY: SessionKnowledgeSummary = { notes: [], plans: [], memory: { global: 0, project: 0 } };
 
-// Several panels ask for the same session's summary at the same moment when a
-// session opens. One request serves all of them, and its answer stays good for
-// a few seconds; local pin changes drop it immediately.
 const SUMMARY_FRESH_MS = 5_000;
 const summaryCache = new Map<string, { at: number; request: Promise<SessionKnowledgeSummary> }>();
 // Scoped to the active runtime (issue #2160): a summary fetched from one
@@ -63,7 +64,6 @@ const invalidateSummary = (directory: string, sessionId: string | null | undefin
   summaryCache.delete(summaryCacheKey(directory, sessionId));
 };
 
-/** What the session is carrying, for display. Never throws; shows nothing instead. */
 export const fetchSessionKnowledgeSummary = (
   directory: string | null,
   sessionId?: string | null,
@@ -135,5 +135,7 @@ export const setSessionProjectContextPin = async (
     return sessionProjectContextPinsResponseSchema.parse(await response.json()).pins;
   } catch {
     return null;
+  } finally {
+    invalidateSummary(directory, sessionId);
   }
 };

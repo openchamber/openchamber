@@ -7,7 +7,6 @@ import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
 import { useUIStore } from '@/stores/useUIStore';
-import { SEMANTIC_TYPOGRAPHY } from '@/lib/typography';
 import { themes } from '@/lib/theme/themes';
 import { contrastRatio, mixColor, withOpacity } from '@/lib/theme/color';
 
@@ -87,61 +86,13 @@ test('saved expansion overrides a section default and keeps below-title actions 
  * The interface size setting scales the root font, so only rem sizes follow
  * it. With row text fixed at 13px and headings in rem, 200% showed 24px
  * headings over 13px rows in 56px rows. Sizes from the typography scale keep
- * the panel's proportions at every interface size.
+ * the panel's proportions at every interface size; so do rem sizes.
  */
 const PX_TEXT_SIZE = /\btext-\[\d+(?:\.\d+)?px\]/g;
-const OFF_SCALE_TEXT_SIZE = /\btext-(?:\[\d[^\]]*\]|xs|sm|base|lg|[2-9]?xl)(?=\s|$)/;
-const SCALE_STEP = /\btypography-(micro|ui-label)\b/;
-const scaleStep = (element: Element | null | undefined): string => {
-  const step = SCALE_STEP.exec(element?.getAttribute('class') ?? '')?.[1];
-  if (!step) throw new Error(`No typography step on ${element?.outerHTML.slice(0, 160) ?? 'a missing element'}`);
-  return step;
-};
 /** The innermost element showing exactly `text`. */
 const byText = (container: Element, selector: string, text: string) => [...container.querySelectorAll(selector)]
   .filter((element) => element.textContent === text)
   .at(-1);
-
-test('every text size in the panel primitives comes from the typography scale', async () => {
-  await withDom(async (container, render) => {
-    const { WorkStatusCallout, WorkStatusCollapsibleSection, WorkStatusPill, WorkStatusRow, WorkStatusRowAction, WorkStatusSection, WorkStatusValue } = primitives;
-    await render(
-      <>
-        <WorkStatusSection title="Project" subject="openchamber" summary="2 apps">
-          <WorkStatusRow icon="git-branch" label="main" value={<WorkStatusValue tone="muted">↑2</WorkStatusValue>} />
-          <WorkStatusRow icon="git-pull-request" label="A pull request" value={<WorkStatusPill color="var(--pr-open)">#204</WorkStatusPill>} />
-          <WorkStatusRow label="Goal" value={<WorkStatusRowAction tone="info" onClick={() => undefined}>Pause</WorkStatusRowAction>} />
-          <WorkStatusCallout>Merge in progress</WorkStatusCallout>
-        </WorkStatusSection>
-        <WorkStatusCollapsibleSection id="probe" title="Turn stats" icon="bar-chart-2" summary="~41 tok/s" defaultExpanded>
-          <WorkStatusRow label="Elapsed" value={<WorkStatusValue>1m 12s</WorkStatusValue>} />
-        </WorkStatusCollapsibleSection>
-      </>,
-    );
-
-    const summaries = [...container.querySelectorAll('[data-work-status-heading] [dir="auto"]')];
-    const label = byText(container, 'span[id]', 'main');
-    // Positive control: everything checked below rendered.
-    expect(summaries.map((summary) => summary.textContent)).toEqual(['2 apps', '~41 tok/s']);
-    expect(label).toBeDefined();
-
-    // Headings, summaries and pills sit a step below row text, as designed.
-    expect(scaleStep(container.querySelector('h3'))).toBe('micro');
-    expect(scaleStep(byText(container, 'button[aria-expanded] span', 'Turn stats'))).toBe('micro');
-    for (const summary of summaries) expect(scaleStep(summary)).toBe('micro');
-    expect(scaleStep(label)).toBe('ui-label');
-    expect(scaleStep(label?.nextElementSibling)).toBe('ui-label');
-    expect(scaleStep(byText(container, 'span', '#204'))).toBe('micro');
-    expect(scaleStep(byText(container, 'button', 'Pause'))).toBe('micro');
-    expect(scaleStep(byText(container, 'div', 'Merge in progress'))).toBe('ui-label');
-    expect(Number.parseFloat(SEMANTIC_TYPOGRAPHY.micro)).toBeLessThan(Number.parseFloat(SEMANTIC_TYPOGRAPHY.uiLabel));
-
-    const offScale = [...container.querySelectorAll('*')]
-      .map((element) => element.getAttribute('class') ?? '')
-      .filter((className) => OFF_SCALE_TEXT_SIZE.test(className));
-    expect(offScale).toEqual([]);
-  });
-});
 
 test('no file drawn in the panel sizes text in px', () => {
   const componentsRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -150,7 +101,6 @@ test('no file drawn in the panel sizes text in px', () => {
       .filter((file) => file.endsWith('.tsx') && !file.includes('.test.'))
       .map((file) => `chat/work-status/${file}`),
     // Drawn inside the panel's Project section.
-    'layout/ProjectActionsButton.tsx',
     'desktop/OpenInAppButton.tsx',
   ];
   // Positive control: the scan reads the panel's files, and the pattern
@@ -187,7 +137,7 @@ test('text the panel cuts off shows in full in a tooltip, and text that fits sho
     const branch = 'feature/a-branch-name-longer-than-the-panel';
     await render(
       <>
-        <WorkStatusSection title="Project">
+        <WorkStatusSection title="Project" icon="git-branch">
           <WorkStatusRow icon="git-branch" onClick={() => undefined} ariaLabel="Open branch" label={branch} />
           <WorkStatusRow icon="file-edit" onClick={() => undefined} ariaLabel="Open changes" label="2 files" />
           <WorkStatusRow label="Subagent title" tooltip="Model name" />
@@ -239,7 +189,7 @@ test('a section title keeps its width and its summary is cut first', async () =>
     const { WorkStatusCollapsibleSection, WorkStatusSection } = primitives;
     await render(
       <>
-        <WorkStatusSection title="Project" subject="a-project-name-longer-than-the-panel" summary="2 apps">
+        <WorkStatusSection title="Project" icon="git-branch" subject="a-project-name-longer-than-the-panel" summary="2 apps">
           <span>Body</span>
         </WorkStatusSection>
         <WorkStatusCollapsibleSection id="probe-usage" title="Usage" icon="timer" summary="Five-hour window 42%" defaultExpanded>
@@ -265,17 +215,13 @@ test('a section title keeps its width and its summary is cut first', async () =>
     expect(canBeCut(alone)).toBe(true);
     expect(classes(alone)).not.toContain('shrink-0');
 
-    // The project's name is cut before its title, and the heading cannot
-    // shrink below the title, so the summary beside it gives way first.
+    // The heading keeps its title's width, so the trailing text beside it gives way first.
     const heading = container.querySelector('h3');
-    const title = byText(container, 'h3 span', 'Project');
-    const subject = byText(container, 'h3 span', 'a-project-name-longer-than-the-panel');
-    expect(heading?.textContent).toBe('Projecta-project-name-longer-than-the-panel');
-    expect(classes(heading)).toContain('flex');
+    const trailing = byText(container, '[data-work-status-heading] [dir="auto"]', '2 apps');
+    expect(heading?.textContent).toBe('Project');
+    expect(classes(heading)).toContain('shrink-0');
     expect(classes(heading)).not.toContain('min-w-0');
-    expect(classes(heading)).not.toContain('truncate');
-    expect(classes(title)).toContain('shrink-0');
-    expect(canBeCut(subject)).toBe(true);
+    expect(canBeCut(trailing)).toBe(true);
   });
 });
 
@@ -295,9 +241,10 @@ test('an inactive row steps back and every other row keeps full contrast', async
     expect(inactive).toBeDefined();
     expect(classes(inactive)).toContain('opacity-75');
     // A plain row's label is the row's own colour, unfaded.
-    expect(classes(plain).some((name) => name.startsWith('opacity-') || name.startsWith('text-'))).toBe(false);
+    const colour = (name: string) => name.startsWith('text-') && !name.startsWith('text-[');
+    expect(classes(plain).some((name) => name.startsWith('opacity-') || colour(name))).toBe(false);
     // The row's colour is inherited, so hovering a clickable row still brightens it.
-    expect(classes(inactive).some((name) => name.startsWith('text-'))).toBe(false);
+    expect(classes(inactive).some(colour)).toBe(false);
   });
 });
 

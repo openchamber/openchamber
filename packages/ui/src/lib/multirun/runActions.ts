@@ -18,10 +18,6 @@ import { multiRunVariantLabel, readMultiRunIdentity, type MultiRunSummary } from
 import { clampMultiRunTitle } from './title';
 import { generateUuid } from '@/lib/uuid';
 
-/**
- * Renames the run on every member. Each write is a merge patch of the title
- * alone; members whose write failed keep the old title and are returned.
- */
 export async function renameRun(run: MultiRunSummary, title: string, sessionById: ReadonlyMap<string, Session>): Promise<string[]> {
   const nextTitle = clampMultiRunTitle(title);
   if (!nextTitle) return [];
@@ -42,7 +38,14 @@ export async function renameRun(run: MultiRunSummary, title: string, sessionById
   return failed;
 }
 
-/** Archives every member of the run. Worktrees stay; the chats move to the archive. */
+export async function detachFromRun(session: Session, runTitle: string): Promise<void> {
+  const result = await requestSessionMetadataUpdate(session.id, { openchamber: { multirun: null } }, session.directory);
+  if (result.outcome !== 'updated') throw new Error(`Multi-run membership was not removed: ${result.reason}`);
+  registerMultiRunSession({ ...session, metadata: result.metadata }, session.directory);
+  const title = runTitle.trim();
+  if (title && title !== session.title) await useSessionUIStore.getState().updateSessionTitle(session.id, title);
+}
+
 export async function archiveRun(run: MultiRunSummary): Promise<{ archivedIds: string[]; failedIds: string[] }> {
   return useSessionUIStore.getState().archiveSessions([...run.memberIds]);
 }
@@ -54,12 +57,6 @@ export class NotFirstTurnError extends Error {
   }
 }
 
-/**
- * Turns a chat into a run: the chat becomes the first lane, and each chosen
- * model gets its own lane with the same first prompt and files, in its own
- * worktree when the project is a git repository. Only the chat's first turn
- * qualifies, because new lanes start without the conversation that followed.
- */
 export async function askOtherModels(input: {
   session: Session;
   turnUserMessageId: string;
@@ -97,6 +94,7 @@ export async function askOtherModels(input: {
     lanes: [{ sessionId: session.id, identity }],
     fusions: [],
     parents: [],
+    generationSessions: [],
     memberIds: [session.id],
     providerIDs: [providerID],
     variants: [undefined],
@@ -107,7 +105,6 @@ export async function askOtherModels(input: {
   let failedCount = 0;
   for (const model of input.models) {
     try {
-      // Each new lane counts the ones before it, so duplicates get an index.
       const laneId = await addLaneToRun({ run, runGroup: undefined, model, sessionById, isolateFromProjectRoot: true });
       const created = { sessionId: laneId, identity: { ...identity, providerID: model.providerID, modelID: model.modelID } };
       run.lanes = [...run.lanes, created];
@@ -119,21 +116,11 @@ export async function askOtherModels(input: {
   return { runKey: identity.key, failedCount };
 }
 
-/**
- * Adds a lane for another model to an existing variant: same prompt and
- * files as that variant's first lane, same starting commit, its own worktree
- * when the run is isolated. Returns the new session id.
- */
 export async function addLaneToRun(input: {
   run: MultiRunSummary;
   runGroup: string | undefined;
   model: { providerID: string; modelID: string; variant?: string; displayName?: string };
   sessionById: ReadonlyMap<string, Session>;
-  /**
-   * Give the new lane its own worktree even when the template lane works in
-   * the project root (a chat turned into a run). Shared-directory runs leave
-   * this off and keep sharing.
-   */
   isolateFromProjectRoot?: boolean;
 }): Promise<string> {
   const { run, model } = input;
@@ -163,7 +150,6 @@ export async function addLaneToRun(input: {
     ?? (input.isolateFromProjectRoot && location && await checkIsGitRepository(location.project.path) ? location.project.path : null);
   assertCurrent();
   if (location && startDirectory) {
-    // The template's HEAD is where every lane of the run started.
     const { head } = await snapshotGitWorktree(startDirectory, { ref: runSnapshotRef(run, templateSession.id) });
     assertCurrent();
     const modelPart = `${toModelSlug(model.providerID, model.modelID)}${index ? `/${index}` : ''}`;
@@ -200,6 +186,7 @@ export async function addLaneToRun(input: {
       index,
       role: 'run',
       title: run.title,
+      generationSessions: [...run.generationSessions],
     },
     selection: { model: { providerID: model.providerID, id: model.modelID, variant: model.variant }, agent: templateSession.agent },
   }, assertCurrent);

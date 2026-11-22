@@ -35,6 +35,7 @@ Use esta página se você executa o OpenChamber atrás do Nginx, Nginx Proxy Man
 - Desative o gzip no proxy se o OpenChamber já comprime as respostas.
 - Mantenha a compressão ativada em apenas uma camada.
 - Encaminhe os cabeçalhos de proxy normais, como `Host`, `X-Forwarded-For` e `X-Forwarded-Proto`.
+- Se o proxy roda em outra máquina ou em outro contêiner, coloque o endereço dele em [`OPENCHAMBER_TRUSTED_PROXIES`](/pt-br/environment/#openchamber_trusted_proxies). Caso contrário, todos atrás dele dividem um único limite de tentativas de login com falha.
 - Aumente os limites de tamanho do corpo se os usuários enviarem arquivos.
 
 ## Checklist rápido
@@ -324,6 +325,21 @@ reverse_proxy 127.0.0.1:3000 {
 </details>
 
 O Caddy lida com os upgrades de WebSocket automaticamente — nenhuma configuração extra é necessária. A diretiva `flush_interval -1` garante que os fragmentos SSE sejam encaminhados imediatamente, sem buffer.
+
+## Proxies com login (Authentik, Authelia, oauth2-proxy)
+
+Se os usuários fazem login no proxy antes de chegar ao OpenChamber, os painéis de extensões precisam de uma exceção. Um painel roda em um frame isolado, e o navegador não envia o cookie de login do proxy com as requisições próprias desse frame. Por isso o proxy redireciona os arquivos do painel para a página de login, e o painel fica vazio.
+
+Deixe `/api/guest-files/` passar sem login. Esse caminho serve só os arquivos das extensões que você instalou, e só por um link que o OpenChamber emite para um usuário logado para aquele painel. Ele não abre mais nada. Com Nginx e `auth_request`:
+
+```nginx
+location ^~ /api/guest-files/ {
+    auth_request off;
+    proxy_pass http://127.0.0.1:3000;
+}
+```
+
+Em outros proxies, adicione uma regra que pule o login para o mesmo prefixo de caminho. Não libere `/api/guests/`: esse caminho também instala extensões e atende às requisições delas, e sem senha de interface do OpenChamber qualquer pessoa poderia usá-lo.
 
 ## Aviso sobre CDN e dupla compressão
 

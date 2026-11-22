@@ -2,7 +2,9 @@ import React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isSearchableQuery, searchMessages, type MessageSearchHit } from '@/lib/messageSearch';
 import { requestMessageFocus } from '@/lib/router/messageFocus';
@@ -11,9 +13,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { findTermRanges, paintSearchHighlights, toHighlightTerms } from './chatSearchHighlight';
 import { requestReasoningReveal } from './reasoningReveal';
 
-// Hits come from the server's index for this session only, oldest first, so
-// messages the timeline has not loaded yet are found too; moving to one goes
-// through the message-link mechanism, which loads older history itself.
 const PAGE_SIZE = 200;
 const MAX_PAGES = 5;
 
@@ -39,15 +38,31 @@ const loadAllHits = async (query: string, sessionId: string, includeReasoning: b
   return { status: 'ready', hits };
 };
 
+const SearchAction: React.FC<{
+  label: string;
+  icon: IconName;
+  disabled?: boolean;
+  onClick: () => void;
+}> = ({ label, icon, disabled, onClick }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className="inline-flex">
+        <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled={disabled} onClick={onClick} aria-label={label}>
+          <Icon name={icon} className="h-4 w-4" />
+        </Button>
+      </span>
+    </TooltipTrigger>
+    <TooltipContent side="bottom" sideOffset={6}>{label}</TooltipContent>
+  </Tooltip>
+);
+
 export const ChatSearchBar: React.FC<{
   sessionId: string;
   scrollNode: HTMLElement | null;
-  /** Bumped by every Cmd+F: focus and select the query again. */
   focusRequest: number;
   onClose: () => void;
 }> = ({ sessionId, scrollNode, focusRequest, onClose }) => {
   const { t } = useI18n();
-  // Hidden reasoning is not searched: its hits would lead nowhere visible.
   const includeReasoning = useUIStore((state) => state.showReasoningTraces);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [query, setQuery] = React.useState('');
@@ -79,7 +94,6 @@ export const ChatSearchBar: React.FC<{
       .then((next) => {
         if (controller.signal.aborted) return;
         setState(next);
-        // Start at the newest match: the reader is usually near the end.
         setCurrent(next.status === 'ready' ? next.hits.length - 1 : -1);
       })
       .catch(() => {
@@ -88,18 +102,12 @@ export const ChatSearchBar: React.FC<{
     return () => controller.abort();
   }, [debouncedQuery, includeReasoning, sessionId]);
 
-  // Moving to a hit is a message link: shown where links land, loading older
-  // history when the message is not in the loaded window. A hit in reasoning
-  // opens the folds it sits behind first.
   React.useEffect(() => {
     if (!currentHit) return;
     requestReasoningReveal(currentHit.role === 'reasoning' ? currentHit.id : null);
     requestMessageFocus(sessionId, currentHit.id);
   }, [currentHit, sessionId]);
 
-  // Paint every visible occurrence, the current hit's stronger; repaint as
-  // rows mount, unmount or re-render. A reasoning hit paints its reasoning
-  // block, which sorted mode may draw inside another message.
   const hitIdsKey = hits.map((hit) => `${hit.role === 'reasoning' ? 'r' : 'm'}:${hit.id}`).join(' ');
   React.useEffect(() => {
     const terms = toHighlightTerms(debouncedQuery);
@@ -133,7 +141,6 @@ export const ChatSearchBar: React.FC<{
       observer.disconnect();
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-    // `hitIdsKey` stands for `hits`.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [currentHit?.id, currentHit?.role, debouncedQuery, hitIdsKey, scrollNode]);
 
@@ -179,15 +186,9 @@ export const ChatSearchBar: React.FC<{
         className="h-7 w-48 min-w-0 bg-transparent typography-meta text-foreground outline-none placeholder:text-muted-foreground"
       />
       <span className="min-w-[4.5rem] shrink-0 text-end typography-micro text-muted-foreground" role="status" aria-live="polite">{status}</span>
-      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled={hits.length === 0} onClick={() => step(-1)} aria-label={t('chat.search.previous')}>
-        <Icon name="arrow-up-s" className="h-4 w-4" />
-      </Button>
-      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled={hits.length === 0} onClick={() => step(1)} aria-label={t('chat.search.next')}>
-        <Icon name="arrow-down-s" className="h-4 w-4" />
-      </Button>
-      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={onClose} aria-label={t('chat.search.close')}>
-        <Icon name="close" className="h-4 w-4" />
-      </Button>
+      <SearchAction label={t('chat.search.previous')} icon="arrow-up-s" disabled={hits.length === 0} onClick={() => step(-1)} />
+      <SearchAction label={t('chat.search.next')} icon="arrow-down-s" disabled={hits.length === 0} onClick={() => step(1)} />
+      <SearchAction label={t('chat.search.close')} icon="close" onClick={onClose} />
     </div>
   );
 };

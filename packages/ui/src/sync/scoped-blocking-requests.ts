@@ -6,24 +6,39 @@ type BlockingRequest = { id: string }
 /** The record of a session, or nothing when none is held. */
 export type SessionLookup = (sessionID: string) => Session | undefined
 
-export const computeSubtreeIds = (sessions: Session[], rootId: string): Set<string> => {
-  const childrenByParent = new Map<string, string[]>()
+const NO_CHILDREN: readonly Session[] = []
+
+const childrenByParentCache = new WeakMap<readonly Session[], ReadonlyMap<string, readonly Session[]>>()
+
+const readChildrenByParent = (sessions: readonly Session[]): ReadonlyMap<string, readonly Session[]> => {
+  const cached = childrenByParentCache.get(sessions)
+  if (cached) return cached
+  const childrenByParent = new Map<string, Session[]>()
   for (const session of sessions) {
     if (!session.parentID) continue
-    const list = childrenByParent.get(session.parentID) ?? []
-    list.push(session.id)
-    childrenByParent.set(session.parentID, list)
+    const list = childrenByParent.get(session.parentID)
+    if (list) list.push(session)
+    else childrenByParent.set(session.parentID, [session])
   }
+  childrenByParentCache.set(sessions, childrenByParent)
+  return childrenByParent
+}
 
+export const readChildSessions = (sessions: readonly Session[], parentId: string): readonly Session[] => (
+  readChildrenByParent(sessions).get(parentId) ?? NO_CHILDREN
+)
+
+export const computeSubtreeIds = (sessions: readonly Session[], rootId: string): Set<string> => {
+  const childrenByParent = readChildrenByParent(sessions)
   const ids = new Set<string>([rootId])
   const queue = [rootId]
   for (const id of queue) {
     const children = childrenByParent.get(id)
     if (!children) continue
-    for (const childId of children) {
-      if (ids.has(childId)) continue
-      ids.add(childId)
-      queue.push(childId)
+    for (const child of children) {
+      if (ids.has(child.id)) continue
+      ids.add(child.id)
+      queue.push(child.id)
     }
   }
   return ids
@@ -69,6 +84,13 @@ export const areRequestArraysReferentiallyEqual = <T extends BlockingRequest>(le
   return true
 }
 
+const hasAnyRequest = <T>(requestsBySession: Record<string, T[] | undefined>): boolean => {
+  for (const sessionID in requestsBySession) {
+    if (requestsBySession[sessionID]?.length) return true
+  }
+  return false
+}
+
 /**
  * The requests the composer of `sessionID` docks: each one whose lineage
  * reaches that session, its own first and a nearer subagent's before a farther
@@ -80,7 +102,7 @@ export const collectScopedBlockingRequests = <T extends BlockingRequest>(
   lookup: SessionLookup,
   empty: T[],
 ): T[] => {
-  if (!sessionID) return empty
+  if (!sessionID || !hasAnyRequest(requestsBySession)) return empty
 
   const docked = Object.entries(requestsBySession)
     .flatMap(([requestSessionID, entries]) => {

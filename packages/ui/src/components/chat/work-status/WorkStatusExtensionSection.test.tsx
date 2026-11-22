@@ -47,6 +47,7 @@ test('a status frame keeps subscriptions and storage alive while project changes
       childServiceCalls++;
       return childServiceResponse;
     }
+    if (target.includes('/frame-grant')) return Response.json({ grant: 'grant-test', expiresAt: Date.now() + 60_000 });
     if (target.includes('/auth/url-token')) return Response.json({ token: 'scoped-test', expiresAt: Date.now() + 60_000 });
     if (target.includes('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
     if (target.includes('/session/active')) return Response.json({ data: {} });
@@ -130,7 +131,7 @@ test('a status frame keeps subscriptions and storage alive while project changes
     const frame = container.querySelector<HTMLIFrameElement>('iframe');
     if (!frame) throw new Error('Status frame did not mount');
     expect(container.textContent).toContain('Recent commits');
-    expect(frame.src.includes('/api/guests/git-graph/status/index.html')).toBe(true);
+    expect(frame.src.includes('/api/guest-files/grant-test/status/index.html')).toBe(true);
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
     const box = frame.parentElement;
     if (!box) throw new Error('Frame box missing');
@@ -187,7 +188,7 @@ test('a status frame keeps subscriptions and storage alive while project changes
     const childMessages = iframeMessages.get(child);
     if (!childMessages) throw new Error('Popover message collector is missing');
     expect(childSource).not.toBe(source);
-    expect(child.src.includes('/api/guests/git-graph/status/index.html')).toBe(true);
+    expect(child.src.includes('/api/guest-files/grant-test/status/index.html')).toBe(true);
     expect(child.getAttribute('sandbox')).toBe('allow-scripts');
 
     // Pointer previews do not steal the owner's focus when their child loads.
@@ -328,8 +329,10 @@ test('a status frame keeps subscriptions and storage alive while project changes
 
     await act(async () => { send({ channel: 'openchamber.sdk', v: 1, type: 'resize', id: 'h-1', payload: { height: 96 } }); });
     expect(box.style.height).toBe('96px');
+    await act(async () => { send({ channel: 'openchamber.sdk', v: 1, type: 'resize', id: 'h-mid', payload: { height: 400 } }); });
+    expect(box.style.height).toBe('400px');
     await act(async () => { send({ channel: 'openchamber.sdk', v: 1, type: 'resize', id: 'h-2', payload: { height: 2000 } }); });
-    expect(box.style.height).toBe('320px');
+    expect(box.style.height).toBe('480px');
     expect(messages.some((message) => message.type === 'result' && message.id === 'h-2' && message.ok)).toBe(true);
     // Status-only: the catalog has no panel entry, and that must not tear the section down.
     expect(container.querySelector('iframe')).not.toBeNull();
@@ -340,7 +343,7 @@ test('a status frame keeps subscriptions and storage alive while project changes
     expect(container.querySelector('iframe')).toBeNull();
     // Reopening starts at the height the page last asked for, not the manifest default.
     await act(async () => header.click());
-    expect(container.querySelector('iframe')?.parentElement?.style.height).toBe('320px');
+    expect(container.querySelector('iframe')?.parentElement?.style.height).toBe('480px');
 
     // Changing either installation identity or approved origins replaces the
     // frame, so stale header bindings cannot address the new installation.

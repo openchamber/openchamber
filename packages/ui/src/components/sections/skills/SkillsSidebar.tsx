@@ -18,7 +18,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { selectSkillPoliciesForDirectory, selectSkillsForDirectory, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { getSkillSwitchState } from '@/stores/skillSwitch';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
@@ -30,7 +31,6 @@ import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { SETTINGS_SECTION_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
-import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 
 interface SkillsSidebarProps {
   onItemSelect?: () => void;
@@ -42,19 +42,6 @@ const isBuiltInSkill = (skill: DiscoveredSkill | null | undefined): boolean => s
 const isRenamableSkill = (skill: DiscoveredSkill | null | undefined): boolean => (
   !!skill && !isBuiltInSkill(skill) && skill.renamable === true
 );
-
-/**
- * The id OpenCode's `skill:<id>` policies name: the folder of a `SKILL.md`, or
- * a loose `<id>.md` file's name (`config/plugin/skill-file.ts` upstream).
- */
-const skillPolicyId = (skill: DiscoveredSkill): string => {
-  if (isBuiltInSkill(skill)) return skill.name;
-  const parts = skill.path.split(/[\\/]/).filter(Boolean);
-  const file = parts.at(-1) ?? '';
-  if (file === 'SKILL.md') return parts.at(-2) ?? skill.name;
-  if (file.endsWith('.md')) return file.slice(0, -3);
-  return skill.name;
-};
 
 export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
@@ -81,11 +68,15 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     getSkillDetail: s.getSkillDetail,
   })));
 
-  // Settings browses whichever project its own selector points at; the app
-  // stays where it is.
   const settingsDirectory = useSettingsDirectory();
   const skills = useSkillsStore((state) => selectSkillsForDirectory(state, settingsDirectory));
-  const isBlocked = useIntegrationPolicyBlock(settingsDirectory);
+  const policies = useSkillsStore((state) => selectSkillPoliciesForDirectory(state, settingsDirectory));
+  const offReason = (skill: DiscoveredSkill): SkillOffReason => {
+    if (!policies) return null;
+    const state = getSkillSwitchState(policies, skill.id);
+    if (state.enabled) return null;
+    return state.switchable ? 'switch' : 'policy';
+  };
   const loadSkills = useSkillsStore((state) => state.loadSkills);
 
   React.useEffect(() => {
@@ -95,7 +86,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   const bgClass = 'bg-background';
 
   const handleCreateNew = () => {
-    // Generate unique name
     const baseName = 'new-skill';
     let newName = baseName;
     let counter = 1;
@@ -104,7 +94,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       counter++;
     }
 
-    // Set draft and open the page for editing
     setSkillDraft({ name: newName, scope: 'user', source: 'opencode', description: '' });
     setSelectedSkill(newName);
     onItemSelect?.();
@@ -148,19 +137,17 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       newName = `${baseName}-copy-${copyNumber}`;
     }
 
-    // Get full skill detail to copy
     const detail = await getSkillDetail(skill.name, settingsDirectory);
     if (!detail) {
       toast.error(t('settings.skills.sidebar.toast.duplicateLoadFailed'));
       return;
     }
 
-    // Set draft with prefilled values from source skill
       setSkillDraft({
         name: newName,
         scope: skill.scope || 'user',
         source: skill.source || 'opencode',
-        description: detail.sources.md.fields.includes('description') ? '' : '', // Will be populated from page
+        description: detail.sources.md.fields.includes('description') ? '' : '',
         instructions: '',
       });
     setSelectedSkill(newName);
@@ -197,7 +184,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
-    // Rename in place on disk so SKILL.md body and supporting files are preserved.
     const success = await renameSkill(renameDialogSkill.name, sanitizedName, settingsDirectory);
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillRenamed', { name: sanitizedName }));
@@ -209,12 +195,10 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     setRenameDialogSkill(null);
   };
 
-  // Separate project and user skills
   const shownSkills = skills.filter((skill) => matchesRankQuery([skill.name, skill.description], query));
   const projectSkills = shownSkills.filter((s) => s.scope === 'project');
   const userSkills = shownSkills.filter((s) => s.scope === 'user');
 
-  // Helper: group a list of skills by their domain folder
   function groupSkillsByFolder(list: DiscoveredSkill[]) {
     const groups: Record<string, DiscoveredSkill[]> = {};
     const ungrouped: DiscoveredSkill[] = [];
@@ -285,7 +269,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                       <SkillListItem
                         key={skill.name}
                         skill={skill}
-                        blocked={isBlocked(`skill:${skillPolicyId(skill)}`)}
+                        off={offReason(skill)}
                         isSelected={selectedSkillName === skill.name}
                         onSelect={() => {
                           setSelectedSkill(skill.name);
@@ -305,7 +289,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                   <SkillListItem
                     key={skill.name}
                     skill={skill}
-                    blocked={isBlocked(`skill:${skillPolicyId(skill)}`)}
+                    off={offReason(skill)}
                     isSelected={selectedSkillName === skill.name}
                     onSelect={() => {
                       setSelectedSkill(skill.name);
@@ -338,7 +322,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                       <SkillListItem
                         key={skill.name}
                         skill={skill}
-                        blocked={isBlocked(`skill:${skillPolicyId(skill)}`)}
+                        off={offReason(skill)}
                         isSelected={selectedSkillName === skill.name}
                         onSelect={() => {
                           setSelectedSkill(skill.name);
@@ -358,7 +342,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                   <SkillListItem
                     key={skill.name}
                     skill={skill}
-                    blocked={isBlocked(`skill:${skillPolicyId(skill)}`)}
+                    off={offReason(skill)}
                     isSelected={selectedSkillName === skill.name}
                     onSelect={() => {
                       setSelectedSkill(skill.name);
@@ -410,7 +394,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
         </DialogContent>
       </Dialog>
 
-      {/* Rename Dialog */}
       <Dialog open={renameDialogSkill !== null} onOpenChange={(open) => !open && setRenameDialogSkill(null)}>
         <DialogContent>
           <DialogHeader>
@@ -449,10 +432,11 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   );
 };
 
+type SkillOffReason = 'switch' | 'policy' | null;
+
 interface SkillListItemProps {
   skill: DiscoveredSkill;
-  /** A policy in the OpenCode config keeps agents from loading this skill. */
-  blocked: boolean;
+  off: SkillOffReason;
   isSelected: boolean;
   onSelect: () => void;
   onDelete: () => void;
@@ -464,7 +448,7 @@ interface SkillListItemProps {
 
 const SkillListItem: React.FC<SkillListItemProps> = ({
   skill,
-  blocked,
+  off,
   isSelected,
   onSelect,
   onDelete,
@@ -506,10 +490,15 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
           tabIndex={0}
         >
           <div className="flex items-center gap-1.5">
-            <span className={cn('typography-ui-label font-normal truncate', blocked ? 'text-muted-foreground' : 'text-foreground')}>
+            <span className={cn('typography-ui-label font-normal truncate', off ? 'text-muted-foreground' : 'text-foreground')}>
               {skill.name}
             </span>
-            {blocked ? (
+            {off === 'switch' ? (
+              <span className="typography-micro shrink-0 text-muted-foreground" title={t('settings.skills.sidebar.switchedOffHint')}>
+                {t('settings.skills.sidebar.switchedOff')}
+              </span>
+            ) : null}
+            {off === 'policy' ? (
               <span
                 className="typography-micro shrink-0 text-[var(--status-warning)]"
                 title={t('settings.skills.sidebar.blockedByPolicyHint')}
@@ -524,9 +513,9 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
           <DropdownMenuTrigger asChild>
             <Button size="sm"
               variant="ghost"
-              className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+              className="h-6 w-6 px-0 flex-shrink-0 -me-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 pointer-fine:hidden"
             >
-              <Icon name="more-2" className="h-3.5 w-3.5" />
+              <Icon name="more" className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">

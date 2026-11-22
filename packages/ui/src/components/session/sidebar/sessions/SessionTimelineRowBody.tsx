@@ -89,7 +89,7 @@ const ProjectImageIcon: React.FC<{ project: TimelineRowProject; fallback: React.
 
 // `label` makes the icon speak and explain itself on hover, for rows where it
 // is the only word for the project; a row that prints the name passes null.
-const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string | null }> = ({ project, label }) => {
+export const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string | null }> = ({ project, label }) => {
   const iconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
   const iconColor = resolveProjectColor(project.color);
   const glyph = iconName

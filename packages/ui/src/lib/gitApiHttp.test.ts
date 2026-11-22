@@ -49,6 +49,7 @@ import {
   unstageGitFiles,
 } from './gitApiHttp';
 import { gitIdentitySummarySchema } from './api/git-identity';
+import { GitRepositoryUnreadableError } from './gitRepositoryUnreadable';
 import {
   GitNetworkOperationRequestError,
   type GitNetworkOperation,
@@ -397,6 +398,26 @@ describe('gitApiHttp worktree bootstrap', () => {
       restoreMocks();
     }
   });
+
+  // A bootstrap code the server records but this schema does not list makes
+  // `.parse` throw, and the failure toast then shows the validation dump
+  // instead of the server's sentence.
+  for (const code of ['PATH_LENGTH_LIMIT', 'BRANCH_NAME_CONFLICT'] as const) test(`accepts a ${code} bootstrap failure`, async () => {
+    installWindowMock();
+    try {
+      const failure = {
+        status: 'failed', phase: 'directory-created',
+        error: 'Git could not create the worktree branch: its name clashes with an existing branch.',
+        errorCode: code, updatedAt: 12,
+      };
+      // SAFETY: This test double accepts every fetch call and always returns a Response.
+      globalThis.fetch = (async () => Response.json(failure)) as typeof fetch;
+
+      expect(await getGitWorktreeBootstrapStatus('/repository')).toEqual(failure);
+    } finally {
+      restoreMocks();
+    }
+  });
 });
 
 test('nested repository discovery scopes the workspace to the requested root', async () => {
@@ -577,6 +598,22 @@ describe('gitApiHttp branch comparisons', () => {
       // A 413 without the route's body keeps the generic fallback.
       globalThis.fetch = Object.assign(async () => new Response('Payload Too Large', { status: 413, statusText: 'Payload Too Large' }), previousFetch);
       await expect(getGitFileDiff('/repo', { path: 'big.txt' })).rejects.toThrow('Failed to get git file diff: Payload Too Large');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('rejects non-repository reads with the message shown by diff error views', async () => {
+    installWindowMock();
+    globalThis.fetch = Object.assign(async () => Response.json({ code: 'not_repository', error: 'This directory is not a Git repository.' }, { status: 409 }), previousFetch);
+    try {
+      for (const request of [
+        () => getGitDiff('/plain', { path: 'file.ts' }),
+        () => getGitFileDiff('/plain', { path: 'file.ts' }),
+        () => getGitDiffs('/plain', { paths: ['z.ts', 'a.ts'] }),
+      ]) {
+        await expect(request()).rejects.toThrow('This directory is not a Git repository.');
+      }
     } finally {
       restoreMocks();
     }
@@ -1814,6 +1851,105 @@ describe('gitApiHttp request priority', () => {
 });
 
 describe('batched project reads', () => {
+  test('publishes streamed statuses before the batch ends and preserves them after a truncated stream', async () => {
+    installWindowMock();
+    const stream = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = stream.writable.getWriter();
+    const encoder = new TextEncoder();
+    const calls: FetchCall[] = [];
+    let notifyStarted = () => {};
+    const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+    // SAFETY: fetch has a Bun-only preconnect member unused by these HTTP reads.
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      notifyStarted();
+      return new Response(stream.readable);
+    }) as typeof fetch;
+    try {
+      const fast = getGitStatus('/stream/fast');
+      const plain = getGitStatus('/stream/plain');
+      const failed = getGitStatus('/stream/failed').then(() => null, (error: Error) => error);
+      const missing = getGitStatus('/stream/missing').then(() => null, (error: Error) => error);
+      await started;
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0].input)).toContain('/api/git/status/batch');
+      const status = { current: '中文分支', tracking: null, ahead: 0, behind: 0, files: [], isClean: true };
+      await writer.write(encoder.encode(JSON.stringify({ directory: '/stream/plain', isGitRepository: false, status: { ...status, current: '' } }) + '\n'));
+      expect((await plain).current).toBe('');
+      expect(await checkIsGitRepository('/stream/plain')).toBe(false);
+      const bytes = encoder.encode(JSON.stringify({ directory: '/stream/fast', isGitRepository: true, status }) + '\n');
+      await writer.write(bytes.slice(0, 75));
+      await writer.write(bytes.slice(75));
+      expect((await fast).current).toBe('中文分支');
+      expect(await checkIsGitRepository('/stream/fast')).toBe(true);
+      await writer.write(encoder.encode(JSON.stringify({ directory: '/stream/failed', error: 'unreadable', code: 'GIT_REPOSITORY_UNREADABLE' }) + '\n'));
+      expect(await failed).toBeInstanceOf(GitRepositoryUnreadableError);
+      await writer.close();
+      expect((await missing)?.message).toContain('before every directory answered');
+      expect((await getGitStatus('/stream/fast')).current).toBe('中文分支');
+      expect(calls).toHaveLength(1);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('falls back to two single reads at a time against a server without the batch route', async () => {
+    installWindowMock();
+    const oldServer = '/spaces/0123456789ab';
+    const calls: string[] = [];
+    let activeReads = 0;
+    let peakReads = 0;
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes('/api/git/status/batch')) {
+        // A server without the route proxies the POST to OpenCode, whose answer is not NDJSON.
+        return new Response('<!doctype html>', { headers: { 'Content-Type': 'text/html' } });
+      }
+      activeReads += 1;
+      peakReads = Math.max(peakReads, activeReads);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeReads -= 1;
+      const directory = new URL(url).searchParams.get('directory') ?? '';
+      return Response.json({ current: directory.split('/').pop(), tracking: null, ahead: 0, behind: 0, files: [], isClean: true });
+    }) as typeof fetch;
+    try {
+      const directories = ['a', 'b', 'c', 'd', 'e', 'f'].map((name) => `${oldServer}/${name}`);
+      const statuses = await Promise.all(directories.map((directory) => getGitStatus(directory)));
+      expect(statuses.map((status) => status.current)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+      expect(calls.filter((url) => url.includes('/api/git/status/batch'))).toHaveLength(1);
+      expect(peakReads).toBeLessThanOrEqual(2);
+
+      // The server is remembered: later reads go straight to the single route.
+      calls.length = 0;
+      const later = await Promise.all([`${oldServer}/g`, `${oldServer}/h`].map((directory) => getGitStatus(directory)));
+      expect(later.map((status) => status.current)).toEqual(['g', 'h']);
+      expect(calls.some((url) => url.includes('/api/git/status/batch'))).toBe(false);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('keeps an ordinary batch failure as an error instead of falling back', async () => {
+    installWindowMock();
+    const calls: string[] = [];
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (input) => {
+      calls.push(String(input));
+      return new Response('boom', { status: 500, statusText: 'Internal Server Error' });
+    }) as typeof fetch;
+    try {
+      const reads = ['x', 'y'].map((name) => getGitStatus(`/spaces/0123456789ac/${name}`).then(() => null, (error: Error) => error));
+      const errors = await Promise.all(reads);
+      expect(errors.every((error) => error?.message.includes('500'))).toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toContain('/api/git/status/batch');
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('collapses per-project git reads into one request per endpoint', async () => {
     installWindowMock();
     const calls: FetchCall[] = [];
@@ -1826,6 +1962,7 @@ describe('batched project reads', () => {
       if (String(input).includes('/api/git/project-worktrees')) {
         return Response.json({ projects: directories.map((directory) => ({ directory, worktrees: [] })) });
       }
+      if (String(input).includes('/api/git/status/batch')) return new Response(directories.map((directory) => JSON.stringify({ directory, isGitRepository: true, status: { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true } })).join('\n') + '\n');
       return Response.json({
         projects: directories.map((directory) => ({
           directory,
@@ -1847,7 +1984,7 @@ describe('batched project reads', () => {
       expect(statuses.map((status) => status.current)).toEqual(['main', 'main', 'main', 'main', 'main']);
       expect(worktrees).toEqual([[], [], [], [], []]);
 
-      const projectCalls = calls.filter((call) => String(call.input).includes('/api/git/projects'));
+      const projectCalls = calls.filter((call) => String(call.input).includes('/api/git/status/batch'));
       const worktreeCalls = calls.filter((call) => String(call.input).includes('/api/git/project-worktrees'));
       expect(projectCalls).toHaveLength(1);
       expect(worktreeCalls).toHaveLength(1);
@@ -1855,7 +1992,7 @@ describe('batched project reads', () => {
       // SAFETY: the captured request body is this test's own JSON.stringify payload, so it parses to the { directories, fields } shape the adapter sent.
       const sent = JSON.parse(String(projectCalls[0].init?.body)) as { directories: string[]; fields?: string[] };
       expect([...sent.directories].sort()).toEqual([...directories].sort());
-      expect(sent.fields).toEqual(['status']);
+      expect(sent.fields).toBeUndefined();
     } finally {
       restoreMocks();
     }
@@ -1870,19 +2007,15 @@ describe('batched project reads', () => {
       releaseStatus = resolve;
     });
     // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
-    globalThis.fetch = (async (_input, init) => {
+    globalThis.fetch = (async (input, init) => {
       // SAFETY: the request body is this test's own JSON.stringify payload, so it parses to the { directories, fields } shape the adapter sent.
       const body = JSON.parse(String(init?.body ?? '{}')) as { directories: string[]; fields?: string[] };
-      bodies.push(body);
-      if (body.fields?.includes('status')) {
+      if (String(input).includes('/api/git/status')) {
         // Hold the status batch: a slow status must not delay the cheap check.
         await statusGate;
-        return Response.json({ projects: body.directories.map((entry) => ({
-          directory: entry,
-          isGitRepository: true,
-          status: { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true },
-        })) });
+        return Response.json({ current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true });
       }
+      bodies.push(body);
       return Response.json({ projects: body.directories.map((entry) => ({ directory: entry, isGitRepository: true })) });
     }) as typeof fetch;
     try {
@@ -1894,7 +2027,33 @@ describe('batched project reads', () => {
 
       releaseStatus();
       await prefetch;
-      expect(bodies).toHaveLength(2);
+      expect(bodies).toHaveLength(1);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test("rejects with Git's message when Git could not read the directory, and never caches it", async () => {
+    installWindowMock();
+    const directory = '/batch/unreadable-repo';
+    const message = "fatal: detected dubious ownership in repository at '/batch/unreadable-repo'";
+    let requests = 0;
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (input) => {
+      requests += 1;
+      if (String(input).includes('/api/git/status')) {
+        return Response.json({ error: message, code: 'GIT_REPOSITORY_UNREADABLE' }, { status: 500 });
+      }
+      return Response.json({ projects: [{ directory, error: message, code: 'GIT_REPOSITORY_UNREADABLE' }] });
+    }) as typeof fetch;
+    try {
+      await expect(checkIsGitRepository(directory)).rejects.toBeInstanceOf(GitRepositoryUnreadableError);
+      // The next check asks again: a failure is not an answer to keep.
+      await checkIsGitRepository(directory).catch(() => undefined);
+      expect(requests).toBe(2);
+
+      await expect(getGitStatus(directory)).rejects.toBeInstanceOf(GitRepositoryUnreadableError);
+      await expect(getGitStatus(directory)).rejects.toThrow(message);
     } finally {
       restoreMocks();
     }
@@ -1949,19 +2108,14 @@ describe('batched project reads', () => {
     const batchGate = new Promise<void>((resolve) => {
       releaseBatch = resolve;
     });
+    let statusReads = 0;
     // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
     globalThis.fetch = (async (input) => {
       const url = String(input);
-      if (url.includes('/api/git/projects')) {
+      if (url.includes('/api/git/status') && ++statusReads === 1) {
         // Hold the batch in flight until the test bumps the status-cache version.
         await batchGate;
-        return Response.json({
-          projects: [{
-            directory,
-            isGitRepository: true,
-            status: { current: 'stale', tracking: null, ahead: 0, behind: 0, files: [], isClean: true },
-          }],
-        });
+        return Response.json({ current: 'stale', tracking: null, ahead: 0, behind: 0, files: [], isClean: true });
       }
       if (url.includes('/api/git/status')) {
         return Response.json({ current: 'fresh', tracking: null, ahead: 0, behind: 0, files: [], isClean: true });

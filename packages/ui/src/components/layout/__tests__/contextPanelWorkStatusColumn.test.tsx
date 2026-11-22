@@ -16,7 +16,7 @@ mock.module('@/components/layout/RightSidebarTabs', () => ({ ProjectContextPanel
 const dom = installDom();
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
-const { setWorkStatusReserved } = await import('../rightSlot');
+const { setWorkStatusColumn } = await import('../rightSlot');
 const { getWorkStatusWidths } = await import('@/components/chat/work-status/useWorkStatusVisibility');
 
 afterAll(async () => {
@@ -30,7 +30,7 @@ describe('the right slot holds the work status column', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     await act(async () => {
-      setWorkStatusReserved(false);
+      setWorkStatusColumn(false, false);
       useUIStore.setState({ fontSize: previousSize });
     });
   });
@@ -38,7 +38,7 @@ describe('the right slot holds the work status column', () => {
   test('as wide as the card and its margins at every interface size', async () => {
     useUIStore.setState({ contextPanelByDirectory: {}, fontSize: 100 });
     useDirectoryStore.setState({ currentDirectory: DIRECTORY });
-    setWorkStatusReserved(true);
+    setWorkStatusColumn(true, false);
     root = createRoot(dom.container);
     await renderContextPanels(root);
 

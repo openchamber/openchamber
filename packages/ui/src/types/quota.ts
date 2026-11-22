@@ -1,5 +1,5 @@
-export type QuotaProviderId =
-  | 'openai'
+type BuiltInQuotaProviderId =
+   'openai'
   | 'codex'
   | 'command-code'
   | 'cursor'
@@ -18,6 +18,7 @@ export type QuotaProviderId =
   | 'ollama-cloud'
   | 'wafer'
   | 'opencode-go'
+  | 'opencode'
   | 'deepinfra'
   | 'deepseek'
   | 'exe-dev'
@@ -30,10 +31,19 @@ export type QuotaProviderId =
   | 'opendesign'
   | 'xai';
 
+export type ExtensionQuotaProviderId = `ext-${string}`;
+
+export type QuotaProviderId = BuiltInQuotaProviderId | ExtensionQuotaProviderId;
+
 export interface UsageWindowGiftReset {
   recordId: number;
   expireAt: number;
+  grantType?: string;
 }
+
+export type UsageWindowValue =
+  | { kind: 'requests'; count: number }
+  | { kind: 'spend'; spent: number | null; limit: number | null };
 
 export interface UsageWindow {
   usedPercent: number | null;
@@ -44,7 +54,8 @@ export interface UsageWindow {
   resetAtFormatted: string | null;
   resetAfterFormatted: string | null;
   valueLabel?: string | null;
-  /** Claimable gift (bonus) limit reset, when the provider exposes an available one. */
+  value?: UsageWindowValue;
+  creditsUsed?: number;
   giftReset?: UsageWindowGiftReset | null;
 }
 
@@ -52,9 +63,30 @@ export interface UsageWindows {
   windows: Record<string, UsageWindow>;
 }
 
+export interface ConsoleBudget {
+  id: string;
+  limit: number;
+  spent: number;
+  usedPercent: number;
+  reached: boolean;
+  resetsAt: number;
+  sharing: 'you' | 'everyone' | 'group';
+  perModel: boolean;
+  kind: 'all' | 'vendors' | 'price' | 'models' | 'each';
+  vendors: string[];
+  models: string[];
+  inputPriceAtLeast: number | null;
+}
+
+export interface ConsoleBudgets {
+  workspace: string | null;
+  budgets: ConsoleBudget[];
+}
+
 interface ProviderUsage extends UsageWindows {
   models?: Record<string, UsageWindows>;
   usageAvailability?: 'console-only';
+  consoleBudgets?: ConsoleBudgets;
 }
 
 export interface ProviderResult {
@@ -63,13 +95,11 @@ export interface ProviderResult {
   ok: boolean;
   configured: boolean;
   error?: string;
-  /** Subscription tier reported by the provider, when it exposes one. */
   planLabel?: string | null;
   /** Per-credential identity, present when the provider holds several stored credentials. */
   credentialId?: string;
   credentialLabel?: string;
   credentialActive?: boolean;
-  accountLabel?: string;
   /**
    * The provider's plan is walled (a 402-class quota-exhausted state), which is
    * distinct from a read failure (`ok: false` without this flag). A consumer
@@ -78,6 +108,8 @@ export interface ProviderResult {
   quotaExhausted?: boolean;
   /** When the walled window resets, in epoch milliseconds, when the provider says. */
   quotaResetAt?: number | null;
+  accountLabel?: string | null;
+  selection?: string;
   usage: ProviderUsage | null;
   fetchedAt: number;
 }

@@ -1,8 +1,10 @@
 import { isShellTool, isSubagentTool, isWriteTool } from '@/lib/opencode/tools';
 import React from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { PdfArtifact } from '@/components/views/files/previews/PdfArtifact';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
-import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
+import { HighlightedCode } from '@/components/code/HighlightedCode';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
@@ -11,6 +13,7 @@ import { toolDisplayStyles } from '@/lib/typography';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
+import { DIFFS_HIGHLIGHTER, toDiffsLanguage } from '@/lib/shiki/diffsHighlighter';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import {
     renderGrepOutput,
@@ -22,16 +25,23 @@ import {
 } from './toolRenderers';
 import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
+import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { useDefaultDiffViewMode } from './useDefaultDiffViewMode';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
+import { StatusImage } from '@/components/ui/status-image';
 import { Icon } from "@/components/icon/Icon";
 import { getToolIcon } from './parts/toolPresentation';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { fetchBypassingRuntimeBridge, runtimeFetch } from '@/lib/runtime-fetch';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { toast } from '@/components/ui';
+import { saveFile } from './parts/saveFile';
 import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, getMermaidFileSourcePromise, getMermaidRemoteSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
-import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
+import { PIERRE_DIFF_TINT_CSS, PIERRE_SEPARATOR_CSS } from '@/lib/shiki/pierreDiffTint';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -57,12 +67,7 @@ type PierreThemeConfig = {
 
 const TOOL_DIFF_UNSAFE_CSS = `
   ${PIERRE_DIFF_TINT_CSS}
-  [data-diff-header],
-  [data-diff] {
-    [data-separator] {
-      height: 24px !important;
-    }
-  }
+  ${PIERRE_SEPARATOR_CSS}
 `;
 
 const TOOL_DIFF_METRICS = {
@@ -94,15 +99,13 @@ const usePierreThemeConfig = (): PierreThemeConfig => {
         [availableThemes, darkThemeId, fallbackDarkTheme],
     );
 
-    React.useEffect(() => {
-        ensurePierreThemeRegistered(lightTheme);
-        ensurePierreThemeRegistered(darkTheme);
-    }, [darkTheme, lightTheme]);
+    const lightThemeName = ensurePierreThemeRegistered(lightTheme);
+    const darkThemeName = ensurePierreThemeRegistered(darkTheme);
 
     const currentVariant = themeSystem?.currentTheme.metadata.variant ?? 'light';
 
     return {
-        theme: { light: lightTheme.metadata.id, dark: darkTheme.metadata.id },
+        theme: { light: lightThemeName, dark: darkThemeName },
         themeType: currentVariant === 'dark' ? 'dark' : 'light',
     };
 };
@@ -158,7 +161,7 @@ const getSvgAspectRatio = (svg: SVGElement): number | null => {
         // Ignore getBBox failures and fall back to SVG attrs/viewBox.
     }
 
-    const viewBox = svg.getAttribute('viewBox');
+    const viewBox = svg.getAttribute('data-oc-mermaid-original-viewbox') ?? svg.getAttribute('viewBox');
     if (viewBox) {
         const parts = viewBox.trim().split(/\s+/).map(Number);
         if (parts.length === 4) {
@@ -254,6 +257,24 @@ const usePreviewViewport = (open: boolean) => {
     return viewport;
 };
 
+type GalleryItem = NonNullable<NonNullable<ToolPopupContent['image']>['gallery']>[number];
+
+const imageLoader = (image: GalleryItem | undefined): (() => Promise<Blob>) | null => {
+    if (!image || isVSCodeRuntime()) return null;
+    if (image.load) return image.load;
+    const { url } = image;
+    if (/^(?:data|blob):/i.test(url)) return () => fetchBypassingRuntimeBridge(url).then((response) => response.blob());
+    return null;
+};
+
+const EXTENSION_BY_IMAGE_MIME = new Map([['image/png', 'png'], ['image/jpeg', 'jpg'], ['image/gif', 'gif'], ['image/webp', 'webp'], ['image/svg+xml', 'svg']]);
+
+const savedImageName = (filename: string | undefined, blob: Blob): string => {
+    const name = filename?.split(/[\\/]/).pop()?.trim() || 'image';
+    if (/\.[A-Za-z0-9]{2,5}$/.test(name)) return name;
+    return `${name}.${EXTENSION_BY_IMAGE_MIME.get(blob.type) ?? 'png'}`;
+};
+
 const ImagePreviewDialog: React.FC<{
     popup: ToolPopupContent;
     onOpenChange: (open: boolean) => void;
@@ -262,9 +283,9 @@ const ImagePreviewDialog: React.FC<{
     const { t, direction } = useI18n();
     const gallery = React.useMemo(() => {
         const baseImage = popup.image;
-        if (!baseImage) return [] as Array<{ url: string; mimeType?: string; filename?: string; size?: number }>;
+        if (!baseImage) return [] as GalleryItem[];
         const fromPopup = Array.isArray(baseImage.gallery)
-            ? baseImage.gallery.filter((item): item is { url: string; mimeType?: string; filename?: string; size?: number } => Boolean(item?.url))
+            ? baseImage.gallery.filter((item): item is GalleryItem => Boolean(item?.url))
             : [];
 
         if (fromPopup.length > 0) {
@@ -276,6 +297,7 @@ const ImagePreviewDialog: React.FC<{
             mimeType: baseImage.mimeType,
             filename: baseImage.filename,
             size: baseImage.size,
+            load: baseImage.load,
         }];
     }, [popup.image]);
 
@@ -303,6 +325,17 @@ const ImagePreviewDialog: React.FC<{
 
     const currentImage = gallery[currentIndex] ?? gallery[0] ?? popup.image;
     const imageTitle = currentImage?.filename || popup.title || 'Image preview';
+    const loadCurrentImage = imageLoader(currentImage);
+    const currentFilename = currentImage?.filename;
+    const handleDownload = React.useCallback(async () => {
+        if (!loadCurrentImage) return;
+        try {
+            const blob = await loadCurrentImage();
+            await saveFile(new File([blob], savedImageName(currentFilename, blob), { type: blob.type }));
+        } catch {
+            toast.error(t('chat.image.downloadFailed'));
+        }
+    }, [currentFilename, loadCurrentImage, t]);
     const hasMultipleImages = gallery.length > 1;
 
     const showPrevious = React.useCallback(() => {
@@ -326,7 +359,6 @@ const ImagePreviewDialog: React.FC<{
                 return;
             }
 
-            // "Previous" sits at the start of the row: on the right in RTL.
             const previousKey = direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
             const nextKey = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
             if (event.key === previousKey && hasMultipleImages) {
@@ -347,9 +379,6 @@ const ImagePreviewDialog: React.FC<{
         };
     }, [direction, hasMultipleImages, onOpenChange, popup.open, showNext, showPrevious]);
 
-    // The measured size belongs to one URL. Resetting it in an effect on URL
-    // change raced the load event of an already-cached image, which left the
-    // viewer stuck at its maximum box with wide dead margins around the image.
     const currentImageUrl = currentImage?.url;
     const currentNaturalSize = imageNaturalSize && imageNaturalSize.url === currentImageUrl
         ? imageNaturalSize
@@ -385,8 +414,6 @@ const ImagePreviewDialog: React.FC<{
             <div
                 aria-hidden="true"
                 className={cn(
-                    // Same scrim as DialogOverlay, so the image viewer sits on
-                    // the app the way every other dialog does.
                     'oc-glass-backdrop absolute inset-0 bg-surface-overlay/60',
                     isTransitioning && 'transition-opacity duration-150 ease-out',
                     isVisible ? 'opacity-100' : 'opacity-0'
@@ -396,24 +423,34 @@ const ImagePreviewDialog: React.FC<{
 
             {hasMultipleImages && (
                 <>
-                    <button
-                        type="button"
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={showPrevious}
-                        className="absolute inset-s-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring"
-                        aria-label={t('chat.toolOutputDialog.image.previousAria')}
-                    >
-                        <Icon name="arrow-left-s" className="h-6 w-6" />
-                    </button>
-                    <button
-                        type="button"
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={showNext}
-                        className="absolute inset-e-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring"
-                        aria-label={t('chat.toolOutputDialog.image.nextAria')}
-                    >
-                        <Icon name="arrow-right-s" className="h-6 w-6" />
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={showPrevious}
+                                className="absolute inset-s-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring"
+                                aria-label={t('chat.toolOutputDialog.image.previousAria')}
+                            >
+                                <Icon name="arrow-left-s" className="h-6 w-6" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('chat.toolOutputDialog.image.previousAria')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={showNext}
+                                className="absolute inset-e-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring"
+                                aria-label={t('chat.toolOutputDialog.image.nextAria')}
+                            >
+                                <Icon name="arrow-right-s" className="h-6 w-6" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('chat.toolOutputDialog.image.nextAria')}</TooltipContent>
+                    </Tooltip>
                 </>
             )}
 
@@ -435,24 +472,26 @@ const ImagePreviewDialog: React.FC<{
                         <div className="min-w-0 flex-1 text-foreground typography-ui-header font-semibold truncate" title={imageTitle}>
                             {imageTitle}
                         </div>
-                        <button
-                            type="button"
-                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                            onClick={() => onOpenChange(false)}
-                            aria-label={t('chat.toolOutputDialog.image.closeAria')}
-                        >
-                            <Icon name="close" className="h-4 w-4" />
-                        </button>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                            {loadCurrentImage ? (
+                                <ToolbarTooltipButton label={t('chat.image.download')} icon="download" onClick={() => { void handleDownload(); }} />
+                            ) : null}
+                            <ToolbarTooltipButton
+                                label={t('chat.toolOutputDialog.image.closeAria')}
+                                icon="close"
+                                onClick={() => onOpenChange(false)}
+                            />
+                        </div>
                     </div>
 
-                    <img
+                    <StatusImage
                         src={currentImage.url}
                         alt={imageTitle}
-                        className="block object-contain"
+                        variant="large"
                         style={{ width: `${imageDisplaySize.width}px`, height: `${imageDisplaySize.height}px` }}
-                        loading="lazy"
-                        onLoad={(event) => {
-                            const element = event.currentTarget;
+                        imgClassName="block h-full w-full object-contain"
+                        lazy
+                        onLoad={(element) => {
                             const width = element.naturalWidth;
                             const height = element.naturalHeight;
                             const url = element.getAttribute('src') ?? '';
@@ -474,7 +513,6 @@ const ImagePreviewDialog: React.FC<{
     return createPortal(content, document.body);
 };
 
-// ── PERF-007: Virtualised sub-components for dialog ──────────────────
 
 const DialogUnifiedDiff: React.FC<{
     popup: ToolPopupContent;
@@ -499,6 +537,7 @@ const DialogUnifiedDiff: React.FC<{
                     overflow: 'wrap',
                     theme: pierreThemeConfig.theme,
                     themeType: pierreThemeConfig.themeType,
+                    preferredHighlighter: DIFFS_HIGHLIGHTER,
                     unsafeCSS: TOOL_DIFF_UNSAFE_CSS,
                 }}
                 className="block w-full"
@@ -570,13 +609,14 @@ const DialogReadContent: React.FC<{
                 file={{
                     name: filePath,
                     contents: fileContents,
-                    lang: detectedLanguage || undefined,
+                    lang: toDiffsLanguage(detectedLanguage),
                 }}
                 options={{
                     disableFileHeader: true,
                     overflow: 'wrap',
                     theme: pierreThemeConfig.theme,
                     themeType: pierreThemeConfig.themeType,
+                    preferredHighlighter: DIFFS_HIGHLIGHTER,
                 }}
                 className="block w-full"
             />
@@ -608,6 +648,8 @@ const MermaidPreviewDialog: React.FC<{
     const requestIdRef = React.useRef(0);
     const loadAbortRef = React.useRef<AbortController | null>(null);
     const mermaidPreviewRef = React.useRef<HTMLDivElement | null>(null);
+    const [toolbarSlot, setToolbarSlot] = React.useState<HTMLDivElement | null>(null);
+    const mermaidControls = React.useMemo(() => ({ ...MERMAID_CONTROLS, toolbarSlot }), [toolbarSlot]);
 
     // A Mermaid load must not outlive the dialog or a newer load: the request-id
     // guard discards stale results, and the controller cancels the request.
@@ -771,16 +813,19 @@ const MermaidPreviewDialog: React.FC<{
             return;
         }
 
+        let measuredSvg: SVGElement | null = null;
         const measureAspectRatio = () => {
             const svg = mermaidPreviewRef.current?.querySelector('svg');
             if (!svg) {
                 return false;
             }
+            if (svg === measuredSvg) return true;
 
             const aspectRatio = getSvgAspectRatio(svg as SVGElement);
             if (!aspectRatio || !Number.isFinite(aspectRatio) || aspectRatio <= 0) {
                 return false;
             }
+            measuredSvg = svg;
 
             setDiagramAspectRatio((previous) => {
                 if (previous && Math.abs(previous - aspectRatio) < 0.001) {
@@ -820,7 +865,7 @@ const MermaidPreviewDialog: React.FC<{
         });
 
         if (mermaidPreviewRef.current) {
-            observer.observe(mermaidPreviewRef.current, { childList: true, subtree: true, attributes: true });
+            observer.observe(mermaidPreviewRef.current, { childList: true, subtree: true });
         }
 
         return () => {
@@ -878,15 +923,13 @@ const MermaidPreviewDialog: React.FC<{
                     style={{ width: `${dialogSize.width}px` }}
                     onMouseDown={(event) => event.stopPropagation()}
                 >
-                    <div className="flex items-center justify-end">
-                        <button
-                            type="button"
-                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    <div className="flex items-center justify-end gap-0.5">
+                        <div ref={setToolbarSlot} className="flex items-center gap-0.5" />
+                        <ToolbarTooltipButton
+                            label={t('chat.toolOutputDialog.mermaid.closeAria')}
+                            icon="close"
                             onClick={() => onOpenChange(false)}
-                            aria-label={t('chat.toolOutputDialog.mermaid.closeAria')}
-                        >
-                            <Icon name="close" className="h-4 w-4" />
-                        </button>
+                        />
                     </div>
                     <div
                         className="relative overflow-hidden"
@@ -929,11 +972,11 @@ const MermaidPreviewDialog: React.FC<{
                             {status === 'ready' && (
                                 <div ref={mermaidPreviewRef} className="h-full">
                                     <SimpleMarkdownRenderer
+                                        singleTilde={false}
                                         content={mermaidMarkdown}
                                         variant="tool"
-                                        allowMermaidWheelEvents
                                         className="markdown-mermaid-fullscreen h-full"
-                                        mermaidControls={MERMAID_CONTROLS}
+                                        mermaidControls={mermaidControls}
                                         enableFileReferences={false}
                                     />
                                 </div>
@@ -946,6 +989,57 @@ const MermaidPreviewDialog: React.FC<{
     );
 
     return createPortal(content, document.body);
+};
+
+const dataUrlBytes = (url: string): Uint8Array<ArrayBuffer> | null => {
+    const match = /^data:[^,]*;base64,(.*)$/s.exec(url);
+    if (!match) return null;
+    try {
+        return Uint8Array.from(atob(match[1]), (char) => char.charCodeAt(0));
+    } catch {
+        return null;
+    }
+};
+
+const DocumentPreviewDialog: React.FC<{
+    popup: ToolPopupContent;
+    onOpenChange: (open: boolean) => void;
+    isMobile: boolean;
+}> = ({ popup, onOpenChange, isMobile }) => {
+    const pdf = popup.document;
+    const [file, setFile] = React.useState<{ src: string; size: number } | null>(null);
+    React.useEffect(() => {
+        if (!popup.open || !pdf) return;
+        const bytes = dataUrlBytes(pdf.url);
+        if (!bytes) return;
+        const src = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        setFile({ src, size: bytes.byteLength });
+        return () => {
+            URL.revokeObjectURL(src);
+            setFile(null);
+        };
+    }, [pdf, popup.open]);
+    if (!pdf) return null;
+
+    return (
+        <Dialog open={popup.open} onOpenChange={onOpenChange}>
+            <DialogContent
+                className={cn(
+                    'overflow-hidden flex flex-col min-h-0 pt-3 pb-4 px-4 gap-2',
+                    isMobile ? 'w-[95vw] max-w-[95vw] [&>button]:top-1.5 [&>button]:inset-e-1' : 'max-w-5xl [&>button]:top-2.5 [&>button]:inset-e-4',
+                )}
+                style={{ height: '90vh' }}
+            >
+                <div className="flex flex-shrink-0 items-center gap-2 pe-8">
+                    <FileTypeIcon filePath={pdf.filename} className="h-4 w-4 flex-shrink-0" />
+                    <DialogTitle className="min-w-0 flex-1 truncate typography-ui-header font-semibold text-foreground">{popup.title}</DialogTitle>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden rounded-xl oc-tile">
+                    {file ? <PdfArtifact src={file.src} name={pdf.filename} sizeBytes={file.size} /> : null}
+                </div>
+            </DialogContent>
+        </Dialog>
+    );
 };
 
 const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, isMobile }) => {
@@ -967,6 +1061,10 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
     if (popup.mermaid) {
         return <MermaidPreviewDialog popup={popup} onOpenChange={onOpenChange} isMobile={isMobile} />;
+    }
+
+    if (popup.document) {
+        return <DocumentPreviewDialog popup={popup} onOpenChange={onOpenChange} isMobile={isMobile} />;
     }
 
     return (
@@ -996,7 +1094,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                     </div>
                 </div>
                 <div className="flex-1 min-h-0 rounded-xl oc-tile overflow-hidden">
-                    <div className="tool-output-surface h-full max-h-[75vh] overflow-y-auto px-3 pe-4">
+                    <ScrollableOverlay outerClassName="h-full max-h-[75vh]" className="tool-output-surface px-3 pe-4" disableHorizontal>
                         {popup.metadata?.input && typeof popup.metadata.input === 'object' &&
                             Object.keys(popup.metadata.input).length > 0 &&
                             popup.metadata?.tool !== 'patch' ? (() => {
@@ -1008,10 +1106,9 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                   const val = input[key];
                                   return typeof val === 'string' ? val : (typeof val === 'number' ? String(val) : null);
                                 };
-                                // v2 file tools report `path`.
                                 const writeTarget = getInputValue('path') || getInputValue('filePath') || getInputValue('file_path') || '';
                                 return (
-                                <div className="border-b border-border/20 p-4 -mx-3">
+                                <div className="border-b border-edge-muted p-4 -mx-3">
                                     <div className="typography-markdown font-medium text-muted-foreground mb-2 px-3">
                                         {isShellTool(metaTool)
                                             ? 'Command:'
@@ -1021,7 +1118,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                     </div>
                                     {isShellTool(metaTool) && getInputValue('command') ? (
                                         <div className="tool-input-surface oc-tile rounded-xl mx-3">
-                                            <WorkerHighlightedCode
+                                            <HighlightedCode
                                                 language="bash"
                                                 code={getInputValue('command')!}
                                                 style={toolDisplayStyles.getPopupStyles()}
@@ -1044,13 +1141,14 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                                 file={{
                                                     name: writeTarget || 'new-file',
                                                     contents: getInputValue('content')!,
-                                                    lang: getLanguageFromExtension(writeTarget) || undefined,
+                                                    lang: toDiffsLanguage(getLanguageFromExtension(writeTarget)),
                                                 }}
                                                 options={{
                                                     disableFileHeader: true,
                                                     overflow: 'wrap',
                                                     theme: pierreThemeConfig.theme,
                                                     themeType: pierreThemeConfig.themeType,
+                                                    preferredHighlighter: DIFFS_HIGHLIGHTER,
                                                 }}
                                                 className="block w-full"
                                             />
@@ -1100,8 +1198,8 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                                 if (isSubagentTool(tool) || tool === 'reasoning') {
                                     return (
-                                        <div className={tool === 'reasoning' ? "text-muted-foreground/70" : ""}>
-                                            <SimpleMarkdownRenderer content={popup.content} variant="tool" />
+                                        <div className={tool === 'reasoning' ? "text-muted-foreground" : ""}>
+                                            <SimpleMarkdownRenderer content={popup.content} singleTilde={false} variant="tool" />
                                         </div>
                                     );
                                 }
@@ -1109,7 +1207,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 if (tool === 'web-search' || tool === 'websearch' || tool === 'search_web') {
                                     return (
                                         renderWebSearchOutput(popup.content) || (
-                                            <WorkerHighlightedCode
+                                            <HighlightedCode
                                                 language="text"
                                                 code={popup.content}
                                                 style={toolDisplayStyles.getPopupContainerStyles()}
@@ -1124,7 +1222,6 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                     return <DialogReadContent popup={popup} pierreThemeConfig={pierreThemeConfig} />;
                                 }
 
-                                // JSON tree viewer for generic JSON outputs
                                 const jsonResult = popup.content ? tryParseJsonOutput(popup.content) : { data: null, isJson: false };
                                 if (jsonResult.isJson) {
                                     return (
@@ -1137,7 +1234,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 }
 
                                 return (
-                                    <WorkerHighlightedCode
+                                    <HighlightedCode
                                         language={popup.language || 'text'}
                                         code={popup.content}
                                         style={toolDisplayStyles.getPopupContainerStyles()}
@@ -1153,13 +1250,11 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                             <div className="typography-meta">{t('chat.toolOutputDialog.noOutputProduced')}</div>
                         </div>
                     )}
-                    </div>
+                    </ScrollableOverlay>
                 </div>
             </DialogContent>
         </Dialog>
     );
 };
 
-// Mounted by every chat message, which re-renders on each streamed chunk
-// while the popup state and handlers stay the same.
 export default React.memo(ToolOutputDialog);

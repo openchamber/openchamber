@@ -59,14 +59,22 @@
             src = self;
             opencode = opencodePackage;
           };
+          # The desktop's Electron major is read from packages/electron
+          # devDependencies at eval time, so an Electron bump there fails
+          # evaluation with the next step named instead of shipping a
+          # desktop that dies on start (on 43 the main window failed to
+          # open: main.mjs uses webContents.setZoomMode and
+          # Notification.remove). Only the major is asserted; nixpkgs'
+          # minor may trail the caret range.
+          electronSpec = (lib.importJSON ./packages/electron/package.json).devDependencies.electron;
+          electronMajor = lib.versions.major (lib.removePrefix "^" electronSpec);
           desktopArgs = {
             src = self;
             opencode = opencodePackage;
             inherit (openchamber) node_modules;
-            # Must match packages/electron/package.json ("electron": "^44.9.0"):
-            # main.mjs uses Electron 44 APIs (webContents.setZoomMode,
-            # Notification.remove), and on 43 the main window failed to open.
-            electron = pkgs.electron_44;
+            electron =
+              pkgs.${"electron_${electronMajor}"}
+                or (throw "packages/electron pins electron ${electronSpec}, but nixpkgs has no electron_${electronMajor}. Pin an older electron in packages/electron or move the fleet nixpkgs pin.");
           };
           openchamber-desktop =
             if pkgs.stdenv.hostPlatform.isDarwin then

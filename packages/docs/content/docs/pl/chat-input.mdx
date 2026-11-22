@@ -1,6 +1,6 @@
 ---
 title: Wprowadzanie w czacie
-description: Co można wpisać w polu czatu: polecenia, skille, fragmenty, wzmianki i załączniki.
+description: "Co można wpisać w polu czatu: polecenia, skille, fragmenty, wzmianki i załączniki."
 ---
 
 # Wprowadzanie w czacie
@@ -61,11 +61,13 @@ Wpisz `@`, aby załączyć plik albo uruchomić wiadomość innym agentem.
 Menu **+** obok pola czatu załącza więcej niż plik:
 
 - pliki z Twojego komputera
-- issues i pull requesty z Twojego repozytorium (GitHub, a w projekcie GitLab to GitLab)
+- issues i pull requesty z Twojego repozytorium (GitHub, GitLab, Gitea, Forgejo albo Gerrit, zależnie od tego, gdzie jest projekt)
 - issues Linear, gdy Linear jest podłączony
 - zadania z zainstalowanych [rozszerzeń](/pl/extensions/), które oferują załączanie
 
-Każda pozycja jedzie z Twoją następną wiadomością jako kontekst; to wiadomość mówi, co z nią zrobić. Możesz też wkleić obraz albo przeciągnąć plik wprost na pole czatu.
+Możesz też wkleić obraz albo przeciągnąć plik wprost na pole czatu. Niezależnie od tego, jak trafi, każda pozycja staje się chipem w Twoim tekście, w miejscu kursora, więc wiadomość może powiedzieć, co z nią zrobić: „porównaj to z tamtym”. Kliknij chip, aby zobaczyć podgląd. Usuń chip, a jego załącznik nie pójdzie już z wiadomością; cofnięcie przywraca oba. Wiadomość wysyła tylko to, co nadal jest w jej tekście.
+
+Przy plikach Word, PowerPoint, Excel i OpenDocument (docx, pptx, xlsx, odt, odp, ods), które upuszczasz, wklejasz lub wybierasz, OpenChamber pyta, co z nimi zrobić. **Załącz bez zmian** umieszcza oryginał tam, gdzie działa OpenCode, i podaje do niego ścieżkę, aby agent otworzył go własnymi narzędziami. **Przekształć na tekst** wysyła wyodrębniony tekst. Stały wybór ustawisz w **Settings → Chat**, w sekcji **Dokumenty Office**. Plik przeciągnięty z panelu Files lub wspomniany przez `@` działa jak dotąd.
 
 ## Uruchamianie polecenia powłoki
 
@@ -85,4 +87,4 @@ Na telefonie Enter zawsze zaczyna nowy wiersz. Wysyła przycisk wysyłania albo 
 
 - [Skille](/pl/skills/): wczytuj większe zestawy instrukcji na żądanie
 - [Magic Prompts](/pl/magic-prompts/): wbudowane polecenia i miejsca ich uruchamiania
-- [Issues i PR-y GitHub](/pl/github/): załączaj issues i pull requesty
+- [Hosty Git](/pl/github/): załączaj issues i pull requesty

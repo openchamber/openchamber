@@ -39,6 +39,16 @@ const readFailureReason = (error) => {
  * a caller on a hot path (Git status polling) never starts `op`. Either
  * way a failed re-read keeps the last good value.
  */
+/**
+ * @param {{
+ *   execFile?: typeof nodeExecFile,
+ *   env?: () => NodeJS.ProcessEnv,
+ *   now?: () => number,
+ *   logger?: Pick<Console, 'warn'>,
+ *   timeoutMs?: number,
+ *   ttlMs?: number,
+ * }} [options]
+ */
 export const createVaultResolver = ({
   execFile = nodeExecFile,
   env = () => process.env,

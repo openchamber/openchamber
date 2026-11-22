@@ -194,6 +194,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 </label>
                 <Textarea
                   id="plugin-options"
+                  dir="ltr"
                   value={optionsJson}
                   onChange={(e) => setOptionsJson(e.target.value)}
                   rows={5}
@@ -237,6 +238,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 </label>
                 <Textarea
                   id="plugin-content"
+                  dir="ltr"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   rows={16}
@@ -274,7 +276,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                     <span
                       className={cn(
                         'typography-ui-label font-normal',
-                        selected ? 'text-foreground' : 'text-foreground/60',
+                        selected ? 'text-foreground' : 'oc-title-rest',
                       )}
                     >
                       {label}

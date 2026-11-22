@@ -10,22 +10,10 @@ const findCodeColumns = (pre: Element | null): HTMLElement[] => pre
   ? Array.from(pre.children).filter((child): child is HTMLElement => child instanceof HTMLElement && child.hasAttribute('data-code'))
   : [];
 
-/**
- * Mirrors the horizontal scroll of each code column Pierre renders inside
- * `container` (two in a split diff, one in a unified one) into a track inside
- * `bar`, which the caller keeps sticky at the bottom of the scrolling panel.
- *
- * Sizes are read only in ResizeObserver callbacks, after the browser's own
- * layout, so vertical scrolling and row virtualization cost nothing here.
- * Structure is followed with child-list observers on the host, its shadow
- * root, the `pre` and each column; the rows Pierre swaps while scrolling sit
- * one level deeper and are not observed.
- */
 export const bindStickyScrollbar = (container: HTMLElement, bar: HTMLElement): (() => void) => {
   const tracks = new Map<HTMLElement, Track>();
 
   const measure = () => {
-    // All reads first: a write between them would force a second layout.
     const origin = container.getBoundingClientRect().left;
     const sizes = Array.from(tracks.values(), (entry) => ({
       entry,
@@ -59,7 +47,6 @@ export const bindStickyScrollbar = (container: HTMLElement, bar: HTMLElement): (
     track.appendChild(spacer);
     bar.appendChild(track);
 
-    // Each side follows the other; the guard stops the echo of our own write.
     const onColumnScroll = () => {
       if (Math.abs(track.scrollLeft - column.scrollLeft) >= 1) track.scrollLeft = column.scrollLeft;
     };
@@ -98,8 +85,6 @@ export const bindStickyScrollbar = (container: HTMLElement, bar: HTMLElement): (
     for (const column of columns) {
       const entry = tracks.get(column) ?? attach(column);
       tracks.set(column, entry);
-      // The content box grows with the longest rendered line, which the
-      // column's own box does not show.
       const content = Array.from(column.children).find((child) => child.hasAttribute('data-content')) ?? null;
       if (content !== entry.content) {
         if (entry.content) resizeObserver.unobserve(entry.content);

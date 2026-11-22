@@ -1,13 +1,3 @@
-/**
- * The window with the end of a failed setup command's output (5d-4), opened from "Output" on the
- * group's status line. The output was printed by the project's code inside the space, so it is
- * plain text in a monospace block and never anything else. For a space that reaches only allowed
- * domains it lists, above the output, the domains the gatekeeper refused while the run went, each
- * with Allow; when it refused none, or the journal cannot say, there is no such list at all.
- *
- * Mounted once by the main layout and the mobile app, behind the switch; never in VS Code
- * (decision 16).
- */
 
 import React from 'react';
 
@@ -23,14 +13,10 @@ import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
 import { useOpenSpaceDomain, useSpaceJournal } from './spaceNetwork';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type OutputRead = { kind: 'reading' } | { kind: 'read'; answer: SpaceSetupOutput } | { kind: 'failed'; reason: string };
 
-/**
- * The domains the failed run could not reach, each with Allow, which turns into "Allowed" once the
- * space took it; the user runs setup again from the footer. Nothing while the journal is read, when
- * it cannot be read, or when it shows no such domain: the output then speaks for itself.
- */
 const SetupBlockedDomains: React.FC<{ entry: SpaceEntry; span: { startedAt: string | null; finishedAt: string | null } }> = ({ entry, span }) => {
   const { t } = useI18n();
   const journal = useSpaceJournal(entry.id, true);
@@ -40,7 +26,7 @@ const SetupBlockedDomains: React.FC<{ entry: SpaceEntry; span: { startedAt: stri
   if (blocked.length === 0) return null;
   const allowed = entry.network?.mode === 'allowlist' ? entry.network.domains : [];
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-border/60 px-2.5 py-2">
+    <div className="flex flex-col gap-1.5 rounded-md border border-edge px-2.5 py-2">
       <p className="typography-meta text-muted-foreground">{t('spaces.setup.output.blocked')}</p>
       <ul className="flex flex-col gap-1.5">
         {blocked.map((domain) => (
@@ -64,7 +50,6 @@ const SetupBlockedDomains: React.FC<{ entry: SpaceEntry; span: { startedAt: stri
   );
 };
 
-/** The program a shell could not find, from its "name: command not found" line, or null. */
 const missingProgramOf = (output: string): string | null => {
   const match = /(?:^|\n)(?:\S+: )?(?:line \d+: )?([^\s:]+): command not found/.exec(output);
   return match?.[1] ?? null;
@@ -77,7 +62,6 @@ export const SpaceSetupOutputDialog: React.FC = () => {
   const entry = useSpacesStore((state) => (spaceId ? state.journey?.get(spaceId) : undefined));
   const [read, setRead] = React.useState<OutputRead>({ kind: 'reading' });
 
-  // Read when opened, and again when the failure it shows changed: a run again that failed anew.
   const failedAt = entry?.setup?.state === 'failed' ? `${entry.setup.index}:${entry.setup.command}` : null;
   React.useEffect(() => {
     if (!spaceId) return;
@@ -101,8 +85,6 @@ export const SpaceSetupOutputDialog: React.FC = () => {
   const output = read.kind === 'read' ? read.answer.output : null;
   const name = entry?.name ?? '';
   const title = t('spaces.setup.output.title');
-  // A shell that could not find the program says so in its last words, with exit code 127: the
-  // window names the program, since that is the one thing to install or change.
   const missingProgram = setup?.state === 'failed' && setup.exitCode === 127 ? missingProgramOf(output ?? '') : null;
 
   const runAgain = () => {
@@ -119,16 +101,14 @@ export const SpaceSetupOutputDialog: React.FC = () => {
       {setup?.state === 'failed' ? (
         <div className="flex min-w-0 flex-col gap-1">
           {setup.total > 1 ? <p className="typography-micro text-muted-foreground">{t('spaces.setup.output.command', { current: setup.index + 1, total: setup.total })}</p> : null}
-          {/* The command and what it printed, as a terminal shows them; the project's own text, shown as is. */}
-          <pre dir="ltr" className="max-h-[50vh] min-w-0 overflow-auto whitespace-pre-wrap break-all rounded-md bg-[var(--surface-muted)] p-2.5 font-mono text-[11px] leading-snug text-foreground">
+          <ScrollableOverlay as="pre" dir="ltr" outerClassName="max-h-[50vh] min-w-0 rounded-md bg-[var(--surface-muted)]" className="whitespace-pre-wrap break-all p-2.5 font-mono text-[0.6875rem] leading-snug text-foreground" disableHorizontal>
             <span className="text-muted-foreground">$ </span>{setup.command}
             {output ? `\n${output}` : null}
-          </pre>
+          </ScrollableOverlay>
           {read.kind === 'read' && !output ? <p className="typography-meta text-muted-foreground">{t('spaces.setup.output.empty')}</p> : null}
           {setup.timedOut ? <p className="typography-meta text-muted-foreground">{t('spaces.setup.output.timedOut')}</p> : null}
         </div>
       ) : null}
-      {/* The journal is the running gatekeeper's memory; a stopped space has none to read. */}
       {entry?.network?.mode === 'allowlist' && entry.state === 'running' && setup?.state === 'failed'
         ? <SetupBlockedDomains key={failedAt} entry={entry} span={setup} />
         : null}

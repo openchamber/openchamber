@@ -35,12 +35,54 @@ describe('chooseBridgeGitGenerationModel', () => {
     assert.deepEqual(choice, { providerID: 'openrouter', modelID: 'meta/llama-3' });
   });
 
+  test('the selected thinking variant travels with the small-model override', () => {
+    const choice = chooseBridgeGitGenerationModel(
+      {},
+      { smallModelUseDefault: false, smallModelOverride: 'openai/gpt-4.1-mini', smallModelVariant: 'high' },
+      catalogOf('openai/gpt-4.1-mini'),
+    );
+    assert.deepEqual(choice, { providerID: 'openai', modelID: 'gpt-4.1-mini', variant: 'high' });
+  });
+
+  test('a variant the catalog lists for the model is kept', () => {
+    const choice = chooseBridgeGitGenerationModel(
+      {},
+      { smallModelUseDefault: false, smallModelOverride: 'openai/gpt-4.1-mini', smallModelVariant: 'high' },
+      catalogOf('openai/gpt-4.1-mini'),
+      null,
+      (_providerID, _modelID, variant) => variant === 'high',
+    );
+    assert.deepEqual(choice, { providerID: 'openai', modelID: 'gpt-4.1-mini', variant: 'high' });
+  });
+
+  test('a variant the catalog knows the model does not list is dropped', () => {
+    const choice = chooseBridgeGitGenerationModel(
+      {},
+      { smallModelUseDefault: false, smallModelOverride: 'openai/gpt-4.1-mini', smallModelVariant: 'high' },
+      catalogOf('openai/gpt-4.1-mini'),
+      null,
+      () => false,
+    );
+    assert.deepEqual(choice, { providerID: 'openai', modelID: 'gpt-4.1-mini' });
+  });
+
+  test('a title-agent variant is carried and validated the same way', () => {
+    const choice = chooseBridgeGitGenerationModel(
+      {},
+      {},
+      catalogOf('sidecar/tiny-model'),
+      { providerID: 'sidecar', modelID: 'tiny-model', variant: 'low' },
+      (_providerID, _modelID, variant) => variant === 'low',
+    );
+    assert.deepEqual(choice, { providerID: 'sidecar', modelID: 'tiny-model', variant: 'low' });
+  });
+
   test('override is ignored when smallModelUseDefault is not false', () => {
     const hasModel = catalogOf('openai/gpt-4.1-mini');
     for (const useDefault of [true, undefined, 'false']) {
       const choice = chooseBridgeGitGenerationModel(
         {},
-        { smallModelUseDefault: useDefault, smallModelOverride: 'openai/gpt-4.1-mini' },
+        { smallModelUseDefault: useDefault, smallModelOverride: 'openai/gpt-4.1-mini', smallModelVariant: 'high' },
         hasModel,
       );
       assert.deepEqual(choice, { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL });

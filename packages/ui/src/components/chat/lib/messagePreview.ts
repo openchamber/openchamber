@@ -2,6 +2,9 @@ import type { Part } from '@/lib/opencode/model';
 
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 import { readContextPart, type ContextPartPayload } from '@/lib/messages/contextParts';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { readSourceControlProvider, type SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 
 type Translate = (key: I18nKey, params?: I18nParams) => string;
 
@@ -21,8 +24,8 @@ const basename = (path: string): string => {
     return segments[segments.length - 1] ?? path;
 };
 
-/** The caption a context attachment shows in the bubble, reused as a preview prefix. */
-const contextSummary = (payload: ContextPartPayload, t: Translate): string => {
+const contextSummary = (payload: ContextPartPayload, t: Translate, descriptorOf: SourceControlDescriptorOf): string => {
+    const changeRequestTermOf = (provider: string | undefined) => descriptorOf(provider).terminology.changeRequest;
     switch (payload.kind) {
         case 'code-comment': {
             const file = basename(payload.fileLabel);
@@ -39,9 +42,9 @@ const contextSummary = (payload: ContextPartPayload, t: Translate): string => {
         case 'browser-annotation':
             return t('chat.message.context.browserAnnotation', { page: payload.pageUrl });
         case 'pr-comment':
-            return t(payload.provider === 'gitlab' ? 'chat.message.context.mrComment' : 'chat.message.context.prComment', { label: payload.label });
+            return t(changeRequestCopy('chat.message.context.prComment', changeRequestTermOf(payload.provider)), { label: payload.label });
         case 'pr-check':
-            return t(payload.provider === 'gitlab' ? 'chat.message.context.mrCheck' : 'chat.message.context.prCheck', { label: payload.label });
+            return t(changeRequestCopy('chat.message.context.prCheck', changeRequestTermOf(payload.provider)), { label: payload.label });
         case 'file-quote': {
             const file = basename(payload.fileLabel);
             if (payload.startLine == null || payload.endLine == null) {
@@ -54,18 +57,24 @@ const contextSummary = (payload: ContextPartPayload, t: Translate): string => {
         case 'chat-quote':
             return t('chat.message.context.chatQuote');
         case 'repository-issue':
+        case 'repository-discussion':
             return `#${payload.number} ${payload.title}`;
         case 'change-request':
-            return `#${payload.number} ${payload.title}`;
-        case 'linear-issue':
+            return `${formatChangeRequestReference(descriptorOf(payload.provider), payload.number)} ${payload.title}`;
+        case 'tracker-item':
             return `${payload.identifier} ${payload.title}`;
         case 'guest-issue':
         case 'guest-pr':
             return `${payload.id} ${payload.title}`;
+        case 'session':
+            return payload.title;
+        case 'session-message':
+            return payload.excerpt;
+        case 'shared-page':
+            return payload.title || payload.host;
     }
 };
 
-/** The quoted material behind a context attachment. */
 const contextBody = (payload: ContextPartPayload): string => {
     switch (payload.kind) {
         case 'code-comment':
@@ -82,32 +91,26 @@ const contextBody = (payload: ContextPartPayload): string => {
         case 'chat-quote':
             return payload.quote;
         case 'repository-issue':
+        case 'repository-discussion':
         case 'change-request':
-        case 'linear-issue':
+        case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
+        case 'session':
+        case 'session-message':
+        case 'shared-page':
             return '';
     }
 };
 
-/**
- * One preview line for a context attachment, mirroring the collapsed bubble:
- * the caption, then the user's comment when there is one, otherwise the quote.
- */
-const contextPreview = (payload: ContextPartPayload, t: Translate): string => {
-    const summary = contextSummary(payload, t);
+const contextPreview = (payload: ContextPartPayload, t: Translate, descriptorOf: SourceControlDescriptorOf): string => {
+    const summary = contextSummary(payload, t, descriptorOf);
     const comment = 'text' in payload ? payload.text.trim() : '';
     const detail = comment.length > 0 ? comment : contextBody(payload).trim();
     return detail.length > 0 ? `${summary}: ${detail}` : summary;
 };
 
-/**
- * The text a user prompt shows in navigators: what the user typed, and — for
- * messages that are only attached context (a quoted message, a terminal
- * selection) — a label derived from that context, so such turns are never
- * label-less. Without a translator it falls back to the raw part text.
- */
-export function getPromptPreviewText(parts: Part[], t?: Translate): string {
+export function getPromptPreviewText(parts: Part[], t?: Translate, descriptorOf: SourceControlDescriptorOf = readSourceControlProvider): string {
     const typed = parts
         .filter(isTextPart)
         .filter((p) => readContextPart(p) === null)
@@ -121,7 +124,7 @@ export function getPromptPreviewText(parts: Part[], t?: Translate): string {
         const contextLines = parts
             .map((part) => readContextPart(part))
             .filter((payload): payload is ContextPartPayload => payload !== null)
-            .map((payload) => contextPreview(payload, t))
+            .map((payload) => contextPreview(payload, t, descriptorOf))
             .filter((line) => line.length > 0);
         if (contextLines.length > 0) {
             return contextLines.join(' · ');
@@ -131,8 +134,13 @@ export function getPromptPreviewText(parts: Part[], t?: Translate): string {
     return getFullText(parts);
 }
 
-export function getMessagePreview(parts: Part[], maxLength = 80, t?: Translate): string {
-    const full = getPromptPreviewText(parts, t);
+export function getMessagePreview(
+    parts: Part[],
+    maxLength = 80,
+    t?: Translate,
+    descriptorOf: SourceControlDescriptorOf = readSourceControlProvider,
+): string {
+    const full = getPromptPreviewText(parts, t, descriptorOf);
     const singleLine = full.replace(/\n/g, ' ');
     return singleLine.length > maxLength ? `${singleLine.slice(0, maxLength)}…` : singleLine;
 }

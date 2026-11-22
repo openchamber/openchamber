@@ -3,7 +3,9 @@
 // same way, and it answers with its pid so the test can tell one service from its successor.
 import http from 'node:http';
 
-import { createServerStartupRuntime } from './server-startup-runtime.js';
+// The server is TypeScript run from source; this is the loader bin/cli.js installs for it.
+await import('../../../scripts/register-server-sources.mjs');
+const { createServerStartupRuntime } = await import('../server-frame/server-startup-runtime.js');
 
 const server = http.createServer((_request, response) => {
   response.setHeader('content-type', 'application/json');

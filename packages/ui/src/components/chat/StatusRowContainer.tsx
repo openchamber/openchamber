@@ -8,11 +8,6 @@ import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { StatusRow } from './StatusRow';
 import { useContinueWithModelAction } from './continueWithModelContext';
 
-/**
- * Status row wrapper.
- * Uses the dedicated assistant status hook so the row keeps accurate live activity
- * labels while still limiting subscriptions to the active assistant message.
- */
 export const StatusRowContainer: React.FC = React.memo(() => {
     const { activeModel, working } = useAssistantStatus();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
@@ -20,8 +15,6 @@ export const StatusRowContainer: React.FC = React.memo(() => {
     const backgroundWork = useBackgroundSessionWork();
     const continueWithModel = useContinueWithModelAction();
 
-    // The shortcut lives with the status that knows whether anything can go
-    // to the background; otherwise it yields the key.
     useKeybind('background_session_work', () => {
         if (!working.canBackground) return false;
         backgroundWork();
@@ -40,7 +33,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
     return (
         <StatusRow
             isWorking={working.isWorking}
-            statusText={working.statusText}
+            status={working.status}
             isGenericStatus={working.isGenericStatus}
             isWaitingForPermission={working.isWaitingForPermission}
             abortActive={working.abortActive}

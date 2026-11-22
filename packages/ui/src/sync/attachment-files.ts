@@ -1,147 +1,3 @@
-const ACCEPTED_ATTACHMENT_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.oasis.opendocument.text",
-  "application/vnd.oasis.opendocument.presentation",
-  "application/vnd.oasis.opendocument.spreadsheet",
-  "text/*",
-  "application/json",
-  "application/ld+json",
-  "application/toml",
-  "application/x-toml",
-  "application/x-yaml",
-  "application/xml",
-  "application/yaml",
-  ".bat",
-  ".c",
-  ".cc",
-  ".cjs",
-  ".cmd",
-  ".conf",
-  ".cpp",
-  ".cs",
-  ".css",
-  ".csv",
-  ".cts",
-  ".dart",
-  ".diff",
-  ".docx",
-  ".drawio",
-  ".excalidraw",
-  ".env",
-  ".erl",
-  ".ex",
-  ".exs",
-  ".fs",
-  ".fsx",
-  ".go",
-  ".gql",
-  ".graphql",
-  ".h",
-  ".har",
-  ".hh",
-  ".hcl",
-  ".heic",
-  ".heif",
-  ".hpp",
-  ".hrl",
-  ".htm",
-  ".html",
-  ".ini",
-  ".ipynb",
-  ".java",
-  ".jl",
-  ".js",
-  ".json",
-  ".jsonl",
-  ".jsx",
-  ".kt",
-  ".kts",
-  ".log",
-  ".lua",
-  ".md",
-  ".mdx",
-  ".mjs",
-  ".mts",
-  ".ndjson",
-  ".odp",
-  ".ods",
-  ".odt",
-  ".patch",
-  ".php",
-  ".proto",
-  ".pptx",
-  ".ps1",
-  ".py",
-  ".r",
-  ".rb",
-  ".rs",
-  ".sass",
-  ".scala",
-  ".scss",
-  ".sh",
-  ".sol",
-  ".sql",
-  ".svelte",
-  ".svg",
-  ".swift",
-  ".tf",
-  ".toml",
-  ".ts",
-  ".tsx",
-  ".txt",
-  ".vue",
-  ".xml",
-  ".xlsx",
-  ".yaml",
-  ".yml",
-  ".zig",
-  ".zsh",
-] as const
-
-export const ATTACHMENT_ACCEPT = ACCEPTED_ATTACHMENT_TYPES.join(",")
-
-const PICKER_MIME_EXTENSIONS = new Map<string, string>([
-  ["image/png", "png"],
-  ["image/jpeg", "jpg"],
-  ["image/gif", "gif"],
-  ["image/webp", "webp"],
-  ["image/heic", "heic"],
-  ["image/heif", "heif"],
-  ["application/pdf", "pdf"],
-  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
-  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"],
-  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"],
-  ["application/vnd.oasis.opendocument.text", "odt"],
-  ["application/vnd.oasis.opendocument.presentation", "odp"],
-  ["application/vnd.oasis.opendocument.spreadsheet", "ods"],
-  ["application/json", "json"],
-  ["application/ld+json", "jsonld"],
-  ["application/toml", "toml"],
-  ["application/x-toml", "toml"],
-  ["application/x-yaml", "yaml"],
-  ["application/xml", "xml"],
-  ["application/yaml", "yaml"],
-])
-const TEXT_ATTACHMENT_EXTENSIONS = ["txt", "text", "md", "markdown", "log", "csv"]
-
-export const ACCEPTED_ATTACHMENT_EXTENSIONS = Array.from(new Set(
-  ACCEPTED_ATTACHMENT_TYPES.flatMap((type) => {
-    if (type.startsWith(".")) return [type.slice(1)]
-    if (type === "text/*") return TEXT_ATTACHMENT_EXTENSIONS
-    const extension = PICKER_MIME_EXTENSIONS.get(type)
-    return extension ? [extension] : []
-  })
-)).sort()
-
 type OpenCodeAttachmentMimeType =
   | "image/png"
   | "image/jpeg"
@@ -151,6 +7,36 @@ type OpenCodeAttachmentMimeType =
   | "text/plain"
 
 export type AttachmentInputModality = "text" | "image" | "pdf" | "audio" | "video"
+
+export const PATH_NOTE_MEDIA_TYPE = "text/plain;x-openchamber=path-note"
+
+export const isPathNoteDataUrl = (url: string): boolean => url.startsWith(`data:${PATH_NOTE_MEDIA_TYPE};`)
+
+const REFERENCE_NOTE_OPENING = "File on disk: "
+const SAVED_NOTE_OPENING = "File saved on disk: "
+const PLAIN_TEXT_BASE64 = "data:text/plain;base64,"
+
+export const fileReferenceNoteText = (path: string, size: string): string => (
+  `${REFERENCE_NOTE_OPENING}${path} (${size}). Its content is not in this message. Read what you need from it with your tools.\n`
+)
+
+export const savedFileNoteText = (filename: string, path: string, detail: string): string => {
+  const target = path.replace(/\\/g, "/")
+  return `${SAVED_NOTE_OPENING}[${filename}](${/[\s()]/.test(target) ? `<${target}>` : target})\n${detail}\n`
+}
+
+export const withRestoredPathNoteMarker = (url: string): string => {
+  if (!url.startsWith(PLAIN_TEXT_BASE64)) return url
+  const payload = url.slice(PLAIN_TEXT_BASE64.length)
+  let opening: string
+  try {
+    opening = atob(payload.slice(0, 28))
+  } catch {
+    return url
+  }
+  if (!opening.startsWith(REFERENCE_NOTE_OPENING) && !opening.startsWith(SAVED_NOTE_OPENING)) return url
+  return `data:${PATH_NOTE_MEDIA_TYPE};base64,${payload}`
+}
 
 export const getAttachmentInputModality = (mimeType: string): AttachmentInputModality | undefined => {
   const normalizedMimeType = mimeType.toLowerCase().split(";", 1)[0]?.trim() ?? ""
@@ -219,14 +105,8 @@ const extensionOf = (name: string): string => {
   return index === -1 ? "" : name.slice(index + 1).toLowerCase()
 }
 
-const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
+export const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
 
-/**
- * An `@` mention of these files is read and attached by the client, like a
- * picked file. Anything else reaches OpenCode as a path it reads itself; an
- * image sent that way has no preview in the message. A PDF stays a path, so a
- * model without PDF input can still extract its text with tools.
- */
 export const isReadOnSendMentionFilename = (name: string): boolean => {
   const extension = extensionOf(name)
   return DOCUMENT_EXTENSIONS.has(extension) || IMAGE_MENTION_EXTENSIONS.has(extension)
@@ -368,17 +248,24 @@ const prepareStructuredText = async (file: File, extension: string): Promise<Fil
   return new File([text], file.name, { type: "text/plain" })
 }
 
-const convertHeicToJpeg = async (file: File): Promise<File | undefined> => {
+export class HeicConversionError extends Error {
+  constructor(file: File) {
+    super(`Could not convert ${file.name} from HEIC to JPEG`)
+    this.name = "HeicConversionError"
+  }
+}
+
+const convertHeicToJpeg = async (file: File): Promise<File> => {
   try {
     const heic2any = (await import("heic2any")).default
     const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 })
     const blob = Array.isArray(converted) ? converted[0] : converted
-    if (!blob) return
+    if (!blob) throw new Error("the decoder returned no image")
     const filename = file.name.replace(/\.(heic|heif)$/i, ".jpg")
     return new File([blob], filename, { type: "image/jpeg" })
   } catch (error) {
     console.warn("Failed to convert HEIC attachment to JPEG", error)
-    return
+    throw new HeicConversionError(file)
   }
 }
 
@@ -388,9 +275,7 @@ export const prepareAttachmentFile = (
   const extension = extensionOf(file.name)
   const type = declaredMimeOf(file)
   if (type === "image/heic" || type === "image/heif" || extension === "heic" || extension === "heif") {
-    return convertHeicToJpeg(file).then((converted) => converted
-      ? { file: converted, mimeType: "image/jpeg" }
-      : undefined)
+    return convertHeicToJpeg(file).then((converted) => ({ file: converted, mimeType: "image/jpeg" }))
   }
   if (extension === "har" || extension === "ipynb") {
     return prepareStructuredText(file, extension).then((prepared) => prepared
@@ -418,7 +303,12 @@ export const prepareAttachmentFiles = (
     if (!extracted) return
     const prepared: PreparedAttachmentFile[] = [{ file: extracted.textFile, mimeType: "text/plain" }]
     for (const image of extracted.images) {
-      const output = await prepareAttachmentFile(image)
+      let output: PreparedAttachmentFile | undefined
+      try {
+        output = await prepareAttachmentFile(image)
+      } catch (error) {
+        if (!(error instanceof HeicConversionError)) throw error
+      }
       if (!output || !output.mimeType.startsWith("image/")) return
       prepared.push(output)
     }

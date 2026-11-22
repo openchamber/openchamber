@@ -1,11 +1,6 @@
 import type { Session } from '@/lib/opencode/model';
 import { SESSION_GOAL_CHAR_LIMIT_MAX } from '@/lib/sessionGoalLimits';
 
-// Session goal driven by the server's session-goal runtime, stored under
-// session.metadata.openchamber.goal. The UI writes goals (create/edit/
-// pause/resume/clear) by patching this metadata; the server loop accounts
-// usage, checks progress with Jev or the small model, and auto-continues the
-// session until the goal settles.
 export type SessionGoalStatus = 'active' | 'paused' | 'blocked' | 'budgetLimited' | 'complete';
 
 const SESSION_GOAL_STATUSES: SessionGoalStatus[] = ['active', 'paused', 'blocked', 'budgetLimited', 'complete'];
@@ -13,7 +8,6 @@ const SESSION_GOAL_STATUSES: SessionGoalStatus[] = ['active', 'paused', 'blocked
 export interface SessionGoalPayload {
   id: string;
   objective: string;
-  /** True when the objective text lives in a server-side file keyed by session id. */
   objectiveFile: boolean;
   /**
    * Hash of the objective text as last saved ('' for goals saved before
@@ -42,8 +36,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isGoalStatus = (value: unknown): value is SessionGoalStatus =>
   typeof value === 'string' && (SESSION_GOAL_STATUSES as string[]).includes(value);
 
-export function getSessionGoal(session: Session | null | undefined): SessionGoalPayload | null {
-  const metadata = (session as { metadata?: unknown } | null | undefined)?.metadata;
+export function getSessionGoal(session: Pick<Session, 'metadata'> | null | undefined): SessionGoalPayload | null {
+  const metadata = session?.metadata;
   if (!isRecord(metadata)) return null;
   const namespace = metadata.openchamber;
   if (!isRecord(namespace)) return null;

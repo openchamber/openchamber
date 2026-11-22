@@ -16,18 +16,15 @@ describe('OpenChamberToolsSettings prompt cache note', () => {
   let windowInstance: Window;
   let host: HTMLDivElement;
   let root: Root;
-  let initialCodeMode: boolean;
   let initialApplyLive: boolean;
   let fetchSpy: ReturnType<typeof spyOn>;
   let globalDescriptors: Map<string, PropertyDescriptor | undefined>;
 
   const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'localStorage', 'sessionStorage', 'requestAnimationFrame', 'cancelAnimationFrame', 'MutationObserver', 'IS_REACT_ACT_ENVIRONMENT'];
-  const direct = settingsDict['settings.openchamber.tools.cacheNote.direct'];
   const codeMode = settingsDict['settings.openchamber.tools.cacheNote.codeMode'];
 
   beforeEach(() => {
     windowInstance = new Window();
-    initialCodeMode = useUIStore.getState().agentToolsCodeMode;
     initialApplyLive = useUIStore.getState().managedToolsApplyLive;
     globalDescriptors = new Map(globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
     Object.assign(globalThis, {
@@ -61,7 +58,7 @@ describe('OpenChamberToolsSettings prompt cache note', () => {
       await act(async () => root.unmount());
     } finally {
       fetchSpy.mockRestore();
-      useUIStore.setState({ agentToolsCodeMode: initialCodeMode, managedToolsApplyLive: initialApplyLive });
+      useUIStore.setState({ managedToolsApplyLive: initialApplyLive });
       windowInstance.close();
       for (const [name, descriptor] of globalDescriptors) {
         if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -70,39 +67,31 @@ describe('OpenChamberToolsSettings prompt cache note', () => {
     }
   });
 
-  test('names the switches that change the tool list for the current code mode', async () => {
-    expect(direct).not.toBe(codeMode);
-    useUIStore.setState({ agentToolsCodeMode: false, managedToolsApplyLive: true });
+  test('says that a switch costs a running session its prompt cache when it reaches OpenCode live', async () => {
+    useUIStore.setState({ managedToolsApplyLive: true });
     await act(async () => root.render(
       <I18nProvider>
         <OpenChamberToolsSettings />
       </I18nProvider>,
     ));
 
-    expect(host.textContent).toContain(direct);
-    expect(host.textContent).not.toContain(codeMode);
-
-    await act(async () => useUIStore.setState({ agentToolsCodeMode: true }));
-
     expect(host.textContent).toContain(codeMode);
-    expect(host.textContent).not.toContain(direct);
   });
 
   // With an external OpenCode or a user-owned OPENCODE_CONFIG a switch waits for a
   // restart, so the running session's cache is untouched and the note would be wrong.
   test('shows no cache note when the switches do not reach the running OpenCode live', async () => {
-    useUIStore.setState({ agentToolsCodeMode: false, managedToolsApplyLive: false });
+    useUIStore.setState({ managedToolsApplyLive: false });
     await act(async () => root.render(
       <I18nProvider>
         <OpenChamberToolsSettings />
       </I18nProvider>,
     ));
 
-    expect(host.textContent).not.toContain(direct);
     expect(host.textContent).not.toContain(codeMode);
 
     await act(async () => useUIStore.setState({ managedToolsApplyLive: true }));
 
-    expect(host.textContent).toContain(direct);
+    expect(host.textContent).toContain(codeMode);
   });
 });

@@ -1,11 +1,12 @@
 import React from 'react';
 import { registerSessionLeavePlanner } from '@/sync/session-leave-navigation';
-import { useNotificationStore } from '@/sync/notification-store';
 import { isSidebarSectionKey, isSidebarAttentionZoneKey, type SidebarLayout } from '@/stores/sidebarLayout';
 import type { SessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { getOpenedSessionHistory, holdOpenSessionForDone, releaseOpenSession } from './openSessionHold';
 import { resolveLeaveTarget } from './openSessionLeave';
 import { requestSidebarReveal } from './sidebarReveal';
+import { isSessionUnread } from '@/sync/session-unread';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 
 const ZONE_CONTAINER_PREFIX = 'activity:';
 
@@ -56,7 +57,7 @@ export const useSessionLeavePlanner = (enabled: boolean, inputs: PlannerInputs):
         leavingIds,
         entries: rowModel.navigationEntries,
         isAttentionContainer,
-        isUnread: (id) => (useNotificationStore.getState().index.session.unseenCount[id] ?? 0) > 0,
+        isUnread: (id) => isSessionUnread(useGlobalSessionsStore.getState().entityById.get(id)),
         history: getOpenedSessionHistory(),
       });
       return { next: target ? { id: target.sessionId, directory: target.directory } : null };

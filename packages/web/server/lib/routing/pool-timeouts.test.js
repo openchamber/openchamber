@@ -38,6 +38,19 @@ describe('pool effort schema and first-output limits', () => {
     expect(normalizePoolTimeouts(routes).top).toMatchObject({ health: { firstTokenTimeoutMs: false }, nestedTimeout: 'longest' });
     expect(normalizePoolTimeouts({ ...routes, top: { ...routes.top, nestedTimeout: 'shortest' } }).top.health.firstTokenTimeoutMs).toBe(8_000);
   });
+  // Oracle: the rules OpenCode applies (developing-today-forks/opencode#2674, firstTokenTimeout).
+  it('own keeps the pool\'s wait for its own models and lets a pool around it wait for the slowest inside', () => {
+    const routes = {
+      slow: { targets: ['p/s'], health: { firstTokenTimeoutMs: 120_000 } },
+      mid: { targets: ['p/m', 'opencode-route/slow'], nestedTimeout: 'own', health: { firstTokenTimeoutMs: 20_000 } },
+      top: { targets: ['opencode-route/mid'] },
+    };
+    const normalized = normalizePoolTimeouts(routes);
+    expect(normalized.mid).toMatchObject({ nestedTimeout: 'own', health: { firstTokenTimeoutMs: 20_000 } });
+    expect(normalized.top).toMatchObject({ nestedTimeout: 'longest', health: { firstTokenTimeoutMs: 120_000 } });
+    expect(normalizePoolTimeouts({ ...routes, mid: { targets: ['p/m', 'opencode-route/slow'], nestedTimeout: 'own' } }).mid.health.firstTokenTimeoutMs).toBe(30_000);
+    expect(normalizePoolTimeouts(normalized)).toEqual(normalized);
+  });
   it('cuts a cycle at the bounded default and stays stable', () => {
     const routes = { a: { targets: ['p/a', 'opencode-route/b'] }, b: { targets: ['p/b', 'opencode-route/a'] } };
     const once = normalizePoolTimeouts(routes);

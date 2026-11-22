@@ -38,6 +38,10 @@ function resolveTimeoutSetting({ env: name, fallback }, env, warn) {
 /**
  * Reads the three windows from the environment. Returns `{ stallTimeoutMs, concurrentStallTimeoutMs,
  * resumeIdleTimeoutMs }`, each a whole number of milliseconds.
+ *
+ * @param {Record<string, string | undefined>} [env]
+ * @param {(message: string) => void} [warn]
+ * @returns {{ stallTimeoutMs: number, concurrentStallTimeoutMs: number, resumeIdleTimeoutMs: number }}
  */
 export function resolveEventStreamTimeouts(env = process.env, warn = console.warn) {
   const resolved = {};

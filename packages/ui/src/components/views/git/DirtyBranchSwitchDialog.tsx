@@ -11,31 +11,18 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 interface DirtyBranchSwitchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   targetBranch: string;
   changedFileCount: number;
-  /**
-   * Commit every uncommitted change with this message — pushing the commit
-   * first when the user opted in — then perform the checkout.
-   */
   onCommitAndSwitch: (message: string, pushAfter: boolean) => Promise<void>;
-  /** Produce an AI commit message for the current changes, same as the commit panel. */
   onGenerateMessage: () => Promise<string>;
-  /** Revert every uncommitted change, then perform the checkout. */
   onRevertAndSwitch: () => Promise<void>;
 }
 
-/**
- * Switching branches with uncommitted changes is blocked so a checkout can
- * never silently carry, conflict with, or drop the user's work. The user
- * resolves the working tree with one explicit choice: commit and switch
- * (message written, generated on demand, or generated automatically when the
- * field is left empty — same pipeline as the commit panel), or revert and
- * switch. Cancel leaves everything untouched for a fully manual flow.
- */
 export const DirtyBranchSwitchDialog: React.FC<DirtyBranchSwitchDialogProps> = ({
   open,
   onOpenChange,
@@ -70,8 +57,6 @@ export const DirtyBranchSwitchDialog: React.FC<DirtyBranchSwitchDialogProps> = (
     }
   };
 
-  // An empty field is not an obstacle: the message is generated on the spot,
-  // through the same pipeline as the commit panel, and the commit proceeds.
   const handleCommitAndSwitch = async () => {
     setPendingAction('commit');
     try {
@@ -133,20 +118,21 @@ export const DirtyBranchSwitchDialog: React.FC<DirtyBranchSwitchDialogProps> = (
               }}
               className="min-w-0 flex-1 bg-transparent typography-meta text-foreground outline-none placeholder:text-muted-foreground"
             />
-            <button
-              type="button"
-              onClick={() => { void handleGenerate(); }}
-              disabled={isProcessing}
-              aria-label={t('gitView.commit.generate')}
-              title={t('gitView.commit.generate')}
-              className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
-            >
-              {pendingAction === 'generate' ? (
-                <Icon name="loader-4" className="size-4 animate-spin" />
-              ) : (
-                <Icon name="ai-generate-2" className="size-4 text-primary" />
-              )}
-            </button>
+            <ButtonTooltip sideOffset={8} label={t('gitView.commit.generateAria')} className="shrink-0">
+              <button
+                type="button"
+                onClick={() => { void handleGenerate(); }}
+                disabled={isProcessing}
+                aria-label={t('gitView.commit.generate')}
+                className="shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
+              >
+                {pendingAction === 'generate' ? (
+                  <Icon name="loader-4" className="size-4 animate-spin" />
+                ) : (
+                  <Icon name="ai-generate-2" className="size-4 text-primary" />
+                )}
+              </button>
+            </ButtonTooltip>
           </div>
 
           <div className="flex items-center gap-2">

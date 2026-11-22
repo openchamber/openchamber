@@ -2,25 +2,30 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createWindowGeometryState } from './window-geometry-state.mjs';
+import { persistMainWindowState } from './window-state.mjs';
 
-const createFakeTimers = () => {
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+const createFakeTimers = ({ clearable = true } = {}) => {
   let nextId = 0;
   const callbacks = new Map();
   return {
-    callbacks,
     setTimeoutFn(callback) {
       const id = ++nextId;
       callbacks.set(id, callback);
       return id;
     },
     clearTimeoutFn(id) {
-      callbacks.delete(id);
+      if (clearable) callbacks.delete(id);
+    },
+    pending() {
+      return [...callbacks.keys()];
     },
     async fire(id) {
       const callback = callbacks.get(id);
       callbacks.delete(id);
       callback?.();
-      await new Promise((resolve) => setImmediate(resolve));
+      await flush();
     },
   };
 };
@@ -37,28 +42,14 @@ test('repeated geometry updates replace timers and only persist the latest revis
   const window = createWindow(7);
 
   geometry.schedule(window);
-  const staleTimer = geometry.timers.get('7');
+  const [staleTimer] = fakeTimers.pending();
   geometry.schedule(window);
-  const latestTimer = geometry.timers.get('7');
+  const [latestTimer] = fakeTimers.pending();
   assert.notEqual(latestTimer, staleTimer);
-  assert.equal(fakeTimers.callbacks.has(staleTimer), false);
 
   await fakeTimers.fire(latestTimer);
   assert.deepEqual(persisted, [7]);
-  assert.equal(geometry.timers.has('7'), false);
-  assert.equal(geometry.revisions.has('7'), false);
-});
-
-test('debounce completion releases revision and timer state', async () => {
-  const fakeTimers = createFakeTimers();
-  const geometry = createWindowGeometryState({ persist: async () => {}, ...fakeTimers });
-  const window = createWindow(9);
-
-  geometry.schedule(window);
-  await fakeTimers.fire(geometry.timers.get('9'));
-
-  assert.equal(geometry.timers.has('9'), false);
-  assert.equal(geometry.revisions.has('9'), false);
+  assert.deepEqual(fakeTimers.pending(), []);
 });
 
 test('closing with a pending timer cancels it and prevents persistence', async () => {
@@ -71,17 +62,16 @@ test('closing with a pending timer cancels it and prevents persistence', async (
   const window = createWindow(11);
 
   geometry.schedule(window);
-  const timer = geometry.timers.get('11');
+  const [timer] = fakeTimers.pending();
   window.destroyed = true;
   geometry.cancel(window);
   await fakeTimers.fire(timer);
 
   assert.deepEqual(persisted, []);
-  assert.equal(geometry.timers.has('11'), false);
-  assert.equal(geometry.revisions.has('11'), false);
+  assert.deepEqual(fakeTimers.pending(), []);
 });
 
-test('an older completion cannot delete a newer scheduled revision', async () => {
+test('an older completion cannot drop a newer scheduled save', async () => {
   const fakeTimers = createFakeTimers();
   let finishFirst;
   let calls = 0;
@@ -96,44 +86,86 @@ test('an older completion cannot delete a newer scheduled revision', async () =>
   const window = createWindow(13);
 
   geometry.schedule(window, true);
-  await new Promise((resolve) => setImmediate(resolve));
+  await flush();
   geometry.schedule(window);
-  const latestTimer = geometry.timers.get('13');
+  const [latestTimer] = fakeTimers.pending();
   finishFirst();
-  await new Promise((resolve) => setImmediate(resolve));
+  await flush();
 
-  assert.equal(geometry.revisions.has('13'), true);
-  assert.equal(geometry.timers.get('13'), latestTimer);
   await fakeTimers.fire(latestTimer);
-  assert.equal(geometry.revisions.has('13'), false);
+  assert.equal(calls, 2);
 });
 
-test('a stale timer callback cannot delete the newer timer', async () => {
-  const callbacks = new Map();
-  let nextId = 0;
+test('a stale timer callback cannot cancel the newer timer', async () => {
+  const fakeTimers = createFakeTimers({ clearable: false });
   const persisted = [];
   const geometry = createWindowGeometryState({
     persist: async (window) => persisted.push(window.id),
-    setTimeoutFn(callback) {
-      const id = ++nextId;
-      callbacks.set(id, callback);
-      return id;
-    },
-    clearTimeoutFn() {},
+    ...fakeTimers,
   });
   const window = createWindow(15);
 
   geometry.schedule(window);
-  const staleTimer = geometry.timers.get('15');
   geometry.schedule(window);
-  const latestTimer = geometry.timers.get('15');
-  callbacks.get(staleTimer)();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(geometry.timers.get('15'), latestTimer);
+  const [staleTimer, latestTimer] = fakeTimers.pending();
+  await fakeTimers.fire(staleTimer);
   assert.deepEqual(persisted, []);
-  callbacks.get(latestTimer)();
-  await new Promise((resolve) => setImmediate(resolve));
+
+  await fakeTimers.fire(latestTimer);
   assert.deepEqual(persisted, [15]);
-  assert.equal(geometry.revisions.has('15'), false);
+});
+
+test('bounds restored after a save skipped while minimized are written once the oldest write finishes', async () => {
+  const fakeTimers = createFakeTimers();
+  let minimized = false;
+  let bounds = { x: 10, y: 10, width: 1000, height: 700 };
+  const mainWindow = {
+    id: 1,
+    isDestroyed: () => false,
+    isMinimized: () => minimized,
+    getBounds: () => bounds,
+    isMaximized: () => false,
+    isFullScreen: () => false,
+  };
+  const settings = {};
+  const writes = [];
+  let finishFirstWrite;
+  const mutateSettingsRoot = async (mutator) => {
+    writes.push(mutator);
+    if (writes.length === 1) await new Promise((resolve) => { finishFirstWrite = resolve; });
+    mutator(settings);
+  };
+  const geometry = createWindowGeometryState({
+    persist: (browserWindow) => persistMainWindowState({
+      browserWindow,
+      mainWindowId: 1,
+      quakeActive: false,
+      minWidth: 800,
+      minHeight: 520,
+      mutateSettingsRoot,
+    }),
+    ...fakeTimers,
+  });
+
+  geometry.schedule(mainWindow, true);
+  await flush();
+  assert.equal(writes.length, 1);
+
+  minimized = true;
+  geometry.schedule(mainWindow);
+  await fakeTimers.fire(fakeTimers.pending()[0]);
+  assert.equal(writes.length, 1);
+
+  minimized = false;
+  bounds = { x: 50, y: 60, width: 1200, height: 800 };
+  geometry.schedule(mainWindow);
+  finishFirstWrite();
+  await flush();
+
+  await fakeTimers.fire(fakeTimers.pending()[0]);
+  assert.equal(writes.length, 2);
+  assert.deepEqual(settings.desktopWindowState, {
+    x: 50, y: 60, width: 1200, height: 800, maximized: false, fullscreen: false,
+  });
+  assert.deepEqual(fakeTimers.pending(), []);
 });

@@ -36,7 +36,6 @@ export const OpenCodeUpdateToast: React.FC = () => {
     toast.dismiss(UPGRADE_TOAST_ID);
     void reloadOpenCodeConfiguration({
       message: t('opencodeUpdate.toast.reload.message'),
-      mode: 'projects',
       scopes: ['all'],
     }).catch(() => undefined);
   }, [t]);
@@ -79,12 +78,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
   }, [reloadOpenCode, t]);
 
   React.useEffect(() => {
-    // Managed CLI installations upgrade through the host. External runtimes
-    // keep the informational toast because the host cannot run their CLI.
     const showUpdateAvailableToast = (version: string, supported: boolean) => {
-      // Upstream setting wins over our dedup logic: if user disabled
-      // OpenCode update notifications, dismiss any active toast and bail
-      // before consulting dedup state.
       if (!useUIStore.getState().showOpenCodeUpdateNotifications) {
         toast.dismiss(UPDATE_TOAST_ID);
         return;
@@ -99,29 +93,24 @@ export const OpenCodeUpdateToast: React.FC = () => {
       }
       seenVersionsRef.current.add(version);
 
-      const dismiss = {
-        label: t('opencodeUpdate.toast.actions.dismiss'),
-        onClick: () => {
-          getDeferredSafeStorage().setItem(UPDATE_TOAST_DISMISSED_VERSION_KEY, version);
-          void updateDesktopSettings({ openCodeUpdateToastDismissedVersion: version });
-          toast.dismiss(UPDATE_TOAST_ID);
-        },
+      const skipVersion = () => {
+        if (!useUIStore.getState().showOpenCodeUpdateNotifications) return;
+        getDeferredSafeStorage().setItem(UPDATE_TOAST_DISMISSED_VERSION_KEY, version);
+        void updateDesktopSettings({ openCodeUpdateToastDismissedVersion: version });
       };
-      // The toast wrapper adds an "OK" action when none is given, so the
-      // informational variant makes Dismiss its only button.
       toast.info(t('opencodeUpdate.toast.available.title'), supported
         ? {
           id: UPDATE_TOAST_ID,
           description: t('opencodeUpdate.toast.available.description', { version }),
           duration: Infinity,
           action: { label: t('opencodeUpdate.toast.actions.update'), onClick: runUpgrade },
-          cancel: dismiss,
+          onDismiss: skipVersion,
         }
         : {
           id: UPDATE_TOAST_ID,
           description: t('opencodeUpdate.toast.available.manualDescription', { version }),
           duration: Infinity,
-          action: dismiss,
+          onDismiss: skipVersion,
         });
     };
 
@@ -129,16 +118,20 @@ export const OpenCodeUpdateToast: React.FC = () => {
     const timeoutIds: Array<ReturnType<typeof setTimeout>> = [];
 
     const checkForUpdate = async (attempt: number, runtimeKey = getRuntimeKey()) => {
+      const scheduleRetry = () => {
+        const delay = CHECK_RETRY_DELAYS_MS[attempt];
+        if (!cancelled && runtimeKey === getRuntimeKey() && delay !== undefined) {
+          timeoutIds.push(setTimeout(() => { void checkForUpdate(attempt + 1, runtimeKey); }, delay));
+        }
+      };
       try {
         const status = await fetchOpenCodeUpgradeStatus();
         if (!cancelled && runtimeKey === getRuntimeKey() && status.availableVersion) {
           showUpdateAvailableToast(status.availableVersion, status.supported);
         }
+        if (status.latestVersionLookupFailed) scheduleRetry();
       } catch {
-        const delay = CHECK_RETRY_DELAYS_MS[attempt];
-        if (!cancelled && runtimeKey === getRuntimeKey() && delay !== undefined) {
-          timeoutIds.push(setTimeout(() => { void checkForUpdate(attempt + 1, runtimeKey); }, delay));
-        }
+        scheduleRetry();
       }
     };
 

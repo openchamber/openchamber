@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import type { GitHubChecksSummary } from '@/lib/api/types';
+import type { CISummary } from '@/lib/source-control/types';
 
 import { getPullRequestChecksText, getWorkStatusChecksPresentation } from './checksSummaryPresentation';
 
-const unknownChecks: GitHubChecksSummary = {
+const unknownChecks: CISummary = {
   state: 'unknown',
   total: 100,
   success: 100,
@@ -21,7 +21,7 @@ describe('checks summary presentation', () => {
   });
 
   test('known successful summaries retain their passed count', () => {
-    const checks: GitHubChecksSummary = { ...unknownChecks, state: 'success', total: 3, success: 3 };
+    const checks: CISummary = { ...unknownChecks, state: 'success', total: 3, success: 3 };
     const presentation = getWorkStatusChecksPresentation(checks);
     expect(presentation).not.toBeNull();
     expect(presentation?.passed).toBe(3);

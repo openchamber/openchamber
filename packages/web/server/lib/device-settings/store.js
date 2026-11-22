@@ -59,7 +59,7 @@ const REPORTABLE = {
 };
 const REPORTABLE_KEYS = new Set(Object.keys(REPORTABLE));
 // Every reportable key must stay device-scoped in the registry.
-const registry = createRequire(import.meta.url)('../opencode/settings-registry.json');
+const registry = createRequire(import.meta.url)('../settings/settings-registry.json');
 const DEVICE_KEYS = new Set([...REPORTABLE_KEYS].filter((key) => registry.fields[key]?.scope === 'device'));
 const SURFACES = new Set(['web', 'desktop', 'vscode', 'mobile']);
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;

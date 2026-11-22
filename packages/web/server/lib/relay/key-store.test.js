@@ -168,7 +168,7 @@ describe('relay key store', () => {
         console.log(JSON.stringify({ message: error.message, cause: error.cause }));
       }
     `;
-    const child = spawnSync('node', ['--input-type=module', '-e', script, dataDir], {
+    const child = spawnSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', script, dataDir], {
       encoding: 'utf8',
       timeout: 3000,
     });

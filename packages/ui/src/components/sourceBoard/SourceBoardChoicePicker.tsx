@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Popover } from '@base-ui/react/popover';
 
 import { Icon } from '@/components/icon/Icon';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import { Command, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
@@ -12,9 +13,7 @@ import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn } from '@/lib/utils';
 
 export type BoardChoice = {
-    /** What the host names it by: a label's name, a reviewer's id. */
     id: string;
-    /** What the search matches. */
     label: string;
     content: React.ReactNode;
 };
@@ -28,17 +27,11 @@ const sameSet = (left: readonly string[], right: ReadonlySet<string>) => (
     left.length === right.size && left.every((id) => right.has(id))
 );
 
-/**
- * Several of a list, picked with checks in a searchable popup: an item's
- * labels or a PR's reviewers. The choices are read when it opens; the new set
- * is handed over once, when it closes, so a few clicks are one change.
- */
 export const SourceBoardChoicePicker: React.FC<{
     ariaLabel: string;
     searchPlaceholder: string;
     emptyText: string;
     selected: readonly string[];
-    /** What is chosen now but may be past the one page the host lists. */
     selectedChoices: readonly BoardChoice[];
     loadChoices: () => Promise<BoardChoice[]>;
     onCommit: (ids: string[]) => void;
@@ -85,21 +78,22 @@ export const SourceBoardChoicePicker: React.FC<{
 
     return (
         <Popover.Root open={open} onOpenChange={openChange} onOpenChangeComplete={(next) => { if (next) searchRef.current?.focus(); }}>
-            <Popover.Trigger
-                render={
-                    <Button
-                        variant="ghost"
-                        size="xs"
-                        aria-label={ariaLabel}
-                        title={ariaLabel}
-                        aria-haspopup="dialog"
-                        disabled={busy}
-                        className="size-6 shrink-0 px-0 text-muted-foreground data-[popup-open]:bg-interactive-hover"
-                    />
-                }
-            >
-                <Icon name={busy ? 'loader-4' : 'pencil'} className={cn('size-3.5', busy && 'animate-spin')} />
-            </Popover.Trigger>
+            <ButtonTooltip label={ariaLabel} className="shrink-0">
+                <Popover.Trigger
+                    render={
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            aria-label={ariaLabel}
+                            aria-haspopup="dialog"
+                            disabled={busy}
+                            className="size-6 shrink-0 px-0 text-muted-foreground data-[popup-open]:bg-interactive-hover"
+                        />
+                    }
+                >
+                    <Icon name={busy ? 'loader-4' : 'pencil'} className={cn('size-3.5', busy && 'animate-spin')} />
+                </Popover.Trigger>
+            </ButtonTooltip>
             <Popover.Portal>
                 <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
                     <Popover.Popup
@@ -143,7 +137,6 @@ export const SourceBoardChoicePicker: React.FC<{
                                         <CommandItem
                                             key={choice.id}
                                             value={choice.id}
-                                            // By the choice itself: the list trims the value it hands back.
                                             onSelect={() => toggle(choice.id)}
                                             aria-current={checked ? true : undefined}
                                             className="max-w-full"

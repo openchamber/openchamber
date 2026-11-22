@@ -34,4 +34,22 @@ describe('repository provider memory', () => {
     const reloaded = await import(`./repositoryProviderMemory?second=${Date.now()}`);
     expect(reloaded.rememberedRepositoryProvider('runtime-a', '/projects/app')).toBe('gitlab');
   });
+
+  test('keeps any served provider id, old and new, and drops only a malformed entry', async () => {
+    const key = (path: string) => `runtime-a\u0000${path}`;
+    store.set('openchamber.repositoryProvider.v1', JSON.stringify([
+      [key('/projects/old'), 'github'],
+      [key('/projects/bad'), 'Bad Id'],
+      [key('/projects/new'), 'acme'],
+    ]));
+    const memory = await import(`./repositoryProviderMemory?open=${Date.now()}`);
+    expect(memory.rememberedRepositoryProvider('runtime-a', '/projects/old')).toBe('github');
+    expect(memory.rememberedRepositoryProvider('runtime-a', '/projects/bad')).toBeNull();
+    expect(memory.rememberedRepositoryProvider('runtime-a', '/projects/new')).toBe('acme');
+
+    memory.rememberRepositoryProvider('runtime-a', '/projects/other', 'acme');
+    const reloaded = await import(`./repositoryProviderMemory?openReload=${Date.now()}`);
+    expect(reloaded.rememberedRepositoryProvider('runtime-a', '/projects/other')).toBe('acme');
+    expect(reloaded.rememberedRepositoryProvider('runtime-a', '/projects/old')).toBe('github');
+  });
 });

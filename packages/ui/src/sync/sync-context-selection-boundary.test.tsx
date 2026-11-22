@@ -7,6 +7,7 @@ import { SyncProvider, useChildStoreManager, useSyncDirectory } from './sync-con
 import { usePrefetchSessionMessages } from './use-sync'
 import { installHookTestDom } from '../components/session/sidebar/test-utils/testDom'
 import { useSessionUIStore } from './session-ui-store'
+import { useProjectsStore } from '@/stores/useProjectsStore'
 import type { Message, Part, Session } from '@/lib/opencode/model'
 import type { SessionPage } from '@/lib/opencode/client'
 
@@ -108,6 +109,12 @@ describe('SyncProvider selection boundary', () => {
       const Probe = () => { manager = useChildStoreManager(); return null }
       const sessionID = `selected-${mode}`
       const directory = `/workspace/actual-${mode}`
+      const previousProjects = useProjectsStore.getState().projects
+      useProjectsStore.setState({ projects: [{ id: 'project', path: '/workspace' }] })
+      const detail = mode === 'adopted' ? spyOn(opencodeClient, 'getSession').mockResolvedValue({
+        id: sessionID, projectID: 'project', directory, title: sessionID, cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 },
+      }) : null
       try {
         await act(async () => root.render(<SyncProvider sdk={createSdk()} directory="/workspace/guess"><Probe /></SyncProvider>))
         if (!manager) throw new Error('Directory manager was not mounted')
@@ -139,6 +146,8 @@ describe('SyncProvider selection boundary', () => {
         expect(store.getState().message[sessionID]).toHaveLength(10)
       } finally {
         useSessionUIStore.getState().setCurrentSession(null)
+        useProjectsStore.setState({ projects: previousProjects })
+        detail?.mockRestore()
         await act(async () => root.unmount())
         window.__OPENCHAMBER_SURFACE__ = previousSurface
         dom.restore()

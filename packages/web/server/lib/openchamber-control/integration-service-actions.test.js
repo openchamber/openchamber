@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { registerGitLabRoutes } from '../gitlab/routes.js';
 import { OpenChamberControlError } from './error.js';
 import {
   INTEGRATION_SERVICE_ACTION_DEFINITIONS,
@@ -207,26 +206,8 @@ describe('secrets never leave', () => {
     expect(answer.scope).toBe('repo');
     await expect(run('extensions.settings', { extensionId: 'acme', extensionSettings: { tokenType: 'bearer', scope: 'repo' } })).resolves.toBeTruthy();
   });
-
-  it('returns no token from a real GitLab account store', async () => {
-    const account = {
-      id: `${GITLAB}#9`, credentialId: `${GITLAB}#9`, credentialRevision: 1, providerUserId: `${GITLAB}#9`,
-      token: SEED, refreshToken: SEED, user: { id: 9, username: 'gl-user' }, source: 'pat', status: 'valid',
-    };
-    const store = {
-      listInstances: async () => [GITLAB],
-      readInstance: async () => ({ activeAccountId: account.id, accounts: [account], cliDisabled: true, cliActive: false }),
-    };
-    const fetch = vi.fn(async () => Response.json({ id: 9, username: 'gl-user', name: 'GitLab User' }));
-    const gitlab = registerGitLabRoutes({ get: () => {}, post: () => {}, put: () => {}, delete: () => {} }, { store, fetch, execFile: async () => ({ stdout: '' }) });
-    const actions = createIntegrationServiceActions({ getIntegrationOperations: () => ({ gitlab: gitlab.accounts }) });
-
-    const result = await actions.execute('gitlab.status', { instance: GITLAB }, {});
-
-    expect(result).toMatchObject({ connected: true, accounts: [{ id: account.id, current: true }] });
-    expect(fetch).toHaveBeenCalled();
-    expect(JSON.stringify(result)).not.toContain(SEED);
-  });
+  // The provider path (source-control accountOperations to the provider
+  // implementation) is covered in integration-service-actions.providers.test.js.
 });
 
 describe('github actions', () => {

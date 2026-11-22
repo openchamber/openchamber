@@ -32,6 +32,37 @@ const mockResponse = (body = payload) => ({
 });
 
 describe('GitHub Copilot quota provider', () => {
+  it.each([null, undefined, false, 0, 'unexpected', [], {}])('keeps empty windows for an unchecked payload %j', async (body) => {
+    for (const fetchProviderQuota of [fetchQuota]) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => body,
+      }));
+
+      const result = await fetchProviderQuota({ readAuth });
+
+      expect(result.ok).toBe(true);
+      expect(result.usage.windows).toEqual({});
+      expect(result.planLabel).toBeUndefined();
+    }
+  });
+
+  it('reads inherited fields and array containers without requiring own properties', async () => {
+    const snapshot = Object.create({ entitlement: '100', quota_remaining: '25.5' });
+    const snapshots = Object.assign([], { premium_interactions: snapshot });
+    const body = Object.create({ quota_snapshots: snapshots, copilot_plan: 'business' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse(body)));
+
+    for (const fetchProviderQuota of [fetchQuota]) {
+      const result = await fetchProviderQuota({ readAuth });
+
+      expect(result.ok).toBe(true);
+      expect(result.planLabel).toBe('Copilot Business');
+      expect(result.usage.windows.premium_interactions.usedPercent).toBe(74.5);
+      expect(result.usage.windows.premium_interactions.valueLabel).toBe('74.5 / 100 used');
+    }
+  });
+
   it.each([
     ['primary provider', fetchQuota],
   ])('exposes only premium interactions for the %s', async (_name, fetchProviderQuota) => {
@@ -152,6 +183,84 @@ describe('GitHub Copilot quota provider', () => {
     expect(result.ok).toBe(true);
     expect(result.usage.windows.premium_interactions.usedPercent).toBeNull();
     expect(result.usage.windows.premium_interactions.valueLabel).toBe('Unlimited');
+  });
+
+  it.each([
+    ['primary provider', fetchQuota],
+  ])('reports credits used and plan label for unlimited plans with usage for the %s', async (_name, fetchProviderQuota) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      copilot_plan: 'business',
+      quota_reset_date: '2026-11-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { unlimited: true, entitlement: -1, remaining: -1, credits_used: 3233 },
+      },
+    })));
+
+    const result = await fetchProviderQuota({ readAuth });
+
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('Copilot Business');
+    expect(result.usage.windows.premium_interactions.usedPercent).toBeNull();
+    expect(result.usage.windows.premium_interactions.creditsUsed).toBe(3233);
+    expect(result.usage.windows.premium_interactions.valueLabel).toBeUndefined();
+  });
+
+  it.each([0, '3233.27', -1, '', '  ', 'invalid', null, undefined, Infinity])('handles unlimited credits_used %s in the provider', async (creditsUsed) => {
+    for (const fetchProviderQuota of [fetchQuota]) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+        quota_snapshots: { premium_interactions: { unlimited: true, credits_used: creditsUsed } },
+      })));
+      const result = await fetchProviderQuota({ readAuth });
+      const window = result.usage.windows.premium_interactions;
+      const expected = creditsUsed === 0 ? 0 : creditsUsed === '3233.27' ? 3233.27 : undefined;
+      expect(window.creditsUsed).toBe(expected);
+      expect(window.valueLabel).toBe(expected === undefined ? 'Unlimited' : undefined);
+      expect(window.usedPercent).toBeNull();
+      expect(window.remainingPercent).toBeNull();
+    }
+  });
+
+  it('returns null/omits plan label for unmapped plan/sku and handles can_signup_for_limited', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      copilot_plan: 'some_unknown_enterprise_tier',
+      access_type_sku: 'unknown_sku',
+      quota_snapshots: {
+        premium_interactions: { unlimited: true },
+      },
+    })));
+    const unmappedResult = await fetchQuota({ readAuth });
+    expect(unmappedResult.planLabel).toBeUndefined();
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      copilot_plan: 'business',
+      can_signup_for_limited: true,
+      quota_snapshots: {
+        premium_interactions: { unlimited: true },
+      },
+    })));
+    const paidWithSignupResult = await fetchQuota({ readAuth });
+    expect(paidWithSignupResult.planLabel).toBe('Copilot Business');
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      can_signup_for_limited: true,
+      quota_snapshots: {
+        premium_interactions: { unlimited: false, entitlement: 50, remaining: 50 },
+      },
+    })));
+    const freeSignupResult = await fetchQuota({ readAuth });
+    expect(freeSignupResult.planLabel).toBe('Copilot Free');
+  });
+
+  it('keeps Unlimited value label when has_quota is false despite credits_used', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      copilot_plan: 'business',
+      quota_snapshots: {
+        premium_interactions: { unlimited: true, has_quota: false, credits_used: 1200 },
+      },
+    })));
+    const result = await fetchQuota({ readAuth });
+    expect(result.usage.windows.premium_interactions.valueLabel).toBe('Unlimited');
+    expect(result.usage.windows.premium_interactions.creditsUsed).toBeUndefined();
   });
 
   it.each([

@@ -18,14 +18,15 @@ import {
 import { repositoryBindingOwner } from '@/lib/source-control/repository-binding';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import type { GitHubPullRequestRef, SourceControlReadContext } from '@/lib/api/types';
+import type { SourceControlReadContext } from '@/lib/api/types';
 import { limitSourceControlDiscoveryCandidates } from '../sourceControlDiscovery';
 import { reconcileRegisteredContextDirectories, type RegisteredContextDirectories } from './registeredContextDirectories';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
-import { getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedSidebarIssues, type GitLabThreadRef } from '@/lib/linkedIssues';
+import { getLinkedSidebarChanges, getLinkedSidebarIssues } from '@/lib/linkedIssues';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
-import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
-import type { TrackedItem } from '@/lib/trackedItems/model';
+import { repositoryThread, workItem } from '@/lib/trackedItems/fromLinks';
+import { trackedItemKey, type TrackedItem } from '@/lib/trackedItems/model';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import { useArchivedAutoFolders } from '../folders/useArchivedAutoFolders';
@@ -619,18 +620,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   // Timeline rows there; expanded project groups in the Projects view; In
   // work rows in both. Collapse state from the Projects
   // view must not decide what a Timeline badge shows.
+  const urlMatcher = useRepositoryUrlMatcher();
   const shownPrs = React.useMemo(() => {
     const targets = new Map<string, { directory: string; branch: string }>();
-    // PRs and GitHub issues linked to the sessions on screen, whatever their
-    // branch.
-    const linkedRefs = new Map<string, GitHubPullRequestRef>();
-    const linkedIssueRefs = new Map<string, GitHubPullRequestRef>();
-    // GitLab merge requests and issues linked to the sessions on screen; their
-    // state comes from their instance, on its own cadence below.
-    const gitlabRefs = new Map<string, GitLabThreadRef>();
-    // Linear issues linked to the sessions on screen; their state comes from
-    // Linear, on its own cadence below.
-    const linearIdentifiers = new Set<string>();
+    // Change requests and issues linked to the sessions on screen, whatever
+    // their branch, on any repository host; and tracker items (Linear, ...).
+    // The server follows each and pushes its state.
+    const linkedItems = new Map<string, TrackedItem>();
     const addTarget = (directory: string | null, branch: string | null | undefined) => {
       const trimmed = branch?.trim();
       if (directory && trimmed) targets.set(getGitHubPrStatusKey(directory, trimmed), { directory, branch: trimmed });
@@ -639,17 +635,17 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     const addNode = (node: SessionNode) => {
       addTarget(normalizePath(node.worktree?.path ?? null), node.worktree?.branch);
       if (!topology.isVSCode) {
-        for (const link of getLinkedGitHubPullRequests(node.session)) {
-          linkedRefs.set(`${link.owner.toLowerCase()}/${link.repo.toLowerCase()}#${link.number}`, { owner: link.owner, repo: link.repo, number: link.number });
-        }
-        for (const issue of getLinkedSidebarIssues(node.session)) {
-          if (issue.source === 'github') {
-            linkedIssueRefs.set(`${issue.owner.toLowerCase()}/${issue.repo.toLowerCase()}#${issue.number}`, { owner: issue.owner, repo: issue.repo, number: issue.number });
-          } else if (issue.source === 'linear') {
-            linearIdentifiers.add(issue.identifier.toUpperCase());
+        for (const change of getLinkedSidebarChanges(node.session, urlMatcher)) {
+          if (change.repository) {
+            const item = repositoryThread('pull', change.repository);
+            linkedItems.set(trackedItemKey(item), item);
           }
         }
-        for (const ref of getLinkedGitLabThreads(node.session)) gitlabRefs.set(ref.key, ref);
+        for (const issue of getLinkedSidebarIssues(node.session, urlMatcher)) {
+          const item = issue.source === 'repository' ? repositoryThread(issue.ref.thread, issue.ref)
+            : issue.source === 'tracker' ? workItem(issue.provider, issue.identifier) : null;
+          if (item) linkedItems.set(trackedItemKey(item), item);
+        }
       }
       node.children.forEach(addNode);
     };
@@ -661,13 +657,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     const headerless = view.headerlessSidebar;
     if (timeListMode) {
       if (headerless || !projectView.collapsedActivities.has('timeline')) timelineItems.forEach((item) => addNode(item.node));
-      return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers], gitlabRefs: [...gitlabRefs.values()] };
+      return { targets, linkedItems: [...linkedItems.values()] };
     }
     if (timelineMode) {
       timelineItems.forEach((item) => {
         if (headerless || !item.projectId || !projectView.collapsedProjects.has(item.projectId)) addNode(item.node);
       });
-      return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers], gitlabRefs: [...gitlabRefs.values()] };
+      return { targets, linkedItems: [...linkedItems.values()] };
     }
     projectSections.forEach((section) => {
       if (!headerless && projectView.collapsedProjects.has(section.project.id)) return;
@@ -681,8 +677,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         addTarget(directory, group.branch?.trim() || topology.gitBranches.get(directory || ''));
       });
     });
-    return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers], gitlabRefs: [...gitlabRefs.values()] };
-  }, [attentionItems, pinnedItems, projectSections, projectView.collapsedActivities, projectView.collapsedProjects, timeListMode, timelineItems, timelineMode, topology.gitBranches, topology.isVSCode, view.headerlessSidebar, workItems]);
+    return { targets, linkedItems: [...linkedItems.values()] };
+  }, [attentionItems, pinnedItems, projectSections, projectView.collapsedActivities, projectView.collapsedProjects, timeListMode, timelineItems, timelineMode, topology.gitBranches, topology.isVSCode, urlMatcher, view.headerlessSidebar, workItems]);
   const shownPrTargets = shownPrs.targets;
   // The discovery effect below subscribes to bindings and reads them; keep its
   // input stable while the shown branches are the same, so ordinary sidebar
@@ -728,7 +724,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         );
         const scope = repositoryBindingOwner.scope(directory);
         const loading = runBackgroundNetworkTask(() => repositoryBindingOwner.read(scope, sourceControl)).then((load) => {
-          if (cancelled || discoveryRuntimeKey !== getRuntimeKey()) return null;
+          // An undefined load is a runtime switch that dropped the read.
+          if (!load || cancelled || discoveryRuntimeKey !== getRuntimeKey()) return null;
           const primaryContext = load.contexts[0];
           const contexts = primaryContext && getSourceControlReadContextAuthState(
             useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(primaryContext)],
@@ -870,10 +867,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const branchPulls = useBranchTrackedPulls(shownPrKeys);
   const shownTrackedItems = React.useMemo((): TrackedItem[] => [
     ...branchPulls,
-    ...shownPrs.linkedRefs.map((ref) => githubThread('pull', ref)),
-    ...shownPrs.linkedIssueRefs.map((ref) => githubThread('issue', ref)),
-    ...shownPrs.gitlabRefs.map((ref) => (ref.thread === 'pull' ? gitlabThread('pull', ref) : gitlabThread('issue', ref))),
-    ...shownPrs.linearIdentifiers.map(linearIssue),
+    ...shownPrs.linkedItems,
   ], [branchPulls, shownPrs]);
   useTrackedItems(shownTrackedItems);
 

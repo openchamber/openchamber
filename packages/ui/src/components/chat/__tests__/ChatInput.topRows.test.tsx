@@ -129,6 +129,7 @@ const devServer: RunningShell = {
 const watcher: PersistentPtyInfo = {
   id: 'pty_watch',
   title: 'watch',
+  userTitle: null,
   command: 'bun',
   args: ['run', 'watch'],
   cwd: DIRECTORY,

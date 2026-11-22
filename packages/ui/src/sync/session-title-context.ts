@@ -10,7 +10,6 @@ import type { SessionMessageLoader, SessionMessageTarget } from './session-messa
  */
 const TITLE_TURNS_MAX_PAGES = 20;
 
-/** Share the normal loader's requests, stopping as soon as three pairs are covered. */
 export async function loadSessionTitleTurns(input: {
   loader: Pick<SessionMessageLoader, 'getSnapshot' | 'ensure' | 'loadOlder'>;
   target: SessionMessageTarget;

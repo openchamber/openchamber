@@ -2,12 +2,10 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import {
-  SettingsSection,
-  SettingsCheckboxRow,
-} from '@/components/sections/shared/SettingsSection';
+import { SettingsChipGroup, SettingsControlGroup, SettingsNewBadge, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -15,66 +13,68 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { BUILTIN_BROWSER_PROVIDER, browserProviderGuests } from '@/lib/guests/browser-providers';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
+import { opencodeClient } from '@/lib/opencode/client';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { listModelVariantIds } from '@/lib/modelVariants';
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { ModelVariantSelect } from './ModelVariantSelect';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
+import { isDesktopShell } from '@/lib/desktop';
+
+type WorkflowAutoApproveMode = 'ask' | 'leads' | 'all';
 
 interface ToolRowProps {
   icon: IconName;
   title: string;
   summary: string;
-  info: string;
   ariaLabel: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   settingsItem: string;
+  children?: React.ReactNode;
+  reveals?: readonly string[];
 }
 
-/** Icon column width plus gap, so a nested row lines up with the tool text. */
-const TOOL_ROW_TEXT_INSET_CLASS = 'ps-[3.75rem]';
+const TOOL_LIST_CLASS = 'max-w-[44rem] space-y-1';
+const TOOL_OPTION_TRIGGER_CLASS = 'ms-auto w-auto min-w-0 max-w-[16rem]';
 
-const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, info, ariaLabel, checked, onChange, settingsItem }) => (
-  <div data-settings-item={settingsItem} className="flex items-center gap-3 px-4 py-3">
-    {/* The switch alone says "off": dimming the row would read as disabled. */}
-    <span className="flex size-8 shrink-0 items-center justify-center oc-tile-inset rounded-lg text-foreground">
-      <Icon name={icon} className="size-4" />
-    </span>
-    <div className="min-w-0 flex-1">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span className="truncate typography-ui-label font-medium text-foreground">{title}</span>
-        <SettingsInfoHint>{info}</SettingsInfoHint>
+const ToolRow: React.FC<ToolRowProps> = ({ icon, title, summary, ariaLabel, checked, onChange, settingsItem, children, reveals = [] }) => (
+  <div className="py-2">
+    <div data-settings-item={settingsItem} className="flex items-start gap-3">
+      <Icon name={icon} className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="min-w-0 truncate typography-ui-label text-foreground">{title}</div>
+          <SettingsNewBadge items={checked ? [settingsItem] : [settingsItem, ...reveals]} />
+        </div>
+        <p className="typography-meta text-muted-foreground">{summary}</p>
       </div>
-      <p className="typography-meta text-muted-foreground">{summary}</p>
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={ariaLabel} className="mt-0.5" />
     </div>
-    <Switch checked={checked} onCheckedChange={onChange} aria-label={ariaLabel} />
+    {children}
   </div>
 );
 
-/**
- * Which OpenChamber capabilities agents are given.
- *
- * Each entry is one tool the managed OpenCode child is handed, so the choices
- * belong together and not under the CLI's own configuration — the binary path
- * is about which OpenCode runs, these are about what it can do.
- *
- * A toggle only writes the setting: the server keeps OpenChamber's plugin
- * injection in a watched file, so OpenCode picks the change up on its own and
- * the tool list is live without a restart.
- *
- * Each tool is a list row with a switch because each one adds or removes a
- * whole capability, and the one-line summary says what without opening the
- * hint. A setting of one tool alone is a nested row under it. The Code Mode
- * checkbox is an option on how the enabled ones are offered, so it sits below
- * the list rather than in it.
- */
+const ToolOption: React.FC<{ settingsItem: string; label: string; info?: string; children: React.ReactNode }> = ({ settingsItem, label, info, children }) => (
+  <div data-settings-item={settingsItem} className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+    <span className="truncate typography-meta text-muted-foreground">{label}</span>
+    <SettingsNewBadge items={[settingsItem]} />
+    {info ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
+    {children}
+  </div>
+);
+
 export const OpenChamberToolsSettings: React.FC = () => {
   const { t } = useI18n();
   const agentControlToolEnabled = useUIStore((state) => state.agentControlToolEnabled);
+  const managedToolsApplyLive = useUIStore((state) => state.managedToolsApplyLive);
   const setAgentControlToolEnabled = useUIStore((state) => state.setAgentControlToolEnabled);
   const agentScheduleToolEnabled = useUIStore((state) => state.agentScheduleToolEnabled);
   const setAgentScheduleToolEnabled = useUIStore((state) => state.setAgentScheduleToolEnabled);
@@ -82,23 +82,41 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentWebToolEnabled = useUIStore((state) => state.setAgentWebToolEnabled);
   const browserProvider = useUIStore((state) => state.browserProvider);
   const setBrowserProvider = useUIStore((state) => state.setBrowserProvider);
+  const agentBrowserSharesLogins = useUIStore((state) => state.agentBrowserSharesLogins);
+  const setAgentBrowserSharesLogins = useUIStore((state) => state.setAgentBrowserSharesLogins);
   const guests = useGuestsStore((state) => state.guests);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
-  // Absent, not merely off: the feature is finished but unreleased, and a
-  // visible switch invites turning on something that was never announced.
   const agentMemoryAvailable = useUIStore((state) => state.agentMemoryFeatureAvailable);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
+  const agentMemoryDreamingEnabled = useUIStore((state) => state.agentMemoryDreamingEnabled);
+  const setAgentMemoryDreamingEnabled = useUIStore((state) => state.setAgentMemoryDreamingEnabled);
+  const agentMemoryDreamingModel = useUIStore((state) => state.agentMemoryDreamingModel);
+  const setAgentMemoryDreamingModel = useUIStore((state) => state.setAgentMemoryDreamingModel);
+  const agentMemoryDreamingVariant = useUIStore((state) => state.agentMemoryDreamingVariant);
+  const setAgentMemoryDreamingVariant = useUIStore((state) => state.setAgentMemoryDreamingVariant);
+  const providers = useConfigStore((state) => state.providers);
   const agentKnowledgeToolEnabled = useUIStore((state) => state.agentKnowledgeToolEnabled);
   const setAgentKnowledgeToolEnabled = useUIStore((state) => state.setAgentKnowledgeToolEnabled);
   const agentNotifyToolEnabled = useUIStore((state) => state.agentNotifyToolEnabled);
   const setAgentNotifyToolEnabled = useUIStore((state) => state.setAgentNotifyToolEnabled);
+  const agentUsageToolEnabled = useUIStore((state) => state.agentUsageToolEnabled);
+  const setAgentUsageToolEnabled = useUIStore((state) => state.setAgentUsageToolEnabled);
+  const agentTerminalToolEnabled = useUIStore((state) => state.agentTerminalToolEnabled);
+  const setAgentTerminalToolEnabled = useUIStore((state) => state.setAgentTerminalToolEnabled);
   const agentRenderToolEnabled = useUIStore((state) => state.agentRenderToolEnabled);
   const setAgentRenderToolEnabled = useUIStore((state) => state.setAgentRenderToolEnabled);
-  const agentToolsCodeMode = useUIStore((state) => state.agentToolsCodeMode);
-  // False for an external OpenCode or a user-owned OPENCODE_CONFIG: there a switch waits
-  // for a restart, so it does not touch a running session's prompt cache.
-  const managedToolsApplyLive = useUIStore((state) => state.managedToolsApplyLive);
-  const setAgentToolsCodeMode = useUIStore((state) => state.setAgentToolsCodeMode);
+  const agentImageToolEnabled = useUIStore((state) => state.agentImageToolEnabled);
+  const setAgentImageToolEnabled = useUIStore((state) => state.setAgentImageToolEnabled);
+  const agentImageModel = useUIStore((state) => state.agentImageModel);
+  const setAgentImageModel = useUIStore((state) => state.setAgentImageModel);
+  const agentSecretToolEnabled = useUIStore((state) => state.agentSecretToolEnabled);
+  const setAgentSecretToolEnabled = useUIStore((state) => state.setAgentSecretToolEnabled);
+  const agentWorkflowAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
+  const setAgentWorkflowToolEnabled = useUIStore((state) => state.setAgentWorkflowToolEnabled);
+  const agentWorkflowAutoApprove = useUIStore((state) => state.agentWorkflowAutoApprove);
+  const agentWorkflowAutoApproveLeads = useUIStore((state) => state.agentWorkflowAutoApproveLeads);
+  const workflowAutoApproveMode: WorkflowAutoApproveMode = agentWorkflowAutoApprove ? 'all' : agentWorkflowAutoApproveLeads ? 'leads' : 'ask';
 
   const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
     setAgentControlToolEnabled(enabled);
@@ -120,48 +138,79 @@ export const OpenChamberToolsSettings: React.FC = () => {
     void updateDesktopSettings({ agentNotifyToolEnabled: enabled });
   }, [setAgentNotifyToolEnabled]);
 
+  const handleAgentUsageToolChange = React.useCallback((enabled: boolean) => {
+    setAgentUsageToolEnabled(enabled);
+    void updateDesktopSettings({ agentUsageToolEnabled: enabled });
+  }, [setAgentUsageToolEnabled]);
+
+  const handleAgentTerminalToolChange = React.useCallback((enabled: boolean) => {
+    setAgentTerminalToolEnabled(enabled);
+    void updateDesktopSettings({ agentTerminalToolEnabled: enabled });
+  }, [setAgentTerminalToolEnabled]);
+
   const handleAgentRenderToolChange = React.useCallback((enabled: boolean) => {
     setAgentRenderToolEnabled(enabled);
     void updateDesktopSettings({ agentRenderToolEnabled: enabled });
   }, [setAgentRenderToolEnabled]);
+
+  const handleAgentImageToolChange = React.useCallback((enabled: boolean) => {
+    setAgentImageToolEnabled(enabled);
+    void updateDesktopSettings({ agentImageToolEnabled: enabled });
+  }, [setAgentImageToolEnabled]);
+
+  const handleAgentImageModelChange = React.useCallback((value: string) => {
+    setAgentImageModel(value);
+    void updateDesktopSettings({ agentImageModel: value });
+  }, [setAgentImageModel]);
+
+  const [imageModels, setImageModels] = React.useState<{ status: 'loading' | 'failed' } | { status: 'ready'; models: Array<{ value: string; name: string; providerID: string }> }>({ status: 'loading' });
+  React.useEffect(() => {
+    let cancelled = false;
+    opencodeClient.listImageModels().then(
+      (models) => { if (!cancelled) setImageModels({ status: 'ready', models }); },
+      () => { if (!cancelled) setImageModels({ status: 'failed' }); },
+    );
+    return () => { cancelled = true; };
+  }, []);
+  const imageModelOptions = imageModels.status === 'ready' ? imageModels.models : [];
+  const imageModelKnown = imageModelOptions.some((model) => model.value === agentImageModel);
+
+  const handleAgentSecretToolChange = React.useCallback((enabled: boolean) => {
+    setAgentSecretToolEnabled(enabled);
+    void updateDesktopSettings({ agentSecretToolEnabled: enabled });
+  }, [setAgentSecretToolEnabled]);
 
   const handleAgentKnowledgeToolChange = React.useCallback((enabled: boolean) => {
     setAgentKnowledgeToolEnabled(enabled);
     void updateDesktopSettings({ agentKnowledgeToolEnabled: enabled });
   }, [setAgentKnowledgeToolEnabled]);
 
-  const handleAgentToolsCodeModeChange = React.useCallback((enabled: boolean) => {
-    setAgentToolsCodeMode(enabled);
-    void updateDesktopSettings({ agentToolsCodeMode: enabled });
-  }, [setAgentToolsCodeMode]);
+  const handleAgentWorkflowToolChange = React.useCallback((enabled: boolean) => {
+    setAgentWorkflowToolEnabled(enabled);
+    void updateDesktopSettings({ agentWorkflowToolEnabled: enabled });
+  }, [setAgentWorkflowToolEnabled]);
 
-  // The dropdown lists installed extensions, so the catalog has to be loaded
-  // here too: this page can be the first thing opened after a fresh start.
+  const handleWorkflowAutoApproveChange = React.useCallback((mode: WorkflowAutoApproveMode) => {
+    const next = { agentWorkflowAutoApprove: mode === 'all', agentWorkflowAutoApproveLeads: mode === 'leads' };
+    useUIStore.setState(next);
+    void updateDesktopSettings(next);
+  }, []);
+
   React.useEffect(() => {
     void loadGuestCatalog();
   }, []);
   const providerGuests = React.useMemo(() => browserProviderGuests(guests), [guests]);
-  // A selection whose extension is gone shows as the built-in: the server
-  // already routes to it and resets the setting on the next action.
   const providerValue = providerGuests.some((guest) => guest.id === browserProvider)
     ? browserProvider
     : BUILTIN_BROWSER_PROVIDER;
 
-  // Read by the server on the next browser action; no OpenCode restart involved.
   const handleBrowserProviderChange = React.useCallback((value: string) => {
     setBrowserProvider(value);
     void updateDesktopSettings({ browserProvider: value });
   }, [setBrowserProvider]);
 
-  // Turning memory off removes the whole feature, not just the tool: the panel
-  // tab goes with it and sessions stop being given the index. Showing the user
-  // what is stored would be pointless once the agent can no longer manage it.
   const handleAgentMemoryToolChange = React.useCallback((enabled: boolean) => {
     setAgentMemoryToolEnabled(enabled);
-    // Re-read after the write lands, not before. The switch flips the client
-    // immediately, which makes the panel ask the server straight away — and
-    // while the setting is still being written the server truthfully answers
-    // "disabled", which used to leave the tab hidden until a restart.
     void updateDesktopSettings({ agentMemoryToolEnabled: enabled })
       .finally(() => {
         if (enabled) {
@@ -170,148 +219,317 @@ export const OpenChamberToolsSettings: React.FC = () => {
       });
   }, [setAgentMemoryToolEnabled]);
 
+  const handleDreamingChange = React.useCallback((enabled: boolean) => {
+    setAgentMemoryDreamingEnabled(enabled);
+    void updateDesktopSettings({ agentMemoryDreamingEnabled: enabled });
+  }, [setAgentMemoryDreamingEnabled]);
+
+  const handleDreamingModelChange = React.useCallback((providerId: string, modelId: string) => {
+    const value = providerId && modelId ? `${providerId}/${modelId}` : '';
+    setAgentMemoryDreamingModel(value);
+    setAgentMemoryDreamingVariant('');
+    void updateDesktopSettings({ agentMemoryDreamingModel: value, agentMemoryDreamingVariant: '' });
+  }, [setAgentMemoryDreamingModel, setAgentMemoryDreamingVariant]);
+
+  const handleDreamingVariantChange = React.useCallback((variant: string | undefined) => {
+    setAgentMemoryDreamingVariant(variant ?? '');
+    void updateDesktopSettings({ agentMemoryDreamingVariant: variant ?? '' });
+  }, [setAgentMemoryDreamingVariant]);
+
+  const dreamingModel = parseModelIdentifier(agentMemoryDreamingModel) ?? { providerId: '', modelId: '' };
+  const dreamingVariants = React.useMemo(() => {
+    if (!dreamingModel.providerId || !dreamingModel.modelId) return [];
+    const provider = providers.find((candidate) => candidate.id === dreamingModel.providerId);
+    return listModelVariantIds(provider?.models.find((model) => model.id === dreamingModel.modelId)?.variants);
+  }, [dreamingModel.modelId, dreamingModel.providerId, providers]);
+
   return (
-    <SettingsSection title={t('settings.openchamber.tools.title')}>
-      <div className="max-w-[44rem] oc-tile divide-y divide-[var(--interactive-border)] rounded-xl">
+    <SettingsSection title={t('settings.openchamber.tools.title')} contentClassName="space-y-6">
+      <SettingsControlGroup title={t('settings.openchamber.tools.group.work')} contentClassName={TOOL_LIST_CLASS}>
         <ToolRow
           icon="node-tree"
           settingsItem="sessions.agent-control-tool"
           checked={agentControlToolEnabled}
           onChange={handleAgentControlToolChange}
-          title={t('settings.openchamber.tools.field.agentControlTool')}
+          title={t('settings.openchamber.tools.name.control')}
           summary={t('settings.openchamber.tools.field.agentControlToolSummary')}
-          info={t('settings.openchamber.tools.field.agentControlToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentControlToolAria')}
         />
-
+        {agentWorkflowAvailable ? (
+          <ToolRow
+            icon="flow-chart"
+            settingsItem="sessions.agent-workflow-tool"
+            checked={agentWorkflowToolEnabled}
+            onChange={handleAgentWorkflowToolChange}
+            title={t('settings.openchamber.tools.name.workflow')}
+            summary={t('settings.openchamber.tools.field.agentWorkflowToolSummary')}
+            ariaLabel={t('settings.openchamber.tools.field.agentWorkflowToolAria')}
+            reveals={['sessions.agent-workflow-auto-approve']}
+          >
+            {agentWorkflowToolEnabled ? (
+              <div data-settings-item="sessions.agent-workflow-auto-approve" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+                <span className="truncate typography-meta text-muted-foreground">
+                  {t('settings.openchamber.tools.workflowAutoApprove.label')}
+                </span>
+                <SettingsChipGroup
+                  value={workflowAutoApproveMode}
+                  onChange={handleWorkflowAutoApproveChange}
+                  aria-label={t('settings.openchamber.tools.workflowAutoApprove.label')}
+                  options={[
+                    { value: 'ask', label: t('settings.openchamber.tools.workflowAutoApprove.ask') },
+                    { value: 'leads', label: t('settings.openchamber.tools.workflowAutoApprove.leads') },
+                    { value: 'all', label: t('settings.openchamber.tools.workflowAutoApprove.all') },
+                  ]}
+                />
+                <SettingsNewBadge items={['sessions.agent-workflow-auto-approve']} />
+                <SettingsInfoHint>{t('settings.openchamber.tools.workflowAutoApprove.info')}</SettingsInfoHint>
+              </div>
+            ) : null}
+          </ToolRow>
+        ) : null}
         <ToolRow
           icon="calendar-schedule"
           settingsItem="sessions.agent-schedule-tool"
           checked={agentScheduleToolEnabled}
           onChange={handleAgentScheduleToolChange}
-          title={t('settings.openchamber.tools.field.agentScheduleTool')}
+          title={t('settings.openchamber.tools.name.schedule')}
           summary={t('settings.openchamber.tools.field.agentScheduleToolSummary')}
-          info={t('settings.openchamber.tools.field.agentScheduleToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentScheduleToolAria')}
         />
-
-        {/* One group, so no divider separates the web tool from its own setting. */}
-        <div>
-          <ToolRow
-            icon="global"
-            settingsItem="sessions.agent-web-tool"
-            checked={agentWebToolEnabled}
-            onChange={handleAgentWebToolChange}
-            title={t('settings.openchamber.tools.field.agentWebTool')}
-            summary={t('settings.openchamber.tools.field.agentWebToolSummary')}
-            info={t('settings.openchamber.tools.field.agentWebToolInfo')}
-            ariaLabel={t('settings.openchamber.tools.field.agentWebToolAria')}
-          />
-
-          {/* Stays visible with nothing to choose: the hint is how people
-              learn that browser-provider extensions exist. */}
-          <div
-            data-settings-item="sessions.browser-provider"
-            className={cn('flex min-w-0 items-center gap-2 pb-3 pe-4', TOOL_ROW_TEXT_INSET_CLASS)}
-          >
-            <span className="truncate typography-meta text-muted-foreground">
-              {t('settings.openchamber.tools.browserProvider.label')}
-            </span>
-            <SettingsInfoHint>{t('settings.openchamber.tools.browserProvider.info')}</SettingsInfoHint>
-            <Select<string>
-              value={providerValue}
-              onValueChange={handleBrowserProviderChange}
-              disabled={!agentWebToolEnabled || providerGuests.length === 0}
-            >
-              <SelectTrigger
-                className="ms-auto w-auto min-w-0 max-w-[14rem]"
-                aria-label={t('settings.openchamber.tools.browserProvider.aria')}
-              >
-                <SelectValue>
-                  {(value) => (
-                    value === BUILTIN_BROWSER_PROVIDER
-                      ? t('settings.openchamber.tools.browserProvider.option.builtin')
-                      : providerGuests.find((guest) => guest.id === value)?.name ?? null
-                  )}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={BUILTIN_BROWSER_PROVIDER}>
-                  {t('settings.openchamber.tools.browserProvider.option.builtin')}
-                </SelectItem>
-                {providerGuests.map((guest) => (
-                  <SelectItem key={guest.id} value={guest.id}>{guest.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
         <ToolRow
-          icon="notification-3"
-          settingsItem="sessions.agent-notify-tool"
-          checked={agentNotifyToolEnabled}
-          onChange={handleAgentNotifyToolChange}
-          title={t('settings.openchamber.tools.field.agentNotifyTool')}
-          summary={t('settings.openchamber.tools.field.agentNotifyToolSummary')}
-          info={t('settings.openchamber.tools.field.agentNotifyToolInfo')}
-          ariaLabel={t('settings.openchamber.tools.field.agentNotifyToolAria')}
+          icon="global"
+          settingsItem="sessions.agent-web-tool"
+          reveals={['sessions.browser-provider', 'sessions.agent-browser-logins']}
+          checked={agentWebToolEnabled}
+          onChange={handleAgentWebToolChange}
+          title={t('settings.openchamber.tools.name.web')}
+          summary={t('settings.openchamber.tools.field.agentWebToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentWebToolAria')}
+        >
+          {agentWebToolEnabled ? (
+            <ToolOption
+              settingsItem="sessions.browser-provider"
+              label={t('settings.openchamber.tools.browserProvider.label')}
+              info={t('settings.openchamber.tools.browserProvider.info')}
+            >
+              <Select<string>
+                value={providerValue}
+                onValueChange={handleBrowserProviderChange}
+                disabled={providerGuests.length === 0}
+              >
+                <SelectTrigger
+                  className={TOOL_OPTION_TRIGGER_CLASS}
+                  aria-label={t('settings.openchamber.tools.browserProvider.aria')}
+                >
+                  <SelectValue>
+                    {(value) => (
+                      value === BUILTIN_BROWSER_PROVIDER
+                        ? t('settings.openchamber.tools.browserProvider.option.builtin')
+                        : providerGuests.find((guest) => guest.id === value)?.name ?? null
+                    )}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={BUILTIN_BROWSER_PROVIDER}>
+                    {t('settings.openchamber.tools.browserProvider.option.builtin')}
+                  </SelectItem>
+                  {providerGuests.map((guest) => (
+                    <SelectItem key={guest.id} value={guest.id}>{guest.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </ToolOption>
+          ) : null}
+          {agentWebToolEnabled && isDesktopShell() ? (
+            <div data-settings-item="sessions.agent-browser-logins" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+              <Checkbox
+                checked={agentBrowserSharesLogins}
+                onChange={setAgentBrowserSharesLogins}
+                ariaLabel={t('settings.openchamber.tools.agentBrowserLogins.label')}
+              />
+              <button
+                type="button"
+                className="truncate typography-meta text-muted-foreground"
+                onClick={() => setAgentBrowserSharesLogins(!agentBrowserSharesLogins)}
+              >
+                {t('settings.openchamber.tools.agentBrowserLogins.label')}
+              </button>
+              <SettingsNewBadge items={['sessions.agent-browser-logins']} />
+              <SettingsInfoHint>{t('settings.openchamber.tools.agentBrowserLogins.info')}</SettingsInfoHint>
+            </div>
+          ) : null}
+        </ToolRow>
+        <ToolRow
+          icon="terminal-box"
+          settingsItem="sessions.agent-terminal-tool"
+          checked={agentTerminalToolEnabled}
+          onChange={handleAgentTerminalToolChange}
+          title={t('settings.openchamber.tools.field.agentTerminalTool')}
+          summary={t('settings.openchamber.tools.field.agentTerminalToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentTerminalTool')}
         />
+      </SettingsControlGroup>
 
+      <SettingsControlGroup title={t('settings.openchamber.tools.group.chat')} contentClassName={TOOL_LIST_CLASS}>
         <ToolRow
           icon="bar-chart-box"
           settingsItem="sessions.agent-render-tool"
           checked={agentRenderToolEnabled}
           onChange={handleAgentRenderToolChange}
-          title={t('settings.openchamber.tools.field.agentRenderTool')}
+          title={t('settings.openchamber.tools.name.render')}
           summary={t('settings.openchamber.tools.field.agentRenderToolSummary')}
-          info={t('settings.openchamber.tools.field.agentRenderToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentRenderToolAria')}
         />
+        <ToolRow
+          icon="image"
+          settingsItem="sessions.agent-image-tool"
+          reveals={['sessions.agent-image-model']}
+          checked={agentImageToolEnabled}
+          onChange={handleAgentImageToolChange}
+          title={t('settings.openchamber.tools.name.image')}
+          summary={t('settings.openchamber.tools.field.agentImageToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentImageToolAria')}
+        >
+          {agentImageToolEnabled ? (
+            <ToolOption
+              settingsItem="sessions.agent-image-model"
+              label={t('settings.openchamber.tools.imageModel.label')}
+            >
+              <Select<string>
+                value={agentImageModel}
+                onValueChange={handleAgentImageModelChange}
+                disabled={imageModelOptions.length === 0}
+              >
+                <SelectTrigger
+                  className={TOOL_OPTION_TRIGGER_CLASS}
+                  aria-label={t('settings.openchamber.tools.imageModel.aria')}
+                >
+                  <SelectValue>
+                    {(value) => {
+                      if (imageModels.status === 'failed' && !value) return t('settings.openchamber.tools.imageModel.loadFailed');
+                      if (imageModels.status === 'ready' && imageModelOptions.length === 0 && !value) return t('settings.openchamber.tools.imageModel.empty');
+                      if (!value) return t('settings.openchamber.tools.imageModel.placeholder');
+                      const known = imageModelOptions.find((model) => model.value === value);
+                      if (known) return known.name;
+                      return imageModels.status === 'ready'
+                        ? t('settings.openchamber.tools.imageModel.unavailable', { model: value })
+                        : value;
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {agentImageModel && !imageModelKnown && imageModels.status === 'ready' ? (
+                    <SelectItem value={agentImageModel} disabled>
+                      {t('settings.openchamber.tools.imageModel.unavailable', { model: agentImageModel })}
+                    </SelectItem>
+                  ) : null}
+                  {imageModelOptions.map((model) => (
+                    <SelectItem key={model.value} value={model.value}>
+                      <span className="truncate">{model.name}</span>
+                      <span className="ms-2 truncate typography-meta text-muted-foreground">{model.providerID}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </ToolOption>
+          ) : null}
+        </ToolRow>
+        <ToolRow
+          icon="shield-keyhole"
+          settingsItem="sessions.agent-secret-tool"
+          checked={agentSecretToolEnabled}
+          onChange={handleAgentSecretToolChange}
+          title={t('settings.openchamber.tools.name.secret')}
+          summary={t('settings.openchamber.tools.field.agentSecretToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentSecretToolAria')}
+        />
+        <ToolRow
+          icon="notification-3"
+          settingsItem="sessions.agent-notify-tool"
+          checked={agentNotifyToolEnabled}
+          onChange={handleAgentNotifyToolChange}
+          title={t('settings.openchamber.tools.name.notify')}
+          summary={t('settings.openchamber.tools.field.agentNotifyToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentNotifyToolAria')}
+        />
+      </SettingsControlGroup>
 
+      <SettingsControlGroup title={t('settings.openchamber.tools.group.knowledge')} contentClassName={TOOL_LIST_CLASS}>
+        {agentMemoryAvailable ? (
+          <ToolRow
+            icon="brain"
+            settingsItem="sessions.agent-memory-tool"
+            reveals={['sessions.agent-memory-dreaming', 'sessions.agent-memory-dreaming-model']}
+            checked={agentMemoryToolEnabled}
+            onChange={handleAgentMemoryToolChange}
+            title={t('settings.openchamber.tools.name.memory')}
+            summary={t('settings.openchamber.tools.field.agentMemoryToolSummary')}
+            ariaLabel={t('settings.openchamber.tools.field.agentMemoryToolAria')}
+          >
+            {agentMemoryToolEnabled ? (
+              <div data-settings-item="sessions.agent-memory-dreaming" className="mt-2 flex min-w-0 items-center gap-2 ps-7">
+                <Checkbox
+                  checked={agentMemoryDreamingEnabled}
+                  onChange={handleDreamingChange}
+                  ariaLabel={t('settings.openchamber.tools.dreaming.aria')}
+                />
+                <button
+                  type="button"
+                  className="truncate typography-meta text-muted-foreground"
+                  onClick={() => handleDreamingChange(!agentMemoryDreamingEnabled)}
+                >
+                  {t('settings.openchamber.tools.dreaming.label')}
+                </button>
+                <SettingsNewBadge items={['sessions.agent-memory-dreaming', 'sessions.agent-memory-dreaming-model']} />
+                <SettingsInfoHint>{t('settings.openchamber.tools.dreaming.info')}</SettingsInfoHint>
+                <div data-settings-item="sessions.agent-memory-dreaming-model" className="ms-auto flex min-w-0 items-center gap-2">
+                  <ModelSelector
+                    providerId={dreamingModel.providerId}
+                    modelId={dreamingModel.modelId}
+                    onChange={handleDreamingModelChange}
+                    placeholder={t('settings.openchamber.tools.dreamingModel.default')}
+                    className="min-w-0 max-w-[16rem]"
+                    disabled={!agentMemoryDreamingEnabled}
+                  />
+                  <ModelVariantSelect
+                    variants={dreamingVariants}
+                    value={agentMemoryDreamingVariant || undefined}
+                    onChange={handleDreamingVariantChange}
+                    ariaLabel={t('settings.openchamber.tools.dreamingModel.thinking')}
+                    triggerClassName="w-auto min-w-0"
+                    disabled={!agentMemoryDreamingEnabled}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </ToolRow>
+        ) : null}
         <ToolRow
           icon="sticky-note"
           settingsItem="sessions.agent-knowledge-tool"
           checked={agentKnowledgeToolEnabled}
           onChange={handleAgentKnowledgeToolChange}
-          title={t('settings.openchamber.tools.field.agentKnowledgeTool')}
+          title={t('settings.openchamber.tools.name.knowledge')}
           summary={t('settings.openchamber.tools.field.agentKnowledgeToolSummary')}
-          info={t('settings.openchamber.tools.field.agentKnowledgeToolInfo')}
           ariaLabel={t('settings.openchamber.tools.field.agentKnowledgeToolAria')}
         />
+        <ToolRow
+          icon="bar-chart-2"
+          settingsItem="sessions.agent-usage-tool"
+          checked={agentUsageToolEnabled}
+          onChange={handleAgentUsageToolChange}
+          title={t('settings.openchamber.tools.name.usage')}
+          summary={t('settings.openchamber.tools.field.agentUsageToolSummary')}
+          ariaLabel={t('settings.openchamber.tools.field.agentUsageToolAria')}
+        />
+      </SettingsControlGroup>
 
-        {agentMemoryAvailable ? (
-          <ToolRow
-            icon="brain"
-            settingsItem="sessions.agent-memory-tool"
-            checked={agentMemoryToolEnabled}
-            onChange={handleAgentMemoryToolChange}
-            title={t('settings.openchamber.tools.field.agentMemoryTool')}
-            summary={t('settings.openchamber.tools.field.agentMemoryToolSummary')}
-            info={t('settings.openchamber.tools.field.agentMemoryToolInfo')}
-            ariaLabel={t('settings.openchamber.tools.field.agentMemoryToolAria')}
-          />
-        ) : null}
-      </div>
-
-      <SettingsCheckboxRow
-        className="mt-4"
-        settingsItem="sessions.agent-tools-code-mode"
-        checked={agentToolsCodeMode}
-        onChange={handleAgentToolsCodeModeChange}
-        label={t('settings.openchamber.tools.field.agentToolsCodeMode')}
-        ariaLabel={t('settings.openchamber.tools.field.agentToolsCodeModeAria')}
-        info={t('settings.openchamber.tools.field.agentToolsCodeModeInfo')}
-      />
-
-      {/* A direct tool is part of the request's tool list, which providers cache as
-          the start of the prompt. In code mode only the render tool stays direct;
-          the rest change a catalog that OpenCode appends as a message. */}
+      {/* Tools run through Code Mode, so only the render tool stays in the request's
+          tool list, which providers cache as the start of the prompt. A switch that
+          waits for an OpenCode restart leaves the running session's cache alone. */}
       {managedToolsApplyLive ? (
-        <p className="mt-2 max-w-[44rem] typography-meta text-muted-foreground">
-          {agentToolsCodeMode
-            ? t('settings.openchamber.tools.cacheNote.codeMode')
-            : t('settings.openchamber.tools.cacheNote.direct')}
+        <p className="max-w-[44rem] typography-meta text-muted-foreground">
+          {t('settings.openchamber.tools.cacheNote.codeMode')}
         </p>
       ) : null}
     </SettingsSection>

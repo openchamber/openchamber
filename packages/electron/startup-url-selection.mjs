@@ -3,10 +3,6 @@ export const resolveStartupUrlProbePlan = ({ development, packagedUi, skipLocalS
   probeHmrUi: development === true && packagedUi !== true,
 });
 
-// The environment can stop the built-in server and point the window at another
-// address. Neither shows anywhere else, so a launch that inherited them from a
-// terminal or a shortcut looked like a server that failed without a word.
-// Only the origin of the address is logged: a path or query may carry a token.
 export const describeStartupEnvironmentOverrides = ({ skipLocalServer, serverUrl }) => {
   const lines = [];
   if (skipLocalServer) {

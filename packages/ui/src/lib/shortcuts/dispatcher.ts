@@ -1,4 +1,5 @@
 import {
+  eventMatchesHeldSequenceKey,
   eventMatchesShortcut,
   normalizeCombo,
   parseShortcut,
@@ -12,6 +13,8 @@ import { isIMECompositionEvent } from '../ime';
 const SEQUENCE_TIMEOUT_MS = 3000;
 const MODIFIER_KEYS = new Set(['alt', 'control', 'meta', 'shift']);
 
+const namesCtrl = (chord: string): boolean => parseShortcut(chord)?.chords[0]?.modifiers.has('ctrl') === true;
+
 export interface ShortcutDispatcherOptions {
   registry: ShortcutRegistry;
   getBinding: (actionId: ShortcutActionId) => ShortcutCombo;
@@ -24,15 +27,21 @@ interface BindingMatch {
   handler: ShortcutHandler;
 }
 
-/** Stateless with respect to the DOM; callers decide whether a consumed event is prevented. */
+const parsedBindings = new Map<ShortcutCombo, { binding: ShortcutCombo; parsed: ReturnType<typeof parseShortcut> }>();
+const parseBinding = (combo: ShortcutCombo) => {
+  let entry = parsedBindings.get(combo);
+  if (!entry) {
+    const binding = normalizeCombo(combo);
+    entry = { binding, parsed: parseShortcut(binding) };
+    parsedBindings.set(combo, entry);
+  }
+  return entry;
+};
+
 export class ShortcutDispatcher {
   private readonly now: () => number;
   private readonly timeoutMs: number;
   private prefix: string | undefined;
-  // The target the leader chord was pressed on. DOM-agnostic (opaque
-  // EventTarget): callers use it to decide whether an unmodified completion
-  // key arriving from an EDITABLE target is a deliberate sequence (same
-  // target as the arming press) or typing that must not be swallowed.
   private prefixTarget: EventTarget | null = null;
   private expiresAt = 0;
   private prefixSuspensionVersion = 0;
@@ -65,6 +74,12 @@ export class ShortcutDispatcher {
     const singles = matches.filter((match) => (
       match.chords.length === 1 && eventMatchesShortcut(event, match.chords[0])
     ));
+    // In a macOS browser `mod` also matches Control, so a Ctrl chord the user
+    // bound on purpose (ctrl+b) and a Cmd default (mod+b) both match one
+    // press. The binding that names Control is the more specific one.
+    if (singles.length > 1) {
+      singles.sort((left, right) => Number(namesCtrl(right.chords[0])) - Number(namesCtrl(left.chords[0])));
+    }
     if (singles.length > 0 && this.invoke(singles, event)) {
       return true;
     }
@@ -144,11 +159,10 @@ export class ShortcutDispatcher {
   }
 
   private getPrefixMatches(matches: BindingMatch[], event: KeyboardEvent): BindingMatch[] {
-    return matches.filter((match) => (
-      match.chords.length === 2
-      && match.chords[0] === this.prefix
-      && eventMatchesShortcut(event, match.chords[1])
-    ));
+    const sequences = matches.filter((match) => match.chords.length === 2 && match.chords[0] === this.prefix);
+    const exact = sequences.filter((match) => eventMatchesShortcut(event, match.chords[1]));
+    if (exact.length > 0) return exact;
+    return sequences.filter((match) => eventMatchesHeldSequenceKey(event, match.chords[0], match.chords[1]));
   }
 
   private getMatches(): BindingMatch[] {
@@ -157,14 +171,11 @@ export class ShortcutDispatcher {
       const handlers = this.options.registry.getAll(actionId);
       if (handlers.length === 0) continue;
 
-      const binding = normalizeCombo(this.options.getBinding(actionId));
-      const parsed = parseShortcut(binding);
+      const { binding, parsed } = parseBinding(this.options.getBinding(actionId));
       if (!parsed || parsed.chords.some((chord) => !chord.key || chord.key === UNASSIGNED_SHORTCUT)) {
         continue;
       }
 
-      // One match per registration, in order: a handler that declines leaves
-      // the key to the next surface registered for the same action.
       const chords = binding.split(' ');
       for (const handler of handlers) matches.push({ chords, handler });
     }

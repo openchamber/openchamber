@@ -1,6 +1,6 @@
 ---
 title: 聊天输入
-description: 你可以在聊天输入框中输入什么：命令、技能、代码片段、提及和附件。
+description: "你可以在聊天输入框中输入什么：命令、技能、代码片段、提及和附件。"
 ---
 
 # 聊天输入
@@ -61,11 +61,13 @@ description: 你可以在聊天输入框中输入什么：命令、技能、代�
 聊天框旁的 **+** 菜单不仅能附加文件：
 
 - 你电脑上的文件
-- 你仓库中的 issue 和 pull request（GitHub，或在 GitLab 项目上使用 GitLab）
+- 你仓库中的 issue 和 pull request（GitHub、GitLab、Gitea、Forgejo 或 Gerrit，取决于项目托管在哪里）
 - 连接 Linear 后的 Linear issue
 - 已安装[扩展](/zh-cn/extensions/)提供附加的任务
 
-每一项都会作为上下文随你的下一条消息一起发出；你的消息决定如何使用它。你也可以粘贴图片，或把文件直接拖到聊天框上。
+你也可以粘贴图片，或把文件直接拖到聊天框上。无论以哪种方式添加，每一项都会在光标所在处变成文本中的一个标签，这样你的消息就能说明怎么处理它：“把这个和那个比较一下”。点击标签可以预览。删除标签后，它的附件就不再随消息发送；撤销会把两者一起恢复。消息只发送其文本中仍然保留的内容。
+
+拖放、粘贴或选择的 Word、PowerPoint、Excel 和 OpenDocument 文件（docx、pptx、xlsx、odt、odp、ods）会询问如何处理。**按原样附加** 将原始文件放在 OpenCode 运行的位置并按路径链接，让代理用自己的工具打开。**转换为文本** 发送提取的文本。要固定一种方式，请在 **Settings → Chat** 的 **Office 文档** 中选择。从 Files 面板拖入或用 `@` 提及的文件保持原有行为。
 
 ## 运行 shell 命令
 
@@ -85,4 +87,4 @@ description: 你可以在聊天输入框中输入什么：命令、技能、代�
 
 - [Skills](/zh-cn/skills/): 按需加载更大的指令集
 - [Magic Prompts](/zh-cn/magic-prompts/): 内置命令及其各自的运行位置
-- [GitHub Issue 与 PR](/zh-cn/github/): 附加 issue 和 pull request
+- [Git 托管服务](/zh-cn/github/): 附加 issue 和 pull request

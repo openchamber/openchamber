@@ -31,7 +31,8 @@ export const useIsTextTruncated = <T extends HTMLElement>(
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [checkTruncation, ref]);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- deps are the caller's, as in the layout effect above.
+  }, [checkTruncation, ref, ...deps]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {

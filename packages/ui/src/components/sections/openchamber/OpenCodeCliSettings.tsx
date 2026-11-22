@@ -18,13 +18,14 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
+import { ExternalOpenCodePluginBanner } from './ExternalOpenCodePluginBanner';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
-  // The server starts OpenCode only from the administrator's path and ignores
-  // the user's setting, so the field shows that path and stays read-only.
   const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [value, setValue] = React.useState('');
+  const [useSharedService, setUseSharedService] = React.useState(false);
+  const [bannerRefreshKey, setBannerRefreshKey] = React.useState(0);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
@@ -39,6 +40,7 @@ export const OpenCodeCliSettings: React.FC = () => {
           return;
         }
         setValue(data.opencodeBinary ?? '');
+        setUseSharedService(data.useGlobalOpenCodeService === true);
       } catch {
         // ignore
       } finally {
@@ -71,14 +73,9 @@ export const OpenCodeCliSettings: React.FC = () => {
     }
   }, []);
 
-  // The only setting left that OpenCode cannot pick up by itself: which binary
-  // runs. Everything else is watched by OpenCode and applies live, so this page
-  // owns the restart instead of a global pending-changes counter.
   const handleSaveAndReload = React.useCallback(async () => {
     setIsSaving(true);
     try {
-      // Strip a wrapping quote pair (Windows "Copy as path" pastes) — literal
-      // quotes are never part of a real path.
       const trimmed = value.trim();
       const unquoted = trimmed.length >= 2
         && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
@@ -88,7 +85,6 @@ export const OpenCodeCliSettings: React.FC = () => {
       await updateDesktopSettings({ opencodeBinary: unquoted });
       await reloadOpenCodeConfiguration({
         message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
-        mode: 'projects',
         scopes: ['all'],
       });
     } catch (error) {
@@ -118,6 +114,30 @@ export const OpenCodeCliSettings: React.FC = () => {
     setShowOpenCodeUpdateNotifications(enabled);
     void updateDesktopSettings({ showOpenCodeUpdateNotifications: enabled });
   }, [setShowOpenCodeUpdateNotifications]);
+
+  const handleUseSharedServiceChange = React.useCallback(async (enabled: boolean) => {
+    const previous = useSharedService;
+    setUseSharedService(enabled);
+    setIsSaving(true);
+    try {
+      const saved = await updateDesktopSettings({ useGlobalOpenCodeService: enabled });
+      if (!saved.ok) {
+        throw new Error(t('settings.openchamber.opencodeCli.restart.failed'));
+      }
+      await reloadOpenCodeConfiguration({
+        message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
+        scopes: ['all'],
+      });
+      setBannerRefreshKey((key) => key + 1);
+    } catch (error) {
+      setUseSharedService(previous);
+      await updateDesktopSettings({ useGlobalOpenCodeService: previous }).catch(() => {});
+      const reason = error instanceof Error && error.message ? error.message : t('settings.openchamber.opencodeCli.restart.failed');
+      toast.error(t('settings.openchamber.opencodeCli.sharedServiceSwitchFailed', { reason }));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [t, useSharedService]);
 
   return (
     <SettingsSection title={t('settings.openchamber.opencodeCli.title')}>
@@ -163,6 +183,18 @@ export const OpenCodeCliSettings: React.FC = () => {
         </SettingsFieldRow>
 
         <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
+          <SettingsCheckboxRow
+            settingsItem="sessions.opencode-shared-service"
+            checked={useSharedService}
+            onChange={(enabled) => void handleUseSharedServiceChange(enabled)}
+            disabled={isLoading || isSaving}
+            label={t('settings.openchamber.opencodeCli.field.useSharedService')}
+            info={t('settings.openchamber.opencodeCli.field.useSharedServiceInfo')}
+            ariaLabel={t('settings.openchamber.opencodeCli.field.useSharedServiceAria')}
+          />
+
+          <ExternalOpenCodePluginBanner refreshKey={bannerRefreshKey} />
+
           <SettingsCheckboxRow
             settingsItem="sessions.opencode-update-notifications"
             checked={showOpenCodeUpdateNotifications}

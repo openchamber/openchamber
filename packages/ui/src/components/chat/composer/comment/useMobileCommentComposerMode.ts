@@ -1,8 +1,3 @@
-/**
- * Owns ChatInput's comment subscription, scope checks, and attach/cancel focus
- * handoff. Callbacks capture the rendered generation; ChatInput keys the shell
- * by it. A quote stays in its captured scope or is dropped, never re-targeted.
- */
 
 import React from 'react';
 import { flushSync } from 'react-dom';
@@ -17,7 +12,6 @@ import type { MobileCommentScope } from './mobileCommentDraft';
 export interface MobileCommentModeOptions {
     isMobile: boolean;
     runtimeKey: string;
-    /** Session the composer's inline drafts target ('' when there is none). */
     directory: string | null;
     sessionKey: string | null;
     mobileShell: MobileComposerShell;
@@ -26,9 +20,7 @@ export interface MobileCommentModeOptions {
 export interface MobileCommentMode {
     active: boolean;
     draft: ReturnType<typeof useMobileCommentDraft>;
-    /** Wiring for the comment shell; callbacks are bound to the rendered open. */
     handlers: MobileCommentComposerHandlers;
-    /** Attach whatever comment is open right now (form submit path). */
     submit(): void;
 }
 
@@ -40,21 +32,16 @@ export function useMobileCommentComposerMode(options: MobileCommentModeOptions):
     const active = isMobile && draft.status === 'open';
 
     const scope = React.useMemo<MobileCommentScope | null>(
-        () => (!isMobile || !runtimeKey || !directory || !sessionKey
+        () => (!runtimeKey || !directory || !sessionKey
             ? null
             : { runtimeKey, directory, sessionKey }),
-        [isMobile, directory, runtimeKey, sessionKey],
+        [directory, runtimeKey, sessionKey],
     );
-    // Publish the committed composer's target before a selection-menu tap can
-    // open a comment. The menu must not derive a second target from the parent.
     React.useLayoutEffect(() => {
         controller?.setScope(scope);
         return () => controller?.setScope(null);
     }, [controller, scope]);
 
-    // Entering comment mode unmounts the wrapper-level dictation engine (the
-    // shell mounts its own, comment-scoped one); a stale active flag from it
-    // must not hold the shell expanded for the comment's lifetime.
     const prevActiveRef = React.useRef(false);
     React.useEffect(() => {
         if (active && !prevActiveRef.current && mobileShell.dictationActive) {
@@ -63,9 +50,6 @@ export function useMobileCommentComposerMode(options: MobileCommentModeOptions):
         prevActiveRef.current = active;
     }, [active, mobileShell]);
 
-    // Attach inside the tap: expand() flushes the shell swap and focuses the
-    // restored composer in the same call stack, as iOS requires for the soft
-    // keyboard. A stale or scope-mismatched open restores nothing.
     const attach = React.useCallback((generation: number, text?: string) => {
         if (!controller) return;
         let attached = false;
@@ -79,7 +63,7 @@ export function useMobileCommentComposerMode(options: MobileCommentModeOptions):
         } else {
             const open = controller.getState();
             if (open.status === 'open' && open.generation === generation) {
-                toast.error(t('chat.textSelection.comment.attachFailed'));
+                toast.error(t('inlineComment.toast.noRoom'));
             }
         }
     }, [controller, mobileShell, t]);

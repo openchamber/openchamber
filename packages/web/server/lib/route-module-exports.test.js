@@ -9,7 +9,7 @@ describe('lazy-loaded route module exports', () => {
       'getCommitSummaries',
       'listStashes',
     ]],
-    ['./quota/index.js', ['fetchQuotaForProvider', 'listConfiguredQuotaProviders']],
+    ['./quota/index.js', ['fetchQuotaForProvider', 'listConfiguredQuotaProviders', 'listUsagePageProviders']],
     ['./tts/index.js', ['ttsService', 'TTS_VOICES']],
     ['./walkthrough/index.js', ['getRepositoryRootFor']],
   ])('%s keeps the exports its routes load dynamically', async (specifier, names) => {

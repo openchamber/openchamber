@@ -40,12 +40,6 @@ describe('issue #2644: Escape in terminal must not close the context panel', () 
     if (!input) throw new Error('the terminal is not mounted');
     return input;
   };
-  const outsideButton = (): HTMLButtonElement => {
-    const button = [...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((candidate) => candidate.textContent === 'Outside the terminal');
-    if (!button) throw new Error('the pane chrome is not mounted');
-    return button;
-  };
 
   beforeEach(async () => {
     useUIStore.setState({ contextPanelByDirectory: {} });
@@ -71,23 +65,7 @@ describe('issue #2644: Escape in terminal must not close the context panel', () 
     expect(isPanelOpen()).toBe(true);
   });
 
-  test('Escape on the pane chrome outside the terminal closes the zone', async () => {
-    const notPrevented = await pressEscape(outsideButton());
-
-    expect(isPanelOpen()).toBe(false);
-    expect(notPrevented).toBe(false);
-    expect(ptyKeys).toEqual([]);
-  });
-
-  test('Escape on the panel frame itself closes the zone', async () => {
-    const frame = document.querySelector<HTMLElement>('aside[data-context-panel]');
-    expect(frame).not.toBeNull();
-
-    await pressEscape(frame!);
-
-    expect(isPanelOpen()).toBe(false);
-    expect(ptyKeys).toEqual([]);
-  });
+  // Escape no longer closes a context zone (upstream a6dc1101c1); the drawer below keeps its own rule.
 });
 
 describe('issue #2644: the mobile drawer keeps its terminal Escape exception', () => {
@@ -106,9 +84,11 @@ describe('issue #2644: the mobile drawer keeps its terminal Escape exception', (
             tab={tab}
             onClose={() => { closes += 1; }}
             onTabChange={() => undefined}
+            registerPreviewBackHandler={() => undefined}
             pendingChangesDiff={null}
+            pendingChangesCommit={null}
             onOpenPlan={() => undefined}
-            onOpenMcpSettings={() => undefined}
+            onOpenReceivedPage={() => undefined}
           />
         </I18nProvider>,
       );

@@ -7,21 +7,12 @@ import { useGlobalSessionStatusStore } from "./global-session-status"
 import { hasPendingSessionAssist } from "./pending-session-assists"
 import type { State } from "./types"
 
-// OpenCode 2 keeps a location for every directory it serves, and each location
-// runs its own copy of the user's local MCP servers until OpenCode's hour-long
-// inactivity sweep. Once the user has left a managed chat or a worktree and
-// nothing runs there, ask OpenCode to drop that location sooner. Project roots
-// are never released: the user returns to them most, and the server keeps
-// reading the last-used one.
 
-/** Long enough that flicking between chats does not restart their MCP servers. */
 export const CHAT_LOCATION_RELEASE_DELAY_MS = 30_000
 
-/**
- * Worktrees are a place the user works in and comes back to through the day,
- * and coming back after a release waits for the MCP servers to start again.
- */
 export const WORKTREE_LOCATION_RELEASE_DELAY_MS = 5 * 60_000
+
+export const PROJECT_LOCATION_RELEASE_DELAY_MS = 15 * 60_000
 
 type Timers<T> = {
   set: (run: () => void, ms: number) => T
@@ -33,16 +24,10 @@ const realTimers: Timers<ReturnType<typeof setTimeout>> = {
   clear: (timer) => clearTimeout(timer),
 }
 
-/**
- * `busy`: work or a question for the user still holds the location.
- * `unknown`: this window cannot see the directory's sessions, so it leaves
- * the location to OpenCode's own sweep.
- */
 export type DirectoryUse = "free" | "busy" | "unknown"
 
 type LocationReleaseDeps<T> = {
-  /** How long after leaving `directory` to release it; null never releases it. */
-  releaseDelayMs: (directory: string) => number | null
+  releaseDelayMs: (directory: string) => number
   isCurrentDirectory: (directory: string) => boolean
   directoryUse: (directory: string) => DirectoryUse
   release: (directory: string) => Promise<void>
@@ -50,12 +35,7 @@ type LocationReleaseDeps<T> = {
 }
 
 export type LocationRelease = {
-  /** The user moved from `previous` to `next`. */
   directoryChanged: (previous: string | null | undefined, next: string | null | undefined) => void
-  /**
-   * Something that kept a directory busy let go. Directories waiting for
-   * their next busy re-check that `matches` accepts are looked at now.
-   */
   recheck: (matches: (directory: string) => boolean) => void
   dispose: () => void
 }
@@ -63,7 +43,6 @@ export type LocationRelease = {
 export function createLocationRelease<T>(deps: LocationReleaseDeps<T>): LocationRelease {
   const { timers } = deps
   const pending = new Map<string, T>()
-  // Directories found busy, with the delay their re-check runs at.
   const rechecking = new Map<string, number>()
   let disposed = false
 
@@ -86,8 +65,6 @@ export function createLocationRelease<T>(deps: LocationReleaseDeps<T>): Location
     if (disposed || deps.isCurrentDirectory(directory)) return
     const use = deps.directoryUse(directory)
     if (use === "unknown") return
-    // Work still running, or waiting on the user, is looked at again later:
-    // it usually finishes while the user is elsewhere.
     if (use === "busy") {
       schedule(directory, delayMs)
       rechecking.set(directory, delayMs)
@@ -103,8 +80,7 @@ export function createLocationRelease<T>(deps: LocationReleaseDeps<T>): Location
       if (disposed || previous === next) return
       if (next) cancel(next)
       if (!previous) return
-      const delayMs = deps.releaseDelayMs(previous)
-      if (delayMs !== null) schedule(previous, delayMs)
+      schedule(previous, deps.releaseDelayMs(previous))
     },
     recheck: (matches) => {
       if (disposed) return
@@ -123,12 +99,6 @@ export function createLocationRelease<T>(deps: LocationReleaseDeps<T>): Location
   }
 }
 
-/**
- * Whether anything in `directory` still needs its location: a running or
- * retrying session, a pending permission or form, a recap and suggestion the
- * server is still to write, or a background command.
- * `state` is the directory's store; without one the answer is unknown.
- */
 export function directoryUse(
   directory: string,
   state: Pick<State, "session_status" | "permission" | "form"> | undefined,
@@ -152,7 +122,6 @@ export function directoryUse(
   return shellRuns ? "busy" : "free"
 }
 
-/** Whether `directory` is a known worktree of a project or a sub-folder inside one, not the project root itself. */
 export function isWorktreeDirectory(
   directory: string,
   availableWorktreesByProject: ReadonlyMap<string, readonly WorktreeMetadata[]>,

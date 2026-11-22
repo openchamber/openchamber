@@ -162,7 +162,8 @@ describe('VS Code theme import', () => {
 
   test('rejects malformed, non-color and oversized input before saving', () => {
     expect(() => importVSCodeTheme('{', 'bad.json')).toThrow('invalid');
-    expect(() => importVSCodeTheme('{"colors":{"editor.background":"red; body {display:none}"}}', 'bad.json')).toThrow('invalid');
+    // A value that is not a color is dropped, as VS Code drops it, so this theme has no background left.
+    expect(() => importVSCodeTheme('{"colors":{"editor.background":"red; body {display:none}"}}', 'bad.json')).toThrow('background');
     expect(() => importVSCodeTheme(' '.repeat(MAX_THEME_IMPORT_BYTES + 1), 'large.json')).toThrow('size');
   });
 });

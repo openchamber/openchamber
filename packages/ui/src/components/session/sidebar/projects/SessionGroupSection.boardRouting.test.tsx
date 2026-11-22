@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-import type { GitHubReferenceKind, ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry, RepositoryReferenceKind } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { I18nProvider } from '@/lib/i18n';
 import type { Metadata, Session } from '@/lib/opencode/model';
@@ -182,7 +182,7 @@ describe('SessionGroupSection chip routing', () => {
       windowOpens.push(url ?? '');
       return null;
     };
-    const boardFocus: { projectId: string; kind: GitHubReferenceKind; query: string }[] = [];
+    const boardFocus: { projectId: string; kind: RepositoryReferenceKind; query: string }[] = [];
     const originalProjects = useProjectsStore.getState().projects;
     const originalBoard = useSourceBoardStore.getState();
     const originalWorktrees = useSessionUIStore.getState().availableWorktreesByProject;

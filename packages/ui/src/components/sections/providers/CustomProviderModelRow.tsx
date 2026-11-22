@@ -13,8 +13,7 @@ import { useI18n } from '@/lib/i18n';
 import { formatGoalTokens } from '@/lib/sessionGoalMetadata';
 import { cn } from '@/lib/utils';
 import type { ModelFieldErrors, ModelRow } from './custom-provider-form';
-
-const MODEL_CAPABILITIES = ['text', 'image', 'audio', 'video', 'pdf'] as const;
+import { MODEL_CAPABILITIES } from './model-capabilities';
 
 export type ModelTextField = 'id' | 'name' | 'variants' | 'contextWindow' | 'maxOutputTokens';
 export type ModelCapabilityList = 'inputCapabilities' | 'outputCapabilities';
@@ -27,6 +26,7 @@ type Props = {
   onChange: (key: ModelTextField, value: string) => void;
   onToggleCapability: (target: ModelCapabilityList, capability: string) => void;
   onToolsChange: (tools: boolean) => void;
+  onImageGenerationChange: (imageGeneration: boolean) => void;
   onRemove?: () => void;
 };
 
@@ -35,11 +35,6 @@ const positive = (value: string): number | null => {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
-/**
- * One model of a custom provider. Collapsed, it reads as a single line (name,
- * id, the limits and anything beyond plain text), so a provider with dozens
- * of imported models stays scannable; the editor opens on demand.
- */
 export const CustomProviderModelRow: React.FC<Props> = ({
   model,
   errors,
@@ -48,6 +43,7 @@ export const CustomProviderModelRow: React.FC<Props> = ({
   onChange,
   onToggleCapability,
   onToolsChange,
+  onImageGenerationChange,
   onRemove,
 }) => {
   const { t } = useI18n();
@@ -70,7 +66,7 @@ export const CustomProviderModelRow: React.FC<Props> = ({
   );
 
   return (
-    <div className="border-b border-border/50 last:border-b-0">
+    <div className="border-b border-edge last:border-b-0">
       <div className="flex items-center gap-1 py-1">
         <button
           type="button"
@@ -200,6 +196,13 @@ export const CustomProviderModelRow: React.FC<Props> = ({
               </div>
             </div>
           ))}
+
+          <SettingsCheckboxRow
+            checked={model.type === 'image'}
+            onChange={onImageGenerationChange}
+            label={t('settings.providers.page.custom.models.imageGeneration')}
+            ariaLabel={t('settings.providers.page.custom.models.imageGeneration')}
+          />
 
           <SettingsCheckboxRow
             checked={model.tools}

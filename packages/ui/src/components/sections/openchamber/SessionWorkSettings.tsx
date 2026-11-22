@@ -65,12 +65,6 @@ const SessionWorkEntryField: React.FC<{ disabled: boolean }> = ({ disabled }) =>
   );
 };
 
-/**
- * What the sidebar lists: the Chats section and "In work" (the sidebar block,
- * the Track / Done actions, and how sessions enter it on their own). Sessions
- * enter on their own through the OpenChamber server, which VS Code does not
- * have.
- */
 export const SessionWorkSettings: React.FC = () => {
   const { t } = useI18n();
   const isVSCode = isVSCodeRuntime();

@@ -8,6 +8,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { useDeviceInfo } from '@/lib/device';
@@ -31,19 +32,10 @@ interface ModelSelectorProps {
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
     directory?: string;
-    /**
-     * Drop the model name and the chevron, leaving the provider logo. For
-     * headers that run out of room before they run out of controls — the logo
-     * still says which provider is answering, which is the part a glance is
-     * usually after.
-     */
     compact?: boolean;
-    /**
-     * Offer the Auto routing row on top, as the composer does. Only for
-     * selections that are later sent through the routing rewrite (Session
-     * Defaults); a routing category or fallback must name a real model.
-     */
     offerAuto?: boolean;
+    triggerTooltip?: string;
+    disabled?: boolean;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -59,6 +51,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     compact = false,
     directory,
     offerAuto = false,
+    triggerTooltip,
+    disabled = false,
 }) => {
     const { t } = useI18n();
     const autoReady = useRoutingStore(selectAutoReady);
@@ -67,6 +61,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         : null), [autoReady, offerAuto, t]);
     const isAutoSelected = isAutoModel(providerId, modelId);
     const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
+    const canOpen = isReady && !disabled;
     const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
         ? state.providers : selectProvidersForDirectory(state, directory));
     const loadProviders = useConfigStore((state) => state.loadProviders);
@@ -95,7 +90,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
     const handleSelect = React.useCallback((entry: ModelPickerEntry) => {
         onChange(entry.providerID, entry.modelID);
-        // Auto has its own pinned row; it does not belong in Recent.
         if (!isAutoModel(entry.providerID, entry.modelID)) addRecentModel(entry.providerID, entry.modelID);
         closePicker();
     }, [addRecentModel, closePicker, onChange]);
@@ -126,7 +120,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
     const selectedModel = providerId && modelId ? { providerID: providerId, modelID: modelId } : null;
     const displayReady = isReady || Boolean(selectedModel);
-    // Show the model's display name (as in the picker list), not the raw provider/model id.
     const triggerLabel = React.useMemo(() => {
         if (!providerId || !modelId) {
             return placeholder || t('settings.agents.modelSelector.notSelected');
@@ -158,6 +151,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             tooltipsEnabled={tooltipsEnabled && (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen)}
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
+            {...(isActuallyMobile ? {
+                autoFocus: false,
+                maxHeightClassName: 'min-h-0 flex-1',
+                providersStartCollapsed: true,
+                showKeyboardHints: false,
+            } : null)}
         />
     );
 
@@ -166,11 +165,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <>
                 <button
                     type="button"
-                    onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
-                    disabled={!isReady}
+                    onClick={canOpen ? () => setIsMobilePanelOpen(true) : undefined}
+                    disabled={!canOpen}
                     className={cn(
                         dropdownTriggerVariants({ size: 'mobile' }),
-                        'w-full',
+                        'w-fit max-w-full',
                         className,
                     )}
                 >
@@ -195,6 +194,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     open={isMobilePanelOpen}
                     onClose={closePicker}
                     title={t('settings.agents.modelSelector.title')}
+                    scrollContent={false}
                 >
                     {picker}
                 </MobileOverlayPanel>
@@ -202,44 +202,46 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         );
     }
 
+    const trigger = (
+        <DropdownMenuTrigger asChild nativeButton={false}>
+            <div
+                className={cn(
+                    dropdownTriggerVariants(),
+                    'min-w-0 w-fit',
+                    !canOpen && 'opacity-60 cursor-not-allowed',
+                    className,
+                )}
+                title={compact && displayReady && !triggerTooltip ? triggerLabel : undefined}
+            >
+                {!displayReady ? (
+                    <>
+                        {isUnavailable ? <Icon name="error-warning" className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" /> : <Spinner className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
+                        {!compact && (
+                            <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
+                                {isUnavailable ? t('common.unavailable') : t('common.loading')}
+                            </span>
+                        )}
+                    </>
+                ) : (
+                    <>
+                        {isAutoSelected
+                            ? <Icon name="openchamber" className="h-3.5 w-3.5 flex-shrink-0" />
+                            : providerId
+                                ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" />
+                                : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
+                        {!compact && (
+                            <span className="typography-ui-label min-w-0 flex-1 truncate text-start font-normal text-foreground">{triggerLabel}</span>
+                        )}
+                    </>
+                )}
+                {!compact && <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />}
+            </div>
+        </DropdownMenuTrigger>
+    );
+
     return (
-        <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
-            <DropdownMenuTrigger asChild nativeButton={false}>
-                <div
-                    className={cn(
-                        dropdownTriggerVariants(),
-                        'min-w-0 w-fit',
-                        !isReady && 'opacity-60 cursor-not-allowed',
-                        className,
-                    )}
-                    // The name is gone from the trigger, so it has to stay
-                    // reachable somewhere.
-                    title={compact && displayReady ? triggerLabel : undefined}
-                >
-                    {!displayReady ? (
-                        <>
-                            {isUnavailable ? <Icon name="error-warning" className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" /> : <Spinner className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
-                            {!compact && (
-                                <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
-                                    {isUnavailable ? t('common.unavailable') : t('common.loading')}
-                                </span>
-                            )}
-                        </>
-                    ) : (
-                        <>
-                            {isAutoSelected
-                                ? <Icon name="openchamber" className="h-3.5 w-3.5 flex-shrink-0" />
-                                : providerId
-                                    ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" />
-                                    : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
-                            {!compact && (
-                                <span className="typography-ui-label min-w-0 flex-1 truncate text-start font-normal text-foreground">{triggerLabel}</span>
-                            )}
-                        </>
-                    )}
-                    {!compact && <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />}
-                </div>
-            </DropdownMenuTrigger>
+        <DropdownMenu open={canOpen && isDropdownOpen} onOpenChange={canOpen ? setIsDropdownOpen : undefined}>
+            {triggerTooltip ? <HoverTooltip label={triggerTooltip} side="bottom">{trigger}</HoverTooltip> : trigger}
             <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start" portalToBody={dropdownPortalToBody}>
                 {picker}
             </DropdownMenuContent>

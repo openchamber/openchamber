@@ -98,6 +98,13 @@ describe('space server channel: idle stop setting', () => {
 });
 
 describe('space server channel: default permission mode', () => {
+  it('delivers the user task name as stdin data with an atomic replacement', async () => {
+    const { channel, calls } = channelWith(ok());
+    await channel.writeUserTaskTitle(ID, { title: 'Name $(never a command)' });
+    expect(calls[0].options.stdin).toBe('{"title":"Name $(never a command)"}');
+    expect(calls[0].argv.join(' ')).not.toContain('never a command');
+    expect(calls[0].argv[2]).toContain('cat > /home/space/.openchamber-space/user-task-title.json.new && mv');
+  });
   it('writes the mode on stdin through a temporary name, beside the token', async () => {
     const { channel, calls } = channelWith(ok());
     await channel.writePermissionDefault(ID, { mode: 'auto' });

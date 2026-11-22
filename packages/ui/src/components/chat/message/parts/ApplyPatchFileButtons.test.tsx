@@ -115,11 +115,12 @@ describe('ApplyPatchFileButtons', () => {
                 });
             },
         }) as React.ReactElement<{ children: React.ReactNode }>;
-        // The deleted file renders as a plain span with no click handler.
-        // SAFETY: every fragment child is a button or span; the optional handler selects buttons only.
+        // The deleted file renders as a plain span; a button sits inside its tooltip, which alone has a label.
+        // SAFETY: every fragment child is a tooltip around a button, or a span; the optional label selects tooltips only.
         const buttons = (React.Children.toArray(tree.props.children) as React.ReactElement<{
-            onClick?: (event: { stopPropagation: () => void }) => void;
-        }>[]).filter((child) => child.props.onClick !== undefined);
+            label?: string;
+            children: React.ReactElement<{ onClick?: (event: { stopPropagation: () => void }) => void }>;
+        }>[]).filter((child) => child.props.label !== undefined).map((child) => child.props.children);
 
         buttons[0]?.props.onClick?.({ stopPropagation });
         buttons[1]?.props.onClick?.({ stopPropagation });

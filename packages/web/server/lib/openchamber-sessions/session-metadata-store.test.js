@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createSessionMetadataStore, mergeMetadataPatch } from './session-metadata-store.js';
+import { createOpenCodeSessionMetadata, createSessionMetadataStore, mergeMetadataPatch } from './session-metadata-store.js';
 
 const tempDirs = [];
 
@@ -19,6 +19,7 @@ afterEach(() => {
     fs.rmSync(tempDirs.pop(), { recursive: true, force: true });
   }
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('mergeMetadataPatch', () => {
@@ -48,6 +49,14 @@ describe('mergeMetadataPatch', () => {
     expect(mergeMetadataPatch(undefined, { a: 1 })).toEqual({ a: 1 });
     expect(mergeMetadataPatch('nope', { a: 1 })).toEqual({ a: 1 });
     expect(mergeMetadataPatch({ a: 1 }, 'nope')).toEqual({ a: 1 });
+  });
+
+  it('keeps unchecked retained values and merges dictionary names without treating inherited members as records', () => {
+    const retained = new Map([['key', 'value']]);
+    const merged = mergeMetadataPatch({ retained }, { constructor: { active: true }, toString: { active: true } });
+    expect(merged.retained).toBe(retained);
+    expect(merged.constructor).toEqual({ active: true });
+    expect(merged.toString).toEqual({ active: true });
   });
 });
 
@@ -91,6 +100,52 @@ const makeStore = (openCode, dataDir = makeDataDir()) => ({
 });
 
 describe('createSessionMetadataStore', () => {
+  it('keeps legacy session ids that name object prototype members', async () => {
+    const dataDir = makeDataDir();
+    writeLegacy(dataDir, '{"__proto__":{"kept":true},"constructor":{"kept":true}}');
+    const store = createSessionMetadataStore({ dataDir, openCode: createFakeOpenCode() });
+    expect(await store.get('__proto__')).toEqual({ kept: true });
+    expect(await store.get('constructor')).toEqual({ kept: true });
+  });
+  it('cancels one reader while shared legacy loading continues for another', async () => {
+    const load = Promise.withResolvers();
+    const openCode = createFakeOpenCode({ ses_1: { ready: true } });
+    const store = createSessionMetadataStore({
+      dataDir: makeDataDir(), openCode,
+      fsPromises: { ...fs.promises, readFile: async () => load.promise },
+    });
+    const controller = new AbortController();
+    const cancelled = store.get('ses_1', { signal: controller.signal }).catch((error) => error);
+    const other = store.get('ses_1');
+    controller.abort(new DOMException('Cleanup timed out', 'TimeoutError'));
+    expect((await cancelled).name).toBe('TimeoutError');
+    expect(openCode.read).not.toHaveBeenCalled();
+    load.resolve('{}');
+    expect(await other).toEqual({ ready: true });
+  });
+
+  it('cancels a hanging SDK session.get through the metadata store', async () => {
+    const entered = Promise.withResolvers();
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      entered.resolve(init.signal);
+      return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+    }));
+    const store = createSessionMetadataStore({
+      dataDir: makeDataDir(),
+      openCode: createOpenCodeSessionMetadata({
+        buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
+        getOpenCodeAuthHeaders: () => ({}),
+      }),
+    });
+    const controller = new AbortController();
+    const result = store.get('ses_hanging', { signal: controller.signal }).catch((error) => error);
+    const signal = await entered.promise;
+    expect(signal).toBeDefined();
+    controller.abort(new DOMException('Cleanup timed out', 'TimeoutError'));
+    expect(await result).toBeInstanceOf(Error);
+    expect(signal.aborted).toBe(true);
+  });
+
   it('reads metadata from OpenCode, and a session OpenCode does not know as empty', async () => {
     const openCode = createFakeOpenCode({ ses_1: { openchamber: { goal: { id: 'g1' } } } });
     const { store } = makeStore(openCode);
@@ -143,6 +198,7 @@ describe('createSessionMetadataStore', () => {
     await expect(store.setSessionMetadata('ses_1', { a: 1 })).rejects.toThrow('timeout');
     openCode.failRead = null;
     await expect(store.setSessionMetadata('ses_missing', { a: 1 })).rejects.toThrow('not found');
+    await expect(store.updateSessionMetadata('ses_missing', () => ({ a: 1 }))).rejects.toMatchObject({ _tag: 'SessionNotFoundError' });
 
     expect(openCode.write).not.toHaveBeenCalled();
     expect(openCode.sessions.get('ses_1')).toEqual({ keep: true });
@@ -166,13 +222,22 @@ describe('createSessionMetadataStore', () => {
     expect(openCode.write).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a missing id or a non-object patch', async () => {
-    const { store } = makeStore(createFakeOpenCode());
-    await expect(store.setSessionMetadata('', { a: 1 })).rejects.toThrow();
-    await expect(store.setSessionMetadata('ses_1', ['a'])).rejects.toThrow();
-  });
-
   describe('legacy sessions-metadata.json', () => {
+    it('serves and migrates only object entries from a mixed legacy file', async () => {
+      const openCode = createFakeOpenCode({
+        ses_ok: {}, ses_list: { keep: true }, ses_text: { keep: true }, ses_null: { keep: true },
+      });
+      const dataDir = makeDataDir();
+      writeLegacy(dataDir, { ses_ok: { a: 1 }, ses_list: ['a'], ses_text: 'nope', ses_null: null });
+      const { store } = makeStore(openCode, dataDir);
+
+      await expect(store.listUnmigrated()).resolves.toEqual({ ses_ok: { a: 1 } });
+      await expect(store.migrateLegacy()).resolves.toBe(0);
+      expect(Object.fromEntries(openCode.sessions)).toEqual({
+        ses_ok: { a: 1 }, ses_list: { keep: true }, ses_text: { keep: true }, ses_null: { keep: true },
+      });
+    });
+
     it('serves a legacy entry over the OpenCode record until it is migrated', async () => {
       const openCode = createFakeOpenCode({ ses_1: { openchamber: { kind: 'review' } } });
       const dataDir = makeDataDir();

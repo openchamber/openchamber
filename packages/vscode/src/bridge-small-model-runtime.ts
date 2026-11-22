@@ -1,4 +1,4 @@
-import { OpenCode } from '@opencode/client';
+import { OpenCode, type ModelSettings } from '@opencode/client';
 import { z } from 'zod';
 import type { BridgeResponse } from './bridge';
 import type { OpenCodeManager } from './opencode';
@@ -10,23 +10,20 @@ type BridgeMessageInput = {
 };
 
 type CatalogProvider = { id: string };
-type CatalogModel = { providerID: string; enabled?: boolean };
+type CatalogModel = { providerID: string; enabled?: boolean; settings?: ModelSettings };
 type SmallModelCatalog = { providers: CatalogProvider[]; models: CatalogModel[] };
 
-// The webview sends `{ directory }`; any other shape reads as no directory.
 const SmallModelRequest = z.object({ directory: z.string().optional() });
 
 type OpenCodeConnection = Pick<OpenCodeManager, 'getApiUrl' | 'getOpenCodeAuthHeaders'>;
 
-/**
- * Provider ids that have at least one enabled model, providers in OpenCode's
- * own order first. Mirrors `listAuthenticatedProviders` in the web server's
- * `lib/small-model/index.js`, which answers the same route there.
- */
+const isAnonymousZenModel = (model: CatalogModel): boolean => model.providerID === 'opencode'
+  && model.settings?.apiKey === 'public';
+
 const listAuthenticatedProviders = ({ providers, models }: SmallModelCatalog): string[] => {
   const enabled = new Set<string>();
   for (const model of models) {
-    if (model.enabled === false) continue;
+    if (model.enabled === false || isAnonymousZenModel(model)) continue;
     if (model.providerID) enabled.add(model.providerID);
   }
   const ids = new Set<string>();
@@ -37,8 +34,6 @@ const listAuthenticatedProviders = ({ providers, models }: SmallModelCatalog): s
   return Array.from(ids);
 };
 
-// Model lists are directory-scoped: without the header OpenCode answers for
-// its own working directory, which need not hold the project's models.
 export const readOpenCodeSmallModelCatalog = async (
   connection: OpenCodeConnection | undefined,
   directory: string | undefined,
@@ -56,14 +51,6 @@ export const readOpenCodeSmallModelCatalog = async (
   return { providers: providers.data, models: models.data };
 };
 
-/**
- * `GET /api/small-model` for the VS Code runtime, which has no OpenChamber
- * server to answer it. Only `authenticatedProviders` is computed: the Small
- * Model and walkthrough pickers read it to list models. `available` is left
- * out, so the availability store keeps "unknown" as it did before this route
- * existed here. A failed read is an error, never an empty list, so the picker
- * keeps its previous answer.
- */
 export async function handleSmallModelBridgeMessage(
   message: BridgeMessageInput,
   readCatalog: (directory: string | undefined) => Promise<SmallModelCatalog>,

@@ -4,30 +4,28 @@ import { useChatColumnActions, useChatSessionSelection } from './chatColumnSessi
 import { useSubagentRequest } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { canSavePermission } from './permissionSummary';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, type ShortcutActionId } from '@/lib/shortcuts';
+import { useUIStore } from '@/stores/useUIStore';
 
 type ColumnKind = 'main' | 'pinned';
 
-// Newest pending card of a chat owns that chat's keyboard; older cards wait
-// their turn. With a chat pinned in the side panel, each chat answers only the
-// keys pressed inside it (anywhere else counts as the main chat).
 const activePermissionCards: Array<{ id: string; column: ColumnKind }> = [];
 
 const columnOfEvent = (event: KeyboardEvent): ColumnKind => (
   event.target instanceof Element && event.target.closest('[data-chat-column="pinned"]') ? 'pinned' : 'main'
 );
 
-/**
- * The reply a key press gives: Alt+Enter allows once, Alt+Shift+Enter always
- * (only when the request has something to save), Alt+Backspace denies.
- */
 export const permissionShortcutReply = (
-  event: Pick<KeyboardEvent, 'key' | 'altKey' | 'shiftKey' | 'metaKey' | 'ctrlKey'>,
+  event: KeyboardEvent,
   canSave: boolean,
+  overrides?: Record<string, string>,
 ): PermissionReply | null => {
-  if (!event.altKey || event.metaKey || event.ctrlKey) return null;
-  if (event.key === 'Enter') return event.shiftKey ? (canSave ? 'always' : null) : 'once';
-  if (event.key === 'Backspace' && !event.shiftKey) return 'reject';
-  return null;
+  const pressed = (actionId: ShortcutActionId) => (
+    eventMatchesShortcut(event, getEffectiveShortcutCombo(actionId, overrides))
+  );
+  if (pressed('permission_allow_once')) return 'once';
+  if (pressed('permission_deny')) return 'reject';
+  return canSave && pressed('permission_allow_always') ? 'always' : null;
 };
 
 /** The message a deny-with-feedback reply carries; blank text is no message. */
@@ -54,17 +52,11 @@ export const permissionFeedbackKeyAction = (
   return isMobile ? null : 'submit';
 };
 
-/** The request was raised by a subagent below the session the user is looking at, at any depth. */
 export const usePermissionFromSubagent = (permission: PermissionRequest): boolean => {
   const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
   return useSubagentRequest(permission.sessionID, currentSessionId, currentSessionDirectory ?? undefined);
 };
 
-/**
- * Replies to one request and owns its keyboard shortcuts while it is the
- * newest pending one (see `permissionShortcutReply`). Shared by the inline
- * card and the dock.
- */
 export const usePermissionResponse = (
   permission: PermissionRequest,
   onResponse?: (response: PermissionReply) => void,
@@ -102,7 +94,7 @@ export const usePermissionResponse = (
         if (entry.column === target) owner = entry;
       }
       if (owner !== card) return;
-      const response = permissionShortcutReply(event, canSave);
+      const response = permissionShortcutReply(event, canSave, useUIStore.getState().shortcutOverrides);
       if (!response) return;
       event.preventDefault();
       event.stopPropagation();

@@ -1,16 +1,11 @@
-/**
- * The parts a user message shows.
- *
- * Two things happen here. Linked issues and pull requests render as link
- * attachments rather than context cards, so their context parts are mapped to
- * the display-only file part `FileAttachment` understands. And a file part that
- * merely repeats the range an inline comment already quotes is dropped, so the
- * message does not show the same lines twice.
- */
 
 import type { FilePart, Part, TextPart } from '@/lib/opencode/model';
-import { readContextPart } from '@/lib/messages/contextParts';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { readContextPart, type ContextPartPayload } from '@/lib/messages/contextParts';
+import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
+import type { SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
+import { repositoryIssueLinkMime, trackerItemLinkMime } from '@/lib/messages/attachmentPreview';
+
+const LEGACY_ISSUE_PROVIDER = 'github';
 
 const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
     const comments = parts
@@ -43,15 +38,23 @@ const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
     return redundant;
 };
 
-/**
- * The display-only file part a linked issue or pull request renders as. It
- * keeps the identity of the context part it replaces, and never goes back to
- * the server.
- */
-const linkAttachmentPart = (part: TextPart): FilePart | null => {
+export type InlineLinkedItem = Extract<ContextPartPayload, { kind: 'repository-issue' | 'repository-discussion' | 'change-request' | 'tracker-item' }>;
+
+const linkedItems = new WeakMap<Part, InlineLinkedItem>();
+
+export const linkedItemOfDisplayPart = (part: Part): InlineLinkedItem | null => linkedItems.get(part) ?? null;
+
+const linkAttachmentPart = (part: TextPart, descriptorOf: SourceControlDescriptorOf): FilePart | null => {
     const payload = readContextPart(part);
     if (!payload) return null;
+    const display = displayPartOf(part, payload, descriptorOf);
+    if (display && (payload.kind === 'repository-issue' || payload.kind === 'repository-discussion' || payload.kind === 'change-request' || payload.kind === 'tracker-item')) {
+        linkedItems.set(display, payload);
+    }
+    return display;
+};
 
+const displayPartOf = (part: TextPart, payload: ContextPartPayload, descriptorOf: SourceControlDescriptorOf): FilePart | null => {
     const identity = { id: part.id, sessionID: part.sessionID, messageID: part.messageID };
 
     switch (payload.kind) {
@@ -59,9 +62,16 @@ const linkAttachmentPart = (part: TextPart): FilePart | null => {
             return {
                 ...identity,
                 type: 'file',
-                // GitLab's has its own type so the chip shows GitLab's mark, not GitHub's.
-                mime: payload.provider === 'gitlab' ? 'application/vnd.openchamber.gitlab-issue-link' : 'application/vnd.github.issue-link',
+                mime: repositoryIssueLinkMime(payload.provider ?? LEGACY_ISSUE_PROVIDER),
                 filename: `Issue #${payload.number}: ${payload.title}`,
+                url: payload.url,
+            };
+        case 'repository-discussion':
+            return {
+                ...identity,
+                type: 'file',
+                mime: repositoryIssueLinkMime(payload.provider),
+                filename: `Discussion #${payload.number}: ${payload.title}`,
                 url: payload.url,
             };
         case 'change-request':
@@ -69,14 +79,14 @@ const linkAttachmentPart = (part: TextPart): FilePart | null => {
                 ...identity,
                 type: 'file',
                 mime: 'application/vnd.github.pull-request-link',
-                filename: `${payload.provider === 'gitlab' ? 'MR' : 'PR'} ${formatChangeRequestReference(payload.provider, payload.number)}: ${payload.title}`,
+                filename: `${formatChangeRequestLabel(descriptorOf(payload.provider), payload.number)}: ${payload.title}`,
                 url: payload.url,
             };
-        case 'linear-issue':
+        case 'tracker-item':
             return {
                 ...identity,
                 type: 'file',
-                mime: 'application/vnd.openchamber.linear-issue-link',
+                mime: trackerItemLinkMime(payload.provider),
                 filename: `${payload.identifier}: ${payload.title}`,
                 url: payload.url,
             };
@@ -85,7 +95,7 @@ const linkAttachmentPart = (part: TextPart): FilePart | null => {
                 ...identity,
                 type: 'file',
                 mime: 'application/vnd.openchamber.guest-issue-link',
-                filename: `${payload.id}: ${payload.title}`,
+                filename: payload.title === payload.id ? payload.id : `${payload.id}: ${payload.title}`,
                 url: payload.url,
             };
         case 'guest-pr':
@@ -101,9 +111,9 @@ const linkAttachmentPart = (part: TextPart): FilePart | null => {
     }
 };
 
-export const normalizeUserDisplayParts = (parts: Part[]): Part[] => {
+export const normalizeUserDisplayParts = (parts: Part[], descriptorOf: SourceControlDescriptorOf): Part[] => {
     const redundantFileUrls = redundantCommentFileUrls(parts);
     return parts
         .filter((part) => !(part.type === 'file' && redundantFileUrls.has(part.url)))
-        .map((part) => (part.type === 'text' ? linkAttachmentPart(part) ?? part : part));
+        .map((part) => (part.type === 'text' ? linkAttachmentPart(part, descriptorOf) ?? part : part));
 };

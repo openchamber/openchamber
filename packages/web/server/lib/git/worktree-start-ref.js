@@ -32,7 +32,7 @@ export const sanitizeWorktreeStartFromOverrides = (value) => {
 /**
  * Where a worktree made at `place` starts: its override, else the default for all.
  *
- * @param {{ worktreeStartFrom?: unknown, worktreeStartFromOverrides?: Record<string, unknown> } | null | undefined} settings
+ * @param {{ worktreeStartFrom?: unknown, worktreeStartFromOverrides?: unknown, [setting: string]: unknown } | null | undefined} settings
  * @param {string} place one of WORKTREE_START_PLACES
  * @returns {'project-root' | 'remote-default'}
  */
@@ -45,7 +45,7 @@ export const resolveWorktreeStartFrom = (settings, place) => {
 /**
  * Whether a worktree from a pull request starts a new branch from its head by default.
  *
- * @param {{ pullRequestWorktree?: unknown } | null | undefined} settings
+ * @param {{ pullRequestWorktree?: unknown, [setting: string]: unknown } | null | undefined} settings
  */
 export const branchesOffPullRequestsByDefault = (settings) => settings?.pullRequestWorktree === 'branch-off';
 

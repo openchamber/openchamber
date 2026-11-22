@@ -10,6 +10,8 @@ import { WorkStatusUsageSection } from './WorkStatusUsageSection';
 
 test('initial visible usage waits for readiness, then runs ahead of queued background metadata', async () => {
   const dom = installHookTestDom();
+  const locationDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
+  Object.defineProperty(window, 'location', { configurable: true, value: { protocol: 'http:' } });
   const root = createRoot(dom.container);
   const previousInitialized = useConfigStore.getState().isInitialized;
   const order: string[] = [];
@@ -40,6 +42,8 @@ test('initial visible usage waits for readiness, then runs ahead of queued backg
     await act(async () => root.unmount());
     load.mockRestore();
     useConfigStore.setState({ isInitialized: previousInitialized });
+    if (locationDescriptor) Object.defineProperty(window, 'location', locationDescriptor);
+    else Reflect.deleteProperty(window, 'location');
     dom.restore();
   }
 });

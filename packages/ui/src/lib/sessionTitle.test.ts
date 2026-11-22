@@ -174,14 +174,12 @@ describe('bounded history loading', () => {
   test('uses the real shared loader and stops paging as soon as three pairs are available', async () => {
     let requests = 0;
     const childStores = new ChildStoreManager();
-    // Records that go through a child store come back ordered by creation
-    // time, so this fixture stamps each pair with its own slot.
     const orderedPair = (ordinal: number, id: string): RecordEntry[] => {
       const created = ordinal * 10;
       const prompt = user(id);
       return [
-        { ...prompt, info: { id: `msg_${ordinal}_1`, sessionID: 'session', role: 'user', time: { created } } },
         assistant(id, { id: `msg_${ordinal}_2`, time: { created: created + 1, completed: created + 2 } }),
+        { ...prompt, info: { id: `msg_${ordinal}_1`, sessionID: 'session', role: 'user', time: { created } } },
       ];
     };
     // v2 pages messages newest-first through the loader's page source rather
@@ -190,7 +188,7 @@ describe('bounded history loading', () => {
       getSessionMessages: async () => {
         requests += 1;
         return {
-          items: requests === 1 ? orderedPair(3, 'three') : [...orderedPair(1, 'one'), ...orderedPair(2, 'two')],
+          items: requests === 1 ? orderedPair(3, 'three') : [...orderedPair(2, 'two'), ...orderedPair(1, 'one')],
           cursor: { next: requests === 1 ? 'older' : 'much-older' },
         };
       },
@@ -216,7 +214,7 @@ describe('bounded history loading', () => {
     let loads = 0;
     const state: ReturnType<SessionMessageLoader['getSnapshot']> = {
       status: 'ready', loadingKind: null, error: null, resolved: true,
-      limit: 50, cursor: 'cursor-0', complete: false, generation: 0, updatedAt: 1,
+      limit: 50, cursor: 'cursor-0', complete: false, generation: 0, updatedAt: 1, olderCompletedReplyIds: new Set(),
     };
     const loader = {
       ensure: async () => {},
@@ -235,7 +233,7 @@ describe('bounded history loading', () => {
     const error = new Error('offline');
     const loader = {
       ensure: async () => {}, loadOlder: async () => {},
-      getSnapshot: (): ReturnType<SessionMessageLoader['getSnapshot']> => ({ status: 'error', loadingKind: null, error, resolved: true, limit: 50, cursor: 'older', complete: false, generation: 0, updatedAt: 1 }),
+      getSnapshot: (): ReturnType<SessionMessageLoader['getSnapshot']> => ({ status: 'error', loadingKind: null, error, resolved: true, limit: 50, cursor: 'older', complete: false, generation: 0, updatedAt: 1, olderCompletedReplyIds: new Set() }),
     };
     await expect(loadSessionTitleTurns({ loader, target: { sessionID: 'session', directory: '/project' }, getRecords: () => pair('cached'), signal: new AbortController().signal })).rejects.toThrow('offline');
   });
@@ -244,6 +242,7 @@ describe('bounded history loading', () => {
     let state: ReturnType<SessionMessageLoader['getSnapshot']> = {
       status: 'error', loadingKind: null, error: new Error('offline'), resolved: true,
       limit: 50, cursor: undefined, complete: true, generation: 0, updatedAt: 1,
+      olderCompletedReplyIds: new Set(),
     };
     const loader = {
       ensure: async (_target: { directory: string; sessionID: string }, options?: { force?: boolean }) => {
@@ -273,6 +272,11 @@ describe('generation lifecycle', () => {
       });
       const { prompt } = z.object({ prompt: z.string() }).parse(body);
       expect(prompt.startsWith('**Current title:** Original\n\n---\n\n**User**')).toBe(true);
+      const { system } = z.object({ system: z.string() }).parse(body);
+      expect(system).toContain('only the user message decides the language');
+      expect(system).toContain('Most titles are two or three words');
+      expect(system).toContain('Leave out the name of the project');
+      expect(system).toContain('检查项目的 git 记录和未完成的计划 → 项目进度检查');
       calls += 1;
       return calls === 1 ? Response.json({ text: 'A useful title' }) : new Response('Unavailable', { status: 503 });
     };

@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { ProviderResult, QuotaProviderId } from '@/types';
-import { fetchQuota } from '@/lib/quota/fetchQuota';
+import { fetchConfiguredQuotaProviders, fetchQuota } from '@/lib/quota/fetchQuota';
 import { useQuotaStore } from './useQuotaStore';
 
 const result = (providerId: QuotaProviderId = 'claude'): ProviderResult => ({
@@ -197,6 +197,11 @@ describe('per-credential quota results', () => {
 });
 
 describe('quota request deadline', () => {
+  test('a provider list that never answers reads as unknown, so quota loads go on', async () => {
+    handleRequest = () => deferredResponse().promise;
+    expect(await fetchConfiguredQuotaProviders(15)).toBeNull();
+  });
+
   test('bounds a transport that never returns headers, even if it ignores abort', async () => {
     let signal: AbortSignal | null | undefined;
     const pending = deferredResponse();

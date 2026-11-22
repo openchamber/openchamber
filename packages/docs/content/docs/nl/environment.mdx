@@ -60,6 +60,10 @@ Start zonder webinterface bij `true` of `1`. De API-routes blijven beschikbaar v
 
 Origins die OpenChamber in een frame op hun eigen pagina mogen tonen, gescheiden door spaties, bijvoorbeeld `https://dash.example.com`. `*` staat elke site toe. Standaard mogen alleen OpenChamber zelf en de desktop- en mobiele apps het insluiten, zodat geen andere site over de knoppen heen kan leggen.
 
+### `OPENCHAMBER_TRUSTED_PROXIES`
+
+Adressen van reverse proxy's die op een andere machine of in een andere container draaien, gescheiden door komma's, zoals `192.168.1.10` of `172.18.0.0/16`. OpenChamber beperkt mislukte aanmeldpogingen per client en leest het adres van de client alleen uit `X-Forwarded-For` als het verzoek van deze machine of van een adres in deze lijst komt. Een proxy die niet in de lijst staat telt als één client, dus de mislukte pogingen van één persoon kunnen iedereen erachter een tijdje buitensluiten.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Stelt een andere gegevensmap in. De standaard is `~/.config/openchamber`.
@@ -113,6 +117,22 @@ Voorkomt bij `true` dat OpenChamber zelf een OpenCode-server start.
 ### `OPENCHAMBER_OPENCODE_HOSTNAME`
 
 Hostnaam waarop de door OpenChamber beheerde OpenCode-server luistert. Standaard `127.0.0.1`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Tijdslimiet voor een OpenCode-statuscontrole, in milliseconden. De standaardwaarde is `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Aantal opeenvolgende getelde mislukte statuscontroles voordat OpenChamber een nog draaiend beheerd OpenCode-proces herstart. De standaardwaarde is `20`. Bezige sessies kunnen de herstart uitstellen.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Overschrijft het interval voor statuscontroles van beheerd OpenCode, in milliseconden. Bepaalt ook de minimale tijd tussen getelde fouten. De standaardwaarde is `0`, waarmee het serverinterval van `15000` milliseconden behouden blijft.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+Hoelang OpenChamber een resultaat van een statuscontrole van beheerd OpenCode hergebruikt, in milliseconden. Ook mislukte resultaten worden hergebruikt. De standaardwaarde is `750`.
 
 ### `OPENCODE_BINARY`
 

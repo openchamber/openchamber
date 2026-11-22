@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { SyncEvent } from "@/lib/opencode/events"
 import { opencodeClient } from "@/lib/opencode/client"
 import { ChildStoreManager } from "../child-store"
-import { createEventRoutingIndex, handleEvent } from "../sync-context"
+import { createEventRoutingIndex, handleEvent, wakeDormantLocations } from "../sync-context"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { useAgentsStore } from "@/stores/useAgentsStore"
 import { useMcpStore } from "@/stores/useMcpStore"
@@ -252,5 +252,75 @@ describe("MCP status when a location shuts down", () => {
 
     expect(bootstraps).toEqual(["/open"])
     expect(statusReads).toEqual(["/open"])
+  })
+
+  // An app left open overnight restarted the directory on screen, MCP servers
+  // included, right after every hourly idle shutdown.
+  describe("with the window hidden or unfocused", () => {
+    const setUi = (visibilityState: "visible" | "hidden", focused: boolean) => {
+      Object.defineProperty(globalThis, "document", {
+        value: { visibilityState, hasFocus: () => focused },
+        configurable: true,
+      })
+    }
+
+    afterEach(() => {
+      Reflect.deleteProperty(globalThis, "document")
+      // The dormant set is module state; empty it for the next test.
+      wakeDormantLocations(childStores, null)
+    })
+
+    const away = [
+      { label: "hidden", visibility: "hidden", focused: false },
+      { label: "visible but unfocused", visibility: "visible", focused: false },
+    ] as const
+    for (const { label, visibility, focused } of away) test(`the directory on screen waits while the window is ${label}`, async () => {
+      setUi(visibility, focused)
+      const routing = createEventRoutingIndex()
+      handleEvent("/open", mcpStatusChanged, childStores, routing, getRuntimeKey())
+      handleEvent("/open", shutdown, childStores, routing, getRuntimeKey())
+      handleEvent("/open", mcpStatusChanged, childStores, routing, getRuntimeKey())
+      await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
+
+      expect(bootstraps).toEqual([])
+      expect(statusReads).toEqual([])
+      expect(useMcpStore.getState().byDirectory["/open"]).toBe(held)
+    })
+
+    test("coming back bootstraps it and reads its status once", async () => {
+      setUi("hidden", false)
+      handleEvent("/open", shutdown, childStores, createEventRoutingIndex(), getRuntimeKey())
+
+      setUi("visible", true)
+      wakeDormantLocations(childStores, "/open")
+      wakeDormantLocations(childStores, "/open")
+      await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
+
+      expect(bootstraps).toEqual(["/open"])
+      expect(statusReads).toEqual(["/open"])
+    })
+
+    test("a directory left while away is forgotten on return instead", async () => {
+      setUi("hidden", false)
+      handleEvent("/open", shutdown, childStores, createEventRoutingIndex(), getRuntimeKey())
+
+      wakeDormantLocations(childStores, "/left-chat")
+      await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
+
+      expect(bootstraps).toEqual([])
+      expect(statusReads).toEqual([])
+      expect(useMcpStore.getState().byDirectory["/open"]).toBeUndefined()
+    })
+
+    test("a shutdown while focused bootstraps at once and leaves nothing to wake", async () => {
+      setUi("hidden", false)
+      const routing = createEventRoutingIndex()
+      handleEvent("/open", shutdown, childStores, routing, getRuntimeKey())
+      setUi("visible", true)
+      handleEvent("/open", shutdown, childStores, routing, getRuntimeKey())
+      wakeDormantLocations(childStores, "/open")
+
+      expect(bootstraps).toEqual(["/open"])
+    })
   })
 })

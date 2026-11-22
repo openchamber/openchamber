@@ -8,15 +8,10 @@ export type ScheduledTask = {
   name: string;
   enabled: boolean;
   targetSessionId?: string;
-  /** Absolute path of the `.agents/loops/*.md` file driving this task, when
-   *  any. Present only for loop-sourced tasks; unknown to older clients. */
   loopFile?: string;
   /** Per-task run limit in milliseconds (#765). Absent = inherit the
    *  server-wide `scheduledTasksMaxRunDurationMs` setting / shipped default. */
   maxRunDurationMs?: number;
-  /** Why a repository loop whose file says `enabled: true` is paused here:
-   *  never enabled on this machine (`required`), or changed since it was
-   *  (`outdated`). Absent when nothing holds the loop back. */
   loopApproval?: 'required' | 'outdated';
   schedule: {
     kind: 'daily' | 'weekly' | 'once' | 'cron';
@@ -29,10 +24,8 @@ export type ScheduledTask = {
   };
   execution: {
     prompt: string;
-    /** Absent on a task that follows the session defaults and was never pinned. */
     providerID?: string;
     modelID?: string;
-    /** Model, thinking level and agent come from the session defaults at run time. */
     useDefaults?: boolean;
     variant?: string;
     agent?: string;
@@ -40,6 +33,9 @@ export type ScheduledTask = {
     goalTokenBudget?: number;
     permissionAutoAccept?: boolean;
   };
+  runInWorktree?: boolean;
+  cleanupWorktree?: boolean;
+  baseBranch?: string;
   state: {
     createdAt: number;
     updatedAt: number;
@@ -48,6 +44,8 @@ export type ScheduledTask = {
     lastError?: string;
     lastDurationMs?: number;
     lastSessionId?: string;
+    lastRunIsolated?: boolean;
+    lastRunBranch?: string;
     nextRunAt?: number;
   };
 };
@@ -110,13 +108,6 @@ const eligibleTargetsResponseSchema = z.object({
   eligible: z.array(z.object({ sessionId: z.string().min(1) })),
 });
 
-/**
- * Which of the candidates a save or run would accept, answered by the
- * scheduler's own membership rule so the picker can never disagree with it.
- * The route takes at most 500 candidates, so larger lists go in batches. A
- * failed request or a malformed answer throws: the caller shows an error
- * instead of an empty list that looks like "no sessions".
- */
 export const fetchEligibleScheduledTaskTargets = async (
   projectID: string,
   candidates: Array<{ sessionId: string; directory: string }>,
@@ -191,9 +182,6 @@ export const syncScheduledTaskLoops = async (projectID: string): Promise<void> =
   await fetchScheduledTasks(projectID);
 };
 
-// A malformed field is dropped on its own; the rest of the answer still counts.
-// `directory` is where the run's session lives: a chats-scope run opens a new
-// chat directory, a project run reports the project path.
 const RunNowResponseSchema = z.object({
   sessionId: z.string().min(1).optional().catch(undefined),
   directory: z.string().min(1).optional().catch(undefined),
@@ -202,7 +190,6 @@ const RunNowResponseSchema = z.object({
 
 const BusyResponseSchema = z.object({ busy: z.enum(['running', 'queued']) });
 
-/** Run now refused because the task already has a run in flight or queued. */
 export class ScheduledTaskBusyError extends Error {
   constructor(readonly busy: 'running' | 'queued', message: string) {
     super(message);

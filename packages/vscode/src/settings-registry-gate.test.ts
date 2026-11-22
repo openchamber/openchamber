@@ -5,6 +5,7 @@ import { SETTINGS_REGISTRY_FIELDS, filterPersistableSettingsChanges, withoutSecr
 const fields: SettingsRegistryGateFields = {
   themeId: { scope: 'profile' },
   smallModelOverride: { scope: 'profile' },
+  smallModelVariant: { scope: 'profile' },
   hasDesktopSettings: { scope: 'instance', computed: true },
   sidebarWidth: { scope: 'device', local: true },
   windowBounds: { scope: 'instance', owner: 'desktop-shell' },
@@ -65,10 +66,16 @@ describe('filterPersistableSettingsChanges', () => {
       themeId: 'nord',
       smallModelUseDefault: false,
       smallModelOverride: 'zen/gpt-5-nano',
+      smallModelVariant: 'high',
       gitProviderId: 'zen',
       gitModelId: 'gpt-5-nano',
     });
-    assert.deepEqual(result, { themeId: 'nord', smallModelUseDefault: false, smallModelOverride: 'zen/gpt-5-nano' });
+    assert.deepEqual(result, {
+      themeId: 'nord',
+      smallModelUseDefault: false,
+      smallModelOverride: 'zen/gpt-5-nano',
+      smallModelVariant: 'high',
+    });
 
     const computedKeys = Object.entries(SETTINGS_REGISTRY_FIELDS).filter(([, field]) => field.computed).map(([key]) => key);
     const localKeys = Object.entries(SETTINGS_REGISTRY_FIELDS).filter(([, field]) => field.local).map(([key]) => key);

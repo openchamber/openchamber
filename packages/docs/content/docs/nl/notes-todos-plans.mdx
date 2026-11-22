@@ -42,6 +42,14 @@ Agents lezen en werken dezelfde notities, taken en plannen bij via de projectken
 Een agent werkt aan het project waartoe zijn sessie behoort, worktrees inbegrepen. Als een agent een notitie of plan wijzigt terwijl u erin typt, wordt uw tekst over de wijziging van de agent heen opgeslagen. Agents wordt gevraagd de gelezen tekst mee te sturen bij een notitie of plan dat ze volledig vervangen; is die intussen veranderd, dan wordt de schrijfactie geweigerd en leest de agent opnieuw.
 
 De tool staat standaard aan. Schakel hem uit in **Settings → General → OpenChamber Tools** met **Project knowledge tool**. Net als de andere OpenChamber-tools is hij er alleen wanneer OpenChamber zijn eigen OpenCode-server draait, dus niet met een externe server of in de VS Code-extensie.
+Een agent kan een notitie of taak aan een plan koppelen en een taak afhankelijk maken van andere taken in hetzelfde plan; een taak zonder plan heeft geen afhankelijkheden. De agent kan de taken opvragen die klaar zijn: onafgeronde taken waarvan alle afhankelijkheden zijn afgerond. Als u een taak verwijdert, verdwijnt die uit de afhankelijkheden van andere taken, en als u een plan verwijdert, worden de notities en taken ervan losgekoppeld. Een agent kan ook de sessie die aan een plan gekoppeld is instellen of wissen.
+
+## Notities en taken in de repository
+
+Notities en taken worden opgeslagen in de eigen gegevens van OpenChamber op deze machine. Om ze via Git te synchroniseren, opent u **Instellingen → Projecten**, kiest u het project en zet u op het tabblad General **Notities en taken in de repository bewaren** aan. Daarna worden ze bewaard in `.openchamber/notes-todos.json`; commit dat bestand zoals elk ander. De optie geldt alleen voor deze machine, dus zet hem aan op elke machine die het bestand moet gebruiken.
+
+Zet u de optie aan, dan worden uw notities en taken naar het bestand verplaatst, na de items die er al in staan. Zet u haar uit, dan worden de items uit het bestand teruggekopieerd naar deze machine, en het bestand blijft in de repository. Plannen horen niet in het bestand; om een plan te delen, verplaatst u het naar de plannenmap van de repository. Heeft het bestand een Git-conflict, dan kan het paneel notities en taken pas weer laden of opslaan als u het bestand herstelt.
+
 ## Zie ook
 
 - [Worktree-sessies](/nl/worktrees/) om een taak in een eigen branch uit te voeren

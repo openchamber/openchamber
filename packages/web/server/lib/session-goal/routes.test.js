@@ -1,11 +1,12 @@
 import express from 'express';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import request from 'supertest';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-
+import { afterAll, beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
 import { registerSessionGoalRoutes } from './routes.js';
+import fsp from 'node:fs/promises';
+
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-routes-'));
 process.env.OPENCHAMBER_DATA_DIR = dataDir;
@@ -181,5 +182,72 @@ describe('goal objective versions (#1830)', () => {
     const objective = await request(app).get(`/api/goals/objective/${sessionId}`).expect(200);
     expect(objective.body).toEqual({ content: 'saved anyway' });
     consoleError.mockRestore();
+  });
+});
+
+// Upstream's suite runs with its own data dir per test, scoped here so its
+// hooks do not reach the fork's suite above.
+describe('upstream session goal routes', () => {
+
+  let upstreamDataDir;
+  let handlers;
+
+  beforeEach(async () => {
+    upstreamDataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'openchamber-goal-routes-'));
+    vi.stubEnv('OPENCHAMBER_DATA_DIR', upstreamDataDir);
+    handlers = {};
+    // Only the objective routes themselves; the versions and goal-writer routes are tested elsewhere.
+    registerSessionGoalRoutes(Object.fromEntries(['put', 'get', 'delete', 'post'].map((method) => [
+      method,
+      (route, handler) => { if (route === '/api/goals/objective/:sessionId') handlers[method] = handler; },
+    ])));
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fsp.rm(upstreamDataDir, { recursive: true, force: true });
+  });
+
+  const request = async (method, body, sessionId = 'ses_routes') => {
+    const response = {
+      statusCode: 200,
+      status(code) { this.statusCode = code; return this; },
+      json(value) { this.body = value; },
+    };
+    await handlers[method]({ params: { sessionId }, body }, response);
+    return { status: response.statusCode, body: response.body };
+  };
+
+  describe('goal objective routes', () => {
+    it.each([
+      ['  finish  ', 'finish'],
+      [42, '42'],
+      [false, 'false'],
+      [['a', 'b'], 'a,b'],
+      [{ task: 'finish' }, '[object Object]'],
+    ])('preserves JSON content coercion for %j', async (content, expected) => {
+      expect(await request('put', { content })).toMatchObject({ status: 200, body: { ok: true } });
+      expect(await request('get')).toEqual({ status: 200, body: { content: expected } });
+      expect(await request('delete')).toEqual({ status: 200, body: { ok: true } });
+      expect(await request('get')).toEqual({ status: 404, body: { error: 'objective not found' } });
+    });
+
+    it.each([undefined, null, false, 42, 'text', [], {}, { content: null }])(
+      'rejects a body without objective content: %j',
+      async (body) => {
+        expect(await request('put', body)).toEqual({
+          status: 400,
+          body: { error: 'objective content is required' },
+        });
+      },
+    );
+
+    it('rejects invalid session ids before writing', async () => {
+      expect(await request('put', { content: 'finish' }, 'abc')).toEqual({
+        status: 400,
+        body: { error: 'invalid session id' },
+      });
+      expect(await fsp.readdir(upstreamDataDir)).toEqual([]);
+    });
   });
 });

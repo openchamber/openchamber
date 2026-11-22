@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 
 const gitLibraries = {
+  getPathDiff: vi.fn(),
+  getPathDiffs: vi.fn(),
+  getFileDiff: vi.fn(),
+  getLog: vi.fn(),
   stageFiles: vi.fn(),
   unstageFiles: vi.fn(),
   isGitRepository: vi.fn(),
   getStatus: vi.fn(),
   createWorktree: vi.fn(),
+  seedBranchTaskTitle: vi.fn(),
+  setWorktreeTaskTitle: vi.fn(),
+  markGeneratedBranchName: vi.fn(),
   validateWorktreeCreate: vi.fn(),
   getWorktrees: vi.fn(),
   resolvePrimaryWorktreeRoot: vi.fn(),
@@ -30,6 +38,11 @@ const gitLibraries = {
   getLog: vi.fn(),
   getCommitFiles: vi.fn(),
   resolveWorktreeTopLevel: vi.fn(),
+  teardownWorktree: vi.fn(),
+  archiveWorktree: vi.fn(),
+  listWorktreeArchives: vi.fn(),
+  deleteWorktreeArchive: vi.fn(),
+  inspectContributorCheckoutActions: vi.fn(),
 };
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -82,12 +95,91 @@ const createMockResponse = () => {
   };
 };
 
+it('streams a complete non-repository status beside valid repository statuses', async () => {
+  const { app, getRoute } = createRouteRegistry();
+  registerGitRoutes(app, { gitLibraryService: gitLibraries });
+  gitLibraries.isGitRepository.mockImplementation(async directory => directory !== '/plain-folder');
+  const status = { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true };
+  gitLibraries.getStatus.mockResolvedValue(status);
+  // Resolve the route registry's lazy import before its concurrent workers.
+  await getRoute('GET', '/api/git/check')({ query: { directory: '/plain-folder' } }, createMockResponse());
+  gitLibraries.isGitRepository.mockClear();
+  const lines = [];
+  const response = Object.assign(new EventEmitter(), {
+    setHeader() {}, flushHeaders() {}, end() {},
+    write(line) { lines.push(JSON.parse(line)); return true; },
+  });
+  await getRoute('POST', '/api/git/status/batch')({ body: { directories: ['/plain-folder', '/repo'] } }, response);
+  expect(lines).toEqual([
+    { directory: '/plain-folder', isGitRepository: false, status: { ...status, current: '' } },
+    { directory: '/repo', isGitRepository: true, status },
+  ]);
+});
+
+describe('worktree title ownership', () => {
+  it.each([[undefined, 'user'], ['user', 'user'], ['agent', 'agent']])('accepts %s ownership as %s', async (by, expected) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+    gitLibraries.setWorktreeTaskTitle.mockResolvedValueOnce({ title: 'Task', branch: 'fix/task', applied: true });
+    const response = createMockResponse();
+    await getRoute('PUT', '/api/git/worktrees/title')({ query: { directory: '/wt' }, body: { title: 'Task', by } }, response);
+    expect(response.statusCode).toBe(200);
+    expect(gitLibraries.setWorktreeTaskTitle).toHaveBeenLastCalledWith('/wt', { title: 'Task', by: expected });
+  });
+
+  it('refuses unknown ownership', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+    const response = createMockResponse();
+    const calls = gitLibraries.setWorktreeTaskTitle.mock.calls.length;
+    await getRoute('PUT', '/api/git/worktrees/title')({ query: { directory: '/wt' }, body: { title: 'Task', by: 'unknown' } }, response);
+    expect(response.statusCode).toBe(400);
+    expect(gitLibraries.setWorktreeTaskTitle.mock.calls.length).toBe(calls);
+  });
+});
+
+describe('git diff failures', () => {
+  it.each([
+    ['GET', 'diff', 'getPathDiff'],
+    ['GET', 'file-diff', 'getFileDiff'],
+    ['POST', 'diffs', 'getPathDiffs'],
+  ])('keeps unexpected %s %s failures as 500', async (method, endpoint, operation) => {
+    gitLibraries[operation].mockRejectedValueOnce(new Error('permission denied'));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+    const response = createMockResponse();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await getRoute(method, `/api/git/${endpoint}`)({ query: { directory: '/repo', path: 'file.txt' }, body: { paths: ['file.txt'] } }, response);
+      expect(response.statusCode).toBe(500);
+      expect(response.body).toEqual({ error: 'permission denied' });
+      expect(error).toHaveBeenCalledOnce();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it.each([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422]])('preserves %s path errors', async (code, status) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+    for (const [endpoint, operation] of [['diff', 'getPathDiff'], ['file-diff', 'getFileDiff']]) {
+      gitLibraries[operation].mockRejectedValueOnce(Object.assign(new Error('Path unavailable'), { code }));
+      const response = createMockResponse();
+      await getRoute('GET', `/api/git/${endpoint}`)({ query: { directory: '/repo', path: 'file.txt' } }, response);
+      expect(response.statusCode).toBe(status);
+      expect(response.body).toEqual({ code, error: 'Path unavailable' });
+    }
+  });
+});
+
 describe('git route renderer DTOs', () => {
   beforeEach(() => {
     gitLibraries.getGlobalIdentity.mockReset();
     gitLibraries.getCurrentIdentity.mockReset();
     gitLibraries.getRemoteUrl.mockReset();
     gitLibraries.getRemotes.mockReset();
+    gitLibraries.getRepositoryRemoteUrls.mockReset();
+    gitLibraries.getRepositoryRemoteUrls.mockResolvedValue([]);
     gitLibraries.getProfiles.mockReset();
     gitLibraries.createProfile.mockReset();
     gitLibraries.updateProfile.mockReset();
@@ -147,6 +239,29 @@ describe('git route renderer DTOs', () => {
 
     expect(urlResponse.body).toEqual({ url: null });
     expect(remotesResponse.body).toEqual([{ name: 'origin', fetchUrl: '', pushUrl: '' }]);
+  });
+
+  it('does not offer a remote that is a path on disk', async () => {
+    gitLibraries.getRemotes.mockResolvedValue([
+      // A path with a space reads as empty here, the way simple-git splits it.
+      { name: 'backup', fetchUrl: '', pushUrl: '' },
+      { name: 'mirror', fetchUrl: 'https://example.com/team/mirror.git', pushUrl: 'file:///srv/git/mirror.git' },
+      { name: 'origin', fetchUrl: 'git@example.com:team/repo.git', pushUrl: 'git@example.com:team/repo.git' },
+    ]);
+    gitLibraries.getRepositoryRemoteUrls.mockResolvedValue([
+      { name: 'backup', fetchUrl: '/srv/My Drive/project.git', pushUrl: '/srv/My Drive/project.git' },
+      { name: 'mirror', fetchUrl: 'https://example.com/team/mirror.git', pushUrl: 'file:///srv/git/mirror.git' },
+      { name: 'origin', fetchUrl: 'git@example.com:team/repo.git', pushUrl: 'git@example.com:team/repo.git' },
+    ]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/remotes')({ query: { directory: '/repo' } }, response);
+
+    expect(response.body).toEqual([
+      { name: 'origin', fetchUrl: 'git@example.com:team/repo.git', pushUrl: 'git@example.com:team/repo.git' },
+    ]);
   });
 
   it('projects stored profiles to the public author DTO', async () => {
@@ -259,6 +374,39 @@ describe('git route renderer DTOs', () => {
   });
 });
 
+describe('git log errors', () => {
+  it('returns a missing revision as 404 without logging a server failure', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+    gitLibraries.getLog.mockRejectedValueOnce(Object.assign(new Error("Revision 'feature' not found"), { code: 'revision_not_found' }));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = createMockResponse();
+      await getRoute('GET', '/api/git/log')({ query: { directory: '/repo', to: 'feature' } }, res);
+      expect(res.statusCode).toBe(404);
+      expect(res.body).toMatchObject({ code: 'revision_not_found' });
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('keeps unexpected Git failures as server errors', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+    gitLibraries.getLog.mockRejectedValueOnce(new Error('Git failed'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = createMockResponse();
+      await getRoute('GET', '/api/git/log')({ query: { directory: '/repo', to: 'feature' } }, res);
+      expect(res.statusCode).toBe(500);
+      expect(log).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
+  });
+});
+
 describe('git routes index mutations', () => {
   beforeEach(() => {
     gitLibraries.stageFiles.mockReset();
@@ -362,6 +510,26 @@ describe('contributor worktree authority', () => {
     gitLibraries.validateWorktreeCreate.mockReset();
     gitLibraries.validateWorktreeCreate.mockResolvedValue({ ok: true, errors: [] });
     gitLibraries.createWorktree.mockResolvedValue({ path: '/repo-pr-42' });
+  });
+
+  it('answers a stored source SHA that is not a string as a changed checkout without deciding trust', async () => {
+    const record = {
+      repositoryId: 'repo_one', revision: 4,
+      provenance: { kind: 'contributor-fork', sourceSha: ['a'.repeat(40)], setupCommand: '' },
+    };
+    const decideCheckoutTrust = vi.fn();
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries,
+      contributorProvenance: { read: vi.fn(async () => record) },
+      networkOperations: { decideCheckoutTrust },
+    });
+    for (const [method, body] of [['GET', undefined], ['POST', { digest: 'digest', decision: 'run' }]]) {
+      const response = createMockResponse();
+      await getRoute(method, '/api/git/worktrees/checkout-trust')({ query: { directory: '/repo' }, body }, response);
+      expect(response.statusCode).toBe(409);
+      expect(response.body).toEqual({ error: 'Git repository configuration changed', code: 'STALE_CONFIG' });
+    }
+    expect(decideCheckoutTrust).not.toHaveBeenCalled();
   });
 
   it('uses only a server-resolved endpoint and managed transfer', async () => {
@@ -662,6 +830,107 @@ describe('git worktree topology routes', () => {
   });
 });
 
+describe('git worktree archive routes', () => {
+  const worktreeBootstrapStore = { remove: vi.fn() };
+
+  it('archives with the sessions, the bootstrap store and a disposal hook, like a removal', async () => {
+    gitLibraries.archiveWorktree.mockResolvedValue({ id: 'a1' });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries,
+      worktreeBootstrapStore,
+      buildOpenCodeUrl: (routePath) => `http://opencode.test${routePath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+    });
+    const response = createMockResponse();
+    await getRoute('POST', '/api/git/worktrees/archives')(
+      { query: { directory: '/repo' }, body: { directory: '/repo/wt', id: 'a1', sessionIds: ['ses_1'] } },
+      response,
+    );
+    expect(response.statusCode).toBe(200);
+    expect(gitLibraries.archiveWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
+      directory: '/repo/wt',
+      id: 'a1',
+      sessionIds: ['ses_1'],
+      disposeInstance: expect.any(Function),
+    }), { bootstrapStore: worktreeBootstrapStore });
+  });
+
+  it('answers 404 for an archive that is gone', async () => {
+    gitLibraries.deleteWorktreeArchive.mockRejectedValue(Object.assign(new Error('Worktree archive not found'), { code: 'WORKTREE_ARCHIVE_NOT_FOUND' }));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, worktreeBootstrapStore });
+    const response = createMockResponse();
+    await getRoute('DELETE', '/api/git/worktrees/archives')({ query: { directory: '/repo' }, body: { id: 'gone' } }, response);
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('lists the archives of the project', async () => {
+    gitLibraries.listWorktreeArchives.mockResolvedValue([{ id: 'a1' }]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, worktreeBootstrapStore });
+    const response = createMockResponse();
+    await getRoute('GET', '/api/git/worktrees/archives')({ query: { directory: '/repo' } }, response);
+    expect(response.body).toEqual({ archives: [{ id: 'a1' }] });
+  });
+});
+
+describe('git worktree teardown routes', () => {
+  const worktreeBootstrapStore = { remove: vi.fn() };
+  const teardownFailure = () => Object.assign(new Error('Worktree teardown command failed, so the worktree was kept: no compose file'), { code: 'WORKTREE_TEARDOWN_FAILED' });
+
+  beforeEach(() => {
+    gitLibraries.removeWorktree.mockReset();
+    gitLibraries.archiveWorktree.mockReset();
+    gitLibraries.teardownWorktree.mockReset();
+  });
+
+  it('tells removal and teardown alone which checkouts are a contributor fork, and fails closed', async () => {
+    const read = vi.fn(async (directory) => {
+      if (directory === '/repo/broken') throw new Error('provenance store unreadable');
+      return { provenance: directory === '/repo/fork' ? { kind: 'contributor-fork' } : null };
+    });
+    gitLibraries.removeWorktree.mockResolvedValue(true);
+    gitLibraries.teardownWorktree.mockResolvedValue(true);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, worktreeBootstrapStore, contributorProvenance: { read } });
+
+    await getRoute('DELETE', '/api/git/worktrees')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
+    await getRoute('POST', '/api/git/worktrees/teardown')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
+
+    const hooks = [
+      gitLibraries.removeWorktree.mock.calls[0][1],
+      gitLibraries.teardownWorktree.mock.calls[0][1],
+    ];
+    for (const input of hooks) {
+      expect(input.teardownCommand).toBe('./scripts/stop.sh');
+      await expect(input.isContributorCheckout('/repo/fork')).resolves.toBe(true);
+      await expect(input.isContributorCheckout('/repo/own')).resolves.toBe(false);
+      await expect(input.isContributorCheckout('/repo/broken')).rejects.toThrow('provenance store unreadable');
+    }
+  });
+
+  it('answers a failed teardown with its code, on a delete and on a teardown alone', async () => {
+    gitLibraries.removeWorktree.mockRejectedValue(teardownFailure());
+    gitLibraries.teardownWorktree.mockRejectedValue(teardownFailure());
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, worktreeBootstrapStore });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const removal = createMockResponse();
+      await getRoute('DELETE', '/api/git/worktrees')({ query: { directory: '/repo' }, body: { directory: '/repo/wt', teardownCommand: 'docker compose down' } }, removal);
+      const teardown = createMockResponse();
+      await getRoute('POST', '/api/git/worktrees/teardown')({ query: { directory: '/repo' }, body: { directory: '/repo/wt', teardownCommand: 'docker compose down' } }, teardown);
+      for (const response of [removal, teardown]) {
+        expect(response.statusCode).toBe(500);
+        expect(response.body).toEqual({ error: 'Worktree teardown command failed, so the worktree was kept: no compose file', code: 'WORKTREE_TEARDOWN_FAILED' });
+      }
+      expect(gitLibraries.teardownWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({ directory: '/repo/wt', teardownCommand: 'docker compose down' }));
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
+
 describe('git worktree removal instance disposal', () => {
   let fetchMock;
   const worktreeBootstrapStore = { remove: vi.fn() };
@@ -921,7 +1190,7 @@ describe('git routes status discovery', () => {
     const contributorProvenance = { read: vi.fn(async () => ({})) };
     const getSourceControlBinding = vi.fn(async () => ({}));
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { contributorProvenance, getSourceControlBinding });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, contributorProvenance, getSourceControlBinding });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/contributor-destinations')(
@@ -945,6 +1214,24 @@ describe('git routes status discovery', () => {
     );
 
     expect(response.statusCode).toBe(501);
+  });
+
+  it("answers Git's own message when Git could not tell whether the folder is a repository", async () => {
+    const message = "fatal: detected dubious ownership in repository at 'E:/Gitea/app'";
+    gitLibraries.isGitRepository.mockRejectedValue(Object.assign(new Error(message), { code: 'GIT_REPOSITORY_UNREADABLE' }));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+
+    const status = createMockResponse();
+    await getRoute('GET', '/api/git/status')({ query: { directory: '/opened/project' } }, status);
+    expect(status.statusCode).toBe(500);
+    expect(status.body).toEqual({ error: message, code: 'GIT_REPOSITORY_UNREADABLE' });
+
+    const check = createMockResponse();
+    await getRoute('GET', '/api/git/check')({ query: { directory: '/opened/project' } }, check);
+    expect(check.statusCode).toBe(500);
+    expect(check.body).toEqual({ error: message, code: 'GIT_REPOSITORY_UNREADABLE' });
+    expect(gitLibraries.getStatus).not.toHaveBeenCalled();
   });
 });
 
@@ -970,7 +1257,7 @@ describe('git network operation routes', () => {
       cancel: vi.fn(() => ({ ...snapshot, state: 'cancelled', error: { code: 'CANCELLED', message: 'Cancelled' } })),
     };
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { networkOperations });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, networkOperations });
 
     const planned = createMockResponse();
     await getRoute('POST', '/api/git/network-operations')({ body: { operation: 'clone' } }, planned);
@@ -996,7 +1283,7 @@ describe('git network operation routes', () => {
     const selection = { selectionId: 'git_destination_one', provenanceRevision: 2, sourceSha: 'a'.repeat(40), expiresInMs: 900_000 };
     const networkOperations = { issueContributorDestination: vi.fn(async () => selection) };
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { networkOperations });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, networkOperations });
     const response = createMockResponse();
     const body = { directory: '/repo', destinationRef: 'refs/heads/feature' };
     await getRoute('POST', '/api/git/contributor-destinations')({ body }, response);
@@ -1037,7 +1324,7 @@ describe('git network operation routes', () => {
     const getSourceControlBinding = vi.fn(async () => read);
     const resolveSourceControlAccount = vi.fn(async () => ({ user: { login: 'alice' } }));
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, {
+    registerGitRoutes(app, { gitLibraryService: gitLibraries,
       contributorProvenance: { read: vi.fn(async () => record) }, getSourceControlBinding, resolveSourceControlAccount,
     });
     const list = async () => {
@@ -1114,7 +1401,7 @@ describe('git network operation routes', () => {
 
   it('identifies an ordinary worktree without attempting contributor sync', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, {
+    registerGitRoutes(app, { gitLibraryService: gitLibraries,
       contributorProvenance: { read: vi.fn(async () => ({ revision: 0, provenance: null })) },
       getSourceControlBinding: vi.fn(async () => ({ binding: null })),
     });
@@ -1126,7 +1413,7 @@ describe('git network operation routes', () => {
   it('rejects malformed IDs and non-empty execute bodies before service access', async () => {
     const networkOperations = { execute: vi.fn(), cancel: vi.fn() };
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { networkOperations });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, networkOperations });
 
     const invalidId = createMockResponse();
     await getRoute('POST', '/api/git/network-operations/:id/execute')({ params: { id: '../secret' }, body: {} }, invalidId);
@@ -1144,7 +1431,7 @@ describe('git network operation routes', () => {
       code: 'GIT_NETWORK_OPERATION_NOT_FOUND',
     });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { networkOperations: { get: () => { throw error; } } });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, networkOperations: { get: () => { throw error; } } });
     const response = createMockResponse();
     await getRoute('GET', '/api/git/network-operations/:id')({ params: { id: 'git_missing' } }, response);
     expect(response.statusCode).toBe(404);
@@ -1155,7 +1442,7 @@ describe('git network operation routes', () => {
   it('awaits persistence-backed operation reads', async () => {
     const operation = { operationId: 'git_restart', state: 'outcome-unknown' };
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { networkOperations: { get: vi.fn(async () => operation) } });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, networkOperations: { get: vi.fn(async () => operation) } });
     const response = createMockResponse();
 
     await getRoute('GET', '/api/git/network-operations/:id')({ params: { id: 'git_restart' } }, response);
@@ -1166,7 +1453,7 @@ describe('git network operation routes', () => {
   it('preserves a planning timeout code', async () => {
     const error = Object.assign(new Error('Git network operation timed out'), { code: 'TIMEOUT', status: 408 });
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { networkOperations: { plan: vi.fn(async () => { throw error; }) } });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, networkOperations: { plan: vi.fn(async () => { throw error; }) } });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/network-operations')({ body: { operation: 'fetch' } }, response);
@@ -1179,7 +1466,7 @@ describe('git network operation routes', () => {
     const error = Object.assign(new Error('Pull destination is not the checked out branch'), { code: 'INVALID_GIT_NETWORK_OPERATION', status: 400 });
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { networkOperations: { plan: vi.fn(async () => { throw error; }) } });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, networkOperations: { plan: vi.fn(async () => { throw error; }) } });
     const response = createMockResponse();
 
     await getRoute('POST', '/api/git/network-operations')({ body: { operation: 'pull' } }, response);
@@ -1189,12 +1476,26 @@ describe('git network operation routes', () => {
     logged.mockRestore();
   });
 
+  it('names the fix for a remote URL with a name before @', async () => {
+    const error = Object.assign(new Error('Git remote URL has a name before @'), { code: 'INVALID_GIT_REMOTE_USERINFO', status: 400 });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, networkOperations: { plan: vi.fn(async () => { throw error; }) } });
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/network-operations')({ body: { operation: 'sync' } }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toEqual({ error: 'Remove the name before @ from remote URL', code: 'REMOTE_URL_USERINFO' });
+    logged.mockRestore();
+  });
+
   it('does not expose native planning paths in responses or logs', async () => {
     const canary = '/private/openchamber-store/git-network-operations.json';
     const error = Object.assign(new Error(`ENOENT: no such file or directory, open '${canary}'`), { code: 'ENOENT' });
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, {
+    registerGitRoutes(app, { gitLibraryService: gitLibraries,
       networkOperations: { plan: vi.fn(async () => { throw error; }) },
       errorRedactionSecrets: ['/private/openchamber-store'],
     });
@@ -1216,7 +1517,7 @@ describe('legacy git network route binding gate', () => {
   ])('rejects legacy %s before Git execution', async (method, routePath) => {
     const getSourceControlBinding = vi.fn(async () => ({ revision: 3, binding: { state: 'bound' } }));
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { getSourceControlBinding });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, getSourceControlBinding });
     const response = createMockResponse();
 
     await getRoute(method, routePath)({ query: { directory: '/repo' }, body: {} }, response);
@@ -1234,7 +1535,7 @@ describe('legacy git network route binding gate', () => {
       read: vi.fn(async () => ({ provenance: { kind: 'contributor-fork' }, revision: 2 })),
     };
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { getSourceControlBinding, contributorProvenance });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, getSourceControlBinding, contributorProvenance });
     const response = createMockResponse();
     await getRoute('POST', '/api/git/push')({ query: { directory: '/repo' }, body: {} }, response);
     expect(response.statusCode).toBe(409);
@@ -1247,7 +1548,7 @@ describe('legacy git network route binding gate', () => {
 
   it('rejects remote branch deletion without reading binding state', async () => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, {
+    registerGitRoutes(app, { gitLibraryService: gitLibraries,
       getSourceControlBinding: vi.fn(async () => ({ revision: 4, binding: { state: 'needs-attention' } })),
     });
     const response = createMockResponse();
@@ -1266,7 +1567,7 @@ describe('legacy git network route binding gate', () => {
     ['DELETE', '/api/git/remote-branches'],
   ])('does not restore legacy %s execution for a binding tombstone', async (method, routePath) => {
     const { app, getRoute } = createRouteRegistry();
-    registerGitRoutes(app, { getSourceControlBinding: vi.fn(async () => ({ revision: 7, binding: null })) });
+    registerGitRoutes(app, { gitLibraryService: gitLibraries, getSourceControlBinding: vi.fn(async () => ({ revision: 7, binding: null })) });
     const response = createMockResponse();
     const body = routePath.endsWith('remote-branches')
       ? { remote: 'origin', branch: 'feature' }
@@ -1328,7 +1629,7 @@ describe('batched project reads', () => {
       { directory: '/repo', isGitRepository: true },
       { directory: '/plain', isGitRepository: true },
     ] });
-    expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/repo');
+    expect(gitLibraries.isGitRepository.mock.calls.map(([directory]) => directory)).toEqual(['/repo', '/plain']);
   });
 
   it('isolates a failing status to its own directory', async () => {
@@ -1346,6 +1647,25 @@ describe('batched project reads', () => {
 
     expect(response.body.projects[0]).toEqual({ directory: '/ok', isGitRepository: true, status: { isGitRepository: true, branch: 'ok', files: [], ahead: 0, behind: 0 }, root: null });
     expect(response.body.projects[1]).toEqual({ directory: '/broken', isGitRepository: true, status: null, root: null, errors: ['status'] });
+  });
+
+  it("reports Git's message for the one directory Git could not read, beside complete ones", async () => {
+    const message = "fatal: detected dubious ownership in repository at '/shared'";
+    gitLibraries.isGitRepository.mockImplementation(async (directory) => {
+      if (directory === '/shared') throw Object.assign(new Error(message), { code: 'GIT_REPOSITORY_UNREADABLE' });
+      return true;
+    });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { gitLibraryService: gitLibraries });
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo', '/shared'] } }, response);
+
+    expect(response.body).toEqual({ projects: [
+      { directory: '/repo', isGitRepository: true },
+      { directory: '/shared', error: message, code: 'GIT_REPOSITORY_UNREADABLE' },
+    ] });
+    expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/shared', { failOnGitError: true });
   });
 
   it('reads no status or root for a caller that only asks whether directories are repositories', async () => {

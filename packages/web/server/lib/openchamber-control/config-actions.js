@@ -25,20 +25,20 @@
  *   `versions` (process.versions), `schedule` (setTimeout), `restartDelayMs`
  *   (750), `log` (console).
  *
- * OpenCode config files are read and written through ../opencode/shared.js
+ * OpenCode config files are read and written through ../opencode/config-files.ts
  * directly, the same JSONC-preserving helpers the config routes use.
  */
 import { createRequire } from 'node:module';
 
 import { asNonEmptyString, isPlainObject, isString } from '../shared/guards.js';
-import { readConfigLayers, getConfigForPath, writeConfig } from '../opencode/shared.js';
-import { isPersistableSettingsKey } from '../opencode/settings-helpers.js';
-import { SETTINGS_SURFACES } from '../opencode/settings-files.js';
+import { readConfigLayers, getConfigForPath, writeConfig } from '../opencode/config-files.js';
+import { isPersistableSettingsKey } from '../settings/settings-helpers.js';
+import { SETTINGS_SURFACES } from '../settings/settings-files.js';
 import { isSelfHandoffEnabled } from '../opencode/self-handoff.js';
 import { OpenChamberControlError } from './error.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 
-const settingsRegistry = createRequire(import.meta.url)('../opencode/settings-registry.json');
+const settingsRegistry = createRequire(import.meta.url)('../settings/settings-registry.json');
 
 export const CONFIG_ACTION_DEFINITIONS = Object.freeze([
   { action: 'settings.keys', title: 'List OpenChamber settings', description: 'List every OpenChamber setting key with its scope, whether it is kept per surface kind (perSurface), and whether settings.set may change it (and why not); no parameters' },

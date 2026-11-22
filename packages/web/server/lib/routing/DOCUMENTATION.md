@@ -18,18 +18,20 @@ Auto. There is no env gate — the feature shipped dark behind
 
 ## Files
 
-- `defaults.js` — the Auto sentinel, the Jev endpoints and models, the
+- `defaults.ts` — the Auto sentinel, the Jev endpoints and models, the
   `ZEN_JEV_PROMOTION_ACTIVE` switch, built-in categories, the question wording
   for routing and for the safety net, history excerpt limits.
-- `classifier.js` — the classification providers: `resolveClassifier` (the
+- `classifier.ts` — the classification providers: `resolveClassifier` (the
   user's pick, what is usable, and the source that actually answers) and
   `classifierEndpoint` (where a request for a source goes),
   `legacyClassifier` (the view older clients parse) and
   `parseCustomEndpointUrl` (the custom endpoint's request URL).
-- `store.js` — `routing.json` (only deviations from the built-ins),
+- `store.ts` — `routing.json` (only deviations from the built-ins),
   `routing-auth.json` (the TypeSafe key alone, mode 0600),
-  `classification.json` (the classification provider pick),
+  `classification.json` (the classification provider pick) and
   `classifier-endpoint.json` (the custom endpoint, mode 0600) and
+  `classifier-gemini-key.json` (the Gemini key saved for Jev, mode 0600) in the
+  OpenChamber data dir. An unreadable pick file reads as no pick, an
   `auto-sessions.json` (the sessions on Auto) in the OpenChamber data dir. An unreadable pick file reads as no pick, an
   unreadable endpoint file as no endpoint. `resolveEffectiveConfig` merges built-ins with stored overrides;
   `toStoredConfig` is its inverse. A missing file is the defaults, a malformed
@@ -37,21 +39,25 @@ Auto. There is no env gate — the feature shipped dark behind
   1 MiB for routing config, 64 KiB for the auth, classifier and endpoint files, and
   32 MiB for auto sessions. Over-cap or non-regular config is an error; the pick,
   endpoint, token and session readers preserve their existing warn-and-empty behavior.
-- `jev.js` — request builders, answer parsing, and the HTTP call with a
+- `jev.ts` — request builders, answer parsing, and the HTTP call with a
+  timeout to the endpoint `classifierEndpoint` chose, which for `gemini`
+  first maps the request to Google's shape (`toGeminiDecisionsRequest`). The first timed-out
+  request per endpoint keeps running in the background (see the decision
+  below).
   timeout and a 1 MiB response cap (`JEV_MAX_RESPONSE_BYTES`: the endpoint
   can be user- or admin-chosen, so its body is untrusted input) to the
   endpoint `classifierEndpoint` chose. A category whose model is
   a pool (`opencode-route/<id>`) gets that pool's `description` and `details`
   appended to its criteria string (see "Pool descriptions" below).
-- `history.js` — the last three settled turns through session assist's
+- `history.ts` — the last three settled turns through session assist's
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
   plus tail. The new request is never cut. Also the model that wrote the last
-  settled answer and when it finished (`lastAnswer`), for `cache.js`.
-- `cache.js` — "Try to preserve cache usage": which category a send stays on
+  settled answer and when it finished (`lastAnswer`), for `cache.ts`.
+- `cache.ts` — "Try to preserve cache usage": which category a send stays on
   while the current model's prompt cache is likely warm (`cacheHoldCategory`),
   and how long that is given OpenCode's `warming` config (`warmWindowMs`).
-- `runtime.js` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
+- `runtime.ts` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
   endpoint a Jev request goes to now, or null; also used by
   `../session-work` and `../session-goal`), `noteModelSelection`,
   `isAutoSession`, `resolveAutoSelection`, `applySessionSelection`, `routeSend`,
@@ -62,9 +68,10 @@ Auto. There is no env gate — the feature shipped dark behind
   refused in enterprise mode like a save). The classifier judges the user's
   text plus one attachment fact for sends with images (`attachmentHint`,
   `routingRequestTextOf`); that fact never reaches OpenCode.
-- `routes.js` — `/api/routing` (GET, PUT), `/api/routing/token` (PUT, DELETE),
+- `routes.ts` — `/api/routing` (GET, PUT), `/api/routing/token` (PUT, DELETE),
   `/api/routing/classifier` (PUT), `/api/routing/classifier/custom` (PUT,
-  DELETE), `/api/routing/classifier/test` (POST) and
+  DELETE), `/api/routing/classifier/gemini` (PUT, DELETE: the Gemini key),
+  `/api/routing/classifier/test` (POST) and
   `registerRoutingPromptRewrite`.
 
 ## Plan information
@@ -146,39 +153,45 @@ ordered pool keeps a session on the target answering it while that target is
 ready, so a preference shows on the next draw: a new session, or after the
 current target fails or is benched.
 
-## Picking a pool member directly
+## Pinning a pool member
 
 While a pool is selected, the current-model line above the composer
 (`packages/ui/src/components/chat/CurrentModelIndicator.tsx`) opens a menu of
 the pool's members, read from the catalog OpenCode compiles for the pool
 (`settings.opencodeRoute.targets`; a pool whose members come only from
-patterns lists none and offers no menu). The user picks a member and when it
-applies (`packages/ui/src/lib/routing/poolMemberPick.ts`):
+patterns lists none and offers no menu). Picking a member pins it for the
+session with OpenCode's `POST /api/session/:id/route-target` (fork #2671): the
+session stays on the pool, the pinned member serves while it is healthy, the
+pool fails over to its other members when it is not, and requests return to
+the member once it recovers. "Any model in the pool" clears the pin. The line
+names the pinned member, read with `GET /api/session/:id/route-target`. When
+the pin applies is the user's choice (`packages/ui/src/lib/routing/poolMemberPick.ts`):
 
-- with the next message: only the composer's selection changes;
-- at the next step: the session's model switches now. OpenCode reloads the
-  session context before each model request (`session/runner/llm.ts`), so a
-  running turn makes its next request on the pick;
-- now: a running turn is replayed on the pick, as the "Stop and restart this
-  reply" choice for model changes during a reply does; an idle session
-  switches now.
+- with the next message: set once the running turn finishes (an idle session
+  pins now);
+- at the next step: set now. OpenCode reads the pin on every model request,
+  so a running turn makes its next request on the member;
+- now: set now, and a running turn is replayed on the pool, as the "Stop and
+  restart this reply" choice for model changes during a reply does.
 
-The OpenCode call runs first; the composer follows only when it succeeded.
-After a pick the composer holds that member, and the menu offers "Return to
-pool" for each pool listing it, with the same timings. Everything goes
-through OpenCode's own `session.switchModel` and the existing retry. VS Code
-shows the full model-changed text and the pool-member menu, but not "Prefer
-previous", which needs the OpenChamber server's `/api/model-routes/interpret`
-route that VS Code does not run.
+A session switched to a single member directly (an older pick, or the model
+picker) is offered "Return to pool" for each pool listing that model, with the
+same timings; that goes through `session.switchModel`, and the composer
+follows only when the switch succeeded. VS Code shows the full model-changed
+text and the pool-member menu, but not "Prefer previous", which needs the
+OpenChamber server's `/api/model-routes/interpret` route that VS Code does not
+run.
 
-### Why a pick leaves the pool instead of pinning a member inside it
+### Why a pin and not a switch to the member
 
-OpenCode keeps a session's pool target in memory and has no route to set it,
-and route overrides apply to every session. So a pick makes the member the
-session's model: the session no longer fails over inside the pool until the
-user returns to it. Pool rotation (`pool-rotation.js`) moves sessions the same
-way for the same reason. A per-session target inside the pool needs an
-OpenCode route first.
+A switch makes the member the session's model, so the session leaves the pool
+and stops failing over until the user returns to it. A pin keeps the pool's
+failover. OpenCode holds pins in memory, so a restart clears them and the
+session then selects normally; the line reads the pin back from OpenCode
+instead of remembering it, so it never shows a pin OpenCode no longer has. The
+published `@opencode/client` predates the route, so `lib/opencode/client.ts`
+calls it through `runtimeFetch`, like its other SDK gaps. Pool rotation
+(`pool-rotation.js`) still moves sessions by switching their model.
 
 ## Invariants
 
@@ -190,13 +203,22 @@ OpenCode route first.
   swallowed and marks the session (`noteModelSelection`), and every
   `POST /api/session/:id/{prompt,command}` in a marked session is routed
   (`routeSend`) and switches the session onto the answer before the send is
-  forwarded. Both sit ahead of the generic proxy, which replays a parsed body.
+  forwarded. So is `POST /api/session/:id/form/:formId/reply`: the answer
+  resumes a turn, so it is routed on the values the user filled in, and a
+  failure answers with an error and leaves the form pending. Both sit ahead of
+  the generic proxy, which replays a parsed body.
   The message queue calls `resolveAutoSelection` itself and applies the answer
   with the model/agent switches it already makes. Without a fallback model the
   runtime throws 400 rather than forwarding. The OpenChamber session service
   (`openchamber-sessions/routes.js`) talks to OpenCode through the SDK and can
   pick Auto up from Session Defaults, so it calls `resolveAutoSelection` itself
-  before switching the session.
+  before switching the session. So do scheduled task runs
+  (`scheduled-tasks/runtime.js`): a run on Auto creates its session without a
+  model, routes on the expanded task prompt with the new session's id, and
+  switches the session before the goal and the first send.
+- The mark lives in process memory. A server restart between the model switch
+  and the next send drops it. The session keeps its last real model even if
+  the composer still shows Auto.
 - The mark is saved in `auto-sessions.json` in the data dir, beside
   `routing.json`. A change is written before the switch answers, and the list
   is read back when the runtime starts, so a restart keeps Auto. Choosing a real
@@ -205,10 +227,20 @@ OpenCode route first.
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.
-- The routing question sends `ROUTING_INSTRUCTIONS` as one string, the same
-  form as the Test probe. TypeSafe also accepts a list there, but a
-  self-hosted System One server may not: Kev answers a list with 400, so Auto
-  fell back on every send while Test passed (#4175).
+- A Jev call fails as a timeout whatever the endpoint does next: after
+  `JEV_TIMEOUT_MS` (4 s) where a send or a permission waits for it, and after
+  `JEV_BACKGROUND_TIMEOUT_MS` (15 s) in the checks after a turn (session work,
+  goals). At most one timed-out request per endpoint URL and model
+  stays open in the process, across routing, session work and goals, and it is
+  aborted at `JEV_LINGER_MS` (5 minutes) from its start. Its answer is never
+  used.
+- The routing and safety-net questions send `ROUTING_INSTRUCTIONS` and
+  `SAFETY_INSTRUCTIONS` as one string each, the same form as the Test probe,
+  and the safety-net `ask` question passes `SAFETY_CRITERIA` (`true` / `false`)
+  on `criteria`. TypeSafe and Ollama's `kev` runner accept a list for
+  `instructions`, while `@kev-ai/server` answers a list with 400 (#4175);
+  without `criteria` on `ask`, Ollama `kev` also scored `brew install` and
+  `git checkout -- .` below the 0.6 hold threshold (#6028).
 - The safety net accepts only on a verdict from Jev. With no usable
   classification provider it holds quietly (the session behaves like `ask`);
   when Jev fails it holds, broadcasts `openchamber:routing.safety-skipped` with
@@ -219,7 +251,16 @@ OpenCode route first.
   entries. `safetyNet.threshold` still applies.
 - A category without a model uses the fallback model *and* variant; a variant
   only travels with the model it was chosen for. A category agent replaces the
-  composer's agent; an empty one keeps it.
+  session's agent, and the runtime remembers which agent it replaced. A send
+  whose category names no agent, or that falls back, keeps the composer's
+  agent, except while the session still runs as the agent routing set: then
+  it goes back to the agent from before (#6392). A session found on any other
+  agent, a composer agent other than the routed one, or a switch off Auto ends
+  that, so an agent the user picked stays. A session that had no agent of its
+  own before the category agent has nothing to go back to. The record is
+  process memory, like the Auto mark. A failed switch back keeps the record
+  until a session read confirms that the routed agent is gone, so the next
+  send can retry restoration.
 - A variant the model's catalog entry does not list is dropped before the
   switch, so the reply runs on the model's default thinking instead of OpenCode
   refusing it (Settings from before #4133 saved list positions like `"2"`).
@@ -250,6 +291,149 @@ OpenCode route first.
 - The send rewrite reads a body only in a session already marked as routed,
   which the URL alone answers; every other send, and anything that is not JSON,
   reaches the proxy as the stream it arrived as.
+- Routing settings and credential routes require normal authentication and
+  stay outside browser URL-token allowlists.
+- Directory headers are decoded before routing uses them, including percent
+  escapes without an encoding marker. The UI SDK encodes every directory
+  header but only marks non-Latin-1 values. The runtime encodes the decoded
+  directory for its own OpenCode calls; passing through an encoded value
+  double-encodes it and makes OpenCode's `realPath` fail. Query parameters
+  already arrive decoded.
+- Stored built-in categories contain only deviations so shipped default
+  changes reach categories the user leaves unchanged. Credential files stay
+  separate from exportable routing config and from each other so saving one
+  credential does not rewrite another.
+- Malformed endpoint and Gemini-key JSON produces a generic parse warning.
+  V8 syntax errors can quote file contents containing a key.
+- The config response includes built-in wording so Settings can reset edited
+  categories to their shipped descriptions.
+
+## Decisions
+
+### Conversion contracts
+
+`cache.ts` uses `Array.findLast`, supported by the server's ES2023 library
+selection. Its fallback model comes from the non-null fallback established by
+`resolveAutoSelection`. Rank comparisons preserve JavaScript's conversion of
+null to zero. Duration-unit lookup checks own keys: inherited names such as
+`constructor` still use the default duration, as their nonnumeric values did
+in JavaScript.
+
+`routes.ts` preserves the single array-path registration and header decoding.
+The shared HTTP contract accepts Express's array paths for `post`, exposes its
+required request URL and types the two directory headers as strings. Node joins
+duplicate custom request headers before Express reads them.
+
+Route bodies retain their decoded JSON types until the runtime's existing
+schemas validate them. Config, token, classifier, model and endpoint inputs do
+not promise validated fields before those checks. Sends retain the original body,
+including arrays and malformed fields. Container guards permit field reads
+without changing the runtime's validation errors. Error guards preserve integer
+status codes and non-string message values on thrown objects and functions;
+missing fields keep their existing defaults.
+
+`RoutingPermission` models the fields forwarded by the event translator.
+Only ids are established as strings. Resource elements and metadata retain
+their JSON types; `buildPermissionRequest` serializes them unchanged.
+
+The cache boundary accepts the SDK's complete `config.get()` result and
+parses it with the warming schema. Entries with no `info` field leave the
+last warming value unchanged. Any failed parse treats the response as a cold
+cache; the parameter type does not claim that the response already satisfies
+the warming schema.
+
+### Why endpoint construction requires the selected credential
+
+The classifier marks custom and Gemini usable only with an endpoint or usable
+key. Endpoint construction keeps those requirements in its argument union;
+the runtime narrows the resolved keys before calling it. Provider fallback order
+and the no-provider result remain unchanged.
+
+Routing config and custom endpoint types come from the store's schemas. The
+SDK owns permission and form-answer shapes; `contracts.ts` owns runtime injection
+and selection contracts. HTTP, file, environment and Jev response validation
+remain at their existing boundaries. Error-shape guards preserve code and
+message properties on thrown objects as well as ordinary errors.
+
+### Why category wording judges reasoning and not reply length
+
+Long mechanical edits need little reasoning, while short debugging answers can
+need a hard model. History resolves references and bare approvals to planned
+work; letting finished work influence a follow-up's category sends simple
+follow-ups to the fallback through low-confidence answers. Warm-context cost
+belongs to cache preservation and leaves classification unchanged.
+
+### Why the safety question asks for consent and not destructiveness
+
+Actions outside the working tree or in shared trackers can need consent while
+leaving local files intact. The consent wording and explicit tracker, branch,
+global-install and discard examples hold these actions more reliably in the
+permission lab, with misses on the safe side.
+
+### Why attachments add a classifier hint and not raw request text
+
+Jev reads text only, so an image hint distinguishes a screenshot request from
+a request about image-upload code. `requestTextOf` preserves the user's words
+and ignores preceding synthetic context messages; the separate classifier
+hint uses data URLs or filenames because prompt attachments omit MIME types.
+
+### Why history clips answers at both ends and not only the head
+
+A user's task usually sits at the start of a message, while an answer's
+finding and outcome can sit at opposite ends. New requests stay whole. A
+session without a settled answer has no history or cache to preserve; history
+read failures propagate to the caller so it can explicitly choose request-only
+routing.
+
+### Why uncertain cache state permits a switch and not a hold
+
+Holding a model after its cache goes cold is the costlier mistake, so unreadable
+warming config counts as warming off. OpenCode returns config documents in
+priority order and the last document setting `warming` wins. A hold also keeps
+the requested agent because changing agents misses the cache and can substitute
+tools the request does not ask for, such as a planning agent on an edit.
+
+### Why Gemini has a key field of its own and not only OpenCode's Google key
+
+A key in OpenCode's Google provider also opens every Gemini chat model to
+OpenCode on that machine, and a Gemini API key cannot be limited to one model.
+A user who wants Google only for decisions needs somewhere else to put the key,
+so OpenChamber keeps one of its own for Jev, and it wins over OpenCode's key
+and the variables. Without it, the Google key OpenCode already has is used, the
+way OpenRouter and Vercel borrow theirs.
+
+### Why the server puts the agent back and not the composer
+
+In Auto the composer hides the agent control and shows the session's agent,
+which after a routed Plan is `plan`, so the composer has no agent of its own
+to send. Only the runtime knows that it set the agent and which one was there
+before. Before #6392 an empty category agent left the routed agent in place,
+and every later send stayed in Plan.
+
+### Why a timed-out request keeps running and not a longer timeout
+
+A local model on Ollama loads on its first request, which takes 5 to 7 s for
+`d3:9b` on Apple Silicon, and Ollama cancels the load when the client
+disconnects. The 4 s abort therefore cancelled every cold load, and routing
+never recovered by itself (#6743). Letting the first timed-out request finish
+loads the model, so the next turn routes, while every turn still waits at most
+4 s. A longer timeout would make a hung server slow every send, and a timeout
+field per endpoint is one more setting. The one-per-endpoint limit and the
+5-minute cap keep repeated sends to a hung server from piling up connections.
+It applies to every source, which keeps `jev.js` free of a per-source switch.
+A hosted source loads nothing, so there it only lets one slow request finish
+after its turn has moved on.
+
+### Why the checks after a turn wait 15 s and not 4
+
+Nobody waits for the turn-end check or a goal's progress check, and their
+request is larger than a routing one. The reporter of #6743 measured a loaded
+`d3:9b` on a laptop at 2 to 3 s for a routing request and 5.7 to 6.6 s for the
+check after a turn, so with
+4 s the "looks done" hint and the review offer never came and the recap filter
+never ran. A hung endpoint now delays the recap's quiet window, and each goal
+continuation before the small model takes over, by 15 s instead of 4. Routing and the safety net keep 4 s, and get no retry: that wait
+sits in front of every send and every permission.
 
 ## Where a Jev request goes
 
@@ -259,12 +443,26 @@ Classification providers:
 - `off`: no Jev at all. Every Jev feature takes its no-provider path.
 - `zen-promo`: `opencode.ai/zen/v1/systemone` as `jev-1.13-free`, which OpenCode
   Zen answers with no credential at all. Usable while
-  `ZEN_JEV_PROMOTION_ACTIVE` is true; flip it when OpenCode ends the promotion.
+  `ZEN_JEV_PROMOTION_ACTIVE` is true. While it is false, a user who had picked
+  it sees it disabled as temporarily unavailable and falls back like any
+  unusable pick.
+  On 2026-10-27 zen's anti-fraud client check answered the free model with
+  429 `FreeUsageLimitError` ("Free models work in OpenCode") to Node and curl
+  clients whatever the headers, while Bun clients such as OpenCode got
+  through. The server runs on Node, so the promotion was off for a few hours
+  until Dax exempted Jev. If that 429 comes back, compare one call from Node
+  and one from Bun before anything else, and ask OpenCode in Slack. The other
+  route is OpenCode 2.2's `POST /api/experimental/generate/decisions` with the
+  `opencode` provider, which serves `jev-1.13-free` without a login and takes
+  `x-opencode-client` from `provider.opencode.options.headers`; in 2.2.0 it
+  starts a second copy of every local MCP server (anomalyco/opencode#59605)
+  and its predicate questions take no `criteria` (anomalyco/opencode#59606).
 - `zen-key`: the same endpoint as `jev-1.13` with a Zen API key read from
   OpenCode's credentials (`opencode/auth.js`, entry `opencode`, type `api`).
   An OpenCode account sign-in is an OAuth credential, and zen rejects it as a
-  key ("Invalid API key", checked 2026-09-27), so it does not count. The paid
-  call itself is not verified live yet.
+  key ("Invalid API key", checked 2026-09-27), so it does not count. A paid
+  call from Node with a Zen API key answers (checked 2026-10-27, billed to the
+  Zen balance); the client check that blocks the free model does not apply.
 - `openrouter`: `openrouter.ai/api/v1/systemone` as `jev-latest` (OpenRouter's
   `~typesafe/jev-latest` alias) with the OpenRouter API key saved in OpenCode
   (entry `openrouter`, type `api`), billed to that OpenRouter account.
@@ -273,6 +471,38 @@ Classification providers:
   `api`). Both gateways implement TypeSafe's request and response shapes, so
   `jev.js` is the same for every source. Both answer 401 without a key
   (checked 2026-09-27); a paid call is not verified live yet.
+- `gemini`: Google's Decisions API,
+  `generativelanguage.googleapis.com/v1beta/decisions` as `gemini-decision-1`,
+  billed to the Google account behind the key. On Google's free tier Google may
+  use what it receives to improve its products (Gemini API terms, "Unpaid
+  Services", checked 2026-11-14), which the option and the docs page say. It is
+  Google's model, not Jev. The key is, in this order: the
+  one saved in OpenChamber (`classifier-gemini-key.json`, mode 0600, set with
+  `setGeminiKey`, which also picks `gemini`; `describe` reports only
+  `geminiKeyPresent`), the Google key saved in OpenCode (entry `google`, type
+  `api`), or the first of `GOOGLE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`,
+  `GEMINI_API_KEY` that is set, the variables and order OpenCode reads for
+  Google (models.dev's `env` list, taken by v2 `integration.ts`
+  `resolveConnections`). A managed OpenCode gets all three filled from
+  whichever is set (`../opencode/provider-env-aliases.js`), so any of them
+  works there too. It goes in `x-goog-api-key`: Google answers 401 to a bearer key, and
+  a `?key=` in the URL would land in logs. Google does not speak System One:
+  with `state` it answers 400 "Unknown parameter 'state'", and with noul
+  criteria `true`/`false` "Unknown parameter 'true'" (both checked 2026-11-14),
+  so `jev.js` maps the request (`toGeminiDecisionsRequest`): `state` goes as
+  `input`, serialized to JSON text, the form Google's reference gives for
+  structured data, so the instructions still find `request`, `history` and
+  `answer` by name; noul criteria become `true_description` /
+  `false_description`; instructions sent as a list (session work, goals)
+  become one string, a line per item, because Google takes a string or text
+  blocks and not a list of strings. Choice criteria and the answers are the
+  same shape on both sides, so the parsers are shared.
+  A key with anything but visible ASCII (a space, a line break, a control
+  character) is refused on save with 400 and counts as absent when read from
+  OpenChamber, OpenCode or a variable: Node's `fetch` names a bad header value,
+  key included, in its error. For the same reason `jev.js` replaces any error
+  `fetch` throws for this source with "Could not reach Google Gemini", so no
+  key reaches the Test result, the `safety-skipped` broadcast or a log.
 - `typesafe`: `api.typesafe.ai/v1/systemone` as `jev-latest` with the key saved
   in `routing-auth.json`. Saving a key also picks it.
 - `custom`: any endpoint that speaks the System One API, with the URL, model
@@ -299,7 +529,7 @@ Classification providers:
 In enterprise mode (policy file or `OPENCHAMBER_ENTERPRISE_MODE`, `../enterprise-mode.js`)
 `resolveAccess` treats the pick as `off` whatever is stored (the stored pick is
 kept for when the mode is lifted), `setClassifierSource` refuses anything but
-`off` and `setToken` and `setCustomEndpoint` refuse every write with 403, and `describe` reports
+`off` and `setToken`, `setGeminiKey` and `setCustomEndpoint` refuse every write with 403, and `describe` reports
 `enterpriseMode` so the page shows why only Off is offered. With a pinned
 endpoint it is the administrator's own infrastructure, so it becomes the
 default (`custom` unless the stored pick is `off`) and `custom` is the one
@@ -315,12 +545,15 @@ key (`typesafe`, `custom`, `openrouter`, `vercel`, `zen-key`: what the user set
 up in OpenChamber for Jev before keys borrowed from OpenCode); none usable
 means no Jev.
 `zen-promo` needs no credential, so it is never a fallback: only an explicit
-pick sends anything there, and `off` never falls back.
+pick sends anything there, and `off` never falls back. `gemini` is never a
+fallback either: a Google key in OpenCode or the environment is no choice to
+send excerpts to Google, and a user who picked another source before Gemini
+existed would otherwise start doing so the day that pick stops working.
 The OpenCode keys are read on every request, so a key added or removed in
 OpenCode counts from the next request on.
 
 OpenRouter and Vercel also count a key in `OPENROUTER_API_KEY` /
-`AI_GATEWAY_API_KEY` (`readOpenCodeKeys`), because OpenCode connects those
+`AI_GATEWAY_API_KEY`, and Gemini one in the Google variables above (`readOpenCodeKeys`), because OpenCode connects those
 providers from the variable live and never stores it (v2 `integration.ts`
 `resolveConnections`). A key saved in OpenCode wins. The server's
 `process.env` already carries the login-shell snapshot and a managed OpenCode
@@ -353,7 +586,7 @@ before the classifier pick and adds `jevAvailable`, `classifier` and
 is the full picture. `classifier` is what v2.0.2 clients parse: their schema
 knows only `zen-promo`, `zen-key` and `typesafe` and rejects the whole state
 on any other id, so it lists only those and is null while OpenRouter,
-Vercel or a custom endpoint is picked or answering (`legacyClassifier`). Current clients read
+Vercel, Gemini or a custom endpoint is picked or answering (`legacyClassifier`). Current clients read
 `classification` and drop source ids they do not know.
 
 ## UI
@@ -367,7 +600,7 @@ while Auto is selected. `PermissionCard` shows the hold reason. Settings →
 Routing (`components/sections/routing/RoutingPage.tsx`) edits the config with
 debounced saves. Settings → Providers → Classification providers
 (`components/sections/classification/ClassificationProvidersPage.tsx`) picks
-the source and manages the TypeSafe key and, through `CustomEndpointFields.tsx`,
+the source and manages the TypeSafe and Gemini keys and, through `CustomEndpointFields.tsx`,
 the custom endpoint; `JevAccessNote` links there from the
 features that need Jev.
 
@@ -399,7 +632,7 @@ own, as stored, and the only ones a `PUT` writes; `otherSchedules` lists the
 non-empty lists in the other files (`{ path, schedules }`) and `otherRoutes`
 the non-empty pool maps (`{ path, routes }`), which Settings shows read-only,
 in OpenCode's reading order from `readConfigSources`
-(`../opencode/shared.js`): the global files, `OPENCODE_CONFIG`, then every
+(`../opencode/config-files.ts`): the global files, `OPENCODE_CONFIG`, then every
 `opencode.json(c)` and `.opencode/opencode.json(c)` from the outermost
 ancestor folder down to the project. The folder files are included only when
 the request names the Settings project (`?directory=` or the
@@ -425,7 +658,7 @@ validates the file may flag them. Both were checked against OpenCode on
 Because OpenCode's own config read drops the keys, the routing runtime reads
 the pools from the config files (`readModelPools`, wired in `index.js` to
 `readLayeredModelRoutes(readConfigSources(directory))`), not from OpenCode's
-config API. `readConfigSources` (`../opencode/shared.js`, shared with Settings ›
+config API. `readConfigSources` (`../opencode/config-files.ts`, shared with Settings ›
 MCP) lists the files OpenCode reads, lowest priority first: the global
 `opencode.json` and `opencode.jsonc`, `OPENCODE_CONFIG`, then every
 `opencode.json(c)` from the outermost ancestor folder down to the project, then
@@ -452,10 +685,13 @@ request, so enterprise mode already covers it. The OpenCode `plan_info` pool
 
 OpenCode applies `health.firstTokenTimeoutMs` (and `attempts`, `hedgeAfterMs`)
 only from the pool a session picked; a nested pool's own values are ignored,
-and a pool that names no wait gets OpenCode's 10 seconds. A slow model in a
-pool inside a pool was therefore cut off by the outer pool's default. Every
-`PUT /api/model-routes` passes the map through `normalizePoolTimeouts`
-(`pool-timeouts.js`) before writing:
+and before developing-today-forks/opencode#2674 a pool that names no wait got
+10 seconds. A slow model in a pool inside a pool was therefore cut off by the
+outer pool's default. Every `PUT /api/model-routes` passes the map through
+`normalizePoolTimeouts` (`pool-timeouts.js`) before writing, so older OpenCode
+versions get explicit values. From #2674 on, OpenCode applies the same rules
+itself (`firstTokenTimeout` in its `config/plugin/model-routes.ts`), so a
+hand-written config and a saved one behave alike:
 
 - A pool's own wait without `nestedTimeout` is kept as written, `false` (no
   limit) included.
@@ -465,6 +701,11 @@ pool inside a pool was therefore cut off by the outer pool's default. Every
   "longest"`. With `nestedTimeout` set the value is recomputed on every save,
   so a change to a nested pool reaches the pools around it. `"shortest"` takes
   the shortest; `false` counts as the longest and `"shortest"` passes over it.
+- `nestedTimeout: "own"` keeps the pool's own wait (30 seconds when it names
+  none) for its own models, and OpenCode lets each nested pool's models wait as
+  long as that pool would. A pool around an `own` pool counts every wait the
+  `own` pool applies, so it waits for the slowest model inside. An OpenCode
+  before #2674 drops the key and applies the pool's own wait to every model.
 - Any other pool without a wait gets 30 seconds. A cycle is cut where it
   closes and contributes 30 seconds, so the result is the same on every save
   (`pool-timeouts.test.js` checks idempotence and explicit values over
@@ -473,20 +714,20 @@ pool inside a pool was therefore cut off by the outer pool's default. Every
 Only pools in the user file take part: the validator already refuses a route
 reference to a pool that is not in the saved map. `GET` and `PUT` also return
 `timeouts`, per pool the wait OpenCode applies now and what longest and
-shortest would pick, which the pool page shows. OpenCode cannot give each
-nested pool its own wait; that would need a change in OpenCode.
+shortest would pick, which the pool page shows.
 
 The order of the pools is the key order of the map. `PUT` writes it with
 `writeConfig`'s `orderedPaths` (see `../opencode/DOCUMENTATION.md`), since the
 writer otherwise ignores key order. OpenCode's catalog, and with it the model
-picker, keeps that order with one exception: pools with a `levels` list or a
-`#effort` member come after the others, in their own config order (OpenCode
-2.0.30, checked 2026-11-22 against a private `opencode serve`). JavaScript
+picker, keeps that order. OpenCode 2.0.30 put pools with a `levels` list or a
+`#effort` member after the others (checked 2026-11-22 against a private
+`opencode serve`); #2674 restores config order for them. JavaScript
 lists keys that look like whole numbers first, so a pool id such as `2` always
 sorts before the others.
 
-OpenCode logs `omitted unknown setting` for `nestedTimeout`, as it does for
-`description` and `details`, and drops the key; the route loads unchanged.
+OpenCode before #2674 logs `omitted unknown setting` for `nestedTimeout`, as
+every version does for `description` and `details`, and drops the key; the
+route loads unchanged.
 
 `route-match.js` restates OpenCode's `match` grammar (terms joined by `and`,
 `or`, `not` and parentheses; `re:` patterns compiled with the `i` flag), so the
@@ -711,14 +952,18 @@ Staggered rotation (#295) automates that spreading, off by default; the
 
 ## Tests
 
+`jev.test.js` (the timeout, the one request that keeps running per endpoint
+and its cap, Google's request shape for every question the call sites send, a
+key kept out of the error Node's `fetch` throws on a bad header value),
 `model-routes.test.js` (route validation, pool description and details limits,
 the routes), `model-pools-folder-config.test.js` (which files the pool text
 comes from and which one wins), `store.test.js` (defaults, deviation round-trip, the cache setting's default,
 deleted built-ins, malformed
-file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,
-excerpts, decisions, cache holds and the warm window, endpoints, custom URL normalization and setter,
-classifier fallback, rewrite and fallback
+file, token file mode, classifier pick, custom endpoint file, Gemini key file), `runtime.test.js` (request text,
+excerpts, decisions, the agent a category set and the way back from it, cache holds and the warm window, endpoints, custom URL normalization and setter,
+classifier fallback (never to Gemini), the Gemini key's precedence, validation and enterprise refusal, rewrite and fallback
 paths, pool descriptions in the criteria, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send
 ahead of a stand-in proxy, the routes). The queue and auto-accept tests cover
-their hooks.
+their hooks. In `packages/ui`, `ClassificationProvidersPage.test.tsx` renders
+the page and checks the Gemini option and its key field.

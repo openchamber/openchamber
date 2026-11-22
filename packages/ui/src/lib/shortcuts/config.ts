@@ -5,9 +5,9 @@ type ShortcutCategory = 'session' | 'models' | 'panels' | 'navigation' | 'applic
 type ShortcutConfig = {
   id: string;
   defaultBinding: ShortcutCombo;
-  /** The binding is a bare-modifier chord prefix (completed by another key);
-      conflict resolution compares its prefix rather than a full combo. */
   prefixStyle?: true;
+  singleChord?: true;
+  nativeMenu?: 'all' | 'non-mac';
 } & (
   | { customizable: false }
   | {
@@ -16,13 +16,6 @@ type ShortcutConfig = {
     }
 );
 
-// Default layout, unified around three modes:
-// - Single chords for everyday actions.
-// - The mod+k leader for "open/go" actions, second key mnemonic.
-// - Held mod + digit switches header session tabs; held mod+alt + digit
-//   switches context panel surfaces (mod+shift+digit is reserved by macOS
-//   screenshots).
-// Everything else lives only in the command palette, outside this schema.
 const SHORTCUT_GROUPS = {
   session: [
     {
@@ -37,6 +30,13 @@ const SHORTCUT_GROUPS = {
       defaultBinding: 'mod+i',
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.focus_input.label',
+    },
+    {
+      id: 'search_prompt_history',
+      defaultBinding: 'mod+arrowup',
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label',
     },
     {
       id: 'open_timeline_dialog',
@@ -75,7 +75,6 @@ const SHORTCUT_GROUPS = {
         'settings.openchamber.keyboardShortcuts.action.open_next_attention_session.label',
     },
     {
-      // Browser-style back/forward over the sessions opened in this window.
       id: 'session_history_back',
       defaultBinding: 'mod+[',
       customizable: true,
@@ -145,6 +144,12 @@ const SHORTCUT_GROUPS = {
         'settings.openchamber.keyboardShortcuts.action.new_chat_worktree.label',
     },
     {
+      id: 'new_lead',
+      defaultBinding: 'mod+shift+alt+l',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.new_lead.label',
+    },
+    {
       id: 'new_mini_chat',
       defaultBinding: 'mod+alt+n',
       customizable: true,
@@ -162,11 +167,41 @@ const SHORTCUT_GROUPS = {
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_dictation.label',
     },
+    {
+      id: 'sessions_bulk_delete',
+      defaultBinding: 'mod+backspace',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label',
+    },
+    {
+      id: 'sessions_select_all',
+      defaultBinding: 'mod+a',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label',
+    },
+    {
+      id: 'permission_allow_once',
+      defaultBinding: 'alt+enter',
+      singleChord: true,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.permission_allow_once.label',
+    },
+    {
+      id: 'permission_allow_always',
+      defaultBinding: 'alt+shift+enter',
+      singleChord: true,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label',
+    },
+    {
+      id: 'permission_deny',
+      defaultBinding: 'alt+backspace',
+      singleChord: true,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.permission_deny.label',
+    },
     { id: 'abort_run', defaultBinding: 'escape', customizable: false },
     {
-      // Not ctrl+b (the OpenCode TUI's key): the composer editor's macOS
-      // emacs keymap moves the caret on it, and elsewhere it is mod+b
-      // (toggle_sidebar).
       id: 'background_session_work',
       defaultBinding: 'mod+shift+b',
       customizable: true,
@@ -182,7 +217,12 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.open_model_selector.label',
     },
-    { id: 'cycle_thinking_variant', defaultBinding: 'mod+shift+t', customizable: false },
+    {
+      id: 'cycle_thinking_variant',
+      defaultBinding: 'mod+shift+t',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_thinking_variant.label',
+    },
     {
       id: 'cycle_agent',
       defaultBinding: 'tab',
@@ -212,11 +252,11 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label',
     },
     {
-      id: 'toggle_terminal_expanded',
-      defaultBinding: 'mod+shift+j',
+      id: 'toggle_context_panel_expanded',
+      defaultBinding: 'mod+shift+f',
       customizable: true,
       settingsLabelKey:
-        'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label',
+        'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label',
     },
     {
       id: 'toggle_sidebar',
@@ -240,8 +280,6 @@ const SHORTCUT_GROUPS = {
     {
       id: 'switch_session_tab',
       defaultBinding: 'mod',
-      // The binding is a bare modifier acting as a chord prefix (completed by
-      // a digit); conflict resolution must compare its PREFIX, not a combo.
       prefixStyle: true,
       customizable: true,
       settingsLabelKey:
@@ -256,16 +294,130 @@ const SHORTCUT_GROUPS = {
         'settings.openchamber.keyboardShortcuts.action.switch_context_surface.label',
     },
     {
+      id: 'open_git_panel',
+      defaultBinding: 'mod+shift+g',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_git_panel.label',
+    },
+    {
       id: 'toggle_services_menu',
       defaultBinding: 'mod+k i',
       customizable: true,
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label',
     },
+    {
+      id: 'collapse_sessions_all',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.collapse_sessions_all.label',
+    },
+    {
+      id: 'expand_sessions_all',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.expand_sessions_all.label',
+    },
+    {
+      id: 'toggle_chats_section',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_chats_section.label',
+    },
+    {
+      id: 'toggle_pinned_section',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_pinned_section.label',
+    },
+    {
+      id: 'toggle_work_section',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_work_section.label',
+    },
+    {
+      id: 'toggle_detailed_rows',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_detailed_rows.label',
+    },
+    {
+      id: 'toggle_list_grouping',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_list_grouping.label',
+    },
+    {
+      id: 'toggle_project_display',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_project_display.label',
+    },
+    {
+      id: 'cycle_project_sort',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.cycle_project_sort.label',
+    },
+    {
+      id: 'toggle_selection_mode',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_selection_mode.label',
+    },
   ],
   navigation: [
-    { id: 'save_file', defaultBinding: 'mod+s', customizable: false },
-    { id: 'find_in_file', defaultBinding: 'mod+f', customizable: false },
+    {
+      id: 'save_file',
+      defaultBinding: 'mod+s',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.save_file.label',
+    },
+    {
+      id: 'find_in_file',
+      defaultBinding: 'mod+f',
+      singleChord: true,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.find_in_file.label',
+    },
+    {
+      id: 'diff_next_file',
+      defaultBinding: 'alt+arrowdown',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.diff_next_file.label',
+    },
+    {
+      id: 'diff_previous_file',
+      defaultBinding: 'alt+arrowup',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label',
+    },
+    {
+      id: 'previous_project',
+      defaultBinding: 'ctrl+alt+arrowup',
+      nativeMenu: 'non-mac',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.previous_project.label',
+    },
+    {
+      id: 'next_project',
+      defaultBinding: 'ctrl+alt+arrowdown',
+      nativeMenu: 'non-mac',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.next_project.label',
+    },
     {
       id: 'open_go_to_line',
       defaultBinding: 'alt+g',
@@ -300,7 +452,6 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_help.label',
     },
     {
-      // mod+alt keeps it off the browser's own reload (mod+r, mod+shift+r).
       id: 'open_project_actions',
       defaultBinding: 'mod+alt+r',
       customizable: true,
@@ -312,10 +463,146 @@ const SHORTCUT_GROUPS = {
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_theme.label',
     },
+    {
+      id: 'toggle_reasoning_traces',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_reasoning_traces.label',
+    },
+    {
+      id: 'open_archive',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_archive.label',
+    },
+    {
+      id: 'open_notes',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_notes.label',
+    },
+    {
+      id: 'open_todos',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_todos.label',
+    },
+    {
+      id: 'show_context_usage',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.show_context_usage.label',
+    },
+    {
+      id: 'open_overview',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_overview.label',
+    },
+    {
+      id: 'show_opencode_status',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.show_opencode_status.label',
+    },
+    {
+      id: 'open_new_worktree_dialog',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_new_worktree_dialog.label',
+    },
+    {
+      id: 'add_project',
+      defaultBinding: 'mod+k o',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.add_project.label',
+    },
+    {
+      id: 'reload_ui',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.reload_ui.label',
+    },
+    {
+      id: 'restart_opencode',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.restart_opencode.label',
+    },
+    {
+      id: 'pin_current_session',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.pin_current_session.label',
+    },
+    {
+      id: 'copy_current_session_id',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.copy_current_session_id.label',
+    },
+    {
+      id: 'toggle_work_current_session',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_work_current_session.label',
+    },
+    {
+      id: 'open_multi_run',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_multi_run.label',
+    },
+    {
+      id: 'new_window',
+      defaultBinding: 'mod+shift+alt+n',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.new_window.label',
+    },
+    {
+      id: 'show_diagnostics',
+      defaultBinding: 'mod+shift+l',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.show_diagnostics.label',
+    },
+    {
+      id: 'toggle_developer_tools',
+      defaultBinding: 'mod+alt+i',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_developer_tools.label',
+    },
+    {
+      id: 'toggle_memory_debug',
+      defaultBinding: 'mod+shift+d',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_memory_debug.label',
+    },
+    {
+      id: 'zoom_in',
+      defaultBinding: 'mod+=',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.zoom_in.label',
+    },
+    {
+      id: 'zoom_out',
+      defaultBinding: 'mod+minus',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.zoom_out.label',
+    },
+    {
+      id: 'zoom_reset',
+      defaultBinding: 'mod+0',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.zoom_reset.label',
+    },
   ],
-  // Desktop-shell capabilities: registered as OS-level global shortcuts rather
-  // than in-app keybindings, so they carry no in-app default binding. The
-  // Settings shortcut list renders only the categories above, never this one.
   desktop: [
     {
       id: 'mini_chat_global',
@@ -332,7 +619,6 @@ const SHORTCUT_GROUPS = {
   ],
 } as const satisfies Record<ShortcutCategory, readonly ShortcutConfig[]>;
 
-/** All application shortcuts, flattened in the same order used by Settings. */
 export const SHORTCUT_SCHEMA = [
   ...SHORTCUT_GROUPS.session.map((shortcut) => ({
     ...shortcut,

@@ -76,6 +76,11 @@ describe('Toaster', () => {
     await act(async () => {
       toast('Saved');
     });
+    // The observer pins the toast on its own schedule, which a loaded machine
+    // pushes past any fixed wait.
+    for (let tries = 0; tries < 100; tries += 1) {
+      if (document.querySelector<HTMLElement>('[data-sonner-toast]')?.style.getPropertyPriority('box-shadow')) break;
+    }
 
     const toastElement = await waitForPinnedToast();
     expect(toastElement).not.toBeNull();
@@ -97,5 +102,18 @@ describe('Toaster', () => {
     await settle();
 
     expect(documentQueries.mock.calls.length).toBe(queriesBefore);
+  });
+
+  test('draws a loading toast with the app spinner in place of sonner\'s own', async () => {
+    await act(async () => root.render(<Toaster />));
+
+    await act(async () => {
+      toast.loading('Saving images');
+    });
+    await settle();
+
+    const icon = document.querySelector('[data-sonner-toast] [data-icon]');
+    expect(icon?.querySelector('[data-spinner]')).not.toBeNull();
+    expect(icon?.querySelector('.sonner-loading-bar')).toBeNull();
   });
 });

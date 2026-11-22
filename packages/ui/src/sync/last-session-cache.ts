@@ -1,10 +1,5 @@
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 
-// Persisted "last active session" per runtime (server instance), so a cold
-// app launch can reopen the session the user had open the last time this
-// instance was connected. This is startup-continuity context ONLY — callers
-// must confirm the session still exists against an authoritative snapshot
-// before opening it (see the MobileApp restore effect).
 const STORAGE_KEY = "oc.lastSession.v1"
 const MAX_RUNTIME_ENTRIES = 8
 
@@ -21,6 +16,12 @@ type PersistedEnvelope = {
 }
 
 const emptyEnvelope = (): PersistedEnvelope => ({ version: 1, runtimes: {} })
+
+let pointerOwned = true
+
+export function leaveLastActiveSessionToMainWindow(): void {
+  pointerOwned = false
+}
 
 const readEnvelope = (storage: Storage): PersistedEnvelope => {
   try {
@@ -39,8 +40,6 @@ const readEnvelope = (storage: Storage): PersistedEnvelope => {
     }
     return { version: 1, runtimes }
   } catch {
-    // Malformed persisted data is a read failure, not empty success — but for
-    // a pure convenience cache the correct recovery is the same: start fresh.
     return emptyEnvelope()
   }
 }
@@ -61,10 +60,8 @@ export function persistLastActiveSession(
   entry: PersistedLastSession,
   storage: Storage = getDeferredSafeStorage(),
 ): void {
-  if (!runtimeKey || !entry.sessionId) return
+  if (!pointerOwned || !runtimeKey || !entry.sessionId) return
   const envelope = readEnvelope(storage)
-  // Monotonic vs the stored entries: same-millisecond writes must not tie,
-  // or retention trimming would evict an arbitrary runtime.
   const maxExisting = Object.values(envelope.runtimes).reduce((max, existing) => Math.max(max, existing.updatedAt), 0)
   envelope.runtimes[runtimeKey] = { ...entry, updatedAt: Math.max(Date.now(), maxExisting + 1) }
   writeEnvelope(storage, envelope)
@@ -83,7 +80,7 @@ export function clearLastActiveSession(
   runtimeKey: string,
   storage: Storage = getDeferredSafeStorage(),
 ): void {
-  if (!runtimeKey) return
+  if (!pointerOwned || !runtimeKey) return
   const envelope = readEnvelope(storage)
   if (!envelope.runtimes[runtimeKey]) return
   delete envelope.runtimes[runtimeKey]

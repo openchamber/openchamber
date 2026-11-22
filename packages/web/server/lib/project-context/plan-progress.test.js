@@ -125,6 +125,7 @@ describe('createPlanSummaryCache', () => {
       stat: async () => ({ mtimeMs: 1, size: 10 }),
       readFile: async () => { throw new Error('readFile must not be used when open exists'); },
       open: async () => ({
+        stat: async () => ({ isFile: () => true, size: 10 }),
         read: async (buffer, offset, length) => {
           buffer.fill(120, offset, offset + length);
           return { bytesRead: length };

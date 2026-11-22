@@ -9,7 +9,6 @@ import { useI18n } from '@/lib/i18n';
 interface SessionSuggestionChipProps {
   sessionId: string | null;
   directory?: string;
-  /** The composer already has content — the suggestion must stay out of the way. */
   hidden: boolean;
   onApply: (text: string) => void;
 }
@@ -17,10 +16,6 @@ interface SessionSuggestionChipProps {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-// A suggested follow-up rendered as the composer's own top row (inside the
-// box, and inside the mobile pill). Tapping it fills the composer (no
-// auto-send); the X patches the suggestion out of the session metadata so
-// it stays dismissed everywhere.
 export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React.memo(({ sessionId, directory, hidden, onApply }) => {
   const { suggestion } = useSessionAssistState(sessionId ?? '', directory);
   const { t } = useI18n();
@@ -70,23 +65,27 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
             {suggestion}
           </TooltipContent>
         </Tooltip>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={(event) => void handleDismiss(event)}
-          onMouseDown={(event) => event.preventDefault()}
-          aria-label={t('chat.suggestion.dismissAria')}
-          title={t('chat.suggestion.dismissAria')}
-          className="size-7 shrink-0 rounded-lg text-muted-foreground hover:!bg-transparent hover:text-foreground active:!bg-transparent"
-        >
-          <Icon name="close" className="size-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={(event) => void handleDismiss(event)}
+              onMouseDown={(event) => event.preventDefault()}
+              aria-label={t('chat.suggestion.dismissAria')}
+              className="size-7 shrink-0 rounded-lg text-muted-foreground hover:!bg-transparent hover:text-foreground active:!bg-transparent"
+            >
+              <Icon name="close" className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('chat.suggestion.dismissAria')}</TooltipContent>
+        </Tooltip>
     </>
   );
 
   return (
-    <div className="flex h-10 items-center gap-1 border-b border-border/60 ps-3 pe-1.5">
+    <div className="flex oc-composer-row items-center gap-1 border-b border-edge ps-3 pe-1.5">
       {content}
     </div>
   );

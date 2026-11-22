@@ -2,11 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 import {
-  buildClickScript,
+  buildFieldValueScript,
+  buildFileInputScript,
+  buildFindByTextScript,
+  buildFocusFieldScript,
   buildInspectScript,
+  buildPointScript,
+  buildQuietScript,
   buildScrollScript,
+  buildScrollToScript,
+  buildSelectScript,
   buildSnapshotScript,
-  buildTypeScript,
+  buildWaitConditionScript,
 } from './pageActions';
 
 /**
@@ -24,30 +31,50 @@ const parses = (source: string): boolean => {
 };
 
 const runInWindow = (win: Window, source: string): string => (
-  JSON.stringify(new Function('window', 'document', 'navigator', 'CSS', 'location', `return ${source}`)(
+  // The page's own event constructors, as in a browser tab: the DOM refuses
+  // events built by another realm.
+  JSON.stringify(new Function('window', 'document', 'navigator', 'CSS', 'location', 'Event', 'KeyboardEvent', `return ${source}`)(
     win,
     win.document,
     win.navigator,
     win.CSS,
     win.location,
+    win.Event,
+    win.KeyboardEvent,
   ))
 );
+
+/** Gives an element a box, which happy-dom does not lay out. */
+const drawn = <T extends { setAttribute: (name: string, value: string) => void }>(element: T): T => {
+  // happy-dom computes no opacity, which reads as 0, which reads as hidden.
+  element.setAttribute('style', 'opacity: 1');
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    value: () => ({ x: 16, y: 20, width: 80, height: 32, top: 20, right: 96, bottom: 52, left: 16 }),
+  });
+  return element;
+};
 
 describe('page action scripts', () => {
   test('every script parses', () => {
     expect(parses(buildSnapshotScript())).toBe(true);
     expect(parses(buildSnapshotScript({ selector: '#main' }))).toBe(true);
-    expect(parses(buildClickScript({ selector: '#save' }))).toBe(true);
-    expect(parses(buildClickScript({ text: 'Save' }))).toBe(true);
-    expect(parses(buildTypeScript({ selector: '#q', value: 'hello', submit: true }))).toBe(true);
+    expect(parses(buildPointScript({ selector: '#save' }))).toBe(true);
+    expect(parses(buildPointScript({ id: 3, doc: 'd' }))).toBe(true);
+    expect(parses(buildFindByTextScript('Save'))).toBe(true);
+    expect(parses(buildFocusFieldScript({ selector: '#q' }))).toBe(true);
+    expect(parses(buildFieldValueScript({ id: 1, doc: 'd' }))).toBe(true);
+    expect(parses(buildFileInputScript({ id: 1, doc: 'd' }))).toBe(true);
+    expect(parses(buildSelectScript({ selector: '#country' }, { label: 'Canada' }))).toBe(true);
+    expect(parses(buildSelectScript({ selector: '#country' }, { value: 'ca' }))).toBe(true);
     expect(parses(buildInspectScript({ selector: '#save' }))).toBe(true);
     expect(parses(buildScrollScript({ direction: 'bottom' }))).toBe(true);
-    expect(parses(buildScrollScript({ selector: 'footer' }))).toBe(true);
+    expect(parses(buildScrollToScript({ selector: 'footer' }))).toBe(true);
+    expect(parses(buildWaitConditionScript({ text: 'Saved' }))).toBe(true);
   });
 
   test('a hostile selector is embedded as data, not as code', () => {
     const hostile = `'); window.__owned = true; ('`;
-    const script = buildClickScript({ selector: hostile });
+    const script = buildPointScript({ selector: hostile });
     expect(parses(script)).toBe(true);
     // Present only inside a quoted literal: that is what makes it inert.
     expect(script).toContain(JSON.stringify(hostile));
@@ -55,7 +82,7 @@ describe('page action scripts', () => {
 
   test('a typed value is embedded as data too', () => {
     const value = '"); alert(1); ("';
-    const script = buildTypeScript({ selector: '#q', value, submit: false });
+    const script = buildWaitConditionScript({ text: value });
     expect(parses(script)).toBe(true);
     expect(script).toContain(JSON.stringify(value));
   });
@@ -67,127 +94,60 @@ describe('page action scripts', () => {
     // not the tag name.
     const win = new Window({ url: 'https://duckduckgo.com/' });
     win.document.body.innerHTML = '<input type="checkbox" id="sidemenu-toggle"><input type="text" id="search">';
-    const runType = new Function(
-      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
-      `return ${buildTypeScript({ selector: 'input', value: 'hello', submit: false })}`,
-    );
-    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
-    expect(JSON.stringify(result)).toBe('{"ok":false,"error":"input is not a text field"}');
+    expect(JSON.parse(runInWindow(win, buildFocusFieldScript({ selector: 'input' })))).toEqual({ ok: false, error: '#sidemenu-toggle is not a text field' });
     expect(win.document.querySelector('input')?.checked).toBe(false);
   });
 
   test('typing refuses button-like and hidden inputs but accepts text-like ones', () => {
     const win = new Window({ url: 'https://example.test/' });
-    const runType = (selector: string, typed = 'hello'): string => JSON.stringify(new Function(
-      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
-      `return ${buildTypeScript({ selector, value: typed, submit: false })}`,
-    )(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event));
-
+    const focus = () => JSON.parse(runInWindow(win, buildFocusFieldScript({ selector: '#field' })));
     for (const type of ['submit', 'button', 'radio', 'hidden', 'file']) {
       win.document.body.innerHTML = `<input type="${type}" id="field">`;
-      expect(runType('#field')).toBe('{"ok":false,"error":"#field is not a text field"}');
+      expect(focus()).toEqual({ ok: false, error: '#field is not a text field' });
     }
-    for (const type of ['text', 'search', 'email', 'password', 'tel', 'url']) {
-      win.document.body.innerHTML = `<input type="${type}" id="field">`;
-      expect(runType('#field')).toContain('"ok":true');
-      expect(win.document.querySelector('input')?.value).toBe('hello');
-    }
-    // A number field is text-like too, and keeps a numeric value.
-    win.document.body.innerHTML = '<input type="number" id="field">';
-    expect(runType('#field', '42')).toContain('"ok":true');
-    expect(win.document.querySelector('input')?.value).toBe('42');
     // No type attribute reads back as 'text', in the page and to the user.
-    win.document.body.innerHTML = '<input id="field">';
-    expect(runType('#field')).toContain('"ok":true');
-
-    win.document.body.innerHTML = '<textarea id="field"></textarea>';
-    expect(runType('#field')).toContain('"ok":true');
-    expect(win.document.querySelector('textarea')?.value).toBe('hello');
+    for (const field of ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].map((type) => `<input type="${type}" id="field">`)
+      .concat(['<input id="field">', '<textarea id="field"></textarea>'])) {
+      win.document.body.innerHTML = field;
+      expect(focus()).toMatchObject({ ok: true });
+    }
   });
 
-  test('typing reports failure when the field rejects the value', () => {
-    // Issue #68: a number field handed letters ends up empty, as it does for
-    // a person typing them, but the type script reported success anyway —
-    // the agent then acts on a value that never landed.
+  test('a password field read back after typing never carries its value', () => {
+    // Issue #1073 (Codex P1 on PR #70): what a password field holds is the
+    // secret itself, and the answer travels to the calling agent.
     const win = new Window({ url: 'https://example.test/' });
-    win.document.body.innerHTML = '<input type="number" id="field">';
-    const runType = new Function(
-      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
-      `return ${buildTypeScript({ selector: '#field', value: 'hello', submit: false })}`,
-    );
-    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
-    expect(JSON.stringify(result)).toContain('"ok":false');
-    expect(JSON.stringify(result)).toContain('did not keep the typed value');
-    expect(win.document.querySelector('input')?.value).toBe('');
+    for (const field of [
+      '<input type="password" id="field">',
+      // CodeRabbit on PR #1087: a visibility toggle flips type to text while
+      // autocomplete="current-password" still names the secret.
+      '<input type="text" autocomplete="current-password" id="field">',
+    ]) {
+      win.document.body.innerHTML = field;
+      const input = win.document.querySelector('input');
+      if (!input) throw new Error('password input missing');
+      input.value = 'held-secret-value';
+      const rendered = runInWindow(win, buildFieldValueScript({ selector: '#field' }));
+      expect(JSON.parse(rendered)).toEqual({ ok: true, secret: true });
+      expect(rendered).not.toContain('held-secret-value');
+    }
+    // Positive control: an ordinary field reads back what it holds.
+    win.document.body.innerHTML = '<input type="text" id="field" value="plain">';
+    expect(JSON.parse(runInWindow(win, buildFieldValueScript({ selector: '#field' })))).toMatchObject({ ok: true, value: 'plain' });
   });
 
-  test('a password field mismatch error never contains the held or typed secret', () => {
-    // Issue #1073 (Codex P1 on PR #70): the mismatch error embedded the
-    // field's held value verbatim, so a controlled password field whose
-    // handler restores its value handed the secret to the calling agent.
-    const win = new Window({ url: 'https://example.test/' });
-    win.document.body.innerHTML = '<input type="password" id="field">';
-    const input = win.document.querySelector('input');
-    if (!input) throw new Error('password input missing');
-    const heldSecret = 'held-secret-value';
-    input.value = heldSecret;
-    input.addEventListener('input', () => { input.value = heldSecret; });
-    input.addEventListener('change', () => { input.value = heldSecret; });
-    const runType = new Function(
-      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
-      `return ${buildTypeScript({ selector: '#field', value: 'typed-secret-attempt', submit: false })}`,
-    );
-    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
-    const rendered = JSON.stringify(result);
-    expect(rendered).toContain('"ok":false');
-    expect(rendered).toContain('did not keep the typed value');
-    expect(rendered).not.toContain(heldSecret);
-    expect(rendered).not.toContain('typed-secret-attempt');
-    expect(rendered).not.toContain('character');
-    expect(input.value).toBe(heldSecret);
-  });
+  test('a select criterion is embedded as data too', () => {
+    const selector = `'); window.__owned = true; ('`;
+    const label = `"); window.__owned = true; ("`;
+    const value = `\\'); window.__owned = true; ('`;
 
-  test('a revealed password field mismatch error carries no character count', () => {
-    // CodeRabbit on PR #1087: a visibility toggle flips type to text while
-    // autocomplete="current-password" still names the secret — the count is
-    // a diagnostic derived from the secret's content and must be suppressed.
-    const win = new Window({ url: 'https://example.test/' });
-    win.document.body.innerHTML = '<input type="text" autocomplete="current-password" id="field">';
-    const input = win.document.querySelector('input');
-    if (!input) throw new Error('revealed password input missing');
-    const heldSecret = 'revealed-secret';
-    input.value = heldSecret;
-    input.addEventListener('input', () => { input.value = heldSecret; });
-    input.addEventListener('change', () => { input.value = heldSecret; });
-    const runType = new Function(
-      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
-      `return ${buildTypeScript({ selector: '#field', value: 'another-attempt', submit: false })}`,
-    );
-    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
-    const rendered = JSON.stringify(result);
-    expect(rendered).toContain('"ok":false');
-    expect(rendered).toContain('did not keep the typed value');
-    expect(rendered).not.toContain(heldSecret);
-    expect(rendered).not.toContain('character');
-  });
-
-  test('a contenteditable field turned non-editable by its handler still reports the mismatch', () => {
-    // CodeRabbit on PR #1087: the readback must use the editing kind captured
-    // before dispatch — reading .value off a div whose editability flipped
-    // mid-event is undefined and must not throw instead of reporting.
-    const win = new Window({ url: 'https://example.test/' });
-    win.document.body.innerHTML = '<div contenteditable="true" id="field">old text</div>';
-    const div = win.document.querySelector('div');
-    if (!div) throw new Error('contenteditable div missing');
-    div.addEventListener('input', () => { div.textContent = 'old text'; div.contentEditable = 'false'; });
-    div.addEventListener('change', () => { div.textContent = 'old text'; });
-    const runType = new Function(
-      'window', 'document', 'navigator', 'CSS', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event',
-      `return ${buildTypeScript({ selector: '#field', value: 'typed replacement', submit: false })}`,
-    );
-    const result = runType(win, win.document, win.navigator, win.CSS, win.location, win.HTMLInputElement, win.HTMLTextAreaElement, win.Event);
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain('did not keep the typed value');
+    for (const script of [
+      buildSelectScript({ selector }, { label }),
+      buildSelectScript({ selector }, { value }),
+    ]) {
+      expect(parses(script)).toBe(true);
+      expect(script).toContain(JSON.stringify({ selector }));
+    }
   });
 
   test('whitespace regexes survive interpolation', () => {
@@ -200,7 +160,7 @@ describe('page action scripts', () => {
     // A page with scroll-behavior: smooth would otherwise still be animating
     // when the position is read.
     expect(buildScrollScript({ direction: 'bottom' })).toContain("behavior: 'instant'");
-    expect(buildScrollScript({ selector: 'footer' })).toContain("behavior: 'instant'");
+    expect(buildScrollToScript({ selector: 'footer' })).toContain("behavior: 'instant'");
   });
 
   test('scrolling answers on a page that gets no paint frames', async () => {
@@ -219,114 +179,474 @@ describe('page action scripts', () => {
     await win.happyDOM.close();
   });
 
-  test('a scoped snapshot reads only the subtree it was given', () => {
-    const script = buildSnapshotScript({ selector: '#changelog' });
-    expect(script).toContain('"#changelog"');
-    expect(script).toContain('root.querySelectorAll');
+  test('waiting for quiet holds while the page keeps changing, then answers', async () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<div id="root">Loading</div>';
+    const root = win.document.querySelector('#root');
+    if (!root) throw new Error('test root was not created');
+    const run = (script: string): Promise<{ ok: boolean; quiet: boolean }> => Promise.resolve(new Function(
+      'window', 'document', 'MutationObserver', 'PerformanceObserver', 'performance', 'setTimeout',
+      `return ${script}`,
+    )(win, win.document, win.MutationObserver, undefined, performance, setTimeout));
+
+    const startedAt = performance.now();
+    const ticker = setInterval(() => { root.textContent = String(performance.now()); }, 20);
+    const changing = await run(buildQuietScript({ quietMs: 100, maxMs: 300 }));
+    clearInterval(ticker);
+    expect(changing).toEqual({ ok: true, quiet: false });
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(290);
+
+    setTimeout(() => { root.textContent = 'App'; }, 50);
+    expect(await run(buildQuietScript({ quietMs: 100, maxMs: 2_000 }))).toEqual({ ok: true, quiet: true });
+    await win.happyDOM.close();
   });
 
-  test('a click opens a widget that listens for mousedown or focus', () => {
-    // VueMultiselect and many custom selects open on the first half of a
-    // click; a bare click event reported success while they stayed shut.
+  test('waiting for quiet holds through a finite animation and ignores an endless one', async () => {
+    // A splash fades out by style alone, with no DOM change until it is gone.
+    const win = new Window({ url: 'http://localhost:3000/' });
+    const fadeEndsAt = performance.now() + 250;
+    const fade = { get playState() { return performance.now() < fadeEndsAt ? 'running' : 'finished'; }, pending: false, effect: { getTiming: () => ({ iterations: 1 }) } };
+    const pulse = { playState: 'running', pending: false, effect: { getTiming: () => ({ iterations: Infinity }) } };
+    Object.defineProperty(win.document, 'getAnimations', { value: () => [fade, pulse] });
+    const run = new Function(
+      'window', 'document', 'MutationObserver', 'PerformanceObserver', 'performance', 'setTimeout',
+      `return ${buildQuietScript({ quietMs: 100, maxMs: 2_000 })}`,
+    );
+
+    const startedAt = performance.now();
+    const result = await Promise.resolve(run(win, win.document, win.MutationObserver, undefined, performance, setTimeout));
+
+    expect(result).toEqual({ ok: true, quiet: true });
+    // Never before the fade ended; the endless pulse did not hold it to the limit.
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(250);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    await win.happyDOM.close();
+  });
+
+  test('waiting for quiet still ends when the page breaks getAnimations', async () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    Object.defineProperty(win.document, 'getAnimations', { value: () => { throw new Error('page override'); } });
+    const run = new Function(
+      'window', 'document', 'MutationObserver', 'PerformanceObserver', 'performance', 'setTimeout',
+      `return ${buildQuietScript({ quietMs: 50, maxMs: 1_000 })}`,
+    );
+
+    expect(await Promise.resolve(run(win, win.document, win.MutationObserver, undefined, performance, setTimeout))).toEqual({ ok: true, quiet: true });
+    await win.happyDOM.close();
+  });
+
+  test('a scoped snapshot returns the text of its subtree only', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<nav>Sidebar session</nav><div role="dialog">Appearance settings</div>';
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript({ selector: '[role=dialog]' })));
+
+    expect(result.text).toContain('Appearance settings');
+    expect(result.text).not.toContain('Sidebar session');
+  });
+
+  test('snapshots native select options in live DOM order with state metadata', () => {
     const win = new Window({ url: 'http://localhost:3000/' });
     win.document.body.innerHTML = `
-      <div id="by-mousedown"><span class="placeholder">Add a monitor</span></div>
-      <div id="by-focus" tabindex="-1">Pick one</div>`;
-    const opened: string[] = [];
-    win.document.querySelector('#by-mousedown')?.addEventListener('mousedown', () => opened.push('mousedown'));
-    win.document.querySelector('#by-focus')?.addEventListener('focus', () => opened.push('focus'));
+      <select id="country">
+        <option value="us">
+          United
+          States
+        </option>
+        <optgroup label="Disabled group" disabled>
+          <option value="grouped">グループ\noption</option>
+        </optgroup>
+        <option value="direct" disabled>Direct disabled</option>
+        <option value="" selected>Empty value</option>
+        <option value="us">Duplicate value</option>
+      </select>`;
+    const select = win.document.querySelector('#country');
+    if (!(select instanceof win.HTMLSelectElement)) throw new Error('test select was not created');
+    select.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(select, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 240, height: 32, top: 20, right: 256, bottom: 52, left: 16 }),
+    });
+    select.options[0]!.selected = true;
 
-    expect(runInWindow(win, buildClickScript({ selector: '#by-mousedown' }))).toContain('"ok":true');
-    expect(runInWindow(win, buildClickScript({ selector: '#by-focus' }))).toContain('"ok":true');
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#country');
 
-    expect(opened).toEqual(['mousedown', 'focus']);
+    expect(entry).toMatchObject({
+      selector: '#country',
+      tag: 'select',
+      multiple: false,
+      options: [
+        { label: 'United States', value: 'us', selected: true, disabled: false },
+        { label: 'グループ option', value: 'grouped', selected: false, disabled: true },
+        { label: 'Direct disabled', value: 'direct', selected: false, disabled: true },
+        { label: 'Empty value', value: '', selected: false, disabled: false },
+        { label: 'Duplicate value', value: 'us', selected: false, disabled: false },
+      ],
+    });
+    expect(entry.optionsTruncated).toBeUndefined();
+
+    const snapshotLabel = entry.options[0].label;
+    const selectResult = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: snapshotLabel })));
+    expect(selectResult).toMatchObject({ ok: true, label: snapshotLabel, value: 'us' });
   });
 
-  test('a click sends the sequence a mouse sends, once each', () => {
+  test('snapshots multiple selects and reports bounded option truncation', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    const select = win.document.createElement('select');
+    select.id = 'many';
+    select.multiple = true;
+    for (let index = 0; index < 33; index += 1) {
+      const option = win.document.createElement('option');
+      option.value = index === 0 ? `${'value'.repeat(30)}🙂` : `value-${index}`;
+      option.textContent = index === 0 ? `${'label'.repeat(30)}🙂` : `Option ${index}`;
+      select.append(option);
+    }
+    win.document.body.append(select);
+    select.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(select, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 240, height: 32, top: 20, right: 256, bottom: 52, left: 16 }),
+    });
+    select.options[0]!.selected = true;
+    select.options[32]!.selected = true;
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#many');
+
+    expect(entry.multiple).toBe(true);
+    expect(entry.options).toHaveLength(32);
+    expect(entry.options[0]).toMatchObject({
+      value: 'value'.repeat(16),
+      label: 'label'.repeat(16),
+      selected: true,
+      disabled: false,
+    });
+    expect(entry.options.at(-1)).toMatchObject({ value: 'value-31', selected: false });
+    expect(entry.optionsTruncated).toBe(true);
+    // The selected option beyond the cap is not promoted into the returned prefix.
+    expect(entry.options.some((option: { value: string; selected: boolean }) => option.value === 'value-32' && option.selected)).toBe(false);
+  });
+
+  test('keeps non-select snapshot entries free of select-only fields', () => {
     const win = new Window({ url: 'http://localhost:3000/' });
     win.document.body.innerHTML = '<button id="save">Save</button>';
+    const button = win.document.querySelector('#save');
+    if (!button) throw new Error('test button was not created');
+    button.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(button, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 80, height: 32, top: 20, right: 96, bottom: 52, left: 16 }),
+    });
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#save');
+
+    expect(entry).toEqual({
+      id: 1,
+      selector: '#save',
+      tag: 'button',
+      bounds: { x: 16, y: 20, width: 80, height: 32 },
+      inViewport: true,
+      label: 'Save',
+    });
+  });
+
+  test('handles an empty select and an invalid snapshot scope', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<select id="empty"></select>';
+    const select = win.document.querySelector('#empty');
+    if (!(select instanceof win.HTMLSelectElement)) throw new Error('test select was not created');
+    select.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(select, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 240, height: 32, top: 20, right: 256, bottom: 52, left: 16 }),
+    });
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#empty');
+    expect(entry).toMatchObject({ multiple: false, options: [] });
+    expect(entry.optionsTruncated).toBeUndefined();
+    expect(JSON.parse(runInWindow(win, buildSnapshotScript({ selector: '[' })))).toEqual({
+      ok: false,
+      error: 'Invalid selector: [',
+    });
+  });
+
+  test('keeps hostile option strings as page data', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    const select = win.document.createElement('select');
+    select.id = 'safe';
+    const hostile = `"); window.__owned = true; ("`;
+    const option = win.document.createElement('option');
+    option.value = hostile;
+    option.textContent = hostile;
+    select.append(option);
+    win.document.body.append(select);
+    select.setAttribute('style', 'opacity: 1');
+    Object.defineProperty(select, 'getBoundingClientRect', {
+      value: () => ({ x: 16, y: 20, width: 240, height: 32, top: 20, right: 256, bottom: 52, left: 16 }),
+    });
+
+    const result = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = result.elements.find((element: { selector: string }) => element.selector === '#safe');
+
+    expect(entry.options).toEqual([{ label: hostile, value: hostile, selected: true, disabled: false }]);
+    expect((win as Window & { __owned?: boolean }).__owned).toBeUndefined();
+  });
+
+  test('selects a native option by its exact visible label and delivers events', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="us">United States</option>
+        <option value="ca">Canada</option>
+      </select>`;
     const seen: string[] = [];
-    for (const type of ['pointerdown', 'mousedown', 'focus', 'pointerup', 'mouseup', 'click']) {
-      win.document.querySelector('#save')?.addEventListener(type, () => seen.push(type));
-    }
+    const select = win.document.querySelector('#country');
+    if (!(select instanceof win.HTMLSelectElement)) throw new Error('test select was not created');
+    select?.addEventListener('input', () => seen.push('input'));
+    select?.addEventListener('change', () => seen.push('change'));
 
-    runInWindow(win, buildClickScript({ selector: '#save' }));
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Canada' })));
 
-    expect(seen).toEqual(['pointerdown', 'mousedown', 'focus', 'pointerup', 'mouseup', 'click']);
+    expect(result).toEqual({ ok: true, selector: '#country', label: 'Canada', value: 'ca', url: 'http://localhost:3000/' });
+    expect(select?.value).toBe('ca');
+    expect(select?.selectedOptions[0]?.textContent).toBe('Canada');
+    expect(seen).toEqual(['input', 'change']);
   });
 
-  test('a page that prevents mousedown keeps its focus where it was', () => {
-    // Dropdown options do this so picking one does not blur the search field.
+  test('selects an option by exact value and reports the selected label', () => {
     const win = new Window({ url: 'http://localhost:3000/' });
-    win.document.body.innerHTML = '<input id="search"><div id="option" tabindex="-1">Website</div>';
-    const search = win.document.querySelector('input');
-    search?.focus();
-    win.document.querySelector('#option')?.addEventListener('mousedown', (event) => event.preventDefault());
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="us">United States</option>
+        <option value="ca">Canada</option>
+      </select>`;
 
-    runInWindow(win, buildClickScript({ selector: '#option' }));
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { value: 'ca' })));
 
-    expect(win.document.activeElement).toBe(search);
+    expect(result).toMatchObject({ ok: true, selector: '#country', label: 'Canada', value: 'ca' });
+    const select = win.document.querySelector('#country');
+    if (!(select instanceof win.HTMLSelectElement)) throw new Error('test select was not created');
+    expect(select.value).toBe('ca');
   });
 
-  test('copies and pastes through the browser clipboard in one tab', async () => {
-    const fixture = 'test_secret_not_real_123';
-    let clipboard = '';
+  test('normalizes whitespace when matching an option label', () => {
     const win = new Window({ url: 'http://localhost:3000/' });
-    Object.defineProperty(win.navigator, 'clipboard', {
-      value: {
-        writeText: async (value: string) => { clipboard = value; },
-        readText: async () => clipboard,
-      },
-    });
-    win.document.body.innerHTML = '<button id="copy">Copy API key</button><button id="paste">Paste</button><input id="target">';
-    win.document.querySelector('#copy')?.addEventListener('click', () => {
-      void win.navigator.clipboard.writeText(fixture);
-    });
-    win.document.querySelector('#paste')?.addEventListener('click', () => {
-      void win.navigator.clipboard.readText().then((value) => {
-        const target = win.document.querySelector('input');
-        if (target) target.value = value;
-      });
-    });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="ca">\n          Canada\n        </option>
+      </select>`;
 
-    const copyResult = runInWindow(win, buildClickScript({ selector: '#copy' }));
-    runInWindow(win, buildClickScript({ selector: '#paste' }));
-    await Promise.resolve();
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Canada' })));
 
-    expect(win.document.querySelector('input')?.value).toBe(fixture);
-    expect(copyResult).not.toContain(fixture);
+    expect(result).toMatchObject({ ok: true, label: 'Canada', value: 'ca' });
   });
 
-  test('copies in one tab and pastes in another without serializing the value', async () => {
-    const fixture = 'test_secret_not_real_123';
-    let clipboard = '';
-    const source = new Window({ url: 'https://example.test/account' });
-    const destination = new Window({ url: 'http://localhost:3000/' });
-    Object.defineProperty(source.navigator, 'clipboard', {
-      value: { writeText: async (value: string) => { clipboard = value; } },
-    });
-    Object.defineProperty(destination.navigator, 'clipboard', {
-      value: { readText: async () => clipboard },
-    });
-    source.document.body.innerHTML = '<button id="copy">Copy API key</button>';
-    destination.document.body.innerHTML = '<button id="paste">Paste</button><input id="target">';
-    source.document.querySelector('#copy')?.addEventListener('click', () => {
-      void source.navigator.clipboard.writeText(fixture);
-    });
-    destination.document.querySelector('#paste')?.addEventListener('click', () => {
-      void destination.navigator.clipboard.readText().then((value) => {
-        const target = destination.document.querySelector('input');
-        if (target) target.value = value;
-      });
-    });
+  test('rejects missing, conflicting, invalid, and ambiguous selection inputs', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <option value="ca">Canada</option>
+        <option value="ca">Canada</option>
+      </select>`;
 
-    const copyResult = runInWindow(source, buildClickScript({ selector: '#copy' }));
-    const pasteResult = runInWindow(destination, buildClickScript({ selector: '#paste' }));
-    await Promise.resolve();
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, {})))).toEqual({
+      ok: false,
+      error: 'browser.select requires exactly one of label or value',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Canada', value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'browser.select requires exactly one of label or value',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Missing' })))).toEqual({
+      ok: false,
+      error: 'No option in #country has the exact label Missing',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { label: 'Canada' })))).toEqual({
+      ok: false,
+      error: 'More than one option in #country has the exact label Canada',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'More than one option in #country has the exact value ca',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '[' }, { value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'Invalid selector: [',
+    });
+  });
 
-    expect(destination.document.querySelector('input')?.value).toBe(fixture);
-    expect(copyResult).not.toContain(fixture);
-    expect(pasteResult).not.toContain(fixture);
-    expect(runInWindow(destination, buildSnapshotScript())).not.toContain(fixture);
+  test('rejects custom controls, disabled options, disabled selects, and multiple selects', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <div id="custom" role="listbox"><div role="option">Canada</div></div>
+      <select id="disabled-option"><option value="ca" disabled>Canada</option></select>
+      <select id="disabled-select" disabled><option value="ca">Canada</option></select>
+      <select id="multiple" multiple><option value="ca">Canada</option></select>`;
+
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#custom' }, { label: 'Canada' })))).toEqual({
+      ok: false,
+      error: '#custom is not a native HTML select',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#disabled-option' }, { label: 'Canada' })))).toEqual({
+      ok: false,
+      error: 'The matching option in #disabled-option is disabled',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#disabled-select' }, { value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'The select #disabled-select is disabled',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#multiple' }, { value: 'ca' })))).toEqual({
+      ok: false,
+      error: 'Multiple selects are not supported for browser.select',
+    });
+  });
+
+  test('refuses an option inside a disabled optgroup and still selects its enabled siblings', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <optgroup label="Europe" disabled><option value="de">Germany</option></optgroup>
+        <optgroup label="Americas"><option value="ca">Canada</option></optgroup>
+      </select>`;
+
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { value: 'de' })))).toEqual({
+      ok: false,
+      error: 'The matching option in #country is disabled',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country' }, { value: 'ca' })))).toMatchObject({
+      ok: true,
+      label: 'Canada',
+      value: 'ca',
+    });
+  });
+
+  test('keeps hostile selector, label, and value strings inert', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    const hostile = `"); window.__owned = true; ("`;
+    const select = win.document.createElement('select');
+    select.id = 'safe';
+    const option = win.document.createElement('option');
+    option.value = hostile;
+    option.textContent = hostile;
+    select.append(option);
+    win.document.body.append(select);
+
+    const result = JSON.parse(runInWindow(win, buildSelectScript({ selector: '#safe' }, { value: hostile })));
+
+    expect(result).toMatchObject({ ok: true, label: hostile, value: hostile });
+    expect((win as Window & { __owned?: boolean }).__owned).toBeUndefined();
+  });
+
+  test('numbers the elements it lists, and a number then reaches its element', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button><a href="/next">Next</a>';
+    for (const element of win.document.querySelectorAll('button, a')) drawn(element);
+
+    const snapshot = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const save = snapshot.elements.find((element: { selector?: string }) => element.selector === '#save');
+    expect(Number.isInteger(save.id)).toBe(true);
+
+    const point = JSON.parse(runInWindow(win, buildPointScript({ id: save.id, doc: snapshot.doc })));
+    expect(point).toMatchObject({ ok: true, x: 56, y: 36, label: 'Save', selector: '#save' });
+  });
+
+  test('a new snapshot retires the numbers of the last one', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button>';
+    drawn(win.document.querySelector('#save')!);
+    const first = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    runInWindow(win, buildSnapshotScript());
+
+    expect(JSON.parse(runInWindow(win, buildPointScript({ id: first.elements[0].id, doc: first.doc })))).toMatchObject({ ok: false, code: 'stale' });
+  });
+
+  test('a number from a replaced document reaches nothing, even where the new one reuses it', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button>';
+    drawn(win.document.querySelector('#save')!);
+    const old = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    // A navigation gives the frame a new document, and with it a new registry.
+    Reflect.deleteProperty(win, '__openchamberAgent');
+    win.document.body.innerHTML = '<button id="delete">Delete</button>';
+    drawn(win.document.querySelector('#delete')!);
+    runInWindow(win, buildSnapshotScript());
+
+    expect(JSON.parse(runInWindow(win, buildPointScript({ id: old.elements[0].id, doc: old.doc })))).toMatchObject({ ok: false, code: 'stale' });
+  });
+
+  test('lists controls inside an open shadow root by number, without a selector', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<div id="host"></div>';
+    const shadow = win.document.querySelector('#host')!.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<button>Inside</button>';
+    drawn(shadow.querySelector('button')!);
+
+    const entry = JSON.parse(runInWindow(win, buildSnapshotScript())).elements.find((element: { label?: string }) => element.label === 'Inside');
+    expect(entry).toMatchObject({ tag: 'button', inShadowRoot: true });
+    expect(entry.selector).toBeUndefined();
+  });
+
+  test('lists a hidden file input, marked hidden, so an upload can reach it', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<input id="avatar" type="file" accept="image/*" style="display:none">';
+
+    const snapshot = JSON.parse(runInWindow(win, buildSnapshotScript()));
+    const entry = snapshot.elements.find((element: { selector?: string }) => element.selector === '#avatar');
+    expect(entry).toMatchObject({ tag: 'input', type: 'file', hidden: true, accept: 'image/*' });
+    expect(entry.inViewport).toBeUndefined();
+    expect(JSON.parse(runInWindow(win, buildFileInputScript({ id: entry.id, doc: snapshot.doc })))).toEqual({ ok: true, multiple: false });
+    expect(JSON.parse(runInWindow(win, buildFileInputScript({ selector: 'body' }))).error).toContain('is not a file input');
+  });
+
+  test('refuses to press an element something else is drawn over, naming the cover', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button><div id="banner">Accept cookies</div>';
+    const save = drawn(win.document.querySelector('#save')!);
+    const banner = win.document.querySelector('#banner')!;
+    Object.defineProperty(win.document, 'elementFromPoint', { value: () => banner });
+
+    const result = JSON.parse(runInWindow(win, buildPointScript({ selector: '#save' })));
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('#banner "Accept cookies" is drawn over #save "Save"');
+    expect(save.isConnected).toBe(true);
+  });
+
+  test('refuses a disabled control for a click', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save" disabled>Save</button>';
+    drawn(win.document.querySelector('#save')!);
+
+    expect(JSON.parse(runInWindow(win, buildPointScript({ selector: '#save' }))).error).toBe('#save "Save" is disabled');
+  });
+
+  test('finds a button by its label, an exact match before a containing one', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="all">Save all</button><button id="one">Save</button>';
+    for (const element of win.document.querySelectorAll('button')) drawn(element);
+
+    const found = JSON.parse(runInWindow(win, buildFindByTextScript('save')));
+    expect(found).toMatchObject({ ok: true, found: true, exact: true });
+    expect(JSON.parse(runInWindow(win, buildPointScript({ id: found.id, doc: found.doc }))).selector).toBe('#one');
+    expect(JSON.parse(runInWindow(win, buildFindByTextScript('Delete')))).toEqual({ ok: true, found: false });
+  });
+
+  test('selects the whole field before typing, so the typed text replaces it', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<input id="q" value="old text"><button id="b">B</button>';
+
+    expect(JSON.parse(runInWindow(win, buildFocusFieldScript({ selector: '#q' })))).toMatchObject({ ok: true, selector: '#q' });
+    const input = win.document.querySelector('input')!;
+    expect(win.document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 'old text'.length]);
+    expect(JSON.parse(runInWindow(win, buildFocusFieldScript({ selector: '#b' }))).error).toContain('is not a text field');
+  });
+
+  test('waits on text in the page and in shadow roots', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<p>Loading</p><div id="host"></div>';
+    win.document.querySelector('#host')!.attachShadow({ mode: 'open' }).innerHTML = '<span>Saved   changes</span>';
+
+    expect(JSON.parse(runInWindow(win, buildWaitConditionScript({ text: 'saved changes' })))).toEqual({ ok: true, present: true });
+    expect(JSON.parse(runInWindow(win, buildWaitConditionScript({ text: 'Done' })))).toEqual({ ok: true, present: false });
+    expect(JSON.parse(runInWindow(win, buildWaitConditionScript({ target: { selector: '#missing' } })))).toMatchObject({ ok: true, present: false });
   });
 });

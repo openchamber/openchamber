@@ -1,4 +1,4 @@
-import { normalizeToolName } from '@/lib/opencode/tools';
+import { normalizeToolName, opencodeNamespaceTool } from '@/lib/opencode/tools';
 import {
   isEditTool,
   isPatchTool,
@@ -7,7 +7,6 @@ import {
   isWriteTool,
 } from '@/lib/opencode/tools';
 
-/** v2 file tools report `path`; the other keys cover MCP and plugin tools. */
 const readInputPath = (input: Record<string, unknown> | undefined): string | null => {
   const value = input?.path ?? input?.filePath ?? input?.file_path ?? input?.sourcePath;
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -67,8 +66,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
     ]
   },
 
-  // OpenCode 2 Code Mode: one tool whose input is a short JS script that calls
-  // the MCP and integration tools as functions.
   execute: {
     displayName: 'Script',
     category: 'code',
@@ -79,7 +76,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
   },
 
   shell: {
-    displayName: 'Shell Command',
+    displayName: 'Shell',
     category: 'system',
     outputLanguage: 'text',
     inputFields: [
@@ -161,34 +158,6 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
        { key: 'id', label: 'Skill', type: 'text' }
      ]
    },
-   // The `opencode` namespace: OpenCode managing itself.
-   session_rename: {
-     displayName: 'Rename Session',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'title', label: 'Title', type: 'text' },
-       { key: 'sessionID', label: 'Session', type: 'text' }
-     ]
-   },
-   session_move: {
-     displayName: 'Move Session',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'directory', label: 'Directory', type: 'file' },
-       { key: 'sessionID', label: 'Session', type: 'text' }
-     ]
-   },
-   models: {
-     displayName: 'Search Models',
-     category: 'system',
-     outputLanguage: 'json',
-     inputFields: [
-       { key: 'search', label: 'Search', type: 'text' },
-       { key: 'provider', label: 'Provider', type: 'text' }
-     ]
-   },
     question: {
        displayName: 'Question',
        category: 'ai',
@@ -197,6 +166,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
          { key: 'questions', label: 'Questions', type: 'code', language: 'json' }
        ]
      },
+
+    todowrite: {
+      displayName: 'Tasks',
+      category: 'ai',
+      outputLanguage: 'text',
+      inputFields: []
+    },
 
     openchamber: {
       displayName: 'OpenChamber',
@@ -240,8 +216,36 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       inputFields: []
     },
 
+    openchamber_usage: {
+      displayName: 'OpenChamber Usage',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
     openchamber_render: {
       displayName: 'OpenChamber Render',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_image: {
+      displayName: 'OpenChamber Image',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_secret: {
+      displayName: 'OpenChamber Secret',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    openchamber_workflow: {
+      displayName: 'OpenChamber Workflow',
       category: 'system',
       outputLanguage: 'json',
       inputFields: []
@@ -284,8 +288,15 @@ function formatUnknownToolDisplayName(toolName: string): string {
     .replace(/^./, (char) => char.toUpperCase());
 }
 
+const OPENCODE_NAMESPACE_METADATA: ToolMetadata = {
+  displayName: 'OpenCode',
+  category: 'system',
+  outputLanguage: 'json',
+  inputFields: []
+};
+
 export function getToolMetadata(toolName: string): ToolMetadata {
-  // Namespaced tools (`opencode.session_rename`) are keyed by their last segment.
+  if (toolName === 'opencode' || opencodeNamespaceTool(toolName)) return OPENCODE_NAMESPACE_METADATA;
   return TOOL_METADATA[toolName] || TOOL_METADATA[normalizeToolName(toolName)] || {
     displayName: formatUnknownToolDisplayName(toolName),
     category: 'system',
@@ -333,7 +344,6 @@ export function detectToolOutputLanguage(
 export function getLanguageFromExtension(filePath: string): string | null {
   const ext = filePath.split('.').pop()?.toLowerCase();
   
-  // Handle special filenames without extensions
   const filename = filePath.split('/').pop()?.toLowerCase() || '';
   const filenameMap: Record<string, string> = {
     'dockerfile': 'dockerfile',
@@ -371,7 +381,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     '.env.test': 'bash',
     'procfile': 'yaml',
     'codeowners': 'text',
-    // Lock files
     'package-lock.json': 'json',
     'composer.lock': 'json',
     'yarn.lock': 'yaml',
@@ -390,7 +399,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
   }
 
   const languageMap: Record<string, string> = {
-    // JavaScript/TypeScript
     'js': 'javascript',
     'jsx': 'jsx',
     'ts': 'typescript',
@@ -400,7 +408,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'mts': 'typescript',
     'cts': 'typescript',
 
-    // Web markup/styling
     'html': 'html',
     'htm': 'html',
     'xhtml': 'html',
@@ -432,7 +439,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'pcss': 'css',
     'postcss': 'css',
 
-    // Data/config formats
     'json': 'json',
     'jsonc': 'json',
     'json5': 'json',
@@ -480,7 +486,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'csv': 'text',
     'tsv': 'text',
 
-    // Python
     'py': 'python',
     'pyw': 'python',
     'pyx': 'python',
@@ -491,7 +496,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'gypi': 'python',
     'bzl': 'python',
 
-    // Ruby
     'rb': 'ruby',
     'erb': 'erb',
     'rake': 'ruby',
@@ -503,7 +507,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'rabl': 'ruby',
     'builder': 'ruby',
 
-    // PHP
     'php': 'php',
     'phtml': 'php',
     'php3': 'php',
@@ -511,14 +514,12 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'php5': 'php',
     'php7': 'php',
     'phps': 'php',
-    // PHP templates (Smarty-style .tpl, CakePHP .ctp) and PHP test files.
     'tpl': 'php',
     'ctp': 'php',
     'phpt': 'php',
     'inc': 'php',
     'blade.php': 'php',
 
-    // Java/JVM
     'java': 'java',
     'kt': 'kotlin',
     'kts': 'kotlin',
@@ -530,7 +531,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'gy': 'groovy',
     'gsh': 'groovy',
 
-    // C/C++/Objective-C
     'c': 'c',
     'h': 'c',
     'cpp': 'cpp',
@@ -545,7 +545,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'm': 'objectivec',
     'mm': 'objectivec',
 
-    // C#/F#/.NET
     'cs': 'csharp',
     'csx': 'csharp',
     'cake': 'csharp',
@@ -554,43 +553,33 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'fsi': 'fsharp',
     'vb': 'vbnet',
 
-    // Go
     'go': 'go',
     'mod': 'go',
     'sum': 'text',
 
-    // Rust
     'rs': 'rust',
 
-    // Swift
     'swift': 'swift',
 
-    // Dart
     'dart': 'dart',
 
-    // Lua
     'lua': 'lua',
 
-    // Perl
     'pl': 'perl',
     'pm': 'perl',
     'pod': 'perl',
     't': 'perl',
 
-    // R
     'r': 'r',
     'R': 'r',
     'rmd': 'markdown',
     'rnw': 'r',
 
-    // Julia
     'jl': 'julia',
 
-    // Haskell
     'hs': 'haskell',
     'lhs': 'haskell',
 
-    // Elixir/Erlang
     'ex': 'elixir',
     'exs': 'elixir',
     'eex': 'html',
@@ -599,13 +588,11 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'erl': 'erlang',
     'hrl': 'erlang',
 
-    // Clojure
     'clj': 'clojure',
     'cljs': 'clojure',
     'cljc': 'clojure',
     'edn': 'clojure',
 
-    // Lisp/Scheme
     'lisp': 'lisp',
     'cl': 'lisp',
     'el': 'lisp',
@@ -613,32 +600,25 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'ss': 'scheme',
     'rkt': 'scheme',
 
-    // OCaml/ReasonML
     'ml': 'ocaml',
     'mli': 'ocaml',
     're': 'reason',
     'rei': 'reason',
 
-    // Nim
     'nim': 'nim',
     'nims': 'nim',
     'nimble': 'nim',
 
-    // Zig
     'zig': 'zig',
 
-    // V
     'v': 'v',
     'vsh': 'v',
 
-    // Crystal
     'cr': 'crystal',
 
-    // D
     'd': 'd',
     'di': 'd',
 
-    // Shell/Scripts
     'sh': 'bash',
     'bash': 'bash',
     'zsh': 'bash',
@@ -652,7 +632,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'bat': 'batch',
     'cmd': 'batch',
 
-    // SQL
     'sql': 'sql',
     'psql': 'sql',
     'plsql': 'sql',
@@ -660,33 +639,25 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'pgsql': 'sql',
     'sqlite': 'sql',
 
-    // GraphQL
     'graphql': 'graphql',
     'gql': 'graphql',
 
-    // Solidity
     'sol': 'solidity',
 
-    // Assembly
     'asm': 'nasm',
     's': 'nasm',
     'S': 'nasm',
 
-    // Nix
     'nix': 'nix',
 
-    // Terraform/HCL
     'tf': 'hcl',
     'tfvars': 'hcl',
     'hcl': 'hcl',
 
-    // Docker
     'dockerignore': 'text',
 
-    // Puppet
     'pp': 'puppet',
 
-    // LaTeX
     'tex': 'latex',
     'latex': 'latex',
     'sty': 'latex',
@@ -694,7 +665,6 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'bib': 'bibtex',
     'bst': 'bibtex',
 
-    // Markdown/docs
     'md': 'markdown',
     'mdx': 'markdown',
     'markdown': 'markdown',
@@ -708,38 +678,29 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'text': 'text',
     'rtf': 'text',
 
-    // Vim
     'vim': 'vim',
     'vimrc': 'vim',
 
-    // Makefile variants
     'mk': 'makefile',
 
-    // CMake
     'cmake': 'cmake',
 
-    // Diff/Patch
     'diff': 'diff',
     'patch': 'diff',
 
 
 
-    // Prisma
     'prisma': 'prisma',
 
-    // Protocol Buffers
     'proto': 'protobuf',
 
-    // Thrift
     'thrift': 'thrift',
 
-    // WASM
     'wat': 'wasm',
     'wast': 'wasm',
 
 
 
-    // GLSL/Shaders
     'glsl': 'glsl',
     'vert': 'glsl',
     'frag': 'glsl',
@@ -750,14 +711,11 @@ export function getLanguageFromExtension(filePath: string): string | null {
     'cg': 'cg',
     'shader': 'glsl',
 
-    // Apache/Nginx config
     'htaccess': 'apacheconf',
     'nginx': 'nginx',
 
-    // Kubernetes
     'kubeconfig': 'yaml',
 
-    // Ansible
     'ansible': 'yaml',
   };
 
@@ -792,9 +750,6 @@ export function isSvgFile(filePath: string): boolean {
   return filePath.toLowerCase().endsWith('.svg');
 }
 
-// Playable in a browser media element: the viewer plays these instead of
-// offering a download. What a runtime's engine cannot decode (an HEVC .mov,
-// a .mkv) still opens; the element reports the failure and the viewer says so.
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'opus', 'weba'];
 const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'webm', 'mov', 'ogv', 'mkv'];
 const FONT_EXTENSIONS = ['ttf', 'otf', 'woff', 'woff2'];
@@ -811,10 +766,31 @@ export function isFontFile(filePath: string): boolean {
   return FONT_EXTENSIONS.includes(getFileExtension(filePath));
 }
 
-/** Comma- or tab-separated text the viewer can lay out as a table. */
 export function isDelimitedTableFile(filePath: string): boolean {
   const ext = getFileExtension(filePath);
   return ext === 'csv' || ext === 'tsv';
+}
+
+const OFFICE_PREVIEW_EXTENSIONS = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp']);
+
+export function isOfficePreviewFile(filePath: string): boolean {
+  return OFFICE_PREVIEW_EXTENSIONS.has(getFileExtension(filePath));
+}
+
+export function isNotebookFile(filePath: string): boolean {
+  return getFileExtension(filePath) === 'ipynb';
+}
+
+export function isArchiveFile(filePath: string): boolean {
+  return ['zip', 'jar', 'war'].includes(getFileExtension(filePath));
+}
+
+export function isDataFile(filePath: string): boolean {
+  return ['sqlite', 'sqlite3', 'db', 'parquet'].includes(getFileExtension(filePath));
+}
+
+export function hasFileVersionsDiff(filePath: string): boolean {
+  return isImageFile(filePath) || isOfficePreviewFile(filePath);
 }
 
 export function isMermaidFile(filePath: string): boolean {
@@ -822,22 +798,14 @@ export function isMermaidFile(filePath: string): boolean {
   return ext === 'mmd' || ext === 'mermaid';
 }
 
-/** Known non-text extensions that must not be opened or saved as UTF-8 text. */
 const BINARY_FILE_EXTENSIONS = new Set([
-  // Documents / office
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
-  // Archives / packages
   'zip', 'rar', '7z', 'gz', 'tgz', 'tar', 'bz2', 'xz', 'jar', 'war', 'apk', 'dmg', 'iso',
   'deb', 'rpm', 'msi',
-  // Images (svg is text and is excluded via isSvgFile)
   ...IMAGE_EXTENSIONS.filter((ext) => ext !== 'svg'),
-  // Audio / video
   ...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS, 'wma', 'avi', 'wmv',
-  // Fonts
   ...FONT_EXTENSIONS, 'eot',
-  // Native / bytecode
   'exe', 'dll', 'so', 'dylib', 'bin', 'class', 'o', 'a', 'lib', 'wasm', 'node',
-  // Databases / locks / misc binary
   'sqlite', 'sqlite3', 'db', 'dat', 'parquet', 'feather', 'pickle', 'pyc', 'pyo', 'lockb',
 ]);
 
@@ -850,7 +818,6 @@ export function getFileExtension(filePath: string): string {
   return base.slice(dot + 1).toLowerCase();
 }
 
-/** True for known binary extensions (including images/PDF). SVG is not binary. */
 export function isBinaryFile(filePath: string): boolean {
   if (isSvgFile(filePath)) {
     return false;
@@ -859,10 +826,6 @@ export function isBinaryFile(filePath: string): boolean {
   return BINARY_FILE_EXTENSIONS.has(ext);
 }
 
-/**
- * Heuristic for UTF-8 text that is actually binary (or was lossily decoded).
- * Used as defense-in-depth when extension checks miss a binary file.
- */
 export function looksLikeBinaryText(content: string): boolean {
   if (!content) {
     return false;
@@ -875,7 +838,6 @@ export function looksLikeBinaryText(content: string): boolean {
   if (sample.startsWith('%PDF')) {
     return true;
   }
-  // ZIP-based formats (docx/xlsx/pptx/jar/apk…) and raw ZIP.
   if (sample.startsWith('PK\u0003\u0004') || sample.startsWith('PK\u0005\u0006') || sample.startsWith('PK\u0007\u0008')) {
     return true;
   }
@@ -887,7 +849,6 @@ export function looksLikeBinaryText(content: string): boolean {
       suspicious += 1;
       continue;
     }
-    // C0 controls excluding common whitespace (TAB/LF/VT/FF/CR).
     if (code < 9 || (code > 13 && code < 32) || code === 127) {
       suspicious += 1;
     }

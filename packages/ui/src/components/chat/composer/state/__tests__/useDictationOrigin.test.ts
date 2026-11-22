@@ -7,12 +7,25 @@ import { readChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistenc
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useInputStore } from '@/sync/input-store';
 import { useComposerDraft } from '../useComposerDraft';
+import { createComposerText } from '../composerText';
 import { useDictationOrigin, type DictationOriginControls } from '../useDictationOrigin';
 
 const started: ChatDraftIdentity = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'started' };
 const switchedTo: ChatDraftIdentity = { ...started, sessionId: 'switched-to' };
 
-function renderComposer(persistEnabled: boolean, initialText = '') {
+
+/** The composer's text the way ChatInput holds it: outside state, with a render per write. */
+function useProbeText(initial: string) {
+    const [text] = React.useState(() => createComposerText(initial));
+    const [, setRevision] = React.useState(0);
+    const setMessage = React.useCallback((next: string) => {
+        text.set(next);
+        setRevision((revision) => revision + 1);
+    }, [text]);
+    return { text, setMessage };
+}
+
+function renderComposer(initialText = '') {
     const dom = installHookTestDom();
     // Restoring a non-empty draft schedules a selection frame; nothing here depends on it.
     const originalRaf = globalThis.requestAnimationFrame;
@@ -21,14 +34,12 @@ function renderComposer(persistEnabled: boolean, initialText = '') {
     const result = { text: '', keptNotices: 0, dictation: null as DictationOriginControls | null };
 
     function Probe({ identity }: { identity: ChatDraftIdentity }) {
-        const [message, setMessage] = React.useState(initialText);
-        const messageRef = React.useRef(message);
+        const { text, setMessage } = useProbeText(initialText);
         const confirmedMentionsRef = React.useRef(new Set<string>());
         const identityRef = React.useRef<ChatDraftIdentity | null>(identity);
-        React.useEffect(() => { messageRef.current = message; }, [message]);
         React.useEffect(() => { identityRef.current = identity; }, [identity]);
         const { restoreDraft } = useComposerDraft({
-            message, messageRef, setMessage, confirmedMentionsRef, identity, persistEnabled,
+            text, setMessage, confirmedMentionsRef, identity,
             initialDraft: { text: initialText, identity: started },
         });
         result.dictation = useDictationOrigin({
@@ -36,7 +47,7 @@ function renderComposer(persistEnabled: boolean, initialText = '') {
             restoreDraft,
             onKeptForOrigin: () => { result.keptNotices += 1; },
         });
-        result.text = message;
+        result.text = text.get();
         return null;
     }
 
@@ -62,7 +73,7 @@ beforeEach(() => {
 
 describe('dictation origin', () => {
     test('a transcript for the rendered draft is left to the composer', () => {
-        const composer = renderComposer(true);
+        const composer = renderComposer();
         try {
             composer.result.dictation?.markDictationStart();
             let kept = true;
@@ -76,9 +87,9 @@ describe('dictation origin', () => {
         }
     });
 
-    for (const persistEnabled of [true, false]) {
-        test(`a session switch keeps the transcript out of the visible composer, persistence=${persistEnabled}`, () => {
-            const composer = renderComposer(persistEnabled);
+    {
+        test('a session switch keeps the transcript out of the visible composer', () => {
+            const composer = renderComposer();
             try {
                 composer.result.dictation?.markDictationStart();
                 composer.render(switchedTo);
@@ -90,7 +101,7 @@ describe('dictation origin', () => {
                 expect(composer.result.keptNotices).toBe(1);
                 expect(composer.result.text).toBe('');
                 expect(readChatDraft(switchedTo).text).toBe('');
-                expect(readChatDraft(started).text).toBe(persistEnabled ? 'dictated text' : '');
+                expect(readChatDraft(started).text).toBe('dictated text');
 
                 // Returning to the session that started the dictation shows it.
                 composer.render(started);
@@ -102,7 +113,7 @@ describe('dictation origin', () => {
     }
 
     test('the transcript is appended to text already drafted in the originating session', () => {
-        const composer = renderComposer(true, 'typed before dictating');
+        const composer = renderComposer('typed before dictating');
         try {
             composer.result.dictation?.markDictationStart();
             composer.render(switchedTo);
@@ -116,7 +127,7 @@ describe('dictation origin', () => {
     });
 
     test('overlapping capture paths keep separate origins in both directions', () => {
-        const composer = renderComposer(true);
+        const composer = renderComposer();
         try {
             // Facade capture starts in the first draft; the user switches
             // drafts and starts streaming dictation there.
@@ -145,7 +156,7 @@ describe('dictation origin', () => {
     });
 
     test('an origin is used once, so a later transcript follows the rendered draft', () => {
-        const composer = renderComposer(true);
+        const composer = renderComposer();
         try {
             composer.result.dictation?.markDictationStart();
             composer.render(switchedTo);

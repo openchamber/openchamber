@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { getPrStatusLabel } from '../prStatusLabel';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
@@ -46,7 +45,7 @@ import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
 import { useSessionRowOrderRegistry } from './sessionRowOrder';
-import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveSessionPrLookup, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
+import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
 import { useSessionRowMenuState } from './useSessionRowMenuState';
 import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from './sessionSubtreeActions';
 import type { SessionNode } from '../types';
@@ -59,16 +58,11 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
-import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
+import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from './SidebarRefLinks';
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
-import { useFreshestSourceControlVisualSummaryForBranch, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
-import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
-import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
-import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useSessionRefLines } from './useSessionRefLines';
+import { useSessionUnread } from '@/sync/session-unread';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -188,15 +182,7 @@ const areNodeWorktreeRenderSemanticsEqual = (prev: SessionNode, next: SessionNod
   && prev.worktree?.branch === next.worktree?.branch
 );
 
-const EMPTY_LINKED_PULL_REQUESTS: readonly LinkedGitHubPullRequest[] = [];
-const EMPTY_LINKED_SIDEBAR_ISSUES: readonly LinkedSidebarIssue[] = [];
-const EMPTY_LINKED_SIDEBAR_CHANGES: readonly LinkedSidebarChange[] = [];
 
-/** One PR or issue a session row lists in its badge and tooltips. */
-type SessionRefLine = SidebarRefLink & {
-  /** The badge's short form: `#12` or the tracker identifier. */
-  label: string;
-};
 const TIMELINE_ROW_LEFT_PX = 10;
 
 const cancelScrollAnchorByContainer = new WeakMap<HTMLElement, () => void>();
@@ -457,126 +443,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const tooltipBranchLabel = resolveTooltipBranchLabel(secondaryMeta, node.worktree?.branch ?? null);
   // A space's name stands where a branch would; the mark beside it is the space's, as on its group.
   const branchInSpace = secondaryMeta?.inSpace === true;
-  const prLookup = React.useMemo(
-    () => resolveSessionPrLookup(node.worktree, isVSCode),
-    [isVSCode, node.worktree],
-  );
-  const branchPrSummary = useFreshestSourceControlVisualSummaryForBranch(prLookup?.directory ?? null, prLookup?.branch ?? null);
-  const linkedPullRequests = React.useMemo(
-    () => (isVSCode ? EMPTY_LINKED_PULL_REQUESTS : getLinkedGitHubPullRequests(session)),
-    [isVSCode, session],
-  );
-  const linkedPullLinks = React.useMemo(
-    () => linkedPullRequests.map((link) => ({ item: githubThread('pull', link), url: link.url, title: link.title })),
-    [linkedPullRequests],
-  );
-  const linkedPullVisuals = useTrackedPullVisualSummaries(linkedPullLinks);
-  const linkedPrSummaries = React.useMemo(
-    () => linkedPullVisuals.filter((summary): summary is PrVisualSummary => summary !== null),
-    [linkedPullVisuals],
-  );
-  // Merge and pull requests on other services follow the GitHub ones. GitLab
-  // merge requests carry live state once it arrives; the rest show by
-  // identifier, uncoloured.
-  const linkedChanges = React.useMemo(
-    () => (isVSCode ? EMPTY_LINKED_SIDEBAR_CHANGES : getLinkedSidebarChanges(session)),
-    [isVSCode, session],
-  );
-  const linkedGitLabChanges = React.useMemo(
-    () => linkedChanges.flatMap((change) => (change.gitlab ? [{ item: gitlabThread('pull', change.gitlab), url: change.url, title: change.title }] : [])),
-    [linkedChanges],
-  );
-  const gitlabChangeSummaries = useTrackedPullVisualSummaries(linkedGitLabChanges);
-  // The branch's PR and the PRs and merge requests linked to the session; the
-  // row leads with the one that needs attention first.
-  const prSummaries = React.useMemo(
-    () => combineSessionPrSummaries(branchPrSummary, [
-      ...linkedPrSummaries,
-      ...gitlabChangeSummaries.filter((summary): summary is PrVisualSummary => summary !== null),
-    ]),
-    [branchPrSummary, gitlabChangeSummaries, linkedPrSummaries],
-  );
-  // GitLab merge requests whose state is known are among the PR lines above.
-  const uncolouredChanges = React.useMemo(() => {
-    let gitlabIndex = 0;
-    return linkedChanges.filter((change) => {
-      if (!change.gitlab) return true;
-      const known = gitlabChangeSummaries[gitlabIndex] !== null;
-      gitlabIndex += 1;
-      return !known;
-    });
-  }, [gitlabChangeSummaries, linkedChanges]);
-  const linkedPrsWithoutState = React.useMemo(
-    () => findLinkedPrsWithoutState(linkedPullRequests, prSummaries),
-    [linkedPullRequests, prSummaries],
-  );
-  // The branch icon speaks for the branch, not for PRs linked from elsewhere.
-  const branchPrIconColor = branchPrSummary ? `var(--pr-${branchPrSummary.visualState})` : undefined;
-  // Linked issues show only while the session has no PR: once a PR exists it
-  // is the thing to follow, and it usually closes the issue anyway.
-  const linkedIssues = React.useMemo(
-    () => (isVSCode ? EMPTY_LINKED_SIDEBAR_ISSUES : getLinkedSidebarIssues(session)),
-    [isVSCode, session],
-  );
-  const linkedGitHubIssueItems = React.useMemo(
-    () => linkedIssues.flatMap((issue) => (issue.source === 'github' ? [githubThread('issue', issue)] : [])),
-    [linkedIssues],
-  );
-  const linkedIssueStates = useTrackedIssueStates(linkedGitHubIssueItems);
-  const linkedGitLabIssueItems = React.useMemo(
-    () => linkedIssues.flatMap((issue) => (issue.source === 'gitlab' ? [gitlabThread('issue', issue.ref)] : [])),
-    [linkedIssues],
-  );
-  const linkedGitLabIssueStates = useTrackedIssueStates(linkedGitLabIssueItems);
-  const linkedLinearItems = React.useMemo(
-    () => linkedIssues.flatMap((issue) => (issue.source === 'linear' ? [linearIssue(issue.identifier)] : [])),
-    [linkedIssues],
-  );
-  const linkedLinearStates = useTrackedLinearStates(linkedLinearItems);
-  // What the row's badge and tooltips list: its PRs, or else its issues.
-  const refLines = React.useMemo((): SessionRefLine[] => {
-    if (prSummaries.length > 0 || linkedPrsWithoutState.length > 0 || uncolouredChanges.length > 0) {
-      const githubLines = prSummaries.map((summary): SessionRefLine => {
-        const label = getPrStatusLabel(summary, t);
-        const reference = formatChangeRequestReference(summary.provider, summary.number);
-        return {
-          key: `${summary.provider ?? ''}:${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
-          icon: 'git-pull-request',
-          label: reference,
-          color: `var(--pr-${summary.visualState})`,
-          url: summary.url,
-          title: summary.title,
-          text: label ? `${reference} · ${label}` : reference,
-        };
-      });
-      const pendingLines = linkedPrsWithoutState.map((link): SessionRefLine => ({
-        key: `${link.owner}/${link.repo}#${link.number}`,
-        icon: 'git-pull-request',
-        label: `#${link.number}`,
-        url: link.url,
-        title: link.title,
-        text: `#${link.number}`,
-      }));
-      const otherLines = uncolouredChanges.map((change): SessionRefLine => ({
-        key: change.key,
-        icon: 'git-pull-request',
-        label: change.identifier,
-        url: change.url,
-        title: change.title,
-        text: change.identifier,
-      }));
-      return [...githubLines, ...pendingLines, ...otherLines];
-    }
-    return buildSessionIssueItems(linkedIssues, linkedIssueStates, linkedLinearStates, linkedGitLabIssueStates).map((item) => ({
-      key: item.key,
-      icon: item.icon,
-      label: item.label,
-      color: item.color ?? undefined,
-      url: item.url,
-      title: item.title,
-      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
-    }));
-  }, [linkedGitLabIssueStates, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t, uncolouredChanges]);
+  // The branch's change request, the changes and issues linked to the session, with live state (upstream useSessionRefLines).
+  const { refLines, branchPrIconColor } = useSessionRefLines(session, node.worktree, isVSCode);
   const primaryRef = refLines[0] ?? null;
   const moreRefCount = Math.max(0, refLines.length - 1);
   const openTrackerItem = useOpenTrackerItem();
@@ -719,7 +587,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     hasForm: hasPendingForm,
   } = useSessionBlockingRequests(blockingBadgeSessionScopes);
   const isSubtaskSession = Boolean(resolvedSession.parentID);
-  const unseenCount = useSessionUnseenCount(session.id);
+  // Unread (an unseen turn or a mark), as one count the row's dot reads.
+  const unseenCount = useSessionUnread(session.id) ? 1 : 0;
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
   // The last conversation, as the list orders by: a rename or a metadata
   // write must not make an old session read as just used.

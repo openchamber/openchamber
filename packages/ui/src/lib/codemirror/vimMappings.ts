@@ -1,9 +1,3 @@
-/**
- * Persistent Vim mappings for the file editor, written as vimrc map lines
- * (`inoremap jk <Esc>`). Only key-to-key maps are understood; ex-command
- * mappings, `<expr>` and anything else is reported back as an invalid line
- * rather than half-applied.
- */
 
 type VimMappingContext = 'normal' | 'insert' | 'visual' | 'operatorPending';
 
@@ -16,11 +10,9 @@ export interface VimMapping {
 
 export interface ParsedVimMappings {
   mappings: VimMapping[];
-  /** 1-based numbers of non-empty, non-comment lines that are not a supported map. */
   invalidLines: number[];
 }
 
-// `map` without a mode covers normal, visual and operator-pending, as in Vim.
 const MAP_ALL: VimMappingContext[] = ['normal', 'visual', 'operatorPending'];
 
 const COMMANDS = new Map<string, { contexts: VimMappingContext[]; recursive: boolean }>([
@@ -38,7 +30,6 @@ const COMMANDS = new Map<string, { contexts: VimMappingContext[]; recursive: boo
   ['onoremap', { contexts: ['operatorPending'], recursive: false }],
 ]);
 
-// Arguments that change nothing for a key-to-key map in this editor.
 const IGNORED_ARGUMENTS = new Set(['<silent>', '<nowait>', '<buffer>', '<unique>']);
 
 const MAP_LINE = /^(\S+)((?:\s+<[a-z]+>)*)\s+(\S+)\s+(.+)$/i;

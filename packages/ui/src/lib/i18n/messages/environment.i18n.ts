@@ -48,6 +48,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'Enter a 1Password reference such as op://Vault/item/field.',
     'settings.vault.error.failed': 'Couldn’t add the account.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber keeps the token on its server and never shows it again. A 1Password reference such as op://Vault/item/field works too: then only the reference is stored, and the token is read each time it is used.',
+    'settings.environment.secrets.label': 'Saved secrets',
+    'settings.environment.secrets.info': 'Saved from an agent\'s secret card. Only the commands you confirm on that card get them.',
   },
   de: {
     'settings.environment.user.title': 'Umgebungsvariablen',
@@ -97,6 +99,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'Gib einen 1Password-Verweis ein, etwa op://Vault/item/field.',
     'settings.vault.error.failed': 'Das Konto konnte nicht hinzugefügt werden.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber bewahrt das Token auf seinem Server auf und zeigt es nie wieder an. Ein 1Password-Verweis wie op://Vault/item/field geht auch: Dann wird nur der Verweis gespeichert und das Token bei jeder Nutzung gelesen.',
+    'settings.environment.secrets.label': 'Gespeicherte Geheimnisse',
+    'settings.environment.secrets.info': 'Auf der Geheimnis-Karte eines Agenten gespeichert. Nur Befehle, die du auf dieser Karte bestätigst, erhalten sie.',
   },
   fr: {
     'settings.environment.user.title': 'Variables d’environnement',
@@ -146,6 +150,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'Saisissez une référence 1Password comme op://Vault/item/field.',
     'settings.vault.error.failed': 'Impossible d’ajouter le compte.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber conserve le jeton sur son serveur et ne l’affiche plus jamais. Une référence 1Password comme op://Vault/item/field fonctionne aussi : seule la référence est alors stockée, et le jeton est lu à chaque utilisation.',
+    'settings.environment.secrets.label': 'Secrets enregistrés',
+    'settings.environment.secrets.info': 'Enregistrés depuis la carte de secrets d\'un agent. Seules les commandes que vous confirmez sur cette carte les reçoivent.',
   },
   nl: {
     'settings.environment.user.title': 'Omgevingsvariabelen',
@@ -195,6 +201,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'Voer een 1Password-verwijzing in, zoals op://Vault/item/field.',
     'settings.vault.error.failed': 'Het account kon niet worden toegevoegd.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber bewaart het token op zijn server en toont het nooit meer. Een 1Password-verwijzing zoals op://Vault/item/field werkt ook: dan wordt alleen de verwijzing bewaard en het token bij elk gebruik gelezen.',
+    'settings.environment.secrets.label': 'Opgeslagen geheimen',
+    'settings.environment.secrets.info': 'Opgeslagen vanaf de geheimenkaart van een agent. Alleen opdrachten die je op die kaart bevestigt, krijgen ze.',
   },
   es: {
     'settings.environment.user.title': 'Variables de entorno',
@@ -244,6 +252,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'Introduce una referencia de 1Password como op://Vault/item/field.',
     'settings.vault.error.failed': 'No se pudo añadir la cuenta.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber guarda el token en su servidor y nunca vuelve a mostrarlo. También sirve una referencia de 1Password como op://Vault/item/field: entonces solo se guarda la referencia y el token se lee cada vez que se usa.',
+    'settings.environment.secrets.label': 'Secretos guardados',
+    'settings.environment.secrets.info': 'Guardados desde la tarjeta de secretos de un agente. Solo los reciben los comandos que confirmas en esa tarjeta.',
   },
   ja: {
     'settings.environment.user.title': '環境変数',
@@ -293,6 +303,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'op://Vault/item/field のような 1Password の参照を入力してください。',
     'settings.vault.error.failed': 'アカウントを追加できませんでした。',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber はトークンを自分のサーバーに保存し、二度と表示しません。op://Vault/item/field のような 1Password の参照も使えます。その場合は参照だけを保存し、使うたびにトークンを読み取ります。',
+    'settings.environment.secrets.label': '保存したシークレット',
+    'settings.environment.secrets.info': 'エージェントのシークレットカードから保存したものです。そのカードで確認したコマンドだけが受け取ります。',
   },
   'pt-BR': {
     'settings.environment.user.title': 'Variáveis de ambiente',
@@ -342,6 +354,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'Digite uma referência do 1Password, como op://Vault/item/field.',
     'settings.vault.error.failed': 'Não foi possível adicionar a conta.',
     'settings.vault.gitlab.tokenInfo': 'O OpenChamber guarda o token no próprio servidor e nunca mais o mostra. Uma referência do 1Password como op://Vault/item/field também funciona: aí só a referência é guardada, e o token é lido a cada uso.',
+    'settings.environment.secrets.label': 'Segredos salvos',
+    'settings.environment.secrets.info': 'Salvos pelo cartão de segredos de um agente. Só os comandos que você confirma nesse cartão os recebem.',
   },
   uk: {
     'settings.environment.user.title': 'Змінні середовища',
@@ -391,6 +405,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'Введіть посилання 1Password, наприклад op://Vault/item/field.',
     'settings.vault.error.failed': 'Не вдалося додати обліковий запис.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber зберігає токен на своєму сервері й більше ніколи його не показує. Посилання 1Password на кшталт op://Vault/item/field теж підходить: тоді зберігається лише посилання, а токен читається під час кожного використання.',
+    'settings.environment.secrets.label': 'Збережені секрети',
+    'settings.environment.secrets.info': 'Збережено з картки секретів агента. Їх отримують лише команди, які ви підтверджуєте на цій картці.',
   },
   ko: {
     'settings.environment.user.title': '환경 변수',
@@ -440,6 +456,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'op://Vault/item/field 같은 1Password 참조를 입력하세요.',
     'settings.vault.error.failed': '계정을 추가하지 못했습니다.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber는 토큰을 자체 서버에 보관하며 다시는 보여 주지 않습니다. op://Vault/item/field 같은 1Password 참조도 쓸 수 있습니다. 이때는 참조만 저장하고 쓸 때마다 토큰을 읽습니다.',
+    'settings.environment.secrets.label': '저장된 비밀',
+    'settings.environment.secrets.info': '에이전트의 비밀 카드에서 저장한 값입니다. 그 카드에서 확인한 명령만 받습니다.',
   },
   pl: {
     'settings.environment.user.title': 'Zmienne środowiskowe',
@@ -489,6 +507,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'Wpisz odwołanie 1Password, na przykład op://Vault/item/field.',
     'settings.vault.error.failed': 'Nie udało się dodać konta.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber trzyma token na swoim serwerze i nigdy więcej go nie pokazuje. Działa też odwołanie 1Password, takie jak op://Vault/item/field: wtedy zapisywane jest tylko odwołanie, a token jest odczytywany przy każdym użyciu.',
+    'settings.environment.secrets.label': 'Zapisane sekrety',
+    'settings.environment.secrets.info': 'Zapisane z karty sekretów agenta. Dostają je tylko polecenia potwierdzone na tej karcie.',
   },
   'zh-CN': {
     'settings.environment.user.title': '环境变量',
@@ -538,6 +558,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': '请输入 1Password 引用，例如 op://Vault/item/field。',
     'settings.vault.error.failed': '无法添加账号。',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber 将令牌保存在自己的服务器上，之后不会再显示。也可以填写 op://Vault/item/field 这样的 1Password 引用：这时只保存引用，每次使用时读取令牌。',
+    'settings.environment.secrets.label': '已保存的密钥',
+    'settings.environment.secrets.info': '从智能体的密钥卡片保存。只有你在该卡片上确认的命令会收到它们。',
   },
   'zh-TW': {
     'settings.environment.user.title': '環境變數',
@@ -587,6 +609,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': '請輸入 1Password 參照，例如 op://Vault/item/field。',
     'settings.vault.error.failed': '無法新增帳號。',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber 會將權杖保存在自己的伺服器上，之後不會再顯示。也可以填寫 op://Vault/item/field 這樣的 1Password 參照：這時只儲存參照，每次使用時讀取權杖。',
+    'settings.environment.secrets.label': '已儲存的密鑰',
+    'settings.environment.secrets.info': '從代理的密鑰卡片儲存。只有你在該卡片上確認的指令會收到它們。',
   },
   tr: {
     'settings.environment.user.title': 'Ortam değişkenleri',
@@ -636,6 +660,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'op://Vault/item/field gibi bir 1Password başvurusu girin.',
     'settings.vault.error.failed': 'Hesap eklenemedi.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber token’ı kendi sunucusunda saklar ve bir daha asla göstermez. op://Vault/item/field gibi bir 1Password başvurusu da olur: o zaman yalnızca başvuru saklanır ve token her kullanımda okunur.',
+    'settings.environment.secrets.label': 'Kayıtlı gizli değerler',
+    'settings.environment.secrets.info': 'Bir ajanın gizli değer kartından kaydedildi. Yalnızca o kartta onayladığın komutlar bunları alır.',
   },
   ar: {
     'settings.environment.user.title': 'متغيرات البيئة',
@@ -685,6 +711,8 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'أدخل مرجع 1Password مثل op://Vault/item/field.',
     'settings.vault.error.failed': 'تعذّرت إضافة الحساب.',
     'settings.vault.gitlab.tokenInfo': 'يحتفظ OpenChamber بالرمز المميز على خادمه ولا يعرضه مرة أخرى. يصلح أيضًا مرجع 1Password مثل op://Vault/item/field: عندها يُخزَّن المرجع فقط ويُقرأ الرمز عند كل استخدام.',
+    'settings.environment.secrets.label': 'الأسرار المحفوظة',
+    'settings.environment.secrets.info': 'حُفظت من بطاقة الأسرار لدى أحد الوكلاء. لا تصل إلا إلى الأوامر التي تؤكدها على تلك البطاقة.',
   },
   he: {
     'settings.environment.user.title': 'משתני סביבה',
@@ -734,5 +762,7 @@ export const environmentI18n = {
     'settings.vault.error.invalidReference': 'הזינו הפניה של 1Password, כמו op://Vault/item/field.',
     'settings.vault.error.failed': 'לא ניתן היה להוסיף את החשבון.',
     'settings.vault.gitlab.tokenInfo': 'OpenChamber שומר את האסימון בשרת שלו ולא מציג אותו שוב. גם הפניה של 1Password כמו op://Vault/item/field עובדת: אז נשמרת רק ההפניה, והאסימון נקרא בכל שימוש.',
+    'settings.environment.secrets.label': 'סודות שמורים',
+    'settings.environment.secrets.info': 'נשמרו מכרטיס הסודות של סוכן. רק פקודות שמאשרים בכרטיס הזה מקבלות אותם.',
   },
 } as const;

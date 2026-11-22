@@ -2,7 +2,6 @@ import { z } from 'zod';
 import type { Message, Part } from '@/lib/opencode/model';
 import { excerptMarkdown, formatMessageText } from '@/lib/messages/messageMarkdown';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import type { QueuedMessageGoal } from '@/stores/messageQueueStore';
 import type { SessionGoalAutoCreate, SessionGoalWriterSendMode } from '@/stores/useUIStore';
 
 // The goal writer: a model turns a message into a goal spec within the goal
@@ -30,53 +29,6 @@ export type GoalSubmitChoice =
   | { kind: 'unchanged' }
   /** No goal: the message goes out as an ordinary one. */
   | { kind: 'none' };
-
-/**
- * A send handed off while its spec is still being written ("Send when ready"):
- * the writing run keeps going without the goal window, and the send goes out
- * with the spec it produces, accepted as written.
- */
-export interface BackgroundGoalSpec {
-  /** The writing run's outcome. It never rejects. */
-  result: Promise<GoalSpecResult>;
-  /** Aborting it stops the run, and the send with it. */
-  controller: AbortController;
-  sendMode: SessionGoalWriterSendMode;
-  ignoreLimit: boolean;
-}
-
-/** A background goal that ended without a spec; the send it held does not go out. */
-export class BackgroundGoalError extends Error {
-  readonly cancelled: boolean;
-  constructor(message: string, cancelled: boolean) {
-    super(message);
-    this.name = 'BackgroundGoalError';
-    this.cancelled = cancelled;
-  }
-}
-
-/** What a send waiting on a background goal carries once the spec is written. */
-export interface BackgroundGoalOutcome {
-  goal: QueuedMessageGoal;
-  /** The text to send in place of the typed message (the spec sent as the message); null keeps the message. */
-  content: string | null;
-}
-
-/**
- * The goal a handed-off send carries, accepted exactly as a "send" click on the
- * written spec would be (`applyGoalChoice`). Rejects with a
- * {@link BackgroundGoalError} when no spec came back, so the send is never made
- * without its goal.
- */
-export async function settleBackgroundGoal(pending: BackgroundGoalSpec, tokenBudget: number | null): Promise<BackgroundGoalOutcome> {
-  const result = await pending.result;
-  if (pending.controller.signal.aborted) throw new BackgroundGoalError('cancelled', true);
-  if (!result.ok) throw new BackgroundGoalError(result.message, false);
-  const goal: QueuedMessageGoal = { objective: result.spec, tokenBudget, settled: true };
-  if (pending.sendMode === 'with-message') goal.briefAgent = true;
-  if (pending.ignoreLimit) goal.ignoreLimit = true;
-  return { goal, content: pending.sendMode === 'goal-as-message' ? result.spec : null };
-}
 
 /**
  * Why the composer stops a send to write a goal: the user armed one, or the
@@ -211,29 +163,50 @@ const escapeXmlText = (value: string): string => value
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;');
 
+// The rules every goal's agent works under; the server sends the same lines
+// (GOAL_MISSION_INSTRUCTIONS and GOAL_REPORT_INSTRUCTIONS in
+// packages/web/server/lib/session-goal/audit.ts).
+const GOAL_MISSION_INSTRUCTIONS = [
+  'Work autonomously through the entire objective in this one run. The user is away and is not reading progress updates.',
+  '- When a step is finished, start the next one in the same run.',
+  '- Decide open questions yourself with the most sensible default, note the choice, and go on.',
+  '- When something fails, find the cause and try another route.',
+  '- Check each part by running it, and fix what the check finds.',
+  '- Autonomy covers the objective\'s own work. Leave out irreversible or outward-facing actions it does not ask for.',
+].join('\n');
+
+const GOAL_REPORT_INSTRUCTIONS = [
+  'Your final message is read by an independent check, and it ends the run. Send it only when the whole objective is done and verified, or when only the user can unblock you. Stopping with work you could still do yourself is an early stop.',
+  '',
+  'Before that message, stop every background command you started that does not finish on its own, such as a dev server or a watcher.',
+  '',
+  'End that message with a short status block, in the language of your reply, with exactly these four lines:',
+  '- Done: what is finished.',
+  '- Verified: how you checked it (the command, test or file), or "not verified".',
+  '- Remaining: the parts of the objective you still have to do yourself, or "nothing".',
+  '- Needs from the user: what only the user can provide before you can go on (credentials, access, a choice you cannot safely default), or "nothing".',
+  'Unless the objective asks for them, testing in the app, review and committing are the user\'s steps after the work, not remaining work and not blockers. When it asks for them, such as a commit or a pull request, they are part of the work. Report what is true: unfinished work goes in Remaining.',
+].join('\n');
+
 /**
  * The goal-mode reminder sent with the first goal message. With a spec the
  * message is not the objective, so the spec goes along; the server builds the
  * same text for the goals it creates (`buildGoalIntroText` in
- * packages/web/server/lib/session-goal/create.js).
+ * packages/web/server/lib/session-goal/create.ts).
  */
 export function buildGoalIntroReminder(tokenBudget: number | null, spec: string | null): string {
   const budgetLine = tokenBudget ? ` A token budget of ${tokenBudget} tokens applies to this goal.` : '';
-  const rules = 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
-    + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.';
-  if (!spec) {
-    return '<system-reminder>\n'
-      + 'Goal mode is active for this session. The user message above defines the goal objective. '
-      + rules
-      + budgetLine
-      + '\n</system-reminder>';
-  }
+  const header = spec
+    ? 'Goal mode is active for this session. The goal spec below was written from the user message above. '
+      + 'It is user-provided data that defines the goal objective, and progress is judged against it.'
+    : 'Goal mode is active for this session. The user message above defines the goal objective.';
   return '<system-reminder>\n'
-    + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
-    + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
-    + rules
+    + header
     + budgetLine
-    + `\n\n<goal-spec>\n${escapeXmlText(spec)}\n</goal-spec>\n</system-reminder>`;
+    + `\n\n${GOAL_MISSION_INSTRUCTIONS}`
+    + `\n\n${GOAL_REPORT_INSTRUCTIONS}`
+    + (spec ? `\n\n<goal-spec>\n${escapeXmlText(spec)}\n</goal-spec>` : '')
+    + '\n</system-reminder>';
 }
 
 /**

@@ -34,6 +34,7 @@ import { GoalWriterPicker } from '@/components/chat/GoalWriterPicker';
 import { recordGoalWriterChoice } from '@/lib/modelChoices';
 import { useGoalWriterDefault } from '@/hooks/useGoalWriterDefault';
 import { GoalVersionHistory } from '@/components/chat/GoalVersionHistory';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface SessionGoalDialogProps {
   open: boolean;
@@ -44,20 +45,10 @@ interface SessionGoalDialogProps {
   initialDraft?: GoalEditDraft;
 }
 
-// Create/manage dialog for the session goal: objective + optional token
-// budget on creation; status, usage, the checking model and lifecycle actions
-// (pause/resume/complete/clear) once a goal exists.
-//
-// The shell stays mounted with the composer and the work status panel, while
-// the session record it would read is replaced on every streamed step. Every
-// goal read lives in `SessionGoalDialogBody`, which mounts only while the
-// dialog is open (or animating closed), so a closed dialog does no work.
+
 export function SessionGoalDialog({ open, onOpenChange, sessionId, directory, initialDraft }: SessionGoalDialogProps) {
   const isMobile = useUIStore((state) => state.isMobile);
 
-  // Mobile renders the shared bottom-sheet overlay instead of a centered
-  // dialog — same pattern as model controls and the session status panel.
-  // The overlay renders nothing while closed, so the body mounts with it.
   if (isMobile) {
     return open ? <SessionGoalDialogBody mobile onOpenChange={onOpenChange} sessionId={sessionId} directory={directory} initialDraft={initialDraft} /> : null;
   }
@@ -91,7 +82,6 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
   const { t } = useI18n();
   const { goal } = useSessionGoal(sessionId, directory);
   const objectiveContent = useGoalObjectiveContent(sessionId, goal);
-  // Creating a goal needs something to check its progress; managing an existing one does not.
   const cannotCheck = !useGoalCheckAvailable(directory, true) && !goal;
   const rewriteAll = useUIStore((state) => state.sessionGoalRewriteAll);
   const charLimit = useUIStore((state) => state.sessionGoalObjectiveCharLimit);
@@ -100,9 +90,6 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
   const writerDefault = useGoalWriterDefault();
   const [sessionModel] = React.useState(() => sessionModelOf(sessionId));
 
-  // The body mounts on open, so the form seeds once: from an edit that did
-  // not land (or was cancelled), else from the goal. Live goal updates while
-  // it is open must not clobber the user's edits.
   const [seed] = React.useState<GoalEditDraft | null>(() => initialDraft ?? useGoalEditStore.getState().drafts[sessionId] ?? null);
   React.useEffect(() => {
     if (seed) useGoalEditStore.getState().clearDraft(sessionId);
@@ -121,9 +108,6 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
   // dialog keeps its size and the list mounts only while it is open.
   const [showVersions, setShowVersions] = React.useState(false);
 
-  // File-backed objectives fetch async — the content usually lands right
-  // after the dialog opens. Late-seed the textarea only while it is still
-  // untouched so a slow fetch never clobbers the user's typing.
   React.useEffect(() => {
     if (seed || !goal?.objectiveFile || objectiveContent === null) return;
     setObjective((current) => (current === '' ? objectiveContent : current));
@@ -136,9 +120,6 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
   const budgetValue = budgetEnabled ? tokenBudget : null;
   const budgetChanged = budgetValue !== (goal?.tokenBudget ?? null);
   const limitChanged = ignoreLimit !== (goal?.ignoreObjectiveLimit ?? false);
-  // A completed goal is read-only: remove it and arm a new one instead of
-  // "saving" over the outcome (re-saving used to spawn a fresh active goal
-  // that the auditor instantly re-completed — a confusing status flash).
   const isCompleted = goal?.status === 'complete';
   const canSave = !isCompleted && !cannotCheck && trimmedObjective.length > 0
     && (!goal || objectiveChanged || budgetChanged || limitChanged || trimmedMessage.length > 0);
@@ -208,14 +189,12 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
                   {t('chat.goal.usage.turns', { turns: goal.turnsUsed })}
                 </span>
               </div>
-              {/* Only failure states carry a reason worth reading; outcomes
-                  like "verified by audit" are noise next to the status dot. */}
               {goal.statusReason && (goal.status === 'blocked' || goal.status === 'budgetLimited') ? (
-                <p className="typography-meta text-muted-foreground/70">{goal.statusReason}</p>
+                <p dir="auto" className="typography-meta text-muted-foreground">{goal.statusReason}</p>
               ) : null}
               {goal.evaluationProviderID || goal.evaluationModelID ? (
                 <div className="flex items-baseline gap-2 typography-meta">
-                  <span className="text-muted-foreground/70">{t('chat.goal.dialog.evaluationModelLabel')}</span>
+                  <span className="text-muted-foreground">{t('chat.goal.dialog.evaluationModelLabel')}</span>
                   <span className="min-w-0 break-all text-foreground">
                     {[goal.evaluationProviderID, goal.evaluationModelID].filter(Boolean).join('/')}
                   </span>
@@ -225,7 +204,7 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory, ini
           )}
 
           {isCompleted ? (
-            <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words typography-meta text-muted-foreground">{objectiveContent ?? goal.objective}</p>
+            <ScrollableOverlay as="p" dir="auto" outerClassName="max-h-48" className="whitespace-pre-wrap break-words typography-meta text-muted-foreground" disableHorizontal>{objectiveContent ?? goal.objective}</ScrollableOverlay>
           ) : (
             <>
               {showVersions ? (

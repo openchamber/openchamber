@@ -29,7 +29,12 @@ export function useCommitComparison(directory: string | null, branch: string | n
     const requestRuntime = getRuntimeKey();
     setHistory({ key, status: 'loading' });
     try {
-      const result = await git.getGitLog(directory, { maxCount: 50, to: branch ? `refs/heads/${branch}` : 'HEAD' });
+      const to = branch && branch !== 'HEAD' ? `refs/heads/${branch}` : 'HEAD';
+      if (!git.getGitLog) {
+        setHistory({ key, status: 'error', message: t('commitComparison.loadError') });
+        return;
+      }
+      const result = await git.getGitLog(directory, { maxCount: 50, to });
       if (requestId.current !== id || getRuntimeKey() !== requestRuntime) return;
       const commits = result.all.slice(0, 50);
       setHistory({ key, status: 'ready', commits });

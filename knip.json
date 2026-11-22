@@ -5,10 +5,12 @@
     "packages/mobile/ios/App/App/public/**",
     "packages/sdk/examples/**",
     "fixtures/knip-class-members/**",
+    "packages/web/build/**",
   ],
   "workspaces": {
     ".": {
       "entry": [
+        "fix-deprecation.js",
         "oxlint.config.ts",
         "oxlint.anti-slop.config.ts",
         "postcss.config.js",
@@ -22,6 +24,9 @@
     "packages/ui": {
       "entry": [
         "src/apps/renderVSCodeApp.tsx",
+        "src/share-document/entry.tsx",
+        "src/share-document/shims/*.{ts,tsx}",
+        "src/test/preload.ts",
         "src/**/*.bench.{ts,tsx}",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
@@ -65,6 +70,13 @@
     },
     "packages/web": {
       "entry": [
+        "bin/cli.js",
+        "server/lib/opencode/login-shell-env.ts",
+        "server/index.js",
+        "scripts/build-server.mjs",
+        "scripts/check-server-types.mjs",
+        "scripts/register-server-sources.mjs",
+        "scripts/smoke-server-build.mjs",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",
@@ -77,6 +89,7 @@
       "project": [
         "bin/**/*.js",
         "server/**/*.{js,mjs,cjs}",
+        "server/lib/routing/runtime.ts",
         "src/**/*.{ts,tsx}"
       ],
       "ignoreMembers": [
@@ -108,6 +121,7 @@
     },
     "packages/vscode": {
       "entry": [
+        "src/extension.ts",
         "webview/main.tsx",
         "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
         "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
@@ -120,6 +134,7 @@
     "packages/sdk": {
       "entry": [
         "src/index.ts",
+        "scripts/check-guest.ts",
         "src/ui/index.ts",
         "src/schemas.ts",
         "src/**/*.{test,spec}.ts",

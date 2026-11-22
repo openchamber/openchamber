@@ -10,6 +10,7 @@ import {
   type FlatJsonNode,
 } from '@/lib/jsonTreeUtils';
 import { Icon } from '@/components/icon/Icon';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { FileTreeIndentGuides } from '@/components/views/files/FileTreeRowParts';
 import { fileTreeRowPaddingLeft } from '@/components/views/files/fileTreeRow';
 import { cn } from '@/lib/utils';
@@ -94,7 +95,6 @@ function JsonRowValue({ node, isExpanded, isCollapsible }: { node: JsonTreeNode;
   }
   const brackets = node.type === 'object' ? '{}' : '[]';
   if (!isCollapsible) {
-    // Empty, or past maxDepth/maxNodes: its children were never read, so show its size.
     if (node.childCount === 0) {
       return <span className="text-[var(--syntax-foreground)]">{brackets}</span>;
     }
@@ -106,8 +106,6 @@ function JsonRowValue({ node, isExpanded, isCollapsible }: { node: JsonTreeNode;
   return <span className="text-muted-foreground">{getCollapsedPreview(node)}</span>;
 }
 
-// Rows share the file tree's geometry and look (FILE_TREE_INDENT_PX per level,
-// one guide per ancestor under its chevron), so nesting reads the same in both trees.
 const ROW_CLASS_NAME = 'relative flex items-center rounded-sm py-0.5 pe-2 cursor-default font-mono text-xs leading-5 whitespace-nowrap';
 
 const JsonRow = React.memo(
@@ -166,17 +164,9 @@ const JsonRow = React.memo(
             type="button"
             onClick={handleToggle}
             aria-expanded={isExpanded}
-            // The arrow stays as small as the line, so the row keeps its height on
-            // touch screens too: the inline mins beat mobile.css's 36px button
-            // floor, and the invisible ::before widens the tap area to the row's
-            // full height and into the indent: 26x24px, under that floor on
-            // purpose, because a 36px arrow made its row taller than its siblings.
             className="relative me-1 flex w-3.5 shrink-0 items-center justify-center self-stretch rounded-sm hover:bg-interactive-hover before:absolute before:-inset-y-0.5 before:-inset-s-2 before:-inset-e-1 before:content-['']"
             style={{ minHeight: 0, minWidth: 0 }}
           >
-            {/* FileTreeChevron's look without its rtl: rotation: Tailwind's rtl:
-                variant follows <html dir>, but this tree is dir="ltr", where the
-                icon is not mirrored, so that rotation would point it up. */}
             <Icon
               name="arrow-right-s"
               className={cn('size-3.5 text-muted-foreground transition-transform', isExpanded && 'rotate-90')}
@@ -209,7 +199,7 @@ const ROW_HEIGHT = 24;
 
 const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: () => void }, JsonTreeViewerProps>(
   function JsonTreeViewer(
-    { data, className, maxHeight = '100%', initiallyExpandedDepth = 2, onCopyPath },
+    { data, className, maxHeight, initiallyExpandedDepth = 2, onCopyPath },
     ref,
   ) {
     const jsonString = React.useMemo(() => {
@@ -236,8 +226,8 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
     );
 
     const shouldVirtualize = flatNodes.length > VIRTUALIZE_THRESHOLD;
-    const parentRef = React.useRef<HTMLDivElement>(null);
-    const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    const parentRef = React.useRef<HTMLElement>(null);
+    const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
       count: flatNodes.length,
       enabled: shouldVirtualize,
       getScrollElement: () => parentRef.current,
@@ -273,16 +263,14 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
       return null;
     }
 
-    // JSON is code: it reads left to right in every language (rtl-layout), so
-    // brackets are not mirrored and "</head>" does not turn into "<head/>".
 
     if (shouldVirtualize) {
       return (
-        <div
+        <ScrollableOverlay
           ref={parentRef}
           dir="ltr"
-          className={className}
-          style={{ maxHeight, overflow: 'auto' }}
+          outerClassName={className}
+          outerStyle={{ maxHeight }}
         >
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((item) => {
@@ -304,16 +292,16 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
               );
             })}
           </div>
-        </div>
+        </ScrollableOverlay>
       );
     }
 
     return (
-      <div
+      <ScrollableOverlay
         ref={parentRef}
         dir="ltr"
-        className={className}
-        style={{ maxHeight, overflow: 'auto' }}
+        outerClassName={className}
+        outerStyle={{ maxHeight }}
       >
         {flatNodes.map((flatNode) => (
           <JsonRow
@@ -323,7 +311,7 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
             onCopyPath={onCopyPath}
           />
         ))}
-      </div>
+      </ScrollableOverlay>
     );
   },
 );

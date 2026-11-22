@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const credential = vi.fn();
+const context = vi.fn();
 
-// Dependency seams: credential discovery is injected per call.
-const findCredential = () => credential();
-const loadCredential = async () => credential();
+vi.mock('./auth.js', () => ({
+  findClaudeCredential: () => credential(),
+  loadClaudeCredential: async () => credential(),
+  readClaudeCredentialContext: () => context(),
+}));
 
 import { fetchQuota, isConfigured, resetClaudeQuotaCache } from './index.js';
 
@@ -30,6 +33,13 @@ const jsonResponse = (body) => ({
   json: async () => body,
 });
 
+const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+
+// A request Anthropic never answers: it settles only when its signal aborts.
+const hangingFetch = () => vi.fn((_url, init) => new Promise((_resolve, reject) => {
+  init.signal.addEventListener('abort', () => reject(init.signal.reason));
+}));
+
 const errorResponse = (status, headers = {}) => ({
   ok: false,
   status,
@@ -40,6 +50,7 @@ const errorResponse = (status, headers = {}) => ({
 beforeEach(() => {
   resetClaudeQuotaCache();
   credential.mockReturnValue(CREDENTIAL);
+  context.mockReturnValue({ configDir: null, error: null });
 });
 
 afterEach(() => {
@@ -50,8 +61,8 @@ describe('Claude quota provider', () => {
   it('reports not configured when no credential source has a token', async () => {
     credential.mockReturnValue(null);
 
-    expect(isConfigured({}, { findCredential })).toBe(false);
-    const result = await fetchQuota({ loadCredential });
+    expect(isConfigured({})).toBe(false);
+    const result = await fetchQuota();
     expect(result.configured).toBe(false);
     expect(result.ok).toBe(false);
     expect(result.usage).toBeNull();
@@ -60,11 +71,92 @@ describe('Claude quota provider', () => {
   it('returns windows and the plan label from the credential', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(PAYLOAD)));
 
-    const result = await fetchQuota({ loadCredential });
+    const result = await fetchQuota();
 
     expect(result.ok).toBe(true);
     expect(result.planLabel).toBe('max');
     expect(result.usage.windows['5h'].usedPercent).toBe(5);
+  });
+
+  it('keeps a selected but unavailable home visible without showing another account', async () => {
+    context.mockReturnValue({ configDir: '/selected', error: null });
+    credential.mockReturnValue(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect(isConfigured({})).toBe(true);
+    const result = await fetchQuota();
+    expect(result).toMatchObject({ ok: false, configured: true, usage: null });
+    expect(result.error).toContain('CLAUDE_CONFIG_DIR');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports unreadable Settings without using credentials or hiding Claude', async () => {
+    context.mockReturnValue({ configDir: null, error: 'Cannot read Claude usage environment settings.' });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect(isConfigured({})).toBe(true);
+    expect(await fetchQuota()).toMatchObject({ ok: false, configured: true, usage: null, error: 'Cannot read Claude usage environment settings.' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not join or cache an old home request after selection changes', async () => {
+    let releaseOld;
+    const fetchMock = vi.fn().mockReturnValueOnce(new Promise(resolve => { releaseOld = resolve; }))
+      .mockResolvedValueOnce(jsonResponse({ limits: [{ kind: 'session', percent: 70 }] }))
+      .mockResolvedValueOnce(errorResponse(429));
+    vi.stubGlobal('fetch', fetchMock);
+    const oldRequest = fetchQuota();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    context.mockReturnValue({ configDir: '/selected', error: null });
+    credential.mockReturnValue({ ...CREDENTIAL, accessToken: 'access-b' });
+    const newRequest = fetchQuota();
+    releaseOld(jsonResponse(PAYLOAD));
+    const [oldResult, newResult] = await Promise.all([oldRequest, newRequest]);
+    expect(newResult.usage.windows['5h'].usedPercent).toBe(70);
+    expect(oldResult.ok).toBe(false);
+    expect((await fetchQuota()).usage.windows['5h'].usedPercent).toBe(70);
+  });
+
+  it('drops a pending read when the home changes even if nothing starts a replacement read', async () => {
+    let release;
+    const fetchMock = vi.fn().mockReturnValueOnce(new Promise(resolve => { release = resolve; }))
+      .mockResolvedValueOnce(errorResponse(429));
+    vi.stubGlobal('fetch', fetchMock);
+    const before = await (async () => {
+      const pending = fetchQuota();
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      context.mockReturnValue({ configDir: '/unavailable', error: null });
+      release(jsonResponse({ limits: [{ kind: 'session', percent: 71 }] }));
+      return pending;
+    })();
+    expect(before).toMatchObject({ ok: false, usage: null });
+    context.mockReturnValue({ configDir: null, error: null });
+    // Nothing from the abandoned read was cached for a later rate-limited answer.
+    expect(await fetchQuota()).toMatchObject({ ok: false, usage: null });
+  });
+
+  it('answers a failed old-home read with the account change and the current revision', async () => {
+    let fail;
+    vi.stubGlobal('fetch', vi.fn().mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; })));
+    const pending = fetchQuota();
+    await vi.waitFor(() => expect(fail).toBeDefined());
+    context.mockReturnValue({ configDir: '/b', error: null });
+    credential.mockReturnValue(null);
+    const current = (await fetchQuota()).selection;
+    fail(new Error('socket hang up'));
+    expect(await pending).toMatchObject({ ok: false, configured: true, error: 'Claude usage account changed. Refresh usage again.', selection: current });
+  });
+
+  it('tags every result with a selection revision that changes only with the home', async () => {
+    credential.mockReturnValue(null);
+    const first = await fetchQuota();
+    const again = await fetchQuota();
+    context.mockReturnValue({ configDir: '/selected', error: null });
+    const other = await fetchQuota();
+    expect(first.selection).toMatch(/^[0-9a-f]{16}$/);
+    expect(again.selection).toBe(first.selection);
+    expect(other.selection).not.toBe(first.selection);
+    expect(other.selection).not.toContain('selected');
   });
 
   it('coalesces concurrent refreshes into one Anthropic request', async () => {
@@ -74,8 +166,8 @@ describe('Claude quota provider', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const first = fetchQuota({ loadCredential });
-    const second = fetchQuota({ loadCredential });
+    const first = fetchQuota();
+    const second = fetchQuota();
     resolveResponse(jsonResponse(PAYLOAD));
 
     const [firstResult, secondResult] = await Promise.all([first, second]);
@@ -91,8 +183,8 @@ describe('Claude quota provider', () => {
       .mockResolvedValueOnce(errorResponse(429, { 'retry-after': '120' }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchQuota({ loadCredential });
-    const rateLimited = await fetchQuota({ loadCredential });
+    await fetchQuota();
+    const rateLimited = await fetchQuota();
 
     expect(rateLimited.ok).toBe(true);
     expect(rateLimited.usage.windows['5h'].usedPercent).toBe(5);
@@ -104,11 +196,28 @@ describe('Claude quota provider', () => {
       .mockResolvedValueOnce(errorResponse(429));
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchQuota({ loadCredential });
-    await fetchQuota({ loadCredential });
-    await fetchQuota({ loadCredential });
+    await fetchQuota();
+    await fetchQuota();
+    await fetchQuota();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks Anthropic again on the next refresh after Retry-After: 0', async () => {
+    const fresh = { limits: [{ kind: 'session', percent: 40, resets_at: '2026-08-14T19:10:00Z', scope: null }] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(PAYLOAD))
+      .mockResolvedValueOnce(errorResponse(429, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(jsonResponse(fresh));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+    const rateLimited = await fetchQuota();
+    const next = await fetchQuota();
+
+    expect(rateLimited.usage.windows['5h'].usedPercent).toBe(5);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(next.usage.windows['5h'].usedPercent).toBe(40);
   });
 
   it('never shows one account cached values after the credential changes', async () => {
@@ -117,45 +226,91 @@ describe('Claude quota provider', () => {
       .mockResolvedValueOnce(errorResponse(429));
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchQuota({ loadCredential });
+    await fetchQuota();
     credential.mockReturnValue({ ...CREDENTIAL, accessToken: 'access-b', refreshToken: 'refresh-b', planLabel: null });
-    const afterSwitch = await fetchQuota({ loadCredential });
+    const afterSwitch = await fetchQuota();
 
     expect(afterSwitch.ok).toBe(false);
     expect(afterSwitch.usage).toBeNull();
   });
 
+  it('retries with the new credential after a rate limit even when no usage was cached', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(errorResponse(429))
+      .mockResolvedValueOnce(jsonResponse(PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const limited = await fetchQuota();
+    expect(limited.ok).toBe(false);
+
+    credential.mockReturnValue({ ...CREDENTIAL, accessToken: 'access-b', refreshToken: 'refresh-b' });
+    const afterSwitch = await fetchQuota();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(afterSwitch.ok).toBe(true);
+  });
+
+  it('reports an expired credential without asking Anthropic', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+    credential.mockReturnValue({ ...CREDENTIAL, expiresAt: Date.now() - 1_000 });
+
+    const result = await fetchQuota();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toContain('Claude Code');
+  });
+
   it('explains an expired session instead of reporting a bare 401', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(401)));
 
-    const result = await fetchQuota({ loadCredential });
+    const result = await fetchQuota();
 
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);
     expect(result.error).toContain('Claude Code');
   });
 
+  it('tells a token without usage access apart from an expired session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(403)));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).not.toContain('expired');
+    expect(result.error).toContain('claude setup-token');
+  });
+
   it('surfaces a network failure instead of an empty successful result', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket hang up')));
 
-    const result = await fetchQuota({ loadCredential });
+    const result = await fetchQuota();
 
     expect(result.ok).toBe(false);
     expect(result.usage).toBeNull();
     expect(result.error).toBe('socket hang up');
   });
-});
 
-describe('Claude request deadline', () => {
-  it('recognizes the timeout exception from AbortSignal.timeout', async () => {
-    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+  it('gives up on a usage request Anthropic never answers, and the next refresh asks again', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
+    const fetchMock = hangingFetch();
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await fetchQuota({ loadCredential });
+    try {
+      const result = await fetchQuota();
 
-    expect(result.ok).toBe(false);
-    expect(result.configured).toBe(true);
-    expect(result.error).toBe('Request timed out');
-    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+      expect(timeout).toHaveBeenCalledWith(15_000);
+      expect(result.ok).toBe(false);
+      expect(result.configured).toBe(true);
+      expect(result.error).toBe('Request timed out');
+
+      await fetchQuota();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 });

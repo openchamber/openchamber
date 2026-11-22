@@ -291,6 +291,10 @@ const normalizeProviderArgs = (providerArg) => {
 };
 
 function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = process.env } = {}) {
+  /**
+   * @param {{ all?: boolean, json?: boolean, quiet?: boolean }} [options]
+   * @param {string | string[] | null} [providerArg]
+   */
   return async function quotaCommand(options = {}, providerArg = null) {
     const args = normalizeProviderArgs(providerArg);
     if (args.length === 1 && args[0] === 'help') {

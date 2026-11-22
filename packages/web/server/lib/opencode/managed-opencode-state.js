@@ -209,6 +209,12 @@ export const transitionGenerationState = (store, generationId, toState, endedAt 
 // Write-ahead: the record for a step is persisted BEFORE that step is
 // attempted, so a crash between any two steps has a defined resume path.
 // `at` and fresh handoff ids are injectable for deterministic replay tests.
+/**
+ * @template {{ handoffs: Array<{ handoff_id: string }> }} Store
+ * @param {Store} store
+ * @param {{ handoff_id: string, predecessor: unknown, successor: unknown, busy_set?: string[], step: unknown, outcome?: string | null, at?: unknown, [field: string]: unknown }} handoff
+ * @returns {Store}
+ */
 export const recordHandoffStep = (store, {
   handoff_id,
   predecessor,

@@ -50,8 +50,6 @@ const formatDuration = (durationMs: number): string => {
   return `${minutes}m ${remainderSeconds}s`;
 };
 
-// Fixed-width seconds format ("XX.XX s") for the percentile series so the
-// legend/labels don't jitter as values change. Pair with `tabular-nums`.
 const formatSeconds = (durationMs: number): string => `${(durationMs / 1000).toFixed(2)} s`;
 
 const StreamingIcon: React.FC = () => {
@@ -433,7 +431,7 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                   }}
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
+                    <span dir="auto" className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
                     {stat.isStreaming ? <StreamingIcon /> : null}
                     {stat.isZombie ? <span className="text-[var(--status-warning)]">!</span> : null}
                   </div>

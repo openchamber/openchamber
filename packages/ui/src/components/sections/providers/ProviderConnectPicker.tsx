@@ -26,18 +26,12 @@ const ProviderRow: React.FC<{ provider: ConnectableProvider; onSelect: (provider
 );
 
 interface ProviderConnectPickerProps {
-  /** Null until the integration list is read. */
   providers: readonly ConnectableProvider[] | null;
   loadFailed: boolean;
   onSelect: (providerId: string) => void;
   onSelectCustom: () => void;
 }
 
-/**
- * The connect page before a provider is chosen: popular providers as cards,
- * every other one as a compact row behind "Show all", and a search that
- * covers all of them.
- */
 export const ProviderConnectPicker: React.FC<ProviderConnectPickerProps> = ({ providers, loadFailed, onSelect, onSelectCustom }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
@@ -87,7 +81,7 @@ export const ProviderConnectPicker: React.FC<ProviderConnectPickerProps> = ({ pr
   return (
     <>
       {search}
-      <SettingsSection title={t('settings.providers.connect.popular')} divider={false} settingsItem="providers.connect">
+      <SettingsSection title={t('settings.providers.connect.popular')} settingsItem="providers.connect">
         <div className={SETTINGS_CARD_GRID_CLASS}>
           {popular.map((provider) => (
             <SettingsCard

@@ -1,16 +1,3 @@
-/**
- * The actions of an isolated space: apply its work (user journey step 6) above the repair actions
- * (step 8), from soft to hard: restart OpenCode, restart the container, stop or start, and delete
- * after a confirmation, which offers to apply first. The
- * desktop has them in a menu on the space's group; the phone opens the same list as a sheet from
- * the group's swipe actions. Delete never runs from the list itself: it opens the confirmation,
- * which says what goes with the space. The space's chats go to the Archive page first (decision 9);
- * when they cannot all be saved the space stays and the confirmation opens again with "Delete
- * anyway", and once they went, a notice says where they are, with "Open".
- *
- * The sheet and the confirmation are mounted once by the main layout and the mobile app, behind
- * the switch; never in VS Code (decision 16).
- */
 
 import React from 'react';
 
@@ -26,12 +13,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { isSpaceActionUnavailable, isSpaceApplicable, runSpaceAction, spaceMenuActionsOf } from '@/lib/spaces/space-repair';
+import { isSpaceApplicable, runSpaceAction } from '@/lib/spaces/space-repair';
 import { useSpacesStore, type SpaceAction } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { SPACE_ACTION_TEXT } from './spaceActionText';
+import { openSpaceApply, pickSpaceAction, useSpaceActions } from './spaceActionsState';
+import { SpaceStatusLines } from './SpaceStatus';
 
 const ACTION_ICON = {
   start: 'play',
@@ -42,37 +32,59 @@ const ACTION_ICON = {
   remove: 'delete-bin',
 } satisfies Record<SpaceAction, IconName>;
 
-/** Runs an action picked from the menu or the sheet; delete opens its confirmation instead. */
-const pick = (spaceId: string, action: SpaceAction) => {
-  if (action === 'remove') useSpacesStore.getState().openDeleteDialog(spaceId);
-  else void runSpaceAction(spaceId, action);
+const openAccess = (spaceId: string) => useSpacesStore.getState().openAccessDialog(spaceId);
+
+type SpaceMenuSlots = {
+  Item: React.ComponentType<{ className?: string; disabled?: boolean; onClick?: (event: React.MouseEvent) => void; children?: React.ReactNode }>;
+  Separator: React.ComponentType;
 };
 
-const useSpaceActions = (spaceId: string) => {
-  const entry = useSpacesStore((state) => state.journey?.get(spaceId));
-  const busy = useSpacesStore((state) => state.actions.get(spaceId)?.kind === 'running');
-  return {
-    actions: spaceMenuActionsOf(entry),
-    applicable: isSpaceApplicable(entry),
-    busy,
-    unavailable: (action: SpaceAction) => isSpaceActionUnavailable(entry, action),
-  };
-};
+type SpaceMenuItem = 'apply' | SpaceAction;
 
-const openApply = (spaceId: string) => useSpacesStore.getState().openApplyDialog(spaceId);
-
-/** The "⋯" menu on a space's group header, beside the grant key and the new-session button. */
-export const SpaceActionsMenu: React.FC<{ spaceId: string; label: string; className?: string }> = ({ spaceId, label, className }) => {
+export const SpaceMenuItems: React.FC<{ spaceId: string; slots: SpaceMenuSlots; omit?: readonly SpaceMenuItem[] }> = ({ spaceId, slots: { Item, Separator }, omit = [] }) => {
   const { t } = useI18n();
-  const { actions, applicable, busy, unavailable } = useSpaceActions(spaceId);
-  if (actions.length === 0) return null;
+  const { actions: all, applicable, busy, unavailable } = useSpaceActions(spaceId);
+  const actions = all.filter((action) => !omit.includes(action));
+  return (
+    <>
+      {applicable && !omit.includes('apply') ? (
+        <Item disabled={busy} onClick={() => openSpaceApply(spaceId)}>
+          <Icon name="git-merge" className="h-4 w-4" />
+          <span>{t('spaces.actions.apply')}</span>
+        </Item>
+      ) : null}
+      <Item onClick={() => openAccess(spaceId)}>
+        <Icon name="key" className="h-4 w-4" />
+        <span>{t('spaces.actions.access')}</span>
+      </Item>
+      {actions.map((action) => (
+        <React.Fragment key={action}>
+          {action === 'remove' || action === actions[0] ? <Separator /> : null}
+          <Item
+            className={action === 'remove' ? 'text-destructive' : undefined}
+            disabled={busy || unavailable(action)}
+            onClick={() => pickSpaceAction(spaceId, action)}
+          >
+            <Icon name={ACTION_ICON[action]} className="h-4 w-4" />
+            <span>{t(SPACE_ACTION_TEXT[action])}</span>
+          </Item>
+        </React.Fragment>
+      ))}
+    </>
+  );
+};
+
+const DROPDOWN_SLOTS: SpaceMenuSlots = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator };
+
+export const SpaceActionsMenu: React.FC<{ spaceId: string; label: string; className: string; omit?: readonly SpaceMenuItem[] }> = ({ spaceId, label, className, omit }) => {
+  const { t } = useI18n();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
           onClick={(event) => event.stopPropagation()}
-          className={className ?? 'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'}
+          className={className}
           aria-label={t('spaces.actions.menuAria', { label })}
           title={t('spaces.actions.menu')}
         >
@@ -80,35 +92,12 @@ export const SpaceActionsMenu: React.FC<{ spaceId: string; label: string; classN
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[200px]" onClick={(event) => event.stopPropagation()}>
-        {applicable ? (
-          <>
-            <DropdownMenuItem disabled={busy} onClick={() => openApply(spaceId)} className="gap-2">
-              <Icon name="git-merge" className="h-4 w-4" />
-              {t('spaces.actions.apply')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-        {actions.map((action) => (
-          <React.Fragment key={action}>
-            {action === 'remove' && actions.length > 1 ? <DropdownMenuSeparator /> : null}
-            <DropdownMenuItem
-              variant={action === 'remove' ? 'destructive' : 'default'}
-              disabled={busy || unavailable(action)}
-              onClick={() => pick(spaceId, action)}
-              className="gap-2"
-            >
-              <Icon name={ACTION_ICON[action]} className="h-4 w-4" />
-              {t(SPACE_ACTION_TEXT[action])}
-            </DropdownMenuItem>
-          </React.Fragment>
-        ))}
+        <SpaceMenuItems spaceId={spaceId} slots={DROPDOWN_SLOTS} omit={omit} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
 };
 
-/** The same actions on the phone, as a sheet opened from the group's swipe actions. */
 export const SpaceActionsSheet: React.FC = () => {
   const { t } = useI18n();
   const spaceId = useSpacesStore((state) => state.actionsSheet);
@@ -117,45 +106,48 @@ export const SpaceActionsSheet: React.FC = () => {
   const close = () => useSpacesStore.getState().closeActionsSheet();
   return (
     <MobileOverlayPanel open={spaceId !== null} title={name ?? t('spaces.actions.menu')} onClose={close}>
-      <div className="flex flex-col gap-1 px-3 pb-4 pt-1">
-        {spaceId && applicable ? (
-          <Button
-            variant="ghost"
-            className="justify-start gap-2"
-            disabled={busy}
-            onClick={() => {
-              close();
-              openApply(spaceId);
-            }}
-          >
-            <Icon name="git-merge" className="h-4 w-4" />
-            {t('spaces.actions.apply')}
-          </Button>
-        ) : null}
-        {spaceId ? actions.map((action) => (
-          <Button
-            key={action}
-            variant={action === 'remove' ? 'destructive' : 'ghost'}
-            className="justify-start gap-2"
-            disabled={busy || unavailable(action)}
-            onClick={() => {
-              close();
-              pick(spaceId, action);
-            }}
-          >
-            <Icon name={ACTION_ICON[action]} className="h-4 w-4" />
-            {t(SPACE_ACTION_TEXT[action])}
-          </Button>
-        )) : null}
-      </div>
+      {spaceId ? <SpaceStatusLines spaceId={spaceId} className="px-2 pb-2" onAction={close} /> : null}
+      {spaceId && applicable ? (
+        <MobileSheetRow
+          icon="git-merge"
+          disabled={busy}
+          onClick={() => {
+            close();
+            openSpaceApply(spaceId);
+          }}
+        >
+          {t('spaces.actions.apply')}
+        </MobileSheetRow>
+      ) : null}
+      {spaceId ? (
+        <MobileSheetRow
+          icon="key"
+          onClick={() => {
+            close();
+            openAccess(spaceId);
+          }}
+        >
+          {t('spaces.actions.access')}
+        </MobileSheetRow>
+      ) : null}
+      {spaceId ? actions.map((action) => (
+        <MobileSheetRow
+          key={action}
+          icon={ACTION_ICON[action]}
+          destructive={action === 'remove'}
+          disabled={busy || unavailable(action)}
+          onClick={() => {
+            close();
+            pickSpaceAction(spaceId, action);
+          }}
+        >
+          {t(SPACE_ACTION_TEXT[action])}
+        </MobileSheetRow>
+      )) : null}
     </MobileOverlayPanel>
   );
 };
 
-/**
- * Says once that a deleted space's chats are on the Archive page, with the way there. The phone's
- * layout has no Archive page, so there the notice has no "Open" that would lead nowhere.
- */
 const useArchivedNotice = () => {
   const { t } = useI18n();
   const name = useSpacesStore((state) => state.archivedNotice);
@@ -169,7 +161,6 @@ const useArchivedNotice = () => {
       return;
     }
     toast.success(text, {
-      // A space deleted from Settings: the Archive page would open behind its window.
       action: {
         label: t('spaces.archive.noticeOpen'),
         onClick: () => {
@@ -181,7 +172,6 @@ const useArchivedNotice = () => {
   }, [isMobile, name, t]);
 };
 
-/** The confirmation before a space is deleted; the deletion's progress and failure show on the group. */
 export const SpaceDeleteDialog: React.FC = () => {
   const { t } = useI18n();
   useArchivedNotice();
@@ -190,8 +180,6 @@ export const SpaceDeleteDialog: React.FC = () => {
   const unsaved = useSpacesStore((state) => state.deleteUnsaved);
   const name = useSpacesStore((state) => (spaceId ? state.journey?.get(spaceId)?.name ?? '' : ''));
   const applicable = useSpacesStore((state) => isSpaceApplicable(spaceId ? state.journey?.get(spaceId) : undefined));
-  // Closing clears the store at once while the desktop dialog still fades out; it keeps showing what it
-  // showed, so the title never reads Delete "" and the buttons do not change under the pointer.
   const [lastShown, setLastShown] = React.useState({ name, unsaved, applicable });
   if (spaceId !== null && (lastShown.name !== name || lastShown.unsaved !== unsaved || lastShown.applicable !== applicable)) {
     setLastShown({ name, unsaved, applicable });
@@ -206,7 +194,7 @@ export const SpaceDeleteDialog: React.FC = () => {
   const applyFirst = () => {
     if (!spaceId) return;
     close();
-    openApply(spaceId);
+    openSpaceApply(spaceId);
   };
   const title = t('spaces.delete.title', { name: shown.name });
   const buttons = (
@@ -216,8 +204,6 @@ export const SpaceDeleteDialog: React.FC = () => {
       <Button variant="destructive" size="sm" onClick={confirm}>{shown.unsaved ? t('spaces.delete.deleteAnyway') : t('spaces.delete.confirm')}</Button>
     </div>
   );
-  // After chats could not be saved: a line for the whole when anything but size failed, and one
-  // per chat too large to save, named by its title from the space, shown as text.
   const lines = shown.unsaved
     ? [
       ...(shown.unsaved.failed > 0 || shown.unsaved.tooLarge.length === 0 ? [t('spaces.delete.chatsNotSaved', { name: shown.name })] : []),

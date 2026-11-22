@@ -1,0 +1,66 @@
+---
+title: Workflows
+description: Let an agent fan a large task out to many agents that run in the background.
+---
+
+# Workflows
+
+A workflow splits a large task into many small pieces and gives each piece its own agent. The agent in your session writes a short script that says which agents to start and what to ask each one. OpenChamber runs the script in the background, so your session stays free while the agents work. When the run ends, its report comes back into the session.
+
+Workflows fit work with many similar, independent pieces: a review of every changed file, an audit of every API route, a migration across many files, or research where each source is checked on its own. A single feature or a few steps is faster in one session.
+
+## Turn it on
+
+The workflow tool is off by default. Open **Settings → General → OpenChamber Tools** and turn on **Workflow tool**. Running sessions get it on their next turn. Turning it off again removes the tool and the instructions about it from every session and hides the Workflows panel; runs you already have come back when you turn it on.
+
+Workflows work automatically with OpenChamber's managed OpenCode server, and also work on a local external or shared OpenCode server after you register the OpenChamber plugin in your global OpenCode config from **Settings → General → OpenCode Server** (see [OpenCode Server](/opencode-server/#enable-openchamber-tools-on-an-external-local-server)). They are not available on a remote OpenCode server or inside the VS Code extension.
+
+## Run a workflow
+
+1. Ask for one in plain language, for example "Run a workflow that reviews every file changed on this branch and lists the bugs it finds."
+2. The agent proposes a plan and a model for each phase. Agree on the models before the run starts: see [Models and cost](#models-and-cost).
+3. A card with the plan appears in the chat. Select **Run workflow** to start it, or **Don't run** to drop it. Nothing runs until you choose, unless you let runs start without approval (below).
+4. While it runs, the card shows each phase and agent. The session's row in the sidebar says **Workflow running**, and the **Workflows** section of the work-status panel lists the run. Select **Stop** to end it early.
+5. When the run ends, its report arrives in the session as a message. A finished or failed run wakes the agent so it can act on the result; a run you stopped or declined does not.
+
+A stopped or failed run can be continued with **Resume**. Agents that already answered keep their answers, and only the rest run again.
+
+Agents of a running workflow cannot start a workflow of their own.
+
+## Start runs without approval
+
+Under **Workflow tool**, **Start runs without my approval** decides whether a run the agent starts waits for your click:
+
+- **No**: every run waits until you select **Run workflow**
+- **For leads**: runs a [lead](/leads/) starts begin right away, every other session still waits
+- **Always**: every run begins right away
+
+A run that begins right away shows as running on its card, with no **Run workflow** button, and you can still **Stop** it. This is for work you agreed on and then left: for example, you ask the agent to try a few models on a small pilot and run the whole job on the best one, and it can start that run while you are away.
+
+An ordinary session still proposes the plan and the models in the chat before it starts a run; the setting skips only the click. A lead runs its work on its own, so with **For leads** it can start a run without asking first. The server reads the setting on every run, so switching back to **No** makes every run wait for you again. The limits below stay the same.
+
+## Models and cost
+
+Every agent in a workflow runs on your session's model unless the script names another one. Dozens of agents on a top model cost many times what the same work costs on a small one. The agent therefore suggests a model per phase: a cheap one for reading and checking against a fixed list, a stronger one where a phase weighs judgement or writes what lands in your project. Change the choice before you approve the run if it does not suit you.
+
+At most 8 agents work at the same time, and one run starts at most 200 agents across all its attempts.
+
+## The Workflows panel
+
+The **Workflows** panel in the right rail shows the runs of the project: its agents, the log, the result and the script, with the model and token use of each agent. Open any agent's session from there or from the chat card to read its full conversation. The icon appears once the project has a run or a saved workflow.
+
+Workflow agents do not appear in the session sidebar, since one run can start a hundred of them. They stay reachable from the run's card and the Workflows panel.
+
+**Delete run** removes a finished run from the panel. The agents' sessions stay.
+
+## Saved workflows
+
+Ask the agent to save a workflow you want to run again. It is stored as `.openchamber/workflows/<name>.js` in the project, so you can commit it with the rest of the repository.
+
+Run a saved workflow from **Saved workflows** in the panel's run picker. It starts right away, in the open session or in a new one, and its report comes back to that session. You can also ask the agent to run it by name.
+
+## Related
+
+- [Agent Control Tool](/agent-control-tool/): the other OpenChamber tools agents get
+- [Project Notes, Todos & Plans](/notes-todos-plans/): the project knowledge and memory tools
+- [Usage](/usage/): what your sessions cost

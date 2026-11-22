@@ -29,7 +29,10 @@ vi.hoisted(() => {
 });
 
 import * as google from './google/index.js';
+import { resetClaudeQuotaCache } from './claude/index.js';
+import { configureClaudeCredentialEnvironment } from './claude/auth.js';
 import { OpenCodeUpstreamAuthError } from '../../opencode/credential-auth-error.js';
+import { configureOpenCodeCredentials } from '../../opencode/auth.js';
 import { fetchQuotaForProvider, fetchQuotaForProviderInstances, listConfiguredQuotaProviders, listQuotaProviderCatalogue } from './index.js';
 
 const createdConfigPaths = [];
@@ -115,6 +118,56 @@ afterEach(() => {
 });
 
 describe('quota provider registry', () => {
+  afterEach(() => {
+    resetClaudeQuotaCache();
+    configureClaudeCredentialEnvironment(() => process.env);
+    vi.unstubAllGlobals();
+  });
+
+  it('does not coalesce Claude reads across a home change, including an unavailable home', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-quota-home-'));
+    let selectedHome = home;
+    fs.writeFileSync(path.join(home, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fixture-old-account' } }));
+    configureClaudeCredentialEnvironment(() => ({ CLAUDE_CONFIG_DIR: selectedHome }));
+    let release;
+    const network = vi.fn().mockReturnValue(new Promise(resolve => { release = resolve; }));
+    vi.stubGlobal('fetch', network);
+    try {
+      const oldRequest = fetchQuotaForProvider('claude', authDeps);
+      await vi.waitFor(() => expect(network).toHaveBeenCalledTimes(1));
+      selectedHome = path.join(home, 'unavailable');
+      const selectedRequest = fetchQuotaForProvider('claude', authDeps);
+      release({ ok: true, status: 200, headers: new Headers(), json: async () => ({ limits: [{ kind: 'session', percent: 12 }] }) });
+      const [oldResult, selectedResult] = await Promise.all([oldRequest, selectedRequest]);
+      expect(selectedResult).toMatchObject({ ok: false, configured: true, usage: null });
+      expect(oldResult.ok).toBe(false);
+      expect(await listConfiguredQuotaProviders({}, authDeps)).toContain('claude');
+      expect(network).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+  it('answers a Claude read whose OpenCode credential lookup rejects with the failure envelope', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-quota-no-local-'));
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+    configureClaudeCredentialEnvironment(() => ({}));
+    // Claude reads the shared credential source, not the injected reads.
+    configureOpenCodeCredentials({ list: async () => { throw new Error('OpenCode is unreachable'); } });
+    try {
+      await expect(fetchQuotaForProvider('claude', authDeps)).resolves.toMatchObject({
+        providerId: 'claude', ok: false, configured: true, usage: null, error: 'OpenCode is unreachable',
+      });
+    } finally {
+      configureOpenCodeCredentials(null);
+      if (platform) Object.defineProperty(process, 'platform', platform);
+      vi.unstubAllEnvs();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('exposes google provider configuration helpers through the provider module', () => {
     expect(google.providerId).toBe('google');
     expect(google.providerName).toBe('Google (Code Assist, per-model)');
@@ -424,7 +477,8 @@ describe('per-credential quota — OpenCode Go workspaces', () => {
     expect(keyRow.credentialLabel).toBe('API Key');
     expect(keyRow.credentialActive).toBe(true);
     expect(keyRow.ok).toBe(true);
-    expect(keyRow.usage.windows['5h'].usedPercent).toBe(42);
+    // A Go API key is read through the Console status endpoint first.
+    expect(keyRow.usage.windows['5h'].usedPercent).toBe(25);
   });
 
   it('catalogues opencode-go with the shared opencode credential alias', () => {
@@ -637,5 +691,16 @@ describe('opencode-go folded instance credentials (popesdrew labelled row)', () 
   it('lists the instance as configured', async () => {
     const configured = await listConfiguredQuotaProviders({}, authDeps);
     expect(configured).toContain('opencode-go.popesdrew');
+  });
+
+  it.each(['constructor', 'toString', '__proto__', 'null', null])('rejects unsupported registry key %s', async (providerId) => {
+    await expect(fetchQuotaForProvider(providerId)).resolves.toMatchObject({
+      providerId,
+      providerName: providerId,
+      ok: false,
+      configured: false,
+      usage: null,
+      error: 'Unsupported provider',
+    });
   });
 });

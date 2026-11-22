@@ -45,7 +45,7 @@ describe('replay store', () => {
     const filePath = tempFile();
     execFileSync('mkfifo', [filePath]);
     const moduleUrl = new URL('./replay-store.js', import.meta.url).href;
-    execFileSync(process.execPath, ['--input-type=module', '-e', `
+    execFileSync(process.execPath, ['--import', new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href, '--input-type=module', '-e', `
       import { createReplayStore } from ${JSON.stringify(moduleUrl)};
       const warnings = [];
       const store = createReplayStore({ filePath: ${JSON.stringify(filePath)}, warn: (message) => warnings.push(message), compactAfterRecords: 1 });

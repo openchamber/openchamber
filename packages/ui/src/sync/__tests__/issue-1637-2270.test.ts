@@ -21,9 +21,11 @@ const runtimeSdkClient = {}
 
 let idCounter = 0
 mock.module("@/lib/opencode/client", () => ({
+  isOpencodeNotFound: () => false,
   ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
     getSdkClient: () => runtimeSdkClient,
+    captureSessionCleanup: async () => async () => undefined,
     getDirectory: () => currentDirectory,
     setDirectory: mock(() => undefined),
     createSession: mock(async (params: unknown, directory?: string | null) => {
@@ -51,6 +53,8 @@ mock.module("../session-ui-store", () => ({
 }))
 
 mock.module("../sync-refs", () => ({
+  getDirectoryState: () => null,
+  getAllSyncSessions: () => [],
   getAllSyncSessionMap: () => new Map(),
   getSyncSessionDirectory: () => null,
   registerSessionDirectory: (sessionID: string, directory: string) => {
@@ -77,6 +81,8 @@ mock.module("@/stores/useConfigStore", () => ({
       hasEverConnected: true,
     }),
   },
+  selectCatalogLoadedForDirectory: () => false,
+  selectConfigAgentsForDirectory: () => [],
 }))
 
 mock.module("../input-store", () => ({

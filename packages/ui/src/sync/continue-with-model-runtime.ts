@@ -61,7 +61,7 @@ const reportedErrorAfter = (sessionId: string, since: number): string | undefine
   const list = useNotificationStore.getState().list
   for (let index = list.length - 1; index >= 0; index -= 1) {
     const notification = list[index]
-    if (notification.session !== sessionId || notification.type !== "error") continue
+    if (notification.session !== sessionId) continue
     if (notification.time < since) return undefined
     const name = notification.error?.name?.trim()
     const message = notification.error?.message?.trim()
@@ -206,7 +206,7 @@ export function createContinueWithModelDeps(): ContinueDeps {
     },
     clearInterruptedPermissions: (target, scope) => dismissPermissionsAfterInterrupt(target.sessionId, scope),
     switchSelection: async (target, selection) => {
-      const change = resolveSendSelection(target.sessionId, storeDirectoryOf(target), selection)
+      const change = await resolveSendSelection(target.sessionId, storeDirectoryOf(target), selection)
       if (change.model) await opencodeClient.switchSessionModel(target.sessionId, change.model, target.directory)
       if (change.agent) await opencodeClient.switchSessionAgent(target.sessionId, change.agent, target.directory)
       rememberSelection(target.sessionId, selection)

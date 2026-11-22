@@ -1,5 +1,27 @@
 # File tree loading and visibility
 
+## Ownership
+
+This module owns shared file-tree behavior, file-editor handoffs and artifact
+previews. `FilesView` and the sidebar and mobile containers own their layout;
+runtime APIs own filesystem access, and `lib/codemirror` owns text-editor aids.
+
+## Invariants
+
+- Folder disclosure releases pinned rows even when loading fails or no rows
+  appear. Closing ghosts retain their final clipped state until removal, so
+  they cannot flash back after the animation ends.
+- Content-search callers debounce the query before passing it to the hook.
+  Search-result paths retain left-to-right marks inside the RTL folder label,
+  so a leading dot stays beside its name.
+- File paths retain trailing whitespace when resolving Git baselines because
+  that whitespace can belong to the filename. Change batches preserve the
+  caller's root spelling, including Windows drive-letter case.
+- Folder badges count files by Git status letter. Diff-style `+` and `-`
+  labels would imply counts of changed lines.
+
+## Directory snapshots
+
 `FilesView` and `SidebarFilesTree` keep directory snapshots in component state.
 `DirectoryRequests` owns shared in-flight reads and supersession. Repeated
 same-path callers await the same request; an explicit mutation refresh can
@@ -40,23 +62,36 @@ when the server stopped at its deadline, when the regular expression is invalid
 failed; none of these is shown as an empty result. The server side is in
 `packages/web/server/lib/fs/DOCUMENTATION.md`.
 
-Desktop `FilesView` in editor-only mode neither loads nor constructs its unused
-tree. In the context panel the panel's tab strip owns the open files: closing
+`FilesView` is the open file's editor and has no tab row of its own. On the
+desktop it neither loads nor constructs a tree. In the context panel the
+panel's tab strip owns the open files: closing
 a file from the editor (Cmd/Ctrl+W in the desktop app, which the window menu
 turns into `openchamber:close-tab` through `lib/closeTabTarget.ts`, or the
 unsaved-changes prompt that may come first) goes through `onCloseFile` to
-`closeContextFile`, which closes that tab exactly as its close button does. Mobile retains its tree. The context panel passes actual visibility,
-including the panel's open state, its active tab, and the editor toggle, to each file surface.
+`closeContextFile`, which closes that tab exactly as its close button does. Mobile
+retains its tree. Opening a file replaces the tree in the same scroll area on a
+phone, so the tree keeps its offset per workspace root and returns to it before
+repainting; a search's results and a folder child's listing are their own lists
+(`memoryKey` on the tree's scroller). A root read still loading or failed,
+search results of another folder or query, a failed search, and a cleared
+search's rows still on screen are not the list. The context panel passes actual
+visibility, including the panel's open state, its active tab, and the editor
+toggle, to each file surface.
 Hidden surfaces retain drafts, loaded content and scroll state. They stop
 directory and file metadata polling; reopening checks freshness once before
-normal polling resumes. Autosave is independent of visibility.
+normal polling resumes. The visible open file is watched by OpenCode
+(`lib/watchedFiles.ts`, OpenCode 2.2): its `filesystem.changed` event starts
+the same freshness check at once, and the check otherwise runs every 30
+seconds instead of every 2, only to cover a watch OpenCode lost. A file
+outside the project folder, or an OpenCode that refuses the watch, keeps the
+2-second poll. An open plan in the repository is watched the same way. Autosave is independent of visibility.
 
 Background polling never supersedes an in-flight directory read. Explicit
 refresh after file mutations does. Each directory failure remains local and
 preserves its previous successful snapshot.
 
 Opening a file outside the workspace reads it directly through the active
-runtime, in both editor-only and full Files modes. Chat navigation and file
+runtime, on the desktop and on the phone. Chat navigation and file
 loading do not request native file grants. Server-backed text reads and metadata
 requests have a 30-second deadline, including response-body reads, so a stalled
 request reaches the existing error handler instead of leaving loading pending.
@@ -68,8 +103,12 @@ there. The metadata poll treats a file deleted while open the same way: without
 unsaved edits it shows the error, with unsaved edits it keeps them. It keeps
 polling a failed file and loads it again once a missing file is back; a file
 that exists but fails to read is never reloaded by the poll
-(`openFilePollStep`). Pruning stale open paths (`removeUnselectedOpenPath`)
-never removes the path on screen.
+(`openFilePollStep`). The poll identifies its baseline by the path on screen,
+not by the path the server answers with: `/api/fs/stat` resolves symlinks, so a
+file opened through a symlinked folder or as a symlink itself would otherwise
+look like a new file on every poll and never reload after an external write
+(`fileStatSnapshotForRequestedPath`). Pruning stale open paths
+(`removeUnselectedOpenPath`) never removes the path on screen.
 
 A pending line jump (`pendingFileNavigationStep`) selects its file only until
 that file has been on screen. If the user then switches tabs while it loads,
@@ -108,6 +147,66 @@ letter on the right. A blue dot before the letter marks a file open in a tab;
 it no longer hides the file's git state. Change the look there, not per tree.
 The JSON tree viewer (`components/ui/JsonTreeViewer.tsx`) takes the same
 indent and guides and copies the chevron's look; keep the copy in step.
+
+A name never truncates. The tree is as wide as its widest row and scrolls
+sideways, and every row is that wide, so fills and marks span the scroll.
+The git marks sit in an end lane (`FileTreeRowEnd`, `oc-file-tree-row-end`
+in `index.css`) that sticks to the pane's end, fades the name out over 1rem
+and redraws the row's rounded end in the row's colour, drop ring included.
+Over the last 1rem of the sideways scroll the fade narrows away, so the
+widest name shows whole at the end without a gap kept after every name. The hover menu is a
+second lane of the same kind that takes no width and fades in over the end,
+so a row reserves no room for it. Error rows stay as wide as the pane
+(`100cqw` of the scroller) and held at its start. The non-virtual trees get
+their width from CSS (`w-max`). The sidebar's virtual list cannot, because
+only some rows are mounted: it remembers, by path, each row seen wider than
+the list, takes the widest as its width, and forgets rows that leave the
+tree. That keeps the sideways scroll when wide rows scroll out of view or
+another folder opens.
+
+### Why `FilesView`'s row menus share one tooltip
+
+`FilesView`'s tree mounts every row and each row's menu button stays mounted,
+so a tooltip per button would keep a root per file. `DelegatedTooltip`
+(`ui/row-tooltip.tsx`) listens on the list and anchors one tooltip to the button
+carrying `data-row-tooltip`. The sidebar tree keeps a tooltip per row because it
+mounts only the rows in view.
+
+### Why the end lane paints the row's colour under a mask
+
+The fade has to cover the name with exactly the colour of the row behind it,
+which is a translucent hover or selection fill over the pane. Fading the
+fill and the pane colour as separate gradients darkened the middle of the
+fade on a selected row. The lane paints the composed colour solid and a mask
+fades it in as a whole.
+
+## Opening and closing a folder
+
+All three trees open and close folders with the sessions sidebar's motion
+(`lib/motion/rowDisclosure.ts`, 200ms ease-out): a folder's rows are revealed
+above a boundary moving down from the folder row and fade in as it uncovers
+them, and every row below slides with the boundary. `useFileTreeDisclosure`
+wraps each tree's toggle. It works on the rows in the document, which carry
+their path in `data-tree-disclosure-path` (a load error row carries its
+folder's path plus `/`), so one hook serves nested lists, a flat list and the
+virtual list. A folder whose children load after opening animates when they
+arrive. Reduced motion, Collapse all, search and auto-expand do not animate.
+
+### Why closing commits at once and draws copies
+
+The tree's state closes the folder immediately, and inert clones of the closing
+rows that were on screen fold away at their old place while the rows below
+slide up. Holding the state open until the motion ended would leave the virtual
+list without the rows that slide into view, which the virtualizer only mounts
+for the closed layout. While the copies fold, the list keeps its old height, so
+a list scrolled to its end does not jump.
+
+### Why the sidebar tree pins rows while a folder opens
+
+In the virtual tree, the rows on screen below an opening folder move past the
+virtual range at once. `SidebarFilesTree` keeps them mounted
+(`slidingRowPaths`) until the motion settles; without that the list under the
+boundary was empty while it moved.
 
 ## Refreshing after file changes
 
@@ -154,16 +253,38 @@ through −/+ steps, Ctrl/⌘ + wheel or trackpad pinch, Safari gesture events,
 a two-finger touch pinch, and double-click between fit and 1:1, anchored at
 the pointer; a zoomed image larger than the viewer pans by mouse drag;
 `imageZoom.ts` holds the scale math; round arrows fixed to the viewer's
-edges, and the arrow keys while the viewer has focus and the image is at fit,
-show the previous and next image of the same folder, see below),
-`MediaArtifact` (native audio/video
+edges, and the arrow keys while the image is at fit, show the previous and
+next image of the same folder, see below),
+`PdfArtifact` (a frame where the runtime has a PDF viewer; elsewhere pages
+drawn by pdf.js, see below), `MediaArtifact` (native audio/video
 element, duration and dimensions once metadata loads, a stated failure when
 the runtime cannot decode the codec), `FontArtifact` (a specimen under a
 throwaway `FontFace` family removed when the tab closes), `TableArtifact`
-(CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
-and `BinaryArtifact` (name, type, size, download; never a decode attempt).
-`FilesView.renderArtifactPreview` is the single switch both the docked and
-the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
+(CSV/TSV through `delimitedText.ts`, the separator read from the file's first
+records rather than its extension, see below; capped rows stated in the meta line),
+`OfficeArtifact` (docx, xlsx, pptx, odt, ods, odp, read-only, see below),
+and `BinaryArtifact` (name, type, size, download, and the desktop's open in
+the default app; never a decode attempt). `view/useArtifactPreview`
+is the single switch the viewer uses.
+
+A file that cannot be shown fills the pane with `ContentState`
+(`components/ui/content-state.tsx`): icon, title, one sentence, actions. A
+failed read names the file, adds the server's reason when there is one, and
+offers Retry (`reloadSelectedFile`, the same reload a content invalidation
+runs); the binary, media and font states use it too. `ContentLoadingState`
+shows the spinner only after 200 ms, so switching between quick files does not
+flash it. `ImageArtifact` keeps the loading state until the image decodes
+(an empty `src` is a fetch still running) and shows its own failure with Retry
+and download for data the browser cannot decode. A failed image fetch marks
+the file failed (`failedFilePath`) like a text read and keeps the loaded path:
+clearing it made the selection effect load the file again, which wiped the
+error without fetching the image.
+
+Opening a file from the sidebar tree, the command palette or a diff runs
+`validateContextFileOpen` first. A file over `MAX_OPEN_FILE_BYTES` or
+`MAX_OPEN_FILE_LINES`, or one that cannot be read, never opens;
+`toastContextFileOpenFailure` names it and adds the limit and its size, or the
+server's reason. SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens
 in preview regardless of the text-first setting because an agent-produced
 artifact is opened to be looked at.
@@ -177,15 +298,475 @@ wrapping at the ends. SVG counts, since it opens in the image preview. A step
 opens the neighbour the way a single click in the tree does (`openContextFile`
 with `preview`): on desktop one preview tab follows the steps while the tab
 the user started from stays; on the phone the Files surface shows the
-neighbour in place and Back still leads to the folder being browsed. The
-viewer unmounts while the next image loads, so a step remembers its target and
-the viewer showing it within five seconds takes the focus back for the next
-key. A folder that cannot be read shows no arrows.
+neighbour in place and Back still leads to the folder being browsed. A folder
+that cannot be read shows no arrows.
+
+### Why images remount by source and not reset in an effect
+
+A data-URL SVG can report its dimensions before React flushes a reset effect;
+the effect would then erase the dimensions just loaded. A source-keyed viewer
+keeps measurements and zoom with their image, and retrying the same URL remounts
+the image element so the browser requests it again.
+
+### Image gesture invariants
+
+- Zoom flushes its render before another wheel or pinch event measures the
+  image, so the next anchor uses current geometry. Wheel deltas are capped
+  because one mouse-wheel notch is much larger than a trackpad pinch delta.
+- Touch pinches suppress simultaneous iOS gesture events. Safari trackpad
+  gestures still work when no finger touches the screen, so a pinch zooms once.
+- The decoding image stays mounted but invisible so it can load and report its
+  dimensions. The outer viewer stays measurable after failure so keyboard
+  visibility checks continue to work.
+
+The arrow keys are heard on the document: while the focus is in the panel
+that holds the viewer, and not in a text field or a control that moves with
+the arrow keys (a tab strip, a menu, a list), or on the page itself after a
+click in that panel. With the focus on the page the browser scrolls whatever
+was clicked last, so a key after a click into a wide code block in the chat
+still scrolls that block. A click
+in the tree leaves the focus on the row, and the viewer unmounts while the
+next image loads, which drops the focus to the page; a listener on the viewer
+alone missed both. A viewer that is laid out nowhere, behind another tab of
+the panel, ignores the keys, and the first viewer to handle a key marks it
+handled, so a second viewer on the page cannot step on the same key.
+
+An image's meta bar has a fullscreen toggle everywhere but the phone layout
+(`useFileImageFullscreen`; the tablet layout keeps it). It opens
+`renderFileImageFullscreen`, a full-size shared `Dialog` over the whole window
+that renders the same `ImageArtifact` through `renderImageArtifact`: the same
+`src`, neighbours and gestures, starting at fit. The arrow-key scope is the
+context panel or the overlay (`data-image-fullscreen`), whichever holds the
+viewer, and the overlay's viewer listens on the overlay itself: Base UI's
+popup stops arrow keys from bubbling on to the document. Other dialogs, such
+as the phone's workspace drawer, keep the document listener. A step from the
+overlay opens the neighbour in the panel as the docked arrows do, and the
+overlay follows the selection. While the next image loads, or when its read
+fails, the overlay keeps a bar with the name and the exit button, so it can be
+left without a keyboard. It closes when the panel is hidden (on a tablet, when
+the workspace drawer closes or switches to another tab: `MobileFilesSurface`
+passes the drawer's visibility down, because the drawer keeps Files mounted
+behind other tabs) or the selection
+is a file other than an image; an SVG shown as source stays (shown as an image,
+with its folder's arrows, since the image navigation keeps listing neighbors
+while the overlay is open), and a step that briefly leaves no file selected does
+not close it. Escape and the exit button
+close it everywhere. In the desktop app Ctrl/⌘+W closes the overlay first and
+leaves the file tab open, as it does the Settings window; Electron's menu sends
+that chord as the close-tab event, while in a browser the chord belongs to the
+browser. Its bar is the header's height and padded by
+`--oc-titlebar-start-inset` and `--oc-titlebar-end-inset` (published by
+`Header`), so the window controls the OS draws over the page (macOS traffic
+lights, an installed web app's window controls overlay) never cover its
+buttons. The desktop app's Windows controls are different: the page draws them
+in the header, and the overlay covers them like any modal, as the Settings
+window does; the exit button stays reachable and the controls work again once
+the overlay closes. It carries the
+header's `header-safe-area` class too, so on an iPad its buttons sit below the
+status bar as the header's do. The dialog portals out of the mobile shell, so
+it carries `oc-side-safe-area` itself: the background stays full bleed and the
+bar and arrows keep clear of a side cutout. Its `DialogContent` is `fullWindow`,
+so in an installed app window 768 px wide or narrower it still fills the window
+with square corners. On close the
+focus goes to the docked toggle, which a step may have remounted, so the docked
+arrows keep working.
+
+### Why a dialog over the window and not the panel's fullscreen
+
+The panel `<aside>` clips and isolates its content, so nothing inside it can
+cover the window. The shared dialog brings the focus trap, Escape, focus return
+and `oc-dialog-open`, which turns off the title bar's drag regions under it;
+the composer's key and paste redirect and the chat arrow navigation already
+skip `[role="dialog"]`. The overlay therefore sets no global flag such as
+`isImagePreviewOpen`: a flag every automatic close must clear can stick, and a
+stuck one silently stops typing from reaching the composer.
+
+### Why the overlay shares the docked `src` and does not fetch again
+
+Both viewers render inside `FilesView`, which owns the object URL and revokes
+it when the selection changes, so the overlay lives no longer than its URL. A
+second fetch would double the bytes and need its own revoke.
 
 Non-text artifacts the browser must own (PDF, audio, video, fonts) are loaded
 through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
+
+On Capacitor with active proxy headers and on any runtime in relay mode,
+`useRawAssetUrl` reads PDF, audio, video and fonts through `runtimeFetch` into
+an object URL: the browser cannot attach those headers to a URL it loads, and
+such a URL never enters the relay tunnel. Reads retain at
+most the existing 10 MiB file-open limit and have a 30-second deadline. A
+file, revision or runtime change aborts the old read and revokes its URL;
+unmount does the same. Failed reads show the existing error without falling
+back to an unauthenticated browser URL. Playback seeks within the downloaded
+file and needs no URL-token renewal. Other runtimes keep streamed byte ranges.
+
+`useRawAssetUrl` makes that URL once per file, revision and runtime and holds
+it, so the shared token rotating never touches an open preview: a PDF stays
+on its page, a player keeps playing, a font stays registered. The server
+checks the token when a request starts, so a held URL keeps working for the
+document it already loads. A player asks for more ranges later, and one asked
+for after the token expired gets a 401; `MediaArtifact` then asks `renew` for
+a URL with a fresh token and resumes at the same position, speed and play
+state. One
+renewal per ten seconds; a renewal that returns the same URL, or fails, shows
+"cannot be played". A file changed on disk bumps the revision, which gives the
+preview a new URL and loads the new bytes.
+
+### Why proxy-protected mobile previews buffer the file
+
+Browser media elements cannot attach proxy headers, and a scoped URL token
+only authenticates to OpenChamber. Reading through the shared HTTP transport
+keeps proxy credentials out of URLs and preserves redirect refusal. The
+existing file-open limit bounds retained bytes, at the cost of waiting for
+the file to finish downloading before playback starts.
+
+### Why the URL is held and not rebuilt with every new token
+
+A rebuilt URL is a new document: the iframe navigates and the media element
+reloads, which put PDFs back on page 1 and stopped playback each time the
+token rotated, about every 45 seconds. A longer token or a per-file grant
+like the HTML preview's would also keep late ranges authorized, but would
+widen what a URL in the page can open. A PDF and a font load their bytes when
+they open, so only media asks for ranges late, and the renewal covers it
+without changing any server check. A PDF still downloading when its token
+expires, a very large file over a slow link, is the case this leaves open.
+
+### Why PDFs keep the frame where they can, and pdf.js only where they cannot
+
+A PDF opens in a frame, and the runtime's own viewer draws it, with its zoom,
+search and print. The Android WebView and Android Chrome have no viewer and
+painted an empty frame (#5823). They report `navigator.pdfViewerEnabled ===
+false`, so there, and only there, `PdfArtifact` draws the pages with pdf.js:
+pages at the pane width and the device pixel ratio, scrolled down, each page
+painted while it is within a screen of view and cleared once it leaves, so a
+long document holds a few canvases. pdf.js everywhere would have replaced
+working viewers with a poorer one. It is the legacy build, which carries
+polyfills that WebViews a few versions behind need, and the module and its
+worker are bundled assets imported on first use, never fetched from a CDN, so
+offline use and the VS Code CSP hold and nothing loads until a PDF opens there.
+It reads the file in one GET, because a Range request needs a CORS header the
+server does not allow to the Android app. There is no pinch zoom, and PDFs that
+need pdf.js's CMap, standard font or wasm data (CJK text without embedded
+fonts, JPEG 2000 images) may lose that text or image.
+
+### Why table, data and office previews load on first use
+
+`TableArtifact`, `DataFileArtifact` and `OfficeArtifact` are `React.lazy` in
+`view/LazyFileArtifacts`, each under its own error boundary keyed by the file, and the
+export reads `delimitedText.ts` with a dynamic import. Imported statically,
+their modules sat in a chunk `FilesView` loaded with itself, so a single
+missing file (Windows Defender quarantined that chunk in 2.7.0, #6630) failed
+the whole `FilesView` import and the app-wide boundary replaced the window
+with "Something went wrong". Now such a failure shows "Preview unavailable" in
+that file's pane, and the tree, the text editor and other previews keep
+working. The artifacts use plain `React.lazy` here, not `lazyWithChunkRecovery`:
+that helper reloads the window, which drops the user's place and cannot bring
+back a quarantined file. `React.lazy` keeps a failed import, so these previews
+stay unavailable until the window reloads; on the web that includes a tab left
+open across a server update, which needs the reload anyway. Swapping in a
+fresh `React.lazy` when the import fails made React retry at once and spin in
+the loading state while the file was missing. The VS Code webview inlines
+dynamic imports, so there nothing changes.
+
+### Office documents
+
+`OfficeArtifact` reads the file's bytes through `runtimeFetch`, so it works on
+every runtime that can read the file, relay and phones included, and loads its
+renderers on first use (`officeDocument.ts`). An extension's binary editor that
+matches the file still comes first. `docx` goes through docx-preview, `pptx`
+through @jvmr/pptx-to-html, `xlsx` and `ods` through `readWorkbook`
+(`sync/document-attachments.ts`) into the same grid CSV uses, with column
+letters, the sheet's own row numbers and a sheet picker. `odt` and `odp` show
+the text and images the chat attachment reader extracts, without their layout.
+`doc`, `xls` and `ppt` have no renderer and stay `BinaryArtifact`. So does a
+document over `MAX_OFFICE_PREVIEW_BYTES`, and one that cannot be parsed, such as
+a damaged or password-protected file, with a sentence saying so. A failed read
+offers Retry instead, because the file itself may be fine.
+
+A document is somebody else's content, and the renderers turn its text and link
+targets into HTML. `officeFrameDocument` is what keeps that contained, and
+these must stay true: the page runs in a frame whose `sandbox` has no
+`allow-same-origin`; its CSP allows no network, only `data:` images and fonts
+and one script by nonce; `cleanDocumentHtml` removes scripts, handlers, active
+elements and every URL outside the file, so a link in a preview is not clickable
+and shows its target on hover. Macros never run. A workbook's cells go through
+React as text and need none of this.
+
+`xl/styles.xml` decides how a number reads for dates, times, elapsed hours,
+percents and decimals. Currency symbols and digit grouping stay out, and a
+format the reader does not apply, such as scientific notation, keeps the stored
+number instead of rounding it. Charts in a workbook are not drawn.
+
+### Tables: sorting, widths and editing
+
+`TableGrid` is one grid for CSV, TSV, XLSX and ODS. Sorting changes the view
+only and stays put while cells change, so a row never jumps out from under an
+edit. A sheet's first row stays on top of a sort when it is all text. Column
+widths and Markdown table widths live in `lib/columnWidthMemory.ts`, per browser
+profile: a sheet is named by its file and sheet, a Markdown table by its file and
+headings, so adding a table above it keeps the widths.
+
+An empty last column takes what is left of a wide pane. Without it the browser
+stretches every column past its width, and a drag starts from a width the column
+does not hold, so its edge jumps away from the pointer.
+
+A CSV edit replaces one field in the text (`setDelimitedField`, with the same
+separator `resolveDelimiter` gave the table) and goes through
+the editor's draft, so it saves and guards like typing. A workbook edit goes
+through `workbook/WorkbookSession`, and these must stay true:
+
+- A write changes only the cells it names. The archive keeps every other entry;
+  a cell keeps its style. `xlsxDocument` and `odsDocument` patch the XML and never
+  rebuild a part from the model.
+- Nothing reaches the disk unread: `prove` reopens the new bytes and compares
+  each changed cell. A mismatch returns the session to the last good bytes.
+- Before a write the file is read again. When it differs from what this view
+  loaded, the edit is dropped with a toast and the view reloads: the newer file
+  wins, because the agent is the usual other writer.
+- Cells the file's structure forbids stay read-only: parts of merged areas and
+  array formulas, table headings, protected sheets.
+- XLSX writes drop `calcChain.xml` and set `fullCalcOnLoad`: a chain naming a cell
+  that lost its formula makes Excel offer a repair.
+
+A selection is a rectangle of the sorted view, and its summary is the numbers
+in it. While there is one, the line above the grid says what is selected instead
+of the table's size, so the two are never read as one. A Comment bubble appears
+over it, as it does over text; the toolbar's comment stays for the whole file. A
+comment on a selection, or on text selected inside a document's frame, attaches
+to the composer through `QuoteCommentMenu` as a `file-quote` naming the place
+(sheet and range, slide or page) and never sends. A press anywhere else closes
+it, as it does the comment field over text. The frame reports its selection
+by message, because a selection cannot cross the frame's edge.
+
+Cells changed from outside stay marked until selected (`cellTraces.ts`). The
+marks live for the app's lifetime and outside the components, since a change on
+disk remounts the preview; the user's own edits move the baseline and mark nothing.
+
+Search and value filters narrow the view the same way sorting does, and the file
+stays as it is. A value filter keeps the values it hides, not the ones it shows,
+because a column can hold more values than the menu lists. Pinned rows stay
+outside the filter and render in the `thead`, so the virtualizer counts body rows
+only: `viewRows` indexes the whole view, `bodyRows` what scrolls. Frozen columns
+and filters live in the view and are not saved.
+
+Rows and columns as a whole change through `TableEditing.structure`, one undo
+step each:
+
+- CSV shifts by byte offset (`shiftDelimitedRow`, `shiftDelimitedColumn`), so
+  every field it does not touch keeps its quoting and line ending.
+- A workbook lets the engine rewrite references in every sheet, then
+  `WorkbookSession.restructure` patches the file and proves the whole of it.
+  Defined names shift through `shiftSheetReferences`, because the engine leaves
+  them. Undo restores the earlier bytes, not the inverse change: a deleted row's
+  cells exist nowhere else.
+- `canRestructure` refuses what would be left behind: a sheet with tables,
+  conditional formatting, data validation, drawings or `extLst`, a protected or
+  partly locked sheet, and any array formula in the workbook, since its block
+  cannot be rewritten cell by cell.
+  An ODS document is refused whole when it holds named ranges, database ranges,
+  validations, conditional formats, drawings, merged or matrix cells: those keep
+  addresses in their own notation or span the lines that would move.
+
+### Why the separator comes from the content and not the extension
+
+A `.csv` file is not always comma-separated. Spreadsheets in locales that use a decimal comma export semicolon-separated files under the `.csv` extension, and a tab-separated file saved as `.csv` is just as common. Reading by extension alone turned those files into a single column, with every value on a line inside one cell.
+
+`resolveDelimiter` (`previews/tableDelimiter.ts`) reads the first records with each candidate separator, comma, semicolon and tab, and compares only the candidates the file actually uses. Among those it prefers one whose split keeps quotes where RFC 4180 allows them (at the start of a field, closed before the next separator or line end), then the one that holds its column count over the most records it actually splits, then the one that gives the wider table, then the comma. The order matters in every direction: a semicolon export reads as one column under a comma, so the wider table wins that tie; a comma file whose values happen to contain semicolons reads as two ragged columns under a semicolon, so the steadier column count keeps the comma; and a comma file with a quoted header next to a semicolon-laden value would read as wider under the semicolon, but that split puts a quote in the middle of a field, so the comma wins. A separator that never appears does not compete, so a comma file with a missing trailing field is not handed to a semicolon that splits nothing. A file with no separator at all keeps the comma it would have had before, so nothing changes for a one-column file. The parser itself stays forgiving for files no candidate reads cleanly.
+
+A `.tsv` path stays a hard hint for the tab and is not sniffed, because that extension names the separator itself. The separator belongs to the loaded file, not to the draft: `view/useTableDelimiter` reads it once per loaded source (the file revision, plus whether the path is `.tsv`) and hands the same value to the preview, the cell and row edits, and the XLSX export. An edit can write a field that reads differently under another separator (a semicolon file accepts an unquoted comma), so sniffing the draft would move the column boundaries mid-edit; a save and a rename or move of the open file keep the separator, a reload or another file reads it again. The sniffer lives apart from `delimitedText.ts` so the view hooks can hold it without importing the lazily loaded parser.
+
+### Large tables
+
+`documentHost.ts` holds everything that parses a table or workbook, behind one
+typed call list (`documentProtocol.ts`). It runs in `document.worker.ts` and in
+the app's thread only where no worker starts (VS Code, tests). A workbook of
+100,000 rows takes seconds to read and each edit reads it back to prove the
+write, so the app never does that itself: it holds the sheet's text for the grid
+and small notes about its cells. These must stay true:
+
+- Rows cross in chunks (`CHUNK_ROWS`), so receiving them never blocks a frame.
+- An edit answers with the cells it changed (`CellPatch`), and a sheet is laid
+  out again only when one falls outside the grid or on its spare edge. What was
+  typed shows at once; the answer or a new layout replaces it.
+- One worker lives for the app, because `cellTraces` does: unseen marks outlast a
+  preview. A book past `MAX_TRACED_CELLS` keeps no marks, since they copy every cell.
+- The grid draws only the columns near the view from `COLUMN_WINDOW_MIN` columns
+  up. All `<col>`s stay and a spanning cell stands for what is not drawn, so widths
+  stay exact. A frozen column and the one being edited are always drawn.
+- Each spanning gap is split into cells of at most 1,000 columns. Browsers clamp larger `colspan` values, which would place the drawn cells in the wrong columns and make the far end unreachable.
+- Reading a column's values for the filter menu takes every row, so it happens
+  when the submenu mounts and never in render.
+
+A text table past `MAX_OPEN_FILE_BYTES` opens read-only from its bytes, because
+the editor could not hold it. `MAX_DATA_PREVIEW_BYTES` bounds data files; a phone
+keeps the office limit. Past `DEFAULT_TABLE_ROW_CAP` rows the grid holds the first
+ones, and a capped SQLite result sorts in the database (`onSort`) because the
+grid does not hold the rows that would come first. Filters and search see only
+the rows the grid holds.
+
+### Why CSV change traces retain parsed rows
+
+The parser produces immutable row arrays, which the trace keeps directly. Creating a map entry and coordinate string for every cell blocked the main thread for seconds on a wide sparse CSV. First loads and own edits adopt the rows without scanning them; outside changes compare values and field presence, so a missing field and a present empty field remain distinct. Workbook traces keep cell maps because their edits arrive as individual cell patches.
+
+### Why long column gaps use several cells
+
+HTML clamps `colspan` to 1,000. Splitting a larger virtual gap keeps the drawn cells at their logical columns, with the same widths as the column definitions. One large spanning cell would shift those cells toward the start and leave the far end of a wide table blank.
+
+### Why grid widths are measured and not left to automatic layout
+
+Only visible rows are mounted, so automatic layout would resize columns while
+scrolling. Fixed layout uses an explicit table width to bound long values;
+wide virtual tables use the virtualizer's pixel total because a `calc()` with
+every column can exceed CSS limits and collapse the table to its drawn cells.
+
+### Table editing invariants
+
+- Virtual column measurements convert `ch` and `rem` to pixels and invalidate
+  cached sizes when those units or column widths change. Otherwise gaps and
+  drawn columns disagree about their positions.
+- Selection changes acknowledge outside edits. A new change under an existing
+  selection stays marked until the selection moves; filtering clears the
+  selection and structural edits clear row-indexed state because those indexes
+  refer to a different view afterward.
+- A comment bubble follows visible selected cells and waits through a
+  double-click into editing. An open comment field remains available when its
+  cells scroll away, so typing is not discarded.
+- A capped CSV has no spare editable row because that row would overwrite a
+  record omitted from the preview. An empty loading draft does not replace the
+  change-trace baseline.
+
+### Why workbook operations share a queue and not independent promises
+
+Edits, undo and retries run in order, and the workbook closes only after the
+queue drains, so an outstanding write cannot use a closed session. Changes
+between renders use the latest view and draft; rejected writes reload the
+authoritative sheet because the optimistic typed values are already visible.
+
+### Workbook round-trip invariants
+
+- Logical row and column counts end at the last cell with data, including gaps.
+  Readers keep these counts independently of capped ODS repeat expansion and grid
+  rows. Empty ODS padding does not extend them, and successful edits adopt the
+  counts from the read-back document.
+- Undo restores stored cell values directly. Re-parsing their display text
+  could turn a text value such as `00123` into a number.
+- SpreadsheetML parts normalize namespace prefixes on open, so reading and
+  patching share one element spelling. Writes remove the optional dimension
+  hint because a new cell can lie outside its stored bounds.
+- Shared formulas expand into independent formulas before an affected edit or
+  move. Their other cells borrow formula text and relative offsets that the
+  change would otherwise invalidate.
+- Formula inputs preserve text with an apostrophe. Calculation keeps full
+  numeric precision without function-specific currency or date styling.
+  ODF result text retains the previous decimal and percent presentation.
+- A rejected formula batch discards its partially changed engine before the
+  next edit. Read-back proof preserves every untouched cell while accepting an
+  absent cached result for a formula computed only in memory.
+
+### Why delimited text is scanned and not split into lines
+
+Quoted fields can span lines, and streaming across the source avoids a second
+large array of lines. Rows beyond the cap are counted without being retained,
+so the preview can report the full size within its memory bound.
+
+### Why workbook dimensions are separate from cells
+
+ODS repeats can describe more populated rows and columns than the preview
+materializes. The readers count their full extents while retaining the existing
+caps; deriving totals from retained cells loses the omitted part. XLSX uses
+populated cell coordinates because its optional dimension hint can be stale.
+
+### Delimited-text invariants
+
+- Parsing and byte-offset edits agree about blank records. A final newline
+  ends the last record; a lone empty field is quoted when written so it
+  survives as a row instead of disappearing as a blank line.
+- Column edits apply from the end of the source, so changing one field leaves
+  the earlier recorded byte offsets valid.
+- The logical column total includes omitted records. The materialized width
+  covers retained records only, so a wide omitted row cannot multiply padding
+  allocations across every visible editable row.
+
+### Data files, archives, notebooks
+
+Each opens as a copy in memory, and nothing it does reaches the disk.
+
+- `DataFileArtifact` shows SQLite through sql.js and Parquet through hyparquet, in
+  the same grid. A query runs on the copy, so a write there changes nothing. A
+  WAL database opens with its flags patched, and the meta line says when a
+  non-empty `-wal` holds changes the copy lacks. It imports sql.js's browser
+  build: the default one pulls `node:fs` into the bundle, which fails only in
+  production.
+- `ArchiveArtifact` lists a zip without unpacking it and inflates one entry on
+  click, up to `MAX_ENTRY_BYTES`.
+- `NotebookArtifact` shows cells and saved outputs and runs nothing. HTML output
+  is the notebook's own content, so it stays in `officeFrameDocument`.
+
+### Data and preview invariants
+
+- SQLite reads retain big integers because converting an identifier past
+  `2^53` to a JavaScript number would round it.
+- PDF parsing and password errors identify an unreadable document. Transport
+  and token failures remain read failures, so a valid file still offers Retry.
+- A preview font uses a throwaway family scoped to its lifetime, so unrelated
+  UI text cannot accidentally select the document's font.
+
+### Why Bun archive operations use synchronous compression
+
+Bun's browser-style Blob workers do not reliably run fflate's asynchronous
+path. Archive reads and workbook packing use synchronous operations there;
+other runtimes retain the asynchronous path.
+
+### Why document parsing has a local transport fallback
+
+Bun's test runtime has no worker bundler, and the VS Code webview cannot load
+the document worker from its origin. Both use the same document host locally,
+while browser runtimes keep parsing off the app's thread.
+
+### Export
+
+`documentExport.ts` turns Markdown into docx or a printable page, and a table into
+xlsx. A file lands next to its source under the next free name and never replaces
+one; the upload runs with `overwrite: false` so a stat that lied cannot change
+that. A runtime without `uploadFile` downloads it instead. PDF is the system print
+dialog on a hidden frame, so it is off on phones.
+
+### Why IronCalc for formulas
+
+HyperFormula covers more but is GPL, which an MIT app cannot ship. IronCalc is
+MIT or Apache, runs inside the app, and its `wasm` file loads on first need:
+a workbook with a formula missing its stored result (openpyxl writes them that
+way), or the first edit of a workbook with formulas. A viewed workbook with
+complete results never loads it. It reads only its own file format, so the
+session feeds it cells, and it gives only formatted text, so formula cells carry
+a scientific format that yields the 15 digits a spreadsheet stores.
+
+A function it lacks shows an error where the file holds a good result. That
+result stays, it is counted in the meta line, and the spreadsheet app recalculates
+on open. Results are never written over from a failed calculation.
+
+### Why these renderers
+
+Sending the file to Office Online or Google's viewer would take its contents to
+a third party, which `enterprise-boundary` rules out. `@docmentis/udoc-viewer`
+draws closest to the original, but its WASM engine is proprietary and needs
+online authorization. SheetJS on npm is stuck on an old release with known
+vulnerabilities, and the workbook reader already existed for chat attachments.
+`pptx-preview` drew images and shape outlines better than @jvmr/pptx-to-html,
+and lost on the rest: empty charts with a placeholder title in Chinese in the
+same test, 441 KB gzipped against 47 KB, and no public source. The chosen one
+draws an unknown shape as a rectangle.
+
+### Why the page is built in the app and shown in a frame
+
+Rendering inside the frame would keep the renderers themselves away from the
+app, at the cost of sending them and the file over `postMessage`, and of a
+parser and a bundle that run nowhere else. docx-preview builds into a document
+with no browsing context, so nothing it creates loads or runs there, and only the
+cleaned result enters the frame. The frame's one script scales paper down to a
+narrow pane, down to 25%; with a host's CSP in the way the page scrolls sideways.
 
 An HTML file's preview is untrusted content. `useHtmlPreviewUrl` asks the
 server for a grant (`POST /api/fs/preview`) and loads the page from
@@ -197,6 +778,27 @@ asks for its grant with `allowOutsideWorkspace`, and the server scopes it to
 the page's folder. VS Code renders `srcDoc` in the same sandbox. The server
 side (read root, CORS, CSP) is described in
 `packages/web/server/lib/fs/DOCUMENTATION.md`.
+
+### Frame invariants
+
+- The host opens only allowed document links after checking the message's
+  source frame. The opaque-origin frame receives its parent's origin from the
+  host because it cannot read it; originless hosts require the wildcard target
+  while retaining the receiver's sender check.
+- Embedded document styles escape closing style tags because those rules are
+  untrusted text. The office iframe retains `color-scheme: normal` so its
+  transparent background stays transparent under a dark app theme.
+
+Adopting new content through `applyLoadedTextContent` bumps the file revision,
+which asks for a new grant and reloads the frame, so a page changed on disk
+shows up in an open preview. A save from the editor sets the content directly;
+the preview gets it when the user switches back from the code.
+
+On a relay connection the panel says the preview is unavailable and offers the
+code, asks for no grant, and the toolbar has no "Annotate page". The browser loads the page and its files itself,
+and a URL it loads never enters the tunnel. Reading the page through the tunnel
+into `srcDoc` was rejected: its neighbouring files would be lost, and a relative
+URL in a `srcDoc` frame resolves against the app's own address.
 
 The preview toolbar has the browser panel's "Annotate page" toggle
 (`useHtmlPreviewAnnotation`, a thin use of `components/browser/useFrameAnnotation.ts`,
@@ -223,14 +825,14 @@ as is, but left web without annotation and given the Files view two preview
 engines. The bridge works the same in both, and gives the app no reach into
 the page that the page's own scripts lack.
 
-The Markdown preview renders the file's raw HTML the way GitHub does
-(`SimpleMarkdownRenderer allowRawHtml`): right after marked, a separate
-DOMPurify instance keeps a GitHub-like allowlist (`markdownSecurity.ts`:
-`picture`/`source`, `img`, `a`, `details`, `sub`/`sup`, `kbd`, aligned
-blocks) and drops author styles, classes, ids, data attributes, handlers,
-forms and embeds. Chat keeps raw HTML inert. A numeric `img height` becomes
-an inline height, because Tailwind preflight's `height: auto` would beat the
-attribute.
+The Markdown preview uses `SimpleMarkdownRenderer allowRawHtml`, sharing
+Streamdown processing with reference descriptions and comments. The policy in
+`chat/markdown/streamdownPlugins.ts` enables raw parsing, a restricted rehype
+sanitizer and Streamdown hardening. It permits document elements such as
+`picture`/`source`, `img`, `a`, `details`, `sub`/`sup`, `kbd` and aligned blocks.
+Author styles, application classes, handlers, forms and embeds are excluded.
+Chat keeps raw HTML inert. Media components own safe image dimensions so an
+HTML height or aspect ratio is not lost to Tailwind preflight.
 
 A Markdown file's frontmatter shows above its body (`SimpleMarkdownRenderer
 frontmatter="properties"`, also used by the plan view): a YAML mapping
@@ -239,21 +841,154 @@ as YAML; TOML (`+++`), invalid YAML and non-mapping YAML show as the block
 was written. The skill editor hides it (`frontmatter="hide"`) because the
 description has its own field there.
 
-`useMarkdownLocalAssets` makes a rendered Markdown file's relative images and
-links work: images and `srcset` candidates are fetched through the runtime
-against the file's own directory (outside the workspace when the file is) and
-swapped for object URLs that are revoked with the preview; relative links
-open the target file through `useUIStore.openContextFile`, which the context
-panel and the mobile files surface both consume. A `<source
-media="(prefers-color-scheme: …)">` follows the app theme, not the OS: the
-feature is rewritten to an always-true or never-true query and re-evaluated
-when the theme changes.
+`useMarkdownLocalAssets` supplies the file path, workspace scope, file-open
+callback and app color scheme before rendering. `MarkdownMediaContext`
+resolves relative images and `srcset` candidates through the runtime against
+the file's own directory, including files outside the workspace. React media
+nodes receive the resulting object URLs; their owner revokes them when the
+preview changes or unmounts. Relative links open through the supplied
+`useUIStore.openContextFile` callback, shared by the context panel and mobile
+files view. Fragment links find a heading within the Markdown root. A source's
+`prefers-color-scheme` condition follows the app theme through its rendered
+`media` prop. Content, file and runtime changes retire older asset results.
+A document image keeps its box hidden until its object URL arrives, and one
+that cannot be read or decoded is replaced by its name after a warning icon,
+with "Image couldn't load" as the tooltip.
+
+A document image is read once it comes within one height of the preview's
+scroller of its visible part (`useNearMedia` with the nearest ancestor that
+scrolls vertically as root; a table that scrolls sideways does not count). A `<picture>` is watched as a whole, since its sources have
+no box, and a source whose `media` does not hold, the other theme's for one,
+is read only once it does. The candidates of one `srcset` are all read when
+their image is near.
+
+### Why a document image waits until it is near the view
+
+The preview read every image when it opened: a README with 100 screenshots of
+2.8 MB read 280 MB and grew the browser by about 600 MB while two pictures
+were on screen (#5320). The observer's root is the preview's scroller, because
+a margin on the viewport is clipped by that scroller and an image would start
+loading only once already visible. Read files stay until the preview closes:
+releasing one far away would collapse its height and move the text being read.
+
+The Markdown preview renders the file a block at a time (`windowed` on
+`SimpleMarkdownRenderer`, `chat/markdown/markdownWindow.ts`): Streamdown
+splits it into top-level blocks as it splits a streamed reply, and only the
+blocks within a viewport of the visible part mount; the rest stand as empty
+boxes of the height and edge margins they had when they left, or an estimate
+from their source until first drawn. A file with footnotes or link
+definitions is one block and renders whole. What reads the whole rendered
+document mounts every block while it does: the find bar while it is open, a
+heading link while it looks for its heading, and a selection that crosses a
+block not mounted (select-all, a shift-click far away) until it collapses. A
+selection keeps the blocks it reached mounted, so its ends stay in the DOM
+while it autoscrolls, and a block whose disclosure the reader toggled, or
+that plays a video, stays mounted. The remembered scroll place of a Markdown
+preview is the block at the viewport's top and the offset into it
+(`useFilePreviewScrollPosition`); that block stays mounted while it is
+restored, held until two frames in a row find it in place, since the blocks
+around it draw only after the jump.
+
+### Why a Markdown preview is virtualized
+
+Rendered whole, a 340 KB changelog (1,000 blocks, 220,000 px) cost 470 ms to
+open, mostly the Markdown parse, and while the panel was resized it laid out
+the whole document on every frame: 80 % of the main thread, and with an
+accessibility client on 1.1 s of serialization and 96 dropped frames per
+gesture. Skipping the layout of blocks off screen in CSS (`content-visibility`)
+left the parse and the accessibility nodes, and changed spacing wherever a
+block's children's margins collapse through it. Mounted a window at a time,
+the changelog opens without a task over 10 ms, and a resize costs what it
+costs with a short file. The blocks render as they do in a streamed reply,
+pixel for pixel the same as the whole document.
+
+The preview's Outline button (`MarkdownPreviewOutline`) lists the headings the
+preview rendered (`readPreviewHeadings`: `h1` to `h6` inside
+`[data-markdown-content]`) and scrolls to the heading element the reader
+picked. Like the find bar, it holds every block mounted while it is open and
+lets go when it closes, and it rescans when the rendered document changes. The
+button exists for every Markdown file in every mode, so the row never changes
+with the mode, and pressing it never changes the mode: in the source it opens
+the editor's Symbols list, which lists a Markdown file's headings. The panel is
+closed by default, closes when the preview goes away or another file opens,
+and stores nothing.
+
+### Why the outline reads the rendered headings
+
+The outline could have parsed the file text and matched each entry to a heading
+by position or title. A raw HTML `<h2>` renders as a heading that a text parser
+does not list, inline formatting and image alt text read differently in the
+text and in the DOM, and duplicate titles need counting, so a match could land
+on the wrong heading or on none. Reading the rendered headings makes the list
+the document as shown, and a pick scrolls the element itself. The price is that
+a long document is mounted whole while the panel is open, which the find bar
+already costs. Parsing the text and mounting blocks only on a pick is the
+fallback if that mount time proves too slow on a very long file.
+
+### Why document assets resolve before node updates
+
+Media and link components own their resources and cleanup. Rewriting the
+rendered Markdown's `src`, `srcset` or `media` attributes would compete with
+React and could publish an old document's assets after a preview switch.
 
 An agent can ask for a file to be shown (`file.open` on the managed
 `openchamber` tool). The server broadcasts `openchamber:file-open-request`;
 `ContextPanel` answers it with `openContextFile`, `MobileApp` additionally
 opens the files drawer. VS Code has no shared file viewer and no managed
 tool, so the event never reaches it.
+
+On a phone the drawer covers the chat, so `MobileApp` opens it only for a request
+from the session on screen, a subagent or `/btw` side chat under it, or no session
+at all. Any other session gets a toast with "Open session", and the tap opens that
+session and the file; a tablet with the side panel does the same. The path is not
+staged before the tap, because `pendingFileFocusPath` is global and would send the
+current session's drawer to the other session's file. A session in a folder still
+waiting for the user's trust switches later or never, so that tap opens only the
+session.
+
+## Editor aids
+
+The text editor's helpers live in `lib/codemirror/` and need no language
+server; `FilesView` assembles them. What the syntax tree or git can answer
+is shown, nothing that needs type information.
+
+- **Git changes.** `gitChangeGutter` diffs the document against the file's git
+  baseline after typing pauses. For a file inside the repository selected in
+  Changes, the baseline and status come from that repository, even when the
+  project root is not a repository. The file tab remains keyed to the project.
+  A click on a bar opens that change in place:
+  the changed lines are tinted, the baseline lines show under them, and
+  Revert puts them back as an ordinary edit, so undo, autosave and the
+  external-change guard treat it like typing. Escape or the close button
+  hides it; a later diff keeps it open while the change still exists.
+  Read-only files show no Revert.
+- **Indent guides** draw one faint line per indent step on the lines in view,
+  at multiples of the width the file itself uses (the most common step
+  between lines), so a 4-space file does not get guides every 2 columns.
+- **Sticky scope** (desktop) pins the first line of each function or class
+  whose body fills the top of the editor, up to three, innermost kept.
+- **Import links.** Cmd+click (Ctrl+click elsewhere) on a relative import path
+  in JS/TS opens the file it names, trying the extensions a bundler tries;
+  holding the key underlines the path. Elsewhere that click still adds a
+  cursor.
+- **JSON errors** (`.json`, `.jsonc`, `.geojson`) underline the first place the
+  file stops parsing.
+
+### Why import links stop at relative paths
+
+`./` and `../` paths name a file; aliases (`@/lib/x`) and packages need the
+project's resolver settings, and a jump that guesses was ruled out. Go to
+definition for symbols needs a language server, which was ruled out as too
+heavy; OpenCode's own LSP served the agent only and is not a source for it.
+
+### Why JSON errors accept comments and trailing commas
+
+tsconfig, VS Code settings and `opencode.json` allow them under a `.json`
+name. Flagging them would be wrong far more often than missing a trailing
+comma in a strict file, so the check blanks both before parsing, keeping
+offsets, and reports only the first error: the parser's recovery after it is
+noise. JSON5 and JSON Lines are not checked. The JSON tree view parses every
+file the same way, so a tsconfig opens as a tree.
 
 ## Canvas editors
 
@@ -262,7 +997,7 @@ editor: an extension's file editor (`contributes.fileEditors`, see
 `packages/sdk/DOCUMENTATION.md`). It exposes `FileCanvasHandle`
 (`fileCanvas.ts`); `getContent(purpose)` returns a `FileCanvasRead`: a
 snapshot, `null` for nothing yet, or a failure message. A failure fails the
-save or keeps the canvas open on a source or fullscreen toggle; it never falls
+save or keeps the canvas open on a source toggle; it never falls
 back to the stale text draft.
 
 An extension editor claims a file when an active extension's pattern matches
@@ -272,16 +1007,25 @@ built-in preview: a text editor only text files, a binary editor
 surface="file"` with a per-mount channel (`lib/guests/file-editor-channel.ts`)
 holding the draft at mount; the frame gets the file on `hello` / load, answers
 snapshot requests within `GUEST_REQUEST_TIMEOUT_MS`, and reports changes. VS
-Code and mobile keep the extension catalog empty, so there nothing matches.
+Code keeps the extension catalog empty, so nothing matches there. The phone's
+Files tab (`MobileFilesSurface` → `FilesView`) matches editors like the
+desktop, with no manifest opt-in: a file editor owns the whole view, so it
+needs none of the room a panel would.
 
 The contract is one-directional content. The frame reads the file it was
 handed at mount, so `FilesView` remounts it with a `key` of path plus
 `canvasRemountNonce` whenever it must adopt content it did not author (a load,
 an external write, a toggle back from the source view, a discard). Its own
 save adopts content without a remount so the viewport is not reset. Exactly
-one instance is mounted, in the docked chain or in the fullscreen overlay;
-entering or leaving fullscreen moves unsaved edits through the text draft, as
-the source toggle does, and the other slot remounts from it.
+one instance is mounted.
+
+### Canvas handoff invariants
+
+- A guest snapshot matches the editor's declared text or binary content kind.
+  Accepting the other kind would write the document through the wrong save path.
+- Office diffs compare content only, so layout-only changes are absent. Older
+  servers can omit the original document versions; the document diff requires
+  the version markers before treating payloads as whole files.
 
 `isDirty` (draft differs from file) is not proof of a user edit. The context
 panel keeps one FilesView that follows the selected path, so during a file
@@ -322,10 +1066,9 @@ while the size is unknown; a stat that settles with no size (no
 write uploads use, with the stat baseline cleared so the poll does not take
 the write for an external change. The binary guards (`isBinaryFile`,
 `contentDetectedBinary`) that refuse text saves step aside only while a binary
-editor owns the file (`binaryCanvasRef`). There is no source toggle; moving to
-or from fullscreen saves unsaved changes first, because bytes cannot travel
-through the draft. An external change reloads the file and remounts the
-editor with the new bytes, unless it has unsaved changes.
+editor owns the file (`binaryCanvasRef`). There is no source toggle. An
+external change reloads the file and remounts the editor with the new bytes,
+unless it has unsaved changes.
 
 ## Excalidraw drawings
 
@@ -384,3 +1127,14 @@ On mobile the header button uploads into the folder currently on screen. A singl
 names are never replaced silently: they collect into a replace-confirmation
 dialog, which is dropped when the workspace or runtime changes. The feature is
 present only when the runtime exposes `files.uploadFile`.
+
+A failed upload names itself and its cause instead of collapsing into one
+generic line: `uploadFailureOf` reads the `FilesystemError` the files API threw
+and keeps the file name beside the reason, so the toast says which file was too
+large (with the server's own `maxBytes` limit), which folder refused the write,
+which folder fell outside the project, or which folder is gone. The cause comes
+from the server's `reason`; a status alone is never read as one, so a 403 from
+anything else (a proxy, for one) reports the unnamed cause. A batch reports
+three rows and counts the rest. A file rejected before any request (an illegal
+name, or the runtime changing mid-upload) has no server reason and reports the
+unnamed cause.

@@ -1,23 +1,18 @@
 import type { Extension } from '@codemirror/state';
 import { drawSelection, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 
-/** Half of CodeMirror's 1.2 s blink cycle, so the rhythm stays the same. */
 const CARET_PHASE_MS = 600;
 const HIDDEN_CLASS = 'oc-caret-hidden';
 
-/**
- * Blinks the caret `drawSelection()` paints from a timer. CodeMirror's own
- * blink is an infinite `steps(1)` CSS animation on the cursor layer: it draws
- * two frames a second, yet keeps the compositor ticking every frame for as long
- * as the editor has focus. Measured headless on the animation fixture: 4.1% of
- * a core for the CSS caret against 1.3% for this timer and 0.6% for a still
- * page. Any typing or caret move restarts the cycle visible, as CodeMirror's
- * does, and an unfocused editor runs no timer.
- */
 class CaretBlink {
     private timer: ReturnType<typeof setInterval> | undefined;
+    private readonly window: Window | null;
+    private readonly onWindowFocusChange = () => this.restart();
 
     constructor(private readonly view: EditorView) {
+        this.window = view.dom.ownerDocument.defaultView;
+        this.window?.addEventListener('focus', this.onWindowFocusChange);
+        this.window?.addEventListener('blur', this.onWindowFocusChange);
         this.restart();
     }
 
@@ -26,14 +21,15 @@ class CaretBlink {
     }
 
     destroy(): void {
+        this.window?.removeEventListener('focus', this.onWindowFocusChange);
+        this.window?.removeEventListener('blur', this.onWindowFocusChange);
         this.stop();
     }
 
     private restart(): void {
         this.stop();
-        if (!this.view.hasFocus) return;
-        // The class goes on the scroller, whose attributes CodeMirror never
-        // rewrites; the editor root's class is recomputed on every update.
+        if (!this.view.hasFocus || !this.view.dom.ownerDocument.hasFocus()) return;
+        // external: https://github.com/codemirror/view/blob/main/src/editorview.ts CodeMirror recomputes the editor root class on updates; the scroller preserves the blink class.
         this.timer = setInterval(() => this.view.scrollDOM.classList.toggle(HIDDEN_CLASS), CARET_PHASE_MS);
     }
 
@@ -44,15 +40,13 @@ class CaretBlink {
     }
 }
 
-/**
- * `drawSelection()` with its CSS blink switched off and the timer blink above
- * in its place. A blink rate of 0 wins over any other `drawSelection()` in the
- * same editor, because CodeMirror keeps the smallest configured rate.
- */
 export const timerCaretBlink = (): Extension => [
+    // external: https://github.com/codemirror/view/blob/main/src/draw-selection.ts CodeMirror uses the smallest configured blink rate, so zero disables the duration across drawSelection instances.
     drawSelection({ cursorBlinkRate: 0 }),
     ViewPlugin.fromClass(CaretBlink),
     EditorView.baseTheme({
         [`.cm-scroller.${HIDDEN_CLASS} > .cm-cursorLayer`]: { opacity: 0 },
+        // external: https://github.com/codemirror/view/blob/main/src/draw-selection.ts A zero-duration blink still swaps inline animation names on caret moves; important overrides prevent per-keystroke animation events.
+        '.cm-cursorLayer': { animationName: 'none !important' },
     }),
 ];

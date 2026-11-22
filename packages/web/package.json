@@ -1,42 +1,60 @@
 {
   "name": "@openchamber/web",
-  "version": "2.5.0",
+  "version": "2.8.0",
   "private": false,
   "type": "module",
-  "main": "./server/index.js",
-  "types": "./server/index.d.ts",
+  "main": "./build/server/index.js",
+  "types": "./build/server/index.d.ts",
   "bin": {
-    "openchamber": "./bin/cli.js"
+    "openchamber": "./build/bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./build/server/index.d.ts",
+      "openchamber-source": "./server/index.js",
+      "default": "./build/server/index.js"
+    },
+    "./server/*": {
+      "openchamber-source": "./server/*",
+      "default": "./build/server/*"
+    },
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public"
   },
   "engines": {
-    "node": ">=24.14.0"
+    "node": ">=24.14.0",
+    "opencode": ">=2.2.4"
   },
   "scripts": {
     "dev": "bun run build:watch",
     "dev:server": "bun ../../scripts/build-builtin-extensions.mjs && OPENCHAMBER_RELAY_HOST=${OPENCHAMBER_RELAY_HOST:-off} OPENCHAMBER_ALLOW_DEV_ORIGINS=1 bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
     "dev:server:watch": "bun ../../scripts/build-builtin-extensions.mjs && node ./scripts/dev-server-watch.mjs",
-    "build": "bun ../../scripts/build-builtin-extensions.mjs && NODE_OPTIONS=--max-old-space-size=6144 vite build",
+    "build": "bun run build:server && NODE_OPTIONS=--max-old-space-size=6144 vite build",
+    "build:server": "bun ../../scripts/build-builtin-extensions.mjs && node scripts/build-server.mjs",
     "build:diag": "bun ../../scripts/build-builtin-extensions.mjs && NODE_OPTIONS=--max-old-space-size=6144 vite build --config vite.diag.config.ts",
     "build:watch": "bun ../../scripts/build-builtin-extensions.mjs && vite build --watch",
-    "prepack": "bun ../../scripts/build-builtin-extensions.mjs",
-    "type-check": "tsc -b",
-    "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src",
+    "prepack": "bun run build:server",
+    "type-check": "bun check -b && bun run type-check:server",
+    "type-check:server": "node scripts/check-server-types.mjs",
+    "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src && bun run lint:server",
+    "lint:server": "node scripts/check-server-types.mjs --lint",
+    "smoke:server-build": "node scripts/smoke-server-build.mjs",
     "test": "vitest run",
-    "start": "node bin/cli.js serve"
+    "start": "bun bin/cli.js serve"
   },
   "dependencies": {
+    "7zip-bin": "5.2.0",
     "@clack/prompts": "^1.1.0",
     "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.0.32",
-    "@opencode/schema": "2.0.32",
+    "@opencode/client": "2.3.2",
+    "@opencode/schema": "2.3.2",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
-    "bun-pty": "0.5.1",
+    "bun-pty": "0.6.0",
     "compression": "^1.8.1",
     "cron-parser": "^5.10.1",
     "express": "^5.1.0",
@@ -44,12 +62,12 @@
     "jose": "^6.1.3",
     "jsonc-parser": "^3.3.1",
     "luxon": "^3.5.0",
-    "node-pty": "1.2.0-beta.15",
+    "node-pty": "1.2.0-beta.18",
     "openai": "^7.18.0",
     "qrcode-terminal": "^0.12.0",
     "reflect-metadata": "^0.2.2",
     "sherpa-onnx-node": "1.13.8",
-    "simple-git": "^3.36.0",
+    "simple-git": "^4.0.2",
     "web-push": "^3.6.7",
     "ws": "^8.18.3",
     "yaml": "^2.8.1",
@@ -80,9 +98,9 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.0",
     "cors": "^2.8.5",
-    "cross-env": "^7.0.3",
+    "cross-env": "^10.0.0",
     "next-themes": "^0.4.6",
     "nodemon": "^3.1.7",
     "react": "^19.1.1",
@@ -97,16 +115,16 @@
     "tsx": "^4.20.6",
     "tw-animate-css": "^1.3.8",
     "typescript": "~7.0.2",
-    "vite": "^7.1.2",
-    "vite-plugin-pwa": "^1.0.3",
+    "vite": "^7.3.2",
+    "vite-plugin-pwa": "^2.0.0",
     "vitest": "^4.1.4",
     "workbox-window": "^7.4.0",
     "zustand": "^5.0.8"
   },
   "files": [
     "dist",
-    "server",
-    "bin",
+    "build",
+    "bin/cli.js",
     "public",
     "package.json",
     "README.md"

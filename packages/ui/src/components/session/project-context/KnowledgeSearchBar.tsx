@@ -1,22 +1,15 @@
 import React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 
-/**
- * The panel's search, floating over the top of the list the way the chat's
- * search floats over the conversation. It opens from the search button in the
- * panel header and filters every section at once; the section tabs show where
- * the matches are. Escape or the close button closes it and clears the query.
- */
 export const KnowledgeSearchBar: React.FC<{
   query: string;
   onQueryChange: (query: string) => void;
   placeholder: string;
-  /** No section has a match for a non-empty query. */
   nothingFound: boolean;
-  /** Bumped every time the search is opened: focus and select the query. */
   focusRequest: number;
   onClose: () => void;
 }> = ({ query, onQueryChange, placeholder, nothingFound, focusRequest, onClose }) => {
@@ -53,9 +46,14 @@ export const KnowledgeSearchBar: React.FC<{
           {t('chat.search.noResults')}
         </span>
       ) : null}
-      <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={onClose} aria-label={t('chat.search.close')}>
-        <Icon name="close" className="h-4 w-4" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={onClose} aria-label={t('chat.search.close')}>
+            <Icon name="close" className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('chat.search.close')}</TooltipContent>
+      </Tooltip>
     </div>
   );
 };

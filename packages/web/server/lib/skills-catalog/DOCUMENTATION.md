@@ -5,14 +5,55 @@ This module provides skill discovery, scanning, and installation capabilities fo
 
 ## Entrypoints and structure
 - `packages/web/server/lib/skills-catalog/`: Skills catalog module directory containing all skill-related functionality.
-  - `cache.js`: In-memory cache for scan results with TTL support.
-  - `curated-sources.js`: Predefined skill sources (Anthropic, OpenAI, Cursor, Matt Pocock).
-  - `github-meta.js`: Best-effort GitHub repository metadata (stars, last push) with in-memory TTL cache.
-  - `git.js`: Git operations helpers for cloning and auth error detection.
-  - `install.js`: Skills installation from git repositories.
-  - `installed-sources.js`: Which source and repo subpath each catalog-installed skill came from, for the Installed badge.
-  - `scan.js`: Skills scanning from git repositories.
-  - `source.js`: Source string parsing for git repositories.
+  - `cache.ts`: In-memory cache for scan results with TTL support.
+  - `curated-sources.ts`: Predefined skill sources (Anthropic, OpenAI, Cursor, Matt Pocock).
+  - `disk-cache.ts`: Shared disk persistence and cache-entry validation.
+  - `github-meta.ts`: Best-effort GitHub repository metadata (stars, last push) with in-memory TTL cache.
+  - `git.ts`: Git operations helpers for cloning and auth error detection.
+  - `install.ts`: Skills installation from git repositories.
+  - `installed-sources.ts`: Which source and repo subpath each catalog-installed skill came from, for the Installed badge.
+  - `remove-directory.ts`: Deletes a clone or skill folder, retrying a delete Windows refuses for a moment.
+  - `scan.ts`: Skills scanning from git repositories.
+  - `source.ts`: Source string parsing for git repositories.
+
+Relative imports and the API headings retain `.js` specifiers for emitted JavaScript and the source resolver.
+
+## Invariants
+
+- The in-memory scan and metadata caches are authoritative. A disk write that fails or is skipped keeps every entry for the running process, and the next successful write persists the current entries.
+- The data directory is resolved on every call, so a test can point `OPENCHAMBER_DATA_DIR` at a fresh directory. The installed-sources temp file name is unique per write, so two installs finishing together never rename each other's file away.
+- A scan of a subpath that does not exist returns `ok: true` with no items. A failed `ls-tree` reads as an empty catalog, so a mistyped or removed subpath shows no skills instead of an error.
+- A root-level `SKILL.md` is dropped from scan results. OpenCode names a skill after the folder that holds it, and a file at the repository root has no such folder name.
+- A source `#ref` is limited to letters, digits and `._/-`, never starts with `-` (it becomes a git argument) and never contains `..`.
+
+## Decisions
+
+### Why persisted values retain their checked shape
+
+Disk cache entries validate only a numeric expiry and a non-null object value, including arrays. Cache reads therefore expose `object`, without promising scan or GitHub metadata fields the reader never checks. HTTP consumers own the narrowing they need. Install provenance validates only the 3 non-empty identity strings, retains their original whitespace, and passes optional metadata through unchecked. Its entry type leaves that metadata `unknown` so reading a file cannot promise valid scope or source enums.
+
+The provenance guard checks and narrows those strings locally. The shared JavaScript `asNonEmptyString` helper has no declaration, so importing it into this TypeScript implementation would break the VS Code consumer, whose compiler does not enable `allowJs`.
+
+### Why external checks remain at parsing boundaries
+
+Source strings and subpaths retain their runtime string checks. Disk JSON, expiry, object values, GitHub payloads and push timestamps, installed-source records, and YAML name and description fields remain checked at their input boundaries. Internally generated skill names and file contents need no repeated string checks; Node and Bun timers expose `unref` directly. Array checks that govern fallback or dictionary acceptance remain unchanged.
+
+### Installation conversion contracts
+
+`../opencode/config-files.d.ts` exposes the existing `OPENCODE_CONFIG_DIR` string used
+by `install.ts`. Its implementation derives the path from environment variables
+and the home directory. Conversion imports that owner value.
+
+Install results expose the validated scope and generated target source, with
+separate success and failure shapes. Scope, target source, selections and the
+default subpath retain their input checks. Skill names come from
+`path.posix.basename`, which already returns a string. Conflict decisions retain
+ordinary dictionary lookup and truthiness behavior, including inherited keys.
+Copying a skill keeps file permissions best-effort if `chmod` fails.
+
+### Why the Git home probe uses config path expansion
+
+`git config --path` expands `~` using Git's own home setting. A shell alias starts Git Bash on Windows, which rewrites `HOME=NUL` into a checkout-relative path before printing it. The config probe checks the unchanged isolated environment without that shell transformation.
 
 ## Public API
 
@@ -64,8 +105,9 @@ The following functions are internal helpers used by exported functions:
 ### Skill Name Validation (used in `install.js`, `scan.js`)
 - `validateSkillName(skillName)`: Validate skill name against pattern `/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/` (1-64 chars, lowercase alphanumeric with hyphens).
 
-### File System Helpers (`install.js`, `scan.js`)
-- `safeRm(dir)`: Safely remove directory recursively (ignores errors).
+### File System Helpers (`install.js`, `scan.js`, `remove-directory.js`)
+- `removeDirectory(dir, { warn })` (`remove-directory.js`): Remove a directory recursively, trying again after 250, 500, 1000 and 2000 ms. A delete that still fails logs a warning naming the folder and leaves it; the scan or install still succeeds. `packages/vscode/src/skillsCatalog.ts` uses the same helper and passes a `warn` that writes to the "OpenChamber" Output channel, because the extension host's console is not kept in any log.
+- `removeStaleCatalogFolders()` (`remove-directory.js`): Remove `openchamber-(vscode-)?skills-(scan|install)-*` folders the current user owns and that are older than an hour from the temp directory. Every scan and install, in both runtimes, starts it right before creating its own clone and does not wait for it. One sweep runs at a time per process. A folder it cannot delete stays without a log line; a failed delete removes some of its files and so makes the folder new again, and the first sweep an hour after that tries again.
 - `ensureDir(dirPath)`: Ensure directory exists with recursive creation.
 - `copyDirectoryNoSymlinks(srcDir, dstDir, cloneRoot)`: Copy a directory's contents without symlinks. Containment is anchored at `realpath(cloneRoot)`, so a selected directory that is a symlink (or sits behind one) and any source resolving outside the clone are refused, not copied.
 - `normalizeUserSkillDir(userSkillDir)`: Normalize the user skill directory path (handles the legacy `skill` directory in the XDG config location, or `~/.config/opencode/skill` when XDG is unset, by selecting the plural `skills` directory when appropriate).
@@ -86,7 +128,7 @@ The following functions are internal helpers used by exported functions:
 - `ok`: Boolean indicating success.
 - `normalizedRepo`: Normalized repo string (`owner/repo`).
 - `effectiveSubpath`: Effective subpath used for scanning (may be from source string or defaultSubpath).
-- `items`: Array of skill items with `{ repoSource, repoSubpath, skillDir, skillName, frontmatterName, description, installable, warnings }`.
+- `items`: Array of skill items with `{ repoSource, repoSubpath, skillDir, skillName, frontmatterName, description, installable, warnings }`. `skillDir` is the directory relative to the repository root and already includes `repoSubpath`, so a consumer that builds a repository path must not prepend the subpath again. `repoSubpath` describes the source (and is what a reinstall passes back), not a prefix to strip from `skillDir`.
 - `error`: Error object with `{ kind, message }` on failure.
 
 ### Install Skills Response
@@ -135,10 +177,14 @@ The following functions are internal helpers used by exported functions:
 - Per-skill decisions override global policy via `conflictDecisions` map.
 - Conflict response includes `{ skillName, scope, source }` for each conflict.
 
+### Why an SSH source takes its subpath only from options
+An SSH URL is `git@host:owner/repo.git`, so the part after the colon is the repository itself and nothing in the URL can name a skill subpath. `options.subpath` is the only source of a subpath for an SSH source. A shorthand source reads the subpath from the URL tail, as in `owner/repo/sub/path`.
+
 ### Cache Management
-- Cache keys include `normalizedRepo`, `subpath`, and `identityId` for isolation.
+- Cache keys include `normalizedRepo`, `ref`, `subpath`, and `identityId` for isolation. The ref belongs in the key because branches of one repository are different catalogs.
 - Default TTL is 3 hours for both scan results and GitHub repository metadata.
 - Scan and GitHub metadata caches persist to JSON files in the OpenChamber data dir, so app restarts and page refreshes reuse previous results instead of re-hitting GitHub.
+- GitHub metadata lookups time out after 1.5 seconds, well under the catalog route's client request deadline, so optional enrichment never aborts catalog loading. A failed lookup is cached for five minutes, which keeps a rate-limited or failing API from being hit on every catalog load.
 - Scans run through a global concurrency limiter (2 at a time) with per-key in-flight deduplication.
 - The refresh button passes `refresh: true` and bypasses the cache.
 
@@ -146,7 +192,18 @@ The following functions are internal helpers used by exported functions:
 - Path traversal protection in `copyDirectoryNoSymlinks` is anchored at the clone directory's real path (`realpath(tempBase)`), not at `realpath(srcDir)`: a selected directory that is itself a symlink resolves outside the clone, so anchoring at it would let every below-root check pass. The prefix comparison is separator-boundary-aware, so a sibling directory whose name merely shares the prefix is still outside.
 - Symlinks are rejected both below the root and at the root: a selection that is a symlink, or that sits behind one, is refused with the same "Symlinks are not supported in skills" reason.
 - `skillDir` selections containing `.`/`..` segments or an absolute path are rejected by the installer (`toFsPath`/selection planning) instead of relying on git's sparse-checkout normalisation to fail first.
-- Temporary directories are cleaned up in `finally` blocks.
+- Temporary directories are cleaned up in `finally` blocks, and the next scan or install removes any that were left (`removeStaleCatalogFolders`).
+
+### Why the temp folder delete retries in its own loop and not with `fs.rm` `maxRetries`
+On Windows a virus scanner or git's background maintenance can hold a file of the fresh clone right when the scan deletes it. A single delete with the error swallowed left one folder in the temp directory per catalog refresh (#5405). `fs.rm`'s own `maxRetries` retries again at every folder level, so a file held for good four levels deep in a clone kept one delete retrying for the whole 10 minutes the file stayed held on Windows (Node 24), and the catalog request waited on it. The loop in `remove-directory.js` gives up after about four seconds.
+
+### Why old clones are swept and the delete does not wait longer
+With an endpoint security agent on Windows, a fresh clone stayed held longer than the four seconds of retries on every scan, and each one stayed in the temp directory (#5497); folders about 50 minutes old deleted on the first try. Waiting longer would hold the catalog request for as long as the scanner keeps the files, which nobody controls. The sweep removes what was left at a later scan or install instead, along with folders earlier versions left. It skips folders younger than an hour: a folder's time changes only when its top-level entries do, and a scan that falls back to one `git show` per SKILL.md can keep using its clone for many minutes, in this process or in another window or app on the same machine. The prefixes cover the server and the extension because both write to the same temp directory.
+
+The sweep reads entries with `lstat` and removes only real folders the current user owns. On a Linux `/tmp` shared with other users, a folder someone else made with a catalog name could hold a link swapped in while the recursive delete walks it, and the delete would then remove the link's target with our rights. Our own clones come from `mkdtemp`, which only we can write into. Windows reports no uid, and its temp directory is per user.
+
+### Why the sparse listing names the subpath
+After the sparse checkout the scan lists SKILL.md files with `git ls-files`. The index also holds the files the sparse checkout left out, and every one of those has no file on disk, so the scan read it with its own `git show`, and in a partial clone each of those fetches its blob from the remote. A source with a subpath in a large repository started thousands of Git processes per scan: 114 for Cursor's `pstack/skills`, about 5,700 for `sickn33/agentic-awesome-skills` with `skills` (#5446). It also listed skills from outside the subpath. `ls-files -- <subpath>` lists only what the checkout wrote, the same set the `ls-tree` fallback reads. `packages/vscode/src/skillsCatalog.ts` does the same.
 
 ### Error Handling
 - All exported functions return `{ ok, ... }` result objects, not throw.

@@ -1,20 +1,12 @@
 import { z } from 'zod';
+import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
 import type { SourceControlProvider } from '@/lib/api/types';
 
-/**
- * Which host each project lives on, remembered across reloads.
- *
- * A project does not move between GitHub and GitLab during a day, yet the
- * answer is only certain once its binding and the accounts have loaded. The
- * last certain answer stands in until then, for the project and every one of
- * its worktrees, so surfaces that name the host do not start as GitHub and
- * flip. Keyed by runtime and project path: another machine's project at the
- * same path is another project. A newer certain answer always replaces it.
- */
 const STORAGE_KEY = 'openchamber.repositoryProvider.v1';
 const MAX_ENTRIES = 500;
 
-const storedMemory = z.array(z.tuple([z.string(), z.enum(['github', 'gitlab'])]));
+const storedMemory = z.array(z.tuple([z.string(), sourceControlProviderIdSchema]).nullable().catch(null))
+  .transform((entries) => entries.filter((entry) => entry !== null));
 
 const listeners = new Set<() => void>();
 let memory: Map<string, SourceControlProvider> | null = null;
@@ -33,8 +25,8 @@ const load = () => {
   try {
     const parsed = storedMemory.safeParse(JSON.parse(readStorage() ?? '[]'));
     if (parsed.success) entries = parsed.data;
+  // oxlint-disable-next-line no-empty
   } catch {
-    // A corrupt entry only costs the head start; the binding still answers.
   }
   memory = new Map(entries);
   return memory;
@@ -50,14 +42,13 @@ export const rememberRepositoryProvider = (runtimeKey: string, projectPath: stri
   const current = load();
   const key = entryKey(runtimeKey, projectPath);
   if (current.get(key) === provider) return;
-  // Re-inserted last, so the oldest entries are the ones trimmed.
   current.delete(key);
   current.set(key, provider);
   for (const stale of [...current.keys()].slice(0, Math.max(0, current.size - MAX_ENTRIES))) current.delete(stale);
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify([...current]));
+  // oxlint-disable-next-line no-empty
   } catch {
-    // Storage full or blocked: the answer still holds for this session.
   }
   for (const listener of listeners) listener();
 };

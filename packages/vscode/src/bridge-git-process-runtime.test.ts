@@ -214,6 +214,15 @@ test('a caller deadline wins over the default timeout', { timeout: 30_000 }, asy
   }
 });
 
+test('sends NUL-delimited Unicode input and closes stdin', async () => {
+  const input = '.ігнор.ts\0.line\nignored.ts\0 space.ts \0';
+  const result = await execGit(['-e', 'process.stdin.pipe(process.stdout)'], os.tmpdir(), {
+    binary: process.execPath, timeoutMs: 3000, input,
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, input);
+});
+
 test('deactivation terminates outstanding Git work and rejects new launches', async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-vscode-stop-'));
   const marker = path.join(cwd, 'pids');

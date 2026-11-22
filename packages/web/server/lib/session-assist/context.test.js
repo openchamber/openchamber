@@ -83,6 +83,16 @@ describe('session assist context', () => {
     expect(context.turns[0].user.authored).toContain('Виправ саме це');
   });
 
+  it('reads a linked item as context, never as the user\'s own words, for the current link kinds and the legacy ones', async () => {
+    for (const kind of ['repository-issue', 'change-request', 'tracker-item', 'github-issue', 'linear-issue']) {
+      const link = user('u', `Linked ${kind}: ENG-12 Search`, { metadata: { openchamberContext: { kind } } });
+      const context = await load(async () => page([link, assistant('a', 'Done')]));
+      expect(context.turns[0].user.text, kind).toContain(`Linked ${kind}: ENG-12 Search`);
+      // The authored text is the language sample; a linked item's title is not one.
+      expect(context.turns[0].user.authored, kind).not.toContain('ENG-12');
+    }
+  });
+
   it('retains the comment after a large quote and the conclusion after a long answer', async () => {
     const attachment = synthetic('s', 'attachment', {
       metadata: {
@@ -100,9 +110,16 @@ describe('session assist context', () => {
     expect(context.last.text.length).toBeLessThanOrEqual(16_000);
   });
 
-  it('fails explicitly on malformed annotation text instead of losing the comment', async () => {
+  it.each(['quote', 'text', 'fileLabel', 'label', 'pageUrl', 'terminalLabel'])('fails explicitly on malformed attachment %s', async (field) => {
     const attachment = synthetic('s', 'attachment', {
-      metadata: { openchamberContext: { kind: 'chat-quote', quote: 'source', text: 42 } },
+      metadata: { openchamberContext: { kind: 'chat-quote', quote: 'source', [field]: 42 } },
+    });
+    await expect(load(async () => page([attachment, user('u', 'Fix'), assistant('a', 'done')]))).rejects.toThrow();
+  });
+
+  it.each(['comment', 'preview', 'path'])('fails explicitly on malformed OpenCode comment %s', async (field) => {
+    const attachment = synthetic('s', 'attachment', {
+      metadata: { opencodeComment: { comment: 'Fix this', [field]: 42 } },
     });
     await expect(load(async () => page([attachment, user('u', 'Fix'), assistant('a', 'done')]))).rejects.toThrow();
   });

@@ -12,6 +12,7 @@ import {
   SETTINGS_NUMBER_INPUT_CLASS,
   SETTINGS_NUMBER_STEPPER_ROW_CLASS,
   SETTINGS_NUMBER_UNIT_CLASS,
+  SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
@@ -28,6 +29,8 @@ const RETENTION_ACTION_OPTIONS: Array<{ value: 'archive' | 'delete'; labelKey: I
 
 export const SessionRetentionSettings: React.FC = () => {
   const { t } = useI18n();
+  const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
+  const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const autoDeleteEnabled = useUIStore((state) => state.autoDeleteEnabled);
   const autoDeleteAfterDays = useUIStore((state) => state.autoDeleteAfterDays);
   const onlyArchived = useUIStore((state) => state.sessionRetentionOnlyArchived);
@@ -35,6 +38,9 @@ export const SessionRetentionSettings: React.FC = () => {
   const setAutoDeleteAfterDays = useUIStore((state) => state.setAutoDeleteAfterDays);
   const setSessionRetentionAction = useUIStore((state) => state.setSessionRetentionAction);
   const setOnlyArchived = useUIStore((state) => state.setSessionRetentionOnlyArchived);
+  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const includeInWork = useUIStore((state) => state.sessionRetentionIncludeInWork);
+  const setIncludeInWork = useUIStore((state) => state.setSessionRetentionIncludeInWork);
 
   const { candidates, isRunning, runCleanup, action, status } = useSessionAutoCleanup({ autoRun: false });
   const pendingCount = candidates.length;
@@ -86,21 +92,43 @@ export const SessionRetentionSettings: React.FC = () => {
         : 'settings.openchamber.sessionRetention.tooltip')}
       contentClassName="space-y-2"
     >
-      <SettingsCheckboxRow
-        settingsItem="sessions.auto-cleanup"
-        checked={autoDeleteEnabled}
-        onChange={setAutoDeleteEnabled}
-        label={t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}
-        ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
-      />
+      <div className={SETTINGS_OPTION_STACK_CLASS}>
+        <SettingsCheckboxRow
+          settingsItem="sessions.deletion-dialog"
+          checked={showDeletionDialog}
+          onChange={setShowDeletionDialog}
+          label={t('settings.openchamber.defaults.field.showDeletionDialog')}
+          ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')}
+        />
+        <SettingsCheckboxRow
+          settingsItem="sessions.auto-cleanup"
+          checked={autoDeleteEnabled}
+          onChange={setAutoDeleteEnabled}
+          label={t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}
+          ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
+        />
+        {sessionWorkEnabled ? (
+          <SettingsCheckboxRow
+            settingsItem="sessions.retention-include-in-work"
+            checked={includeInWork}
+            disabled={onlyArchived}
+            onChange={setIncludeInWork}
+            label={t('settings.openchamber.sessionRetention.field.includeInWork')}
+            ariaLabel={t('settings.openchamber.sessionRetention.field.includeInWork')}
+            info={t('settings.openchamber.sessionRetention.field.includeInWorkInfo')}
+          />
+        ) : null}
+      </div>
 
-      {/* The period, the target and the action also drive "Run cleanup now",
-          so they stay editable while auto-cleanup is off. */}
       <div>
         <SettingsFieldRow
           settingsItem="sessions.retention-only-archived"
           label={t('settings.layout.sessions.retention.target')}
-          info={t('settings.openchamber.sessionRetention.field.onlyArchivedDescription')}
+          info={t(onlyArchived
+            ? 'settings.openchamber.sessionRetention.field.archivedDescription'
+            : action === 'archive'
+              ? 'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription'
+              : 'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription')}
         >
           <SettingsChipGroup
             value={onlyArchived ? 'archived' : 'unarchived'}

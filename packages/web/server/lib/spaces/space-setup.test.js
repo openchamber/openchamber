@@ -155,6 +155,16 @@ describe('setup commands inside a space', () => {
 });
 
 describe('what the user reads of a command', () => {
+  it('preserves the control-character acceptance range for every UTF-16 code unit', () => {
+    for (let code = 0; code <= 0xffff; code += 1) {
+      const character = String.fromCharCode(code);
+      const removed = code <= 8 || code === 11 || code === 12 || (code >= 14 && code <= 31)
+        || (code >= 127 && code <= 159) || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
+      const expected = code === 13 ? 'z' : removed ? 'az' : `a${character}z`;
+      expect(keptOutputOf(`a${character}z`), `code unit ${code}`).toBe(expected);
+    }
+  });
+
   it('keeps the last lines as a terminal last showed them, without its control sequences', () => {
     expect(keptOutputOf('a\r\nb\u0007\u001b[2Kc\n\n')).toBe('a\nbc');
     const many = Array.from({ length: 500 }, (_, index) => `line ${index}`).join('\n');

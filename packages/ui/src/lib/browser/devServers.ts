@@ -1,65 +1,43 @@
-/**
- * Client for dev-server discovery.
- *
- * The result is a tagged union rather than an array, because "no dev server is
- * running" and "we could not look" lead to different UI and must not collapse
- * into the same empty list.
- */
+import { z } from 'zod';
+
+import { normalizePath } from '@/lib/pathNormalization';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-export type DiscoveredDevServer = {
-  readonly port: number;
-  readonly url: string;
-  readonly command: string;
-};
+const discoveredServerSchema = z.object({
+  port: z.number().int().positive(),
+  url: z.string().min(1),
+  command: z.string(),
+  directory: z.string().min(1).optional(),
+});
+
+type DiscoveredDevServer = z.infer<typeof discoveredServerSchema>;
 
 export type DevServerDiscovery =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly servers: ReadonlyArray<DiscoveredDevServer> }
   | { readonly kind: 'unavailable' };
 
-const isDiscoveredServer = (value: unknown): value is DiscoveredDevServer => {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.port === 'number'
-    && Number.isFinite(record.port)
-    && typeof record.url === 'string'
-    && record.url.length > 0
-    && typeof record.command === 'string';
+const parseServers = (value: unknown): DiscoveredDevServer[] | null => {
+  const body = z.object({ servers: z.array(z.unknown()) }).safeParse(value);
+  if (!body.success) return null;
+  return body.data.servers.flatMap((entry) => {
+    const server = discoveredServerSchema.safeParse(entry);
+    return server.success ? [server.data] : [];
+  });
 };
 
-/**
- * The servers listening where this directory's code runs: on the host, or
- * inside the isolated space that owns the directory, which the request is
- * addressed to by its directory.
- */
 export const fetchDevServers = async (signal: AbortSignal | undefined, directory: string): Promise<DevServerDiscovery> => {
   try {
     const response = await runtimeFetch('/api/dev-servers', { signal, directory });
     if (!response.ok) return { kind: 'unavailable' };
 
-    const body: unknown = await response.json();
-    if (!body || typeof body !== 'object') return { kind: 'unavailable' };
-
-    const servers = (body as { servers?: unknown }).servers;
-    if (!Array.isArray(servers)) return { kind: 'unavailable' };
-
-    return { kind: 'ready', servers: servers.filter(isDiscoveredServer) };
+    const servers = parseServers(await response.json());
+    return servers ? { kind: 'ready', servers } : { kind: 'unavailable' };
   } catch {
     return { kind: 'unavailable' };
   }
 };
 
-/**
- * Asks the server for the HTTP status a loopback URL currently returns.
- *
- * A dev server fronted by a gateway answers requests before the app behind it
- * is up, returning a 5xx page. That is a successful load as far as the browser
- * is concerned, so it produces no navigation failure — the status is the only
- * honest signal, short of reading the page and guessing from its contents.
- *
- * Returns null when the status could not be established.
- */
 export const probeLoopbackStatus = async (url: string): Promise<number | null> => {
   try {
     const response = await runtimeFetch('/api/system/probe-url', {
@@ -80,8 +58,9 @@ export const probeLoopbackStatus = async (url: string): Promise<number | null> =
 type DevServerCandidate = {
   readonly url: string;
   readonly port: number;
-  /** Present when a server announced this address itself. */
   readonly announced: boolean;
+  readonly command?: string;
+  readonly directory?: string;
 };
 
 const portOf = (url: string): number | null => {
@@ -94,19 +73,6 @@ const portOf = (url: string): number | null => {
   }
 };
 
-/**
- * Combines what servers said with what is actually listening.
- *
- * Each source knows something the other cannot. An announcement carries the base
- * path an app is served under, which a socket cannot reveal. A listening port is
- * ground truth, which an announcement is not: terminals wrap long lines, and a
- * URL split mid-port reads as a perfectly plausible address on a port where
- * nothing is running.
- *
- * So discovery decides which servers exist and announcements supply their paths.
- * When discovery is unavailable the announcements stand on their own — offering
- * something unverified beats offering nothing.
- */
 export const mergeDevServerCandidates = ({
   announced,
   discovered,
@@ -133,11 +99,79 @@ export const mergeDevServerCandidates = ({
         url: announcedUrl ?? server.url,
         port: server.port,
         announced: announcedUrl !== undefined,
+        command: server.command,
+        directory: server.directory,
       };
     })
     .sort((left, right) => {
-      // Servers this run announced come first: they are the ones just started.
       if (left.announced !== right.announced) return left.announced ? -1 : 1;
       return left.port - right.port;
     });
+};
+
+export type WorkFolder = {
+  readonly path: string;
+  readonly projectPath: string;
+};
+
+type PlacedDevServer = DevServerCandidate & {
+  readonly folderName: string | null;
+  readonly outsideWork: boolean;
+};
+
+const contains = (folder: string, path: string): boolean => (
+  path === folder || path.startsWith(folder.endsWith('/') ? folder : `${folder}/`)
+);
+
+const innermostFolder = (folders: ReadonlyArray<WorkFolder>, path: string | null): WorkFolder | null => {
+  if (!path) return null;
+  let best: WorkFolder | null = null;
+  for (const folder of folders) {
+    if (contains(folder.path, path) && (!best || folder.path.length > best.path.length)) best = folder;
+  }
+  return best;
+};
+
+const lastSegment = (path: string): string => path.slice(path.lastIndexOf('/') + 1) || path;
+
+export const placeDevServerCandidates = ({
+  candidates,
+  folders,
+  directory,
+}: {
+  candidates: ReadonlyArray<DevServerCandidate>;
+  folders: ReadonlyArray<WorkFolder>;
+  directory: string;
+}): PlacedDevServer[] => {
+  const knownFolders = folders.flatMap((folder) => {
+    const path = normalizePath(folder.path);
+    const projectPath = normalizePath(folder.projectPath);
+    return path && projectPath ? [{ path, projectPath }] : [];
+  });
+  const panelPath = normalizePath(directory);
+  const current = panelPath
+    ? { path: panelPath, projectPath: innermostFolder(knownFolders, panelPath)?.projectPath ?? panelPath }
+    : null;
+  const normalizedFolders = current ? [...knownFolders, current] : knownFolders;
+
+  const placed = candidates.map((candidate) => {
+    const serverDirectory = normalizePath(candidate.directory);
+    const folder = innermostFolder(normalizedFolders, serverDirectory);
+    const rank = candidate.announced ? 0
+      : folder && current && folder.path === current.path ? 1
+        : folder && current && folder.projectPath === current.projectPath ? 2
+          : 3;
+    return {
+      server: {
+        ...candidate,
+        folderName: folder ? lastSegment(folder.path) : null,
+        outsideWork: serverDirectory !== null && folder === null && !candidate.announced,
+      },
+      rank,
+    };
+  });
+
+  return placed
+    .sort((left, right) => left.rank - right.rank || left.server.port - right.server.port)
+    .map((entry) => entry.server);
 };

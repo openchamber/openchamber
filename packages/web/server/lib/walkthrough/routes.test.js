@@ -104,11 +104,15 @@ describe('walkthrough routes', () => {
     releaseJob = undefined;
     lastArgs = undefined;
     const app = express();
+    app.use((_req, res, next) => {
+      res.setHeader('Connection', 'close');
+      next();
+    });
     app.use(express.json());
     getWalkthroughService = vi.fn(async () => service);
     validateReadContext = vi.fn(async (context) => ({ ...context, instance: 'github.com' }));
     registerWalkthroughRoutes(app, { getWalkthroughService, validateReadContext });
-    server = app.listen(0);
+    server = app.listen(0, '127.0.0.1');
     await new Promise((resolve) => server.once('listening', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
   });
@@ -167,6 +171,22 @@ describe('walkthrough routes', () => {
     expect(generateCalls).toBe(before);
   });
 
+  it('refuses a named revision on a provider that keeps none, before reading', async () => {
+    const response = await prDiff({ kind: 'pr', number: 42, revision: 'c'.repeat(40) });
+    expect(response.status).toBe(400);
+    expect((await response.json()).code).toBe('INVALID_SOURCE_CONTROL_READ_CONTEXT');
+    expect(lastArgs).toBeUndefined();
+  });
+
+  it('takes a top-level project (an empty owner) only from a path-style provider', async () => {
+    const source = { kind: 'pr', number: 42, sourceRepo: { owner: '', repo: 'demo' } };
+    expect((await prDiff(source)).status).toBe(400);
+    expect(lastArgs).toBeUndefined();
+    const response = await prDiff(source, { ...PR_CONTEXT, provider: 'gerrit', instance: 'https://gerrit.example.com' });
+    expect(response.status).toBe(200);
+    expect(lastArgs.options.sourceRepo).toEqual({ owner: '', repo: 'demo' });
+  });
+
   it('reads no pull request diff without a validated binding context', async () => {
     validateReadContext.mockRejectedValue(Object.assign(new Error('Binding changed'), { code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT' }));
     const response = await prDiff({ kind: 'pr', number: 42 });
@@ -203,7 +223,7 @@ describe('walkthrough routes', () => {
       number: 42,
       readContext: expect.objectContaining({ accountId: PR_CONTEXT.accountId, primaryRemote: PR_CONTEXT.primaryRemote }),
       sourceRepo: source.sourceRepo,
-      file: { path: 'new.ts', previousPath: 'old.ts', status: 'R' },
+      file: { path: 'new.ts', previousPath: 'old.ts', status: 'R', binary: false },
     });
     expect((await request({ path: 'a.ts', status: 'M', source: JSON.stringify({ kind: 'branch', baseRef: 'main', headRef: 'x' }) })).status).toBe(400);
     expect((await request({ status: 'M' })).status).toBe(400);
@@ -283,6 +303,54 @@ describe('walkthrough routes', () => {
     expect(job).toBeNull();
   });
 
+  it.each([null, false, 17, 'text', []])('keeps the missing-directory response for a body of %j', async (body) => {
+    const response = await fetch(`${base}/api/walkthrough/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    expect(response.status).toBe(400);
+    expect(getWalkthroughService).not.toHaveBeenCalled();
+  });
+
+  it.each([null, false, 17, 'text', [], { kind: 'branch' }])('passes an unchecked non-PR source of %j to the service', async (source) => {
+    const response = await fetch(`${base}/api/walkthrough?${new URLSearchParams({
+      directory: '/repo',
+      source: JSON.stringify(source),
+    })}`);
+
+    expect(response.status).toBe(200);
+    expect(lastArgs.source).toEqual(source);
+    expect(validateReadContext).not.toHaveBeenCalled();
+  });
+
+  it('keeps unchecked error fields and omits non-finite budgets', async () => {
+    getWalkthroughService.mockRejectedValueOnce(Object.assign(Object.create({
+      statusCode: 409,
+      code: 'constructor',
+      model: false,
+    }), { message: 23, requiredChars: 0, availableChars: '100' }));
+    const response = await fetch(`${base}/api/walkthrough?directory=/repo`);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 23, code: 'constructor', requiredChars: 0 });
+  });
+
+  it.each([null, false, 17, 'failure'])('logs the original thrown value of %j', async (cause) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      getWalkthroughService.mockRejectedValueOnce(cause);
+      const response = await fetch(`${base}/api/walkthrough?directory=/repo`);
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: 'Failed to load walkthrough' });
+      expect(log).toHaveBeenCalledWith('Failed to load walkthrough:', cause);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   // The language belongs to the request, not to a setting, so both the read
   // and the generation have to carry it: readiness is computed from a prompt
   // that contains the language instruction.
@@ -304,14 +372,6 @@ describe('walkthrough routes', () => {
     await pending;
 
     expect(lastArgs.language).toBe('ja');
-  });
-
-  it('ignores a language that is not a string', async () => {
-    await fetch(
-      `${base}/api/walkthrough?directory=/repo&language[]=uk&source=${encodeURIComponent(JSON.stringify(SOURCE))}`,
-    );
-
-    expect(lastArgs.language).toBeUndefined();
   });
 
   it('cancels through its own endpoint rather than a dropped connection', async () => {

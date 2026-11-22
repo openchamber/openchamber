@@ -4,13 +4,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import {
+import { mock } from 'bun:test';
+
+// skillsCatalog logs through the extension's output channel; outside VS Code there is none.
+mock.module('vscode', () => ({ window: { createOutputChannel: () => ({ appendLine: () => undefined }) } }));
+
+const {
   CATALOG_CACHE_MAX_ENTRIES,
   catalogCache,
   clearCatalogCacheForTests,
   copyDirectoryNoSymlinks,
   pruneCatalogCache,
-} from './skillsCatalog';
+} = await import('./skillsCatalog');
 
 describe('skills catalog cache pruning (#998)', () => {
   afterEach(() => {

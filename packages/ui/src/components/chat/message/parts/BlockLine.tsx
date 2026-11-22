@@ -6,16 +6,6 @@ type BlockLineProps = {
     bottomOffset?: number;
 };
 
-/**
- * The vertical line left of a collapsible chat block's body. Doubles as a
- * click target: clicking it folds/collapses (or expands) the block. The line
- * always folds - unlike the block header, which for editor-integrated tools
- * (edit/write/apply_patch with a known file) opens the file or diff instead of
- * toggling. Blocks rendered as native <details> pass no onToggle; the nearest
- * one is toggled instead. The hit area is a 12px strip centered on the 1px
- * line, sized with inline styles so it does not depend on compiled Tailwind
- * classes.
- */
 export const BlockLine: React.FC<BlockLineProps> = ({ onToggle, topOffset = 0, bottomOffset = 0 }) => (
     <span
         aria-hidden="true"
@@ -38,4 +28,17 @@ export const BlockLine: React.FC<BlockLineProps> = ({ onToggle, topOffset = 0, b
             style={{ insetInlineStart: 6, top: 0, bottom: 0, backgroundColor: 'var(--tools-border)' }}
         />
     </span>
+);
+
+type BlockBodyProps = {
+    onToggle: () => void;
+    style?: React.CSSProperties;
+    children: React.ReactNode;
+};
+
+export const BlockBody: React.FC<BlockBodyProps> = ({ onToggle, style, children }) => (
+    <div className="relative ms-2 ps-3 pt-1 pb-2" style={style}>
+        <BlockLine onToggle={onToggle} />
+        {children}
+    </div>
 );

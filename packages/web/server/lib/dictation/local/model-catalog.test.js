@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_LOCAL_STT_MODEL,
   DEFAULT_LOCAL_TTS_MODEL,
   LOCAL_STT_MODEL_CATALOG,
   LOCAL_TTS_MODEL_CATALOG,
+  RETIRED_LOCAL_MODEL_DIRS,
   getLocalSttModelSpec,
   getLocalTtsDefaultSpeaker,
+  isLocalModelId,
+  isLocalSttModelId,
+  isLocalTtsModelId,
   resolveLocalTtsModelForLanguage,
 } from './model-catalog.js';
 
@@ -36,6 +41,46 @@ describe('getLocalSttModelSpec', () => {
   });
 });
 
+describe('local STT catalog', () => {
+  it('accepts only string ids owned by either catalog', () => {
+    for (const guard of [isLocalModelId, isLocalSttModelId, isLocalTtsModelId]) {
+      for (const id of [undefined, null, 0, {}, 'constructor', 'toString', '__proto__']) {
+        expect(guard(id)).toBe(false);
+      }
+    }
+    expect(isLocalSttModelId(DEFAULT_LOCAL_STT_MODEL)).toBe(true);
+    expect(isLocalTtsModelId(DEFAULT_LOCAL_TTS_MODEL)).toBe(true);
+    expect(isLocalModelId(DEFAULT_LOCAL_STT_MODEL)).toBe(true);
+    expect(isLocalModelId(DEFAULT_LOCAL_TTS_MODEL)).toBe(true);
+  });
+
+  // The files the recognizer engine reads for each model type.
+  const filesByType = {
+    nemo_transducer: ['encoder', 'decoder', 'joiner', 'tokens'],
+    whisper: ['encoder', 'decoder', 'tokens'],
+    qwen3_asr: ['convFrontend', 'encoder', 'decoder', 'tokenizer'],
+  };
+
+  it('every entry has the files its model type loads', () => {
+    for (const [id, spec] of Object.entries(LOCAL_STT_MODEL_CATALOG)) {
+      expect(Object.keys(spec.files).sort(), id).toEqual([...filesByType[spec.type]].sort());
+      expect(spec.archiveUrl, id).toMatch(/^https:\/\/github\.com\/(k2-fsa\/sherpa-onnx|openchamber\/openchamber)\/releases\/download\/asr-models\//);
+    }
+  });
+
+  it('defaults to a catalog model', () => {
+    expect(LOCAL_STT_MODEL_CATALOG[DEFAULT_LOCAL_STT_MODEL]).toBeDefined();
+  });
+
+  it('never deletes the directory of a model it still offers', () => {
+    const offered = [...Object.values(LOCAL_STT_MODEL_CATALOG), ...Object.values(LOCAL_TTS_MODEL_CATALOG)]
+      .map((spec) => spec.extractedDir);
+    for (const dir of RETIRED_LOCAL_MODEL_DIRS) {
+      expect(offered).not.toContain(dir);
+    }
+  });
+});
+
 describe('local TTS catalog', () => {
   it('keeps the selected model when it speaks the language', () => {
     expect(resolveLocalTtsModelForLanguage('en', DEFAULT_LOCAL_TTS_MODEL)).toBe(DEFAULT_LOCAL_TTS_MODEL);
@@ -55,6 +100,7 @@ describe('local TTS catalog', () => {
     expect(getLocalTtsDefaultSpeaker('kokoro-multi-lang-v1_1', 'zh')).toBe(3);
     expect(getLocalTtsDefaultSpeaker('kokoro-multi-lang-v1_1', 'en')).toBe(0);
     expect(getLocalTtsDefaultSpeaker('piper-uk_UA-lada-x_low', 'uk')).toBeUndefined();
+    expect(getLocalTtsDefaultSpeaker('kokoro-multi-lang-v1_1', 'constructor')).toBeUndefined();
   });
 
   it('every TTS entry declares its languages and installable files', () => {

@@ -1,44 +1,102 @@
-/**
- * The tabs of the phone's workspace drawer (and the tablet's workspace panel),
- * in their default order. The user's order and hidden set are stored per
- * device in `useUIStore`; both hold plain ids so a tab added in a later
- * release shows up for everyone, at the end of a saved order.
- */
-const MOBILE_WORKSPACE_TABS = ['changes', 'files', 'terminal', 'notes', 'messages', 'mcp'] as const;
+import { isCapacitorApp } from '@/lib/platform';
+import { isPluginContextPanelMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
 
-export type MobileWorkspaceTab = (typeof MOBILE_WORKSPACE_TABS)[number];
 
-const isMobileWorkspaceTab = (id: string): id is MobileWorkspaceTab =>
-  (MOBILE_WORKSPACE_TABS as readonly string[]).includes(id);
+const ALL_BUILT_IN_MOBILE_WORKSPACE_TABS = ['status', 'changes', 'files', 'terminal', 'preview', 'notes', 'messages'] as const;
 
-/** Every tab in the user's order; tabs the saved order does not name follow in default order. */
-export const orderMobileWorkspaceTabs = (order: readonly string[]): MobileWorkspaceTab[] => {
-  const ordered = order.filter(isMobileWorkspaceTab).filter((id, index, all) => all.indexOf(id) === index);
-  return [...ordered, ...MOBILE_WORKSPACE_TABS.filter((id) => !ordered.includes(id))];
+export type BuiltInMobileWorkspaceTab = (typeof ALL_BUILT_IN_MOBILE_WORKSPACE_TABS)[number];
+
+const builtInMobileWorkspaceTabs = (): readonly BuiltInMobileWorkspaceTab[] => (
+  isCapacitorApp() ? ALL_BUILT_IN_MOBILE_WORKSPACE_TABS : ALL_BUILT_IN_MOBILE_WORKSPACE_TABS.filter((id) => id !== 'preview')
+);
+export type MobileWorkspaceTab = OrderedMobileWorkspaceTab | 'pages';
+
+type OrderedMobileWorkspaceTab = BuiltInMobileWorkspaceTab | PluginContextPanelMode;
+
+const isBuiltInMobileWorkspaceTab = (id: string): id is BuiltInMobileWorkspaceTab =>
+  (builtInMobileWorkspaceTabs() as readonly string[]).includes(id);
+
+const NO_EXTENSION_TABS: readonly PluginContextPanelMode[] = [];
+
+export const orderMobileWorkspaceTabs = (
+  order: readonly string[],
+  extensions: readonly PluginContextPanelMode[] = NO_EXTENSION_TABS,
+): OrderedMobileWorkspaceTab[] => {
+  const known = (id: string): id is OrderedMobileWorkspaceTab => isBuiltInMobileWorkspaceTab(id)
+    || (isPluginContextPanelMode(id) && extensions.includes(id));
+  const ordered = order.filter(known).filter((id, index, all) => all.indexOf(id) === index);
+  const builtIns = builtInMobileWorkspaceTabs();
+  builtIns.forEach((id, index) => {
+    if (ordered.includes(id)) return;
+    const followers = builtIns.slice(index + 1)
+      .map((next) => ordered.indexOf(next))
+      .filter((position) => position >= 0);
+    ordered.splice(followers.length > 0 ? Math.min(...followers) : ordered.length, 0, id);
+  });
+  for (const id of extensions) {
+    if (!ordered.includes(id)) ordered.push(id);
+  }
+  return ordered;
 };
 
-/**
- * The tabs the user keeps, in order. Never empty: a saved set that hides every
- * tab (written by hand or by an older build) shows them all.
- */
-export const shownMobileWorkspaceTabs = (order: readonly string[], hidden: readonly string[]): MobileWorkspaceTab[] => {
-  const all = orderMobileWorkspaceTabs(order);
+export const storedMobileWorkspaceTabOrder = (order: readonly string[], previous: readonly string[]): string[] => {
+  const extensionsIn = (ids: readonly string[]) => ids.filter(isPluginContextPanelMode);
+  const next: string[] = orderMobileWorkspaceTabs(order, extensionsIn(order));
+  const absent = new Set(extensionsIn(previous).filter((id) => !next.includes(id)));
+  if (absent.size === 0) return next;
+  const following = new Map<string | null, string[]>();
+  let anchor: string | null = null;
+  for (const id of previous) {
+    if (next.includes(id)) anchor = id;
+    else if (isPluginContextPanelMode(id) && absent.delete(id)) following.set(anchor, [...(following.get(anchor) ?? []), id]);
+  }
+  return [...(following.get(null) ?? []), ...next.flatMap((id) => [id, ...(following.get(id) ?? [])])];
+};
+
+export const shownMobileWorkspaceTabs = (
+  order: readonly string[],
+  hidden: readonly string[],
+  extensions: readonly PluginContextPanelMode[] = NO_EXTENSION_TABS,
+): OrderedMobileWorkspaceTab[] => {
+  const all = orderMobileWorkspaceTabs(order, extensions);
   const shown = all.filter((id) => !hidden.includes(id));
   return shown.length > 0 ? shown : all;
 };
 
-/**
- * The tabs the strip offers right now: the ones the user keeps, plus the open
- * tab while something opened it although it is hidden (a changed file tapped
- * in the chat opens Changes either way). It leaves the strip once the user
- * switches away.
- */
 export const stripMobileWorkspaceTabs = (
   order: readonly string[],
   hidden: readonly string[],
   active: MobileWorkspaceTab,
+  extensions: readonly PluginContextPanelMode[] = NO_EXTENSION_TABS,
 ): MobileWorkspaceTab[] => {
-  const shown = shownMobileWorkspaceTabs(order, hidden);
-  if (shown.includes(active)) return shown;
-  return orderMobileWorkspaceTabs(order).filter((id) => id === active || shown.includes(id));
+  const shown = shownMobileWorkspaceTabs(order, hidden, extensions);
+  if (shown.some((id) => id === active)) return shown;
+  return orderMobileWorkspaceTabs(order, extensions).filter((id) => id === active || shown.includes(id));
+};
+
+export const withReceivedPagesTab = (tabs: readonly MobileWorkspaceTab[]): MobileWorkspaceTab[] => {
+  const next: MobileWorkspaceTab[] = tabs.filter((id) => id !== 'pages');
+  next.splice(next.indexOf('status') + 1, 0, 'pages');
+  return next;
+};
+
+export type MobileWorkspaceRequest =
+  | { tab: Exclude<MobileWorkspaceTab, 'changes'> }
+  | { tab: 'changes'; commit?: { directory: string } };
+
+type MobileWorkspaceOpener = (request: MobileWorkspaceRequest) => void;
+
+let workspaceOpener: MobileWorkspaceOpener | null = null;
+
+export const connectMobileWorkspaceOpener = (opener: MobileWorkspaceOpener): (() => void) => {
+  workspaceOpener = opener;
+  return () => {
+    if (workspaceOpener === opener) workspaceOpener = null;
+  };
+};
+
+export const openMobileWorkspace = (request: MobileWorkspaceRequest): boolean => {
+  if (!workspaceOpener) return false;
+  workspaceOpener(request);
+  return true;
 };

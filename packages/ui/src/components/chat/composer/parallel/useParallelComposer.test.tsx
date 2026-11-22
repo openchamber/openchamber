@@ -12,6 +12,7 @@ import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { CreateMultiRunParams } from '@/types/multirun';
+import { createComposerText } from '../state/composerText';
 import { useParallelComposer, type ParallelComposer } from './useParallelComposer';
 
 type Capture = { composer: ParallelComposer | null };
@@ -39,14 +40,14 @@ async function withComposer(run: (input: {
       return { groupSlug: 'g', groupKey: 'id:g', sessionIds: ['a', 'b'], firstSessionId: 'a', failedCount: 0 };
     },
   });
-  let message = initialMessage;
+  const text = createComposerText(initialMessage);
   const Harness = () => {
     capture.composer = useParallelComposer({
       enabled: true,
       draftOpen: true,
       draftProjectId: 'p1',
-      message,
-      setMessage: (text) => { message = text; },
+      text,
+      setMessage: (next) => { text.set(next); },
     });
     return null;
   };
@@ -150,6 +151,19 @@ describe('useParallelComposer worktree policy', () => {
 });
 
 describe('generated prompt variants', () => {
+  test('archived generation references follow the selected prompts into the launched run', async () => {
+    useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'm', providers: [] });
+    const source = { sessionID: 'generator', directory: '/repo', providerID: 'project', modelID: 'generator-model' };
+    await withComposer(async ({ capture, render, launches }) => {
+      await render();
+      await act(async () => capture.composer?.enter());
+      await act(async () => capture.composer?.retainGenerationSessions([source, source]));
+      await act(async () => capture.composer?.addGeneratedVariants(['Chosen prompt']));
+      await act(async () => { await capture.composer?.launch(); });
+      expect(launches[0].generationSessions).toEqual([source]);
+      expect(launches[0].groups.map((group) => group.prompt)).toEqual(['Fix the login', 'Chosen prompt']);
+    });
+  });
   // Oracle: selected candidates become ordinary variants and preserve the
   // original text. Each added variant owns its run-model array independently.
   test('retains the original and admits exactly the chosen prompts with independent run models', async () => {

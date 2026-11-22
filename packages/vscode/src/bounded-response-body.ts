@@ -29,7 +29,7 @@ const cancelBody = (body: ReadableStream<Uint8Array> | null): void => {
 };
 
 export const readBoundedResponseBody = async (
-  response: Response,
+  response: Pick<Response, 'headers' | 'body'>,
   maxBytes: number = API_PROXY_RESPONSE_MAX_BYTES,
 ): Promise<Uint8Array> => {
   const declaredLength = response.headers.get('content-length')?.trim();

@@ -24,6 +24,19 @@ Cada parada nomeia o que ela aborda, explica em uma ou duas frases, e depois mos
 A etiqueta é sobre **onde gastar sua atenção**, não sobre a qualidade do código. Uma parada nunca é marcada porque algo errado foi encontrado nela — o percurso não reporta achados, severidades nem vereditos. Se você quer que o código seja julgado, essa é a ação **Review** em [Git & GitHub](/git/).
 
 As únicas marcas que realmente reportam um problema são **Desatualizado** e **Não coberto**, e as duas são sobre o próprio percurso ficar desatualizado, não sobre o seu código — veja abaixo.
+## Observações
+
+Alguns passos trazem uma **observação**: algo com que você concorda ao aceitar a mudança e que só a explicação deixaria passar. A maioria dos passos não tem nenhuma.
+
+| Tipo | O que aponta |
+| --- | --- |
+| **Decisão** | Uma decisão de produto ou de design que poderia ter sido outra |
+| **Custo** | Algo que o projeto mantém daqui em diante, como código em outra linguagem ou uma nova dependência |
+| **Limitação** | Algo que os usuários ainda não conseguem fazer, ou verão falhar, depois da mudança |
+| **Diferença** | Duas versões da mesma coisa se comportam de forma diferente, por exemplo em duas plataformas |
+| **Sem teste** | Nenhum teste verifica a promessa principal da mudança |
+
+Observações afirmam fatos sobre a mudança e não dizem nada sobre o código estar certo. Procurar bugs é papel do **Review**. O motivo da mudança é deduzido do próprio código, de seus textos, documentação e testes, então uma descrição de pull request desatualizada não o engana.
 
 ## O que dá para percorrer
 
@@ -33,7 +46,7 @@ As únicas marcas que realmente reportam um problema são **Desatualizado** e **
 | No stage | Só o que iria para um commit agora |
 | Fora do stage | Árvore de trabalho e arquivos novos |
 | Este branch | Todos os commits do branch que não estão na base |
-| Pull request | A mudança como ela existe no GitHub |
+| Pull request | A mudança como ela existe no host (GitHub, GitLab, Gitea, Forgejo ou o último patchset do Gerrit) |
 
 **Este branch** não quer dizer "commits sem push": é tudo o que o branch acrescenta à sua base, com push ou sem. Por isso, depois do commit e antes do push, ele e o pull request divergem de propósito: um mostra o que você fez, o outro o que os revisores veem agora.
 
@@ -68,18 +81,20 @@ A geração roda no servidor do OpenChamber, não na aba do navegador. Recarregu
 Cada parada está ancorada ao conteúdo exato do código que descreve, então o painel consegue avisar quando esse código mudou:
 
 - **Etapas desatualizadas** — o código que a parada descrevia mudou ou sumiu. O percurso continua aparecendo, marcado, para você decidir se regenera.
-- **Sem cobertura** — mudanças do diff atual que nenhuma parada descreve. Entram aí as edições feitas depois de gerar, as mudanças que o percurso considerou rotineiras e os arquivos de lock e outras saídas geradas, mantidas fora do modelo de propósito. Tudo aparece no fim, para que nada suma em silêncio.
+- **Sem cobertura** — mudanças do diff atual que nenhuma parada descreve. Entram aí as edições feitas depois de gerar, as mudanças que o percurso considerou rotineiras e os arquivos de lock e outras saídas geradas, mantidas fora do modelo de propósito. Tudo aparece no fim, para que nada suma em silêncio. Um arquivo que o percurso deixou de fora traz uma nota de uma linha sobre o que mudou ali, por exemplo “Traduções dos novos textos”.
 
-Regenerar não remenda, reescreve: o percurso anterior vai ao modelo como contexto, o que ainda é verdade permanece, e tudo é reancorado no código atual.
+Regenerar não remenda, reescreve: o percurso anterior vai ao modelo como contexto, o que ainda é verdade permanece, e tudo é reancorado no código atual. Gerar de novo com outro modelo ou em outro idioma começa do zero, então você recebe a leitura própria desse modelo.
 
 ## Notas
 
-- Você pode comentar qualquer linha como na visão de diff; os comentários se anexam ao campo do chat.
-- Disponível em desktop e larguras de tablet. Não é oferecido na extensão do VS Code nem no app móvel.
-- Percorrer um pull request exige uma conta do GitHub conectada — veja [Issues e PRs do GitHub](/github/).
+- Você pode comentar qualquer linha como na visão de diff; os comentários se anexam ao campo do chat. Para comentar um arquivo inteiro, use o ícone de comentário no cabeçalho dele; o comentário indica o pull request, o commit ou o branch de onde veio.
+- Disponível em desktop, tablet e celular. No celular, toque no ícone **Percurso** no topo do painel de mudanças; ele cobre o que a lista mostra. Não é oferecido na extensão do VS Code.
+- Salve o percurso que está na tela como arquivo para ler offline ou compartilhar: o ícone de download no cabeçalho do painel (em **Mais** quando o painel está estreito, ou na folha de opções no celular) oferece **Exportar como Markdown** e **Exportar como HTML**. O arquivo traz cada etapa com explicação, observações, avisos e código, além das mudanças que o percurso deixou de fora. Exportar não chama nenhum modelo. O arquivo HTML é uma única página, sem scripts nem recursos externos.
+- Percorrer um pull request exige uma conta conectada no host do repositório. Veja [Hosts Git](/github/).
+- Adicione suas preferências de tom e ênfase em **Configurações → Magic Prompts → Percurso pelas mudanças**.
 
 ## Relacionado
 
-- [Git e GitHub](/git/) — o painel de mudanças de onde isso lê, e a ação Review, que de fato julga o código
-- [Issues e PRs do GitHub](/github/) — conecte o GitHub para percorrer pull requests
+- [Fluxos de Git](/git/) — o painel de mudanças de onde isso lê, e a ação Review, que de fato julga o código
+- [Hosts Git](/github/) — conecte um host para percorrer pull requests
 - [Provedores, modelos e agentes](/providers/) — de onde vem o modelo pequeno

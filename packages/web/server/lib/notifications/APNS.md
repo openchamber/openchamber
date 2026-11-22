@@ -2,29 +2,56 @@
 
 Native iOS background push (notifications even when the app is **suspended or killed**) is
 delivered via APNs through a **central relay**, so no user configures an Apple key. Each server
-signs its relay requests with an auto-generated keypair, and tokens are bound to the server that
-registered them — so a leaked device token alone can't be used to push.
+signs its relay requests with an auto-generated keypair, and tokens are bound to the servers
+that registered them — so a leaked device token alone can't be used to push.
 
 ## How it works
 
-1. The app registers its APNs device token with **its own server** (`POST /api/push/apns-token`,
-   `useNativePushRegistration`). PWA/desktop never register — only the native Capacitor app.
-2. The server **binds the token on the relay**: it POSTs `{ token, publicKeyJwk, ts, sig }` to
+1. The app registers its APNs device token with **every saved instance**, not only the one it
+   is connected to (`useNativePushRegistration`). PWA/desktop never register — only the native
+   Capacitor app. A server the phone is paired with for the home network only answers
+   `localOnly: true` and neither stores nor binds the token; the other saved servers still do.
+2. Each server **binds the token on the relay**: it POSTs `{ token, publicKeyJwk, ts, sig }` to
    `POST /v1/push/register-token`, signed with its auto-generated ECDSA P-256 key
    (`getOrCreateRelayKeypair`, persisted in settings like the VAPID keys). The relay records
-   `token → serverId` where `serverId = SHA-256(publicKey)`.
+   `token → serverId` where `serverId = SHA-256(publicKey)`, one row per `(token, serverId)`
+   (`migrations/0012_push_token_servers.sql`), so a registration never takes the token from
+   another server. `DELETE /api/push/apns-token` removes this server's row through
+   `POST /v1/push/unregister-token`, signed over `unregister.ts.token`, when this server held
+   the token and no UI session on it holds it any more; the other servers keep theirs. A token
+   the server never stored (a home-network-only phone) never goes to the relay.
 3. On a trigger (ready/error/question/permission), the server composes **generic, content-free**
    clear text (a phone with a push key also gets the real text sealed, see *Data confidentiality*) — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
    needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
    message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
-   badge, env, data:{sessionId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
+   badge, env, data:{sessionId, serverId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
    (`apns-runtime.js` → `sendViaRelay`). It does **not** gate on UI visibility (see below).
 4. The **relay** (`openchamber-website/apps/api`, Cloudflare Worker) verifies the signature +
    `ts` freshness, derives `serverId`, and only delivers to tokens bound to that server. It holds
    the single project APNs `.p8` key, signs an ES256 JWT with `crypto.subtle`, and sends each
-   token to APNs over HTTP/2, returning per-token results; the server drops tokens flagged `drop`
-   (410 / BadDeviceToken). The relay stores no secret — only `token → serverId` hashes.
-5. Tapping a push deep-links to its session via the forwarded `sessionId`.
+   token to APNs over HTTP/2, returning per-token results. A token the provider rejects is
+   flagged `drop` and the server drops it locally. On the relay, a token the provider reports
+   gone (APNs 410, FCM UNREGISTERED) loses every binding last refreshed before APNs saw it gone;
+   any other rejection (BadDeviceToken from a wrong environment, a bad payload) is about the
+   sender's request, so only the sender's binding goes. The relay stores no secret — only
+   `token → serverId` hashes.
+5. Tapping a push reads `data.serverId`, switches to that saved instance, and then opens the
+   session named by `data.sessionId`.
+
+## When the relay cannot be reached
+
+Every relay request (send and register-token) gives up after 15 s. The relay answers a send in
+0.1-0.4 s, its FCM/APNs call included; before the limit a stalled path held the send for
+undici's 300 s and then lost the notification. Sends to different devices run in parallel, so one
+send waiting out the limit or a retry does not delay the others.
+
+A request is sent once more, after 5 s, only when it failed before leaving this machine:
+connection refused, no DNS answer, no route, or Node's 10 s connect timeout. The 15 s limit sits
+above that connect timeout, so a path that never connects is retried. A timeout after the
+connection opened, or a reset, is not retried: the relay keeps no record of what it delivered,
+and a repeat of a request it already took would alert the phone twice. Such a notification is
+lost with a log line that says so. Under Bun, which has no separate connect timeout, a path that
+never connects ends at the 15 s limit and is not retried either.
 
 ## Foreground suppression
 
@@ -49,10 +76,9 @@ same-tag pushes replace one banner while different tags are distinct banners. On
 several banners (`ready-<id>`, `question-<id>`, `permission-<requestKey>` are different tags), so
 counting sessionIds both over- and under-counts the stack; counting tags matches it.
 
-It is deliberately **not** derived from the live attention snapshot (`needsAttention`/`isViewed`):
-that machinery drives in-app indicators on *connected* clients, where a backgrounded client stays
-"viewing" and `needsAttention` is set by a separate `session.status` event that races the push
-trigger. The set self-clears via `clearPendingPushBadge` on any signal that the user is engaging
+It is deliberately **not** derived from the in-app unread marks (OpenCode's `time.viewed`): a
+backgrounded client can still be on the session, and the mark changes on a separate event that
+races the push trigger. The set self-clears via `clearPendingPushBadge` on any signal that the user is engaging
 with the app: the visibility beacon (`updateUiVisibility` wrapper, `visible:true`), **plus** opening
 a session (`POST /api/sessions/:id/view`) and sending a message (`POST /api/sessions/:id/
 message-sent`). The latter two need no auth and fire reliably on the native app when it foregrounds,
@@ -64,6 +90,16 @@ The value flows `runtime.js` (`toApnsGenericPayload`) → `apns-runtime.js` (`se
 direct-mode `aps.badge`) → relay (`pushSendSchema.badge` → `aps.badge`). It is **not** signed (like
 `body`/`data`); the relay still only delivers to bound tokens. The set is server-global, so every
 device token of a server sees the same badge.
+
+## Clearing handled notifications
+
+When the cause of a notification is handled (the question answered, the session continued or
+viewed on another device), the server sends `POST /v1/push/clear` with the notification tags.
+The relay turns it into an APNs background push or an FCM data message, which shows nothing; the
+app removes the delivered notifications with those tags and sets the badge to the count that
+remains. A tag that is cleared also leaves `pendingPushTags`. Later visible pushes repeat the
+recently cleared tags in `data.clear`, for a phone that missed the clearing push. The design and
+the events that clear each tag are in `DOCUMENTATION.md`, *Clearing handled notifications*.
 
 ## Modes
 
@@ -85,8 +121,10 @@ Server (`apns-runtime.js`):
   (or `_P8_PATH`), `OPENCHAMBER_APNS_BUNDLE_ID`, `OPENCHAMBER_PUSH_RELAY_DISABLED=true`.
 
 Relay (Cloudflare Worker secrets via `wrangler secret put` / GitHub Actions): `APNS_P8`,
-`APNS_KEY_ID`, `APNS_TEAM_ID`, optional `APNS_BUNDLE_ID` / `APNS_DEFAULT_ENV`. The `push_tokens`
-binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy).
+`APNS_KEY_ID`, `APNS_TEAM_ID`, optional `APNS_BUNDLE_ID` / `APNS_DEFAULT_ENV`. The binding table
+is `push_token_servers`, one row per token and server, created by
+`migrations/0012_push_token_servers.sql` with the bindings of the older one-server
+`push_tokens` table (`0002`), which stays until a later migration drops it (applied on deploy).
 
 ## Apple setup (one-time)
 
@@ -99,13 +137,15 @@ binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy
 ## Security posture
 
 - The device token is a per-install secret, but no longer the *only* defence: every relay request
-  is signed by the server's private key, and the relay only delivers to a token from its bound
-  `serverId`. A leaked token alone is useless — an attacker has neither the private key nor a
+  is signed by the server's private key, and the relay only delivers to a token from a server
+  bound to it. A leaked token alone is useless — an attacker has neither the private key nor a
   matching binding.
 - `serverId` self-certifies (`SHA-256(publicKey)`), so the relay holds no secret; a D1 leak
   exposes only `token → serverId` hashes. The signed `ts` (±5 min window) blocks replay.
-- Residual: trust-on-first-bind (whoever registers a token first owns it) — acceptable, since
-  registering already requires possessing the token. Cloudflare rate limiting is defence-in-depth.
+- Residual: any server that knows a token can add its own binding; registering already requires
+  possessing the token. A binding only lets that server push; it cannot use, take or remove
+  another server's binding. Registering with every saved instance gives each of them one, so
+  every saved server can push to this phone. Cloudflare rate limiting is defence-in-depth.
 
 ## Data confidentiality (what the relay / Apple / Google can see)
 
@@ -121,8 +161,8 @@ Notification Service Extension and Android's `SealedPushMessagingService` open i
 Who can read what:
 
 - **Network hops:** nothing (TLS).
-- **The relay (Cloudflare):** the generic title, the device token, `sessionId` and the sealed
-  blob. It stores only `token → serverId` hashes (no text, no payload).
+- **The relay (Cloudflare):** the generic title, the device token, `sessionId`, `serverId` and the
+  sealed blob. It stores only `token → serverId` hashes (no text, no payload).
 - **Apple APNs / Google FCM:** the same as the relay.
 - **The device:** opens the blob and shows the real text.
 
@@ -133,4 +173,7 @@ every phone shows only the scenario title.
 ## Android (FCM)
 
 The relay forwards Android tokens to FCM. A sealed push goes as a data message, so
-`SealedPushMessagingService` runs in the background and builds the notification itself.
+`SealedPushMessagingService` runs in the background and builds the notification itself. It posts
+one notification per tag, so a newer push about the same thing replaces the older one, as the
+collapse id does on iOS. A clear-text push carries the tag as its Android notification tag, so a
+clearing message can find it.

@@ -4,15 +4,15 @@ import { Icon } from '@/components/icon/Icon';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { FileContentSearchMatch } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { matchSegments } from '@/lib/search/matchSegments';
 import { cn } from '@/lib/utils';
+import { MatchHighlight } from '@/components/ui/MatchHighlight';
 
 import { fileTreeRowStateClassName } from './fileTreeRow';
-import { matchSegments } from './matchSegments';
 import { fileContentMatchKey, type FileContentSearchState } from './useFileContentSearch';
 
 type Props = {
   state: FileContentSearchState;
-  /** The one result marked as open; other lines of the same file stay plain. */
   activeMatchKey: string | null;
   onOpen: (match: FileContentSearchMatch, options?: { pin?: boolean }) => void;
   onDragStart?: (event: React.DragEvent<HTMLButtonElement>, match: FileContentSearchMatch) => void;
@@ -30,11 +30,6 @@ const splitRelativePath = (relativePath: string): { name: string; directory: str
     : { name: relativePath.slice(slash + 1), directory: relativePath.slice(0, slash) };
 };
 
-/**
- * Find-in-files results as rows of a files tree list: one card per matching
- * line, the file on top and the line with its matches marked below. Renders
- * `<li>` elements, so it sits inside the tree's own `<ul>`.
- */
 export const FileContentSearchResults: React.FC<Props> = ({ state, activeMatchKey, onOpen, onDragStart, onDragEnd }) => {
   const { t } = useI18n();
 
@@ -64,7 +59,6 @@ export const FileContentSearchResults: React.FC<Props> = ({ state, activeMatchKe
   }
 
   if (state.matches.length === 0) {
-    // A search cut short by the deadline found nothing yet; that is not "no matches".
     return state.stopped === 'deadline'
       ? <Note>{t('sidebarFilesTree.contentSearch.deadline')}</Note>
       : <Note>{t('sidebarFilesTree.contentSearch.empty')}</Note>;
@@ -99,7 +93,6 @@ export const FileContentSearchResults: React.FC<Props> = ({ state, activeMatchKe
                     className="oc-ui-start-align min-w-0 flex-1 truncate typography-micro text-muted-foreground"
                     style={{ direction: 'rtl' }}
                   >
-                    {/* Left-to-right marks keep a leading "." in place inside the rtl box. */}
                     {`‎${directory}‎`}
                   </span>
                 ) : <span className="flex-1" />}
@@ -107,11 +100,7 @@ export const FileContentSearchResults: React.FC<Props> = ({ state, activeMatchKe
               </span>
               <span className="block w-full min-w-0 truncate font-mono typography-micro text-muted-foreground" dir="ltr">
                 {match.cutStart ? '…' : null}
-                {matchSegments(match.text, match.ranges).map((segment, index) => (
-                  segment.matched
-                    ? <mark key={index} className="rounded-[2px] bg-primary/25 text-foreground">{segment.text}</mark>
-                    : <React.Fragment key={index}>{segment.text}</React.Fragment>
-                ))}
+                <MatchHighlight segments={matchSegments(match.text, match.ranges)} />
               </span>
             </button>
           </li>

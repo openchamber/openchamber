@@ -13,7 +13,7 @@ export type CustomProviderIcon = (typeof CUSTOM_PROVIDER_ICONS)[number]['id'];
 
 const CUSTOM_PROVIDER_ICON_IDS = new Set<string>(CUSTOM_PROVIDER_ICONS.map((entry) => entry.id));
 
-export const isCustomProviderIcon = (value: unknown): value is CustomProviderIcon => (
+export const isCustomProviderIcon = (value: string): value is CustomProviderIcon => (
   typeof value === 'string' && CUSTOM_PROVIDER_ICON_IDS.has(value)
 );
 

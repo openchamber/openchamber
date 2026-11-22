@@ -1,94 +1,86 @@
 // Run with: bun packages/ui/tests/chat-history-scroll.browser.mjs
 // Uses production React and the installed LegendList in a real Chromium page.
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { createServer } from 'vite';
 import {
     CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait,
 } from '../../../scripts/perf/cdp.mjs';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
-const source = readFileSync(join(repo, 'packages/ui/src/components/chat/MessageList.tsx'), 'utf8');
-const start = source.indexOf('type TimelineListProps =');
-const end = source.indexOf("TimelineList.displayName = 'TimelineList';", start);
-assert.ok(start >= 0 && end > start, 'Locate the production TimelineList component');
-const estimatedSize = source.match(/^const TIMELINE_ESTIMATED_ENTRY_SIZE = .+;$/m)?.[0];
-assert.ok(estimatedSize, 'Use the production row size estimate');
-// Resolve the list the UI package actually installs; a stale hoisted copy at
-// the repository root would otherwise be measured instead.
-const legendList = join(
-    dirname(createRequire(join(repo, 'packages/ui/package.json')).resolve('@legendapp/list/react')),
-    'react.mjs',
-);
 // Prepend compensation loses sub-pixel remainders when row estimates are
 // fractional, and whether they are depends on the measured average. One
 // height profile can pass by luck, so the scenarios run over several.
 const heightProfiles = [[5, 137], [7, 137], [3, 101], [6, 53], [4, 211]];
+// Both layouts run the production per-row estimator. Touch corrections wait
+// until the reader stops scrolling.
+const modes = [
+    { touch: false },
+    { touch: true },
+];
 
 // Exercise the actual list component and its prop wiring without mounting the
 // application or connecting to a user's backend. Only row content and the
 // surrounding chat callbacks are supplied by the fixture.
 const fixture = `
-import React from ${JSON.stringify(join(repo, 'node_modules/react/index.js'))};
-import { createRoot } from ${JSON.stringify(join(repo, 'node_modules/react-dom/client.js'))};
-import { LegendList } from ${JSON.stringify(legendList)};
-${estimatedSize}
-const TimelineRowContext = React.createContext(null);
-const useUIStore = () => true;
-const resolveTimelineIsAtEnd = () => false;
-const timelineKeyExtractor = item => item.key;
-const timelineItemType = item => item.kind;
-function Row({ item }) {
-    const [settled, setSettled] = React.useState(!item.older);
-    React.useEffect(() => {
-        if (settled) return;
-        const timer = setTimeout(() => setSettled(true), 180);
-        return () => clearTimeout(timer);
-    }, [settled]);
-    return <div data-probe-id={item.key} style={{ height: settled ? item.height : 90 }}>
-        Row {item.key}
-    </div>;
-}
-const renderTimelineItem = ({ item }) => <Row item={item} />;
-// The production logTimelineReadiness sits above the sliced component and is
-// gated on a localStorage debug flag. The fixture records every call instead,
-// so the footer scenario can count readiness cycles directly.
-const timelineReadinessLog = [];
-window.__timelineReadinessLog = timelineReadinessLog;
-let footerResizeScheduled = false;
-const logTimelineReadiness = (event, entries, footerSize, cycle) => {
-    timelineReadinessLog.push({ event, entries, footerSize, cycle });
-};
-${source.slice(start, end)}
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { TimelineList } from '@/components/chat/timeline/TimelineList';
+import { I18nProvider } from '@/lib/i18n';
+import { SyncRuntimeContext } from '@/sync/sync-runtime-context';
+import { ChildStoreManager } from '@/sync/child-store';
+import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
+import { createWebAPIs } from ${JSON.stringify(join(repo, 'packages/web/src/api/index.ts'))};
+const childStores = new ChildStoreManager();
+const apis = createWebAPIs();
 const frames = async count => {
     for (let i = 0; i < count; i++) await new Promise(requestAnimationFrame);
 };
 const params = new URLSearchParams(location.search);
 const heightPeriod = Number(params.get('period'));
 const heightStep = Number(params.get('step'));
-const footerBootstrapProbe = params.get('footerBootstrap') === '1';
-const rowsFrom = (from, count, older = false) => Array.from({ length: count }, (_, i) => ({
-    key: 'row-' + (from + i), kind: 'turn', height: 180 + ((from + i + 100) % heightPeriod) * heightStep, older,
-}));
+document.documentElement.classList.toggle('mobile-pointer', params.get('touch') === 'true');
+// CSS supplies deterministic content heights and delayed image-like growth;
+// the real row renderer, estimator, selection hold and list run unchanged.
+const sizing = document.createElement('style');
+document.head.append(sizing);
+const heights = new Map();
+const paintHeights = () => {
+    sizing.textContent = [...heights].map(([key, height]) =>
+        '[data-turn-row="' + key + '"] { height:' + height + 'px; overflow:hidden }'
+    ).join('\\n');
+};
+const rowsFrom = (from, count, older = false) => Array.from({ length: count }, (_, i) => {
+    const key = 'row-' + (from + i);
+    const height = 180 + ((from + i + 100) % heightPeriod) * heightStep;
+    heights.set(key, older ? 90 : height);
+    if (older) setTimeout(() => { heights.set(key, height); paintHeights(); }, 180);
+    const message = {
+        info: { id: key, sessionID: 'history-fixture', role: 'assistant', agent: 'build',
+            providerID: 'fixture', modelID: 'fixture', time: { created: 1, completed: 2 },
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 },
+        parts: [{ id: 'text-' + key, type: 'text',
+            text: Array(Math.ceil((height + 40) / 26)).fill('Row ' + key).join('\\n'),
+            sessionID: 'history-fixture', messageID: key }],
+    };
+    paintHeights();
+    return {
+        key, kind: 'turn-message', messageId: key, slice: null, final: false,
+        underFold: false, gapBelow: false,
+        entry: { key, kind: 'turn', isLastTurn: false, turn: {
+            turnId: key, userMessage: { info: { id: 'prompt-' + key, role: 'user', time: { created: 1 } }, parts: [] },
+            assistantMessages: [message],
+        } },
+    };
+});
 const noop = () => {};
 let list;
+const registerList = value => { list = value; };
 function App() {
     const [rows, setRows] = React.useState(() => rowsFrom(20, 60));
     const [footerHeight, setFooterHeight] = React.useState(50);
-    window.__resizeFooter = () => setFooterHeight(500);
-    const registerList = React.useCallback(value => {
-        list = value;
-        if (value && footerBootstrapProbe) {
-            window.__registeredFooterTarget = value.getState().__initialScroll?.preserveForFooterLayout ?? false;
-            if (!footerResizeScheduled) {
-                footerResizeScheduled = true;
-                queueMicrotask(() => window.__resizeFooter?.());
-            }
-        }
-    }, []);
     window.runScenario = async (moveWhileLoading) => {
         await frames(40);
         const scroller = list.getScrollableNode();
@@ -96,6 +88,12 @@ function App() {
             scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -500, bubbles: true }));
             scroller.scrollTop = top;
         };
+        // A reader scrolls up in steps. The list holds the end it opened at
+        // (initialScrollAtEnd) until a scroll it counts as the user's, and a
+        // single jump can land while its initial scroll is still settling;
+        // the hold then brings the end back with the prepend.
+        moveTo(1200);
+        await frames(10);
         moveTo(moveWhileLoading ? 600 : 0);
         await frames(40);
         // The request begins here. The reader can keep scrolling before the
@@ -105,13 +103,13 @@ function App() {
             moveTo(100);
             await frames(10);
         }
-        const visible = [...scroller.querySelectorAll('[data-probe-id]')].find(
+        const visible = [...scroller.querySelectorAll('[data-turn-row]')].find(
             node => node.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top + 1,
         );
         if (!visible) throw new Error('No visible anchor');
-        const key = visible.dataset.probeId;
+        const key = visible.dataset.turnRow;
         const read = () => {
-            const node = scroller.querySelector('[data-probe-id="' + key + '"]');
+            const node = scroller.querySelector('[data-turn-row="' + key + '"]');
             return node ? node.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
         };
         const before = read();
@@ -139,122 +137,100 @@ function App() {
             tailGrowthShift,
         };
     };
-    window.runFooterResizeScenario = async () => {
-        const readyCount = () => timelineReadinessLog.filter(entry => entry.event === 'ready').length;
-        // Resize in the same beat as a data change, as in production (a
-        // permission arrives, a turn ends): the list still holds its preserved
-        // end target then, which is exactly the window where a footer present
-        // at mount used to re-run readiness and blank the transcript (#52).
-        // A resize long after the list settles touches no initial-scroll
-        // state in either version and would prove nothing.
-        for (let i = 0; i < 200 && readyCount() === 0; i++) await frames(1);
-        if (!footerBootstrapProbe) {
-            setRows(current => [...current, ...rowsFrom(80, 1)]);
-            for (let i = 0; i < 200 && list.getState().data.length !== 61; i++) await frames(1);
-            await frames(5);
-        }
+    // A steady scroll toward older rows, far from the start, through rows
+    // whose estimate exceeds its painted content. Each one measured above the reader
+    // is a size correction. Every frame checks whether the list moved
+    // scrollTop on its own; on touch that has to wait until the scroll stops.
+    window.runScrollScenario = async () => {
+        await frames(40);
         const scroller = list.getScrollableNode();
-        const anchor = [...scroller.querySelectorAll('[data-probe-id]')].find(node => {
-            const rect = node.getBoundingClientRect();
-            const bounds = scroller.getBoundingClientRect();
-            return rect.bottom > bounds.top + 1 && rect.top < bounds.bottom - 1;
-        });
-        if (!anchor) throw new Error('No visible anchor');
-        const key = anchor.dataset.probeId;
-        const read = () => {
-            const node = scroller.querySelector('[data-probe-id="' + key + '"]');
-            if (!node) return null;
-            let opacity = 1;
-            for (let current = node; current && current !== scroller; current = current.parentElement) {
-                opacity = Math.min(opacity, Number(getComputedStyle(current).opacity));
-            }
-            return { top: node.getBoundingClientRect().top - scroller.getBoundingClientRect().top, opacity };
+        const set = top => {
+            scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -30, bubbles: true }));
+            scroller.scrollTop = top;
         };
-        const before = read();
-        if (!before) throw new Error('Anchor vanished before the resize');
-        const readyBefore = readyCount();
-        const samples = [];
-        setFooterHeight(500);
-        for (let i = 0; i < 70; i++) {
+        set(scroller.scrollTop - 1200);
+        await frames(10);
+        set(scroller.scrollTop - 1200);
+        await frames(10);
+        let expected = scroller.scrollTop;
+        const startTop = expected;
+        const corrections = [];
+        for (let i = 0; i < 60; i++) {
+            expected -= 30;
+            set(expected);
             await frames(1);
-            // Match the history scenario: read after layout/ResizeObserver work.
             await new Promise(resolve => setTimeout(resolve, 0));
-            samples.push(read());
+            const deviation = scroller.scrollTop - expected;
+            if (Math.abs(deviation) > 1) corrections.push(Math.round(deviation));
+            expected = scroller.scrollTop;
         }
-        await frames(20);
+        const visible = [...scroller.querySelectorAll('[data-turn-row]')].find(
+            node => node.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top + 1,
+        );
+        const key = visible.dataset.turnRow;
+        const read = () => {
+            const node = scroller.querySelector('[data-turn-row="' + key + '"]');
+            return node ? node.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
+        };
+        const atStop = read();
+        const topAtStop = scroller.scrollTop;
+        await new Promise(resolve => setTimeout(resolve, 600));
+        await frames(5);
         return {
-            key,
-            dataCount: list.getState().data.length,
-            registeredFooterTarget: window.__registeredFooterTarget,
-            readyBefore,
-            readyAfter: readyCount(),
-            footerSizes: timelineReadinessLog.filter(entry => entry.event === 'footer').map(entry => entry.footerSize),
-            missingFrames: samples.filter(value => value === null).length,
-            blankFrames: samples.filter(value => value !== null && value.opacity === 0).length,
-            maxShift: Math.max(...samples.filter(value => value !== null).map(value => Math.abs(value.top - before.top))),
+            startTop: Math.round(startTop), endTop: Math.round(topAtStop),
+            corrections: corrections.length, correctedPx: corrections.reduce((sum, value) => sum + value, 0),
+            correctedAtRestPx: Math.round(scroller.scrollTop - topAtStop),
+            restShift: read() === null ? null : read() - atStop,
         };
     };
     return <TimelineList
-        entries={rows} registerList={registerList} endPinningReleased={true}
-        composerOverlayHeight={0} onIsAtEndChange={noop}
-        onListMetricsChange={noop}
-        onTimelineDataChange={noop}
-        rowContext={{ sessionIsWorking: false }}
+        rows={rows} stickyRowIndices={undefined} showReasoningTraces={false} collapsibleThinkingBlocks={false}
+        registerList={registerList} endPinningReleased={true}
+        composerOverlayHeight={0} onIsAtEndChange={noop} onListMetricsChange={noop}
+        onTimelineDataChange={noop} rowContext={{
+            sessionIsWorking: false, turnExpansion: new Map(), onToggleTurnActivity: noop,
+            shouldAnimateUserMessage: () => false, onUserAnimationConsumed: noop,
+            streamingTailKey: null, activeStreamingMessageId: null, activeStreamingPhase: null,
+        }}
+        // The chat's fixed 48 px "Load older" slot (ChatContainer.tsx). With
+        // nothing above the rows, a reader at scrollTop 0 is at the list's
+        // start, and the list shows a prepend from the top in any version.
+        listHeader={<div style={{ height: 48 }} />}
         listFooter={<div style={{ height: footerHeight }} />}
         scrollContainerProps={{ style: { height: 600, width: 800, overflow: 'auto', overflowAnchor: 'none' } }}
     />;
 }
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(
+    <SyncRuntimeContext.Provider value={{ childStores }}>
+        <RuntimeAPIProvider apis={apis}><I18nProvider><App /></I18nProvider></RuntimeAPIProvider>
+    </SyncRuntimeContext.Provider>
+);
 `;
 
-const build = await Bun.build({
-    entrypoints: ['history-fixture'],
-    minify: true,
-    define: { 'process.env.NODE_ENV': '"production"' },
-    plugins: [{
-        name: 'history-fixture',
-        setup(builder) {
-            builder.onResolve({ filter: /^history-fixture$/ }, () => ({ path: 'entry', namespace: 'fixture' }));
-            builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: fixture, loader: 'tsx' }));
-            builder.onLoad({ filter: /@legendapp\/list\/react\.mjs$/ }, args => {
-                if (args.path !== legendList) return undefined;
-                const source = readFileSync(args.path, 'utf8');
-                const marker = 'getState: () => ({';
-                assert.ok(source.includes(marker), 'Locate the installed LegendList state accessor');
-                return {
-                    contents: source.replace(marker, `${marker}\n      __initialScroll: state.initialScroll,`),
-                    loader: 'js',
-                    resolveDir: dirname(args.path),
-                };
-            });
-            // React 19 provides the hook that the compatibility shim delegates to.
-            builder.onResolve({ filter: /^use-sync-external-store\/shim$/ }, () => ({ path: 'shim', namespace: 'react-shim' }));
-            builder.onLoad({ filter: /.*/, namespace: 'react-shim' }, () => ({
-                contents: `export { useSyncExternalStore } from ${JSON.stringify(join(repo, 'node_modules/react/index.js'))};`,
-                loader: 'js',
-            }));
-        },
-    }],
-});
-assert.ok(build.success, build.logs.join('\n'));
-const javascript = await build.outputs[0].text();
-const chromePath = resolveChrome(process.env.CHROME_PATH);
-const profileDir = mkdtempSync(join(tmpdir(), 'openchamber-history-scroll-'));
-const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    fetch(request) {
-        return new URL(request.url).pathname === '/app.js'
-            ? new Response(javascript, { headers: { 'Content-Type': 'application/javascript' } })
-            : new Response('<!doctype html><div id="root"></div><script type="module" src="/app.js"></script>', {
-                headers: { 'Content-Type': 'text/html' },
-            });
-    },
-});
-const port = await reservePort();
-const chrome = launchChrome({ chrome: chromePath, port, profileDir, headless: true });
+mkdirSync(join(repo, 'packages/ui/tmp'), { recursive: true });
+const fixtureDir = mkdtempSync(join(repo, 'packages/ui/tmp/history-scroll-'));
+let server;
+let chrome;
 let client;
 try {
+    writeFileSync(join(fixtureDir, 'fixture.tsx'), fixture);
+    writeFileSync(join(fixtureDir, 'index.html'), '<!doctype html><div id="root"></div><script type="module" src="/fixture.tsx"></script>');
+    const chromePath = resolveChrome();
+    server = await createServer({
+        configFile: false, root: fixtureDir, logLevel: 'error', cacheDir: join(fixtureDir, '.vite'),
+        resolve: { alias: {
+            '@': join(repo, 'packages/ui/src'),
+            '@openchamber/ui': join(repo, 'packages/ui/src'),
+            '@openchamber/sdk/schemas': join(repo, 'packages/sdk/src/schemas.ts'),
+            '@openchamber/sdk/ui': join(repo, 'packages/sdk/src/ui/index.ts'),
+            '@openchamber/sdk': join(repo, 'packages/sdk/src/index.ts'),
+        } },
+        server: { host: 'localhost', port: 0, hmr: false, watch: null, fs: { allow: [repo, realpathSync(join(repo, 'node_modules'))] } },
+    });
+    await server.listen();
+    const origin = server.resolvedUrls.local[0];
+    const port = await reservePort();
+    chrome = launchChrome({ chrome: chromePath, port, profileDir: join(fixtureDir, 'profile'), headless: true });
     const target = await createPageTarget(port);
     client = new CdpClient(target.webSocketDebuggerUrl);
     await client.connect();
@@ -262,10 +238,10 @@ try {
     await client.send('Page.enable');
     const exceptions = [];
     client.on('Runtime.exceptionThrown', event => exceptions.push(event.exceptionDetails));
-    for (const [period, step] of heightProfiles) for (const moveWhileLoading of [false, true]) {
+    for (const mode of modes) for (const [period, step] of heightProfiles) for (const moveWhileLoading of [false, true]) {
         const loaded = client.once('Page.loadEventFired');
         await client.send('Page.navigate', {
-            url: `http://127.0.0.1:${server.port}/?moving=${moveWhileLoading}&period=${period}&step=${step}`,
+            url: `${origin}?moving=${moveWhileLoading}&period=${period}&step=${step}&touch=${mode.touch}`,
         });
         await loaded;
         let ready = false;
@@ -276,7 +252,7 @@ try {
         }
         assert.ok(ready, 'The browser fixture mounted');
         const result = await evaluateValue(client, `window.runScenario(${moveWhileLoading})`);
-        console.log(JSON.stringify({ period, step, moveWhileLoading, ...result }));
+        console.log(JSON.stringify({ ...mode, period, step, moveWhileLoading, ...result }));
         assert.deepEqual(exceptions, [], 'No browser runtime errors');
         assert.equal(result.dataCount, 81, 'The prepend and tail append actually committed');
         assert.equal(result.frameCount, 70);
@@ -285,64 +261,32 @@ try {
         assert.ok(result.maxShift <= 1, `History shifted the visible anchor by ${result.maxShift}px`);
         assert.ok(Math.abs(result.tailGrowthShift) <= 1, 'Content below the reader must not move them');
     }
-        // Footer-deferral regression (#872, PR #721): on a fresh end-aligned
-        // mount, resizing the footer must not blank the transcript (the #52
-        // bug) or re-run readiness for the same row count.
-        const [footerPeriod, footerStep] = heightProfiles[0];
-        const footerLoaded = client.once('Page.loadEventFired');
-        await client.send('Page.navigate', {
-            url: `http://127.0.0.1:${server.port}/?moving=false&period=${footerPeriod}&step=${footerStep}`,
-        });
-        await footerLoaded;
-        let footerReady = false;
-        for (let attempt = 0; attempt < 100; attempt++) {
-            footerReady = await evaluateValue(client, 'typeof window.runFooterResizeScenario === "function"');
-            if (footerReady) break;
-            await wait(100);
-        }
-        assert.ok(footerReady, 'The browser fixture mounted for the footer scenario');
-        const footerResult = await evaluateValue(client, 'window.runFooterResizeScenario()');
-        console.log(JSON.stringify({ scenario: 'footer-resize', period: footerPeriod, step: footerStep, ...footerResult }));
+    // The touch layout's deferral: without it the list corrects scrollTop
+    // during the scroll (the control that the scenario makes corrections);
+    // with it, nothing moves until the scroll stops, and the reader's row
+    // stays put through the one correction at rest.
+    const scrolls = {};
+    for (const touch of [false, true]) {
+        const loaded = client.once('Page.loadEventFired');
+        await client.send('Page.navigate', { url: `${origin}?period=5&step=137&touch=${touch}` });
+        await loaded;
+        for (let attempt = 0; attempt < 100 && !(await evaluateValue(client, 'typeof window.runScrollScenario === "function"')); attempt++) await wait(100);
+        scrolls[touch] = await evaluateValue(client, 'window.runScrollScenario()');
+        console.log(JSON.stringify({ scroll: true, touch, ...scrolls[touch] }));
         assert.deepEqual(exceptions, [], 'No browser runtime errors');
-        assert.equal(footerResult.dataCount, 61, 'The footer scenario appended exactly one row before the resize');
-        assert.ok(footerResult.readyBefore >= 1, 'Readiness instrumentation recorded the mount cycle');
-        assert.ok(footerResult.footerSizes.includes(500), 'The footer resize was actually measured');
-        assert.equal(footerResult.readyAfter, footerResult.readyBefore, 'A footer resize must not re-run readiness for the same row count');
-        assert.equal(footerResult.missingFrames, 0, 'The visible row stayed mounted during the footer resize');
-        assert.equal(footerResult.blankFrames, 0, 'No row container rendered at opacity 0 during the footer resize');
-        assert.ok(footerResult.maxShift <= 1, `Footer resize shifted the visible anchor by ${footerResult.maxShift}px`);
-
-        // Read LegendList's target at registration, before the queued footer
-        // resize. A footer present on the first render preserves this target.
-        const productionFooterLoaded = client.once('Page.loadEventFired');
-        await client.send('Page.navigate', {
-            url: `http://127.0.0.1:${server.port}/?footerBootstrap=1&period=${footerPeriod}&step=${footerStep}`,
-        });
-        await productionFooterLoaded;
-        let productionFooterReady = false;
-        for (let attempt = 0; attempt < 100; attempt++) {
-            productionFooterReady = await evaluateValue(client, 'typeof window.runFooterResizeScenario === "function"');
-            if (productionFooterReady) break;
-            await wait(100);
-        }
-        assert.ok(productionFooterReady, 'The browser fixture mounted for the preserved-target probe');
-        const productionFooterResult = await evaluateValue(client, 'window.runFooterResizeScenario()');
-        console.log(JSON.stringify({ scenario: 'footer-resize-preserved-target', period: footerPeriod, step: footerStep, ...productionFooterResult }));
-        assert.deepEqual(exceptions, [], 'No browser runtime errors during the preserved-target probe');
-        assert.equal(productionFooterResult.dataCount, 60, 'The probe keeps the initial timeline unchanged');
-        assert.equal(productionFooterResult.registeredFooterTarget, false, 'The production deferral must keep the footer out of LegendList initial target state');
-        assert.equal(productionFooterResult.readyBefore, 1, 'The queued footer resize must not trigger another readiness cycle');
-        assert.ok(productionFooterResult.footerSizes.includes(500), 'The footer resize was measured');
-        assert.equal(productionFooterResult.readyAfter, productionFooterResult.readyBefore, 'The footer resize must not re-run readiness');
-        assert.equal(productionFooterResult.missingFrames, 0, 'The visible row stayed mounted during the footer resize');
-        assert.equal(productionFooterResult.blankFrames, 0, 'No row container rendered at opacity 0 during the footer resize');
+        assert.ok(scrolls[touch].startTop > 2400, 'The scroll stays more than two viewports from the start');
+    }
+    assert.ok(scrolls[false].corrections > 0, 'Rows measured above the reader correct the scroll position');
+    assert.equal(scrolls[true].corrections, 0, 'On touch, corrections wait until the scroll stops');
+    assert.ok(Math.abs(scrolls[true].correctedAtRestPx) > 1, 'The deferred correction lands at rest');
+    assert.ok(scrolls[true].restShift !== null && Math.abs(scrolls[true].restShift) <= 1, `The correction at rest moved the reader's row by ${scrolls[true].restShift}px`);
 } finally {
     client?.socket.close();
-    if (chrome.exitCode === null && chrome.signalCode === null) {
+    if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
         const exited = new Promise(resolve => chrome.once('exit', resolve));
         chrome.kill();
         await exited;
     }
-    server.stop(true);
-    rmSync(profileDir, { recursive: true, force: true });
+    await server?.close();
+    rmSync(fixtureDir, { recursive: true, force: true });
 }

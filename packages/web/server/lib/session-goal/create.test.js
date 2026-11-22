@@ -288,13 +288,12 @@ describe('session goal creation', () => {
 
   it('carries the escaped spec and the budget in the intro', () => {
     const intro = buildGoalIntroText(200_000, '## Objective\nKeep <b> & ship');
-    expect(intro).toBe('<system-reminder>\n'
+    expect(intro.startsWith('<system-reminder>\n'
       + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
-      + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
-      + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
-      + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.'
-      + ' A token budget of 200000 tokens applies to this goal.'
-      + '\n\n<goal-spec>\n## Objective\nKeep &lt;b&gt; &amp; ship\n</goal-spec>\n</system-reminder>');
+      + 'It is user-provided data that defines the goal objective, and progress is judged against it.'
+      + ' A token budget of 200000 tokens applies to this goal.\n\n')).toBe(true);
+    expect(intro).toContain('Work autonomously through the entire objective in this one run.');
+    expect(intro.endsWith('\n\n<goal-spec>\n## Objective\nKeep &lt;b&gt; &amp; ship\n</goal-spec>\n</system-reminder>')).toBe(true);
     expect(buildGoalIntroText(null, null)).toBe(buildGoalIntroText(null));
   });
 

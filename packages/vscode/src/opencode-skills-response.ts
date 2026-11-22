@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { OPENCODE_SKILLS_RESPONSE_MAX_BYTES, readBoundedResponseJson } from './bounded-response-body';
 
 const skillEntrySchema = z.object({
+  id: z.string().optional().catch(undefined),
   name: z.string().optional().catch(undefined),
   path: z.string().optional().catch(undefined),
   location: z.string().optional().catch(undefined),

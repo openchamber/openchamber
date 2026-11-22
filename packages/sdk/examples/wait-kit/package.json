@@ -1,0 +1,47 @@
+{
+  "name": "@openchamber/example-wait-kit",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.7.1"
+    },
+    "contributes": {
+      "panel": {
+        "id": "wait-kit",
+        "name": "Wait Kit",
+        "icon": "timer"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host"
+      },
+      "waits": [
+        {
+          "id": "timer",
+          "title": "Timer",
+          "description": "Wakes the session once the given number of seconds has passed",
+          "params": {
+            "seconds": { "type": "number", "description": "1 to 86400", "required": true }
+          },
+          "interval": 10000
+        },
+        {
+          "id": "url-ready",
+          "title": "URL ready",
+          "description": "Wakes the session once the URL answers with a 2xx status, or with the status given",
+          "params": {
+            "url": { "type": "string", "description": "An http or https address", "required": true },
+            "status": { "type": "number", "description": "The HTTP status to wait for; default any 2xx" }
+          },
+          "interval": 15000
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

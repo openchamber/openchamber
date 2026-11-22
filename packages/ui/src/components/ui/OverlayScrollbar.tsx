@@ -3,25 +3,16 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/useUIStore";
 import { isRightToLeft } from '@/lib/i18n';
 
-type OverlayScrollbarProps = {
-  /** The scrolling element. Container replacement is picked up on the next React commit. */
+export type OverlayScrollbarProps = {
   containerRef: React.RefObject<HTMLElement | null>;
-  /** Minimum thumb length in CSS pixels, capped to the available track. */
   minThumbSize?: number;
-  /** Time in milliseconds before an inactive thumb fades out. */
   hideDelayMs?: number;
   className?: string;
-  /** Skips horizontal geometry reads and keeps the horizontal thumb hidden. */
   disableHorizontal?: boolean;
-  /** Tracks direct-child replacement so newly mounted content remains size-observed. */
   observeMutations?: boolean;
-  /** Hides programmatic motion unless dragging or the device preference keeps scrollbars visible. */
   suppressVisibility?: boolean;
-  /** Requires recent user input in the default auto-hide mode. */
   userIntentOnly?: boolean;
-  /** Pixels kept clear above the vertical track, for controls floating over the scroller's top edge. */
   verticalTrackStart?: number;
-  /** Called when a thumb drag starts: the thumb is outside the scroller, so its own gesture listeners never see it. */
   onThumbDragStart?: () => void;
 };
 
@@ -30,7 +21,6 @@ type ScrollbarOptions = Required<Pick<
   "minThumbSize" | "hideDelayMs" | "disableHorizontal" | "observeMutations" | "suppressVisibility" | "userIntentOnly" | "verticalTrackStart"
 >> & { alwaysVisible: boolean };
 
-// The inset is part of both rendering and drag math; changing it must preserve that shared track.
 const TRACK_INSET = 8;
 const USER_INTENT_DURATION_MS = 1000;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
@@ -68,29 +58,19 @@ function bindScrollbar(
 ) {
   let options = initialOptions;
 
-  // One frame coalesces scroll, resize, and mutation signals. Measurement is requested only when sizes may change.
   let frameId: number | null = null;
   let needsMeasurement = true;
 
-  // Cached unit conversions let steady scrolling avoid layout-dependent size reads.
   let verticalThumbPixelsPerScrollPixel = 0;
   let horizontalThumbPixelsPerScrollPixel = 0;
-  // scrollLeft is 0 at the start of the content: the left in LTR, the right in
-  // RTL, where it runs negative. Adding this origin measures it from the left.
   let horizontalScrollOrigin = 0;
 
-  // A single moving deadline avoids clearing and recreating a timer on every scroll event.
   let hideTimerId: ReturnType<typeof setTimeout> | null = null;
   let hideDeadlineMs = 0;
   let lastUserIntentTimeMs = Number.NEGATIVE_INFINITY;
   let pointerOverThumb = false;
-  // The thumb is a sibling overlay of the container, so hover state is tracked
-  // for both: moving the pointer from the container onto the thumb fires the
-  // container's pointerleave before the thumb's pointerover, and the hide timer
-  // must not run in the gap between those two events.
   let pointerOverContainer = false;
 
-  // Drag state is the minimum snapshot needed to convert pointer travel back into a scroll offset.
   let drag: {
     axis: "vertical" | "horizontal";
     pointerId: number;
@@ -98,8 +78,6 @@ function bindScrollbar(
     scrollStartPx: number;
   } | null = null;
 
-  // Visibility is an imperative presentation detail; no React consumer needs it as state.
-  // React owns the stable elements; this binding exclusively owns their dynamic attributes and styles.
   const setVisible = (visible: boolean) => {
     const value = String(visible);
     if (root.dataset.visible !== value) root.dataset.visible = value;
@@ -122,19 +100,23 @@ function bindScrollbar(
     hideTimerId = setTimeout(hide, Math.max(hideDeadlineMs - performance.now(), 0));
   };
 
-  // Measurement is the cold path. Read every axis before writing either thumb to avoid forced layout.
-  const measureThumbs = () => {
-    const clientHeight = container.clientHeight;
-    const scrollHeight = container.scrollHeight;
-    const clientWidth = options.disableHorizontal ? 0 : container.clientWidth;
-    const scrollWidth = options.disableHorizontal ? 0 : container.scrollWidth;
-    const vertical = calculateThumb(clientHeight, scrollHeight, options.minThumbSize, options.verticalTrackStart);
-    const horizontal = options.disableHorizontal
-      ? null
-      : calculateThumb(clientWidth, scrollWidth, options.minThumbSize);
+  const containerStyle = container.ownerDocument.defaultView?.getComputedStyle(container) ?? null;
+  const scrolls = (overflow: string | undefined) => !overflow || overflow === "auto" || overflow === "scroll";
 
-    // Write only what changed: the wrapper's gutter matches the thumb's
-    // `hidden` through :has(), so even a same-value write invalidates style.
+  const measureThumbs = () => {
+    const scrollsVertically = scrolls(containerStyle?.overflowY);
+    const scrollsHorizontally = !options.disableHorizontal && scrolls(containerStyle?.overflowX);
+    const clientHeight = scrollsVertically ? container.clientHeight : 0;
+    const scrollHeight = scrollsVertically ? container.scrollHeight : 0;
+    const clientWidth = scrollsHorizontally ? container.clientWidth : 0;
+    const scrollWidth = scrollsHorizontally ? container.scrollWidth : 0;
+    const vertical = scrollsVertically
+      ? calculateThumb(clientHeight, scrollHeight, options.minThumbSize, options.verticalTrackStart)
+      : null;
+    const horizontal = scrollsHorizontally
+      ? calculateThumb(clientWidth, scrollWidth, options.minThumbSize)
+      : null;
+
     if (vertical) {
       verticalThumbPixelsPerScrollPixel = vertical.thumbPixelsPerScrollPixel;
       setHidden(verticalThumb, false);
@@ -156,7 +138,6 @@ function bindScrollbar(
   };
 
   const positionThumbs = () => {
-    // This is the hot path: cached scales leave only scroll offsets to read and transforms to write.
     if (!verticalThumb.hidden) {
       verticalThumb.style.transform = `translate3d(0, ${TRACK_INSET + options.verticalTrackStart + container.scrollTop * verticalThumbPixelsPerScrollPixel}px, 0)`;
     }
@@ -169,7 +150,6 @@ function bindScrollbar(
     needsMeasurement ||= measure;
     if (frameId !== null) return;
 
-    // All event sources share one read-before-write pass per frame.
     frameId = requestAnimationFrame(() => {
       frameId = null;
       if (needsMeasurement) {
@@ -184,7 +164,6 @@ function bindScrollbar(
     lastUserIntentTimeMs = performance.now();
   };
 
-  // Scroll visibility is separate from positioning so hidden programmatic scrolling does no DOM work.
   const onScroll = () => {
     const shouldShow = options.alwaysVisible || drag
       || (!options.suppressVisibility
@@ -214,7 +193,6 @@ function bindScrollbar(
     return null;
   };
 
-  // Both thumbs delegate pointer interaction through the stable overlay root.
   const onPointerDown = (event: PointerEvent) => {
     const axis = getThumbAxis(event.target);
     if (!axis) return;
@@ -273,8 +251,6 @@ function bindScrollbar(
     scheduleHide();
   };
 
-  // Hover makes the thumb reachable without wheel input. Touch/pen pointerenter
-  // also fires on contact, so only mouse pointers get this affordance.
   const onContainerPointerEnter = (event: PointerEvent) => {
     if (event.pointerType !== "mouse") return;
     pointerOverContainer = true;
@@ -285,8 +261,6 @@ function bindScrollbar(
       hideTimerId = null;
     }
     setVisible(true);
-    // Hidden programmatic scrolling may have skipped positioning. Refresh both
-    // position and overflow on reveal; disabled horizontal geometry stays unread.
     scheduleUpdate(true);
   };
 
@@ -308,11 +282,6 @@ function bindScrollbar(
   root.addEventListener("pointerover", onPointerOver);
   root.addEventListener("pointerout", onPointerOut);
 
-  // ResizeObserver callbacks run right after layout, so measuring there reads
-  // geometry the browser already has. Deferring to the next frame instead
-  // read it after the chat's own writes (a streaming reply grows the content
-  // every chunk) and forced a synchronous layout each time.
-  // MutationObserver only keeps direct-child observation current.
   const resizeObserver = globalThis.ResizeObserver
     ? new ResizeObserver(() => {
         needsMeasurement = false;
@@ -363,7 +332,6 @@ function bindScrollbar(
   setVisible(options.alwaysVisible);
   scheduleUpdate(true);
 
-  // Props update policy in place; only mounting and unmounting bind browser resources.
   return {
     update(nextOptions: ScrollbarOptions) {
       const visibilityChanged = nextOptions.alwaysVisible !== options.alwaysVisible;
@@ -459,12 +427,6 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     verticalTrackStart,
   };
 
-  // Follow the LIVE container node, not the ref object: the chat timeline's
-  // scroll element is owned by the virtualized list and remounts on every
-  // session switch (key={sessionKey}), so a bind-once contract would leave
-  // the scrollbar attached to a dead element after the first switch. This
-  // effect runs on every commit and rebinds only when the node identity
-  // actually changed — steady renders are a single pointer comparison.
   React.useLayoutEffect(() => {
     const container = containerRef.current;
     if (container === boundContainerRef.current) return;
@@ -507,14 +469,14 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
         hidden
         className="overlay-scrollbar__thumb overlay-scrollbar__thumb--vertical"
         data-overlay-scrollbar-thumb="vertical"
-        style={{ right: `${TRACK_INSET / 2}px` }}
+        style={{ right: 0 }}
       />
       <div
         ref={horizontalThumbRef}
         hidden
         className="overlay-scrollbar__thumb overlay-scrollbar__thumb--horizontal"
         data-overlay-scrollbar-thumb="horizontal"
-        style={{ bottom: `${TRACK_INSET / 2}px`, left: 0 }}
+        style={{ bottom: 0, left: 0 }}
       />
     </div>
   );

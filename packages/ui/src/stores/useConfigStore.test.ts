@@ -1,7 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { Agent, Config } from '@/lib/opencode/model';
+import type { ModelMetadata } from '@/types';
 import type { DesktopSettings } from '@/lib/desktop';
-import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { directoryEnvironment } from './test-support/directoryEnvironment';
+import { flushDeferredStorage } from './utils/safeStorage';
+
+const environment = directoryEnvironment({ home: '/workspace', fakeTimers: false });
 
 const DIRECTORY = '/workspace/project';
 const OTHER_DIRECTORY = '/workspace/other';
@@ -14,48 +19,21 @@ let liveProviderIdsByDirectory = new Map<string, string>();
 let liveProviderVariants: string[] | undefined;
 let getProvidersCalls = 0;
 let getConfigCalls = 0;
+let configByDirectory = new Map<string, Config>();
 let listAgentsCalls = 0;
 let liveAgents: TestAgent[] = [];
 let listAgentsImpl: ((directory?: string | null) => Promise<TestAgent[]>) | null = null;
 let getProvidersForConfigImpl: ((directory?: string | null) => Promise<TestProviderResponse>) | null = null;
-let withDirectoryCalls: Array<string | null> = [];
-let currentFetchDirectory: string | null = DIRECTORY;
-let configListener: ((event: { scopes: string[]; source?: string; timestamp: number }) => void | Promise<void>) | null = null;
 let persistedOpenChamberSettings: DesktopSettings | null = {};
 let settingsLoadCalls = 0;
 let checkHealthImpl = async () => true;
 let probeHealthImpl: (() => Promise<'healthy' | 'unhealthy' | 'unreachable'>) | null = null;
 let probeHealthOptions: Array<{ waitMs?: number } | undefined> = [];
 let loadSettingsImpl: (() => Promise<DesktopSettings | null>) | null = null;
-let runtimeFetchImpl: ((url: string) => Promise<Response>) | null = null;
-type TestProjectsState = {
+let projectsState: {
   activeProjectId: string | null;
-  projects: Array<{ id: string; path: string; label: string; defaultAgent?: string }>;
-};
-
-/** A value the JSON storage mock round-trips: the persisted state shape. */
-type StoredJsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | StoredJsonValue[]
-  | { [key: string]: StoredJsonValue };
-
-/** One synced OpenCode config document as the sync refs hand it over: JSON fields the store narrows itself. */
-type TestSyncConfigValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | TestSyncConfigValue[]
-  | { [key: string]: TestSyncConfigValue };
-
-type TestSyncConfig = Record<string, TestSyncConfigValue>;
-
-let projectsState: TestProjectsState = {
+  projects: Array<{ id: string; path: string; label: string; defaultAgent?: string; defaultModel?: string; defaultVariant?: string }>;
+} = {
   activeProjectId: 'project',
   projects: [
     { id: 'project', path: DIRECTORY, label: 'Project' },
@@ -79,6 +57,14 @@ const makeStorage = (): Storage => ({
     return storage.size;
   },
 }) as Storage;
+const seedConfig = (value: string) => {
+  flushDeferredStorage();
+  storage.set(STORAGE_KEY, value);
+};
+const persistedConfig = () => {
+  flushDeferredStorage();
+  return storage.get(STORAGE_KEY) ?? '{}';
+};
 
 const model = (providerId: string, modelId: string, variantIds?: string[]) => ({
   id: `${providerId}/${modelId}`,
@@ -133,7 +119,7 @@ const testAgent = (name: string, options?: Partial<TestAgent>): Agent => ({
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
-  let reject!: (cause: unknown) => void;
+  let reject!: (error: unknown) => void;
   const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
@@ -141,157 +127,147 @@ const deferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
-mock.module('@/stores/utils/safeStorage', () => ({
-  getDeferredSafeStorage: () => makeStorage(),
-  getSafeStorage: () => makeStorage(),
-  getSafeSessionStorage: () => makeStorage(),
-  createDeferredSafeJSONStorage: () => {
-    const testStorage = makeStorage();
-    return {
-      getItem: (name: string) => {
-        const value = testStorage.getItem(name);
-        return value === null ? null : JSON.parse(value);
-      },
-      setItem: (name: string, value: StoredJsonValue) => {
-        testStorage.setItem(name, JSON.stringify(value));
-      },
-      removeItem: (name: string) => {
-        testStorage.removeItem(name);
-      },
-    };
-  },
-}));
-
-mock.module('@/stores/useProjectsStore', () => ({
-  useProjectsStore: {
-    getState: () => projectsState,
-  },
-}));
-
 let directoryAvailability: 'available' | 'missing' | 'unknown' = 'available';
-
-mock.module('@/lib/opencode/client', () => ({
-  OpencodeApiError: Error,
-  normalizeOpencodeError: (operation: string, cause: unknown) => new Error(`${operation}: ${String(cause)}`),
-  opencodeClient: {
-    setDirectory: mock(() => undefined),
-    getDirectory: mock(() => DIRECTORY),
-    getFilesystemHome: async () => '/workspace',
-    getSystemInfo: async () => ({ homeDirectory: '/workspace' }),
-    checkHealth: () => checkHealthImpl(),
-    probeHealth: (options?: { waitMs?: number }) => {
-      probeHealthOptions.push(options);
-      return probeHealthImpl ? probeHealthImpl() : checkHealthImpl().then((healthy) => (healthy ? 'healthy' : 'unhealthy'));
-    },
-    withDirectory: mock(async <T,>(directory: string | null, callback: () => Promise<T>): Promise<T> => {
-      withDirectoryCalls.push(directory);
-      const previous = currentFetchDirectory;
-      currentFetchDirectory = directory;
-      try {
-        return await callback();
-      } finally {
-        currentFetchDirectory = previous;
-      }
-    }),
-    getProviders: mock(async () => {
+let trustPendingDirectories = new Set<string>();
+const providerReads = new Map<string, { promise: Promise<TestProviderResponse>; remaining: number }>();
+environment.respondSettings(async (_url, init) => {
+  if (init?.method === 'PUT' || init?.method === 'PATCH') {
+    persistedOpenChamberSettings = { ...persistedOpenChamberSettings, ...JSON.parse(String(init.body)) };
+    return Response.json(persistedOpenChamberSettings);
+  }
+  settingsLoadCalls += 1;
+  const settings = loadSettingsImpl ? await loadSettingsImpl() : persistedOpenChamberSettings;
+  return settings === null ? Response.json({}, { status: 500 }) : Response.json(settings);
+});
+environment.respond(async (url, init) => {
+  const directory = decodeURIComponent(new Headers(init?.headers).get('x-opencode-directory') ?? '') || url.searchParams.get('directory') || DIRECTORY;
+  const providerKey = `${url.origin}:${directory}`;
+  if (['/api/model', '/api/model/default', '/api/provider'].includes(url.pathname)) {
+    let read = providerReads.get(providerKey);
+    if (!read) {
       getProvidersCalls += 1;
-      const id = liveProviderIdsByDirectory.get(currentFetchDirectory ?? '') ?? liveProviderId;
-      return providerResponse(id, `${id}-model`, liveProviderVariants);
-    }),
-    getProvidersForConfig: mock(async (directory?: string | null) => {
-      getProvidersCalls += 1;
-      if (getProvidersForConfigImpl) {
-        return getProvidersForConfigImpl(directory);
+      const id = liveProviderIdsByDirectory.get(directory) ?? liveProviderId;
+      read = { promise: getProvidersForConfigImpl ? getProvidersForConfigImpl(directory) : Promise.resolve(providerResponse(id, `${id}-model`, liveProviderVariants)), remaining: 3 };
+      providerReads.set(providerKey, read);
+    }
+    try {
+      const catalog = await read.promise;
+      if (url.pathname === '/api/model') return Response.json({ data: catalog.models });
+      if (url.pathname === '/api/provider') return Response.json({ data: catalog.providers });
+      return Response.json({ data: catalog.default ? { providerID: catalog.default.providerID, modelID: catalog.default.id } : null });
+    } finally {
+      read.remaining -= 1;
+      if (!read.remaining && providerReads.get(providerKey) === read) providerReads.delete(providerKey);
+    }
+  }
+  if (url.pathname === '/api/agent') {
+    listAgentsCalls += 1;
+    try {
+      const agents = listAgentsImpl ? await listAgentsImpl(directory) : liveAgents;
+      return Response.json({ data: agents.map((agent) => ({ ...testAgent(agent.name, agent), ...agent, id: agent.name })) });
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      if (error.cause instanceof Error && 'data' in error.cause) return Response.json({ name: error.cause.name, data: error.cause.data }, { status: 400 });
+      if ('status' in error && error.status === 403) {
+        return Response.json(trustPendingDirectories.has(directory)
+          ? { error: 'Folder is not trusted', code: 'opencode_trust_required', directory }
+          : { error: error.message }, { status: 403 });
       }
-      const id = liveProviderIdsByDirectory.get(directory ?? '') ?? liveProviderId;
-      return providerResponse(id, `${id}-model`, liveProviderVariants);
-    }),
-    listAgents: mock(async (directory?: string | null) => {
-      listAgentsCalls += 1;
-      const impl = listAgentsImpl as ((directory?: string | null) => Promise<TestAgent[]>) | null;
-      return impl ? impl(directory) : liveAgents;
-    }),
-    getConfig: mock(async () => {
-      getConfigCalls += 1;
-      return {};
-    }),
-    clearConfigCache: mock(() => undefined),
-    getDirectoryAvailability: mock(async () => directoryAvailability),
-    invalidateAgentList: mock(() => undefined),
-  },
-}));
-
-mock.module('@/contexts/runtimeAPIRegistry', () => ({
-  getRegisteredRuntimeAPIs: mock(() => null),
-}));
-
-mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async (url: string) => {
-    if (runtimeFetchImpl) return runtimeFetchImpl(url);
-    return new Response(JSON.stringify({}), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }),
-}));
-
-mock.module('@/lib/persistence', () => ({
-  updateDesktopSettings: mock(async () => ({ ok: true })),
-  reportSettingsSaveState: () => undefined,
-  // The store reads the shared document through this; an empty document
-  // keeps every OpenChamber default unset, like the settings route used to.
-  loadDesktopSettings: mock(async () => {
-    settingsLoadCalls += 1;
-    return loadSettingsImpl ? loadSettingsImpl() : persistedOpenChamberSettings;
-  }),
-}));
-
-mock.module('@/lib/startupTrace', () => ({
-  markStartupTrace: mock(() => undefined),
-  measureStartupTrace: mock(async <T,>(_name: string, callback: () => Promise<T>): Promise<T> => callback()),
-}));
-
-mock.module('@/lib/configSync', () => ({
-  emitConfigChange: mock(() => undefined),
-  scopeMatches: mock((event: { scopes: string[] }, scope: string) => event.scopes.includes('all') || event.scopes.includes(scope)),
-  subscribeToConfigChanges: mock((listener: typeof configListener) => {
-    configListener = listener;
-    return () => {
-      if (configListener === listener) {
-        configListener = null;
-      }
-    };
-  }),
-}));
-
-// Runtime-generation guards subscribe at module load. Use real event delivery
-// so A -> B -> A exercises the lifecycle, not just unequal runtime strings.
-Object.defineProperty(globalThis, 'window', {
-  configurable: true,
-  value: Object.assign(new EventTarget(), { location: new URL('https://config-tests.example') }),
+      const tag = 'tag' in error ? String(error.tag) : 'UnknownError';
+      return Response.json({ _tag: tag, message: error.message.replace(/^agent.list failed(?: \(\d+\))?: /, '') }, { status: 400 });
+    }
+  }
+  if (url.pathname === '/api/config') {
+    getConfigCalls += 1;
+    return Response.json([{ type: 'document', path: null, info: configByDirectory.get(directory) ?? {} }]);
+  }
+  if (url.pathname === '/api/opencode/health') {
+    probeHealthOptions.push({ waitMs: Number(url.searchParams.get('wait')) || undefined });
+    const health = probeHealthImpl ? await probeHealthImpl() : await checkHealthImpl() ? 'healthy' : 'unhealthy';
+    if (health === 'unreachable') throw new Error('offline');
+    return Response.json({ healthy: health === 'healthy' });
+  }
+  if (url.pathname === '/api/fs/home') return Response.json({ home: '/workspace', chatsRoot: '/workspace/.config/openchamber/chats' });
+  if (url.pathname === '/api/fs/directory-stats') {
+    const { paths } = JSON.parse(String(init?.body));
+    return Response.json({ results: paths.map((path: string) => ({ path, isDirectory: directoryAvailability === 'available', reason: directoryAvailability === 'missing' ? 'not-found' : 'unavailable' })) });
+  }
+  if (url.pathname === '/api/opencode/trust') return Response.json({ directory, trusted: !trustPendingDirectories.has(directory), fingerprint: null, items: [] });
+  if (url.pathname === '/api/location' || url.pathname === '/api/session') return Response.json({}, { status: 401 });
+  return Response.json({});
 });
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: makeStorage() });
+Object.defineProperty(window, 'localStorage', { configurable: true, value: makeStorage() });
+const { useProjectsStore } = await import('./useProjectsStore');
+const { opencodeClient } = await import('@/lib/opencode/client');
+environment.cleanup(subscribeRuntimeEndpointChanged(() => opencodeClient.reconnectToRuntimeBaseUrl()));
+const { getOpenCodeTrustSnapshot, settleOpenCodeTrust, subscribeOpenCodeTrust } = await import('@/lib/opencodeTrust');
+const trustPrompts: string[] = [];
+environment.cleanup(subscribeOpenCodeTrust(() => {
+  const prompt = getOpenCodeTrustSnapshot();
+  if (!prompt) return;
+  trustPrompts.push(prompt.directory);
+  void settleOpenCodeTrust('skip');
+}));
+const { emitConfigChange } = await import('@/lib/configSync');
+const { invalidateSettingsCache, updateDesktopSettings } = await import('@/lib/persistence');
 
 const {
   useConfigStore,
-  fetchModelsDevMetadata,
-  MODELS_DEV_CATALOG_MAX_BYTES,
   selectConfigAgentsForDirectory,
   selectProvidersForDirectory,
+  selectSettingsOnlyProvidersForDirectory,
   selectCatalogLoadedForDirectory,
   markConfigCatalogStale,
+  invalidateConfigCatalogsForReload,
   selectKnownAgent,
   selectKnownCatalogModel,
   invalidateConfigAgentsLoad,
 } = await import('./useConfigStore');
-const { rememberDisabledProviders } = await import('@/lib/disabledProviders');
 const { emitSyncConfigChanged, setSyncRefs } = await import('@/sync/sync-refs');
 const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 const { useUIStore } = await import('@/stores/useUIStore');
+let testRuntime = 0;
+
+test('configuration subscriptions stay singleton when setup is called again', async () => {
+  const { subscribeConfigRuntimeChanges, subscribeConfigStoreChanges } = await import('./config/subscriptions');
+  const { configRuntime } = await import('./config/runtime');
+  const { useDirectoryStore } = await import('./useDirectoryStore');
+  const configSync = await import('@/lib/configSync');
+  const syncRefs = await import('@/sync/sync-refs');
+  const subscriptions = [
+    spyOn(configSync, 'subscribeToConfigChanges'),
+    spyOn(syncRefs, 'subscribeToSyncConfigChanges'),
+    spyOn(useDirectoryStore, 'subscribe'),
+    spyOn(useRoutingStore, 'subscribe'),
+    spyOn(useUIStore, 'subscribe'),
+    spyOn(useConfigStore, 'subscribe'),
+  ];
+  try {
+    const registrationCounts = subscriptions.map((subscription) => subscription.mock.calls.length);
+    subscribeConfigStoreChanges();
+    subscribeConfigStoreChanges();
+    for (const [index, subscription] of subscriptions.entries()) {
+      expect(subscription.mock.calls.length).toBe(registrationCounts[index]);
+    }
+  } finally {
+    for (const subscription of subscriptions) subscription.mockRestore();
+  }
+  subscribeConfigRuntimeChanges();
+  subscribeConfigRuntimeChanges();
+  const generation = configRuntime.generation;
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://singleton.example', runtimeKey: 'singleton' });
+  expect(configRuntime.generation).toBe(generation + 1);
+});
 
 describe('useConfigStore provider persistence', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://config-tests.example', runtimeKey: `config-test-${++testRuntime}` });
+    await environment.settle();
+    flushDeferredStorage();
+    invalidateSettingsCache();
     storage = new Map<string, string>();
     projectsState = {
       activeProjectId: 'project',
@@ -300,6 +276,11 @@ describe('useConfigStore provider persistence', () => {
         { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
       ],
     };
+    useProjectsStore.setState(projectsState);
+    providerReads.clear();
+    opencodeClient.clearAgentListRequests();
+    opencodeClient.clearProviderCatalogRequests();
+    opencodeClient.clearConfigCache();
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       value: makeStorage(),
@@ -309,28 +290,30 @@ describe('useConfigStore provider persistence', () => {
     liveProviderVariants = undefined;
     getProvidersCalls = 0;
     getConfigCalls = 0;
+    configByDirectory = new Map<string, Config>();
     listAgentsCalls = 0;
     liveAgents = [];
     listAgentsImpl = null;
     getProvidersForConfigImpl = null;
-    withDirectoryCalls = [];
-    currentFetchDirectory = DIRECTORY;
+    trustPendingDirectories = new Set<string>();
+    trustPrompts.length = 0;
+    opencodeClient.setDirectory(DIRECTORY);
     persistedOpenChamberSettings = {};
     settingsLoadCalls = 0;
     checkHealthImpl = async () => true;
     probeHealthImpl = null;
     probeHealthOptions = [];
     loadSettingsImpl = null;
-    runtimeFetchImpl = null;
     setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
     useSelectionStore.setState({
       sessionModelSelections: new Map(),
+      sessionPickedModels: new Map(),
       sessionAgentSelections: new Map(),
       sessionAgentModelSelections: new Map(),
       lastUsedProvider: null,
     });
     useSessionUIStore.setState({ currentSessionId: null, availableWorktreesByProject: new Map() });
-    useUIStore.setState({ hiddenModels: [], lastSelectedModel: undefined });
+    useUIStore.setState({ hiddenModels: [], lastSelectedModel: undefined, lastUsedEfforts: {} });
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       directoryScoped: {},
@@ -379,29 +362,6 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentModelId).toBe('chosen-model');
     expect(useConfigStore.getState().currentVariant).toBe('high');
     expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
-  });
-
-  test('a provider turned off in Settings stays out of a second location whose OpenCode still lists it', async () => {
-    // The app has just reloaded: nothing has read the disabled list yet and
-    // Settings > Providers has not been opened. The second location's
-    // OpenCode has not reloaded either, so its catalog still lists groq.
-    runtimeFetchImpl = async (url) => new Response(
-      JSON.stringify(url.includes('/api/provider/disabled') ? { providers: ['groq'] } : {}),
-      { headers: { 'Content-Type': 'application/json' } },
-    );
-    getProvidersForConfigImpl = async () => ({
-      providers: [providerInfo('groq'), providerInfo('live')],
-      models: [model('groq', 'groq-model'), model('live', 'live-model')],
-      default: { providerID: 'live', id: 'live-model' },
-    });
-
-    await useConfigStore.getState().loadProviders({ directory: OTHER_DIRECTORY });
-
-    const providers = selectProvidersForDirectory(useConfigStore.getState(), OTHER_DIRECTORY);
-    expect(providers.map((entry) => entry.id)).toEqual(['live']);
-    // The snapshot is kept per runtime; clear it so later tests read their
-    // own answers.
-    rememberDisabledProviders([]);
   });
 
   test('worktree catalog uses its own directory and retains its manual model across switches', async () => {
@@ -591,6 +551,46 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentAgentName).toBe('review');
   });
 
+  test('image models stay out of the chat catalog, and an image-only provider is kept for Settings', async () => {
+    const imageModel = (providerId: string, modelId: string) => Object.assign(model(providerId, modelId), { type: 'image' });
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('chat'), providerInfo('mixed'), providerInfo('wawa')],
+      models: [model('chat', 'talk'), model('mixed', 'talk'), imageModel('mixed', 'draw'), imageModel('wawa', 'flare')],
+      default: { providerID: 'chat', id: 'talk' },
+    });
+    await useConfigStore.getState().activateDirectory(DIRECTORY);
+
+    const state = useConfigStore.getState();
+    expect(state.providers.map((entry) => [entry.id, entry.models.map((item) => item.modelID)])).toEqual([
+      ['chat', ['talk']],
+      ['mixed', ['talk']],
+    ]);
+    expect(selectSettingsOnlyProvidersForDirectory(state, DIRECTORY).map((entry) => [entry.id, entry.models.map((item) => item.modelID)])).toEqual([
+      ['wawa', ['flare']],
+    ]);
+    expect(selectSettingsOnlyProvidersForDirectory(state, OTHER_DIRECTORY)).toEqual([]);
+
+    useConfigStore.getState().invalidateProviderCache(DIRECTORY);
+    expect(selectSettingsOnlyProvidersForDirectory(useConfigStore.getState(), DIRECTORY)).toEqual([]);
+  });
+
+  test('a provider with no model at all is kept for Settings and stays out of the chat catalog', async () => {
+    // What a Copilot Free or Student sign-in leaves: OpenCode lists the provider
+    // and answers no model for it.
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('chat'), providerInfo('github-copilot')],
+      models: [model('chat', 'talk')],
+      default: { providerID: 'chat', id: 'talk' },
+    });
+    await useConfigStore.getState().activateDirectory(DIRECTORY);
+
+    const state = useConfigStore.getState();
+    expect(state.providers.map((entry) => entry.id)).toEqual(['chat']);
+    expect(selectSettingsOnlyProvidersForDirectory(state, DIRECTORY).map((entry) => [entry.id, entry.models])).toEqual([
+      ['github-copilot', []],
+    ]);
+  });
+
   test('Settings without a project reads the active catalog', () => {
     // No project added: Settings has no directory, and the only catalog
     // loaded is the one for the directory the app is on.
@@ -624,7 +624,7 @@ describe('useConfigStore provider persistence', () => {
   });
 
   test('hydrates a legacy blob with catalogs for instant paint, refreshes to live data, then writes it slim', async () => {
-    storage.set(STORAGE_KEY, JSON.stringify({
+    seedConfig(JSON.stringify({
       state: {
         configRuntimeKey: getRuntimeKey(),
         activeDirectoryKey: DIRECTORY,
@@ -681,7 +681,7 @@ describe('useConfigStore provider persistence', () => {
     expect(reloaded.currentProviderId).toBe('fresh');
     expect(reloaded.currentModelId).toBe('fresh-model');
 
-    const rewritten = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    const rewritten = JSON.parse(persistedConfig());
     expect(rewritten.version).toBe(1);
     expect(rewritten.state.providers).toBeUndefined();
     expect(rewritten.state.directoryScoped[DIRECTORY].providers).toBeUndefined();
@@ -696,7 +696,7 @@ describe('useConfigStore provider persistence', () => {
       models: [{ ...model('legacy', 'legacy-model'), variants: { high: {} } }],
     };
     const validProvider = provider('valid', 'valid-model', ['low']);
-    storage.set(STORAGE_KEY, JSON.stringify({
+    seedConfig(JSON.stringify({
       state: {
         configRuntimeKey: getRuntimeKey(),
         activeDirectoryKey: DIRECTORY,
@@ -808,8 +808,8 @@ describe('useConfigStore provider persistence', () => {
       [DIRECTORY, 'active-live'],
       [OTHER_DIRECTORY, 'inactive-live'],
     ]);
-    expect(configListener).not.toBeNull();
-    await configListener?.({ scopes: ['providers'], timestamp: Date.now() });
+    emitConfigChange('providers');
+    await environment.settle();
 
     const state = useConfigStore.getState();
     expect(getProvidersCalls).toBe(2);
@@ -932,7 +932,7 @@ describe('useConfigStore provider persistence', () => {
       },
     });
 
-    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    const persisted = JSON.parse(persistedConfig());
     expect(persisted.state.selectedProviderId).toBe('');
     expect(persisted.state.directoryScoped[DIRECTORY].selectedProviderId).toBe('');
   });
@@ -1037,6 +1037,29 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().cycleCurrentVariant()).toBe(undefined);
     expect(useConfigStore.getState().currentVariantSelection.override).toBeNull();
     expect(useConfigStore.getState().currentVariant).toBe(undefined);
+  });
+
+  test('cycleCurrentVariant remembers the chosen level without a send', () => {
+    useConfigStore.setState({
+      providers: [provider('openai', 'gpt-5.6-sol', ['low', 'high'])],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.6-sol',
+      currentVariant: undefined,
+      currentVariantSelection: { override: undefined, inherited: undefined },
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: {} });
+
+    const next = useConfigStore.getState().cycleCurrentVariant();
+
+    expect(next).toBe('low');
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'openai/gpt-5.6-sol': 'low' });
+
+    // Cycling all the way to Default stores the explicit Default sentinel.
+    useConfigStore.setState({ currentVariant: 'low', currentVariantSelection: { override: 'low', inherited: undefined } });
+    expect(useConfigStore.getState().cycleCurrentVariant()).toBe('high');
+    expect(useConfigStore.getState().cycleCurrentVariant()).toBeUndefined();
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'openai/gpt-5.6-sol': null });
   });
 
   test('an unavailable explicit variant cycles back to Default', () => {
@@ -1175,6 +1198,66 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('high');
   });
 
+  test('[issue-5933] a manual model pick survives picking an agent that configures a model', () => {
+    const sessionId = 'ses_5933_manual_model_survives_agent';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [
+        provider('openai', 'gpt-5.5', ['low', 'high']),
+        provider('anthropic', 'claude-3', ['low', 'high']),
+      ],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      // Restores also mark the model manual; the pending pick records intent.
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude-3',
+      currentVariant: undefined,
+      selectionSource: 'manual',
+      directoryScoped: {},
+    });
+
+    useSelectionStore.getState().pickSessionModel(sessionId, 'anthropic', 'claude-3');
+    // Picking an agent must not move the session off the model the user chose.
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('anthropic');
+    expect(state.currentModelId).toBe('claude-3');
+    expect(state.selectionSource).toBe('manual');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'plan')).toEqual({
+      providerId: 'anthropic',
+      modelId: 'claude-3',
+    });
+  });
+
+  for (const scenario of ['older override', 'undiscovered pinned model', 'restored selection', 'draft pick']) {
+    test(`[issue-5933] model precedence with ${scenario}`, () => {
+      const sessionId = 'ses_5933_precedence';
+      useSessionUIStore.setState({ currentSessionId: scenario === 'draft pick' ? null : sessionId });
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [provider('anthropic', 'claude-3', ['low', 'high']), provider('openai', 'gpt-5.5')],
+        agents: [testAgent('plan', { model: {
+          providerID: 'openai', modelID: scenario === 'undiscovered pinned model' ? 'not-discovered' : 'gpt-5.5',
+        } })],
+        settingsDefaultModel: 'openai/gpt-5.5',
+        currentProviderId: 'anthropic', currentModelId: 'claude-3', selectionSource: 'manual',
+        currentVariant: 'high', currentVariantSelection: { override: 'high', inherited: 'low' },
+      });
+      const selection = useSelectionStore.getState();
+      if (scenario === 'older override') selection.saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+      if (scenario !== 'restored selection') selection.pickSessionModel(sessionId, 'anthropic', 'claude-3');
+      else selection.saveSessionModelSelection(sessionId, 'anthropic', 'claude-3');
+
+      useConfigStore.getState().setAgent('plan');
+
+      expect(useConfigStore.getState().currentModelId).toBe(scenario === 'restored selection' ? 'gpt-5.5' : 'claude-3');
+      expect(useConfigStore.getState().selectionSource).toBe(scenario === 'restored selection' ? 'auto' : 'manual');
+      expect(useConfigStore.getState().currentVariant).toBe(scenario === 'restored selection' ? undefined : 'high');
+    });
+  }
+
   test('[issue-4601] the settings effort stays with the settings model', () => {
     const sessionId = 'ses_4601_settings_effort';
     useSessionUIStore.setState({ currentSessionId: sessionId });
@@ -1199,6 +1282,160 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: undefined });
     expect(state.getDefaultVariantForModel('openai', 'other-model')).toBe('high');
     expect(state.getDefaultVariantForModel('openai', 'gpt-5.5')).toBe(undefined);
+  });
+
+  test('a new draft starts on the level its model was last sent with', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'high' } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const state = useConfigStore.getState();
+    expect(state.currentModelId).toBe('gpt-5.5');
+    expect(state.currentVariant).toBe('high');
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: 'high' });
+    // Remembered is not configured: the model's configured level is still unset.
+    expect(state.getDefaultVariantForModel('openai', 'gpt-5.5')).toBeUndefined();
+  });
+
+  test('a configured level for the default model wins over the remembered one', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      settingsDefaultVariant: 'low',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'high' } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    expect(useConfigStore.getState().currentVariant).toBe('low');
+    expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: undefined, inherited: 'low' });
+  });
+
+  test('an agent pin for the default model wins over the remembered level', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('plan', {
+        model: { providerID: 'openai', modelID: 'gpt-5.5' },
+        variant: 'low',
+      })],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      settingsDefaultAgent: 'plan',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'high' } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    expect(useConfigStore.getState().currentVariant).toBe('low');
+    expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: undefined, inherited: 'low' });
+  });
+
+  test('an explicit Default remembered for a model is kept as a choice', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': null } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBeUndefined();
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: null });
+  });
+
+  test('a remembered level the model no longer offers is ignored', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'removed' } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBeUndefined();
+    // Not lowercased into an explicit Default the user never picked.
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: undefined });
+  });
+
+  test('[issue-4601] a remembered level never moves to another model', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [{
+        ...provider('openai', 'model-a', ['low', 'high']),
+        models: [
+          provider('openai', 'model-a', ['low', 'high']).models[0],
+          provider('openai', 'model-b', ['low', 'high']).models[0],
+        ],
+      }],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'model-b' } })],
+      currentProviderId: 'openai',
+      currentModelId: 'model-a',
+      currentAgentName: 'build',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/model-a': 'high' } });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentModelId).toBe('model-b');
+    expect(state.currentVariant).toBeUndefined();
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: undefined });
+  });
+
+  test('setAgent uses the remembered level for the agent-pinned model', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentAgentName: 'build',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'high' } });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBe('high');
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: 'high' });
   });
 
   test('[issue-4601] an agent effort stays with the agent model', () => {
@@ -1615,6 +1852,7 @@ describe('useConfigStore provider persistence', () => {
 
     liveProviderId = 'second';
     persistedOpenChamberSettings = { defaultModel: 'second/second-model' };
+    await updateDesktopSettings({ defaultModel: 'second/second-model' });
     useConfigStore.getState().setSettingsDefaultModel('second/second-model');
 
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY, source: 'test:defaults-cache-second' });
@@ -1645,6 +1883,78 @@ describe('useConfigStore provider persistence', () => {
     liveAgents = [testAgent('build')];
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:fixed' });
     expect(useConfigStore.getState().projectConfigErrors).toEqual({});
+  });
+
+  test('startup with an open chat loads the chat folder catalog, not the active project one (#5522)', async () => {
+    const chatDirectory = '/workspace/.config/openchamber/chats/chat-1';
+    opencodeClient.setDirectory(chatDirectory);
+    const agentDirectories: Array<string | null | undefined> = [];
+    listAgentsImpl = async (directory) => {
+      agentDirectories.push(directory);
+      return [testAgent('build')];
+    };
+    useSessionUIStore.setState({ currentSessionId: 'ses_chat', currentSessionDirectory: chatDirectory });
+    await useConfigStore.getState().initializeApp();
+
+    expect(useConfigStore.getState().isInitialized).toBe(true);
+    expect(useConfigStore.getState().activeDirectoryKey).toBe(chatDirectory);
+    expect(agentDirectories).toEqual([chatDirectory]);
+    expect(opencodeClient.getDirectory()).toBe(chatDirectory);
+  });
+
+  test('startup with a chat draft loads the Chats root catalog, not the active project one (#6283)', async () => {
+    opencodeClient.setDirectory(DIRECTORY);
+    const agentDirectories: Array<string | null | undefined> = [];
+    listAgentsImpl = async (directory) => {
+      agentDirectories.push(directory);
+      return [testAgent('build')];
+    };
+    const draftBefore = useSessionUIStore.getState().newSessionDraft;
+    useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+    try {
+      await useConfigStore.getState().initializeApp();
+    } finally {
+      useSessionUIStore.setState({ newSessionDraft: draftBefore });
+    }
+
+    expect(useConfigStore.getState().activeDirectoryKey).toBe('/workspace/.config/openchamber/chats');
+    expect(agentDirectories).toEqual(['/workspace/.config/openchamber/chats']);
+    expect(opencodeClient.getDirectory()).toBe(DIRECTORY);
+  });
+
+  test('startup left a chat draft while the Chats root was loading keeps the opened session catalog (#6283)', async () => {
+    const chatDirectory = '/workspace/.config/openchamber/chats/chat-1';
+    opencodeClient.setDirectory(chatDirectory);
+    const agentDirectories: Array<string | null | undefined> = [];
+    listAgentsImpl = async (directory) => {
+      agentDirectories.push(directory);
+      return [testAgent('build')];
+    };
+    const draftBefore = useSessionUIStore.getState().newSessionDraft;
+    useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+    try {
+      const startup = useConfigStore.getState().initializeApp();
+      useSessionUIStore.setState({ currentSessionId: 'ses_chat', currentSessionDirectory: DIRECTORY, newSessionDraft: draftBefore });
+      await startup;
+    } finally {
+      useSessionUIStore.setState({ newSessionDraft: draftBefore });
+    }
+
+    expect(useConfigStore.getState().activeDirectoryKey).toBe(DIRECTORY);
+    expect(agentDirectories).toEqual([DIRECTORY]);
+  });
+
+  test('startup without an open session still loads an unknown folder under the active project', async () => {
+    opencodeClient.setDirectory('/workspace');
+    const agentDirectories: Array<string | null | undefined> = [];
+    listAgentsImpl = async (directory) => {
+      agentDirectories.push(directory);
+      return [testAgent('build')];
+    };
+    await useConfigStore.getState().initializeApp();
+
+    expect(useConfigStore.getState().activeDirectoryKey).toBe(DIRECTORY);
+    expect(agentDirectories).toEqual([DIRECTORY]);
   });
 
   test('an unreachable server is recorded as the startup failure', async () => {
@@ -1687,6 +1997,39 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().lastInitFailure).toBeNull();
   }, 10_000);
 
+  test('a project folder OpenCode cannot open does not block startup, even when our server can read it', async () => {
+    listAgentsImpl = async () => {
+      throw Object.assign(new Error('agent.list failed: Location not found: /100.64.0.1/share'), { tag: 'LocationNotFoundError' });
+    };
+    await useConfigStore.getState().initializeApp();
+
+    expect(useConfigStore.getState().isInitialized).toBe(true);
+    expect(useConfigStore.getState().lastInitFailure).toBeNull();
+  }, 10_000);
+
+  test('a project the user has not trusted does not block startup', async () => {
+    listAgentsImpl = async () => {
+      throw Object.assign(new Error('agent.list failed (403): unexpected status'), { status: 403 });
+    };
+    trustPendingDirectories = new Set([DIRECTORY]);
+    await useConfigStore.getState().initializeApp();
+
+    expect(useConfigStore.getState().isInitialized).toBe(true);
+    expect(trustPrompts).toEqual([DIRECTORY]);
+    expect(useConfigStore.getState().lastInitFailure).toBeNull();
+  }, 10_000);
+
+  test('a 403 from a trusted project still fails startup', async () => {
+    listAgentsImpl = async () => {
+      throw Object.assign(new Error('agent.list failed (403): unexpected status'), { status: 403 });
+    };
+    await useConfigStore.getState().initializeApp();
+    expect(trustPrompts).toEqual([]);
+
+    expect(useConfigStore.getState().isInitialized).toBe(false);
+    expect(useConfigStore.getState().lastInitFailure?.step).toBe('loadAgents');
+  }, 10_000);
+
   test('a failed agent load records its error text, and a later success clears it', async () => {
     listAgentsImpl = async () => {
       throw new Error('agent.list failed (500): provider plugin crashed');
@@ -1716,13 +2059,14 @@ describe('useConfigStore provider persistence', () => {
     };
 
     const staleLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:stale' });
-    await Promise.resolve();
+    await environment.settle();
     expect(calls).toBe(1);
 
     invalidateConfigAgentsLoad(DIRECTORY);
     const freshLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:fresh' });
     staleAgents.resolve([{ name: 'old-agent', mode: 'primary' }]);
 
+    await environment.settle();
     expect(calls).toBe(2);
     expect(await staleLoad).toBe(true);
     expect(await freshLoad).toBe(true);
@@ -1741,7 +2085,7 @@ describe('useConfigStore provider persistence', () => {
 
     const ownerLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:owner' });
     const joinedLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:joined' });
-    await Promise.resolve();
+    await environment.settle();
     expect(calls).toBe(1);
 
     invalidateConfigAgentsLoad(DIRECTORY);
@@ -1940,7 +2284,7 @@ describe('useConfigStore provider persistence', () => {
   });
 
   test('rejects a persisted config snapshot belonging to another runtime', async () => {
-    storage.set(STORAGE_KEY, JSON.stringify({ state: {
+    seedConfig(JSON.stringify({ state: {
       configRuntimeKey: 'some-other-instance',
       settingsDefaultModel: 'foreign/model',
       providers: [provider('foreign')],
@@ -1972,6 +2316,50 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers[0]?.id).toBe('b');
   });
 
+  test('the startup agent recheck still discovers agents in the same runtime', async () => {
+    liveAgents = [testAgent('build')];
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://recheck-current.example', runtimeKey: 'recheck-current' });
+    await useConfigStore.getState().initializeApp();
+    expect(useConfigStore.getState().agents.map((agent) => agent.name)).toEqual(['build']);
+
+    liveAgents = [testAgent('build'), testAgent('plugin-agent')];
+    await new Promise((resolve) => setTimeout(resolve, 8_100));
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.agents.map((agent) => agent.name)).toEqual(['build', 'plugin-agent']);
+  }, 12_000);
+
+  test('the startup agent recheck survives a transport change for the same instance', async () => {
+    liveAgents = [testAgent('build')];
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://transport-one.example', runtimeKey: 'same-device' });
+    await useConfigStore.getState().initializeApp();
+    expect(useConfigStore.getState().agents.map((agent) => agent.name)).toEqual(['build']);
+
+    // Mobile rebinds the SDK for LAN/relay changes without initializing again.
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://transport-two.example', runtimeKey: 'same-device' });
+    liveAgents = [testAgent('build'), testAgent('plugin-agent')];
+    await new Promise((resolve) => setTimeout(resolve, 8_100));
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.agents.map((agent) => agent.name)).toEqual(['build', 'plugin-agent']);
+  }, 12_000);
+
+  for (const returnToFirstRuntime of [false, true]) {
+    test(`the startup agent recheck cannot outlive its runtime${returnToFirstRuntime ? ' after a round trip' : ''}`, async () => {
+      liveAgents = [testAgent('build')];
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://recheck-a.example', runtimeKey: 'recheck-a' });
+      await useConfigStore.getState().initializeApp();
+      expect(useConfigStore.getState().agents.map((agent) => agent.name)).toEqual(['build']);
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://recheck-b.example', runtimeKey: 'recheck-b' });
+      if (returnToFirstRuntime) {
+        switchRuntimeEndpoint({ apiBaseUrl: 'https://recheck-a.example', runtimeKey: 'recheck-a' });
+      }
+      const callsAfterSwitch = listAgentsCalls;
+      // Wait beyond the delayed startup recheck. It must neither start a
+      // location on the new runtime nor seed that runtime's directory catalog.
+      await new Promise((resolve) => setTimeout(resolve, 8_100));
+      expect(listAgentsCalls).toBe(callsAfterSwitch);
+      expect(useConfigStore.getState().directoryScoped).toEqual({});
+    }, 12_000);
+  }
+
   test('an A to B to A switch still rejects the first A completion', async () => {
     const pending = deferred<TestProviderResponse>();
     switchRuntimeEndpoint({ apiBaseUrl: 'https://roundtrip-a.example', runtimeKey: 'roundtrip-a' });
@@ -2001,6 +2389,36 @@ describe('useConfigStore provider persistence', () => {
 
     expect(calls).toBe(2);
     expect(useConfigStore.getState().providers.map((entry) => entry.id)).toEqual(['plugin']);
+  });
+
+  test('fresh provider and agent triggers during a fresh read share a post-call replacement', async () => {
+    const providers = deferred<TestProviderResponse>();
+    const agents = deferred<TestAgent[]>();
+    const newProviders = deferred<TestProviderResponse>();
+    const newAgents = deferred<TestAgent[]>();
+    let providerReads = 0;
+    let agentReads = 0;
+    getProvidersForConfigImpl = () => ++providerReads === 1 ? providers.promise : newProviders.promise;
+    listAgentsImpl = () => ++agentReads === 1 ? agents.promise : newAgents.promise;
+    const providerBefore = getProvidersCalls;
+    const agentBefore = listAgentsCalls;
+    const triggers = Array.from({ length: 8 }, () => [
+      useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true }),
+      useConfigStore.getState().loadAgents({ directory: DIRECTORY, fresh: true }),
+    ]).flat();
+    providers.resolve(providerResponse('old'));
+    agents.resolve([{ name: 'build', mode: 'primary' }]);
+    await Promise.all(triggers.slice(0, 2));
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    expect(getProvidersCalls - providerBefore).toBe(2);
+    expect(listAgentsCalls - agentBefore).toBe(2);
+    newProviders.resolve(providerResponse('live'));
+    newAgents.resolve([{ name: 'new-build', mode: 'primary' }]);
+    await Promise.all(triggers);
+    expect(getProvidersCalls - providerBefore).toBe(2);
+    expect(listAgentsCalls - agentBefore).toBe(2);
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.providers[0]?.id).toBe('live');
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.agents[0]?.name).toBe('new-build');
   });
 
   test('a directory whose providers never loaded is read once more on its own', async () => {
@@ -2088,6 +2506,96 @@ describe('useConfigStore provider persistence', () => {
     expect(catalogIds()).toEqual(['builtin', 'plugin']);
   });
 
+  test('a configuration reload retires a pre-reload provider read and keeps the loaded snapshot', async () => {
+    const other = OTHER_DIRECTORY;
+    liveProviderIdsByDirectory.set(DIRECTORY, 'active-catalog');
+    liveProviderIdsByDirectory.set(other, 'other-old');
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadProviders({ directory: other });
+    const revision = useConfigStore.getState().catalogReloadRevision;
+
+    const slowRead = deferred<TestProviderResponse>();
+    let reads = 0;
+    getProvidersForConfigImpl = async () => {
+      reads += 1;
+      return reads === 1 ? slowRead.promise : providerResponse('other-new');
+    };
+    const staleLoad = useConfigStore.getState().loadProviders({ directory: other });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    invalidateConfigCatalogsForReload(['provider', 'agent']);
+    slowRead.resolve(providerResponse('other-stale'));
+    await staleLoad;
+
+    expect(selectProvidersForDirectory(useConfigStore.getState(), other).map((entry) => entry.id)).toEqual(['other-old']);
+    expect(useConfigStore.getState().catalogReloadRevision).toBeGreaterThan(revision);
+
+    await useConfigStore.getState().loadProviders({ directory: other });
+    expect(selectProvidersForDirectory(useConfigStore.getState(), other).map((entry) => entry.id)).toEqual(['other-new']);
+  });
+
+  test('a configuration reload retires an agent read that began before it', async () => {
+    const slowRead = deferred<TestAgent[]>();
+    let reads = 0;
+    listAgentsImpl = async () => {
+      reads += 1;
+      return reads === 1 ? slowRead.promise : [testAgent('new-agent')];
+    };
+    const staleLoad = useConfigStore.getState().loadAgents({ directory: OTHER_DIRECTORY });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    invalidateConfigCatalogsForReload(['agent']);
+    slowRead.resolve([testAgent('stale-agent')]);
+
+    expect(await staleLoad).toBe(false);
+    expect(selectConfigAgentsForDirectory(useConfigStore.getState(), OTHER_DIRECTORY)).toEqual([]);
+
+    await useConfigStore.getState().loadAgents({ directory: OTHER_DIRECTORY });
+    expect(selectConfigAgentsForDirectory(useConfigStore.getState(), OTHER_DIRECTORY).map((entry) => entry.name)).toEqual(['new-agent']);
+  });
+
+  test('a configuration reload gives a joined agent read its replacement list', async () => {
+    const slowRead = deferred<TestAgent[]>();
+    let reads = 0;
+    listAgentsImpl = async () => {
+      reads += 1;
+      return reads === 1 ? slowRead.promise : [testAgent('new-agent')];
+    };
+    const ownerLoad = useConfigStore.getState().loadAgents({ directory: OTHER_DIRECTORY });
+    const joinedLoad = useConfigStore.getState().loadAgents({ directory: OTHER_DIRECTORY });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    invalidateConfigCatalogsForReload(['agent']);
+    slowRead.resolve([testAgent('stale-agent')]);
+
+    expect(await ownerLoad).toBe(false);
+    expect(await joinedLoad).toBe(true);
+    expect(reads).toBe(2);
+    expect(selectConfigAgentsForDirectory(useConfigStore.getState(), OTHER_DIRECTORY).map((entry) => entry.name)).toEqual(['new-agent']);
+  });
+
+  test('a configuration reload followed by a runtime switch starts no replacement agent read', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://reload-a.example', runtimeKey: 'reload-a' });
+    const slowRead = deferred<TestAgent[]>();
+    let reads = 0;
+    listAgentsImpl = async () => {
+      reads += 1;
+      return reads === 1 ? slowRead.promise : [testAgent('replacement-agent')];
+    };
+    const ownerLoad = useConfigStore.getState().loadAgents({ directory: OTHER_DIRECTORY });
+    const joinedLoad = useConfigStore.getState().loadAgents({ directory: OTHER_DIRECTORY });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    invalidateConfigCatalogsForReload(['agent']);
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://reload-b.example', runtimeKey: 'reload-b' });
+    slowRead.resolve([testAgent('runtime-a-agent')]);
+
+    expect(await ownerLoad).toBe(false);
+    expect(await joinedLoad).toBe(false);
+    expect(reads).toBe(1);
+    expect(selectConfigAgentsForDirectory(useConfigStore.getState(), OTHER_DIRECTORY)).toEqual([]);
+  });
+
   test('what other catalogs know fills in for a directory still starting', async () => {
     const worktree = '/workspace/known-catalog-worktree';
     liveAgents = [testAgent('build')];
@@ -2120,7 +2628,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers).toEqual([]);
   });
 
-  test('keeps a saved default model while a sidecar temporarily omits it', async () => {
+  test('a saved default the live catalog no longer lists gives way without being cleared', async () => {
     liveAgents = [testAgent('build')];
     liveProviderId = 'sidecar';
     persistedOpenChamberSettings = { defaultModel: 'sidecar/default' };
@@ -2130,7 +2638,86 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().settingsDefaultModel).toBe('sidecar/default');
     expect(useConfigStore.getState().currentProviderId).toBe('sidecar');
-    expect(useConfigStore.getState().currentModelId).toBe('default');
+    expect(useConfigStore.getState().currentModelId).toBe('sidecar-model');
+  });
+
+  test('a live catalog without the project default selects the global default (provider removed)', async () => {
+    liveAgents = [testAgent('build')];
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'removed/chosen', defaultVariant: 'high' };
+    persistedOpenChamberSettings = { defaultModel: 'global/global-model', defaultVariant: 'low' };
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('global'), providerInfo('opencode')],
+      models: [model('global', 'global-model', ['low', 'high']), model('opencode', 'big-pickle')],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'global', currentModelId: 'global-model', currentVariant: 'low' });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'global', currentModelId: 'global-model', currentVariant: 'low' });
+    // The project keeps its setting: reconnecting the provider brings it back.
+    expect(projectsState.projects[0]?.defaultModel).toBe('removed/chosen');
+  });
+
+  test('a draft on the project default moves to the global default when a re-read drops its provider', async () => {
+    liveAgents = [testAgent('build')];
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'project/chosen' };
+    persistedOpenChamberSettings = { defaultModel: 'global/global-model' };
+    const withProject = {
+      providers: [providerInfo('project'), providerInfo('global')],
+      models: [model('project', 'chosen'), model('global', 'global-model')],
+      default: { providerID: 'global', id: 'global-model' },
+    };
+    getProvidersForConfigImpl = async () => withProject;
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'project', currentModelId: 'chosen' });
+
+    getProvidersForConfigImpl = async () => providerResponse('global', 'global-model');
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'global', currentModelId: 'global-model' });
+  });
+
+  test('a re-read that drops the project default falls to the agent pin when no global default runs', async () => {
+    liveAgents = [testAgent('build', { model: { providerID: 'agent', modelID: 'pinned' } })];
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'project/chosen' };
+    const catalog = (withProject: boolean) => ({
+      providers: [...(withProject ? [providerInfo('project')] : []), providerInfo('agent'), providerInfo('opencode')],
+      models: [...(withProject ? [model('project', 'chosen')] : []), model('agent', 'pinned'), model('opencode', 'big-pickle')],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
+    getProvidersForConfigImpl = async () => catalog(true);
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'project', currentModelId: 'chosen' });
+
+    getProvidersForConfigImpl = async () => catalog(false);
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'agent', currentModelId: 'pinned' });
+  });
+
+  test('with neither configured default in the live catalog the last chat pick and fallback skip missing models too', async () => {
+    liveAgents = [testAgent('build')];
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'removed/chosen' };
+    persistedOpenChamberSettings = { defaultModel: 'removed/global' };
+    useUIStore.getState().setLastSelectedModel('removed', 'picked');
+    getProvidersForConfigImpl = async () => providerResponse('opencode', 'big-pickle');
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
+  });
+
+  test('an empty live catalog keeps the configured default', async () => {
+    liveAgents = [testAgent('build')];
+    persistedOpenChamberSettings = { defaultModel: 'sidecar/chosen' };
+    getProvidersForConfigImpl = async () => ({ ...providerResponse('opencode', 'big-pickle'), providers: [], models: [] });
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'chosen' });
   });
 
   test('a fresh draft keeps its configured identity and thinking before discovery and after return', async () => {
@@ -2144,13 +2731,10 @@ describe('useConfigStore provider persistence', () => {
     });
     persistedOpenChamberSettings = { defaultModel: 'sidecar/chosen', defaultVariant: 'high', defaultAgent: 'build' };
     liveAgents = [testAgent('build')];
-    getProvidersForConfigImpl = async () => (providerResponse('opencode', 'big-pickle'));
+    getProvidersForConfigImpl = async () => (providerResponse('sidecar', 'chosen', ['high']));
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
     useConfigStore.getState().applyDefaultModelAgentSelection();
-    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'chosen', currentVariant: 'high' });
-    getProvidersForConfigImpl = async () => (providerResponse('sidecar', 'chosen', ['high']));
-    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'chosen', currentVariant: 'high' });
     expect(useConfigStore.getState().getCurrentModel()?.modelID).toBe('chosen');
   });
@@ -2178,18 +2762,13 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentVariantSelection.override).toBe('low');
   });
 
-  for (const [stored, expected] of [[undefined, true], [false, false], [true, true]] as const) {
-    test(`Auto-create worktree is ${expected ? 'on' : 'off'} when the settings document ${stored === undefined ? 'never set it' : `stores ${stored}`}`, async () => {
-      persistedOpenChamberSettings = stored === undefined ? {} : { autoCreateWorktree: stored };
-      useConfigStore.setState({ settingsAutoCreateWorktree: !expected });
-      await useConfigStore.getState().loadSessionDefaults();
-      expect(useConfigStore.getState().settingsAutoCreateWorktree).toBe(expected);
-    });
-  }
-
   test('does not choose Big Pickle while settings are still loading', async () => {
     useConfigStore.setState({ settingsDefaultsLoaded: false });
-    getProvidersForConfigImpl = async () => (providerResponse('opencode', 'big-pickle'));
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('opencode'), providerInfo('sidecar')],
+      models: [model('opencode', 'big-pickle'), model('sidecar', 'chosen')],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     useConfigStore.getState().applyDefaultModelAgentSelection();
     expect(useConfigStore.getState().currentModelId).toBe('');
@@ -2536,6 +3115,7 @@ describe('useConfigStore provider persistence', () => {
         { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
       ],
     };
+    useProjectsStore.setState(projectsState);
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       providers: [provider('openai', 'gpt-5.5')],
@@ -2780,6 +3360,7 @@ describe('useConfigStore provider persistence', () => {
         { id: 'other', path: OTHER_DIRECTORY, label: 'Other' },
       ],
     };
+    useProjectsStore.setState(projectsState);
     liveAgents = [testAgent('build'), testAgent('plan')];
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
@@ -2858,7 +3439,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('in-flight loadAgents does not restore pre-await sync config defaults after a clearing event', async () => {
     const pendingAgents = deferred<TestAgent[]>();
-    const syncConfigs = new Map<string, TestSyncConfig>([
+    const syncConfigs = new Map<string, Record<string, unknown>>([
       [DIRECTORY, { default_agent: 'review', model: 'openai/gpt-5.5' }],
     ]);
     setSyncRefs(
@@ -3061,7 +3642,7 @@ describe('useConfigStore provider persistence', () => {
       },
     });
 
-    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    const persisted = JSON.parse(persistedConfig());
     expect(persisted.state.providers).toBeUndefined();
     expect(persisted.state.agents).toBeUndefined();
     for (const directory of [DIRECTORY, OTHER_DIRECTORY]) {
@@ -3083,12 +3664,12 @@ describe('useConfigStore provider persistence', () => {
   test('persisted config is written as version 1', () => {
     useConfigStore.setState({ activeDirectoryKey: DIRECTORY, currentModelId: 'live-model' });
 
-    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    const persisted = JSON.parse(persistedConfig());
     expect(persisted.version).toBe(1);
   });
 
   test('a persisted snapshot without catalogs hydrates its selections and empty catalogs', async () => {
-    storage.set(STORAGE_KEY, JSON.stringify({
+    seedConfig(JSON.stringify({
       state: {
         configRuntimeKey: getRuntimeKey(),
         activeDirectoryKey: DIRECTORY,
@@ -3144,10 +3725,13 @@ describe('useConfigStore provider persistence', () => {
     });
 
     class CountingMap extends Map<string, string> {
-      configWrites = 0;
+      private writes = 0;
+
+      get configWrites() { flushDeferredStorage(); return this.writes; }
+      set configWrites(value: number) { flushDeferredStorage(); this.writes = value; }
 
       override set(key: string, value: string) {
-        if (key === STORAGE_KEY) this.configWrites += 1;
+        if (key === STORAGE_KEY) this.writes += 1;
         return super.set(key, value);
       }
     }
@@ -3177,6 +3761,7 @@ describe('useConfigStore provider persistence', () => {
           },
         },
       });
+      flushDeferredStorage();
       const counting = new CountingMap(storage);
       storage = counting;
       return counting;
@@ -3278,10 +3863,10 @@ describe('useConfigStore provider persistence', () => {
     });
     useConfigStore.getState().setModel('live-model');
     useConfigStore.getState().setAgent('build');
-    const written = storage.get(STORAGE_KEY) ?? '';
+    const written = persistedConfig();
     // Clearing the store writes too, so the saved blob is put back before rehydrating.
     useConfigStore.setState({ directoryScoped: {}, providers: [], agents: [], currentModelId: '', currentAgentName: undefined });
-    storage.set(STORAGE_KEY, written);
+    seedConfig(written);
 
     await useConfigStore.persist.rehydrate();
 
@@ -3293,17 +3878,320 @@ describe('useConfigStore provider persistence', () => {
     expect(selectCatalogLoadedForDirectory(hydrated, 'models', OTHER_DIRECTORY)).toBe(false);
     expect(selectCatalogLoadedForDirectory(hydrated, 'agents', OTHER_DIRECTORY)).toBe(false);
   });
+
+  describe('defaults of a directory that is not active', () => {
+    const worktree = `${OTHER_DIRECTORY}/.oc/worktrees/quiet-otter`;
+
+    beforeEach(() => {
+      // The composer of the active project holds a pick of its own.
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [provider('live', 'chosen')],
+        agents: [testAgent('build'), testAgent('review')],
+        currentProviderId: 'live',
+        currentModelId: 'chosen',
+        currentAgentName: 'review',
+        selectionSource: 'manual',
+        agentSelectionSource: 'manual',
+      });
+      liveProviderIdsByDirectory.set(worktree, 'wt');
+      listAgentsImpl = async (directory) => (directory === worktree
+        ? [{ name: 'build', mode: 'primary' }, { name: 'plan', mode: 'primary' }]
+        : [{ name: 'build', mode: 'primary' }, { name: 'review', mode: 'primary' }]);
+    });
+
+    test('come from that directory and leave the composer pick alone', async () => {
+      configByDirectory.set(worktree, { default_agent: 'plan' });
+      projectsState.projects[1] = { ...projectsState.projects[1], defaultModel: 'wt/wt-model' };
+
+      const resolved = await useConfigStore.getState().resolveDirectoryDefaultSelection(worktree);
+
+      expect(resolved).toEqual({ agentName: 'plan', providerId: 'wt', modelId: 'wt-model', variant: undefined });
+      const state = useConfigStore.getState();
+      expect(state.activeDirectoryKey).toBe(DIRECTORY);
+      expect([state.currentProviderId, state.currentModelId, state.currentAgentName]).toEqual(['live', 'chosen', 'review']);
+    });
+
+    test('give a model the effort that directory\'s project configures for it', () => {
+      projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'shared/model', defaultVariant: 'high' };
+      projectsState.projects[1] = { ...projectsState.projects[1], defaultModel: 'shared/model', defaultVariant: 'low' };
+
+      const state = useConfigStore.getState();
+      expect(state.getDefaultVariantForModel('shared', 'model')).toBe('high');
+      expect(state.getDefaultVariantForModel('shared', 'model', worktree)).toBe('low');
+    });
+
+    test('leave the agent to OpenCode when the directory names none it can read', async () => {
+      listAgentsImpl = async () => [];
+
+      const resolved = await useConfigStore.getState().resolveDirectoryDefaultSelection(worktree);
+
+      expect(resolved).toEqual({ agentName: undefined, providerId: 'wt', modelId: 'wt-model', variant: undefined });
+    });
+
+    test('answer nothing once the runtime changed', async () => {
+      const agents = deferred<TestAgent[]>();
+      listAgentsImpl = () => agents.promise;
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://defaults-a.example', runtimeKey: 'defaults-a' });
+
+      const resolving = useConfigStore.getState().resolveDirectoryDefaultSelection(worktree);
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://defaults-b.example', runtimeKey: 'defaults-b' });
+      agents.resolve([{ name: 'plan', mode: 'primary' }]);
+
+      expect(await resolving).toBeNull();
+    });
+  });
+
+  describe('Chats defaults', () => {
+    const CHAT_DIR = '/workspace/.config/openchamber/chats/2026-11-18/session-a';
+
+    beforeEach(async () => {
+      const { ensureChatsRootDirectory } = await import('@/lib/chatDirectories');
+      await ensureChatsRootDirectory();
+      useConfigStore.setState({ chatsDefaultModel: undefined, chatsDefaultVariant: undefined, chatsDefaultAgent: undefined });
+    });
+
+    test('a chat folder starts on the Chats defaults, and a project folder still on its own', () => {
+      projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'live/live-model', defaultAgent: 'build' };
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low']), provider('live')],
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultModel: 'live/live-model',
+        settingsDefaultAgent: 'build',
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultVariant: 'high',
+        chatsDefaultAgent: 'plan',
+      });
+
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'chat', currentModelId: 'chat-model', currentVariant: 'high', currentAgentName: 'plan' });
+
+      useConfigStore.setState({ activeDirectoryKey: DIRECTORY });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'live', currentModelId: 'live-model', currentAgentName: 'build' });
+    });
+
+    test('a Chats root inside a registered checkout never takes that project\'s defaults', () => {
+      projectsState.projects.push({ id: 'home', path: '/workspace', label: 'Home', defaultModel: 'live/live-model', defaultAgent: 'plan' });
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model'), provider('live')],
+        agents: [testAgent('build'), testAgent('plan'), testAgent('review')],
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultAgent: 'review',
+      });
+
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'review' });
+
+      useConfigStore.setState({ chatsDefaultModel: undefined, chatsDefaultAgent: undefined, settingsDefaultModel: 'chat/chat-model' });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'build' });
+    });
+
+    test('a Chats agent with no model anywhere survives a settings load over a global agent', async () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultAgent: 'build',
+        chatsDefaultAgent: 'plan',
+      });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState().currentAgentName).toBe('plan');
+
+      persistedOpenChamberSettings = { defaultAgent: 'build', chatsDefaultAgent: 'plan' };
+      await useConfigStore.getState().loadSessionDefaults();
+
+      expect(useConfigStore.getState().currentAgentName).toBe('plan');
+    });
+
+    test('a chat folder that is not active reads the Chats thinking level and defaults', async () => {
+      persistedOpenChamberSettings = { defaultModel: 'chat/global-model', defaultVariant: 'low', defaultAgent: 'build', chatsDefaultModel: 'chat/chat-model', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan' };
+      await useConfigStore.getState().loadSessionDefaults();
+      getProvidersForConfigImpl = async () => ({
+        providers: [providerInfo('chat')],
+        models: [model('chat', 'chat-model', ['high', 'low']), model('chat', 'global-model')],
+        default: { providerID: 'chat', id: 'global-model' },
+      });
+      listAgentsImpl = async () => [testAgent('build'), testAgent('plan')];
+
+      expect(useConfigStore.getState().getDefaultVariantForModel('chat', 'chat-model', CHAT_DIR)).toBe('high');
+      expect(await useConfigStore.getState().resolveDirectoryDefaultSelection(CHAT_DIR))
+        .toEqual({ agentName: 'plan', providerId: 'chat', modelId: 'chat-model', variant: 'high' });
+    });
+
+    test('switching to an agent with no model of its own keeps the scope default model over the global one', () => {
+      projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'project/project-model' };
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model'), provider('live'), provider('project', 'project-model')],
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultModel: 'live/live-model',
+        chatsDefaultModel: 'chat/chat-model',
+      });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      useConfigStore.getState().setAgent('plan');
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan' });
+
+      useConfigStore.setState({ activeDirectoryKey: DIRECTORY, currentAgentName: 'build', agentSelectionSource: 'auto' });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      useConfigStore.getState().setAgent('plan');
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'project-model', currentAgentName: 'plan' });
+    });
+
+    test('switching agents in an existing session still falls back to the New sessions model', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model'), provider('live')],
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultModel: 'live/live-model',
+        chatsDefaultModel: 'chat/chat-model',
+        currentAgentName: 'build',
+        agentSelectionSource: 'auto',
+        selectionSource: 'auto',
+      });
+      useSessionUIStore.setState({ currentSessionId: 'ses_existing_chat' });
+      try {
+        useConfigStore.getState().setAgent('plan');
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'live-model', currentAgentName: 'plan' });
+      } finally {
+        useSessionUIStore.setState({ currentSessionId: null });
+      }
+    });
+
+    test('an empty Chats thinking level falls back to the New sessions one only for the same model', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low']), provider('live', 'live-model', ['high', 'low'])],
+        agents: [testAgent('build')],
+        settingsDefaultModel: 'chat/chat-model',
+        settingsDefaultVariant: 'low',
+        chatsDefaultModel: 'chat/chat-model',
+      });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentVariant: 'low' });
+
+      useConfigStore.setState({ settingsDefaultModel: 'live/live-model' });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentVariant: undefined });
+    });
+
+    test('switching agents keeps the New sessions thinking level an empty Chats level inherits', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low'])],
+        agents: [testAgent('build'), testAgent('plan')],
+        settingsDefaultModel: 'chat/chat-model',
+        settingsDefaultVariant: 'high',
+        chatsDefaultModel: 'chat/chat-model',
+      });
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentVariant: 'high' });
+      useConfigStore.getState().setAgent('plan');
+      expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan', currentVariant: 'high' });
+    });
+
+    test('a Chats thinking level change reaches a draft that picked the Chats model by hand', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low']), provider('live', 'live-model', ['high', 'low'])],
+        agents: [testAgent('build')],
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultVariant: 'high',
+      });
+      const draftBefore = useSessionUIStore.getState().newSessionDraft;
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+      try {
+        useConfigStore.getState().applyDefaultModelAgentSelection();
+        useConfigStore.getState().setProvider('live');
+        useConfigStore.getState().setProvider('chat');
+        useConfigStore.getState().setModel('chat-model');
+        useConfigStore.getState().setChatsDefaultVariant('low');
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', selectionSource: 'manual', currentVariant: 'low' });
+
+        useConfigStore.getState().setCurrentVariantOverride('high', 'low');
+        useConfigStore.getState().setChatsDefaultVariant(undefined);
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentVariant: 'high' });
+      } finally {
+        useSessionUIStore.setState({ newSessionDraft: draftBefore });
+      }
+    });
+
+    test('a Chats default change keeps the model, agent and thinking level picked in an open chat draft', () => {
+      useConfigStore.setState({
+        activeDirectoryKey: CHAT_DIR,
+        providers: [provider('chat', 'chat-model', ['high', 'low']), provider('live', 'live-model', ['high', 'low'])],
+        agents: [testAgent('build'), testAgent('plan'), testAgent('review')],
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultAgent: 'build',
+      });
+      const draftBefore = useSessionUIStore.getState().newSessionDraft;
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+      try {
+        useConfigStore.getState().applyDefaultModelAgentSelection();
+        useConfigStore.getState().setAgent('plan', { keepModel: true });
+        useConfigStore.getState().setChatsDefaultAgent('review');
+        useConfigStore.getState().setChatsDefaultModel('live/live-model');
+        expect(useConfigStore.getState()).toMatchObject({ currentAgentName: 'plan', agentSelectionSource: 'manual', currentModelId: 'live-model', selectionSource: 'auto' });
+
+        useConfigStore.getState().setCurrentVariantOverride('high', undefined);
+        useConfigStore.getState().setChatsDefaultVariant('low');
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'live-model', currentVariant: 'high', currentAgentName: 'plan' });
+
+        useConfigStore.getState().setProvider('chat');
+        useConfigStore.getState().setModel('chat-model');
+        useConfigStore.getState().setChatsDefaultModel('live/live-model');
+        useConfigStore.getState().setChatsDefaultAgent('build');
+        const state = useConfigStore.getState();
+        expect(state).toMatchObject({ currentProviderId: 'chat', currentModelId: 'chat-model', selectionSource: 'manual', currentAgentName: 'plan' });
+        expect(state.directoryScoped[CHAT_DIR]).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan' });
+      } finally {
+        useSessionUIStore.setState({ newSessionDraft: draftBefore });
+      }
+    });
+
+    test('an open chat draft takes the Chats defaults before its folder is active, and follows a Chats edit', async () => {
+      projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'live/live-model', defaultAgent: 'build' };
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [provider('chat', 'chat-model'), provider('live')],
+        agents: [testAgent('build'), testAgent('plan')],
+        chatsDefaultModel: 'chat/chat-model',
+        chatsDefaultAgent: 'plan',
+      });
+      const draftBefore = useSessionUIStore.getState().newSessionDraft;
+      useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+      try {
+        useConfigStore.getState().applyDefaultModelAgentSelection();
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan' });
+
+        useConfigStore.getState().setChatsDefaultModel('live/live-model');
+        expect(useConfigStore.getState().currentModelId).toBe('live-model');
+
+        useConfigStore.setState({ activeDirectoryKey: '__global__', currentModelId: '', currentAgentName: 'build' });
+        persistedOpenChamberSettings = { chatsDefaultModel: 'chat/chat-model', chatsDefaultAgent: 'plan' };
+        useConfigStore.getState().setSettingsDefaultModel(undefined);
+        await useConfigStore.getState().loadSessionDefaults();
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'chat-model', currentAgentName: 'plan' });
+
+        useSessionUIStore.setState({ newSessionDraft: { ...draftBefore, open: true, target: 'project' } });
+        useConfigStore.setState({ activeDirectoryKey: DIRECTORY });
+        useConfigStore.getState().applyDefaultModelAgentSelection();
+        useConfigStore.getState().setChatsDefaultModel('live/live-model');
+        expect(useConfigStore.getState()).toMatchObject({ currentModelId: 'live-model', currentAgentName: 'build', selectionSource: 'auto' });
+        useConfigStore.getState().setChatsDefaultModel('chat/chat-model');
+        expect(useConfigStore.getState().currentModelId).toBe('live-model');
+      } finally {
+        useSessionUIStore.setState({ newSessionDraft: draftBefore });
+      }
+    });
+  });
 });
 
 describe('ttsChunkedMode default', () => {
   test('defaults to disabled until the user enables it', () => {
     expect(useConfigStore.getState().ttsChunkedMode).toBe(false);
-  });
-});
-
-describe('Auto-create worktree default', () => {
-  test('starts on before the settings document loads', () => {
-    expect(useConfigStore.getInitialState().settingsAutoCreateWorktree).toBe(true);
   });
 });
 
@@ -3429,59 +4317,796 @@ describe('getModelMetadata limits', () => {
   });
 });
 
-describe('fetchModelsDevMetadata byte cap', () => {
-  const streamedCatalog = (chunks: string[], onPull?: () => void): Response => {
-    let index = 0;
-    const stream = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        onPull?.();
-        if (index >= chunks.length) {
-          controller.close();
-          return;
-        }
-        controller.enqueue(new TextEncoder().encode(chunks[index]));
-        index += 1;
-      },
+describe('getModelMetadata release dates', () => {
+  test('projects the runtime release date without a metadata catalog', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    live.models[0].time.released = 1790640000000;
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState()
+      .getModelMetadata('agent-openai', 'gpt-6.1-sol')?.release_date)
+      .toBe('2026-09-29');
+  });
+
+  const invalidReleaseTimes: ReadonlyArray<number | string | null | undefined> = [
+    undefined, null, 0, -1, NaN, Infinity, -Infinity,
+    '1790640000000', '', Number.MAX_VALUE, 253402300800000,
+  ];
+  for (const released of invalidReleaseTimes) {
+    test(`does not project invalid release time ${String(released)}`, () => {
+      const live = provider('custom', 'local');
+      Reflect.set(live.models[0].time, 'released', released);
+      useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+      expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+        .toBeUndefined();
     });
-    return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/json' } });
-  };
+  }
 
-  test('a streamed over-cap catalog body is refused during the read and both sources fall back to an empty map', async () => {
-    const originalFetch = globalThis.fetch;
-    const originalWarn = console.warn;
-    console.warn = () => {};
-    let pulls = 0;
-    const chunk = 'x'.repeat(9 * 1024 * 1024);
-    try {
-      expect(MODELS_DEV_CATALOG_MAX_BYTES).toBe(16 * 1024 * 1024);
-      // Two 9 MiB chunks cross the 16 MiB cap on each source. The
-      // bounded reader cancels there; a Response wrapper may prefetch
-      // one chunk ahead, but five chunks per source (10 pulls) would
-      // mean the bodies were consumed whole.
-      const fiveChunks = [chunk, chunk, chunk, chunk, chunk];
-      runtimeFetchImpl = async () => streamedCatalog(fiveChunks, () => { pulls += 1; });
-      globalThis.fetch = Object.assign(async () => streamedCatalog(fiveChunks, () => { pulls += 1; }), originalFetch);
+  test('does not project a release date when the runtime time object is missing', () => {
+    const live = provider('custom', 'local');
+    Reflect.deleteProperty(live.models[0], 'time');
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+      .toBeUndefined();
+  });
 
-      expect((await fetchModelsDevMetadata()).size).toBe(0);
-      expect(pulls).toBeLessThan(10);
-    } finally {
-      globalThis.fetch = originalFetch;
-      console.warn = originalWarn;
-      runtimeFetchImpl = null;
+  test('does not project a release date when the runtime released field is missing', () => {
+    const live = provider('custom', 'local');
+    Reflect.deleteProperty(live.models[0].time, 'released');
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+      .toBeUndefined();
+  });
+
+  test('projects a UTC midnight timestamp as that calendar day', () => {
+    const live = provider('custom', 'local');
+    live.models[0].time.released = 1704067200000;
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+      .toBe('2024-01-01');
+  });
+
+  test('projects a late UTC day as that calendar day', () => {
+    const live = provider('custom', 'local');
+    live.models[0].time.released = 1790726399999;
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+      .toBe('2026-09-29');
+  });
+
+  test('a valid runtime release date overrides an older exact catalog date when context is zero', () => {
+    const live = provider('openai', 'gpt-6-astra');
+    live.models[0].time.released = 1790640000000;
+    const cached = {
+      id: 'gpt-6-astra',
+      providerId: 'openai',
+      name: 'GPT-6 Astra',
+      tool_call: false,
+      attachment: true,
+      cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+      limit: { context: 32_000, output: 4_000 },
+      knowledge: '2025-08',
+      release_date: '2025-08-01',
+      last_updated: '2025-09-01',
+    };
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([['openai/gpt-6-astra', cached]]),
+    });
+
+    const metadata = useConfigStore.getState().getModelMetadata('openai', 'gpt-6-astra');
+
+    expect(metadata?.release_date).toBe('2026-09-29');
+    expect(metadata?.limit).toEqual({ context: 32_000, output: 4_000 });
+    expect(metadata?.cost).toEqual(cached.cost);
+    expect(metadata?.tool_call).toBe(false);
+    expect(metadata?.attachment).toBe(true);
+    expect(metadata?.knowledge).toBe('2025-08');
+    expect(metadata?.name).toBe('GPT-6 Astra');
+    expect(cached.release_date).toBe('2025-08-01');
+    expect(cached.limit).toEqual({ context: 32_000, output: 4_000 });
+  });
+
+  test('a valid runtime release date overrides an older exact catalog date when context is positive', () => {
+    const live = provider('openai', 'gpt-6-astra');
+    live.models[0].time.released = 1790640000000;
+    live.models[0].limit = { context: 400_000, output: 128_000 };
+    const cached = {
+      id: 'gpt-6-astra',
+      providerId: 'openai',
+      name: 'GPT-6 Astra',
+      tool_call: false,
+      attachment: true,
+      cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+      limit: { context: 1_050_000, output: 128_000 },
+      knowledge: '2025-08',
+      release_date: '2025-08-01',
+      last_updated: '2025-09-01',
+    };
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([['openai/gpt-6-astra', cached]]),
+    });
+
+    const metadata = useConfigStore.getState().getModelMetadata('openai', 'gpt-6-astra');
+
+    expect(metadata?.release_date).toBe('2026-09-29');
+    expect(metadata?.limit).toEqual({ context: 400_000, output: 128_000 });
+    expect(metadata?.cost).toEqual(cached.cost);
+    expect(metadata?.tool_call).toBe(false);
+    expect(metadata?.attachment).toBe(true);
+    expect(metadata?.knowledge).toBe('2025-08');
+    expect(metadata?.last_updated).toBe('2025-09-01');
+    expect(metadata?.name).toBe('GPT-6 Astra');
+    expect(cached.release_date).toBe('2025-08-01');
+    expect(cached.limit).toEqual({ context: 1_050_000, output: 128_000 });
+  });
+
+  test('an invalid runtime release time keeps the exact catalog date', () => {
+    const live = provider('openai', 'gpt-6-astra');
+    live.models[0].time.released = 0;
+    live.models[0].limit = { context: 400_000, output: 8_000 };
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([['openai/gpt-6-astra', {
+        id: 'gpt-6-astra',
+        providerId: 'openai',
+        name: 'GPT-6 Astra',
+        cost: { input: 3, output: 15 },
+        limit: { context: 1_050_000, output: 128_000 },
+        release_date: '2025-08-01',
+      }]]),
+    });
+
+    const metadata = useConfigStore.getState().getModelMetadata('openai', 'gpt-6-astra');
+
+    expect(metadata?.release_date).toBe('2025-08-01');
+    expect(metadata?.limit).toEqual({ context: 400_000, output: 8_000 });
+    expect(metadata?.cost).toEqual({ input: 3, output: 15 });
+  });
+
+  test('a missing runtime time keeps the exact catalog date', () => {
+    const live = provider('custom', 'local');
+    Reflect.deleteProperty(live.models[0], 'time');
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([['custom/local', {
+        id: 'local',
+        providerId: 'custom',
+        limit: { context: 32_000, output: 4_000 },
+        release_date: '2024-03-01',
+      }]]),
+    });
+
+    const metadata = useConfigStore.getState().getModelMetadata('custom', 'local');
+
+    expect(metadata?.release_date).toBe('2024-03-01');
+    expect(metadata?.limit).toEqual({ context: 32_000, output: 4_000 });
+  });
+
+  test('a missing runtime model keeps the exact catalog entry', () => {
+    const cached = {
+      id: 'local',
+      providerId: 'custom',
+      name: 'Local',
+      limit: { context: 32_000, output: 4_000 },
+      cost: { input: 1, output: 2 },
+      knowledge: '2024-01',
+      release_date: '2024-03-01',
+    };
+    useConfigStore.setState({
+      providers: [],
+      modelsMetadata: new Map([['custom/local', cached]]),
+    });
+
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')).toEqual(cached);
+  });
+});
+
+describe('getModelMetadata descriptive fallback', () => {
+  const catalogEntry = (
+    providerId: string,
+    fields: Partial<ModelMetadata> = {},
+  ): ModelMetadata => ({
+    id: 'different-entry-id',
+    providerId,
+    ...fields,
+  });
+
+  test('supplements a Fast alias using actual modelID without replacing gateway data', () => {
+    const standard = model('agent-openai', 'gpt-6.1-sol');
+    const fast = {
+      ...standard,
+      id: 'gpt-6.1-sol-fast',
+      canonical: 'openai',
+      name: 'Gateway Fast',
+      cost: [{ input: 9, output: 18, cache: { read: 0, write: 7 } }],
+      limit: { context: 123000, output: 5000 },
+      capabilities: { tools: false, input: ['text'], output: ['text'] },
+      time: { released: 1790640000000 },
+    };
+    const entry: ModelMetadata = {
+      id: 'gpt-6.1-sol', providerId: 'openai', name: 'Standard',
+      knowledge: '2026-04-30', release_date: '2026-01-01', last_updated: '2026-10-01',
+      cost: { input: 1, output: 2, cache_read: 3, cache_write: 4 },
+      limit: { context: 1000000, output: 100000 },
+      tool_call: true, attachment: true, reasoning: true, temperature: true,
+      structured_output: true, modalities: { input: ['text', 'image'], output: ['image'] },
+    };
+    useConfigStore.setState({
+      providers: [{ ...provider('agent-openai'), models: [standard, fast] }],
+      modelsMetadata: new Map([['openai/gpt-6.1-sol', entry]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', fast.id);
+    expect(result).toMatchObject({
+      id: 'gpt-6.1-sol', providerId: 'agent-openai', name: 'Gateway Fast',
+      knowledge: '2026-04-30', release_date: '2026-09-29', last_updated: '2026-10-01',
+      cost: { input: 9, output: 18, cache_read: 0, cache_write: 7 },
+      limit: fast.limit, tool_call: false, attachment: false,
+      modalities: { input: ['text'], output: ['text'] },
+    });
+    expect(result?.reasoning).toBeUndefined();
+    expect(result?.temperature).toBeUndefined();
+    expect(result?.structured_output).toBeUndefined();
+  });
+
+  test('uses provider canonical when the model has none', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{ ...live, canonical: 'openai' }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30', last_updated: '2026-10-01' }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.last_updated).toBe('2026-10-01');
+    expect(result?.providerId).toBe('agent-openai');
+    expect(result?.id).toBe('gpt-6.1-sol');
+  });
+
+  test('prefers model canonical over a conflicting provider canonical', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'other',
+        models: [{ ...live.models[0], canonical: 'openai' }],
+      }],
+      modelsMetadata: new Map([
+        ['openai/gpt-6.1-sol', catalogEntry('openai', { knowledge: 'from-model' })],
+        ['other/gpt-6.1-sol', catalogEntry('other', { knowledge: 'from-provider' })],
+      ]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBe('from-model');
+  });
+
+  test('does not search elsewhere when the explicit canonical entry is missing', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{ ...live.models[0], canonical: 'declared-missing' }],
+      }],
+      modelsMetadata: new Map([
+        ['openai/gpt-6.1-sol', catalogEntry('openai', { knowledge: 'from-elsewhere' })],
+      ]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBeUndefined();
+  });
+
+  test('matches a canonical provider id with surrounding whitespace', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{ ...live.models[0], canonical: '  OpenAI  ' }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBe('2026-04-30');
+  });
+
+  test('a blank canonical does not block a unique modelID match', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: '   ',
+        models: [{ ...live.models[0], canonical: '   ' }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBe('2026-04-30');
+  });
+
+  test('uses the canonical release date when runtime time is invalid', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{ ...live.models[0], canonical: 'openai', time: { released: 0 } }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '2026-04-30',
+          release_date: '2026-01-01',
+          last_updated: '2026-10-01',
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.release_date).toBe('2026-01-01');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.last_updated).toBe('2026-10-01');
+  });
+
+  test('an exact catalog entry wins over canonical metadata', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    const exact = {
+      id: 'gpt-6.1-sol',
+      providerId: 'agent-openai',
+      name: 'Exact custom',
+      knowledge: 'exact-knowledge',
+      release_date: '2020-01-01',
+      cost: { input: 4, output: 5, cache_read: 6, cache_write: 7 },
+      limit: { context: 32_000, output: 4_000 },
+    };
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{
+          ...live.models[0],
+          canonical: 'openai',
+          time: { released: 1790640000000 },
+          limit: { context: 0, output: 0 },
+        }],
+      }],
+      modelsMetadata: new Map<string, ModelMetadata>([
+        ['agent-openai/gpt-6.1-sol', exact],
+        ['openai/gpt-6.1-sol', catalogEntry('openai', {
+          name: 'Canonical',
+          knowledge: 'canonical-knowledge',
+          release_date: '2024-06-01',
+          cost: { input: 1, output: 2 },
+          limit: { context: 1_000_000, output: 100_000 },
+        })],
+      ]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('exact-knowledge');
+    expect(result?.name).toBe('Exact custom');
+    expect(result?.release_date).toBe('2026-09-29');
+    expect(result?.cost).toEqual(exact.cost);
+    expect(result?.limit).toEqual(exact.limit);
+    expect(exact.release_date).toBe('2020-01-01');
+  });
+
+  test('keeps explicit zero runtime prices when descriptive metadata matches', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{
+          ...live.models[0],
+          canonical: 'openai',
+          cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+        }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '2026-04-30',
+          cost: { input: 1, output: 2, cache_read: 3, cache_write: 4 },
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.cost).toEqual({ input: 0, output: 0, cache_read: 0, cache_write: 0 });
+  });
+
+  test('leaves runtime cost missing when the runtime cost list is empty', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{ ...live.models[0], canonical: 'openai', cost: [] }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '2026-04-30',
+          cost: { input: 1, output: 2, cache_read: 3, cache_write: 4 },
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.cost).toBeUndefined();
+  });
+
+  test('keeps explicit zero runtime limits from another provider catalog', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{
+          ...live.models[0],
+          canonical: 'openai',
+          limit: { context: 0, output: 0 },
+        }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '2026-04-30',
+          limit: { context: 1_000_000, output: 100_000 },
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.limit).toEqual({ context: 0, output: 0 });
+  });
+
+  const identityCases = [
+    { modelID: 'gpt-6.1-sol', keys: ['openai/gpt-6.1-sol'], matched: true },
+    { modelID: 'gpt-6.1-sol', keys: ['openai/gpt-6.1-sol', 'other/gpt-6.1-sol'], matched: false },
+    { modelID: 'gpt-6.1-sol-fast', keys: ['openai/gpt-6.1-sol'], matched: false },
+    { modelID: 'fast-gpt-6.1-sol', keys: ['openai/gpt-6.1-sol'], matched: false },
+    { modelID: 'GPT-6.1-SOL', keys: ['openai/gpt-6.1-sol'], matched: false },
+    { modelID: 'vendor/model', keys: ['gateway/vendor/model'], matched: true },
+    { modelID: 'model', keys: ['gateway/vendor/model'], matched: false },
+  ];
+
+  for (const { modelID, keys, matched } of identityCases) {
+    test(`uses complete modelID ${modelID} with ${keys.join(',')}`, () => {
+      const live = provider('agent-openai', modelID);
+      const entries = keys.map((key): [string, ModelMetadata] => [key, {
+        id: 'different-entry-id', providerId: key.slice(0, key.indexOf('/')),
+        knowledge: '2026-04-30',
+      }]);
+      useConfigStore.setState({ providers: [live], modelsMetadata: new Map(entries) });
+      expect(useConfigStore.getState().getModelMetadata('agent-openai', modelID)?.knowledge)
+        .toBe(matched ? '2026-04-30' : undefined);
+    });
+  }
+
+  test('keeps runtime identity when the catalog entry id differs', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    const gateway = {
+      ...live.models[0],
+      name: 'Gateway name',
+    };
+    useConfigStore.setState({
+      providers: [{ ...live, models: [gateway] }],
+      modelsMetadata: new Map([['openai/gpt-6.1-sol', {
+        id: 'different-entry-id',
+        providerId: 'openai',
+        name: 'Catalog name',
+        knowledge: '2026-04-30',
+        tool_call: false,
+        attachment: true,
+        reasoning: true,
+        temperature: true,
+        structured_output: true,
+        cost: { input: 8, output: 9, cache_read: 1, cache_write: 2 },
+        limit: { context: 999, output: 999 },
+        modalities: { input: ['text', 'image'], output: ['image'] },
+      }]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result).toMatchObject({
+      id: 'gpt-6.1-sol',
+      providerId: 'agent-openai',
+      name: 'Gateway name',
+      knowledge: '2026-04-30',
+      tool_call: true,
+      attachment: false,
+      modalities: { input: ['text'], output: ['text'] },
+    });
+    expect(result?.reasoning).toBeUndefined();
+    expect(result?.temperature).toBeUndefined();
+    expect(result?.structured_output).toBeUndefined();
+  });
+
+  test('does not match an unknown alias by display name or family', () => {
+    const live = provider('agent-openai', 'private-alias');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{
+          ...live.models[0],
+          name: 'GPT-6.1 Sol',
+          family: 'gpt-6.1-sol',
+        }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { name: 'GPT-6.1 Sol', knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'private-alias')?.knowledge)
+      .toBeUndefined();
+  });
+
+  test('treats duplicate model ids as unknown in either map order', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    const alpha = catalogEntry('alpha', { knowledge: '2026-04-30' });
+    const beta = catalogEntry('beta', { knowledge: '2026-04-30' });
+    for (const entries of [
+      [['alpha/gpt-6.1-sol', alpha], ['beta/gpt-6.1-sol', beta]],
+      [['beta/gpt-6.1-sol', beta], ['alpha/gpt-6.1-sol', alpha]],
+    ] as const) {
+      useConfigStore.setState({
+        providers: [live],
+        modelsMetadata: new Map(entries),
+      });
+      expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+        .toBeUndefined();
     }
   });
 
-  test('a representative streamed catalog body parses into the same metadata map as before', async () => {
-    const payload = JSON.stringify({
-      openai: { id: 'openai', models: { 'gpt-x': { id: 'gpt-x', name: 'GPT X' } } },
+  test('does not infer a cross-provider identity when the runtime model is missing', () => {
+    useConfigStore.setState({
+      providers: [],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
     });
-    runtimeFetchImpl = async () => streamedCatalog([payload.slice(0, 10), payload.slice(10)]);
-    try {
-      const metadata = await fetchModelsDevMetadata();
-      expect(metadata.size).toBe(1);
-      expect(metadata.get('openai/gpt-x')?.name).toBe('GPT X');
-    } finally {
-      runtimeFetchImpl = null;
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol'))
+      .toBeUndefined();
+  });
+
+  test('keeps an exact entry when the runtime model is missing', () => {
+    const exact = {
+      id: 'gpt-6.1-sol',
+      providerId: 'agent-openai',
+      name: 'Exact custom',
+      knowledge: 'exact-knowledge',
+      release_date: '2020-01-01',
+    };
+    useConfigStore.setState({
+      providers: [],
+      modelsMetadata: new Map<string, ModelMetadata>([
+        ['agent-openai/gpt-6.1-sol', exact],
+        ['openai/gpt-6.1-sol', catalogEntry('openai', { knowledge: 'canonical-knowledge' })],
+      ]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol'))
+      .toEqual(exact);
+  });
+
+  test('projects a runtime date and no borrowed fields from an empty catalog', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{
+          ...live.models[0],
+          canonical: 'openai',
+          time: { released: 1790640000000 },
+        }],
+      }],
+      modelsMetadata: new Map(),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.release_date).toBe('2026-09-29');
+    expect(result?.knowledge).toBeUndefined();
+    expect(result?.last_updated).toBeUndefined();
+  });
+
+  test('keeps present descriptive text and drops blank descriptive fields', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{ ...live.models[0], canonical: 'openai', time: { released: 0 } }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '  2026-04-30  ',
+          release_date: '   ',
+          last_updated: '',
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.release_date).toBeUndefined();
+    expect(result?.last_updated).toBeUndefined();
+  });
+
+  test('does not match when the runtime modelID is missing', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{
+          ...live.models[0],
+          id: 'gpt-6.1-sol',
+          modelID: '',
+          canonical: 'openai',
+          name: 'GPT-6.1 Sol',
+          family: 'gpt-6.1-sol',
+        }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBeUndefined();
+  });
+
+  test('does not parse a canonical value as a provider and model alias', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{ ...live.models[0], canonical: 'openai/gpt-6.1-sol' }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBeUndefined();
+  });
+
+  test('does not keep a previous match after the catalog becomes ambiguous or empty', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    const read = () => useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge;
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(read()).toBe('2026-04-30');
+
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([
+        ['other/gpt-6.1-sol', catalogEntry('other', { knowledge: '2026-05-01' })],
+        ['openai/gpt-6.1-sol', catalogEntry('openai', { knowledge: '2026-04-30' })],
+      ]),
+    });
+    expect(read()).toBeUndefined();
+
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(read()).toBeUndefined();
+  });
+
+  test('leaves runtime and catalog inputs unchanged and does not fetch', () => {
+    const exactModel = {
+      ...model('openai', 'gpt-6-astra'),
+      time: { released: 1790640000000 },
+      limit: { context: 400_000, output: 128_000 },
+    };
+    const exactProvider = { ...provider('openai', 'gpt-6-astra'), models: [exactModel] };
+    const exactEntry: ModelMetadata = {
+      id: 'gpt-6-astra',
+      providerId: 'openai',
+      name: 'GPT-6 Astra',
+      knowledge: '2025-08',
+      release_date: '2025-08-01',
+      last_updated: '2025-09-01',
+      cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+      limit: { context: 1_050_000, output: 128_000 },
+    };
+    const crossModel = {
+      ...model('agent-openai', 'gpt-6.1-sol'),
+      canonical: 'openai',
+      name: 'Gateway Fast',
+      time: { released: 1790640000000 },
+      cost: [{ input: 9, output: 18, cache: { read: 0, write: 7 } }],
+      limit: { context: 123_000, output: 5_000 },
+    };
+    const crossProvider = {
+      ...provider('agent-openai'),
+      canonical: 'other',
+      models: [crossModel],
+    };
+    const crossEntry = catalogEntry('openai', {
+      name: 'Standard',
+      knowledge: '2026-04-30',
+      release_date: '2026-01-01',
+      last_updated: '2026-10-01',
+      cost: { input: 1, output: 2, cache_read: 3, cache_write: 4 },
+      limit: { context: 1_000_000, output: 100_000 },
+    });
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    function recordingFetch(input: RequestInfo | URL): Promise<Response> {
+      calls.push(String(input));
+      return Promise.reject(new Error('metadata lookup must not fetch'));
     }
+    globalThis.fetch = recordingFetch;
+
+    try {
+      const exactEntryBefore = structuredClone(exactEntry);
+      const exactModelBefore = structuredClone(exactModel);
+      useConfigStore.setState({
+        providers: [exactProvider],
+        modelsMetadata: new Map([['openai/gpt-6-astra', exactEntry]]),
+      });
+      const exactResult = useConfigStore.getState().getModelMetadata('openai', 'gpt-6-astra');
+      expect(exactResult?.release_date).toBe('2026-09-29');
+      expect(exactResult?.knowledge).toBe('2025-08');
+      expect(exactResult?.limit).toEqual({ context: 400_000, output: 128_000 });
+      expect(exactEntry).toEqual(exactEntryBefore);
+      expect(exactModel).toEqual(exactModelBefore);
+
+      const crossEntryBefore = structuredClone(crossEntry);
+      const crossModelBefore = structuredClone(crossModel);
+      const crossProviderBefore = structuredClone(crossProvider);
+      useConfigStore.setState({
+        providers: [crossProvider],
+        modelsMetadata: new Map([['openai/gpt-6.1-sol', crossEntry]]),
+      });
+      const crossResult = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+      expect(crossResult?.knowledge).toBe('2026-04-30');
+      expect(crossResult?.release_date).toBe('2026-09-29');
+      expect(crossResult?.last_updated).toBe('2026-10-01');
+      expect(crossResult?.id).toBe('gpt-6.1-sol');
+      expect(crossResult?.providerId).toBe('agent-openai');
+      expect(crossResult?.name).toBe('Gateway Fast');
+      expect(crossResult?.cost).toEqual({ input: 9, output: 18, cache_read: 0, cache_write: 7 });
+      expect(crossEntry).toEqual(crossEntryBefore);
+      expect(crossModel).toEqual(crossModelBefore);
+      expect(crossProvider).toEqual(crossProviderBefore);
+      expect(calls).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('voice endpoint path settings', () => {
+  beforeEach(() => {
+    storage = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: makeStorage() });
+  });
+
+  test('defaults both endpoint paths to empty', () => {
+    expect(useConfigStore.getState().openaiCompatibleTtsEndpointPath).toBe('');
+    expect(useConfigStore.getState().sttEndpointPath).toBe('');
+  });
+
+  test('keeps the tts endpoint path in local storage', () => {
+    useConfigStore.getState().setOpenaiCompatibleTtsEndpointPath('/custom/speech');
+
+    expect(useConfigStore.getState().openaiCompatibleTtsEndpointPath).toBe('/custom/speech');
+    expect(localStorage.getItem('openaiCompatibleTtsEndpointPath')).toBe('/custom/speech');
+  });
+
+  test('keeps the stt endpoint path in local storage', () => {
+    useConfigStore.getState().setSttEndpointPath('/speech_to_text');
+
+    expect(useConfigStore.getState().sttEndpointPath).toBe('/speech_to_text');
+    expect(localStorage.getItem('sttEndpointPath')).toBe('/speech_to_text');
   });
 });

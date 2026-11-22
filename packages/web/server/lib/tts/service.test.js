@@ -1,8 +1,25 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { TTSService } from './service.js';
 import { transcribeAudio } from './stt.js';
+import * as credentials from '../opencode/auth.js';
+
+describe('legacy speech credential boundary', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(['legacy-key', { token: 'legacy-token' }, { access: 'legacy-access' }])('keeps accepting the legacy credential form %j', async (entry) => {
+    const previousKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      vi.spyOn(credentials, 'readOpenCodeCredentials').mockResolvedValue({ openai: entry });
+      expect(await new TTSService().isAvailable()).toBe(true);
+    } finally {
+      if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousKey;
+    }
+  });
+});
 
 describe('OpenAI audio SDK compatibility', () => {
   let server;
@@ -73,6 +90,34 @@ describe('OpenAI audio SDK compatibility', () => {
     });
 
     expect(result).toEqual({ buffer: audio, contentType: 'audio/mpeg' });
+  });
+
+  it('sends the custom speech endpoint path and keeps the request body', async () => {
+    const audio = Buffer.from('custom-path-response');
+    let received;
+    const baseURL = await listen(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      received = { url: request.url, method: request.method, body: JSON.parse(Buffer.concat(chunks).toString()) };
+      response.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      response.end(audio);
+    });
+
+    const result = await new TTSService().generateSpeechStream({
+      text: 'Hello', model: 'custom-tts', voice: 'coral', speed: 1, baseURL, endpointPath: 'custom/speech',
+    });
+
+    expect(received).toEqual({
+      url: '/v1/custom/speech', method: 'POST',
+      body: { input: 'Hello', model: 'custom-tts', voice: 'coral', speed: 1, response_format: 'mp3' },
+    });
+    expect(result).toEqual({ buffer: audio, contentType: 'audio/mpeg' });
+  });
+
+  it('refuses a custom endpoint path without a custom server URL', async () => {
+    await expect(new TTSService().generateSpeechStream({
+      text: 'Hello', apiKey: 'sk-test', endpointPath: '/custom/speech',
+    })).rejects.toThrow(/custom server URL/i);
   });
 
   it('uploads transcription audio as multipart data and reads the text', async () => {
@@ -234,5 +279,32 @@ describe('OpenAI audio SDK compatibility', () => {
       audioBuffer: Buffer.from('transcription-input'), mimeType: 'audio/webm',
       model: 'whisper-1', baseURL, timeoutMs: 250,
     })).rejects.toThrow('timed out');
+  });
+
+  it('sends the custom transcription endpoint path and keeps the multipart fields', async () => {
+    const audio = Buffer.from('transcription-input');
+    let received;
+    const baseURL = await listen(async (request, response) => {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const form = await new Response(Buffer.concat(chunks), {
+        headers: { 'Content-Type': request.headers['content-type'] },
+      }).formData();
+      received = {
+        url: request.url,
+        model: form.get('model'), language: form.get('language'), format: form.get('response_format'),
+      };
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ text: 'Custom path transcript' }));
+    });
+
+    const result = await transcribeAudio({
+      audioBuffer: audio, mimeType: 'audio/webm', model: 'whisper-1', language: 'en', baseURL, endpointPath: '/speech_to_text',
+    });
+
+    expect(received).toEqual({
+      url: '/v1/speech_to_text', model: 'whisper-1', language: 'en', format: 'json',
+    });
+    expect(result).toBe('Custom path transcript');
   });
 });

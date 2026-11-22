@@ -1,27 +1,34 @@
 import React from 'react';
-import type { FormField } from '@opencode/client';
+import type { FormField } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 
 import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { toast } from '@/components/ui';
 import type { FormRequest } from '@/lib/opencode/model';
+import type { RecoveredQuestion } from '@/sync/recoverable-questions';
+import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSessionSelection } from './chatColumnSession';
 import { useSubagentRequest } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
+import { agentUnavailableFrom, connectionLostMessage, isFormRequestNotFoundError } from '@/sync/form-request-error';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { dropFormDraft, formDraftScope, loadFormDraft, saveFormDraft } from './formDrafts';
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentCard } from './WebSearchConsent';
 import { answersFromFormValues, rememberPendingQuestionAnswers } from './questionAnswers';
 import { questionCallKey, questionFormCall } from '@/lib/opencode/question';
 import {
     type FormValues,
+    acknowledgeLinks,
     buildFormAnswer,
     initialFormValues,
+    isFieldAnswered,
     missingRequiredKeys,
     valueOf,
     visibleFields,
@@ -29,45 +36,50 @@ import {
 
 interface FormCardProps {
     form: FormRequest;
+    recovered?: RecoveredQuestion;
+    inChat?: boolean;
+    keepDraft?: boolean;
+    directory?: string;
 }
 
-/**
- * The inline card for a form request, used where a dock cannot float: the
- * BTW sheet renders its child session's forms with it. The main composer
- * shows forms in `FormDock` instead, one field at a time.
- *
- * A form request is a single blocking question with typed fields, so the card
- * renders every visible field at once and submits one answer. Fields gated by
- * a `when` clause appear and disappear as their controlling field changes.
- */
-export const FormCard: React.FC<FormCardProps> = ({ form }) => {
+export const FormCard: React.FC<FormCardProps> = ({ form, recovered, inChat, keepDraft, directory }) => {
     const webSearchConsent = readWebSearchConsent(form);
     if (webSearchConsent) return <WebSearchConsentCard form={form} consent={webSearchConsent} />;
-    return <GenericFormCard form={form} />;
+    return <GenericFormCard form={form} recovered={recovered} inChat={inChat} keepDraft={keepDraft} directory={directory} />;
 };
 
-const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
+const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered, inChat = false, keepDraft = false, directory }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
     const isFromSubagent = useSubagentRequest(form.sessionID, currentSessionId, currentSessionDirectory ?? undefined);
 
     const fields = form.fields;
-    // The card shows every field at once, so an external link is on screen
-    // from the start and its acknowledgement travels with the reply.
-    const [values, setValues] = React.useState<FormValues>(() => initialFormValues(fields, { acknowledgeExternal: true }));
+    const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
+    const recoveryDirectory = recovered?.directory;
+    const draftScope = React.useMemo(
+        () => (recoveryDirectory !== undefined || keepDraft || inChat ? formDraftScope(form, recoveryDirectory ?? directory) : null),
+        [directory, form, inChat, keepDraft, recoveryDirectory],
+    );
+    const [restored] = React.useState(() => {
+        const draft = draftScope ? loadFormDraft(draftScope) : null;
+        return draft?.fieldsSignature === fieldsSignature ? draft : null;
+    });
+    const [values, setValues] = React.useState<FormValues>(() => (
+        restored ? acknowledgeLinks(fields, restored.values) : initialFormValues(fields, { acknowledgeExternal: true })
+    ));
     const [isResponding, setIsResponding] = React.useState(false);
+    const respondingRef = React.useRef(false);
     const [hasResponded, setHasResponded] = React.useState(false);
     const [showErrors, setShowErrors] = React.useState(false);
 
-    // The store hands the card a fresh form object whenever the pending list
-    // is rebuilt (an event for another form, a bootstrap reconcile), so the
-    // fields array changes identity without changing content. Resetting on
-    // identity threw away half-filled answers; only a different form, or a
-    // form whose fields actually changed, starts over.
-    const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
+    const mountedIdentityRef = React.useRef<string | null>(null);
     React.useEffect(() => {
-        setValues(initialFormValues(fields, { acknowledgeExternal: true }));
+        const identity = `${form.id}\u0000${fieldsSignature}`;
+        if (mountedIdentityRef.current === identity) return;
+        const first = mountedIdentityRef.current === null;
+        mountedIdentityRef.current = identity;
+        if (!first) setValues(initialFormValues(fields, { acknowledgeExternal: true }));
         setHasResponded(false);
         setShowErrors(false);
         // oxlint-disable-next-line react-hooks/exhaustive-deps
@@ -81,41 +93,102 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
         rememberPendingQuestionAnswers(questionCallKey(questionCall), answersFromFormValues(fields, values));
     }, [fields, questionCall, values]);
 
+    const savedValuesRef = React.useRef<FormValues | null>(restored?.values ?? null);
+    React.useLayoutEffect(() => {
+        if (!draftScope) return;
+        const draft = loadFormDraft(draftScope);
+        if (!draft || draft.values === savedValuesRef.current || draft.fieldsSignature !== fieldsSignature) return;
+        savedValuesRef.current = draft.values;
+        setValues(acknowledgeLinks(fields, draft.values));
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+    }, [draftScope]);
+
+    React.useEffect(() => {
+        if (!draftScope) return;
+        const stored = loadFormDraft(draftScope);
+        saveFormDraft(draftScope, { fieldsSignature, values, step: stored?.fieldsSignature === fieldsSignature ? stored.step : 0 });
+        savedValuesRef.current = values;
+    }, [draftScope, fieldsSignature, values]);
+
     const shown = React.useMemo(() => visibleFields(fields, values), [fields, values]);
     const missing = React.useMemo(() => missingRequiredKeys(fields, values), [fields, values]);
     const canSubmit = missing.length === 0;
+    const allAnswered = React.useMemo(() => shown.every((field) => isFieldAnswered(field, values)), [shown, values]);
 
     const updateValue = React.useCallback((key: string, patch: Partial<FormValues[string]>) => {
         setValues((previous) => ({ ...previous, [key]: { ...valueOf(previous, key), ...patch } }));
     }, []);
 
     const handleSubmit = React.useCallback(async () => {
+        if (respondingRef.current) return;
         if (!canSubmit) {
             setShowErrors(true);
             return;
         }
+        if (inChat && !allAnswered) return;
+        respondingRef.current = true;
         setIsResponding(true);
         try {
-            await sessionActions.replyToForm(form.sessionID, form.id, buildFormAnswer(fields, values));
+            const answer = buildFormAnswer(fields, values);
+            if (recovered) {
+                await sessionActions.sendRecoveredFormAnswer(recovered, serializeFormAnswerAsMarkdown(form, answer));
+            } else {
+                await sessionActions.replyToForm(form.sessionID, form.id, answer);
+            }
+            if (draftScope) dropFormDraft(draftScope);
             setHasResponded(true);
-        } catch {
+        } catch (error) {
+            if (!recovered && isFormRequestNotFoundError(error)) {
+                if (draftScope) dropFormDraft(draftScope);
+                setHasResponded(true);
+                return;
+            }
+            const unavailableAgent = agentUnavailableFrom(error instanceof Error ? error : null);
+            if (unavailableAgent) {
+                toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
+                return;
+            }
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
+                return;
+            }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [canSubmit, fields, form.id, form.sessionID, t, values]);
+    }, [allAnswered, canSubmit, draftScope, fields, form, inChat, recovered, t, values]);
 
     const handleCancel = React.useCallback(async () => {
+        if (respondingRef.current) return;
+        respondingRef.current = true;
         setIsResponding(true);
         try {
-            await sessionActions.cancelForm(form.sessionID, form.id);
+            if (recovered) {
+                noteLocalFormCancelled(recovered.sessionID, recovered.form.id);
+            } else {
+                await sessionActions.cancelForm(form.sessionID, form.id);
+            }
+            if (draftScope) dropFormDraft(draftScope);
             setHasResponded(true);
-        } catch {
+        } catch (error) {
+            if (isFormRequestNotFoundError(error)) {
+                if (draftScope) dropFormDraft(draftScope);
+                setHasResponded(true);
+                return;
+            }
+            const connectionLost = connectionLostMessage(error instanceof Error ? error : null, t);
+            if (connectionLost) {
+                toast.error(connectionLost);
+                return;
+            }
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
         } finally {
+            respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [form.id, form.sessionID, t]);
+    }, [draftScope, form.id, form.sessionID, recovered, t]);
 
     const handleKeyDown = React.useCallback(
         (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -141,8 +214,6 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
         />
     );
 
-    // The question travels to other tools as Markdown (to read) or JSON (to
-    // feed a script); both leave the routing ids behind.
     const handleCopy = React.useCallback(async (format: 'markdown' | 'json') => {
         const text = format === 'markdown' ? serializeFormAsMarkdown(form) : serializeFormAsJson(form);
         const result = await copyTextToClipboard(text);
@@ -158,11 +229,11 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     return (
         <div className="group w-full pt-0 pb-2">
             <div className="chat-column">
-                <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
-                    <div className="px-2 py-1.5 border-b border-border/20">
+                <div className="-mt-1 border border-edge-muted rounded-xl bg-muted/10">
+                    <div className="px-2 py-1.5 border-b border-edge-muted">
                         <div className="flex items-center gap-2">
                             <Icon name="question" className="h-3.5 w-3.5 text-primary" />
-                            <span className="typography-meta font-medium text-foreground">
+                            <span dir="auto" className="typography-meta font-medium text-foreground">
                                 {form.title?.trim() || t('chat.formCard.inputNeeded')}
                             </span>
                             {isFromSubagent ? (
@@ -171,38 +242,46 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
                                 </span>
                             ) : null}
                             <div className="ms-auto flex items-center gap-0.5">
-                                <button
-                                    type="button"
-                                    onClick={() => void handleCopy('markdown')}
-                                    title={t('chat.questionCard.copyMarkdown')}
-                                    aria-label={t('chat.questionCard.copyMarkdown')}
-                                    className="rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
-                                >
-                                    <Icon name="file-text" className="h-3 w-3" />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => void handleCopy('json')}
-                                    title={t('chat.questionCard.copyJson')}
-                                    aria-label={t('chat.questionCard.copyJson')}
-                                    className="rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
-                                >
-                                    <Icon name="code" className="h-3 w-3" />
-                                </button>
+                                <HoverTooltip label={t('chat.questionCard.copyMarkdown')}>
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleCopy('markdown')}
+                                        aria-label={t('chat.questionCard.copyMarkdown')}
+                                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
+                                    >
+                                        <Icon name="file-text" className="h-3 w-3" />
+                                    </button>
+                                </HoverTooltip>
+                                <HoverTooltip label={t('chat.questionCard.copyJson')}>
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleCopy('json')}
+                                        aria-label={t('chat.questionCard.copyJson')}
+                                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
+                                    >
+                                        <Icon name="code" className="h-3 w-3" />
+                                    </button>
+                                </HoverTooltip>
                             </div>
                         </div>
                     </div>
 
+                    {recovered ? (
+                        <div className="typography-micro bg-[var(--status-warning-background)] px-2 py-1.5 text-[var(--status-warning-text)]">
+                            {t(recovered.evidence === 'deferred-on-send' ? 'chat.formCard.deferredNotice' : 'chat.formCard.recoveredNotice')}
+                        </div>
+                    ) : null}
+
                     <div className="px-2 py-2 space-y-1">{shown.map(renderField)}</div>
 
-                    <div className="px-2 pb-1.5 pt-1 flex items-center gap-1.5 border-t border-border/20">
+                    <div className="px-2 pb-1.5 pt-1 flex items-center gap-1.5 border-t border-edge-muted">
                         <button
                             type="button"
                             onClick={() => void handleSubmit()}
-                            disabled={isResponding}
+                            disabled={isResponding || (inChat && !allAnswered)}
                             className={cn(
                                 'flex items-center gap-1 px-2 py-1 typography-meta font-medium rounded transition-colors',
-                                'bg-[rgb(var(--status-success)/0.1)] text-[var(--status-success)] hover:bg-[rgb(var(--status-success)/0.2)]',
+                                'bg-[var(--status-success)]/10 text-[var(--status-success)] hover:bg-[var(--status-success)]/20',
                                 'disabled:opacity-50 disabled:cursor-not-allowed',
                             )}
                         >
@@ -216,7 +295,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
                             disabled={isResponding}
                             className={cn(
                                 'flex items-center gap-1 px-2 py-1 typography-meta font-medium rounded transition-colors',
-                                'bg-[rgb(var(--status-error)/0.1)] text-[var(--status-error)] hover:bg-[rgb(var(--status-error)/0.2)]',
+                                'bg-[var(--status-error)]/10 text-[var(--status-error)] hover:bg-[var(--status-error)]/20',
                                 'disabled:opacity-50 disabled:cursor-not-allowed',
                             )}
                         >

@@ -12,36 +12,27 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { useRepositoryHost } from '@/components/references/referenceSources';
 import { normalizePath } from '@/lib/pathNormalization';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { PullRequestSection } from './git/PullRequestSection';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
+import { GitRepositoryUnreadableState } from './git/GitRepositoryUnreadableState';
 import { NestedRepoPicker } from './git/NestedRepoPicker';
 import { deriveBaseBranch } from './git/baseBranch';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { useBranchPullRequestBase } from '@/hooks/useBranchComparisonBase';
 
-// Remotes rarely change; remembering the last fetched list per directory lets
-// a remount pick the same PR-status key immediately instead of flashing
-// through the remote-less "checking status" state while remotes reload.
-// Runtime-scoped so a backend switch never serves another runtime's remotes.
-/**
- * Standalone pull-request surface: resolves the same repository context
- * GitView does (branch, base branch, remotes) from the shared git stores and
- * renders the pull-request workflow full-size in the context panel.
- */
 export const PullRequestView: React.FC = () => {
   const { t } = useI18n();
   const { git, sourceControl } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
-  // When the root is not itself a repository, the pull-request workflow
-  // operates on the resolved nested repository instead.
-  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(currentDirectory ?? null);
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions, unreadable } = useNestedGitDirectory(currentDirectory ?? null, { recheckOnOpen: true });
   const status = useGitStatus(gitDirectory ?? null);
   const branches = useGitBranches(gitDirectory ?? null);
   const isGitRepo = useIsGitRepo(gitDirectory ?? null);
-  // The binding follows the repository actually in view.
   const binding = useRepositoryBinding(gitDirectory, sourceControl);
   const { ensureAll, ensureNestedRepos, selectNestedRepo } = useGitStore(useShallow((state) => ({
     ensureAll: state.ensureAll,
@@ -135,15 +126,12 @@ export const PullRequestView: React.FC = () => {
 
   const currentBranch = status?.current ?? null;
 
-  // A pull request opened against a branch that does not exist is worse than a
-  // broken walkthrough, so this surface reads the repository's default branch
-  // too rather than guessing at main/master/develop.
   const defaultBranch = React.useMemo(() => {
     const primaryRemote = binding.contexts[0]?.primaryRemote;
     return primaryRemote ? branches?.defaultBranches?.[primaryRemote] : undefined;
   }, [binding.contexts, branches]);
 
-  const baseBranch = React.useMemo(() => deriveBaseBranch({
+  const derivedBaseBranch = React.useMemo(() => deriveBaseBranch({
     remoteNames: new Set(binding.contexts[0]?.primaryRemote ? [binding.contexts[0].primaryRemote] : []),
     knownRemoteNames: new Set(binding.read?.repository.remotes.map((remote) => remote.name) ?? []),
     localBranches,
@@ -161,23 +149,24 @@ export const PullRequestView: React.FC = () => {
     rootBranchHint,
     worktreeMetadata?.createdFromBranch,
   ]);
+  const baseBranch = useBranchPullRequestBase(gitDirectory ?? null, currentBranch, true, binding, branches, derivedBaseBranch);
 
-  // Empty states name the host's own kind of change request.
-  const repositoryProvider = useRepositoryHost(currentDirectory ?? null)?.provider;
+  const changeRequestTerm = useChangeRequestTerm(useRepositoryHost(currentDirectory ?? null)?.provider);
 
   if (!currentDirectory) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Icon name="git-pull-request" className="h-12 w-12 text-muted-foreground/50" />
-        <div className="typography-ui-header text-foreground">{t(changeRequestCopy('gitView.pullRequest.title', repositoryProvider))}</div>
-        <div className="max-w-sm typography-micro text-muted-foreground">{t(changeRequestCopy('gitView.pullRequest.createHint', repositoryProvider))}</div>
+        <div className="typography-ui-header text-foreground">{t(changeRequestCopy('gitView.pullRequest.title', changeRequestTerm))}</div>
+        <div className="max-w-sm typography-micro text-muted-foreground">{t(changeRequestCopy('gitView.pullRequest.createHint', changeRequestTerm))}</div>
       </div>
     );
   }
 
-  // Non-repo root: surface nested-repository resolution while the operating
-  // directory has not proven to be a repository (discovering, failed,
-  // unsupported, none found, or settling on the auto-selected one).
+  if (unreadable) {
+    return <GitRepositoryUnreadableState directory={unreadable.directory} message={unreadable.message} />;
+  }
+
   if (rootIsGitRepo === false && isGitRepo !== true) {
     return (
       <NestedRepoResolutionStates
@@ -196,17 +185,16 @@ export const PullRequestView: React.FC = () => {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Icon name="git-pull-request" className="h-12 w-12 text-muted-foreground/50" />
-        <div className="typography-ui-header text-foreground">{t(changeRequestCopy('gitView.pullRequest.title', repositoryProvider))}</div>
-        <div className="max-w-sm typography-micro text-muted-foreground">{t(changeRequestCopy('gitView.pullRequest.createHint', repositoryProvider))}</div>
+        <div className="typography-ui-header text-foreground">{t(changeRequestCopy('gitView.pullRequest.title', changeRequestTerm))}</div>
+        <div className="max-w-sm typography-micro text-muted-foreground">{t(changeRequestCopy('gitView.pullRequest.createHint', changeRequestTerm))}</div>
       </div>
     );
   }
 
-  // Repository switcher; the pick is shared per root across git surfaces.
   return (
     <div className="flex h-full min-h-0 flex-col">
       {repositoryOptions ? (
-        <div className="flex shrink-0 items-center border-b border-border/60 px-4 py-2">
+        <div className="flex shrink-0 items-center border-b border-edge px-4 py-2">
           <NestedRepoPicker
             repositories={repositoryOptions}
             selectedRepository={gitDirectory ?? null}
@@ -220,7 +208,6 @@ export const PullRequestView: React.FC = () => {
       <ScrollableOverlay
         as={ScrollShadow}
         outerClassName="h-full min-h-0 flex-1"
-        // The section pads its own form; an open PR's preview fills the panel.
         className="h-full"
         disableHorizontal
         preventOverscroll

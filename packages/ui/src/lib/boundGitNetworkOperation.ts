@@ -5,6 +5,7 @@ import type {
   GitNetworkOperation,
   GitNetworkOperationPlan,
   GitNetworkOperationRequest,
+  GitPushReviewIntent,
   GitStatus,
   SourceControlAPI,
   SourceControlBindingRead,
@@ -32,6 +33,7 @@ export class BoundGitNetworkOperationError extends Error {
     | 'stale-runtime'
     | 'contributor-publish-cancelled'
     | 'contributor-publish-cancelled-after-update'
+    | 'review-option-invalid'
     | 'operation-unavailable'
     | 'operation-result'
     | 'operation-storage'
@@ -150,7 +152,6 @@ const executePlan = async (
       throw error;
     }
     read = { ...read, availability: 'unavailable' };
-    // An execute response can be lost after remote acceptance. Only read the original ID, never plan or execute again.
     if (runtimeKey() === capturedRuntime) {
       try { read = acceptOperation(read, await git.getNetworkOperation(plan.operationId), runtimeKey); } catch { /* Keep the operation reference as unavailable. */ }
     }
@@ -163,10 +164,6 @@ const executePlan = async (
   return read.operation;
 };
 
-// Changes and walkthrough refresh a published pull request diff on this signal.
-// The panel pushes through managed operations rather than the HTTP push adapter,
-// so the managed paths announce too, keeping that adapter's contract: only a
-// confirmed push, against the runtime captured before it started.
 const announcePush = (directory: string, capturedRuntime: string) => notifyGitPush(directory, capturedRuntime);
 
 const planOperation = async (
@@ -182,6 +179,7 @@ const planOperation = async (
 };
 
 export const runBoundRemoteBranchDelete = async ({
+  beforePlan,
   branch,
   directory,
   git,
@@ -189,6 +187,7 @@ export const runBoundRemoteBranchDelete = async ({
   runtimeKey = getRuntimeKey,
   sourceControl,
 }: {
+  beforePlan?: () => Promise<void>;
   branch: string;
   directory: string;
   git: Pick<GitAPI, 'planNetworkOperation' | 'executeNetworkOperation' | 'getNetworkOperation'>;
@@ -204,6 +203,10 @@ export const runBoundRemoteBranchDelete = async ({
   if (remote.mode === 'anonymous') fail('anonymous-read-only');
   const branchName = branch.trim().replace(/^refs\/heads\//, '');
   if (!branchName || branchName === 'HEAD') fail('branch-required');
+  if (beforePlan) {
+    await beforePlan();
+    requireCurrentRuntime(runtimeKey, capturedRuntime);
+  }
   const request: GitNetworkOperationRequest = {
     operation: 'delete-remote-branch',
     directory,
@@ -217,6 +220,61 @@ export const runBoundRemoteBranchDelete = async ({
   const plan = await planOperation(git, request, runtimeKey, capturedRuntime);
   requireCurrentRuntime(runtimeKey, capturedRuntime);
   const completion = await executePlan(git, plan, runtimeKey, capturedRuntime);
+  return completion;
+};
+
+const REVIEW_OPTION = /^[A-Za-z0-9._-]{1,128}$/;
+const isValidReviewOption = (value: string): boolean => REVIEW_OPTION.test(value);
+
+export const runBoundReviewPush = async ({
+  directory,
+  git,
+  sourceControl,
+  review,
+  runtimeKey = getRuntimeKey,
+  onOperation,
+}: BoundGitNetworkDependencies & {
+  directory: string;
+  git: Pick<GitAPI, 'getGitStatus' | 'planNetworkOperation' | 'executeNetworkOperation' | 'getNetworkOperation'>;
+  review: GitPushReviewIntent;
+}): Promise<GitNetworkOperation> => {
+  const target = review.target.trim().replace(/^refs\/heads\//, '');
+  if (!target || target === 'HEAD') fail('publish-target-required');
+  const hashtags = (review.hashtags ?? []).map((tag) => tag.replace(/^#/, '')).filter(Boolean);
+  if ((review.topic !== undefined && !isValidReviewOption(review.topic)) || !hashtags.every(isValidReviewOption)) {
+    fail('review-option-invalid');
+  }
+  const capturedRuntime = runtimeKey();
+  const [bindingRead, status] = await Promise.all([sourceControl.repositoryBinding(directory), git.getGitStatus(directory)]);
+  requireCurrentRuntime(runtimeKey, capturedRuntime);
+  const binding = effectiveRepositoryBinding(bindingRead);
+  const primaryRemote = binding.providers[0]?.primaryRemote;
+  if (!primaryRemote) fail('binding-required');
+  const remote = requireRemoteReady(bindingRead, primaryRemote ?? '');
+  if (remote.mode === 'anonymous') fail('anonymous-read-only');
+  const branch = status.current?.trim() ?? '';
+  if (!branch || branch === 'HEAD') fail('branch-required');
+  const intent: GitPushReviewIntent = { target };
+  if (review.topic) intent.topic = review.topic;
+  if (review.wip) intent.wip = true;
+  if (review.private) intent.private = true;
+  if (hashtags.length > 0) intent.hashtags = hashtags;
+  const request: GitNetworkOperationRequest = {
+    operation: 'push',
+    directory,
+    repositoryId: binding.repositoryId,
+    bindingRevision: binding.revision,
+    configRevision: bindingRead.repository.configRevision,
+    remote: { name: remote.name, endpoint: remote.push },
+    sourceRef: `refs/heads/${branch}`,
+    destinationRef: `refs/for/${target}`,
+    transportMode: remote.mode,
+    review: intent,
+  };
+  const plan = await planOperation(git, request, runtimeKey, capturedRuntime, onOperation);
+  requireCurrentRuntime(runtimeKey, capturedRuntime);
+  const completion = await executePlan(git, plan, runtimeKey, capturedRuntime, onOperation);
+  announcePush(directory, capturedRuntime);
   return completion;
 };
 
@@ -516,8 +574,6 @@ export const readGitPublishContext = async ({
 }): Promise<GitPublishContext> => {
   const runtime = runtimeKey();
   const [bindingRead, status, branches] = await Promise.all([
-    // Local refs only: publishing needs the checked-out branch and its commit,
-    // and asking every remote over the network made each push wait seconds.
     sourceControl.repositoryBinding(directory), git.getGitStatus(directory), git.getGitBranches(directory, { remote: 'local' }),
   ]);
   requireCurrentRuntime(runtimeKey, runtime);
@@ -838,11 +894,6 @@ export const runContributorAwarePush = async ({
   });
 };
 
-/**
- * What a finished sync did, for the message that reports it. The server marks
- * a step `skipped` when there was nothing for it to do: a pull that brought
- * nothing in, or a push of a commit the remote already held.
- */
 export type GitSyncOutcome =
   | { kind: 'up-to-date' }
   | { kind: 'pulled'; remoteName: string }

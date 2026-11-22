@@ -13,18 +13,8 @@ type ScrollSpyInput = {
     MutationObserver?: typeof globalThis.MutationObserver;
 };
 
-// Where the reading line sits in the viewport, as a share of its height. The
-// active turn is the last one whose top edge sits at or above this line — a
-// monotonic rule that stays stable while scrolling inside a long turn (no
-// visibility-ratio flip-flop). Half the viewport keeps the choice on the turn
-// the reader is actually looking at: the previous turn peeking in at the top
-// no longer holds the reading position once the turn below owns the larger
-// part of the screen. Lower it (0.4) to make a turn current sooner.
 const READ_LINE_VIEWPORT_FACTOR = 0.5;
 
-// The chat treats its bottom spacer as part of the pinned zone. Match that
-// boundary here so the rail reaches the final prompt even when its top never
-// crosses the reading line before the viewport enters that spacer.
 const BOTTOM_ANCHOR_MIN_PX = 48;
 const BOTTOM_ANCHOR_VIEWPORT_FACTOR = 0.1;
 
@@ -75,16 +65,13 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     let active: string | undefined;
     let dirty = true;
 
-    const nodes = new Map<string, HTMLElement>();
+    const nodes = new Map<HTMLElement, string>();
     let offsets: OffsetTurn[] = [];
 
     const schedule = () => {
         if (frame !== undefined) {
             return;
         }
-        // Reading every turn's offset forces a transcript layout; while a side
-        // column animates its width that would be one per frame. The active
-        // turn is read once the width settles.
         if (isLayoutAnimating()) {
             runWhenLayoutSettled(schedule);
             return;
@@ -104,8 +91,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         }
 
         const baseTop = container.getBoundingClientRect().top;
-        offsets = [...nodes].map(([key, element]) => ({
-            id: key,
+        offsets = [...nodes].map(([element, id]) => ({
+            id,
             top: element.getBoundingClientRect().top - baseTop + container.scrollTop,
         }));
         offsets.sort((a, b) => a.top - b.top);
@@ -155,7 +142,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
                 }, 100);
             });
             ro.observe(container);
-            for (const element of nodes.values()) {
+            for (const element of nodes.keys()) {
                 ro.observe(element);
             }
         }
@@ -192,13 +179,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         observe();
     };
 
-    const register = (element: HTMLElement, key: string) => {
-        const previous = nodes.get(key);
-        if (previous && previous !== element) {
-            ro?.unobserve(previous);
-        }
-
-        nodes.set(key, element);
+    const register = (element: HTMLElement, id: string) => {
+        nodes.set(element, id);
         if (ro) {
             ro.observe(element);
         }
@@ -206,14 +188,13 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         schedule();
     };
 
-    const unregister = (key: string) => {
-        const element = nodes.get(key);
-        if (!element) {
+    const unregister = (element: HTMLElement) => {
+        if (!nodes.has(element)) {
             return;
         }
 
         ro?.unobserve(element);
-        nodes.delete(key);
+        nodes.delete(element);
         dirty = true;
         schedule();
     };
@@ -224,7 +205,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     };
 
     const clear = () => {
-        for (const element of nodes.values()) {
+        for (const element of nodes.keys()) {
             ro?.unobserve(element);
         }
 

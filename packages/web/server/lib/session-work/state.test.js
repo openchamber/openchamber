@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearSuggestionPatch, openPatch, readWork, offerReviewPatch, suggestDonePatch } from './state.js';
+import { clearSuggestionPatch, openPatch, readWork, offerReviewPatch, suggestDonePatch, userStatePatch } from './state.js';
 
 const withWork = (work) => ({ openchamber: { goal: { id: 'g' }, work } });
 
@@ -15,6 +15,14 @@ describe('session work state', () => {
       openchamber: { work: { state: 'open', openedAt: 10, openedBy: 'auto', doneAt: null, suggestDoneAt: null } },
     });
     expect(openPatch(withWork({ state: 'open', openedAt: 1 }), { requestAt: 5, now: 10 })).toBeNull();
+  });
+
+  it('never opens a pinned session, and still closes one an older build left open', () => {
+    const pinned = { openchamber: { pinned: { at: 1, list: 'l1' } } };
+    expect(openPatch(pinned, { requestAt: 5, now: 10 })).toBeNull();
+    expect(userStatePatch(pinned, { state: 'open', now: 10 })).toBeNull();
+    expect(userStatePatch({ openchamber: { pinned: { at: 1 }, work: { state: 'open' } } }, { state: 'done', now: 10 }))
+      .toMatchObject({ openchamber: { work: { state: 'done', doneAt: 10 } } });
   });
 
   it('reopens a closed session only for a message sent after the user closed it', () => {

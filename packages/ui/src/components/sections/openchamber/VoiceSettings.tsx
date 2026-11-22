@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDeviceInfo } from '@/lib/device';
 
@@ -28,11 +28,14 @@ import {
     SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
+import { startFocusedReading } from '@/lib/voice/readingAudioFocus';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
+import { TranscriptionPromptField } from './TranscriptionPromptField';
+import { TranscriptCorrectionRow } from './TranscriptCorrectionRow';
 import { toast } from '@/components/ui';
 import type { VoiceApiKeyKind } from '@/lib/voiceKeysApi';
 import { Spinner } from '@/components/ui/spinner';
@@ -47,22 +50,43 @@ const LOCAL_STT_MODELS = [
         accuracy: 5,
         speed: 5,
         size: '460 MB',
+        languageHint: false,
+    },
+    {
+        id: 'parakeet-ultra-int8',
+        labelKey: 'settings.voice.page.stt.model.parakeetUltra',
+        badgeKey: 'settings.voice.page.stt.badge.bestForMultilingual',
+        accuracy: 5,
+        speed: 4,
+        size: '485 MB',
+        languageHint: false,
     },
     {
         id: 'parakeet-tdt-0.6b-v3-int8',
         labelKey: 'settings.voice.page.stt.model.parakeetV3',
-        badgeKey: 'settings.voice.page.stt.badge.bestForMultilingual',
-        accuracy: 5,
+        badgeKey: null,
+        accuracy: 4,
         speed: 4,
         size: '465 MB',
+        languageHint: false,
     },
     {
-        id: 'whisper-base-int8',
-        labelKey: 'settings.voice.page.stt.model.whisperBase',
+        id: 'whisper-large-v3-turbo-int8',
+        labelKey: 'settings.voice.page.stt.model.whisperTurbo',
         badgeKey: null,
-        accuracy: 3,
+        accuracy: 4,
+        speed: 1,
+        size: '1 GB',
+        languageHint: true,
+    },
+    {
+        id: 'qwen3-asr-0.6b-int8',
+        labelKey: 'settings.voice.page.stt.model.qwen3Asr',
+        badgeKey: null,
+        accuracy: 4,
         speed: 3,
-        size: '200 MB',
+        size: '1 GB',
+        languageHint: true,
     },
     {
         id: 'whisper-tiny-int8',
@@ -71,6 +95,7 @@ const LOCAL_STT_MODELS = [
         accuracy: 2,
         speed: 4,
         size: '115 MB',
+        languageHint: true,
     },
 ] as const;
 
@@ -99,21 +124,22 @@ const RatingBar = ({ value, label }: { value: number; label: string }) => (
 );
 
 const LocalModelPicker = ({
-    selectedModelId,
+    savedModelId,
     onSelect,
 }: {
-    selectedModelId: string;
+    savedModelId: string;
     onSelect: (modelId: string) => void;
 }) => {
     const { t } = useI18n();
     const tUnsafe = useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
     const [models, setModels] = useState<Map<string, DictationModelState>>(new Map());
+    const [activeModelId, setActiveModelId] = useState<string | null>(null);
     const [requestingId, setRequestingId] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
         try {
             const response = await runtimeFetch('/api/dictation/status', {
-                query: { provider: 'local' },
+                query: { provider: 'local', localModel: savedModelId },
             });
             if (!response.ok) {
                 return;
@@ -122,10 +148,13 @@ const LocalModelPicker = ({
             if (Array.isArray(data?.models)) {
                 setModels(new Map(data.models.map((m: DictationModelState) => [m.id, m])));
             }
+            setActiveModelId(data?.activeModel ?? null);
         } catch {
             // Display-only status; keep the previous state on fetch failure.
         }
-    }, []);
+    }, [savedModelId]);
+
+    const selectedModelId = LOCAL_STT_MODELS.some((entry) => entry.id === savedModelId) ? savedModelId : activeModelId;
 
     useEffect(() => {
         void refresh();
@@ -180,8 +209,6 @@ const LocalModelPicker = ({
                 const selected = selectedModelId === entry.id;
                 const state = models.get(entry.id) ?? null;
                 return (
-                    // A tile by tone, the chosen one in the selection colours:
-                    // the cards are options, not boxes around options.
                     <div
                         key={entry.id}
                         className={cn(
@@ -213,7 +240,7 @@ const LocalModelPicker = ({
                                     {tUnsafe(entry.labelKey)}
                                 </div>
                                 {entry.badgeKey ? (
-                                    <span className="inline-block rounded-full bg-[var(--status-success)]/15 px-2 py-px text-[10px] font-medium text-[var(--status-success)]">
+                                    <span className="inline-block rounded-full bg-[var(--status-success)]/15 px-2 py-px text-[0.625rem] font-medium text-[var(--status-success)]">
                                         {tUnsafe(entry.badgeKey)}
                                     </span>
                                 ) : null}
@@ -275,7 +302,6 @@ const LocalModelPicker = ({
     );
 };
 
-/** Kokoro en_v0_19 speaker ids in sherpa-onnx order. */
 const KOKORO_VOICE_OPTIONS = [
     { id: 0, label: 'Alloy (af)' },
     { id: 1, label: 'Bella (af)' },
@@ -293,7 +319,6 @@ const KOKORO_VOICE_OPTIONS = [
 const LOCAL_TTS_MODEL_ID = 'kokoro-en-v0_19';
 
 const KOKORO_MULTI_LANG_MODEL_ID = 'kokoro-multi-lang-v1_1';
-// A few named speakers out of the 103 in the Chinese/English Kokoro build.
 const KOKORO_MULTI_LANG_VOICE_OPTIONS = [
     { id: 0, label: 'Maple (af)' },
     { id: 1, label: 'Sol (af)' },
@@ -310,11 +335,6 @@ interface LocalTtsVoiceOption {
 
 const localTtsVoiceKey = (modelId: string, speakerId: number): string => `${modelId}:${speakerId}`;
 
-/**
- * Local TTS models as the server reports them, plus the actions Settings
- * offers on them. Shared by the model list and the voice picker so both see
- * the same install state.
- */
 const useLocalTtsModels = () => {
     const [models, setModels] = useState<DictationModelState[]>([]);
     const [requestingId, setRequestingId] = useState<string | null>(null);
@@ -367,10 +387,6 @@ const useLocalTtsModels = () => {
     return { models, requestingId, request, refresh };
 };
 
-// Voices the picker offers: Kokoro speakers for the Kokoro models, one voice
-// per installed Piper model. Only installed models (plus the default) appear,
-// so a language model the server fetched on its own becomes selectable once
-// it is on disk.
 const buildLocalTtsVoiceOptions = (models: DictationModelState[]): LocalTtsVoiceOption[] => {
     const options: LocalTtsVoiceOption[] = KOKORO_VOICE_OPTIONS.map((voice) => ({
         modelId: LOCAL_TTS_MODEL_ID,
@@ -457,10 +473,6 @@ const LocalTtsModelStatus = ({ models, requestingId, request }: ReturnType<typeo
         return null;
     }
 
-    // Installed models, anything downloading or in an error state, and the
-    // default English model stay inline where the user expects them; the rest
-    // of the catalog sits behind a collapse so the panel does not flood with
-    // 14 rows.
     const inline: DictationModelState[] = [];
     const available: DictationModelState[] = [];
     for (const model of models) {
@@ -552,11 +564,6 @@ const OPENAI_VOICE_OPTIONS = [
     { value: 'cedar', label: 'Cedar' },
 ];
 
-/**
- * A voice API key is kept on the server, never in the browser. The field
- * shows whether one is saved; typing a new key and pressing Enter (or leaving
- * the field) replaces it, the cross removes it.
- */
 const VoiceApiKeyField: React.FC<{ kind: VoiceApiKeyKind }> = ({ kind }) => {
     const { t } = useI18n();
     const saved = useConfigStore((state) => state.voiceApiKeys[kind]);
@@ -632,20 +639,34 @@ export const VoiceSettings: React.FC = () => {
     const setTtsFollowTextLanguage = useConfigStore((state) => state.setTtsFollowTextLanguage);
     const setLocalTtsVoiceId = useConfigStore((state) => state.setLocalTtsVoiceId);
     const { speak: speakLocalTts, stop: stopLocalTts, isPlaying: isLocalTtsPlaying, error: localTtsError } = useLocalTTS();
+    const previewRef = useRef<ReturnType<typeof startFocusedReading> | null>(null);
+    const beginPreview = useCallback((stopPlayback: () => void) => {
+        const preview = startFocusedReading('voice-settings-preview', () => {
+            stopPlayback();
+            if (previewRef.current === preview) previewRef.current = null;
+        });
+        previewRef.current = preview;
+        return preview;
+    }, []);
+    useEffect(() => () => previewRef.current?.stop(), []);
 
     const previewLocalVoice = useCallback(() => {
         if (isLocalTtsPlaying) {
-            stopLocalTts();
+            previewRef.current?.stop();
             return;
         }
+        const preview = beginPreview(stopLocalTts);
         const voiceLabel = localTtsVoiceOptions.find((v) => v.modelId === localTtsModelId && v.speakerId === localTtsVoiceId)?.label
             ?? String(localTtsVoiceId);
         void speakLocalTts(t('settings.voice.page.preview.voiceLine', { voiceName: voiceLabel }), {
             model: localTtsModelId,
             speakerId: localTtsVoiceId,
             speed: useConfigStore.getState().speechRate,
+            beforePlayback: preview.beforePlayback,
+            onEnd: preview.finish,
+            onError: preview.finish,
         });
-    }, [isLocalTtsPlaying, localTtsModelId, localTtsVoiceId, localTtsVoiceOptions, speakLocalTts, stopLocalTts, t]);
+    }, [isLocalTtsPlaying, localTtsModelId, localTtsVoiceId, localTtsVoiceOptions, speakLocalTts, stopLocalTts, beginPreview, t]);
     const browserVoice = useConfigStore((state) => state.browserVoice);
     const setBrowserVoice = useConfigStore((state) => state.setBrowserVoice);
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
@@ -658,39 +679,43 @@ export const VoiceSettings: React.FC = () => {
     const setOpenaiCompatibleVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const setOpenaiCompatibleTtsModel = useConfigStore((state) => state.setOpenaiCompatibleTtsModel);
+    const openaiCompatibleTtsEndpointPath = useConfigStore((state) => state.openaiCompatibleTtsEndpointPath);
+    const setOpenaiCompatibleTtsEndpointPath = useConfigStore((state) => state.setOpenaiCompatibleTtsEndpointPath);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    const autoReadAloudEnabled = useConfigStore((state) => state.autoReadAloudEnabled);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
     const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
     const ttsChunkedMode = useConfigStore((state) => state.ttsChunkedMode);
     const setTtsChunkedMode = useConfigStore((state) => state.setTtsChunkedMode);
-    // STT settings
     const sttProvider = useConfigStore((state) => state.sttProvider);
     const setSttProvider = useConfigStore((state) => state.setSttProvider);
     const sttServerUrl = useConfigStore((state) => state.sttServerUrl);
     const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
     const sttModel = useConfigStore((state) => state.sttModel);
     const setSttModel = useConfigStore((state) => state.setSttModel);
+    const sttEndpointPath = useConfigStore((state) => state.sttEndpointPath);
+    const setSttEndpointPath = useConfigStore((state) => state.setSttEndpointPath);
     const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
     const setSttLocalModel = useConfigStore((state) => state.setSttLocalModel);
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
     const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
     const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
+    const setAutoReadAloudEnabled = useConfigStore((state) => state.setAutoReadAloudEnabled);
+    const voicePlaybackEnabled = showMessageTTSButtons || autoReadAloudEnabled;
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const setDictationEnabled = useConfigStore((state) => state.setDictationEnabled);
+    const dictationAutoSend = useConfigStore((state) => state.dictationAutoSend);
+    const setDictationAutoSend = useConfigStore((state) => state.setDictationAutoSend);
 
     const [isSayAvailable, setIsSayAvailable] = useState(false);
     const [sayVoices, setSayVoices] = useState<Array<{ name: string; locale: string }>>([]);
     const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
-    const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
     const [isOpenAIAvailable, setIsOpenAIAvailable] = useState(false);
-    // The server refuses cloud speech and remote custom servers; this only explains why.
     const [voiceEnterpriseMode, setVoiceEnterpriseMode] = useState(false);
     const [isOpenAIPreviewPlaying, setIsOpenAIPreviewPlaying] = useState(false);
-    const [openaiPreviewAudio, setOpenaiPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
     const [isCompatiblePreviewPlaying, setIsCompatiblePreviewPlaying] = useState(false);
-    const [compatiblePreviewAudio, setCompatiblePreviewAudio] = useState<HTMLAudioElement | null>(null);
 
     const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
     const [isBrowserPreviewPlaying, setIsBrowserPreviewPlaying] = useState(false);
@@ -729,10 +754,9 @@ export const VoiceSettings: React.FC = () => {
             });
     }, [browserVoices]);
 
-    const previewBrowserVoice = useCallback(() => {
+    const previewBrowserVoice = useCallback(async () => {
         if (isBrowserPreviewPlaying) {
-            browserVoiceService.cancelSpeech();
-            setIsBrowserPreviewPlaying(false);
+            previewRef.current?.stop();
             return;
         }
 
@@ -740,39 +764,35 @@ export const VoiceSettings: React.FC = () => {
         const voiceName = selectedVoice?.name ?? t('settings.voice.page.preview.browserVoiceFallback');
         const previewText = t('settings.voice.page.preview.voiceLine', { voiceName });
 
-        setIsBrowserPreviewPlaying(true);
-
-        const utterance = new SpeechSynthesisUtterance(previewText);
-        utterance.rate = speechRate;
-        utterance.pitch = speechPitch;
-        utterance.volume = speechVolume;
-
-        if (selectedVoice) {
-            utterance.voice = selectedVoice;
-            utterance.lang = selectedVoice.lang;
-        }
-
-        utterance.onend = () => setIsBrowserPreviewPlaying(false);
-        utterance.onerror = () => setIsBrowserPreviewPlaying(false);
-
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
-    }, [browserVoice, browserVoices, speechRate, speechPitch, speechVolume, isBrowserPreviewPlaying, t]);
-
-    useEffect(() => {
-        return () => {
-            if (isBrowserPreviewPlaying) {
-                browserVoiceService.cancelSpeech();
-            }
+        const preview = beginPreview(() => {
+            browserVoiceService.cancelSpeech();
+            setIsBrowserPreviewPlaying(false);
+        });
+        const finish = () => {
+            preview.finish();
+            if (previewRef.current === preview) setIsBrowserPreviewPlaying(false);
         };
-    }, [isBrowserPreviewPlaying]);
+        setIsBrowserPreviewPlaying(true);
+        try {
+            await browserVoiceService.speakText(previewText, selectedVoice?.lang ?? navigator.language, finish, {
+                rate: speechRate,
+                pitch: speechPitch,
+                volume: speechVolume,
+                voiceName: browserVoice || undefined,
+                beforePlayback: preview.beforePlayback,
+                onError: finish,
+            });
+        } catch {
+            finish();
+        }
+    }, [browserVoice, browserVoices, speechRate, speechPitch, speechVolume, isBrowserPreviewPlaying, beginPreview, t]);
 
     useEffect(() => {
         void refreshVoiceApiKeys({ force: true });
     }, [refreshVoiceApiKeys]);
 
     useEffect(() => {
-        if (!showMessageTTSButtons || (voiceProvider !== 'openai' && voiceProvider !== 'openai-compatible')) {
+        if (!voicePlaybackEnabled || (voiceProvider !== 'openai' && voiceProvider !== 'openai-compatible')) {
             setIsOpenAIAvailable(hasOpenaiApiKey);
             return;
         }
@@ -792,10 +812,10 @@ export const VoiceSettings: React.FC = () => {
         };
 
         checkOpenAIAvailability();
-    }, [hasOpenaiApiKey, showMessageTTSButtons, voiceProvider]);
+    }, [hasOpenaiApiKey, voicePlaybackEnabled, voiceProvider]);
 
     useEffect(() => {
-        if (!showMessageTTSButtons) {
+        if (!voicePlaybackEnabled) {
             setIsSayAvailable(false);
             setSayVoices([]);
             return;
@@ -817,182 +837,99 @@ export const VoiceSettings: React.FC = () => {
             .catch(() => {
                 setIsSayAvailable(false);
             });
-    }, [showMessageTTSButtons]);
+    }, [voicePlaybackEnabled]);
 
-    const previewVoice = useCallback(async () => {
-        if (previewAudio) {
-            disposePreviewAudio(previewAudio);
-            setPreviewAudio(null);
-            setIsPreviewPlaying(false);
-            return;
-        }
-
-        setIsPreviewPlaying(true);
+    const playAudioPreview = useCallback(async (
+        path: string,
+        body: Record<string, unknown>,
+        setPlaying: (playing: boolean) => void,
+    ) => {
         let audio: HTMLAudioElement | null = null;
+        let started = false;
+        const preview = beginPreview(() => {
+            disposePreviewAudio(audio);
+            setPlaying(false);
+        });
+        const finish = () => {
+            preview.finish();
+            disposePreviewAudio(audio);
+            if (previewRef.current === preview) setPlaying(false);
+        };
+        setPlaying(true);
         try {
-            const response = await runtimeFetch('/api/tts/say/speak', {
+            const response = await runtimeFetch(path, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    text: t('settings.voice.page.preview.voiceLine', { voiceName: sayVoice }),
-                    voice: sayVoice,
-                    rate: Math.round(100 + (speechRate - 0.5) * 200),
-                }),
+                body: JSON.stringify(body),
             });
-
             if (!response.ok) throw new Error('Preview failed');
-
             const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            audio = new Audio(url);
-
-            audio.onended = () => {
-                disposePreviewAudio(audio);
-                setPreviewAudio(null);
-                setIsPreviewPlaying(false);
+            const player = new Audio(URL.createObjectURL(blob));
+            audio = player;
+            player.onended = finish;
+            player.onerror = finish;
+            let interruption = 0;
+            const play = async () => {
+                const attempt = interruption;
+                try {
+                    await player.play();
+                } catch (error) {
+                    // external: https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/play#exceptions Pausing rejects pending play; a later gain can already be resuming the same player.
+                    if (error instanceof Error && error.name === 'AbortError' && attempt !== interruption) return;
+                    throw error;
+                }
             };
-
-            audio.onerror = () => {
-                disposePreviewAudio(audio);
-                setPreviewAudio(null);
-                setIsPreviewPlaying(false);
-            };
-
-            setPreviewAudio(audio);
-            await audio.play();
-        } catch {
-            disposePreviewAudio(audio);
-            setPreviewAudio(null);
-            setIsPreviewPlaying(false);
-        }
-    }, [sayVoice, speechRate, previewAudio, t]);
-
-    useEffect(() => {
-        return () => {
-            disposePreviewAudio(previewAudio);
-        };
-    }, [previewAudio]);
-
-    const previewOpenAIVoice = useCallback(async () => {
-        if (openaiPreviewAudio) {
-            disposePreviewAudio(openaiPreviewAudio);
-            setOpenaiPreviewAudio(null);
-            setIsOpenAIPreviewPlaying(false);
-            return;
-        }
-
-        setIsOpenAIPreviewPlaying(true);
-        let audio: HTMLAudioElement | null = null;
-        try {
-            const response = await runtimeFetch('/api/tts/speak', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    text: t('settings.voice.page.preview.voiceLine', { voiceName: openaiVoice }),
-                    voice: openaiVoice,
-                    speed: speechRate,
-                }),
+            await preview.beforePlayback({
+                pause: () => { interruption += 1; player.pause(); },
+                resume: async () => { if (started) await play(); },
             });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-                throw new Error(errorData.error || `HTTP ${response.status}`);
-            }
-
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            audio = new Audio(url);
-
-            audio.onended = () => {
-                disposePreviewAudio(audio);
-                setOpenaiPreviewAudio(null);
-                setIsOpenAIPreviewPlaying(false);
-            };
-
-            audio.onerror = () => {
-                disposePreviewAudio(audio);
-                setOpenaiPreviewAudio(null);
-                setIsOpenAIPreviewPlaying(false);
-            };
-
-            setOpenaiPreviewAudio(audio);
-            await audio.play();
+            started = true;
+            await play();
         } catch {
-            disposePreviewAudio(audio);
-            setOpenaiPreviewAudio(null);
-            setIsOpenAIPreviewPlaying(false);
+            finish();
         }
-    }, [openaiVoice, speechRate, openaiPreviewAudio, t]);
+    }, [beginPreview]);
 
-    useEffect(() => {
-        return () => {
-            disposePreviewAudio(openaiPreviewAudio);
-        };
-    }, [openaiPreviewAudio]);
-
-    const previewCompatibleVoice = useCallback(async () => {
-        if (compatiblePreviewAudio) {
-            disposePreviewAudio(compatiblePreviewAudio);
-            setCompatiblePreviewAudio(null);
-            setIsCompatiblePreviewPlaying(false);
+    const previewVoice = useCallback(() => {
+        if (isPreviewPlaying) {
+            previewRef.current?.stop();
             return;
         }
+        void playAudioPreview('/api/tts/say/speak', {
+            text: t('settings.voice.page.preview.voiceLine', { voiceName: sayVoice }),
+            voice: sayVoice,
+            rate: Math.round(100 + (speechRate - 0.5) * 200),
+        }, setIsPreviewPlaying);
+    }, [isPreviewPlaying, playAudioPreview, sayVoice, speechRate, t]);
 
+    const previewOpenAIVoice = useCallback(() => {
+        if (isOpenAIPreviewPlaying) {
+            previewRef.current?.stop();
+            return;
+        }
+        void playAudioPreview('/api/tts/speak', {
+            text: t('settings.voice.page.preview.voiceLine', { voiceName: openaiVoice }),
+            voice: openaiVoice,
+            speed: speechRate,
+        }, setIsOpenAIPreviewPlaying);
+    }, [isOpenAIPreviewPlaying, playAudioPreview, openaiVoice, speechRate, t]);
+
+    const previewCompatibleVoice = useCallback(() => {
+        if (isCompatiblePreviewPlaying) {
+            previewRef.current?.stop();
+            return;
+        }
         if (!openaiCompatibleUrl.trim()) return;
+        void playAudioPreview('/api/tts/speak', {
+            text: t('settings.voice.page.preview.customServerLine'),
+            voice: openaiCompatibleVoice,
+            model: openaiCompatibleTtsModel || undefined,
+            speed: speechRate,
+            baseURL: openaiCompatibleUrl,
+            endpointPath: openaiCompatibleTtsEndpointPath || undefined,
+        }, setIsCompatiblePreviewPlaying);
+    }, [isCompatiblePreviewPlaying, playAudioPreview, openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, openaiCompatibleTtsEndpointPath, speechRate, t]);
 
-        setIsCompatiblePreviewPlaying(true);
-        let audio: HTMLAudioElement | null = null;
-        try {
-            const response = await runtimeFetch('/api/tts/speak', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    text: t('settings.voice.page.preview.customServerLine'),
-                    voice: openaiCompatibleVoice,
-                    model: openaiCompatibleTtsModel || undefined,
-                    speed: speechRate,
-                    baseURL: openaiCompatibleUrl,
-                }),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-                throw new Error(errorData.error || `HTTP ${response.status}`);
-            }
-
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            audio = new Audio(url);
-
-            audio.onended = () => {
-                disposePreviewAudio(audio);
-                setCompatiblePreviewAudio(null);
-                setIsCompatiblePreviewPlaying(false);
-            };
-
-            audio.onerror = () => {
-                disposePreviewAudio(audio);
-                setCompatiblePreviewAudio(null);
-                setIsCompatiblePreviewPlaying(false);
-            };
-
-            setCompatiblePreviewAudio(audio);
-            await audio.play();
-        } catch {
-            disposePreviewAudio(audio);
-            setCompatiblePreviewAudio(null);
-            setIsCompatiblePreviewPlaying(false);
-        }
-    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, speechRate, compatiblePreviewAudio, t]);
-
-    useEffect(() => {
-        return () => {
-            disposePreviewAudio(compatiblePreviewAudio);
-        };
-    }, [compatiblePreviewAudio]);
-
-    // A fixed-width slider with its value beside it, the same on every row,
-    // so the three rows read as one column. Phones get a stepper instead.
     const sliderClass = "w-40 flex-none h-1.5 bg-[var(--interactive-border)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:border-0 disabled:opacity-50";
     const sliderValueClass = 'typography-ui-label w-12 shrink-0 text-end tabular-nums text-muted-foreground';
     const previewIcon = (playing: boolean) => (playing ? <Icon name="stop" className="w-3.5 h-3.5" /> : <Icon name="play" className="w-3.5 h-3.5" />);
@@ -1000,9 +937,153 @@ export const VoiceSettings: React.FC = () => {
     return (
         <>
             <SettingsSection
+                settingsItem="voice.speech-recognition"
+                title={t('settings.voice.page.section.speechRecognition')}
+                contentClassName="space-y-3"
+            >
+                <SettingsCheckboxRow
+                    checked={dictationEnabled}
+                    onChange={setDictationEnabled}
+                    label={t('settings.voice.page.field.enableVoiceInput')}
+                    ariaLabel={t('settings.voice.page.field.enableVoiceInputAria')}
+                />
+                <SettingsCheckboxRow
+                    checked={dictationAutoSend}
+                    onChange={setDictationAutoSend}
+                    label={t('settings.voice.page.field.dictationAutoSend')}
+                    ariaLabel={t('settings.voice.page.field.dictationAutoSendAria')}
+                    info={t('settings.voice.page.field.dictationAutoSendInfo')}
+                    settingsItem="voice.dictation-auto-send"
+                />
+
+                {dictationEnabled && (
+                    <>
+                        <SettingsFieldRow
+                            label={t('settings.voice.page.field.provider')}
+                            info={(
+                                <ul className="space-y-1">
+                                    <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
+                                    <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
+                                </ul>
+                            )}
+                        >
+                            <SettingsChipGroup
+                                value={sttProvider}
+                                onChange={setSttProvider}
+                                aria-label={t('settings.voice.page.field.provider')}
+                                options={[
+                                    { value: 'local', label: t('settings.voice.page.provider.local') },
+                                    { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
+                                ]}
+                            />
+                        </SettingsFieldRow>
+
+                        {sttProvider === 'local' && (
+                            <SettingsStackedField label={t('settings.voice.page.field.model')} controlClassName="max-w-none">
+                                <LocalModelPicker savedModelId={sttLocalModel} onSelect={setSttLocalModel} />
+                            </SettingsStackedField>
+                        )}
+
+                        {sttProvider === 'local' && LOCAL_STT_MODELS.find((entry) => entry.id === sttLocalModel)?.languageHint && (
+                            <SettingsStackedField
+                                label={t('settings.voice.page.field.language')}
+                                info={t('settings.voice.page.field.sttLanguageHint')}
+                                controlClassName="max-w-[8rem]"
+                            >
+                                <input
+                                    type="text"
+                                    value={sttLanguage}
+                                    onChange={(e) => setSttLanguage(e.target.value)}
+                                    placeholder="auto"
+                                    className={VOICE_TEXT_INPUT_CLASS}
+                                />
+                            </SettingsStackedField>
+                        )}
+
+                        {sttProvider === 'openai-compatible' && (
+                            <div className="space-y-3">
+                                <SettingsStackedField
+                                    label={(
+                                        <span className={cn(!sttServerUrl.trim() && 'text-[var(--status-error)]')}>
+                                            {t('settings.voice.page.field.serverUrl')}
+                                        </span>
+                                    )}
+                                    info={t('settings.voice.page.field.sttServerUrlHint')}
+                                >
+                                    <div className="relative w-full">
+                                        <input
+                                            type="text"
+                                            value={sttServerUrl}
+                                            onChange={(e) => setSttServerUrl(e.target.value)}
+                                            placeholder="http://localhost:8001/v1"
+                                            className={VOICE_TEXT_INPUT_CLASS}
+                                        />
+                                        {sttServerUrl && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setSttServerUrl('')}
+                                                className="absolute inset-e-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                            >
+                                                <Icon name="close" className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </SettingsStackedField>
+                                <SettingsStackedField
+                                    label={t('settings.voice.page.field.apiKey')}
+                                    description={t('settings.voice.page.field.apiKeyOptional')}
+                                >
+                                    <VoiceApiKeyField kind="stt" />
+                                </SettingsStackedField>
+                                <SettingsStackedField label={t('settings.voice.page.field.model')}>
+                                    <input
+                                        type="text"
+                                        value={sttModel}
+                                        onChange={(e) => setSttModel(e.target.value)}
+                                        placeholder="deepdml/faster-whisper-large-v3-turbo-ct2"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                                <SettingsStackedField
+                                    settingsItem="voice.stt-endpoint-path"
+                                    label={t('settings.voice.page.field.endpointPath')}
+                                    info={t('settings.voice.page.field.endpointPathHint')}
+                                >
+                                    <input
+                                        type="text"
+                                        value={sttEndpointPath}
+                                        aria-label={t('settings.voice.page.field.endpointPath')}
+                                        dir="ltr"
+                                        onChange={(e) => setSttEndpointPath(e.target.value)}
+                                        placeholder="/audio/transcriptions"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                                <SettingsStackedField
+                                    label={t('settings.voice.page.field.language')}
+                                    info={t('settings.voice.page.field.sttLanguageHint')}
+                                    controlClassName="max-w-[8rem]"
+                                >
+                                    <input
+                                        type="text"
+                                        value={sttLanguage}
+                                        onChange={(e) => setSttLanguage(e.target.value)}
+                                        placeholder="auto"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                                <TranscriptionPromptField />
+                            </div>
+                        )}
+
+                        <TranscriptCorrectionRow />
+                    </>
+                )}
+            </SettingsSection>
+
+            <SettingsSection
                 settingsItem="voice.playback"
                 title={t('settings.voice.page.section.playbackAndSummary')}
-                divider={false}
                 contentClassName="space-y-3"
             >
                 <SettingsCheckboxRow
@@ -1012,7 +1093,16 @@ export const VoiceSettings: React.FC = () => {
                     ariaLabel={t('settings.voice.page.field.messageReadAloudButtonAria')}
                 />
 
-                {showMessageTTSButtons && (
+                <SettingsCheckboxRow
+                    checked={autoReadAloudEnabled}
+                    onChange={setAutoReadAloudEnabled}
+                    label={t('settings.voice.page.field.autoReadAloud')}
+                    ariaLabel={t('settings.voice.page.field.autoReadAloudAria')}
+                    info={t('settings.voice.page.tooltip.autoReadAloud')}
+                    settingsItem="voice.auto-read-aloud"
+                />
+
+                {voicePlaybackEnabled && (
                     <>
                         <SettingsFieldRow
                             label={t('settings.voice.page.field.provider')}
@@ -1116,6 +1206,21 @@ export const VoiceSettings: React.FC = () => {
                                     />
                                 </SettingsStackedField>
                                 <SettingsStackedField
+                                    settingsItem="voice.tts-endpoint-path"
+                                    label={t('settings.voice.page.field.endpointPath')}
+                                    info={t('settings.voice.page.field.endpointPathHint')}
+                                >
+                                    <input
+                                        type="text"
+                                        value={openaiCompatibleTtsEndpointPath}
+                                        aria-label={t('settings.voice.page.field.endpointPath')}
+                                        dir="ltr"
+                                        onChange={(e) => setOpenaiCompatibleTtsEndpointPath(e.target.value)}
+                                        placeholder="/audio/speech"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                                <SettingsStackedField
                                     label={t('settings.voice.page.field.voice')}
                                     info={t('settings.voice.page.field.voiceIdentifierHint')}
                                 >
@@ -1133,7 +1238,6 @@ export const VoiceSettings: React.FC = () => {
                             </div>
                         )}
 
-                        {/* Local (Kokoro) TTS model status */}
                         {voiceProvider === 'local' && <LocalTtsModelStatus {...localTtsModels} />}
 
                         <div>
@@ -1298,109 +1402,6 @@ export const VoiceSettings: React.FC = () => {
                                         info={t('settings.voice.page.tooltip.ttsChunked')}
                                     />
                                 )}
-                            </div>
-                        )}
-                    </>
-                )}
-            </SettingsSection>
-
-            <SettingsSection
-                settingsItem="voice.speech-recognition"
-                title={t('settings.voice.page.section.speechRecognition')}
-                contentClassName="space-y-3"
-            >
-                <SettingsCheckboxRow
-                    checked={dictationEnabled}
-                    onChange={setDictationEnabled}
-                    label={t('settings.voice.page.field.enableVoiceInput')}
-                    ariaLabel={t('settings.voice.page.field.enableVoiceInputAria')}
-                />
-
-                {dictationEnabled && (
-                    <>
-                        <SettingsFieldRow
-                            label={t('settings.voice.page.field.provider')}
-                            info={(
-                                <ul className="space-y-1">
-                                    <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
-                                    <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
-                                </ul>
-                            )}
-                        >
-                            <SettingsChipGroup
-                                value={sttProvider}
-                                onChange={setSttProvider}
-                                aria-label={t('settings.voice.page.field.provider')}
-                                options={[
-                                    { value: 'local', label: t('settings.voice.page.provider.local') },
-                                    { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
-                                ]}
-                            />
-                        </SettingsFieldRow>
-
-                        {sttProvider === 'local' && (
-                            <SettingsStackedField label={t('settings.voice.page.field.model')} controlClassName="max-w-none">
-                                <LocalModelPicker selectedModelId={sttLocalModel} onSelect={setSttLocalModel} />
-                            </SettingsStackedField>
-                        )}
-
-                        {sttProvider === 'openai-compatible' && (
-                            <div className="space-y-3">
-                                <SettingsStackedField
-                                    label={(
-                                        <span className={cn(!sttServerUrl.trim() && 'text-[var(--status-error)]')}>
-                                            {t('settings.voice.page.field.serverUrl')}
-                                        </span>
-                                    )}
-                                    info={t('settings.voice.page.field.sttServerUrlHint')}
-                                >
-                                    <div className="relative w-full">
-                                        <input
-                                            type="text"
-                                            value={sttServerUrl}
-                                            onChange={(e) => setSttServerUrl(e.target.value)}
-                                            placeholder="http://localhost:8001/v1"
-                                            className={VOICE_TEXT_INPUT_CLASS}
-                                        />
-                                        {sttServerUrl && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setSttServerUrl('')}
-                                                className="absolute inset-e-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                            >
-                                                <Icon name="close" className="w-3.5 h-3.5" />
-                                            </button>
-                                        )}
-                                    </div>
-                                </SettingsStackedField>
-                                <SettingsStackedField
-                                    label={t('settings.voice.page.field.apiKey')}
-                                    description={t('settings.voice.page.field.apiKeyOptional')}
-                                >
-                                    <VoiceApiKeyField kind="stt" />
-                                </SettingsStackedField>
-                                <SettingsStackedField label={t('settings.voice.page.field.model')}>
-                                    <input
-                                        type="text"
-                                        value={sttModel}
-                                        onChange={(e) => setSttModel(e.target.value)}
-                                        placeholder="deepdml/faster-whisper-large-v3-turbo-ct2"
-                                        className={VOICE_TEXT_INPUT_CLASS}
-                                    />
-                                </SettingsStackedField>
-                                <SettingsStackedField
-                                    label={t('settings.voice.page.field.language')}
-                                    info={t('settings.voice.page.field.sttLanguageHint')}
-                                    controlClassName="max-w-[8rem]"
-                                >
-                                    <input
-                                        type="text"
-                                        value={sttLanguage}
-                                        onChange={(e) => setSttLanguage(e.target.value)}
-                                        placeholder="auto"
-                                        className={VOICE_TEXT_INPUT_CLASS}
-                                    />
-                                </SettingsStackedField>
                             </div>
                         )}
                     </>

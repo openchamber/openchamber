@@ -2,15 +2,10 @@ import React from 'react';
 import { Icon } from "@/components/icon/Icon";
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { resolveGuestToolIcon } from '@/lib/guests/icon';
+import { opencodeNamespaceTool } from '@/lib/opencode/tools';
 import type { GuestToolRule } from '@/lib/guests/tool-presentation';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 
-/**
- * Icon for a tool row, dialog header, or error fallback. An extension rule
- * with an icon wins: a package SVG drawn as a currentColor mask, or a
- * Remixicon the sprite knows; otherwise the built-in mapping runs on the
- * normalized name, and an unknown tool gets the generic wrench.
- */
 export const getToolIcon = (toolName: string, presentation?: GuestToolRule | null) => {
     const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
     const guestIcon = presentation
@@ -20,6 +15,9 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
         return <GuestIcon icon={guestIcon.icon} iconSrc={guestIcon.iconSrc} className={iconClass} />;
     }
     const tool = toolName.toLowerCase();
+    if (tool === 'opencode' || opencodeNamespaceTool(tool)) {
+        return <Icon name="opencode" className={iconClass} />;
+    }
 
     if (tool === 'reasoning') {
         return <Icon name="brain-ai-3" className={iconClass} />;
@@ -69,7 +67,7 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
     ) {
         return <Icon name="global" className={iconClass} />;
     }
-    if (tool === 'structuredoutput' || tool === 'structured_output') {
+    if (tool === 'structuredoutput' || tool === 'structured_output' || tool === 'todowrite') {
         return <Icon name="list-check-2" className={iconClass} />;
     }
     if (tool === 'skill') {
@@ -96,14 +94,26 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
     if (tool === 'openchamber_notify') {
         return <Icon name="notification-3" className={iconClass} />;
     }
+    if (tool === 'openchamber_usage') {
+        return <Icon name="bar-chart-2" className={iconClass} />;
+    }
     if (tool === 'openchamber_render') {
         return <Icon name="bar-chart-box" className={iconClass} />;
+    }
+    if (tool === 'openchamber_image') {
+        return <Icon name="image" className={iconClass} />;
+    }
+    if (tool === 'openchamber_secret') {
+        return <Icon name="shield-keyhole" className={iconClass} />;
     }
     if (tool === 'openchamber_knowledge') {
         return <Icon name="sticky-note" className={iconClass} />;
     }
     if (tool === 'openchamber_memory') {
         return <Icon name="brain-4" className={iconClass} />;
+    }
+    if (tool === 'openchamber_workflow') {
+        return <Icon name="flow-chart" className={iconClass} />;
     }
     if (tool === 'question') {
         return <Icon name="survey" className={iconClass} />;

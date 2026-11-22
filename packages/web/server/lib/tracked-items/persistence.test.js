@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrackedItemsPersistence } from './persistence.js';
 import { promises as fs } from 'node:fs';
+
 
 describe('tracked-items persistence', () => {
   let dataDir;
@@ -209,3 +210,77 @@ function createFakeFs(files) {
     },
   };
 }
+
+// ---- upstream tests ----
+
+const item = { provider: 'linear', kind: 'work-item', identifier: 'OPE-1' };
+
+// The store reads through the bounded reader, which opens the file and reads
+// it in chunks; this handle serves `contents` that way.
+const handleFor = (contents) => {
+  const bytes = Buffer.from(contents);
+  return {
+    stat: async () => ({ isFile: () => true, size: bytes.length }),
+    read: async (buffer, offset, length, position) => ({ bytesRead: bytes.copy(buffer, offset, position, position + length) }),
+    close: async () => {},
+  };
+};
+
+const persistenceWith = (contents) => createTrackedItemsPersistence({
+  dataDir: '/data',
+  fs: {
+    open: vi.fn(async () => handleFor(contents)),
+    writeFile: vi.fn(async () => {}),
+    rename: vi.fn(async () => {}),
+  },
+});
+
+describe('tracked item persistence', () => {
+  it('keeps arbitrary cached state and drops invalid records independently', async () => {
+    const state = { state: { type: 'completed' }, checks: 'legacy', future: { flag: true } };
+    const persistence = persistenceWith(JSON.stringify({
+      version: 1,
+      items: [
+        { item, state, fetchedAt: 123 },
+        null,
+        { item: null, state, fetchedAt: 124 },
+        { item, state, fetchedAt: '125' },
+        { item: { provider: 'missing', kind: 'pull' }, state, fetchedAt: 126 },
+        { item, state: [], fetchedAt: 127 },
+        { item, fetchedAt: 128 },
+      ],
+    }));
+    await expect(persistence.load()).resolves.toEqual([
+      { item, state, fetchedAt: 123 },
+      { item, state: null, fetchedAt: 127 },
+      { item, state: null, fetchedAt: 128 },
+    ]);
+  });
+
+  it('returns no records for unsupported files and propagates malformed JSON', async () => {
+    for (const value of [null, [], 1, { version: 2, items: [] }, { version: 1, items: {} }]) {
+      await expect(persistenceWith(JSON.stringify(value)).load()).resolves.toEqual([]);
+    }
+    await expect(persistenceWith('{').load()).rejects.toThrow('does not parse as JSON');
+  });
+
+  it('treats only a missing file as an empty cache', async () => {
+    const open = vi.fn();
+    const persistence = createTrackedItemsPersistence({ dataDir: '/data', fs: { open } });
+    open.mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+    await expect(persistence.load()).resolves.toEqual([]);
+    const failure = Object.assign(new Error('denied'), { code: 'EACCES' });
+    open.mockRejectedValueOnce(failure);
+    await expect(persistence.load()).rejects.toBe(failure);
+  });
+
+  it('writes the unchanged envelope through a sibling temporary file', async () => {
+    const fs = { writeFile: vi.fn(async () => {}), rename: vi.fn(async () => {}) };
+    const persistence = createTrackedItemsPersistence({ dataDir: '/data', fs });
+    const items = [{ key: 'linear|OPE-1', item, state: { future: true }, fetchedAt: 123 }];
+    await persistence.save(items);
+    const temporary = `/data/tracked-items.json.${process.pid}.tmp`;
+    expect(fs.writeFile).toHaveBeenCalledWith(temporary, JSON.stringify({ version: 1, items }), 'utf8');
+    expect(fs.rename).toHaveBeenCalledWith(temporary, '/data/tracked-items.json');
+  });
+});

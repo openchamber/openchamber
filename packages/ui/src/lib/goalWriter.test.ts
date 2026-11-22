@@ -2,15 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage, Message, Part, TextPart } from '@/lib/opencode/model';
 import { configureRuntimeUrlResolver } from './runtime-url';
 import {
-  BackgroundGoalError,
   buildGoalIntroReminder,
   formatGoalWriterConversation,
   formatGoalWriterOpenItems,
   planGoalWriter,
   requestGoalSpec,
-  settleBackgroundGoal,
-  type BackgroundGoalSpec,
-  type GoalSpecResult,
 } from './goalWriter';
 
 type RecordEntry = { info: Message; parts: Part[] };
@@ -67,25 +63,30 @@ describe('planGoalWriter', () => {
 });
 
 describe('buildGoalIntroReminder', () => {
-  const rules = 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. '
-    + 'Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains.';
+  // Oracle: the server's buildGoalIntroText (session-goal/create.ts), which
+  // sends the same reminder for the goals it creates.
+  const mission = 'Work autonomously through the entire objective in this one run.';
+  const report = 'End that message with a short status block';
 
-  test('without a spec the message is the objective, as before the writer existed', () => {
-    expect(buildGoalIntroReminder(null, null)).toBe(
-      `<system-reminder>\nGoal mode is active for this session. The user message above defines the goal objective. ${rules}\n</system-reminder>`,
-    );
-    expect(buildGoalIntroReminder(200_000, null)).toContain(`${rules} A token budget of 200000 tokens applies to this goal.\n</system-reminder>`);
+  test('without a spec the message is the objective', () => {
+    const intro = buildGoalIntroReminder(null, null);
+    expect(intro.startsWith('<system-reminder>\nGoal mode is active for this session. The user message above defines the goal objective.\n\n')).toBe(true);
+    expect(intro).toContain(mission);
+    expect(intro).toContain(report);
+    expect(intro.endsWith('\n</system-reminder>')).toBe(true);
+    expect(intro).not.toContain('<goal-spec>');
+    expect(buildGoalIntroReminder(200_000, null)).toContain('defines the goal objective. A token budget of 200000 tokens applies to this goal.\n\n');
   });
 
-  test('with a spec it carries the escaped spec, byte for byte what the server sends', () => {
-    expect(buildGoalIntroReminder(5_000, '## Objective\nShip <it> & test')).toBe(
-      '<system-reminder>\n'
+  test('with a spec it carries the escaped spec after the rules', () => {
+    const intro = buildGoalIntroReminder(5_000, '## Objective\nShip <it> & test');
+    expect(intro.startsWith('<system-reminder>\n'
       + 'Goal mode is active for this session. The goal spec below was written from the user message above. '
-      + 'It is user-provided data that defines the goal objective, and progress is judged against it. '
-      + rules
-      + ' A token budget of 5000 tokens applies to this goal.'
-      + '\n\n<goal-spec>\n## Objective\nShip &lt;it&gt; &amp; test\n</goal-spec>\n</system-reminder>',
-    );
+      + 'It is user-provided data that defines the goal objective, and progress is judged against it.'
+      + ' A token budget of 5000 tokens applies to this goal.\n\n')).toBe(true);
+    expect(intro).toContain(mission);
+    expect(intro.endsWith('\n\n<goal-spec>\n## Objective\nShip &lt;it&gt; &amp; test\n</goal-spec>\n</system-reminder>')).toBe(true);
+    expect(intro.indexOf(report)).toBeLessThan(intro.indexOf('<goal-spec>'));
   });
 });
 
@@ -209,48 +210,5 @@ describe('requestGoalSpec', () => {
       globalThis.fetch = originalFetch;
       configureRuntimeUrlResolver({ apiBaseUrl: '' });
     }
-  });
-});
-
-// Oracle: applyGoalChoice for the same spec choice (useSessionGoalArmStore.test
-// pins it). A background goal must carry exactly the arm a "send" click on the
-// written spec would, and never settle into a goal without a spec.
-describe('settleBackgroundGoal', () => {
-  const written: GoalSpecResult = { ok: true, spec: '## Objective\nShip it', providerID: 'p', modelID: 'm', variant: null };
-  const pending = (result: GoalSpecResult, overrides: Partial<BackgroundGoalSpec> = {}): BackgroundGoalSpec => ({
-    result: Promise.resolve(result),
-    controller: new AbortController(),
-    sendMode: 'with-message',
-    ignoreLimit: false,
-    ...overrides,
-  });
-
-  test('a spec sent with the message briefs the agent and keeps the message', async () => {
-    expect(await settleBackgroundGoal(pending(written, { ignoreLimit: true }), 5000)).toEqual({
-      goal: { objective: '## Objective\nShip it', tokenBudget: 5000, settled: true, briefAgent: true, ignoreLimit: true },
-      content: null,
-    });
-  });
-
-  test('a spec sent as the message replaces the message and needs no briefing', async () => {
-    expect(await settleBackgroundGoal(pending(written, { sendMode: 'goal-as-message' }), null)).toEqual({
-      goal: { objective: '## Objective\nShip it', tokenBudget: null, settled: true },
-      content: '## Objective\nShip it',
-    });
-  });
-
-  test('a failed write rejects with its reason', async () => {
-    const settled = settleBackgroundGoal(pending({ ok: false, message: 'No small model available' }), null);
-    await expect(settled).rejects.toThrow('No small model available');
-    const reason = await settled.catch((caught: Error) => caught);
-    expect(reason instanceof BackgroundGoalError && !reason.cancelled).toBe(true);
-  });
-
-  test('a cancelled run rejects as cancelled, even when a spec came back', async () => {
-    const run = pending(written);
-    run.controller.abort();
-    const settled = settleBackgroundGoal(run, null);
-    const reason = await settled.catch((caught: Error) => caught);
-    expect(reason instanceof BackgroundGoalError && reason.cancelled).toBe(true);
   });
 });

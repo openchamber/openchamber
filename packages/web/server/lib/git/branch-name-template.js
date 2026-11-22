@@ -62,6 +62,7 @@ export const branchNameFromTemplate = (template, values) => (
  *
  * @param {unknown} template
  * @param {'worktree' | 'pull-request'} kind
+ * @returns {template is string}
  */
 export const isBranchTemplate = (template, kind) => {
   if (!isString(template) || !template.includes('{name}') || template.length > MAX_TEMPLATE_LENGTH) return false;

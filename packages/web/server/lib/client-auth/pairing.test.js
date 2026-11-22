@@ -74,6 +74,18 @@ describe('client auth pairing runtime', () => {
     })).rejects.toThrow('Invalid or expired pairing session');
   });
 
+  it('carries a home-network-only pairing onto the device it creates', async () => {
+    const { runtime, remoteClientAuthRuntime } = await makeRuntime();
+    const local = await runtime.createPairingSession({ localOnly: true });
+    const anywhere = await runtime.createPairingSession({ usesRelay: true });
+
+    await runtime.redeemPairingSession({ pairingId: local.pairing.id, secret: local.pairing.secret, clientKind: 'mobile' });
+    await runtime.redeemPairingSession({ pairingId: anywhere.pairing.id, secret: anywhere.pairing.secret, clientKind: 'mobile' });
+
+    expect(remoteClientAuthRuntime.createClient).toHaveBeenNthCalledWith(1, expect.objectContaining({ localOnly: true, usesRelay: false }));
+    expect(remoteClientAuthRuntime.createClient).toHaveBeenNthCalledWith(2, expect.objectContaining({ localOnly: false, usesRelay: true }));
+  });
+
   it('rejects expired, cancelled, wrong-secret, and disallowed-kind redemption', async () => {
     const { runtime: expiredRuntime } = await makeRuntime({ ttlMs: -1000 });
     const expired = await expiredRuntime.createPairingSession();

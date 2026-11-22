@@ -43,7 +43,11 @@ export function encodeOpenChamberCursor({ stream, position, upstream = '' }) {
   return `occ1.${stream}.${position}.${upstream}`;
 }
 
-/** Decodes a versioned OpenChamber cursor, or returns null for anything else. */
+/**
+ * Decodes a versioned OpenChamber cursor, or returns null for anything else.
+ * @param {unknown} cursor
+ * @returns {{ version: number, stream: string, position: number, upstream: string } | null}
+ */
 export function decodeOpenChamberCursor(cursor) {
   const text = `${cursor ?? ''}`;
   const match = OPENCHAMBER_CURSOR_PATTERN.exec(text);

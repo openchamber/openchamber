@@ -5,7 +5,7 @@
 // addProject() add the chosen directory as a workspace folder through the
 // extension host and sync the new folder back as a project.
 
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
 // VS Code runtime detection reads window.__VSCODE_CONFIG__ at module load time;
 // bun test has no browser window, so install a test window before importing the
@@ -49,6 +49,14 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 const noop = () => {};
+const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+  const url = new URL(input instanceof Request ? input.url : String(input), 'https://example.test');
+  if (url.pathname === '/api/opencode/trust') {
+    return Response.json({ directory: url.searchParams.get('directory'), trusted: true, fingerprint: null, items: [] });
+  }
+  throw new Error(`Unexpected request: ${url.pathname}`);
+});
+afterAll(() => fetchSpy.mockRestore());
 const opencodeClientStub = new Proxy(
   {
     setDirectory: noop,
@@ -71,6 +79,7 @@ const opencodeClientStub = new Proxy(
   },
 );
 mock.module('@/lib/opencode/client', () => ({
+  isOpencodeNotFound: () => false,
   OpencodeApiError: Error,
   normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
   opencodeClient: opencodeClientStub,

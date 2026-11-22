@@ -6,18 +6,21 @@ import { setSessionPinned } from './session-actions';
 
 type PinTarget = { directory: string; sessionId: string };
 
-// Clicks on one session run in order, so the last one wins on the server too.
 const pinQueues = new Map<string, { tail: Promise<void>; count: number }>();
 
-/**
- * Pin or unpin a session. The row flips at once; the pin is stored in the
- * session's metadata on the server, which tells every other client. Rejects
- * when the server could not store it, and the row flips back.
- */
 export function toggleSessionPin(target: PinTarget): Promise<void> {
   const key = getPinnedSessionKey(getRuntimeKey(), target.directory, target.sessionId);
   if (!key) return Promise.resolve();
-  const pinned = !useSessionPinnedStore.getState().ids.has(key);
+  return writeSessionPin(key, target, !useSessionPinnedStore.getState().ids.has(key), null);
+}
+
+export function setSessionPinList(target: PinTarget, pinned: boolean, list: string | null): Promise<void> {
+  const key = getPinnedSessionKey(getRuntimeKey(), target.directory, target.sessionId);
+  if (!key) return Promise.resolve();
+  return writeSessionPin(key, target, pinned, list);
+}
+
+function writeSessionPin(key: string, target: PinTarget, pinned: boolean, list: string | null): Promise<void> {
   setPendingPin(key, pinned);
 
   const queue = pinQueues.get(key) ?? { tail: Promise.resolve(), count: 0 };
@@ -25,8 +28,7 @@ export function toggleSessionPin(target: PinTarget): Promise<void> {
   pinQueues.set(key, queue);
   const run = queue.tail.then(async () => {
     try {
-      await setSessionPinned(target.sessionId, target.directory, pinned);
-      // An old local pin must not bring back a session the user just unpinned.
+      await setSessionPinned(target.sessionId, target.directory, pinned, list);
       if (!pinned) forgetLegacyPins([key]);
     } finally {
       queue.count -= 1;
@@ -42,12 +44,6 @@ export function toggleSessionPin(target: PinTarget): Promise<void> {
 
 const migratingRuntimes = new Set<string>();
 
-/**
- * Pins used to live on each device only. Once the server's session list is
- * complete, this device's old pins for that server move into session
- * metadata; a pin whose session is gone is dropped, and one that fails to
- * write stays local and is tried again on the next complete load.
- */
 async function migrateLegacyPins(): Promise<void> {
   const state = useGlobalSessionsStore.getState();
   if (!state.hasLoaded || state.status !== 'ready') return;

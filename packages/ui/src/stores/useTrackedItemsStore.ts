@@ -1,16 +1,14 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
-import type { GitHubIssueLiveSummary, LinearIssueLiveSummary } from '@/lib/api/types';
+import type { DiscussionLiveSummary, IssueLiveSummary, TrackerLiveSummary } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { z } from 'zod';
-import { trackedItemKey, trackedItemRecordSchema, type TrackedItemState, type TrackedLinearIssue, type TrackedThread } from '@/lib/trackedItems/model';
+import { trackedItemKey, trackedItemRecordSchema, type TrackedItem, type TrackedItemState, type TrackedThread, type TrackedWorkItem } from '@/lib/trackedItems/model';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { getLinkedChangeRequestVisualSummary, type PrVisualSummary } from './useGitHubPrStatusStore';
 
 const STORAGE_KEY = 'openchamber.tracked-items';
-// A state older than this is not shown at start; the item reads as unknown
-// until the server answers, the same horizon the branch PR badge keeps.
 const PERSIST_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_ENTRIES = 300;
 
@@ -19,12 +17,7 @@ const storeKey = (runtimeKey: string, key: string) => `${runtimeKey}|${key}`;
 const persistedSchema = z.object({ records: z.record(z.string(), z.object({ item: z.unknown(), state: z.unknown(), fetchedAt: z.unknown() })) });
 
 type TrackedItemsStore = {
-  /** What the server last said about each followed item, by runtime and item key. */
   records: Record<string, TrackedItemState>;
-  /**
-   * Applies records the server sent. A record older than the one held (an
-   * interest answer racing a pushed change) is ignored.
-   */
   apply: (runtimeKey: string, records: ReadonlyArray<{ key: string; record: TrackedItemState }>) => void;
 };
 
@@ -60,8 +53,6 @@ export const useTrackedItemsStore = create<TrackedItemsStore>()(persist(
     storage: createDeferredSafeJSONStorage<{ records: Record<string, TrackedItemState> }>(),
     version: 1,
     partialize: (state) => ({ records: Object.fromEntries(freshRecords(state.records)) }),
-    // Stored data is untrusted: each record is parsed again, and a malformed
-    // one is dropped rather than shown.
     merge: (persisted, current) => {
       const stored = persistedSchema.safeParse(persisted);
       const restored: Record<string, TrackedItemState> = {};
@@ -76,39 +67,67 @@ export const useTrackedItemsStore = create<TrackedItemsStore>()(persist(
   },
 ));
 
-/** Live state of each GitHub or GitLab issue, in order; null until known. */
-export const useTrackedIssueStates = (items: ReadonlyArray<TrackedThread<'issue'>>): Array<GitHubIssueLiveSummary | null> => {
+export const useTrackedRecords = (items: ReadonlyArray<TrackedItem | null>): Array<TrackedItemState | null> => {
   const runtimeKey = getRuntimeKey();
-  return useTrackedItemsStore(useShallow((state) => items.map((item) => {
-    const record = state.records[storeKey(runtimeKey, trackedItemKey(item))];
-    return record?.type === 'issue' ? record.state : null;
-  })));
+  return useTrackedItemsStore(useShallow((state) => items.map((item) => (
+    item ? state.records[storeKey(runtimeKey, trackedItemKey(item))] ?? null : null
+  ))));
 };
 
-/** Live state of each Linear issue, in order; null until known. */
-export const useTrackedLinearStates = (items: ReadonlyArray<TrackedLinearIssue>): Array<LinearIssueLiveSummary | null> => {
-  const runtimeKey = getRuntimeKey();
-  return useTrackedItemsStore(useShallow((state) => items.map((item) => {
-    const record = state.records[storeKey(runtimeKey, trackedItemKey(item))];
-    return record?.type === 'linear' ? record.state : null;
-  })));
+type TrackedRecords = TrackedItemsStore['records'];
+
+const DISCUSSION_ISSUE_STATES = {
+  open: 'open',
+  resolved: 'completed',
+  outdated: 'not_planned',
+  duplicate: 'not_planned',
+} as const satisfies Record<DiscussionLiveSummary['state'], IssueLiveSummary['state']>;
+
+const discussionIssueStates = new WeakMap<DiscussionLiveSummary, IssueLiveSummary>();
+const discussionAsIssue = (summary: DiscussionLiveSummary): IssueLiveSummary => {
+  const known = discussionIssueStates.get(summary);
+  if (known) return known;
+  const issue: IssueLiveSummary = { owner: summary.owner, repo: summary.repo, number: summary.number, title: summary.title, state: DISCUSSION_ISSUE_STATES[summary.state] };
+  discussionIssueStates.set(summary, issue);
+  return issue;
 };
 
-/**
- * Badges of linked pull and merge requests, in order: the same colour and
- * status rule as a branch's PR. Null for one whose state is not known yet.
- */
+export const readTrackedIssueState = (records: TrackedRecords, item: TrackedThread<'issue' | 'discussion'>): IssueLiveSummary | null => {
+  const record = records[storeKey(getRuntimeKey(), trackedItemKey(item))];
+  if (record?.type === 'discussion') return record.state ? discussionAsIssue(record.state) : null;
+  return record?.type === 'issue' ? record.state : null;
+};
+
+export const readTrackedWorkItemState = (records: TrackedRecords, item: TrackedWorkItem): TrackerLiveSummary | null => {
+  const record = records[storeKey(getRuntimeKey(), trackedItemKey(item))];
+  return record?.type === 'work-item' ? record.state : null;
+};
+
+export const readTrackedPullVisualSummary = (
+  records: TrackedRecords,
+  { item, url, title }: { item: TrackedThread<'pull'>; url: string; title: string },
+): PrVisualSummary | null => {
+  const id = storeKey(getRuntimeKey(), trackedItemKey(item));
+  const record = records[id];
+  if (record?.type !== 'pull' || !record.state) return null;
+  return getLinkedChangeRequestVisualSummary(
+    id,
+    { owner: item.owner, repo: item.repo, number: item.number, url, title },
+    record.state,
+    { provider: item.provider, instance: item.instance },
+  );
+};
+
+export const useTrackedIssueStates = (items: ReadonlyArray<TrackedThread<'issue' | 'discussion'>>): Array<IssueLiveSummary | null> => (
+  useTrackedItemsStore(useShallow((state) => items.map((item) => readTrackedIssueState(state.records, item))))
+);
+
+export const useTrackedWorkItemStates = (items: ReadonlyArray<TrackedWorkItem>): Array<TrackerLiveSummary | null> => (
+  useTrackedItemsStore(useShallow((state) => items.map((item) => readTrackedWorkItemState(state.records, item))))
+);
+
 export const useTrackedPullVisualSummaries = (
   links: ReadonlyArray<{ item: TrackedThread<'pull'>; url: string; title: string }>,
-): Array<PrVisualSummary | null> => {
-  const runtimeKey = getRuntimeKey();
-  return useTrackedItemsStore(useShallow((state) => links.map(({ item, url, title }) => {
-    const id = storeKey(runtimeKey, trackedItemKey(item));
-    const record = state.records[id];
-    if (record?.type !== 'pull' || !record.state) return null;
-    const identity = item.provider === 'gitlab'
-      ? { provider: 'gitlab' as const, instance: item.instance }
-      : { provider: 'github' as const, instance: 'github.com' };
-    return getLinkedChangeRequestVisualSummary(id, { owner: item.owner, repo: item.repo, number: item.number, url, title }, record.state, identity);
-  })));
-};
+): Array<PrVisualSummary | null> => (
+  useTrackedItemsStore(useShallow((state) => links.map((link) => readTrackedPullVisualSummary(state.records, link))))
+);

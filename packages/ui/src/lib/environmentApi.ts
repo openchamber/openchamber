@@ -1,15 +1,7 @@
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-/**
- * Environment variables for what the server starts: the managed OpenCode,
- * Git, the terminal and command execution (`/api/environment`). Values can
- * be API tokens, so they stay on the server; the UI learns only the names
- * and can set or remove a value, never read it back. Not available in VS Code,
- * which runs no OpenChamber server.
- */
 
-/** Same rule as the server: an environment identifier. */
 export const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // Vault references (`op://…`) are the one value the server shows: a
@@ -25,6 +17,7 @@ const userEnvironmentSchema = z.object({
   names: z.array(z.string()),
   references: referencesSchema,
   vault: vaultSchema,
+  secrets: z.array(z.string()).default([]),
 });
 
 const commandStatusSchema = z.discriminatedUnion('state', [
@@ -35,6 +28,7 @@ const commandStatusSchema = z.discriminatedUnion('state', [
 const projectEnvironmentSchema = z.object({
   names: z.array(z.string()),
   command: z.string().nullable(),
+  secrets: z.array(z.string()).default([]),
   status: commandStatusSchema.nullable(),
   references: referencesSchema,
   vault: vaultSchema,
@@ -45,7 +39,6 @@ export type EnvironmentVaultRead = z.infer<typeof vaultReadSchema>;
 export type ProjectEnvironment = z.infer<typeof projectEnvironmentSchema>;
 export type EnvironmentCommandStatus = z.infer<typeof commandStatusSchema>;
 
-/** A string sets the variable, null removes it. */
 export type EnvironmentVariablesPatch = Record<string, string | null>;
 
 const readJson = async <T>(response: Response, schema: z.ZodType<T>, failure: string): Promise<T> => {
@@ -57,7 +50,7 @@ const readJson = async <T>(response: Response, schema: z.ZodType<T>, failure: st
   return schema.parse(await response.json());
 };
 
-type EnvironmentUpdate = { variables?: EnvironmentVariablesPatch; command?: string | null };
+export type EnvironmentUpdate = { variables?: EnvironmentVariablesPatch; command?: string | null; secrets?: Record<string, null> };
 
 const jsonHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
 
@@ -75,8 +68,8 @@ export const fetchUserEnvironment = async (): Promise<UserEnvironment> => readJs
   'Failed to read environment variables',
 );
 
-export const updateUserEnvironment = async (variables: EnvironmentVariablesPatch): Promise<UserEnvironment> => readJson(
-  await runtimeFetch('/api/environment', putRequest({ variables })),
+export const updateUserEnvironment = async (update: Pick<EnvironmentUpdate, 'variables' | 'secrets'>): Promise<UserEnvironment> => readJson(
+  await runtimeFetch('/api/environment', putRequest(update)),
   userEnvironmentSchema,
   'Failed to save environment variables',
 );
@@ -96,7 +89,6 @@ export const updateProjectEnvironment = async (
   'Failed to save project environment',
 );
 
-/** Runs the project's environment command now and answers its outcome. */
 export const reloadProjectEnvironment = async (projectId: string): Promise<ProjectEnvironment> => readJson(
   await runtimeFetch(`${projectPath(projectId)}/reload`, { method: 'POST', headers: jsonHeaders }),
   projectEnvironmentSchema,

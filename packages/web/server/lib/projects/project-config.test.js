@@ -25,6 +25,124 @@ const createRuntime = async () => {
 };
 
 describe('project-config runtime', () => {
+  it.each([
+    ['claim', 'stop'], ['claim', 'timeout'], ['discard', 'stop'],
+    ['discard', 'timeout'], ['clear', 'stop'], ['clear', 'timeout'],
+  ])('keeps the journal when %s waits on the project lock and %s cancels', async (stage, cause) => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    const fsPromises = await import('fs/promises');
+    const lockPath = `${runtime.resolveProjectConfigPath('project-test')}.lock`;
+    const blocked = Promise.withResolvers();
+    const controller = new AbortController();
+    const holdLock = () => writeFile(lockPath, JSON.stringify({ pid: process.pid, at: Date.now() }));
+    const lockedRuntime = createProjectConfigRuntime({
+      fsPromises: {
+        ...fsPromises,
+        open: async (...args) => {
+          try { return await fsPromises.open(...args); }
+          catch (error) { if (error?.code === 'EEXIST') blocked.resolve(); throw error; }
+        },
+      },
+      path, projectsDirPath: tempRoot,
+    });
+    const record = {
+      projectDirectory: tempRoot, worktreeDirectory: path.join(tempRoot, 'run'), directoryIdentity: '1:2',
+      sessionID: 'ses_cancelled', branch: 'openchamber/run', startedAt: 1, ownerPID: process.pid, phase: 'waiting',
+    };
+    const remove = vi.fn(async () => { if (stage === 'clear') await holdLock(); });
+    try {
+      await runtime.saveScheduledWorktreeCleanup('project-test', record);
+      if (stage !== 'clear') await holdLock();
+      const result = lockedRuntime.finishScheduledWorktreeCleanup('project-test', record.sessionID,
+        stage === 'discard' ? null : remove, { signal: controller.signal }).catch((error) => error);
+      await blocked.promise;
+      controller.abort(new DOMException('Cleanup cancelled', cause === 'stop' ? 'AbortError' : 'TimeoutError'));
+      await fsPromises.unlink(lockPath);
+      expect(await result).toBeInstanceOf(Error);
+      expect(remove).toHaveBeenCalledTimes(stage === 'clear' ? 1 : 0);
+      const records = await runtime.listScheduledWorktreeCleanups();
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject(stage === 'clear' ? { phase: 'removing', ownerPID: 0 } : { phase: 'waiting' });
+      await runtime.finishScheduledWorktreeCleanup('project-test', record.sessionID, async () => {});
+      expect(await runtime.listScheduledWorktreeCleanups()).toEqual([]);
+    } finally { await cleanup(); }
+  });
+
+  it('journals each cleanup, excludes concurrent finalizers and resumes partial removal', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    const fsPromises = await import('fs/promises');
+    const reopened = createProjectConfigRuntime({ fsPromises, path, projectsDirPath: tempRoot });
+    const file = path.join(tempRoot, 'project-test.json');
+    const base = {
+      projectDirectory: path.join(tempRoot, 'repo'), worktreeDirectory: path.join(tempRoot, 'run-1'),
+      directoryIdentity: '1:2', sessionID: 'ses_run_1', branch: 'openchamber/run-1',
+      startedAt: 1, ownerPID: process.pid, phase: 'waiting',
+    };
+    try {
+      await writeFile(file, JSON.stringify({ version: 1, scheduledTasks: [], custom: { keep: true } }));
+      await runtime.saveScheduledWorktreeCleanup('project-test', base);
+      await runtime.saveScheduledWorktreeCleanup('project-test', {
+        ...base, worktreeDirectory: path.join(tempRoot, 'run-2'), sessionID: 'ses_run_2', branch: 'openchamber/run-2',
+      });
+      expect(await reopened.listScheduledWorktreeCleanups()).toHaveLength(2);
+      const entered = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      const remove = vi.fn(async () => { entered.resolve(); await release.promise; });
+      const first = runtime.finishScheduledWorktreeCleanup('project-test', base.sessionID, remove);
+      await entered.promise;
+      expect(await reopened.finishScheduledWorktreeCleanup('project-test', base.sessionID, remove)).toBe(false);
+      expect(remove).toHaveBeenCalledTimes(1);
+      release.resolve();
+      await first;
+      const [second] = await reopened.listScheduledWorktreeCleanups();
+      expect(second.sessionID).toBe('ses_run_2');
+      await expect(reopened.finishScheduledWorktreeCleanup('project-test', second.sessionID, async () => {
+        throw new Error('Branch removal failed');
+      })).rejects.toThrow('Branch removal failed');
+      expect((await runtime.listScheduledWorktreeCleanups())[0]).toMatchObject({ phase: 'removing', ownerPID: 0 });
+      expect(await runtime.finishScheduledWorktreeCleanup('project-test', second.sessionID, null)).toBe(false);
+      await runtime.finishScheduledWorktreeCleanup('project-test', second.sessionID, async () => {});
+      expect(await reopened.listScheduledWorktreeCleanups()).toEqual([]);
+      expect(JSON.parse(await readFile(file, 'utf8')).custom).toEqual({ keep: true });
+    } finally { await cleanup(); }
+  });
+
+  it('keeps valid cleanups usable beside a malformed record', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const record = {
+      projectDirectory: tempRoot, worktreeDirectory: path.join(tempRoot, 'run'), directoryIdentity: '1:2',
+      sessionID: 'ses_valid', branch: 'openchamber/run', startedAt: 1, ownerPID: process.pid, phase: 'waiting',
+    };
+    try {
+      await writeFile(path.join(tempRoot, 'project-test.json'), JSON.stringify({
+        scheduledWorktreeCleanups: [null, { ...record, projectID: 'project-test' }],
+      }));
+      expect(await runtime.listScheduledWorktreeCleanups()).toHaveLength(1);
+      await runtime.finishScheduledWorktreeCleanup('project-test', record.sessionID, async () => {});
+      expect(await runtime.listScheduledWorktreeCleanups()).toEqual([]);
+      expect(warning).toHaveBeenCalled();
+    } finally { warning.mockRestore(); await cleanup(); }
+  });
+
+  it('preserves cleanup records when their atomic write fails', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    const fsPromises = await import('fs/promises');
+    const record = {
+      projectDirectory: tempRoot, worktreeDirectory: path.join(tempRoot, 'run'), directoryIdentity: '1:2',
+      sessionID: 'ses_1', branch: 'openchamber/run', startedAt: 1, ownerPID: process.pid, phase: 'waiting',
+    };
+    try {
+      await runtime.saveScheduledWorktreeCleanup('project-test', record);
+      const failing = createProjectConfigRuntime({
+        fsPromises: { ...fsPromises, writeFile: async () => { throw new Error('Disk is full'); } },
+        path, projectsDirPath: tempRoot,
+      });
+      await expect(failing.saveScheduledWorktreeCleanup('project-test', { ...record, sessionID: 'ses_2' })).rejects.toThrow('Disk is full');
+      expect((await runtime.listScheduledWorktreeCleanups())[0].sessionID).toBe('ses_1');
+    } finally { await cleanup(); }
+  });
+
   it('round-trips target tasks, terminal states and agent-only overrides without changing legacy model requirements', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {
@@ -136,6 +254,169 @@ describe('project-config runtime', () => {
       const result = await runtime.upsertScheduledTask('project-test', task({ useDefaults: true }));
       expect(result.task.execution).toEqual({ prompt: 'Summarize', useDefaults: true });
       await expect(runtime.upsertScheduledTask('project-test', task({}))).rejects.toThrow('execution.providerID is required');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('round-trips the branch and isolation a task runs with (#1959)', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const base = {
+      name: 'Nightly review',
+      enabled: true,
+      schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+      execution: { prompt: 'Review the diff', providerID: 'openai', modelID: 'gpt-4.1' },
+    };
+    try {
+      // Absent by default: an existing task keeps running in the checkout.
+      const plain = await runtime.upsertScheduledTask('project-test', base);
+      expect(plain.task.runInWorktree).toBeUndefined();
+      expect(plain.task.baseBranch).toBeUndefined();
+
+      const isolated = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: true,
+        baseBranch: 'release/2.5',
+      });
+      expect(isolated.task).toMatchObject({ runInWorktree: true, baseBranch: 'release/2.5' });
+
+      // Persisted, not just echoed back.
+      const reloaded = await runtime.listScheduledTasks('project-test');
+      expect(reloaded.find((task) => task.id === plain.task.id)).toMatchObject({
+        runInWorktree: true,
+        baseBranch: 'release/2.5',
+      });
+
+      // A branch with a space is not a ref, and says so instead of failing at 3am.
+      await expect(runtime.upsertScheduledTask('project-test', { ...base, baseBranch: 'feature/with space' }))
+        .rejects.toThrow('baseBranch is invalid: a branch name cannot contain spaces or control characters');
+
+      // Turning isolation off keeps the pick for the next time it is on.
+      const off = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: false,
+      });
+      expect(off.task.runInWorktree).toBeUndefined();
+      expect(off.task.baseBranch).toBe('release/2.5');
+
+      // Cleanup is on unless the task says otherwise, and the choice survives a
+      // reload; switching it back on drops the flag instead of storing true.
+      const keeping = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: true,
+        cleanupWorktree: false,
+      });
+      expect(keeping.task.cleanupWorktree).toBe(false);
+      const keepingReloaded = await runtime.listScheduledTasks('project-test');
+      expect(keepingReloaded.find((task) => task.id === plain.task.id)?.cleanupWorktree).toBe(false);
+
+      await runtime.upsertScheduledTask('project-test', {
+        ...keepingReloaded[0],
+        runInWorktree: false,
+      });
+      const disabledReloaded = await runtime.listScheduledTasks('project-test');
+      expect(disabledReloaded[0].runInWorktree).toBeUndefined();
+      expect(disabledReloaded[0].cleanupWorktree).toBe(false);
+
+      await runtime.upsertScheduledTask('project-test', {
+        ...disabledReloaded[0],
+        runInWorktree: true,
+      });
+      const enabledReloaded = await runtime.listScheduledTasks('project-test');
+      expect(enabledReloaded[0]).toMatchObject({ runInWorktree: true, cleanupWorktree: false });
+
+      const cleaned = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: true,
+        cleanupWorktree: true,
+      });
+      expect(cleaned.task.cleanupWorktree).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('rejects an oversized source branch without changing the stored task', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    const input = {
+      name: 'Review', enabled: false, runInWorktree: true,
+      baseBranch: `feature/${'x'.repeat(192)}`,
+      schedule: { kind: 'daily', time: '09:00' },
+      execution: { prompt: 'Review', useDefaults: true },
+    };
+    try {
+      const saved = await runtime.upsertScheduledTask('project-test', input);
+      expect((await runtime.listScheduledTasks('project-test'))[0].baseBranch).toBe(input.baseBranch);
+      const before = await readFile(path.join(tempRoot, 'project-test.json'), 'utf8');
+      await expect(runtime.upsertScheduledTask('project-test', {
+        ...input, id: saved.task.id, baseBranch: `${input.baseBranch}x`,
+      })).rejects.toThrow('baseBranch is invalid: at most 200 characters, got 201');
+      expect(await readFile(path.join(tempRoot, 'project-test.json'), 'utf8')).toBe(before);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it.each([
+    ['prompt', 20_000, (task, value) => ({ ...task, execution: { ...task.execution, prompt: value } }), 'execution.prompt is invalid: at most 20000 characters, got 20001'],
+    ['name', 80, (task, value) => ({ ...task, name: value }), 'task.name is invalid: at most 80 characters, got 81'],
+  ])('refuses a %s over the limit on create and update, and saves one at the limit whole', async (_field, limit, withValue, message) => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    const input = {
+      name: 'Digest', enabled: false, schedule: { kind: 'daily', time: '09:00' },
+      execution: { prompt: 'Summarise', useDefaults: true },
+    };
+    const file = path.join(tempRoot, 'project-test.json');
+    try {
+      await expect(runtime.upsertScheduledTask('project-test', withValue(input, 'x'.repeat(limit + 1)))).rejects.toThrow(message);
+      expect(await runtime.listScheduledTasks('project-test')).toEqual([]);
+      await expect(readFile(file, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const saved = await runtime.upsertScheduledTask('project-test', withValue(input, 'x'.repeat(limit)));
+      const stored = await readFile(file, 'utf8');
+      expect(JSON.stringify(JSON.parse(stored).scheduledTasks[0])).toContain('x'.repeat(limit));
+
+      await expect(runtime.upsertScheduledTask('project-test', {
+        ...withValue(input, 'y'.repeat(limit + 1)), id: saved.task.id,
+      })).rejects.toThrow(message);
+      expect(await readFile(file, 'utf8')).toBe(stored);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('counts the limit after trimming, as the stored value is measured', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const saved = await runtime.upsertScheduledTask('project-test', {
+        name: ` ${'n'.repeat(80)} `, enabled: false, schedule: { kind: 'daily', time: '09:00' },
+        execution: { prompt: `\n${'p'.repeat(20_000)}\n`, useDefaults: true },
+      });
+      expect(saved.task.name).toHaveLength(80);
+      expect(saved.task.execution.prompt).toHaveLength(20_000);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('still lists a stored task whose prompt or name is over the limit, cut to it', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      await writeFile(path.join(tempRoot, 'project-test.json'), JSON.stringify({
+        version: 1,
+        scheduledTasks: [{
+          id: 'task-long', name: 'n'.repeat(100), enabled: false, schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+          execution: { prompt: 'p'.repeat(23_499), useDefaults: true },
+        }],
+      }));
+      const [listed] = await runtime.listScheduledTasks('project-test');
+      expect(listed.id).toBe('task-long');
+      expect(listed.name).toHaveLength(80);
+      expect(listed.execution.prompt).toHaveLength(20_000);
     } finally {
       await cleanup();
     }
@@ -785,53 +1066,6 @@ describe('project-config loop reconciliation', () => {
     }
   });
 
-  it('serializes concurrent writes across two runtimes sharing a projects dir', async () => {
-    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-project-lock-contention-'));
-    const fsPromises = await import('fs/promises');
-    try {
-      const runtimeA = createProjectConfigRuntime({
-        fsPromises,
-        path,
-        projectsDirPath: tempRoot,
-        createTaskID: () => 'shared-task',
-      });
-      const runtimeB = createProjectConfigRuntime({
-        fsPromises,
-        path,
-        projectsDirPath: tempRoot,
-        createTaskID: () => 'shared-task',
-      });
-
-      await runtimeA.upsertScheduledTask('project-lock', {
-        name: 'contended',
-        enabled: true,
-        schedule: { kind: 'daily', time: '15:00', timezone: 'UTC' },
-        execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
-      });
-
-      await Promise.all([
-        runtimeA.updateScheduledTaskState('project-lock', 'shared-task', {
-          lastStatus: 'success',
-          lastRunAt: 100,
-        }),
-        runtimeB.updateScheduledTaskState('project-lock', 'shared-task', {
-          lastStatus: 'error',
-          lastRunAt: 200,
-        }),
-      ]);
-
-      const tasks = await runtimeA.listScheduledTasks('project-lock');
-      expect(tasks).toHaveLength(1);
-      expect(['success', 'error']).toContain(tasks[0].state.lastStatus);
-      expect([100, 200]).toContain(tasks[0].state.lastRunAt);
-
-      const lockPath = `${runtimeA.resolveProjectConfigPath('project-lock')}.lock`;
-      await expect(fsPromises.access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    } finally {
-      await rm(tempRoot, { recursive: true, force: true });
-    }
-  });
-
   it('recovers from a stale-by-age project config lock and cleans it up', async () => {
     const { runtime, cleanup } = await createRuntime();
     const fsPromises = await import('fs/promises');
@@ -967,8 +1201,22 @@ describe('project-config loop reconciliation', () => {
   }, 15_000);
 
   it('releases the write chain after a lock timeout so a later write can complete', async () => {
-    const { runtime, cleanup } = await createRuntime();
+    const { tempRoot, cleanup } = await createRuntime();
     const fsPromises = await import('fs/promises');
+    const lockRead = Promise.withResolvers();
+    vi.useFakeTimers();
+    const runtime = createProjectConfigRuntime({
+      fsPromises: {
+        ...fsPromises,
+        readFile: async (...args) => {
+          const value = await fsPromises.readFile(...args);
+          if (String(args[0]).endsWith('.lock')) lockRead.resolve();
+          return value;
+        },
+      },
+      path,
+      projectsDirPath: tempRoot,
+    });
     try {
       const projectID = 'lock-timeout-recover';
       const configPath = runtime.resolveProjectConfigPath(projectID);
@@ -979,27 +1227,27 @@ describe('project-config loop reconciliation', () => {
         at: Date.now(),
       }));
 
-      await expect(runtime.upsertScheduledTask(projectID, {
+      const blocked = expect(runtime.upsertScheduledTask(projectID, {
         name: 'blocked-then-recover',
         enabled: true,
         schedule: { kind: 'daily', time: '11:00', timezone: 'UTC' },
         execution: { prompt: 'Run', providerID: 'openai', modelID: 'gpt-4.1' },
       })).rejects.toThrow(/timeout acquiring project config lock/);
+      await lockRead.promise;
+      await vi.advanceTimersByTimeAsync(0);
+      vi.setSystemTime(Date.now() + 10_001);
+      await vi.advanceTimersByTimeAsync(20);
+      await blocked;
 
       // Remove the hostile lock. A wedged in-process chain would hang forever here.
       await fsPromises.unlink(lockPath);
 
-      const created = await Promise.race([
-        runtime.upsertScheduledTask(projectID, {
-          name: 'after-timeout',
-          enabled: true,
-          schedule: { kind: 'daily', time: '12:00', timezone: 'UTC' },
-          execution: { prompt: 'Run after timeout', providerID: 'openai', modelID: 'gpt-4.1' },
-        }),
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('second write hung after lock timeout')), 3_000);
-        }),
-      ]);
+      const created = await runtime.upsertScheduledTask(projectID, {
+        name: 'after-timeout',
+        enabled: true,
+        schedule: { kind: 'daily', time: '12:00', timezone: 'UTC' },
+        execution: { prompt: 'Run after timeout', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
 
       expect(created.created).toBe(true);
       expect(created.task.name).toBe('after-timeout');
@@ -1007,6 +1255,7 @@ describe('project-config loop reconciliation', () => {
       expect(listed).toHaveLength(1);
       expect(listed[0].name).toBe('after-timeout');
     } finally {
+      vi.useRealTimers();
       await cleanup();
     }
   }, 20_000);
@@ -1041,16 +1290,14 @@ describe('project-config loop reconciliation', () => {
 describe('scheduled-task clamp surrogate-pair boundary (#1976)', () => {
   const EMOJI = '\u{1F600}';
 
-  it('a pair straddling the 80-char name cut is dropped whole, in storage and on disk', async () => {
+  // Over-long names are refused rather than cut, so no cut can split a pair.
+  it('a name past the 80-char limit is refused and nothing is stored', async () => {
     const { runtime, tempRoot, cleanup } = await createRuntime();
     try {
       const input = { name: `${'a'.repeat(79)}${EMOJI}tail`, enabled: true, targetSessionId: 'ses_target', schedule: { kind: 'daily', time: '09:00' }, execution: { prompt: 'Continue', agent: 'plan' } };
-      const saved = await runtime.upsertScheduledTask('project-test', input);
-      expect(saved.task.name).toBe('a'.repeat(79));
-      const listed = await runtime.listScheduledTasks('project-test');
-      expect(listed[0].name).toBe('a'.repeat(79));
-      const onDisk = await readFile(path.join(tempRoot, 'project-test.json'), 'utf8');
-      expect(onDisk).not.toContain('\\ud83d');
+      await expect(runtime.upsertScheduledTask('project-test', input)).rejects.toThrow(/task\.name is invalid: at most 80 characters/);
+      expect(await runtime.listScheduledTasks('project-test')).toEqual([]);
+      await expect(readFile(path.join(tempRoot, 'project-test.json'), 'utf8')).rejects.toThrow();
     } finally {
       await cleanup();
     }

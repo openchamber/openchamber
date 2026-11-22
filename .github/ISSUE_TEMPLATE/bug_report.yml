@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        This form is for bugs. Feature ideas go to [Ideas discussions](https://github.com/openchamber/openchamber/discussions/categories/ideas), questions to [Q&A discussions](https://github.com/openchamber/openchamber/discussions/categories/q-a).
+        This form is for bugs. Something new or a change to how something works goes to a [feature request](https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml), questions to [Q&A discussions](https://github.com/openchamber/openchamber/discussions/categories/q-a).
 
         Please write in English. The maintainers skim every report, and one in another language waits until someone translates it. Machine translation is fine.
 

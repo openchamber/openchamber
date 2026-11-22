@@ -6,7 +6,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 
 type ProviderState = {
   id: string;
-  models: Array<{ id: string; variants?: Record<string, boolean> }>;
+  models: Array<{ id: string; variants?: Record<string, boolean> | Array<{ id: string }> }>;
 };
 
 type ConfigState = {
@@ -20,6 +20,11 @@ type ConfigState = {
   setSettingsDefaultModel: () => void;
   setSettingsDefaultVariant: () => void;
   setSettingsDefaultAgent: () => void;
+  setChatsDefaultModel: () => void;
+  setChatsDefaultVariant: () => void;
+  setChatsDefaultAgent: () => void;
+  chatsDefaultModel?: string;
+  chatsDefaultAgent?: string;
   selectionSource: 'auto';
   agentSelectionSource: 'auto';
   agents: Array<{ name: string; model?: { providerID: string; id: string } }>;
@@ -37,6 +42,9 @@ const configState: ConfigState = {
   setSettingsDefaultModel: () => undefined,
   setSettingsDefaultVariant: () => undefined,
   setSettingsDefaultAgent: () => undefined,
+  setChatsDefaultModel: () => undefined,
+  setChatsDefaultVariant: () => undefined,
+  setChatsDefaultAgent: () => undefined,
   selectionSource: 'auto',
   agentSelectionSource: 'auto',
   agents: [],
@@ -53,12 +61,17 @@ const selectionState = {
   getSessionAgentSelection: () => undefined,
 };
 
-const sessionState = { currentSessionId: null } satisfies { currentSessionId: string | null };
+type SessionState = { currentSessionId: string | null; newSessionDraft?: { open: boolean; target: 'chat' | 'project' } };
+
+const sessionState: SessionState = { currentSessionId: null };
 let savedSettings: DesktopSettings | null = null;
 const updateCalls: Array<Partial<DesktopSettings>> = [];
 
 mock.module('@/stores/useConfigStore', () => ({
   useConfigStore: <T,>(selector: (state: ConfigState) => T): T => selector(configState),
+  selectIsModelMissingFromCatalog: () => false,
+  selectProvidersForDirectory: (state: ConfigState) => state.providers,
+  selectConfigAgentsForDirectory: () => [],
 }));
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: <T,>(selector: (state: typeof settingsState) => T): T => selector(settingsState),
@@ -74,7 +87,9 @@ mock.module('@/stores/useDirectoryStore', () => ({
     selector({ currentDirectory: '/test/project' }),
 }));
 const runtimeFetchCalls: string[] = [];
+const runtimeFetchModule = await import('@/lib/runtime-fetch');
 mock.module('@/lib/runtime-fetch', () => ({
+  ...runtimeFetchModule,
   runtimeFetch: async (url: string) => {
     runtimeFetchCalls.push(url);
     return new Response(JSON.stringify({ authenticatedProviders: [] }), {
@@ -95,19 +110,40 @@ mock.module('@/lib/persistence', () => ({
 const opencodeModule = await import('@/lib/opencode/client');
 mock.module('@/lib/opencode/client', () => ({
   ...opencodeModule,
-  opencodeClient: { getConfig: async () => ({ warming: false }) },
+  opencodeClient: {
+    getConfig: async () => ({ warming: false }),
+    getFilesystemHomeInfo: async () => ({ home: '/home/me', chatsRoot: '/home/me/.config/openchamber/chats' }),
+  },
 }));
 mock.module('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
+  getCurrentIntlLocale: () => 'en-US',
 }));
 mock.module('@/components/chat/mobileControlsUtils', () => ({
   isPrimaryMode: (mode: string | undefined) => mode === 'primary',
 }));
 mock.module('@/components/sections/agents/ModelSelector', () => ({
-  ModelSelector: () => <button type="button">model</button>,
+  ModelSelector: ({
+    providerId,
+    modelId,
+    onChange,
+  }: {
+    providerId: string;
+    modelId: string;
+    onChange: (providerId: string, modelId: string) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() => onChange(providerId, modelId === 'small' ? 'other' : modelId)}
+    >
+      {providerId}/{modelId}
+    </button>
+  ),
 }));
 mock.module('@/components/sections/commands/AgentSelector', () => ({
-  AgentSelector: () => <button type="button">agent</button>,
+  AgentSelector: ({ onChange }: { onChange: (agentName: string) => void }) => (
+    <button type="button" onClick={() => onChange('plan')}>agent</button>
+  ),
 }));
 mock.module('@/components/sections/shared/SettingsInfoHint', () => ({
   SettingsInfoHint: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
@@ -125,12 +161,29 @@ mock.module('@/components/sections/shared/SettingsSection', () => ({
     <div>{label}{children}</div>
   ),
   SETTINGS_CUSTOM_TRIGGER_CLASS: '',
+  SETTINGS_HELPER_CLASS: '',
   SETTINGS_SELECT_ROW_TRIGGER_CLASS: '',
   SETTINGS_OPTION_STACK_CLASS: '',
   SettingsChipGroup: () => null,
 }));
 mock.module('@/components/ui/select', () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Select: ({
+    value,
+    onValueChange,
+    disabled,
+    children,
+  }: {
+    value?: string;
+    onValueChange?: (value: string) => void;
+    disabled?: boolean;
+    children: React.ReactNode;
+  }) => (
+    <div data-select-value={value} data-select-disabled={disabled ? 'true' : undefined}>
+      {children}
+      <button type="button" onClick={() => onValueChange?.('medium')}>select-medium</button>
+      <button type="button" onClick={() => onValueChange?.('__default__')}>select-default</button>
+    </div>
+  ),
   SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -178,6 +231,71 @@ describe('DefaultsSettings', () => {
     windowInstance.close();
   });
 
+  test('saves a Chats model without moving the composer selection', async () => {
+    const { ensureChatsRootDirectory } = await import('@/lib/chatDirectories');
+    await ensureChatsRootDirectory();
+    savedSettings = { defaultModel: 'sidecar/model', chatsDefaultModel: 'sidecar/chat', chatsDefaultVariant: 'high' };
+    const providerChanges: string[] = [];
+    const setProvider = configState.setProvider;
+    configState.setProvider = () => { providerChanges.push('set'); };
+    try {
+      await act(async () => {
+        root.render(<DefaultsSettings />);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const chatsModel = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'sidecar/chat');
+      expect(chatsModel).toBeDefined();
+      await act(async () => {
+        chatsModel?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(updateCalls).toEqual([{ chatsDefaultModel: 'sidecar/chat', chatsDefaultVariant: '' }]);
+      expect(providerChanges).toEqual([]);
+    } finally {
+      configState.setProvider = setProvider;
+    }
+  });
+
+  test('a New sessions edit leaves an open chat draft on its Chats defaults, and moves it when Chats is empty', async () => {
+    const changes: string[] = [];
+    const { setProvider, setAgent } = configState;
+    configState.setProvider = () => { changes.push('model'); };
+    configState.setAgent = () => { changes.push('agent'); };
+    sessionState.newSessionDraft = { open: true, target: 'chat' };
+    const editNewSessions = async () => {
+      await act(async () => {
+        root.render(<DefaultsSettings />);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const buttons = Array.from(host.querySelectorAll('button'));
+      for (const button of [buttons.find((b) => b.textContent === 'sidecar/model'), buttons.find((b) => b.textContent === 'agent')]) {
+        await act(async () => {
+          button?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+          await Promise.resolve();
+        });
+      }
+    };
+    try {
+      configState.chatsDefaultModel = 'sidecar/chat';
+      configState.chatsDefaultAgent = 'plan';
+      await editNewSessions();
+      expect(changes).toEqual([]);
+
+      configState.chatsDefaultModel = undefined;
+      configState.chatsDefaultAgent = undefined;
+      await editNewSessions();
+      expect(changes).toEqual(['model', 'agent']);
+    } finally {
+      configState.setProvider = setProvider;
+      configState.setAgent = setAgent;
+      configState.chatsDefaultModel = undefined;
+      configState.chatsDefaultAgent = undefined;
+      sessionState.newSessionDraft = undefined;
+    }
+  });
+
   test('asks the small-model route for providers in the current directory', async () => {
     runtimeFetchCalls.length = 0;
 
@@ -215,8 +333,169 @@ describe('DefaultsSettings', () => {
       await Promise.resolve();
     });
 
-    expect(host.textContent).toContain('sidecar/model');
     expect(host.textContent).toContain('High');
     expect(updateCalls).toEqual([]);
+  });
+
+  test('shows the thinking levels the selected small model offers', async () => {
+    savedSettings = {
+      defaultModel: 'sidecar/model',
+      defaultVariant: 'high',
+      smallModelUseDefault: false,
+      smallModelOverride: 'sidecar/small',
+      smallModelVariant: 'medium',
+    };
+    configState.providers = [{
+      id: 'sidecar',
+      models: [
+        { id: 'model', variants: { high: true } },
+        { id: 'small', variants: [{ id: 'low' }, { id: 'medium' }] },
+      ],
+    }];
+
+    await act(async () => {
+      root.render(<DefaultsSettings />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Medium');
+    expect(host.textContent).toContain('Low');
+  });
+
+  test('hides the small-model thinking row while the default small model is used', async () => {
+    savedSettings = {
+      defaultModel: 'sidecar/model',
+      defaultVariant: 'high',
+      smallModelUseDefault: true,
+      smallModelOverride: 'sidecar/small',
+      smallModelVariant: 'medium',
+    };
+    configState.providers = [{
+      id: 'sidecar',
+      models: [
+        { id: 'model', variants: { high: true } },
+        { id: 'small', variants: [{ id: 'low' }, { id: 'medium' }] },
+      ],
+    }];
+
+    await act(async () => {
+      root.render(<DefaultsSettings />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).not.toContain('Medium');
+    expect(host.textContent).not.toContain('Low');
+  });
+
+  test('saves the chosen small-model thinking level and clears it when the model changes', async () => {
+    savedSettings = {
+      defaultModel: 'sidecar/model',
+      defaultVariant: 'high',
+      smallModelUseDefault: false,
+      smallModelOverride: 'sidecar/small',
+    };
+    configState.providers = [{
+      id: 'sidecar',
+      models: [
+        { id: 'model', variants: { high: true } },
+        { id: 'small', variants: [{ id: 'low' }, { id: 'medium' }] },
+      ],
+    }];
+
+    await act(async () => {
+      root.render(<DefaultsSettings />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const smallSelect = host.querySelector('[data-select-value="__default__"]');
+    const selectMedium = smallSelect?.querySelector<HTMLButtonElement>('button');
+    expect(selectMedium).toBeTruthy();
+    await act(async () => {
+      selectMedium?.click();
+      await Promise.resolve();
+    });
+    expect(updateCalls.some((call) => call.smallModelVariant === 'medium')).toBe(true);
+
+    const smallSelectWithValue = host.querySelector('[data-select-value="medium"]');
+    const selectDefault = Array.from(smallSelectWithValue?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+      .find((button) => button.textContent === 'select-default');
+    expect(selectDefault).toBeTruthy();
+    await act(async () => {
+      selectDefault?.click();
+      await Promise.resolve();
+    });
+    expect(updateCalls.some((call) => call.smallModelVariant === '')).toBe(true);
+
+    const smallModelButton = Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'sidecar/small');
+    expect(smallModelButton).toBeTruthy();
+    await act(async () => {
+      smallModelButton?.click();
+      await Promise.resolve();
+    });
+    expect(updateCalls.some((call) => (
+      call.smallModelOverride === 'sidecar/other' && call.smallModelVariant === ''
+    ))).toBe(true);
+  });
+
+  test('shows no thinking picker for a small model without levels', async () => {
+    savedSettings = {
+      smallModelUseDefault: false,
+      smallModelOverride: 'sidecar/small',
+    };
+    configState.providers = [{ id: 'sidecar', models: [{ id: 'small' }] }];
+
+    await act(async () => {
+      root.render(<DefaultsSettings />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[data-select-value="__default__"]')).toBeNull();
+  });
+
+  test('saves a thinking level for the walkthrough model and clears it when that model changes', async () => {
+    savedSettings = {
+      defaultModel: 'sidecar/model',
+      defaultVariant: 'high',
+      smallModelUseDefault: true,
+      walkthroughModelOverride: 'sidecar/small',
+    };
+    configState.providers = [{
+      id: 'sidecar',
+      models: [
+        { id: 'model', variants: { high: true } },
+        { id: 'small', variants: [{ id: 'low' }, { id: 'medium' }] },
+        { id: 'other', variants: [{ id: 'low' }] },
+      ],
+    }];
+
+    await act(async () => {
+      root.render(<DefaultsSettings />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The small model uses its default, so the only unset level picker is the walkthrough's.
+    const walkthroughSelect = host.querySelector('[data-select-value="__default__"]');
+    expect(walkthroughSelect).toBeTruthy();
+    await act(async () => {
+      walkthroughSelect?.querySelector<HTMLButtonElement>('button')?.click();
+      await Promise.resolve();
+    });
+    expect(updateCalls.some((call) => call.walkthroughModelVariant === 'medium')).toBe(true);
+
+    const walkthroughModelButton = Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'sidecar/small');
+    await act(async () => {
+      walkthroughModelButton?.click();
+      await Promise.resolve();
+    });
+    expect(updateCalls.some((call) => (
+      call.walkthroughModelOverride === 'sidecar/other' && call.walkthroughModelVariant === ''
+    ))).toBe(true);
   });
 });

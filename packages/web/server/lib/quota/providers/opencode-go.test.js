@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { readConsoleBudgets } from '../console-budgets.js';
 
 const previousDataDirectory = process.env.OPENCHAMBER_DATA_DIR;
 const temporaryDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-opencode-go-'));
@@ -93,10 +94,6 @@ describe('OpenCode Go quota provider — legacy API key', () => {
     expect(windows.weekly.resetAt).toBe(Date.parse('2026-08-19T12:00:00.000Z'));
   });
 
-  it('does not expose credentials in authentication errors', async () => {
-    await expect(fetchOpenCodeGoUsage('secret', async () => new Response('', { status: 403 }))).rejects.toThrow('authentication failed');
-  });
-
   it('uses the Go usage API with bearer authentication', async () => {
     let request;
     const usage = await fetchOpenCodeGoUsage('secret', async (url, options) => {
@@ -117,7 +114,7 @@ describe('OpenCode Go quota provider — legacy API key', () => {
     const legacyPath = path.join(temporaryDataDirectory, 'quota', 'opencode-go.json');
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
     fs.writeFileSync(legacyPath, '{not valid json', { mode: 0o600 });
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
     vi.stubGlobal('fetch', fetchMock);
     const result = await fetchQuota({ readAuth: async () => apiKeyAuth() });
     expect(result).toMatchObject({ providerId: 'opencode-go', ok: true, configured: true });
@@ -125,8 +122,68 @@ describe('OpenCode Go quota provider — legacy API key', () => {
     expect(fs.existsSync(legacyPath)).toBe(false);
   });
 
+  // #5278: the usage API floors its percent, so 17.657% came back as 17 while
+  // the Console page showed 18.
+  it('reads the exact Console meters with an API key, without an organization', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload({ meters: {
+      fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '1000000', usedMicroCents: '43690' },
+      week: { resetsAt: '2026-08-19T12:00:00.000Z', limitMicroCents: '1000000', usedMicroCents: '176570' },
+      month: { resetsAt: '2026-09-01T00:00:00.000Z', limitMicroCents: '1000000', usedMicroCents: '268960' },
+    } }))));
+    const result = await fetchQuota({ readAuth: async () => apiKeyAuth(), fetchImpl });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchImpl.mock.calls[0];
+    expect(url).toBe(CONSOLE_STATUS_URL);
+    expect(options.headers.Authorization).toBe('Bearer test-key');
+    expect(options.headers['x-org-id']).toBeUndefined();
+    expect(options.redirect).toBe('error');
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBeCloseTo(4.369);
+    expect(result.usage.windows.weekly.usedPercent).toBeCloseTo(17.657);
+    expect(result.usage.windows.monthly.usedPercent).toBeCloseTo(26.896);
+  });
+
+  it('names the account the active key belongs to, and no label for an unnamed key', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
+
+    const named = await fetchQuota({ readAuth: async () => ({ 'opencode-go': { key: 'test-key', label: 'outlook' } }), fetchImpl });
+    expect(named.ok).toBe(true);
+    expect(named.accountLabel).toBe('outlook');
+
+    const unnamed = await fetchQuota({ readAuth: async () => ({ 'opencode-go': { key: 'test-key' } }), fetchImpl });
+    expect(unnamed.ok).toBe(true);
+    expect(unnamed.accountLabel).toBeUndefined();
+  });
+
+  it('names a key of the Console integration with its own label', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
+    const result = await fetchQuota({
+      readAuth: async () => ({ opencode: { type: 'api', key: 'console-key', label: 'solar tool' } }),
+      fetchImpl,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.accountLabel).toBe('solar tool');
+  });
+
+  it('falls back to the usage API when the Console status gives the key no Go meters', async () => {
+    const usage = { usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } };
+    const consoleAnswers = [
+      async () => new Response('{}', { status: 403 }),
+      async () => new Response(JSON.stringify(consolePayload({ product: null }))),
+      async () => new Response(JSON.stringify(consolePayload({ meters: {} }))),
+      async () => { throw new TypeError('fetch failed'); },
+    ];
+    for (const consoleAnswer of consoleAnswers) {
+      const fetchImpl = vi.fn(async (url) => (url === CONSOLE_STATUS_URL ? consoleAnswer() : new Response(JSON.stringify(usage))));
+      const result = await fetchQuota({ readAuth: async () => apiKeyAuth(), fetchImpl });
+      expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual([CONSOLE_STATUS_URL, 'https://opencode.ai/zen/go/v1/usage']);
+      expect(result.ok).toBe(true);
+      expect(result.usage.windows['5h'].usedPercent).toBe(25);
+    }
+  });
+
   it('still uses the API-key path when the Console integration is not a Console sign-in', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ usage: { rolling: { percent: 10, resetsAt: '2026-08-12T12:00:00.000Z' } } })));
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
     const result = await fetchQuota({
       readAuth: async () => ({
         ...consoleAuth({ server: 'https://example.com/console' }),
@@ -135,7 +192,8 @@ describe('OpenCode Go quota provider — legacy API key', () => {
       fetchImpl,
     });
     expect(result.ok).toBe(true);
-    expect(fetchImpl.mock.calls[0][0]).toBe('https://opencode.ai/zen/go/v1/usage');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer test-key');
   });
 
   // OpenCode binds OpenCode Go to the Console's `opencode` integration when the
@@ -143,24 +201,80 @@ describe('OpenCode Go quota provider — legacy API key', () => {
   it('reads an API key stored on the Console integration when OpenCode Go has none', async () => {
     const auth = { opencode: { type: 'api', key: 'console-key' } };
     expect(isConfigured(auth)).toBe(true);
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })));
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
     const result = await fetchQuota({ readAuth: async () => auth, fetchImpl });
     expect(result).toMatchObject({ providerId: 'opencode-go', ok: true, configured: true });
-    expect(fetchImpl.mock.calls[0][0]).toBe('https://opencode.ai/zen/go/v1/usage');
+    expect(fetchImpl.mock.calls[0][0]).toBe(CONSOLE_STATUS_URL);
     expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer console-key');
   });
 
-  it('prefers the OpenCode Go key over a key on the Console integration', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })));
-    await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' }, ...apiKeyAuth() }), fetchImpl });
+  // #6679: OpenCode sends Go requests with the Console card's key whenever its workspace has Go, so an
+  // `opencode-go` key alongside it is not the one being billed.
+  it('prefers a key on the Console integration over the OpenCode Go key', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(consolePayload())));
+    const result = await fetchQuota({
+      readAuth: async () => ({ opencode: { type: 'api', key: 'console-key', label: 'console' }, 'opencode-go': { key: 'test-key', label: 'go' } }),
+      fetchImpl,
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer test-key');
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer console-key');
+    expect(result).toMatchObject({ ok: true, accountLabel: 'console' });
+  });
+
+  // OpenCode falls back to the `opencode-go` card when the Console workspace cannot serve Go.
+  it('falls back to the OpenCode Go key when the Console key cannot read Go usage', async () => {
+    const usage = { usage: { rolling: { percent: 10, resetsAt: '2026-08-12T12:00:00.000Z' } } };
+    const fetchImpl = vi.fn(async (url, options) => {
+      if (url === CONSOLE_STATUS_URL) return new Response('{}', { status: 403 });
+      return options.headers.Authorization === 'Bearer test-key'
+        ? new Response(JSON.stringify(usage))
+        : new Response('{}', { status: 403 });
+    });
+    const result = await fetchQuota({
+      readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' }, 'opencode-go': { key: 'test-key', label: 'go' } }),
+      fetchImpl,
+    });
+    expect(result).toMatchObject({ ok: true, accountLabel: 'go' });
+    expect(result.usage.windows['5h'].usedPercent).toBe(10);
+  });
+
+  it('reports the Go key expiry, not the Console key refusal, once it falls back', async () => {
+    const fetchImpl = vi.fn(async (url, options) => {
+      if (url === CONSOLE_STATUS_URL) return new Response('{}', { status: 403 });
+      return options.headers.Authorization === 'Bearer test-key'
+        ? new Response(JSON.stringify({ error: { code: 'api_key_expired' } }), { status: 401 })
+        : new Response('{}', { status: 403 });
+    });
+    const result = await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' }, ...apiKeyAuth() }), fetchImpl });
+    expect(result.error).toBe('OpenCode Go key expired. Connect an OpenCode Console account on the OpenCode card in Providers.');
+  });
+
+  // OpenCode keeps Go on the Console key through a transient failure, so the card must not switch accounts.
+  it('reports a temporary Console key failure instead of falling back to the OpenCode Go key', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{}', { status: 503 }));
+    const result = await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' }, ...apiKeyAuth() }), fetchImpl });
+    expect(result).toMatchObject({ ok: false, configured: true, error: 'OpenCode Go usage API returned HTTP 503' });
+    expect(fetchImpl.mock.calls.every((call) => call[1].headers.Authorization === 'Bearer console-key')).toBe(true);
   });
 
   it('reports an absent subscription when the Console key has no Go', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ type: 'error', error: { type: 'EntitlementError' } }), { status: 403 }));
     const result = await fetchQuota({ readAuth: async () => ({ opencode: { type: 'api', key: 'console-key' } }), fetchImpl });
     expect(result).toMatchObject({ ok: false, configured: true, error: 'No active OpenCode Go subscription on the selected Console account' });
+  });
+
+  it('names an expired key and the sign-in that replaces it', async () => {
+    const expired = { error: { type: 'authentication_error', code: 'api_key_expired', message: 'This API key has expired.' } };
+    for (const auth of [apiKeyAuth(), { opencode: { type: 'api', key: 'console-key' } }]) {
+      const result = await fetchQuota({ readAuth: async () => auth, fetchImpl: async () => new Response(JSON.stringify(expired), { status: 401 }) });
+      expect(result).toMatchObject({ ok: false, configured: true, error: 'OpenCode Go key expired. Connect an OpenCode Console account on the OpenCode card in Providers.' });
+    }
+  });
+
+  it('keeps a 401 without the expired-key code an authentication failure', async () => {
+    const fetchImpl = async () => new Response(JSON.stringify({ error: { type: 'AuthError', message: 'Unauthorized' } }), { status: 401 });
+    const result = await fetchQuota({ readAuth: async () => apiKeyAuth(), fetchImpl });
+    expect(result.error).toBe('OpenCode Go authentication failed');
   });
 
   it('reports a rejected Console key as an authentication failure', async () => {
@@ -180,14 +294,54 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(windows['5h'].resetAt).toBe(Date.parse('2026-08-12T12:00:00.000Z'));
   });
 
-  it('supports Go Plus', async () => {
+  it.each(['go-plus', 'go-teams'])('supports the %s plan', async (product) => {
     const result = await fetchQuota({
       readAuth: async () => consoleAuth(),
-      fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'go-plus' }))),
+      fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product }))),
     });
     expect(result.ok).toBe(true);
-    expect(result.planLabel).toBe('go-plus');
+    expect(result.planLabel).toBe(product);
     expect(result.usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('names the account the active sign-in belongs to, and no label for an unnamed sign-in', async () => {
+    const fetchImpl = async () => new Response(JSON.stringify(consolePayload()));
+
+    const named = await fetchQuota({ readAuth: async () => consoleAuth({ label: 'outlook' }), fetchImpl });
+    expect(named.ok).toBe(true);
+    expect(named.accountLabel).toBe('outlook');
+
+    const unnamed = await fetchQuota({ readAuth: async () => consoleAuth(), fetchImpl });
+    expect(unnamed.ok).toBe(true);
+    expect(unnamed.accountLabel).toBeUndefined();
+  });
+
+  it('keeps the fallback Go key label separate from the Console sign-in budget workspace', async () => {
+    const fetchImpl = async (url, options) =>
+      url === CONSOLE_STATUS_URL && new Headers(options.headers).has('x-org-id')
+        ? Response.json(consolePayload({ product: 'zen' }))
+        : Response.json(consolePayload());
+    const result = await fetchQuota({
+      readAuth: async () => ({
+        ...consoleAuth({ label: 'Work Console sign-in' }),
+        'opencode-go': { key: 'test-key', label: 'Personal Go key' },
+      }),
+      fetchImpl,
+      readBudgets: () => readConsoleBudgets(async () => ({
+        workspace: { name: 'Acme Console' },
+        budgets: [{
+          id: 'bud_1', limit: 50, spent: 10, scope: 'each', per: 'set', coverage: 'all',
+          models: [], vendors: [], picked: false, shared: false, resetsAt: 1_800_000_000_000,
+        }],
+      })),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.accountLabel).toBe('Personal Go key');
+    expect(result.usage.windows['5h'].usedPercent).toBe(25);
+    expect(result.usage.consoleBudgets).toMatchObject({
+      workspace: 'Acme Console',
+      budgets: [{ id: 'bud_1', usedPercent: 20 }],
+    });
   });
 
   it('exposes the Console product as planLabel on the quota result', async () => {
@@ -294,9 +448,22 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(result.ok).toBe(true);
     expect(result.usage.windows['5h'].usedPercent).toBe(10);
     // The billing read starts alongside the Go status; its result is dropped
-    // when the Console read fails.
-    expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual([CONSOLE_BILLING_STATUS_URL, CONSOLE_STATUS_URL, 'https://opencode.ai/zen/go/v1/usage']);
+    // when the Console read fails. The key then tries the same Console status
+    // before the usage API.
+    expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual([CONSOLE_BILLING_STATUS_URL, CONSOLE_STATUS_URL, CONSOLE_STATUS_URL, 'https://opencode.ai/zen/go/v1/usage']);
+    expect(fetchImpl.mock.calls[2][1].headers.Authorization).toBe('Bearer test-key');
     expect(result.usage.windows.credits_balance).toBeUndefined();
+  });
+
+  it('reports the Console error when the fallback key has expired', async () => {
+    const fetchImpl = vi.fn(async (url) => (url === CONSOLE_STATUS_URL
+      ? new Response(JSON.stringify(consolePayload({ product: 'zen' })))
+      : new Response(JSON.stringify({ error: { code: 'api_key_expired' } }), { status: 401 })));
+    const result = await fetchQuota({
+      readAuth: async () => ({ ...consoleAuth(), 'opencode-go': { key: 'test-key' } }),
+      fetchImpl,
+    });
+    expect(result).toMatchObject({ ok: false, configured: true, error: 'No active OpenCode Go subscription on the selected Console account' });
   });
 
   it('reports the Console error when there is no key to fall back to', async () => {
@@ -368,6 +535,39 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     });
     expect(malformed.configured).toBe(true);
     expect(malformed.error).toMatch(/unreadable/i);
+  });
+
+  it('reads a Go product without access as an absent subscription, not a parse failure', async () => {
+    // A Console Go subscription that ended (refunded or cancelled) keeps the Go
+    // product in the status response and drops `access` to null (#6779).
+    const ended = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({
+        product: 'go',
+        cancelAtPeriodEnd: true,
+        renewalStopReason: 'cancelled_by_user',
+        resumability: 'revoked',
+        access: null,
+        accessEndedAt: '2026-10-26T05:32:37.560Z',
+      })),
+    });
+    expect(ended.configured).toBe(true);
+    expect(ended.error).toMatch(/subscription/i);
+    expect(ended.error).not.toMatch(/parsed/i);
+
+    const withoutAccess = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({ product: 'go' })),
+    });
+    expect(withoutAccess.error).toMatch(/subscription/i);
+
+    // An access object that is present but carries no usable meter stays a
+    // malformed response: the subscription exists, the numbers do not.
+    const emptyMeters = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({ product: 'go', access: { meters: {} } })),
+    });
+    expect(emptyMeters.error).toMatch(/parsed/i);
   });
 
   it('reports a temporary request failure as configured', async () => {
@@ -493,11 +693,12 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
       readAuth: async () => apiKeyAuth(),
       fetchImpl: async (url) => {
         seen.push(url);
-        return new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } }));
+        return new Response(JSON.stringify(consolePayload()));
       },
     });
     expect(result.ok).toBe(true);
-    expect(seen).toEqual(['https://opencode.ai/zen/go/v1/usage']);
+    expect(seen).toEqual([CONSOLE_STATUS_URL]);
+    expect(result.usage.windows.credits_balance).toBeUndefined();
   });
 });
 

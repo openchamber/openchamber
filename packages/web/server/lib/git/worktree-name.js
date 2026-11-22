@@ -61,11 +61,14 @@ const modelRefOf = (model) => {
 };
 
 /**
+ * Each field is checked here; a value of the wrong type is ignored.
+ *
  * @param {object} options
- * @param {string} options.prompt the session's initial prompt
- * @param {string|{providerID: string, modelID: string}} [options.model] model to name with; `provider/model`
- * @param {string} [options.directory] project directory (scopes the OpenCode request)
+ * @param {unknown} [options.prompt] the session's initial prompt
+ * @param {unknown} [options.model] model to name with; `provider/model` or `{ providerID, modelID }`
+ * @param {unknown} [options.directory] project directory (scopes the OpenCode request)
  * @param {Function} [options.generateText] injectable for tests; defaults to the small-model service
+ * @param {AbortSignal} [options.signal]
  * @returns {Promise<string>} a slug, or '' when no name could be generated
  */
 export const generateWorktreeName = async ({ prompt, model, directory, generateText, signal } = {}) => {

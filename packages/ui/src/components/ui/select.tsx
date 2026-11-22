@@ -160,7 +160,6 @@ function SelectTrigger({
     <BaseSelect.Trigger
       data-slot="select-trigger"
       className={cn(
-        // Shared trigger chrome: one source of truth for every dropdown trigger.
         dropdownTriggerVariants(),
         "w-fit data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
         className
@@ -214,8 +213,6 @@ function SelectContent({
   const portalContext = React.useContext(SelectPortalContext);
   const alignItemWithTrigger = position === "item-aligned";
   const portalContainer = portalContext?.portalContainer ?? null;
-  // Floating UI bounds the viewport, but native status/home areas live inside
-  // that viewport. Include the app's resolved insets in collision sizing too.
   const [collisionPadding, setCollisionPadding] = React.useState({ top: 8, right: 8, bottom: 8, left: 8 });
 
   React.useLayoutEffect(() => {
@@ -233,7 +230,6 @@ function SelectContent({
       frame = requestAnimationFrame(measure);
     };
     measure();
-    // Native safe-area updates can arrive after the viewport resize event.
     const observer = new MutationObserver(scheduleMeasure);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
     window.addEventListener('resize', scheduleMeasure);
@@ -258,8 +254,6 @@ function SelectContent({
     });
   };
 
-  // `contents`: inside a dialog the portal node is one more flex child, and
-  // the dialog's gap grew the dialog by a row while the popup was open.
   return (
     <BaseSelect.Portal className="contents" container={portalToBody ? undefined : portalContainer || undefined}>
       <BaseSelect.Positioner
@@ -278,7 +272,7 @@ function SelectContent({
             color: 'var(--surface-elevated-foreground)',
           }}
           className={cn(
-            "oc-glass-popover oc-glass-floating pointer-events-auto transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 relative z-[120] max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-x-hidden rounded-xl",
+            "oc-glass-popover oc-glass-floating pointer-events-auto oc-popup-motion data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 relative z-[120] max-h-[var(--available-height)] min-w-[8rem] origin-[var(--transform-origin)] overflow-x-hidden rounded-xl",
             !alignItemWithTrigger &&
               "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
             fitContent && "w-max min-w-0",

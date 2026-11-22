@@ -1,7 +1,3 @@
-/**
- * Branch name generator utility for auto-generating friendly branch names.
- * Uses Ubuntu-style adjective-noun word pairs for memorable, collision-resistant naming.
- */
 
 const ADJECTIVES = [
   'artful', 'bionic', 'cosmic', 'disco', 'focal', 'groovy', 'jammy', 'kinetic',
@@ -17,20 +13,12 @@ const NOUNS = [
   'badger', 'condor', 'dingo', 'egret', 'ferret', 'gecko', 'heron', 'iguana',
 ];
 
-/**
- * Generate a random branch slug (e.g., "cosmic-dolphin", "noble-raccoon").
- */
 export function generateBranchSlug(): string {
   const adjective = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
   const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
   return `${adjective}-${noun}`;
 }
 
-/**
- * Generate a branch name with optional prefix.
- * @param prefix - Optional prefix like "feature", "bugfix" (no trailing slash)
- * @returns Full branch name like "feature/cosmic-dolphin" or just "cosmic-dolphin"
- */
 export function generateBranchName(prefix?: string): string {
   const slug = generateBranchSlug();
   if (prefix && prefix.trim()) {
@@ -38,4 +26,11 @@ export function generateBranchName(prefix?: string): string {
     return `${cleanPrefix}/${slug}`;
   }
   return slug;
+}
+
+const GENERATED_NAME = new RegExp(`^((?:issue|discussion)-[^\\s/]+-)?(?:${ADJECTIVES.join('|')})-(?:${NOUNS.join('|')})(?:-[a-z0-9]{4})?$`);
+
+export function generatedBranchPrefix(name: string): string | null {
+  const match = GENERATED_NAME.exec(name.trim());
+  return match ? match[1] ?? '' : null;
 }

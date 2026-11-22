@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 
-// NOTE: keep the Workbox injection point so vite-plugin-pwa can build.
-// We intentionally do not use Workbox runtime helpers here: iOS Safari can be
-// fragile with more complex SW bundles. For push notifications we only need a
-// minimal SW.
+
+
+
+
 
 declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<string | { url: string; revision?: string }>;
@@ -15,10 +15,16 @@ type PushPayload = {
   title?: string;
   body?: string;
   tag?: string;
+
+
+
+  clear?: string[];
   data?: {
     url?: string;
     sessionId?: string;
     type?: string;
+
+    nid?: string;
   };
   icon?: string;
   badge?: string;
@@ -39,6 +45,8 @@ self.addEventListener('push', (event) => {
       return;
     }
 
+    await closeHandledNotifications(payload.clear);
+
     const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const hasVisibleClient = clients.some((client) => client.visibilityState === 'visible' || client.focused);
     if (hasVisibleClient) {
@@ -50,15 +58,64 @@ self.addEventListener('push', (event) => {
     const icon = payload.icon ?? '/apple-touch-icon-180x180.png';
     const badge = payload.badge ?? '/favicon-32.png';
 
-    await self.registration.showNotification(title, {
+    const options: NotificationOptions & { renotify?: boolean } = {
       body,
       icon,
       badge,
       tag: payload.tag,
       data: payload.data,
-    });
+    };
+    if (payload.tag) {
+      options.renotify = true;
+    }
+    await self.registration.showNotification(title, options);
   })());
 });
+
+
+
+async function closeHandledNotifications(entries: string[] | undefined): Promise<void> {
+  if (!entries?.length) return;
+  const covered = new Map<string, number | null>();
+  for (const entry of entries) {
+    const [tag, id] = entry.split('@');
+    if (tag) covered.set(tag, id ? Number(id) : null);
+  }
+  const shown = await self.registration.getNotifications();
+  for (const notification of shown) {
+    if (!notification.tag || !covered.has(notification.tag)) continue;
+    const upTo = covered.get(notification.tag) ?? null;
+
+    const shownId = Number(notification.data?.nid);
+    if (upTo === null || Number.isNaN(upTo) || Number.isNaN(shownId) || shownId <= upTo) notification.close();
+  }
+}
+
+
+
+function requestAppNavigation(client: WindowClient, url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const finish = (accepted: boolean) => {
+      clearTimeout(timeout);
+      channel.port1.close();
+      channel.port2.close();
+      resolve(accepted);
+    };
+    const timeout = setTimeout(() => finish(false), 1500);
+    channel.port1.onmessage = (event: MessageEvent<unknown>) => finish(event.data === true);
+    channel.port1.onmessageerror = () => finish(false);
+    try {
+      client.postMessage({
+        type: 'openchamber:notification-navigation',
+        url,
+        expiresAt: Date.now() + 1500,
+      }, [channel.port2]);
+    } catch {
+      finish(false);
+    }
+  });
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
@@ -72,8 +129,6 @@ self.addEventListener('notificationclick', (event) => {
   const url = rawUrl || (rawSessionId ? `/?session=${encodeURIComponent(rawSessionId)}` : '/');
 
   event.waitUntil((async () => {
-    // Prefer focusing an already-open window (e.g. the installed PWA) and
-    // navigating it to the target, instead of always spawning a new window.
     const target = new URL(url, self.location.origin).href;
     const windowClients = await self.clients.matchAll({
       type: 'window',
@@ -82,14 +137,14 @@ self.addEventListener('notificationclick', (event) => {
 
     for (const client of windowClients) {
       try {
-        if ('navigate' in client) {
-          await client.navigate(target);
+        await client.focus();
+        if (await requestAppNavigation(client, target)) {
+          return;
         }
+        const navigated = await client.navigate(target);
+        if (navigated) return;
       } catch {
-        // navigate() can reject for uncontrolled clients; fall back to focus.
-      }
-      if ('focus' in client) {
-        return client.focus();
+        // A window can close between enumeration and focus/navigation.
       }
     }
 

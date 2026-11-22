@@ -5,8 +5,11 @@ import {
   TUNNEL_INTENT_EPHEMERAL_PUBLIC,
   TUNNEL_MODE_QUICK,
   TUNNEL_PROVIDER_CLOUDFLARE,
+  TUNNEL_MODE_SERVE,
   TUNNEL_PROVIDER_NGROK,
+  TUNNEL_PROVIDER_TAILSCALE,
 } from './types.js';
+import { tailscaleTunnelProviderCapabilities } from './providers/tailscale.js';
 
 const createProvider = ({ provider, start, stop, resolvePublicUrl }) => ({
   id: provider,
@@ -89,5 +92,52 @@ describe('createTunnelService', () => {
     expect(ngrokStarted).toBe(true);
     expect(result.provider).toBe(TUNNEL_PROVIDER_NGROK);
     expect(result.publicUrl).toBe('https://demo.ngrok-free.app');
+  });
+
+  describe('HTTPS port changes', () => {
+    const setup = () => {
+      const starts = [];
+      const stops = [];
+      let controller = null;
+      const provider = {
+        ...createProvider({
+          provider: TUNNEL_PROVIDER_TAILSCALE,
+          start: async (request) => {
+            starts.push(request.httpsPort);
+            const port = request.httpsPort ?? 443;
+            return { mode: request.mode, httpsPort: port, getPublicUrl: () => `https://box.ts.net:${port}` };
+          },
+          stop: (active) => { stops.push(active.httpsPort); },
+        }),
+        capabilities: tailscaleTunnelProviderCapabilities,
+      };
+      const service = createTunnelService({
+        registry: createRegistry({ [TUNNEL_PROVIDER_TAILSCALE]: provider }),
+        getController: () => controller,
+        setController: (next) => { controller = next; },
+        getActivePort: () => 3000,
+      });
+      return { service, starts, stops };
+    };
+
+    it('replaces the running tunnel when the port changes', async () => {
+      const { service, starts, stops } = setup();
+      await service.start({ provider: TUNNEL_PROVIDER_TAILSCALE, mode: TUNNEL_MODE_SERVE, httpsPort: 443 });
+      const result = await service.start({ provider: TUNNEL_PROVIDER_TAILSCALE, mode: TUNNEL_MODE_SERVE, httpsPort: 8443 });
+
+      expect(starts).toEqual([443, 8443]);
+      expect(stops).toEqual([443]);
+      expect(result.publicUrl).toBe('https://box.ts.net:8443');
+    });
+
+    it('keeps the running tunnel for the same port or no port', async () => {
+      const { service, starts, stops } = setup();
+      await service.start({ provider: TUNNEL_PROVIDER_TAILSCALE, mode: TUNNEL_MODE_SERVE, httpsPort: 8443 });
+      await service.start({ provider: TUNNEL_PROVIDER_TAILSCALE, mode: TUNNEL_MODE_SERVE, httpsPort: 8443 });
+      await service.start({ provider: TUNNEL_PROVIDER_TAILSCALE, mode: TUNNEL_MODE_SERVE });
+
+      expect(starts).toEqual([8443]);
+      expect(stops).toEqual([]);
+    });
   });
 });

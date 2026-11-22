@@ -5,9 +5,10 @@
  * Each directory holds run directories named `<scenario>-<n>` (or just
  * `<scenario>`), as `profile:compare` writes them; every run directory holds
  * one `*-summary.json` from a profile:* command. Runs are grouped by scenario
- * and compared per metric: median and p95 on each side, the change of the
- * median, and a verdict that calls a change noise when the after median lies
- * inside the range the before runs spread over.
+ * and compared per metric, pairing the runs of the two sides by their <n>:
+ * median and p95 on each side, the paired change with its interval, and a
+ * verdict. Each scenario has one primary metric, the one its verdict is about;
+ * the others get verdict words only once the primary has one, Holm-corrected.
  *
  *   node scripts/perf/compare-runs.mjs <before dir> <after dir> [--output comparison.md]
  */
@@ -18,6 +19,7 @@ import { fileURLToPath } from "node:url"
 import process from "node:process"
 
 import { percentile, round } from "./metrics.mjs"
+import { comparePairs, DEFAULT_CONFIDENCE, EQUIVALENCE, holmPasses, medianOf } from "./paired-stats.mjs"
 import { invalidReasons, modifications, readSummary } from "./run-summary.mjs"
 import { measuredToggles, TOGGLE_METRICS } from "./toggle-analysis.mjs"
 import { cachedPipelineMetrics } from "./trace-analysis.mjs"
@@ -26,21 +28,25 @@ const HELP = `Usage: node scripts/perf/compare-runs.mjs <before dir> <after dir>
 
 Groups the run directories in each side by scenario (the name without its
 trailing -<n>) and prints a markdown table: median / p95 (n) per side, the
-change of the median, and a verdict. Runs whose validity flags say they
-measured nothing are excluded and listed.
+paired change with its interval, and a verdict. Runs pair up by <n>; a verdict
+needs 6 pairs. Runs whose validity flags say they measured nothing are excluded
+and listed.
 
 Options:
   --scenario <name>        Compare only this scenario (repeatable)
+  --confidence <level>     Interval level (default: 0.95). A profile:compare with
+                           --pairs auto used 0.9842: pass it to reprint that table
   --output <file>          Also write the table to this file
   --help                   Show this help`
 
 const parseArgs = (argv) => {
-  const options = { before: null, after: null, scenarios: [], output: null }
+  const options = { before: null, after: null, scenarios: [], output: null, confidence: DEFAULT_CONFIDENCE }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === "--help") { console.log(HELP); process.exit(0) }
     else if (value === "--scenario") options.scenarios.push(argv[++index])
     else if (value === "--output") options.output = resolve(argv[++index])
+    else if (value === "--confidence") options.confidence = Number(argv[++index])
     else if (value.startsWith("--")) throw new Error(`Unknown option: ${value}`)
     else if (!options.before) options.before = resolve(value)
     else if (!options.after) options.after = resolve(value)
@@ -61,7 +67,13 @@ const processCpu = (data, label) => {
   return entries.length ? entries.reduce((total, entry) => total + entry.averagePercent, 0) : null
 }
 
+const processWakes = (data, label) => {
+  const entries = data.processCpu?.processes?.filter((entry) => entry.label === label && entry.contextSwitchesPerSecond !== undefined) ?? []
+  return entries.length ? entries.reduce((total, entry) => total + entry.contextSwitchesPerSecond, 0) : null
+}
+
 const metric = (key) => (data) => data.metrics?.[key]
+const signal = (key) => (data) => data.pageSignals?.[key]
 // Read from the timeline trace, which an uninstrumented run (`--process-cpu-only`)
 // never records: its summary holds placeholder zeros, so they read as missing.
 const traceMetric = (key) => (data) => (data.instrumented === false ? null : data.metrics?.[key])
@@ -85,6 +97,12 @@ const RUN_METRICS = {
     [(data) => processCpu(data, "chrome renderer"), "renderer process CPU %", LOWER],
     [(data) => processCpu(data, "chrome GPU"), "GPU process CPU %", LOWER],
     [(data) => data.processCpu?.totalAveragePercent ?? null, "all processes CPU %", LOWER],
+    [(data) => processWakes(data, "chrome renderer"), "renderer wakes/s", LOWER],
+    [(data) => processWakes(data, "chrome GPU"), "GPU process wakes/s", LOWER],
+    [signal("longestTaskMs"), "longest task ≥50 ms, observed", LOWER],
+    [signal("longTaskCount"), "tasks ≥50 ms, observed", LOWER],
+    [signal("layoutShift"), "layout shift", LOWER],
+    [signal("requests"), "requests", LOWER],
     [metric("renderedCharacters"), "rendered characters (workload)", WORKLOAD],
   ],
   idle: [
@@ -97,6 +115,12 @@ const RUN_METRICS = {
     [metric("listenerGrowth"), "listener growth", LOWER],
     [metric("nodeGrowth"), "DOM node growth", LOWER],
     [metric("heapGrowthMbPerSecond"), "heap growth MB/s", LOWER],
+    [(data) => processCpu(data, "chrome renderer"), "renderer process CPU %", LOWER],
+    [(data) => processCpu(data, "chrome GPU"), "GPU process CPU %", LOWER],
+    [(data) => processWakes(data, "chrome renderer"), "renderer wakes/s", LOWER],
+    [(data) => processWakes(data, "chrome GPU"), "GPU process wakes/s", LOWER],
+    [signal("requests"), "requests", LOWER],
+    [signal("longTaskCount"), "tasks ≥50 ms, observed", LOWER],
   ],
   heap: [
     [(data) => data.readings?.loaded?.usedMb, "heap loaded MB", LOWER],
@@ -153,6 +177,22 @@ const STARTUP_MILESTONES = [
   ["rendererIdle", "renderer idle ms"],
 ]
 
+/** The metric each scenario's verdict is about, by scenario name, then by kind. */
+const PRIMARY = {
+  quiet: "main-thread busy %",
+  cpu: "renderer process CPU %",
+  session: "busy ms per 1k chars",
+  idle: "main-thread busy %",
+  switch: "cold visible ms",
+  startup: "usable ms",
+  heap: "heap after opening MB",
+  composer: "recalc ms per line",
+}
+const primaryLabel = (scenario, kind, labels) => PRIMARY[scenario] ?? PRIMARY[kind] ?? labels.find((label) => label.endsWith(" worst frame ms")) ?? labels[0]
+
+/** Rows that count something: a value that holds in every pair is then the answer. */
+const isCount = (label) => /\brequests\b|tasks ≥50 ms|dropped frames|forced style\/layouts/.test(label)
+
 const finite = (values) => values.filter((value) => Number.isFinite(value))
 
 const stats = (values) => {
@@ -162,6 +202,7 @@ const stats = (values) => {
 }
 
 const scenarioOf = (name) => name.replace(/-\d+$/, "")
+const pairNumber = (name) => Number(/-(\d+)$/.exec(name)?.[1] ?? 1)
 
 /** Run directories of one side, grouped by scenario. */
 const loadSide = (root) => {
@@ -226,18 +267,73 @@ const seriesFor = (runs) => {
 
 const formatNumber = (value) => (value === null || value === undefined ? "–" : Number(value).toLocaleString("en-US", { maximumFractionDigits: 2 }))
 const formatSide = (side) => (side ? `${formatNumber(side.median)} / ${formatNumber(side.p95)} (${side.n})` : "–")
-const formatDelta = (before, after) => {
-  if (!before || !after) return "–"
-  const change = after.median - before.median
-  if (change === 0) return "0"
-  const percent = before.median === 0 ? "" : ` (${change > 0 ? "+" : ""}${Math.round((change / Math.abs(before.median)) * 100)}%)`
-  return `${change > 0 ? "+" : ""}${formatNumber(round(change))}${percent}`
+const signed = (value, unit) => `${value > 0 ? "+" : ""}${formatNumber(round(value, 1))}${unit}`
+const formatChange = (comparison) => {
+  if (!comparison) return "–"
+  const unit = comparison.ratio ? "%" : ""
+  if (comparison.exact) return `${signed(comparison.change, unit)} exact`
+  return `${signed(comparison.change, unit)} [${signed(comparison.lower, unit)} … ${signed(comparison.upper, unit)}]`
 }
-const verdictOf = (before, after, lowerIsBetter) => {
-  if (!before || !after || before.median === after.median) return ""
-  if (lowerIsBetter === WORKLOAD) return "WORKLOAD DIFFERS"
-  if (after.median >= before.min && after.median <= before.max) return "noise"
-  return (after.median < before.median) === lowerIsBetter ? "better" : "WORSE"
+const directionWord = (comparison, lowerIsBetter) => {
+  if (comparison.direction === "same") return comparison.exact ? "same (exact)" : "same"
+  return (comparison.direction === "lower") === lowerIsBetter ? "better" : "WORSE"
+}
+
+/** The values of one metric per pair of runs that both have it. */
+const pairedValues = (label, beforeRuns, afterRuns) => {
+  const values = (runs) => new Map(runs.flatMap((run) => {
+    const series = run.invalid.length ? null : seriesFor([run]).get(label)
+    return series?.values.length ? [[pairNumber(run.name), medianOf(series.values)]] : []
+  }))
+  const before = values(beforeRuns)
+  const after = values(afterRuns)
+  return [...before.keys()].filter((key) => after.has(key)).map((key) => ({ before: before.get(key), after: after.get(key) }))
+}
+
+/** The comparison of a scenario's primary metric, what a planned look decides on. */
+export const comparePrimary = (beforeRoot, afterRoot, scenario, { confidence = DEFAULT_CONFIDENCE, throughPair = Infinity } = {}) => {
+  // A resumed compare holds later pairs too; a look reads only the ones it planned.
+  const runsOf = (root) => (loadSide(root).get(scenario) ?? []).filter((run) => pairNumber(run.name) <= throughPair)
+  const beforeRuns = runsOf(beforeRoot)
+  const afterRuns = runsOf(afterRoot)
+  if (!beforeRuns.length || !afterRuns.length) return null
+  const label = primaryLabel(scenario, beforeRuns[0].kind, [...seriesFor(beforeRuns).keys()])
+  const pairs = pairedValues(label, beforeRuns, afterRuns)
+  return { label, comparison: comparePairs(pairs, { confidence, count: isCount(label) }) }
+}
+
+/**
+ * Rows of one scenario. Workload rows must match. Exact counts always read,
+ * and the rest need the primary's verdict and Holm across the secondaries, so
+ * a table of twenty metrics does not cry wolf on one of them every run.
+ */
+const metricRows = (scenario, beforeRuns, afterRuns, confidence) => {
+  const beforeSeries = seriesFor(beforeRuns)
+  const afterSeries = seriesFor(afterRuns)
+  const labels = [...new Set([...beforeSeries.keys(), ...afterSeries.keys()])]
+    .filter((label) => (beforeSeries.get(label)?.values.length ?? 0) + (afterSeries.get(label)?.values.length ?? 0) > 0)
+  const primary = primaryLabel(scenario, beforeRuns[0].kind, labels)
+  const rows = labels.map((label) => {
+    const entry = beforeSeries.get(label) ?? afterSeries.get(label)
+    const beforeStats = stats(beforeSeries.get(label)?.values ?? [])
+    const afterStats = stats(afterSeries.get(label)?.values ?? [])
+    const workload = entry.lowerIsBetter === WORKLOAD
+    const comparison = workload ? null : comparePairs(pairedValues(label, beforeRuns, afterRuns), { confidence, count: isCount(label) })
+    return { label, lowerIsBetter: entry.lowerIsBetter, beforeStats, afterStats, comparison, workload, verdict: workload && beforeStats && afterStats && beforeStats.median !== afterStats.median ? "WORKLOAD DIFFERS" : "" }
+  })
+  const primaryRow = rows.find((row) => row.label === primary)
+  if (primaryRow?.comparison?.direction) primaryRow.verdict = directionWord(primaryRow.comparison, primaryRow.lowerIsBetter)
+  const secondaries = rows.filter((row) => row !== primaryRow && !row.workload && row.comparison)
+  for (const row of secondaries) if (row.comparison.exact) row.verdict = directionWord(row.comparison, row.lowerIsBetter)
+  const tested = secondaries.filter((row) => !row.comparison.exact)
+  if (primaryRow?.verdict) {
+    const passes = holmPasses(tested.map((row) => row.comparison.p))
+    tested.forEach((row, index) => {
+      const { direction } = row.comparison
+      if (passes[index] && (direction === "lower" || direction === "higher")) row.verdict = directionWord(row.comparison, row.lowerIsBetter)
+    })
+  }
+  return rows.map((row) => `| ${row === primaryRow ? `**${row.label}**` : row.label} | ${formatSide(row.beforeStats)} | ${formatSide(row.afterStats)} | ${row.workload ? "" : formatChange(row.comparison)} | ${row.comparison?.n ?? ""} | ${row.verdict} |`)
 }
 
 /** Renders/s per component, for scenarios that ran with the render probe. */
@@ -314,7 +410,7 @@ const validityLines = (side, runs) => {
 }
 
 /** The markdown comparison of two result directories. */
-export const compareResultDirs = (beforeRoot, afterRoot, { scenarios = [] } = {}) => {
+export const compareResultDirs = (beforeRoot, afterRoot, { scenarios = [], confidence = DEFAULT_CONFIDENCE } = {}) => {
   const before = loadSide(beforeRoot)
   const after = loadSide(afterRoot)
   const names = [...new Set([...before.keys(), ...after.keys()])].filter((name) => scenarios.length === 0 || scenarios.includes(name))
@@ -322,7 +418,7 @@ export const compareResultDirs = (beforeRoot, afterRoot, { scenarios = [] } = {}
     `Before: ${beforeRoot}`,
     `After: ${afterRoot}`,
     "",
-    "median / p95 (n) per side. \"noise\": the after median lies inside the before runs' min…max. Lower is better except workload rows, which must match.",
+    `median / p95 (n) per side; change per pair with its ${Math.round(confidence * 1000) / 10}% interval. The bold row is the primary. "same": the interval lies inside ±${EQUIVALENCE * 100}%. No word: no verdict yet, or a secondary before the primary has one. Lower is better except workload rows, which must match.`,
   ]
   for (const name of names) {
     const beforeRuns = before.get(name) ?? []
@@ -332,16 +428,8 @@ export const compareResultDirs = (beforeRoot, afterRoot, { scenarios = [] } = {}
       lines.push(`Only measured on the ${beforeRuns.length ? "before" : "after"} side.`)
       continue
     }
-    const beforeSeries = seriesFor(beforeRuns)
-    const afterSeries = seriesFor(afterRuns)
-    lines.push("| metric | before | after | Δ median | |", "|---|---|---|---|---|")
-    for (const label of new Set([...beforeSeries.keys(), ...afterSeries.keys()])) {
-      const entry = beforeSeries.get(label) ?? afterSeries.get(label)
-      const beforeStats = stats(beforeSeries.get(label)?.values ?? [])
-      const afterStats = stats(afterSeries.get(label)?.values ?? [])
-      if (!beforeStats && !afterStats) continue
-      lines.push(`| ${label} | ${formatSide(beforeStats)} | ${formatSide(afterStats)} | ${formatDelta(beforeStats, afterStats)} | ${verdictOf(beforeStats, afterStats, entry.lowerIsBetter)} |`)
-    }
+    lines.push("| metric | before | after | change [interval] | pairs | |", "|---|---|---|---|---|---|")
+    lines.push(...metricRows(name, beforeRuns, afterRuns, confidence))
     lines.push(...componentTable(beforeRuns, afterRuns))
     const validity = [...validityLines("before", beforeRuns), ...validityLines("after", afterRuns), ...accessibilityLines(beforeRuns, afterRuns)]
     if (validity.length) lines.push("", ...validity.map((line) => `- ${line}`))
@@ -351,7 +439,7 @@ export const compareResultDirs = (beforeRoot, afterRoot, { scenarios = [] } = {}
 
 const main = () => {
   const options = parseArgs(process.argv.slice(2))
-  const table = compareResultDirs(options.before, options.after, { scenarios: options.scenarios })
+  const table = compareResultDirs(options.before, options.after, { scenarios: options.scenarios, confidence: options.confidence })
   console.log(table)
   if (options.output) writeFileSync(options.output, `${table}\n`)
 }

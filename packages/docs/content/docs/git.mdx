@@ -1,9 +1,9 @@
 ---
-title: Git & GitHub Workflows
+title: Git Workflows
 description: Stage, commit, and manage branches without leaving OpenChamber.
 ---
 
-# Git & GitHub Workflows
+# Git Workflows
 
 OpenChamber has a built-in git view so you can review changes, commit, and manage branches without switching to a terminal. Open it from the **Git** tab in the right sidebar.
 
@@ -28,7 +28,15 @@ The git view also covers the everyday rest of git:
 
 ## Pull requests
 
-Connect GitHub (see [GitHub Issues & PRs](/github/)) and the **PR** tab lets you open a pull request, update it, mark it ready, or merge it — and generate its title and description the same way as commit messages.
+With an account connected on the project's host, the **PR** tab lets you open a pull request, update it, mark it ready, or merge it. OpenChamber can write its title and description the same way as commit messages. This works on GitHub, Gitea, Forgejo, and GitLab, where the tab opens merge requests. Gerrit has its own form, **Push for review**. Connecting a host is covered in [Git hosts](/github/).
+
+## Push for review on Gerrit
+
+On a Gerrit project the pull request form becomes **Push for review**. It pushes your commits to `refs/for/<branch>`, which creates a change, or a new patchset of a change you already pushed. The commit message is the change's description, so the form shows the latest commit's subject instead of a title and body. Pick the target branch and, if you want, a topic, hashtags, **Work in progress** and **Private**. It works on the target branch itself too, the usual way to work with Gerrit.
+
+Gerrit matches commits to changes by the `Change-Id` line its commit-msg hook adds to each message. If only the latest commit is missing one, **Add Change-Id** amends that commit after asking; nothing is pushed until you push. If older commits are missing one, the push waits until you install the hook and give each of them a Change-Id.
+
+After the first push, the panel offers **Upload patchset** whenever your local commits aren't on it yet. A change in a chain of changes shows its place in the chain, such as **2 of 3**, next to its badge.
 
 ## Bringing in conflicts
 
@@ -36,6 +44,6 @@ If a merge, rebase, or integrate hits a conflict, OpenChamber shows what's stuck
 
 ## Related
 
-- [GitHub Issues & PRs](/github/) — connect GitHub and start work from issues
+- [Git hosts](/github/) — connect a host and start work from issues
 - [Worktree Sessions](/worktrees/) — isolate a branch in its own folder
 - [Git Identities](/git-identities/) — commit as the right person per repo

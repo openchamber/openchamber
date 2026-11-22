@@ -31,9 +31,24 @@ const COMMENT_INPUTS: Array<{ name: string; file: string; handler: string; guard
     guard: /isIMECompositionEvent\(event\)\) return;/,
   },
   {
+    // Mobile selection comment: the shell replaces the composer, so its Enter
+    // attaches the comment (with "Return key sends" on) rather than sending.
+    name: 'mobile selection comment',
+    file: 'components/chat/composer/comment/MobileCommentComposer.tsx',
+    handler: 'const handleKeyDown',
+    guard: /isIMECompositionEvent\(event\)\) return false;/,
+  },
+  {
     name: 'issues and PRs board reply',
     file: 'components/sourceBoard/SourceBoardReply.tsx',
     handler: 'const onKeyDown',
+    guard: /isIMECompositionEvent\(event\)\) return;/,
+  },
+  {
+    // The comment attached to a marked quote in a message.
+    name: 'quote mark comment',
+    file: 'components/chat/message/ChatQuoteMarkPopover.tsx',
+    handler: 'onKeyDown={(event) => {',
     guard: /isIMECompositionEvent\(event\)\) return;/,
   },
   {
@@ -71,8 +86,8 @@ describe('comment inputs ignore IME composition keystrokes', () => {
 
 describe('comment surfaces type into the guarded comment field', () => {
   for (const file of [
-    'components/chat/message/TextSelectionMenu.tsx',
-    'components/chat/composer/ui/ComposerContextChips.tsx',
+    'components/chat/message/SelectionCommentInput.tsx',
+    'components/chat/composer/ui/ComposerContextRows.tsx',
   ]) {
     test(file, () => {
       const source = readFileSync(join(srcDir, file), 'utf-8');

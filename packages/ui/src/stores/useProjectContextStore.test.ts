@@ -8,12 +8,14 @@ interface NotePayload {
   updatedAt: number;
   source: 'manual' | 'selection' | 'agent';
   pinned: boolean;
+  planId?: string;
 }
 
 interface ContextPayload {
   notes: NotePayload[];
-  todos: { id: string; text: string; completed: boolean; createdAt: number }[];
+  todos: { id: string; text: string; completed: boolean; createdAt: number; planId?: string; dependsOn?: string[] }[];
   plans: { id: string; file: string; title: string; createdAt: number; pinned: boolean }[];
+  notesTodosStore?: 'local' | 'repository';
 }
 
 const emptyPayload = (): ContextPayload => ({ notes: [], todos: [], plans: [] });
@@ -65,6 +67,7 @@ const handlers = {
   remove: async (): Promise<ContextPayload> => emptyPayload(),
 };
 
+const savedStores: (string | null)[] = [];
 const calls = { fetch: 0, saveTodos: 0, writeTodo: 0, createNote: 0, updateNote: 0, deleteNote: 0, create: 0, update: 0, pinPlan: 0, remove: 0 };
 
 mock.module('@/lib/projectContextApi', () => ({
@@ -72,8 +75,9 @@ mock.module('@/lib/projectContextApi', () => ({
     calls.fetch += 1;
     return handlers.fetch();
   },
-  saveProjectTodos: (_project: unknown, todos: ContextPayload['todos']) => {
+  saveProjectTodos: (_project: unknown, todos: ContextPayload['todos'], todosStore: string | null) => {
     calls.saveTodos += 1;
+    savedStores.push(todosStore);
     return handlers.saveTodos(todos);
   },
   writeProjectTodo: (_project: { path?: string }, change: ProjectTodoChange) => {
@@ -135,6 +139,7 @@ const failWith = (message: string) => async (): Promise<never> => {
 
 beforeEach(() => {
   store().reset();
+  savedStores.length = 0;
   calls.fetch = 0;
   calls.saveTodos = 0;
   calls.writeTodo = 0;
@@ -160,7 +165,7 @@ beforeEach(() => {
 
 describe('getEntry', () => {
   test('returns a stable empty entry for an unknown project', () => {
-    expect(entry()).toEqual({ notes: [], todos: [], plans: [], sharedPlansDir: null, loaded: false, loading: false, error: null });
+    expect(entry()).toEqual({ notes: [], todos: [], plans: [], sharedPlansDir: null, notesTodosStore: null, loaded: false, loading: false, error: null });
   });
 
   test('returns the empty entry for a project without a path', () => {
@@ -319,6 +324,20 @@ describe('load', () => {
 });
 
 describe('saveTodos', () => {
+  test('a whole list names the store it was read from, and a refused one reloads the list', async () => {
+    const todo = { id: 'a', text: 'A', completed: false, createdAt: 1 };
+    handlers.fetch = async () => ({ notes: [], todos: [todo], plans: [], notesTodosStore: 'local' });
+    await store().load(PROJECT);
+    handlers.fetch = async () => ({ notes: [], todos: [{ ...todo, id: 'team' }, todo], plans: [], notesTodosStore: 'repository' });
+    handlers.saveTodos = failWith('Notes and todos moved to another store; reload the list');
+
+    expect(await store().saveTodos(PROJECT, [])).toBe(false);
+    expect(savedStores).toEqual(['local']);
+    await store().load(PROJECT);
+    expect(entry().todos.map((entry) => entry.id)).toEqual(['team', 'a']);
+    expect(entry().notesTodosStore).toBe('repository');
+  });
+
   test('applies optimistically before the request resolves', async () => {
     const gate = deferred<ContextPayload>();
     handlers.saveTodos = () => gate.promise;
@@ -331,13 +350,15 @@ describe('saveTodos', () => {
     expect(entry().todos).toHaveLength(1);
   });
 
-  test('rolls back and reports the error on failure', async () => {
-    await store().saveTodos(PROJECT, [{ id: 't1', text: 'original', completed: false, createdAt: 1 }]);
-    handlers.saveTodos = failWith('disk full');
+  test('a refused clear-completed restores every todo with its plan links and reports the error', async () => {
+    const done = { id: 'done', text: 'done', completed: true, createdAt: 1, planId: 'p1' };
+    const next = { id: 'next', text: 'next', completed: false, createdAt: 2, planId: 'p1', dependsOn: ['done'] };
+    await store().saveTodos(PROJECT, [next, done]);
+    handlers.saveTodos = failWith('A dependency must link two todos of the same plan');
 
-    expect(await store().saveTodos(PROJECT, [])).toBe(false);
-    expect(entry().todos.map((todo) => todo.text)).toEqual(['original']);
-    expect(entry().error).toBe('disk full');
+    expect(await store().saveTodos(PROJECT, [next])).toBe(false);
+    expect(entry().todos).toEqual([next, done]);
+    expect(entry().error).toBe('A dependency must link two todos of the same plan');
   });
 
   test('serializes concurrent writes in call order', async () => {
@@ -415,14 +436,15 @@ describe('saveTodos', () => {
     expect(entry().error).toBeNull();
   });
 
-  test('rolls a failed single-todo write back like a whole-list one', async () => {
-    const mine = { id: 'mine', text: 'mine', completed: false, createdAt: 1 };
-    await store().saveTodos(PROJECT, [mine]);
-    handlers.writeTodo = failWith('Todo not found');
+  test('rolls a refused single-todo delete back like a whole-list one', async () => {
+    const mine = { id: 'mine', text: 'mine', completed: false, createdAt: 1, planId: 'p1' };
+    const later = { id: 'later', text: 'later', completed: false, createdAt: 2, planId: 'p1', dependsOn: ['mine'] };
+    await store().saveTodos(PROJECT, [mine, later]);
+    handlers.writeTodo = failWith('A dependency must link two todos of the same plan');
 
-    expect(await store().saveTodos(PROJECT, [], { kind: 'delete', id: 'mine' })).toBe(false);
-    expect(entry().todos).toEqual([mine]);
-    expect(entry().error).toBe('Todo not found');
+    expect(await store().saveTodos(PROJECT, [later], { kind: 'delete', id: 'mine' })).toBe(false);
+    expect(entry().todos).toEqual([mine, later]);
+    expect(entry().error).toBe('A dependency must link two todos of the same plan');
   });
 
   test('ignores a project without a resolvable path', async () => {
@@ -456,13 +478,19 @@ describe('notes', () => {
     expect(entry().error).toBe('no space');
   });
 
-  test('saveNoteBody applies optimistically and commits the server copy', async () => {
+  test('saveNoteBody applies optimistically, keeps the plan link and commits the server copy', async () => {
+    const linked = note({ planId: 'p1' });
+    handlers.createNote = async () => ({ note: linked, context: { notes: [linked], todos: [], plans: [] } });
     await store().createNote(PROJECT, { body: 'before' });
-    handlers.updateNote = async () => note({ body: 'after', updatedAt: 9 });
+    const gate = deferred<NotePayload | null>();
+    handlers.updateNote = () => gate.promise;
 
-    expect(await store().saveNoteBody(PROJECT, 'n1', 'after')).toBe(true);
-    expect(entry().notes[0].body).toBe('after');
-    expect(entry().notes[0].updatedAt).toBe(9);
+    const pending = store().saveNoteBody(PROJECT, 'n1', 'after');
+    expect(entry().notes[0]).toEqual({ ...linked, body: 'after' });
+
+    gate.resolve({ ...linked, body: 'after', updatedAt: 9 });
+    expect(await pending).toBe(true);
+    expect(entry().notes[0]).toEqual({ ...linked, body: 'after', updatedAt: 9 });
   });
 
   test('saveNoteBody rolls back on failure', async () => {

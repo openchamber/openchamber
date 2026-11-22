@@ -29,7 +29,7 @@ const pools = (routes) => JSON.stringify({ experimental: { model_routes: routes 
 
 const loadPools = async () => {
   vi.resetModules();
-  const { readConfigSources } = await import('../opencode/shared.js');
+  const { readConfigSources } = await import('../opencode/config-files.js');
   const { readLayeredModelRoutes } = await import('./model-routes.js');
   return (directory) => readLayeredModelRoutes(readConfigSources(directory));
 };

@@ -7,20 +7,9 @@ import { useTrackedItemsStore } from '@/stores/useTrackedItemsStore';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { trackedItemKey, trackedItemRecordsSchema, type TrackedItem, type TrackedItemState } from './model';
 
-/**
- * What this client shows, told to the server once per change.
- *
- * Every surface that shows linked items declares them; the union goes to the
- * server for this event-stream connection, debounced, only when it changed
- * (an emptied set too: the stream stays open for other listeners), and again
- * after a reconnect, since a new connection knows nothing. Changes come back
- * as `tracked-items-changed` events. Whether the window is visible is told
- * when it flips. Nothing here runs on a timer.
- */
 
 const FLUSH_DELAY_MS = 150;
-// A failed send is retried once the server may be back; a change or a new
-// connection sends sooner.
+const MAX_ITEMS = 300;
 const RETRY_DELAY_MS = 30_000;
 
 const interestResponseSchema = z.object({ states: z.unknown() });
@@ -40,9 +29,7 @@ type Dependencies = {
   apply: (records: Array<{ key: string; record: TrackedItemState }>) => void;
   isVisible: () => boolean;
   onVisibilityChange: (listener: () => void) => void;
-  /** An agent turn finished in a directory: branches there may have a new pull request. */
   onBranchActivity?: (directory: string) => void;
-  /** The window became visible again. */
   onWindowReturned?: () => void;
   warn?: (message: string) => void;
 };
@@ -57,7 +44,7 @@ export function createTrackedItemsInterest({
   onWindowReturned = () => {},
   warn = () => {},
 }: Dependencies) {
-  const declarations = new Map<symbol, readonly TrackedItem[]>();
+  const declarations = new Map<symbol, { items: readonly TrackedItem[]; background: boolean }>();
   let connectionId: string | null = null;
   let sentSignature: string | null = null;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,7 +53,13 @@ export function createTrackedItemsInterest({
 
   const union = () => {
     const items = new Map<string, TrackedItem>();
-    for (const declared of declarations.values()) for (const item of declared) items.set(trackedItemKey(item), item);
+    const ordered = [...declarations.values()].sort((left, right) => Number(left.background) - Number(right.background));
+    for (const declared of ordered) {
+      for (const item of declared.items) {
+        if (items.size >= MAX_ITEMS) return items;
+        items.set(trackedItemKey(item), item);
+      }
+    }
     return items;
   };
 
@@ -88,7 +81,6 @@ export function createTrackedItemsInterest({
     try {
       const response = await post({ path: '/api/tracked-items/interest', body: { connectionId: connection, visible: isVisible(), items: [...items.values()] } });
       if (requestGeneration !== generation) return;
-      // The connection closed before the server saw it; the next one resends.
       if (response.status === 409) return;
       if (!response.ok) throw new Error(`Tracked items returned ${response.status}`);
       const parsed = interestResponseSchema.safeParse(await response.json());
@@ -120,16 +112,14 @@ export function createTrackedItemsInterest({
       if (isVisible()) onWindowReturned();
       const connection = connectionId;
       if (!connection || sentSignature === null) return;
-      // A lost presence signal costs one cadence: the next interest send carries visibility too.
       post({ path: '/api/tracked-items/presence', body: { connectionId: connection, visible: isVisible() } }).catch(() => {});
     });
   };
 
   return {
-    /** Starts listening without following anything yet, so signals reach watched branches. */
     start,
-    declare(token: symbol, items: readonly TrackedItem[]) {
-      declarations.set(token, items);
+    declare(token: symbol, items: readonly TrackedItem[], options?: { background?: boolean }) {
+      declarations.set(token, { items, background: options?.background ?? false });
       start();
       scheduleFlush();
     },
@@ -147,8 +137,6 @@ const trackedItemsInterest = createTrackedItemsInterest({
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(body),
   }),
-  // The runtime is read when the answer lands: records belong to the runtime
-  // that sent them. A branch's open pull request also lands on its entry.
   apply: (records) => {
     useTrackedItemsStore.getState().apply(getRuntimeKey(), records);
     useGitHubPrStatusStore.getState().applyTrackedPulls(records);
@@ -160,20 +148,17 @@ const trackedItemsInterest = createTrackedItemsInterest({
   warn: (message) => console.warn(message),
 });
 
-/**
- * Follows these items while the calling component is mounted. The server
- * starts answering at once and pushes changes; read them with the
- * `useTracked*States` selectors.
- */
-export function useTrackedItems(items: readonly TrackedItem[]): void {
+export function useTrackedItems(items: readonly TrackedItem[], options?: {
+  background?: boolean;
+}): void {
+  const background = options?.background ?? false;
   const signature = items.map(trackedItemKey).sort().join('\n');
   const itemsRef = React.useRef(items);
   itemsRef.current = items;
+  const [token] = React.useState(() => Symbol('tracked-items'));
+  React.useEffect(() => () => trackedItemsInterest.release(token), [token]);
   React.useEffect(() => {
     trackedItemsInterest.start();
-    if (!signature) return undefined;
-    const token = Symbol('tracked-items');
-    trackedItemsInterest.declare(token, itemsRef.current);
-    return () => trackedItemsInterest.release(token);
-  }, [signature]);
+    trackedItemsInterest.declare(token, signature ? itemsRef.current : [], { background });
+  }, [background, signature, token]);
 }

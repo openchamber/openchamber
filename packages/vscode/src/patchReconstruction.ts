@@ -1,43 +1,46 @@
-// Rebuilds the pre-edit file for the VS Code diff view from the current file
-// and the unified diff OpenCode stored for an edit tool call.
-//
-// OpenCode v2 strips the indentation shared by every changed and context line
-// before storing an edit diff (trimDiff in upstream core/tool/plugin/patch.ts).
-// Pasting those trimmed old lines back into the real, indented file would show
-// the "before" side without indentation, so the stripped prefix is recovered
-// from the real file and re-added.
 
 type ParsedDiffHunk = {
+  oldStart: number;
   newStart: number;
   oldLines: string[];
   newLines: string[];
+  oldEndsWithoutNewline: boolean;
+  newEndsWithoutNewline: boolean;
 };
 
-const parseUnifiedDiffHunks = (patch: string): ParsedDiffHunk[] => {
-  const lines = patch.split(/\r?\n/);
+const parseUnifiedDiffHunks = (patch: string, keepCarriageReturns = false): ParsedDiffHunk[] => {
+  const lines = patch.split(keepCarriageReturns ? '\n' : /\r?\n/);
   const hunks: ParsedDiffHunk[] = [];
 
   let current: ParsedDiffHunk | null = null;
+  let previous = '';
 
   for (const line of lines) {
-    const headerMatch = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    const headerMatch = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
     if (headerMatch) {
       if (current) {
         hunks.push(current);
       }
       current = {
-        newStart: Number(headerMatch[1] || 1),
+        oldStart: Number(headerMatch[1] || 1),
+        newStart: Number(headerMatch[2] || 1),
         oldLines: [],
         newLines: [],
+        oldEndsWithoutNewline: false,
+        newEndsWithoutNewline: false,
       };
+      previous = line;
       continue;
     }
 
     if (!current) continue;
 
-    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('\\ No newline')) {
+    if (line.startsWith('\\ No newline')) {
+      if (!previous.startsWith('+')) current.oldEndsWithoutNewline = true;
+      if (!previous.startsWith('-')) current.newEndsWithoutNewline = true;
       continue;
     }
+    previous = line;
 
     if (line.startsWith('-')) {
       current.oldLines.push(line.slice(1));
@@ -65,9 +68,6 @@ const parseUnifiedDiffHunks = (patch: string): ParsedDiffHunk[] => {
 
 const isBlank = (line: string): boolean => line.trim().length === 0;
 
-// Returns the whitespace prefix OpenCode stripped from every line of the
-// patch, '' when the patch already matches the file, or null when the new
-// lines cannot be aligned with the file under one consistent prefix.
 const detectStrippedIndent = (fileLines: string[], hunks: ParsedDiffHunk[]): string | null => {
   let prefix: string | null = null;
   for (const hunk of hunks) {
@@ -89,6 +89,11 @@ const detectStrippedIndent = (fileLines: string[], hunks: ParsedDiffHunk[]): str
   return prefix ?? '';
 };
 
+export const isFileDeletionPatch = (patch: string): boolean => {
+  const hunks = parseUnifiedDiffHunks(patch);
+  return hunks.length > 0 && hunks.every((hunk) => hunk.newLines.length === 0);
+};
+
 export const reconstructOriginalContentFromPatch = (modifiedContent: string, patch: string): string | null => {
   const hunks = parseUnifiedDiffHunks(patch);
   if (hunks.length === 0) {
@@ -96,7 +101,6 @@ export const reconstructOriginalContentFromPatch = (modifiedContent: string, pat
   }
 
   const lines = modifiedContent.split('\n');
-  // Unaligned patches keep the old behavior: paste old lines as stored.
   const prefix = detectStrippedIndent(lines.map((line) => line.replace(/\r$/, '')), hunks) ?? '';
   for (let index = hunks.length - 1; index >= 0; index -= 1) {
     const hunk = hunks[index];
@@ -112,4 +116,17 @@ export const reconstructOriginalContentFromPatch = (modifiedContent: string, pat
   }
 
   return lines.join('\n');
+};
+
+const joinLines = (lines: string[], endsWithoutNewline: boolean): string =>
+  lines.length === 0 ? '' : `${lines.join('\n')}${endsWithoutNewline ? '' : '\n'}`;
+
+export const fileSidesFromFullPatch = (patch: string): { original: string; modified: string } | null => {
+  const hunks = parseUnifiedDiffHunks(patch, true);
+  const hunk = hunks.length === 1 ? hunks[0] : undefined;
+  if (!hunk || hunk.oldStart > 1 || hunk.newStart > 1) return null;
+  return {
+    original: joinLines(hunk.oldLines, hunk.oldEndsWithoutNewline),
+    modified: joinLines(hunk.newLines, hunk.newEndsWithoutNewline),
+  };
 };

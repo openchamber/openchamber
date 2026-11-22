@@ -1,19 +1,12 @@
-/**
- * Utilities for creating worktrees and, when needed, sessions bound to them.
- * This is a standalone entrypoint for keyboard shortcuts, menu actions,
- * and other non-hook contexts.
- */
 
 import { toast } from '@/components/ui';
 import { useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useContextStore } from '@/stores/contextStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { checkIsGitRepository, getGitBranches, resolveGitPrimaryRoot, resolveGitRepositoryPrefix } from '@/lib/gitApi';
 import { branchNameFromTemplate, uniqueBranchName } from '@/lib/worktrees/branchNameTemplate';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import {
@@ -74,14 +67,6 @@ export const resolveProjectRef = (directory: string): ProjectRef | null => {
   return project ? { id: project.id, path: project.path } : null;
 };
 
-/**
- * The project whose folder a session in `directory` works in, for placing it
- * in another worktree. `resolveProjectRef` answers the project that owns the
- * worktree list, which is the repository root when both `repo` and `repo/ai`
- * are registered; the folder comes from where the session sits in its checkout
- * (`projectPathForCheckoutFolder`), as the server does. Falls back to
- * `resolveProjectRef` when git cannot answer.
- */
 export const resolveFolderProjectRef = async (directory: string): Promise<ProjectRef | null> => {
   const owner = resolveProjectRef(directory);
   const located = await Promise.all([resolveGitRepositoryPrefix(directory), resolveGitPrimaryRoot(directory)])
@@ -127,78 +112,10 @@ const templatedBranchName = async (projectDirectory: string, name: string): Prom
   return uniqueBranchName(branchNameFromTemplate(useConfigStore.getState().settingsWorktreeBranchTemplate, { name }), local);
 };
 
-// Track if a worktree creation flow is already running
 let isCreatingWorktreeSession = false;
 
 
 
-const applyDefaultAgentAndModelSelection = (sessionId: string, configState = useConfigStore.getState()) => {
-  try {
-    const visibleAgents = configState.getVisibleAgents();
-    let agentName: string | undefined;
-
-    if (configState.settingsDefaultAgent) {
-      const settingsAgent = visibleAgents.find((a) => a.name === configState.settingsDefaultAgent);
-      if (settingsAgent) {
-        agentName = settingsAgent.name;
-      }
-    }
-
-    if (!agentName) {
-      agentName =
-        visibleAgents.find((agent) => agent.name === 'build')?.name ||
-        visibleAgents[0]?.name;
-    }
-
-    if (!agentName) {
-      return;
-    }
-
-    configState.setAgent(agentName);
-    useContextStore.getState().saveSessionAgentSelection(sessionId, agentName);
-
-    const settingsDefaultModel = configState.settingsDefaultModel;
-    if (!settingsDefaultModel) {
-      return;
-    }
-
-    const parsed = parseModelIdentifier(settingsDefaultModel);
-    if (!parsed) {
-      return;
-    }
-
-    const { providerId, modelId } = parsed;
-    const modelMetadata = configState.getModelMetadata(providerId, modelId);
-    if (!modelMetadata) {
-      return;
-    }
-
-    useContextStore.getState().saveSessionModelSelection(sessionId, providerId, modelId);
-    useContextStore.getState().saveAgentModelForSession(sessionId, agentName, providerId, modelId);
-
-    const settingsDefaultVariant = configState.settingsDefaultVariant;
-    if (!settingsDefaultVariant) {
-      return;
-    }
-
-    const provider = configState.providers.find((p) => p.id === providerId);
-    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelId) as
-      | { variants?: Record<string, unknown> }
-      | undefined;
-    const variants = model?.variants;
-
-    if (variants && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-      configState.setCurrentVariant(settingsDefaultVariant);
-      useContextStore
-        .getState()
-        .saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, settingsDefaultVariant);
-    }
-  } catch {
-    // Ignore errors setting default agent
-  }
-};
-
-/** `startDirectory` is where the session runs inside `metadata.path`; the worktree root stays the checkout. */
 const initializeSessionForWorktree = (sessionId: string, startDirectory: string, metadata: {
   path: string;
   projectDirectory: string;
@@ -209,11 +126,9 @@ const initializeSessionForWorktree = (sessionId: string, startDirectory: string,
   kind?: 'pr' | 'standard';
 }) => {
   const sessionStore = useSessionUIStore.getState();
-  const configState = useConfigStore.getState();
-  sessionStore.initializeNewOpenChamberSession(sessionId, configState.agents);
+  sessionStore.initializeNewOpenChamberSession(sessionId, useConfigStore.getState().agents);
   sessionStore.setSessionDirectory(sessionId, startDirectory);
   sessionStore.setWorktreeMetadata(sessionId, metadata, startDirectory);
-  applyDefaultAgentAndModelSelection(sessionId, configState);
   useDirectoryStore.getState().setDirectory(startDirectory, { showOverlay: false });
 };
 
@@ -223,7 +138,6 @@ const rollBackCancelledDraftWorktree = (
   previousDraft: NewSessionDraftState,
 ): void => {
   const sessionStore = useSessionUIStore.getState();
-  // A draft that is never sent must not turn the cancel into an unhandled rejection.
   void waitForPendingDraftWorktreeRequest(requestId).catch(() => undefined);
   rejectPendingDraftWorktreeRequest(requestId, new Error('Worktree creation cancelled'));
   if (!previousDraft.open) {
@@ -231,8 +145,6 @@ const rollBackCancelledDraftWorktree = (
     sessionStore.closeNewSessionDraft();
     return;
   }
-  // Put the draft back where it was before the worktree was requested: its
-  // directory target, title and "Creating..." state belong to the cancelled request.
   sessionStore.overrideNewSessionDraftTarget({
     selectedProjectId: previousDraft.selectedProjectId,
     directoryOverride: previousDraft.directoryOverride,
@@ -288,8 +200,6 @@ const createInstantWorktreeDraft = async (options?: {
     const previousDraft = useSessionUIStore.getState().newSessionDraft;
     const pendingRequestId = createPendingDraftWorktreeRequest();
 
-    // Lock the draft immediately so no React effect can reset it to the project
-    // root while we await worktree creation below.
     const sessionStore = useSessionUIStore.getState();
     if (previousDraft.open) {
       sessionStore.overrideNewSessionDraftTarget({
@@ -314,8 +224,6 @@ const createInstantWorktreeDraft = async (options?: {
     const preferredName = generateBranchName();
     const startRef = await resolveDefaultWorktreeStartRef(projectRef.path, selectWorktreeStartFrom(useConfigStore.getState(), 'quick'));
 
-    // A preview path has no bootstrap state yet. Selecting it lets background
-    // OpenCode reads initialize an instance before the worktree exists.
     const metadata = await createQuickWorktree(projectRef, { preferredName, startRef, templated: true, cancelOnTrustDismiss: true });
     if (!metadata) {
       rollBackCancelledDraftWorktree(pendingRequestId, previousDraft);
@@ -352,28 +260,14 @@ const createInstantWorktreeDraft = async (options?: {
   }
 };
 
-/**
- * Create a new worktree and open a draft scoped to it.
- * 
- * @returns The worktree path, or null if creation failed
- */
 export async function createWorktreeSession(): Promise<string | null> {
   return createInstantWorktreeDraft();
 }
 
-/**
- * Check if a worktree session is currently being created.
- */
 export async function createWorktreeDraft(options?: { initialPrompt?: string; title?: string }): Promise<string | null> {
   return createInstantWorktreeDraft(options);
 }
 
-/**
- * Create a worktree session for a new branch name.
- * Callers can still use startPoint for metadata or follow-up git operations.
- * Without one, the worktree starts where Settings say for `options.place`,
- * else from the project root's branch.
- */
 export async function createWorktreeSessionForNewBranch(
   projectDirectory: string,
   preferredBranchName: string,

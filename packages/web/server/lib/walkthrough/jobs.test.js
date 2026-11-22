@@ -99,6 +99,33 @@ describe('generation jobs', () => {
     expect(describeSmallModel.mock.calls.at(-1)[0]).toMatchObject({ directory: '/repo', preferredProviderID: 'anthropic', preferredModelID: 'claude-opus-5' });
   });
 
+  it('runs the saved walkthrough model at its saved thinking level, and a model picked for one review at its own', async () => {
+    const settingsFile = path.join(TEMP_DATA_DIR, 'settings.json');
+    fs.writeFileSync(settingsFile, JSON.stringify({
+      walkthroughModelOverride: 'anthropic/claude-sonnet-5',
+      walkthroughModelVariant: 'high',
+    }));
+    describeSmallModel.mockResolvedValue({
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet-5',
+      variant: 'high',
+      source: 'request',
+      inputCharBudget: 1_000_000,
+      structuredOutput: true,
+    });
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    try {
+      await generateWalkthrough({ directory: '/repo', source: SOURCE, force: true });
+      expect(describeSmallModel.mock.calls.at(-1)[0]).toMatchObject({ overrideModel: 'anthropic/claude-sonnet-5', overrideVariant: 'high' });
+      expect(generateSmallModelText.mock.calls.at(-1)[0]).toMatchObject({ model: 'anthropic/claude-sonnet-5', variant: 'high' });
+
+      await generateWalkthrough({ directory: '/repo', source: SOURCE, force: true, model: 'openai/gpt-5.6' });
+      expect(describeSmallModel.mock.calls.at(-1)[0]).toMatchObject({ overrideModel: 'openai/gpt-5.6', overrideVariant: undefined });
+    } finally {
+      fs.rmSync(settingsFile, { force: true });
+    }
+  });
+
   it('runs a second request against the same job instead of paying twice', async () => {
     let release;
     generateSmallModelText.mockImplementation(() => new Promise((resolve) => {
@@ -182,6 +209,88 @@ describe('generation jobs', () => {
 
     expect(second.fromCache).toBe(true);
     expect(generateSmallModelText).not.toHaveBeenCalled();
+  });
+
+  it('passes shallowly checked cache metadata through and keeps malformed anchor failures', async () => {
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    const entries = path.join(TEMP_DATA_DIR, 'walkthroughs', 'entries');
+    const file = path.join(entries, fs.readdirSync(entries)[0]);
+    const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
+    entry.model = 37;
+    entry.language = { unchecked: true };
+    entry.generatedAt = ['timestamp'];
+    fs.writeFileSync(file, JSON.stringify(entry));
+    expect(await getWalkthrough({ directory: '/repo', source: SOURCE })).toMatchObject({
+      model: 37, language: { unchecked: true }, generatedAt: ['timestamp'],
+    });
+    const uncheckedIds = [null, 7, { hunk: 'fake' }];
+    fs.writeFileSync(file, JSON.stringify({
+      ...entry, walkthrough: { chapters: [{ stops: [{ hunkIds: uncheckedIds }] }] },
+    }));
+    expect(await getWalkthrough({ directory: '/repo', source: SOURCE })).toMatchObject({
+      isStale: true, missingHunkIds: uncheckedIds, staleStopIds: [undefined],
+    });
+    for (const [chapters, message] of [
+      [[null], "Cannot read properties of null (reading 'stops')"],
+      [[{}], 'chapter.stops is not iterable'],
+      [[{ stops: [{ hunkIds: null }] }], "Cannot read properties of null (reading 'filter')"],
+      [[{ stops: [{ hunkIds: 'h1' }] }], 'stop.hunkIds.filter is not a function'],
+    ]) {
+      fs.writeFileSync(file, JSON.stringify({ ...entry, walkthrough: { chapters } }));
+      await expect(getWalkthrough({ directory: '/repo', source: SOURCE })).rejects.toThrow(message);
+    }
+  });
+
+  // Asking another model about the same diff is asking for a second opinion;
+  // handing it the first one under "the code has moved on" got a copy back.
+  it('hands the previous narrative only to the same model and language after the code moved', async () => {
+    const otherModel = {
+      providerID: 'openai',
+      modelID: 'gpt-5.6',
+      source: 'request',
+      inputCharBudget: 1_000_000,
+      structuredOutput: true,
+    };
+    const sentPrompts = [];
+    generateSmallModelText.mockImplementation(async ({ prompt }) => {
+      sentPrompts.push(prompt);
+      return { text: RESPONSE };
+    });
+
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    describeSmallModel.mockResolvedValueOnce(otherModel);
+    await generateWalkthrough({ directory: '/repo', source: SOURCE, model: 'openai/gpt-5.6' });
+    await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
+    expect(sentPrompts.some((prompt) => prompt.includes('A previous walkthrough'))).toBe(false);
+
+    getDiff.mockImplementation(async (_dir, options) => (
+      options?.staged ? '' : PATCH.replace('const added = true;', 'const added = false;')
+    ));
+    await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
+    expect(sentPrompts.at(-1)).toContain('A previous walkthrough');
+  });
+
+  it('sends the reader preferences from the walkthrough prompt override', async () => {
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    const readWalkthroughInstructions = vi.fn(async () => '  Point out every new dependency.  ');
+
+    await generateWalkthrough({ directory: '/repo', source: SOURCE }, { readWalkthroughInstructions });
+
+    expect(readWalkthroughInstructions).toHaveBeenCalledWith('/repo');
+    expect(generateSmallModelText.mock.calls.at(-1)[0].system).toContain('<preferences>\nPoint out every new dependency.\n</preferences>');
+  });
+
+  it('refuses to generate without preferences it could not read, and still answers a read', async () => {
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    const readWalkthroughInstructions = vi.fn(async () => { throw new Error('magic-prompts.json is not valid JSON'); });
+
+    await expect(generateWalkthrough({ directory: '/repo', source: SOURCE }, { readWalkthroughInstructions }))
+      .rejects.toMatchObject({ code: 'instructions-unreadable' });
+    expect(generateSmallModelText).not.toHaveBeenCalled();
+
+    const read = await getWalkthrough({ directory: '/repo', source: SOURCE }, { readWalkthroughInstructions });
+    expect(read.readiness).toMatchObject({ ready: true });
   });
 
   it('isolates PR jobs, stages, cancellation, and cache results by bound read context', async () => {

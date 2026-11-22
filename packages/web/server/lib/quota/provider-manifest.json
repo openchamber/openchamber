@@ -311,6 +311,18 @@
       }
     },
     {
+      "id": "opencode",
+      "name": "OpenCode Zen",
+      "surfaces": {
+        "web": true,
+        "vscode_dispatch": true,
+        "vscode_configured": true,
+        "ui_catalog": true,
+        "ui_union": true,
+        "docs": true
+      }
+    },
+    {
       "id": "neuralwatt",
       "name": "NeuralWatt",
       "surfaces": {

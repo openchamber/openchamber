@@ -1,46 +1,29 @@
-/**
- * VirtualizedCodeBlock — PERF-007
- *
- * Renders large code/read outputs without mounting one highlighter per line:
- *   1. ONE worker tokenization of the whole block (off the main thread)
- *   2. @tanstack/react-virtual to only render visible rows
- *
- * Tokenizing the whole block at once also preserves cross-line syntax context
- * (multi-line strings/comments) that per-line highlighting loses. Colors resolve
- * through the `--md-syntax-*` CSS variables on the container.
- */
 
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntaxVars';
-import { useWorkerHighlightedLines } from '@/components/code/useWorkerHighlightedLines';
+import { useHighlightedLines } from '@/components/code/useHighlightedLines';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-// ── Threshold: files smaller than this render without virtualization ──
 const VIRTUALIZE_THRESHOLD = 80;
-const ROW_HEIGHT = 20; // px — matches typography-code line-height
+const ROW_HEIGHT = 20;
 
-// ── Types ────────────────────────────────────────────────────────────
 export interface CodeLine {
   text: string;
   lineNumber?: number | null;
   isInfo?: boolean;
-  /** For diff lines */
   type?: 'context' | 'added' | 'removed';
 }
 
 interface VirtualizedCodeBlockProps {
   lines: CodeLine[];
   language: string;
-  /** Max visible height in CSS (default: 60vh) */
   maxHeight?: string;
-  /** Show line numbers (default: true) */
   showLineNumbers?: boolean;
-  /** Styles per line type (for diffs) */
   lineStyles?: (line: CodeLine) => React.CSSProperties | undefined;
 }
 
-// ── Component ────────────────────────────────────────────────────────
 export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.memo((props) => {
   const {
     lines,
@@ -52,20 +35,19 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
 
   const { currentTheme } = useThemeSystem();
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  // Tokenize the whole block in one worker call; rows index into the result.
   const fullText = React.useMemo(() => lines.map((line) => line.text).join('\n'), [lines]);
-  const highlightResult = useWorkerHighlightedLines(fullText, language);
-  // Unchanged lines keep their colours while an update tokenizes.
+  const highlightResult = useHighlightedLines(fullText, language);
   const highlighted = highlightResult.status === 'loading' ? highlightResult.carriedLines : highlightResult.lines;
 
   const shouldVirtualize = lines.length > VIRTUALIZE_THRESHOLD;
 
-  // ── Small file: render directly (no virtualizer overhead) ──
   if (!shouldVirtualize) {
     return (
-      <div
-        className="oc-surface-code bg-[var(--syntax-background)] typography-code font-mono w-full min-w-0"
-        style={{ ...(syntaxVars as React.CSSProperties), maxHeight, overflow: 'auto' }}
+      <ScrollableOverlay
+        outerClassName="oc-surface-code bg-[var(--syntax-background)] min-w-0"
+        outerStyle={{ maxHeight }}
+        className="typography-code font-mono min-w-0"
+        style={syntaxVars as React.CSSProperties}
       >
         {lines.map((line, idx) => (
           <Row
@@ -76,11 +58,10 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
             style={lineStyles?.(line)}
           />
         ))}
-      </div>
+      </ScrollableOverlay>
     );
   }
 
-  // ── Large file: virtualise ──
   return (
     <VirtualizedRows
       lines={lines}
@@ -95,7 +76,6 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
 
 VirtualizedCodeBlock.displayName = 'VirtualizedCodeBlock';
 
-// ── Virtualised container (extracted so the hook is top-level) ────────
 interface VirtualizedRowsProps {
   lines: CodeLine[];
   highlighted: readonly (string | undefined)[] | null;
@@ -113,10 +93,10 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   showLineNumbers,
   lineStyles,
 }) => {
-  const parentRef = React.useRef<HTMLDivElement>(null);
+  const parentRef = React.useRef<HTMLElement>(null);
   const viewportHeight = `min(${lines.length * ROW_HEIGHT}px, ${maxHeight})`;
 
-  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+  const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
     count: lines.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
@@ -125,10 +105,12 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div
+    <ScrollableOverlay
       ref={parentRef}
-      className="oc-surface-code bg-[var(--syntax-background)] typography-code font-mono w-full min-w-0"
-      style={{ ...(syntaxVars as React.CSSProperties), height: viewportHeight, maxHeight, overflow: 'auto' }}
+      outerClassName="oc-surface-code bg-[var(--syntax-background)] min-w-0"
+      outerStyle={{ height: viewportHeight, maxHeight }}
+      className="typography-code font-mono min-w-0"
+      style={syntaxVars as React.CSSProperties}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualItems.map((item) => {
@@ -151,13 +133,12 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
           );
         })}
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 });
 
 VirtualizedRows.displayName = 'VirtualizedRows';
 
-// ── Single row ───────────────────────────────────────────────────────
 interface RowProps {
   line: CodeLine;
   html: string | undefined;
@@ -181,7 +162,7 @@ const Row: React.FC<RowProps> = React.memo(({ line, html, showLineNumbers, style
       )}
       <div className="flex-1 min-w-0">
         {line.isInfo ? (
-          <div className="whitespace-pre-wrap break-words text-muted-foreground/70 italic">
+          <div className="whitespace-pre-wrap break-words text-muted-foreground italic">
             {line.text}
           </div>
         ) : html !== undefined ? (

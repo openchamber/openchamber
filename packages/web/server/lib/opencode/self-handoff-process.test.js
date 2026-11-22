@@ -20,7 +20,7 @@ const cliRuntime = process.versions.bun ? 'node' : process.execPath;
 const fakeOpenCodeSource = `
   const http = require('node:http');
   const args = process.argv.slice(2);
-  if (args.includes('--version')) { console.log('2.0.26'); process.exit(0); }
+  if (args.includes('--version')) { console.log('2.3.2'); process.exit(0); }
   const host = args[args.indexOf('--hostname') + 1];
   const port = Number(args[args.indexOf('--port') + 1]);
   // Every fake records its pid, so teardown can stop the ones a failing handoff left behind.
@@ -28,7 +28,7 @@ const fakeOpenCodeSource = `
   const server = http.createServer((req, res) => {
     if (req.url === '/api/info' || req.url === '/global/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ healthy: true, version: '2.0.26', pid: process.pid }));
+      res.end(JSON.stringify({ healthy: true, version: '2.3.2', pid: process.pid }));
       return;
     }
     if (req.url === '/api/event') {

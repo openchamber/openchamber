@@ -32,11 +32,7 @@ mock.module('node:os', () => osWithScratchHome);
 
 const {
   fetchOpenCodeSkillsFromApi,
-  readMagicPromptOverrides,
   readSettings,
-  resetAllMagicPromptOverrides,
-  resetMagicPromptOverride,
-  saveMagicPromptOverride,
 } = await import('./bridge-settings-runtime.ts');
 
 const originalFetch = globalThis.fetch;
@@ -72,6 +68,7 @@ describe('fetchOpenCodeSkillsFromApi payload mapping', () => {
       { id: 'v1-location-skill', name: 'v1-location-skill', location: path.join(projectRoot, '.agents', 'skills', 'v1-location-skill'), description: 'v1 location', content: 'content-v1' },
       { id: 'builtin-skill', name: 'builtin-skill', path: '<built-in>', description: 'built-in' },
       { id: 'opencode', name: 'OpenCode', path: '/builtin/opencode.md', description: 'v2 built-in', content: 'builtin-content' },
+      { id: 'report', name: 'Report', path: 'skill://report/SKILL.md', description: '2.2.7 built-in', content: 'report-content' },
       { id: 'unlocated-skill', name: 'unlocated-skill', description: 'no location at all' },
     ];
     const fetchMock = stubSkillListResponse(workspaces);
@@ -104,6 +101,7 @@ describe('fetchOpenCodeSkillsFromApi payload mapping', () => {
 
     // Built-in skills keep the opencode source and user scope.
     expect(byName.get('builtin-skill')).toEqual({
+      id: 'builtin-skill',
       name: 'builtin-skill',
       path: '<built-in>',
       scope: 'user',
@@ -114,12 +112,24 @@ describe('fetchOpenCodeSkillsFromApi payload mapping', () => {
 
     // OpenCode v2 built-ins carry a synthetic `/builtin/` path; normalize to the read-only marker.
     expect(byName.get('OpenCode')).toEqual({
+      id: 'opencode',
       name: 'OpenCode',
       path: '<built-in>',
       scope: 'user',
       source: 'opencode',
       description: 'v2 built-in',
       content: 'builtin-content',
+    });
+
+    // OpenCode 2.2.7 reports a built-in as `skill://<id>/SKILL.md`, which is no file either.
+    expect(byName.get('Report')).toEqual({
+      id: 'report',
+      name: 'Report',
+      path: '<built-in>',
+      scope: 'user',
+      source: 'opencode',
+      description: '2.2.7 built-in',
+      content: 'report-content',
     });
 
     // Items with neither field are dropped, unchanged.
@@ -198,106 +208,10 @@ describe('fetchOpenCodeSkillsFromApi skill scope for subdirectory sessions', () 
   });
 });
 
-describe('magic prompt overrides store', () => {
-  const magicDir = path.join(scratchHome, '.config', 'openchamber');
-  const magicPath = path.join(magicDir, 'magic-prompts.json');
-  const corruptSiblings = () =>
-    fs.existsSync(magicDir) ? fs.readdirSync(magicDir).filter((name) => name.includes('.corrupt-')) : [];
-  const tmpSiblings = () =>
-    fs.existsSync(magicDir) ? fs.readdirSync(magicDir).filter((name) => name.includes('.tmp-')) : [];
-  const cleanMagicStore = () => {
-    fs.rmSync(magicDir, { recursive: true, force: true });
-  };
-
-  test('ENOENT yields an empty state silently with no backup', () => {
-    cleanMagicStore();
-    expect(readMagicPromptOverrides()).toEqual({ version: 1, overrides: {} });
-    expect(corruptSiblings()).toEqual([]);
-  });
-
-  test('set / reset / reset-all round trips persist {version:1, overrides}', async () => {
-    cleanMagicStore();
-    await saveMagicPromptOverride('alpha.visible', 'alpha text');
-    const afterTwo = await saveMagicPromptOverride('beta.visible', 'beta text');
-    expect(afterTwo).toEqual({
-      version: 1,
-      overrides: { 'alpha.visible': 'alpha text', 'beta.visible': 'beta text' },
-    });
-    expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual(afterTwo);
-    expect(readMagicPromptOverrides()).toEqual(afterTwo);
-
-    const afterReset = await resetMagicPromptOverride('alpha.visible');
-    expect(afterReset.overrides).toEqual({ 'beta.visible': 'beta text' });
-
-    const afterResetAll = await resetAllMagicPromptOverrides();
-    expect(afterResetAll).toEqual({ version: 1, overrides: {} });
-    expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual({ version: 1, overrides: {} });
-  });
-
-  test('writes are atomic: no temp files are left behind and the file parses', async () => {
-    cleanMagicStore();
-    await saveMagicPromptOverride('alpha.visible', 'alpha text');
-    expect(tmpSiblings()).toEqual([]);
-    expect(() => JSON.parse(fs.readFileSync(magicPath, 'utf8'))).not.toThrow();
-  });
-
-  test('a corrupt file is preserved as a .corrupt sibling before any overwrite, and a later save does not destroy it', async () => {
-    cleanMagicStore();
-    await saveMagicPromptOverride('alpha.visible', 'alpha text');
-    await saveMagicPromptOverride('beta.visible', 'beta text');
-    // Simulate a torn write.
-    const torn = '{"version":1,"overrides":{"alpha.visible":"alpha te';
-    fs.writeFileSync(magicPath, torn);
-
-    const warnings = [];
-    const originalWarn = console.warn;
-    console.warn = (...args) => warnings.push(args.join(' '));
-    let afterTear;
-    try {
-      afterTear = readMagicPromptOverrides();
-    } finally {
-      console.warn = originalWarn;
-    }
-    expect(afterTear).toEqual({ version: 1, overrides: {} });
-    expect(warnings.some((line) => line.includes(magicPath))).toBe(true);
-
-    const preserved = corruptSiblings();
-    expect(preserved).toHaveLength(1);
-    expect(fs.readFileSync(path.join(magicDir, preserved[0]), 'utf8')).toBe(torn);
-    // The corrupt bytes were moved aside, not copied: the store is gone
-    // until the next save recreates it.
-    expect(fs.existsSync(magicPath)).toBe(false);
-
-    await saveMagicPromptOverride('gamma.visible', 'gamma text');
-    expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual({
-      version: 1,
-      overrides: { 'gamma.visible': 'gamma text' },
-    });
-    // The preserved copy is still the only place the torn bytes live.
-    expect(corruptSiblings()).toEqual(preserved);
-    expect(fs.readFileSync(path.join(magicDir, preserved[0]), 'utf8')).toBe(torn);
-  });
-
-  test('reset-all on a corrupt file preserves it instead of silently overwriting it', async () => {
-    cleanMagicStore();
-    fs.mkdirSync(magicDir, { recursive: true });
-    const torn = 'not json at all';
-    fs.writeFileSync(magicPath, torn);
-
-    await resetAllMagicPromptOverrides();
-
-    const preserved = corruptSiblings();
-    expect(preserved).toHaveLength(1);
-    expect(fs.readFileSync(path.join(magicDir, preserved[0]), 'utf8')).toBe(torn);
-    expect(JSON.parse(fs.readFileSync(magicPath, 'utf8'))).toEqual({ version: 1, overrides: {} });
-  });
-});
-
 describe('bounded shared-store reads (#1641)', () => {
   const configDir = path.join(scratchHome, '.config', 'openchamber');
   const settingsPath = path.join(configDir, 'settings.json');
   const preferencesPath = path.join(configDir, 'preferences.json');
-  const magicPath = path.join(configDir, 'magic-prompts.json');
   const cleanStores = () => {
     fs.rmSync(configDir, { recursive: true, force: true });
     fs.mkdirSync(configDir, { recursive: true });
@@ -346,43 +260,5 @@ describe('bounded shared-store reads (#1641)', () => {
 
     const merged = readSettings();
     expect(merged.opencodeBinary).toBeUndefined();
-  });
-
-  test('an over-cap magic-prompts.json reads as an empty store, is not preserved as corrupt, and refuses overwrite', async () => {
-    cleanStores();
-    const oversized = JSON.stringify({ version: 1, overrides: { 'alpha.visible': 'x'.repeat(5 * 1024 * 1024) } });
-    fs.writeFileSync(magicPath, oversized);
-
-    expect(readMagicPromptOverrides()).toEqual({ version: 1, overrides: {} });
-    // The bytes are untouched and were not moved aside as corrupt.
-    expect(fs.readFileSync(magicPath, 'utf8')).toBe(oversized);
-    expect(fs.readdirSync(configDir).filter((name) => name.includes('.corrupt-'))).toEqual([]);
-
-    await expect(saveMagicPromptOverride('beta.visible', 'beta text')).rejects.toThrow('Refusing to overwrite');
-    expect(fs.readFileSync(magicPath, 'utf8')).toBe(oversized);
-
-    // Once the file is readable again, saves work as before.
-    fs.writeFileSync(magicPath, JSON.stringify({ version: 1, overrides: {} }));
-    const saved = await saveMagicPromptOverride('beta.visible', 'beta text');
-    expect(saved.overrides).toEqual({ 'beta.visible': 'beta text' });
-  });
-
-  test('a save that would serialize past the read cap is rejected and the store stays readable', async () => {
-    cleanStores();
-    // Each entry is exactly at the 200,000-character save cap but three
-    // bytes per character in UTF-8: six entries fit under 4 MiB serialized,
-    // the seventh would cross it.
-    const maxText = '\u754c'.repeat(200_000);
-    const ids = ['a.visible', 'b.visible', 'c.visible', 'd.visible', 'e.visible', 'f.visible'];
-    for (const id of ids) {
-      await saveMagicPromptOverride(id, maxText);
-    }
-    expect(fs.statSync(magicPath).size).toBeLessThan(4 * 1024 * 1024);
-
-    await expect(saveMagicPromptOverride('g.visible', maxText)).rejects.toThrow('exceeds the 4194304-byte limit');
-
-    const after = readMagicPromptOverrides();
-    expect(Object.keys(after.overrides).sort()).toEqual(ids);
-    expect(fs.statSync(magicPath).size).toBeLessThan(4 * 1024 * 1024);
   });
 });

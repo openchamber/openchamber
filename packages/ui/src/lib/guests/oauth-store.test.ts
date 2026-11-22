@@ -11,7 +11,7 @@ describe('instance-scoped extension accounts', () => {
       const pending = useGuestOauthStore.getState().refresh('openchamber-builtin-sdk-demo');
       await new Promise(resolve => setTimeout(resolve, 0));
       useGuestOauthStore.getState().resetForRuntimeSwitch();
-      const current = { connection: { connected: true, account: 'current' }, hasClient: false, settings: {}, redirectUri: '' };
+      const current = { connection: { connected: true, account: 'current' }, hasClient: false, settings: {}, secretsSet: [], redirectUri: '' };
       useGuestOauthStore.getState().setStatus('openchamber-builtin-sdk-demo', current);
       if (!respond) throw new Error('Expected a pending status request');
       respond(Response.json({ connected: true, account: 'old', hasClient: false, settings: {}, redirectUri: '' }));

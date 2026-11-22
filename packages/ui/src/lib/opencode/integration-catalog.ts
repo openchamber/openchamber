@@ -1,52 +1,45 @@
-/**
- * OpenCode's integration list (`GET /api/integration`), kept for the app
- * session so Settings → Providers opens on it instead of waiting for the read.
- *
- * The list is what a user can connect and how each provider is connected
- * right now. The cached snapshot is a starting point only: Settings reads the
- * list again every time it opens and after every credential write, and each
- * read replaces the snapshot. Nothing refreshes it in the background.
- *
- * The snapshot belongs to the runtime it was read from; after a runtime
- * switch it is ignored until a read from the new runtime lands.
- */
 
 import type { IntegrationInfo } from "@opencode/client"
 import { getRuntimeKey } from "../runtime-switch"
-import { normalizeOpencodeError, opencodeClient } from "./client"
+import { normalizeOpencodeError, opencodeClient, type OpenCodeClient } from "./client"
 import { listWebSearchProviders } from "./websearch"
 
 export interface IntegrationCatalog {
   integrations: IntegrationInfo[]
-  /**
-   * Web search providers are integrations too, but their keys live in
-   * Settings → Web search. `null` when that list could not be read, so the
-   * caller keeps them rather than hiding real providers.
-   */
   webSearchIds: ReadonlySet<string> | null
 }
 
 let snapshot: { runtimeKey: string; catalog: IntegrationCatalog } | null = null
 let latestRead = 0
 let prefetching = false
+const credentialChangeListeners = new Set<() => void>()
 
-/** The last list read from the current runtime, or `null` when there is none. */
+export function notifyCredentialChanged(): void {
+  for (const listener of credentialChangeListeners) listener()
+}
+
+export function subscribeCredentialChanges(listener: () => void): () => void {
+  credentialChangeListeners.add(listener)
+  return () => {
+    credentialChangeListeners.delete(listener)
+  }
+}
+
 export function peekIntegrationCatalog(): IntegrationCatalog | null {
   return snapshot?.runtimeKey === getRuntimeKey() ? snapshot.catalog : null
 }
 
-/**
- * Reads the list again and keeps it. A read started earlier never replaces
- * one started later, so a read that began before a credential write cannot
- * bring back the state from before it. Throws when the integration list
- * cannot be read; a failed read is never an empty list.
- */
+const clientFor = (directory: string | null): OpenCodeClient =>
+  directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient()
+
+// external: https://github.com/anomalyco/opencode/tree/v2.3.0/packages/core/src Integration reads wait for plugin activation; credential writes need the same warmed location.
+export function getIntegrationClient(): OpenCodeClient {
+  return clientFor(opencodeClient.getDirectory() || null)
+}
+
 async function readIntegrations(directory: string | null): Promise<IntegrationInfo[]> {
   try {
-    // Scoped like every location read: without a directory OpenCode answers
-    // for its own working directory, the home, and starts a location there.
-    const client = directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient()
-    const response = await client.integration.list()
+    const response = await clientFor(directory).integration.list()
     return response.data
   } catch (error) {
     throw normalizeOpencodeError("integration.list", error)
@@ -71,10 +64,6 @@ export async function loadIntegrationCatalog(): Promise<IntegrationCatalog> {
   return catalog
 }
 
-/**
- * Reads the list once when the current runtime has none yet. A failure is
- * left for Settings to report when it opens and reads the list itself.
- */
 export function prefetchIntegrationCatalog(): void {
   if (prefetching || peekIntegrationCatalog()) return
   prefetching = true

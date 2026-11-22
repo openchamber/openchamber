@@ -51,17 +51,54 @@ describe('ChildStoreManager.subscribeAllSelected', () => {
     manager.disposeAll();
   });
 
-  test('notifies when the child-store registry changes', () => {
+  test('notifies when the child-store registry changes, after the creating call returns', async () => {
     const manager = new ChildStoreManager();
     let notifications = 0;
     const unsubscribe = manager.subscribeAllSelected((state) => state.session, () => {
       notifications += 1;
     });
 
+    // A sidebar row creates stores during render; notifying React there
+    // updates another component mid-render.
     manager.ensureChild('/workspace', { bootstrap: false });
+    manager.ensureChild('/other', { bootstrap: false });
+    expect(notifications).toBe(0);
+    await settle();
     expect(notifications).toBe(1);
 
     unsubscribe();
+    manager.disposeAll();
+  });
+
+  test('a new store is watched at once, before the deferred registry notification', async () => {
+    const manager = new ChildStoreManager();
+    let notifications = 0;
+    const unsubscribe = manager.subscribeAllSelected((state) => state.session, () => {
+      notifications += 1;
+    });
+
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    child.setState({ session: [...child.getState().session] });
+    expect(notifications).toBe(1);
+    await settle();
+    expect(notifications).toBe(2);
+
+    unsubscribe();
+    manager.disposeAll();
+  });
+
+  test('an unsubscribed reader gets no deferred registry notification', async () => {
+    const manager = new ChildStoreManager();
+    let notifications = 0;
+    const unsubscribe = manager.subscribeAll(() => {
+      notifications += 1;
+    });
+
+    manager.ensureChild('/workspace', { bootstrap: false });
+    unsubscribe();
+    await settle();
+    expect(notifications).toBe(0);
+
     manager.disposeAll();
   });
 
@@ -751,20 +788,26 @@ describe('ChildStoreManager bootstrap context liveness', () => {
         captured = context;
       },
     });
-    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
-    await settle();
-    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    const completed = deferred();
+    const unsubscribe = manager.subscribeBootstrap(() => {
+      if (manager.getBootstrapState('/workspace') === 'complete') completed.resolve();
+    });
+    try {
+      manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+      await completed.promise;
+      expect(manager.getBootstrapState('/workspace')).toBe('complete');
 
-    // bootstrapDirectory schedules deferred recovery pulls (permission.list
-    // and friends) from a setTimeout(0), which always runs after the pump's
-    // .finally() has cleaned up the run entry. isCurrent must remain true
-    // there, or those pulls and every commit they make get skipped.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(captured?.isCurrent()).toBe(true);
+      // Completion is published after the pump's .finally() removes the run.
+      // Deferred recovery pulls must still be allowed to commit at that point.
+      expect(captured?.isCurrent()).toBe(true);
 
-    cleanup();
-    expect(captured?.isCurrent()).toBe(false);
-    manager.disposeAll();
+      cleanup();
+      expect(captured?.isCurrent()).toBe(false);
+    } finally {
+      unsubscribe();
+      cleanup();
+      manager.disposeAll();
+    }
   });
 
   test('a newer same-directory run invalidates the previous context', async () => {

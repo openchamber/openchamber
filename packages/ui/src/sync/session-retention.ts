@@ -15,7 +15,6 @@ const DAY_MS = 86_400_000;
 export const RETENTION_KEEP_RECENT = 5;
 export const RETENTION_INTERVAL_MS = DAY_MS;
 
-// A record without timestamps has no age to compare, so it never qualifies.
 const retentionTimestamp = (session: Session, onlyArchived: boolean): number => (
   onlyArchived ? session.time?.archived ?? 0 : session.time?.updated ?? session.time?.created ?? 0
 );
@@ -26,14 +25,17 @@ const isOlderThanCutoff = (session: Session, cutoff: number, onlyArchived: boole
   return Number.isFinite(timestamp) && timestamp > 0 && timestamp < cutoff;
 };
 
-/**
- * Sessions the user asked to keep: pinned or in the In work block. The pin is
- * read from the session itself and from the pinned set, which also holds a
- * pin clicked a moment ago and this device's older local pins that have not
- * reached the server yet.
- */
-export const isSessionKeptByUser = (session: Session, pinnedIds: Set<string> = useSessionPinnedStore.getState().ids): boolean => (
-  isSessionInWork(session) || isSessionPinnedInMetadata(session) || isSessionPinned(pinnedIds, session.directory, session.id)
+export const inWorkKeepsSessions = (settings: { sessionWorkEnabled: boolean; sessionRetentionIncludeInWork: boolean }): boolean => (
+  settings.sessionWorkEnabled && !settings.sessionRetentionIncludeInWork
+);
+
+export const isSessionKeptByUser = (
+  session: Session,
+  pinnedIds: Set<string> = useSessionPinnedStore.getState().ids,
+  workKeeps: boolean = inWorkKeepsSessions(useUIStore.getState()),
+): boolean => (
+  (workKeeps && !isArchived(session) && isSessionInWork(session))
+  || isSessionPinnedInMetadata(session) || isSessionPinned(pinnedIds, session.directory, session.id)
 );
 
 type CandidateOptions = {
@@ -47,7 +49,6 @@ type CandidateOptions = {
   now?: number;
 };
 
-/** The unselected scope stays protected, including from cascading parent deletion. */
 export function buildSessionRetentionCandidates({
   sessions, currentSessionId, cutoffDays, action, onlyArchived = false, activeSessionIds, isKept, now = Date.now(),
 }: CandidateOptions): string[] {
@@ -64,7 +65,6 @@ export function buildSessionRetentionCandidates({
     }
   }
   if (action === 'delete' || onlyArchived) {
-    // OpenCode deletes the whole subtree. Protect every ancestor of a retained session.
     for (const id of protectedIds) {
       const parentId = byId.get(id)?.parentID;
       if (parentId) protectedIds.add(parentId);
@@ -73,8 +73,6 @@ export function buildSessionRetentionCandidates({
   const candidates = sorted.filter((session) => !protectedIds.has(session.id));
   if (action === 'archive' && !onlyArchived) return candidates.map((session) => session.id);
 
-  // Children first: each request deletes one eligible session, and a failed child
-  // can prevent its parent from bypassing that failure with a cascading delete.
   const ids = new Set(candidates.map((session) => session.id));
   const childrenLeft = new Map<string, number>();
   for (const session of candidates) {
@@ -90,7 +88,6 @@ export function buildSessionRetentionCandidates({
     childrenLeft.set(parentId, remaining);
     if (remaining === 0) ordered.push(parentId);
   }
-  // Cyclic/malformed hierarchies never become leaves and cannot be deleted.
   return ordered;
 }
 
@@ -101,7 +98,6 @@ type SessionRetentionResult = {
   skippedReason?: 'disabled' | 'loading' | 'cooldown' | 'no-candidates' | 'running' | 'runtime-changed';
 };
 
-// Shared by the app's automatic runner and every Settings mount. Acquire before any await.
 export const useSessionRetentionRunStore = create(() => ({ isRunning: false }));
 
 export async function runSessionRetentionCleanup({ force = false } = {}): Promise<SessionRetentionResult> {
@@ -166,8 +162,6 @@ export async function runSessionRetentionCleanup({ force = false } = {}): Promis
             else archivedChildrenByParentId.set(archived.parentID, [archived.id]);
           }
         }
-        // Planned children ran first. Any child still present either failed,
-        // became protected, or arrived mid-run. Never delete it via its parent.
         const children = [
           ...(state.structure.activeChildrenByParentId.get(id) ?? []),
           ...(archivedChildrenByParentId.get(id) ?? []),

@@ -1,6 +1,6 @@
 ---
 title: Sohbet girişi
-description: Sohbet kutusuna yazabilecekleriniz: komutlar, skill'ler, snippet'ler, bahsetmeler ve ekler.
+description: "Sohbet kutusuna yazabilecekleriniz: komutlar, skill'ler, snippet'ler, bahsetmeler ve ekler."
 ---
 
 # Sohbet girişi
@@ -61,11 +61,13 @@ Bir dosya eklemek ya da mesajı başka bir agent'la çalıştırmak için `@` ya
 Sohbet kutusunun yanındaki **+** menüsü bir dosyadan fazlasını ekler:
 
 - bilgisayarınızdaki dosyalar
-- deponuzdaki issue'lar ve pull request'ler (GitHub, GitLab projesinde GitLab)
+- deponuzdaki issue'lar ve pull request'ler (proje hangisinde barınıyorsa GitHub, GitLab, Gitea, Forgejo ya da Gerrit)
 - Linear bağlıysa Linear issue'ları
 - ekleme sunan kurulu [eklentilerin](/extensions/) görevleri
 
-Her biri bir sonraki mesajınızla bağlam olarak gelir; ne yapılacağını mesajınız belirler. Bir görseli yapıştırabilir ya da bir dosyayı doğrudan sohbet kutusuna bırakabilirsiniz.
+Bir görseli yapıştırabilir ya da bir dosyayı doğrudan sohbet kutusuna bırakabilirsiniz. Nasıl gelirse gelsin, her biri metninizde imlecin olduğu yerde bir çipe dönüşür; böylece mesajınız onunla ne yapılacağını söyleyebilir: "bunu şununla karşılaştır". Önizlemek için bir çipe tıklayın. Çipi silerseniz eki artık mesajla gitmez; geri alma ikisini de geri getirir. Bir mesaj yalnızca metninde hâlâ bulunanları gönderir.
+
+Bıraktığın, yapıştırdığın veya seçtiğin Word, PowerPoint, Excel ve OpenDocument dosyalarında (docx, pptx, xlsx, odt, odp, ods) OpenChamber ne yapılacağını sorar. **Olduğu gibi ekle** orijinali OpenCode’un çalıştığı yere koyar ve yoluyla bağlar; ajan onu kendi araçlarıyla açar. **Metne dönüştür** çıkarılan metni gönderir. Her seferinde aynısını seçmek için **Settings → Chat** altında **Office belgeleri** bölümünü kullan. Files panelinden sürüklenen veya `@` ile anılan bir dosya eskisi gibi çalışır.
 
 ## Bir shell komutu çalıştırma
 
@@ -85,4 +87,4 @@ Telefonda Enter her zaman yeni satır başlatır. Gönder düğmesi veya **Ctrl/
 
 - [Skills](/skills/): daha büyük yönerge kümelerini gerektiğinde yükler
 - [Magic Prompts](/magic-prompts/): yerleşik komutlar ve her birinin çalıştığı yer
-- [GitHub issue'ları ve PR'lar](/github/): issue ve pull request ekleyin
+- [Git sunucuları](/github/): issue ve pull request ekleyin

@@ -1,6 +1,6 @@
 ---
 title: Chat Input
-description: What you can type in the chat box: commands, skills, snippets, mentions, and attachments.
+description: "What you can type in the chat box: commands, skills, snippets, mentions, and attachments."
 ---
 
 # Chat Input
@@ -61,11 +61,13 @@ Type `@` to attach a file or run the message with a different agent.
 The **+** menu next to the chat box attaches more than a file:
 
 - files from your computer
-- issues and pull requests from your repository (GitHub, or GitLab on a GitLab project)
+- issues and pull requests from your repository (GitHub, GitLab, Gitea, Forgejo or Gerrit, whichever hosts the project)
 - Linear issues, when Linear is connected
 - tasks from installed [extensions](/extensions/) that offer to attach
 
-Each one rides along with your next message as context; your message says what to do with it. You can also paste an image or drop a file straight onto the chat box.
+You can also paste an image or drop a file straight onto the chat box. However it arrives, each one becomes a chip in your text, where the cursor was, so your message can say what to do with it: "compare this with that". Click a chip to preview it. Delete the chip and its attachment no longer goes with the message; undo brings both back. A message sends only what its text still holds.
+
+Word, PowerPoint, Excel and OpenDocument files (docx, pptx, xlsx, odt, odp, ods) that you drop, paste or pick ask what to do. **Attach as is** puts the original where OpenCode runs and links it by path, so the agent opens it with its own tools. **Convert to text** sends the extracted text. Pick one for every time under **Settings → Chat**, in **Office documents**. A file dragged from the Files panel or mentioned with `@` works as before.
 
 ## Run a shell command
 
@@ -85,4 +87,4 @@ On a phone, Enter always starts a new line. The send button or **Ctrl/Cmd+Enter*
 
 - [Skills](/skills/): load larger instruction sets on demand
 - [Magic Prompts](/magic-prompts/): the built-in commands and where each one runs
-- [GitHub Issues & PRs](/github/): attach issues and pull requests
+- [Git hosts](/github/): attach issues and pull requests

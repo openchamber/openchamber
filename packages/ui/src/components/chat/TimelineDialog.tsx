@@ -9,14 +9,17 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessageRecords } from '@/sync/sync-context';
+import { useSessionMessageLoader, useSessionMessageRecords, useSyncDirectory } from '@/sync/sync-context';
 import { useChatSessionSelection } from './chatColumnSession';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { getFullText, getMessagePreview } from './lib/messagePreview';
+import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
+import { foldPromptEntries } from './lib/promptPreviews';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface TimelineDialogProps {
     open: boolean;
@@ -29,8 +32,6 @@ interface TimelineDialogProps {
     onLoadEarlier?: () => void;
 }
 
-// Locale-keyed formatters: constructing an Intl formatter is far more
-// expensive than formatting with one, and every row formats two timestamps.
 const dateGroupFormatters = new Map<string, Intl.DateTimeFormat>();
 const messageTimeFormatters = new Map<string, Intl.DateTimeFormat>();
 
@@ -53,13 +54,6 @@ const formatDateGroup = (timestamp: number): string =>
 const formatMessageTime = (timestamp: number): string =>
     getFormatter(messageTimeFormatters, { hour: 'numeric', minute: '2-digit' }).format(timestamp);
 
-/**
- * The dialog shell stays mounted with the chat. Everything that reads the
- * session's messages lives in `TimelineDialogBody`, which the dialog popup
- * mounts only while open or animating closed, so a closed timeline does no
- * work while a reply streams. The search query lives here so reopening the
- * dialog keeps it.
- */
 export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     open,
     onOpenChange,
@@ -107,7 +101,15 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     onSearchQueryChange,
 }) => {
     const { t } = useI18n();
+    const descriptorOf = useSourceControlDescriptorOf();
     const messages = useSessionMessageRecords(currentSessionId, currentSessionDirectory);
+    const messageLoader = useSessionMessageLoader();
+    const syncDirectory = useSyncDirectory();
+    const historyDirectory = currentSessionDirectory ?? syncDirectory;
+    React.useEffect(() => {
+        if (!historyDirectory) return;
+        return messageLoader.retainSessionHistory({ directory: historyDirectory, sessionID: currentSessionId }, 'browsing');
+    }, [currentSessionId, historyDirectory, messageLoader]);
     const revertToMessage = useSessionUIStore((state) => state.revertToMessage);
     const forkFromMessage = useSessionUIStore((state) => state.forkFromMessage);
     const { isMobile, isTablet } = useDeviceInfo();
@@ -119,14 +121,10 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     const pendingLoadAnchorRef = React.useRef<{ messageId: string; top: number } | null>(null);
     const preservingLoadPositionRef = React.useRef(false);
 
-    // Timeline actions are only valid for user messages.
     const userMessages = React.useMemo(() => {
-        return messages
-            .filter((message) => message.info.role === 'user')
-            .map((message) => ({ message }));
+        return foldPromptEntries(messages).map((message) => ({ message }));
     }, [messages]);
 
-    // Filter by search query using all text parts in each user message.
     const filteredMessages = React.useMemo(() => {
         const trimmedQuery = searchQuery.trim();
         if (!trimmedQuery) return userMessages;
@@ -138,8 +136,6 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
         });
     }, [userMessages, searchQuery]);
 
-    // The body mounts on open, so start on the row the reset below would pick;
-    // starting at 0 would scroll the first row into view after the open scroll.
     const [selectedIndex, setSelectedIndex] = React.useState(() => (
         searchQuery.trim() ? 0 : Math.max(0, filteredMessages.length - 1)
     ));
@@ -174,8 +170,6 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
         preservingLoadPositionRef.current = false;
     }, [filteredMessages.length, isLoadingEarlier]);
 
-    // Opening the dialog mounts the body: start at the latest message unless
-    // a search query is active.
     const openedWithQueryRef = React.useRef(searchQuery.trim() !== '');
     React.useLayoutEffect(() => {
         const container = listRef.current;
@@ -260,7 +254,6 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
         }
     }, [filteredMessages, navigateToMessage, selectedIndex]);
 
-    // Handle fork with loading state and session refresh
     const handleFork = async (messageId: string) => {
         setForkingMessageId(messageId);
         try {
@@ -275,7 +268,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
         <>
             <button
                 type="button"
-                className="text-[11px] uppercase tracking-wide text-muted-foreground/90 hover:text-foreground"
+                className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground hover:text-foreground"
                 onClick={() => {
                     void onScrollByTurnOffset?.(-1);
                     onOpenChange(false);
@@ -286,7 +279,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
             <span className="text-muted-foreground/50">/</span>
             <button
                 type="button"
-                className="text-[11px] uppercase tracking-wide text-muted-foreground/90 hover:text-foreground"
+                className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground hover:text-foreground"
                 onClick={() => {
                     onResumeToLatest?.();
                     onOpenChange(false);
@@ -341,14 +334,14 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                     </div>
                 )}
 
-                <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
+                <ScrollableOverlay ref={listRef} outerClassName="min-h-0 flex-1" disableHorizontal>
                     {filteredMessages.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
                             {searchQuery ? t('chat.timeline.empty.search') : t('chat.timeline.empty.session')}
                         </div>
                     ) : (
                         filteredMessages.map(({ message }, index) => {
-                            const preview = getMessagePreview(message.parts, undefined, t);
+                            const preview = getMessagePreview(message.parts, undefined, t, descriptorOf);
                             const timestamp = message.info.time.created;
                             const dateGroup = formatDateGroup(timestamp);
                             const previous = filteredMessages[index - 1];
@@ -367,11 +360,11 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                                 <React.Fragment key={message.info.id}>
                                     {showDateGroup && (
                                         <div className="sticky top-0 z-10 flex items-center gap-3 bg-background/95 py-2 backdrop-blur-sm">
-                                            <div className="h-px flex-1 bg-border/60" />
+                                            <div className="h-px flex-1 bg-edge" />
                                             <span className="typography-meta text-muted-foreground">
                                                 {dateGroup}
                                             </span>
-                                            <div className="h-px flex-1 bg-border/60" />
+                                            <div className="h-px flex-1 bg-edge" />
                                         </div>
                                     )}
                                     <div
@@ -392,8 +385,8 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                                         )}>
                                             {messageTime}
                                         </span>
-                                        <p className={cn(
-                                            "flex-1 min-w-0 typography-small truncate",
+                                        <p dir="auto" className={cn(
+                                            "flex-1 min-w-0 typography-small truncate oc-ui-start-align",
                                             isSelected ? "text-interactive-selection-foreground" : "text-foreground"
                                         )}>
                                             {snippet ?? (preview || t('chat.timeline.noTextContent'))}
@@ -446,10 +439,10 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                             );
                         })
                     )}
-                </div>
+                </ScrollableOverlay>
 
                 {isMobile ? (
-                    <div className="mt-2 flex shrink-0 items-center justify-center gap-2 border-t border-border/60 pt-2">
+                    <div className="mt-2 flex shrink-0 items-center justify-center gap-2 border-t border-edge pt-2">
                         {turnActions}
                     </div>
                 ) : (

@@ -7,7 +7,8 @@ import type { WalkthroughSource } from '@/lib/walkthrough/types';
 
 export type PullRequestSource = Extract<WalkthroughSource, { kind: 'pr' }>;
 
-/** Keep each file's original patch bytes, including binary and metadata-only changes. */
+export const revisionSuffix = (source: PullRequestSource): string => (source.revision ? ` @${source.revision.slice(0, 7)}` : '');
+
 export function parsePullRequestDiff(patch: string) {
   if (!patch.trim()) return [];
   if (!patch.startsWith('diff --git ')) throw new Error('Invalid pull request diff');
@@ -45,12 +46,11 @@ export async function fetchPullRequestDiff(directory: string, source: PullReques
 
 const pullRequestFileSchema = z.object({ original: z.string(), modified: z.string() });
 
-/** Both sides of one PR file from GitHub, for expanding collapsed context on demand. */
 export async function fetchPullRequestFile(
   directory: string,
   source: PullRequestSource,
   context: Readonly<SourceControlReadContext>,
-  file: { path: string; previousPath?: string; status: string },
+  file: { path: string; previousPath?: string; status: string; binary?: boolean },
 ) {
   const response = await runtimeFetch('/api/walkthrough/pr-file', {
     query: {
@@ -58,6 +58,7 @@ export async function fetchPullRequestFile(
       path: file.path,
       previousPath: file.previousPath ?? '',
       status: file.status,
+      binary: file.binary ? 'true' : undefined,
     },
     signal: AbortSignal.timeout(30_000),
   });

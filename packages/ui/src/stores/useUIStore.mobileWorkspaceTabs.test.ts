@@ -9,18 +9,31 @@ describe('useUIStore mobile workspace tabs', () => {
 
   test('hides and shows tabs, but never the last one shown', () => {
     const { setMobileWorkspaceTabVisible } = useUIStore.getState();
-    for (const tab of ['changes', 'files', 'terminal', 'notes', 'messages'] as const) setMobileWorkspaceTabVisible(tab, false);
-    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['changes', 'files', 'terminal', 'notes', 'messages']);
+    for (const tab of ['status', 'changes', 'files', 'terminal'] as const) setMobileWorkspaceTabVisible(tab, false);
+    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['status', 'changes', 'files', 'terminal']);
 
-    setMobileWorkspaceTabVisible('mcp', false);
-    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['changes', 'files', 'terminal', 'notes', 'messages']);
+    setMobileWorkspaceTabVisible('notes', false);
+    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['status', 'changes', 'files', 'terminal']);
 
     setMobileWorkspaceTabVisible('files', true);
-    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['changes', 'terminal', 'notes', 'messages']);
+    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['status', 'changes', 'terminal']);
   });
 
   test('stores a full order of known tabs', () => {
-    useUIStore.getState().setMobileWorkspaceTabOrder(['mcp', 'unknown', 'mcp', 'files']);
-    expect(useUIStore.getState().mobileWorkspaceTabOrder).toEqual(['mcp', 'files', 'changes', 'terminal', 'notes', 'messages']);
+    useUIStore.getState().setMobileWorkspaceTabOrder(['notes', 'unknown', 'notes', 'mcp', 'files']);
+    expect(useUIStore.getState().mobileWorkspaceTabOrder).toEqual(['status', 'changes', 'terminal', 'notes', 'files']);
+  });
+
+  test('counts the extension tabs shown, and keeps a saved extension tab across a reorder without it', () => {
+    const { setMobileWorkspaceTabVisible, setMobileWorkspaceTabOrder } = useUIStore.getState();
+    for (const tab of ['status', 'changes', 'files', 'terminal'] as const) setMobileWorkspaceTabVisible(tab, false, ['plugin:tasks']);
+    setMobileWorkspaceTabVisible('notes', false, ['plugin:tasks']);
+    expect(useUIStore.getState().mobileWorkspaceHiddenTabs).toEqual(['status', 'changes', 'files', 'terminal', 'notes']);
+
+    setMobileWorkspaceTabOrder(['status', 'plugin:tasks', 'changes', 'files', 'terminal', 'notes']);
+    // Another server has no such extension: the drawer reorders what it shows,
+    // and the extension's tab keeps its place after Status.
+    setMobileWorkspaceTabOrder(['notes', 'status', 'changes', 'files', 'terminal']);
+    expect(useUIStore.getState().mobileWorkspaceTabOrder).toEqual(['notes', 'status', 'plugin:tasks', 'changes', 'files', 'terminal']);
   });
 });

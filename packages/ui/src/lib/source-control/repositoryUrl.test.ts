@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test';
 import type { GitRemote, SourceControlIdentity } from '@/lib/api/types';
-import { repositoryLinkFromRemotes } from './repositoryUrl';
+import { defaultSourceControlIdentities } from './identity';
+import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './providers/descriptor.fixture';
+import { repositoryLinkFromRemotes as linkFromRemotes } from './repositoryUrl';
+
+const descriptors = [githubLikeDescriptor(), gitlabLikeDescriptor(), acmeDescriptor()];
+const defaults = defaultSourceControlIdentities(descriptors);
+// Remotes are recognised on the connected instances and each provider's default one.
+const repositoryLinkFromRemotes = (remotes: GitRemote[], identities: SourceControlIdentity[]) => linkFromRemotes(remotes, [...identities, ...defaults], descriptors);
 
 const remote = (name: string, fetchUrl: string, pushUrl = fetchUrl): GitRemote => ({ name, fetchUrl, pushUrl });
 const link = (url: string, identities: SourceControlIdentity[] = []) => repositoryLinkFromRemotes([remote('origin', url)], identities);
@@ -29,6 +36,14 @@ test('configured instance ports and path prefixes are retained', () => {
   expect(link('https://code.example.com:8443/gitlab/group/project.git', identities)).toEqual({ provider: 'gitlab', url: 'https://code.example.com:8443/gitlab/group/project' });
 });
 
+test('separate SSH addresses produce web links only for SSH remotes', () => {
+  const identities: SourceControlIdentity[] = [{ provider: 'github', instance: 'https://code.example.com', instanceSshUrl: 'ssh://git.example.com' }];
+  for (const url of ['git@git.example.com:team/repo.git', 'ssh://git@git.example.com/team/repo.git', 'ssh://git@git.example.com:22/team/repo.git']) {
+    expect(link(url, identities)).toEqual({ provider: 'github', url: 'https://code.example.com/team/repo' });
+  }
+  expect(link('https://git.example.com/team/repo.git', identities)).toBeNull();
+});
+
 test('unsupported hosts and malformed repository paths have no entry', () => {
   for (const url of ['', 'not a url', 'https://example.com/group/project', 'https://github.com/team', 'https://github.com/team/repo/tree/main', 'git@gitlab.com:group//repo.git', 'git@gitlab.com:group/../repo.git', 'git@gitlab.com:group/repo.git?token=secret', 'file://github.com/team/repo']) {
     expect(link(url)).toBeNull();
@@ -48,4 +63,10 @@ test('unsupported origin falls back to another recognized remote or push endpoin
     .toEqual({ provider: 'gitlab', url: 'https://gitlab.com/group/project' });
   expect(repositoryLinkFromRemotes([remote('origin', '', 'git@github.com:team/repo.git')], []))
     .toEqual({ provider: 'github', url: 'https://github.com/team/repo' });
+});
+
+test('a provider without nested namespaces names a project by owner and name only', () => {
+  const identities: SourceControlIdentity[] = [{ provider: 'github', instance: 'ghe.example.com' }];
+  expect(link('https://ghe.example.com/team/repo.git', identities)).toEqual({ provider: 'github', url: 'https://ghe.example.com/team/repo' });
+  expect(link('https://ghe.example.com/team/sub/repo.git', identities)).toBeNull();
 });

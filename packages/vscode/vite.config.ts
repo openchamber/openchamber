@@ -27,7 +27,7 @@ export default defineConfig(({ mode }) => ({
   worker: {
     format: 'es',
     // VS Code webviews cannot load module imports from inside a web worker.
-    // Keep the Shiki worker self-contained instead of emitting grammar chunks.
+    // Keep the diff worker self-contained instead of emitting grammar chunks.
     rollupOptions: {
       output: {
         inlineDynamicImports: true,

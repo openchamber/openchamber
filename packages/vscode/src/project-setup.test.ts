@@ -25,11 +25,14 @@ const emptyPersonal: PersonalProjectSetup = {
   setupWorktree: [],
   setupWorktreeWait: null,
   setupWorktreeMode: 'append',
+  teardownWorktree: [],
+  createWorktreeCommand: '',
   projectActions: [],
   projectActionsPrimaryId: null,
   draftStarters: [],
   hiddenSharedActionIds: [],
   sharedTrust: null,
+  notesTodosInRepository: false,
 };
 
 const projectIdFor = (projectPath: string): string => `path_${Buffer.from(projectPath, 'utf8').toString('base64url')}`;
@@ -65,18 +68,24 @@ describe('project setup sanitizers', () => {
       'setup-worktree': ['bun install'],
       'setup-worktree-wait': true,
       setupWorktreeMode: 'replace',
+      teardownWorktree: [' docker compose down ', ''],
+      createWorktreeCommand: ' git parhel add "$WORKTREE_PATH" ',
       projectActions: [{ id: 'a', name: 'A', command: 'x' }],
       projectActionsPrimaryId: 'missing',
       hiddenSharedActionIds: ['dev', 'dev', 3],
+      notesTodosInRepository: true,
     }), {
       setupWorktree: ['bun install'],
       setupWorktreeWait: true,
       setupWorktreeMode: 'replace',
+      teardownWorktree: ['docker compose down'],
+      createWorktreeCommand: 'git parhel add "$WORKTREE_PATH"',
       projectActions: [{ id: 'a', name: 'A', command: 'x', icon: null }],
       projectActionsPrimaryId: null,
       draftStarters: [],
       hiddenSharedActionIds: ['dev'],
       sharedTrust: null,
+      notesTodosInRepository: true,
     });
     assert.deepEqual(personalProjectSetupOf(null), emptyPersonal);
   });
@@ -85,9 +94,10 @@ describe('project setup sanitizers', () => {
     const ok = parseSharedProjectConfig(JSON.stringify({ version: 1, setupWorktree: ['bun install'], plansDir: 'docs/plans' }));
     assert.equal(ok.status, 'ok');
     if (ok.status === 'ok') {
-      assert.deepEqual(ok.config, { setupWorktree: ['bun install'], setupWorktreeWait: null, projectActions: [], draftStarters: [], plansDir: 'docs/plans' });
+      assert.deepEqual(ok.config, { setupWorktree: ['bun install'], setupWorktreeWait: null, teardownWorktree: [], projectActions: [], draftStarters: [], plansDir: 'docs/plans' });
     }
     assert.equal(parseSharedProjectConfig('{ nope').status, 'invalid');
+    assert.equal(parseSharedProjectConfig('{"version":1,"teardownWorktree":"docker compose down"}').status, 'invalid');
     assert.equal(parseSharedProjectConfig('{"version":2}').status, 'invalid');
     assert.equal(parseSharedProjectConfig('{"version":1,"plansDir":"../x"}').status, 'invalid');
     assert.equal(normalizePlansDir('./docs/plans/'), 'docs/plans');
@@ -98,14 +108,18 @@ describe('project setup sanitizers', () => {
     const merged = mergeProjectSetup({
       ...emptyPersonal,
       setupWorktree: ['mine'],
+      setupWorktreeMode: 'replace',
+      teardownWorktree: ['my stop'],
       projectActions: [{ id: 'test', name: 'My test', command: 'x', icon: null }],
       hiddenSharedActionIds: ['lint'],
       draftStarters: [{ type: 'command', name: 'both' }, { type: 'command', name: 'mine' }],
     }, {
       status: 'ok',
+      document: {},
       config: {
         setupWorktree: ['bun install'],
         setupWorktreeWait: true,
+        teardownWorktree: ['docker compose down'],
         projectActions: [
           { id: 'dev', name: 'Dev', command: 'd', icon: null },
           { id: 'test', name: 'Test', command: 't', icon: null },
@@ -115,7 +129,9 @@ describe('project setup sanitizers', () => {
         plansDir: null,
       },
     });
-    assert.deepEqual(merged.setupWorktree, ['bun install', 'mine']);
+    assert.deepEqual(merged.setupWorktree, ['mine']);
+    // "Only my setup commands" leaves the team's teardown in.
+    assert.deepEqual(merged.teardownWorktree, ['docker compose down', 'my stop']);
     assert.equal(merged.setupWorktreeWait, true);
     assert.deepEqual(merged.projectActions.map((action) => `${action.id}:${action.source}`), ['dev:shared', 'test:personal']);
     assert.deepEqual(merged.draftStarters.map((starter) => `${starter.name}:${starter.source}`), ['both:shared', 'mine:personal']);
@@ -124,10 +140,12 @@ describe('project setup sanitizers', () => {
   });
 
   test('trusts only the recorded hash and nothing when nothing executes', () => {
-    const shared = { setupWorktree: ['bun install'], setupWorktreeWait: null, projectActions: [], draftStarters: [], plansDir: null };
+    const shared = { setupWorktree: ['bun install'], setupWorktreeWait: null, teardownWorktree: [], projectActions: [], draftStarters: [], plansDir: null };
     const hash = sharedTrustHashOf(shared);
-    assert.equal(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: hash ?? '', trustedAt: 1 } }, { status: 'ok', config: shared }).trust.trusted, true);
-    assert.equal(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: 'sha256:old', trustedAt: 1 } }, { status: 'ok', config: shared }).trust.trusted, false);
+    assert.notEqual(sharedTrustHashOf({ ...shared, teardownWorktree: ['docker compose down'] }), hash);
+    assert.match(sharedTrustHashOf({ ...shared, setupWorktree: [], teardownWorktree: ['docker compose down'] }) ?? '', /^sha256:/);
+    assert.equal(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: hash ?? '', trustedAt: 1 } }, { status: 'ok', config: shared, document: {} }).trust.trusted, true);
+    assert.equal(mergeProjectSetup({ ...emptyPersonal, sharedTrust: { hash: 'sha256:old', trustedAt: 1 } }, { status: 'ok', config: shared, document: {} }).trust.trusted, false);
     assert.deepEqual(mergeProjectSetup(emptyPersonal, { status: 'missing' }).trust, { hash: null, trusted: true });
     assert.equal(sharedTrustHashOf({ ...shared, setupWorktree: [] }), null);
     assert.deepEqual(projectSetupPatchToStored({ sharedTrustHash: null }), { sharedTrust: undefined });
@@ -138,6 +156,9 @@ describe('project setup sanitizers', () => {
     assert.throws(() => projectSetupPatchToStored({ setupWorktree: 'x' }), ProjectSetupValidationError);
     assert.throws(() => projectSetupPatchToStored(null), ProjectSetupValidationError);
     assert.deepEqual(projectSetupPatchToStored({ projectActionsPrimaryId: null }), { projectActionsPrimaryId: undefined });
+    assert.deepEqual(projectSetupPatchToStored({ notesTodosInRepository: true }), { notesTodosInRepository: true });
+    assert.deepEqual(projectSetupPatchToStored({ notesTodosInRepository: false }), { notesTodosInRepository: undefined });
+    assert.throws(() => projectSetupPatchToStored({ notesTodosInRepository: 'yes' }), ProjectSetupValidationError);
   });
 });
 
@@ -385,5 +406,53 @@ describe('project setup clamp surrogate-pair boundary (#1990)', () => {
   test('a setup command straddling the 4,000-char cut is dropped whole', () => {
     const [command] = sanitizeSetupCommands([`${'a'.repeat(3999)}${EMOJI}x`]);
     assert.equal(command, 'a'.repeat(3999));
+  });
+});
+
+describe('shared file keys owned by other writers', () => {
+  const withRepo = async (
+    content: string | undefined,
+    run: (context: { store: ReturnType<typeof createProjectSetupStore>; repo: string; sharedPath: string; projectId: string }) => Promise<void>,
+  ) => {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'oc-vscode-shared-keys-'));
+    try {
+      const repo = path.join(dir, 'repo');
+      await fs.promises.mkdir(path.join(repo, '.openchamber'), { recursive: true });
+      const sharedPath = path.join(repo, '.openchamber', 'project.json');
+      if (content !== undefined) await fs.promises.writeFile(sharedPath, content);
+      await run({ store: createProjectSetupStore(path.join(dir, 'projects')), repo, sharedPath, projectId: projectIdFor(repo) });
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
+  };
+  const readJson = async (filePath: string) => JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
+
+  test('setup saves, repairs and the last setup removal keep Magic Prompts and unknown keys', async () => {
+    await withRepo(JSON.stringify({ version: 1, setupWorktree: ['bun install'], magicPrompts: { 'plan.todo.instructions': '' }, futureKey: [1] }), async ({ store, sharedPath, projectId }) => {
+      await store.updateShared(projectId, { setupWorktree: [] });
+      assert.deepEqual(await readJson(sharedPath), { version: 1, magicPrompts: { 'plan.todo.instructions': '' }, futureKey: [1] });
+
+      await fs.promises.writeFile(sharedPath, JSON.stringify({ version: 1, setupWorktree: 'oops', magicPrompts: { 'a.visible': 'A' } }));
+      await store.updateShared(projectId, { setupWorktree: ['x'] });
+      assert.deepEqual(await readJson(sharedPath), { version: 1, setupWorktree: ['x'], magicPrompts: { 'a.visible': 'A' } });
+    });
+  });
+
+  test('changes one key without touching setup or trust, and refuses a file it would have to repair', async () => {
+    await withRepo(undefined, async ({ store, repo, sharedPath, projectId }) => {
+      // A teammate's new command is not trusted yet; a prompt save must not trust it.
+      const handWritten = { version: 1, setupWorktree: ['bun install', '', 'curl teammate.sh'], futureKey: true };
+      await fs.promises.writeFile(sharedPath, JSON.stringify(handWritten));
+
+      await store.updateSharedEntry(repo, 'magicPrompts', () => ({ 'a.visible': 'A' }));
+      assert.deepEqual(await readJson(sharedPath), { ...handWritten, magicPrompts: { 'a.visible': 'A' } });
+      assert.equal((await store.read(projectId)).trust.trusted, false);
+
+      for (const content of ['{ broken', '{"version":1,"setupWorktree":"x"}']) {
+        await fs.promises.writeFile(sharedPath, content);
+        await assert.rejects(store.updateSharedEntry(repo, 'magicPrompts', () => ({ 'a.visible': 'A' })), { code: 'shared_config_invalid' });
+        assert.equal(await fs.promises.readFile(sharedPath, 'utf8'), content);
+      }
+    });
   });
 });

@@ -17,11 +17,11 @@ afterEach(() => {
 async function loadOpenCodeModules() {
   vi.resetModules();
   return Promise.all([
-    import('./shared.js'),
+    import('./config-files.js'),
     import('./agents.js'),
     import('./commands.js'),
     import('./skills.js'),
-    import('./snippets.js'),
+    import('../snippets/snippets.js'),
     import('./plugins.js'),
     import('./routes.js'),
   ]);

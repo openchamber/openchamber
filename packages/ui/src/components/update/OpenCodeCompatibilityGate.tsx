@@ -8,15 +8,8 @@ import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { recoverOpenCode, type OpenCodeCompatibility } from '@/lib/opencode/compatibility';
 import { runCompatibilityCheck, takeCompatibilityCheck, type CompatibilityCheck } from './openCodeCompatibilityCheck';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
-/**
- * The app mounts at once and keeps starting while the check runs; only a
- * confirmed incompatible OpenCode replaces it with the recovery screen. A
- * failed check leaves the app's own connection recovery in charge.
- *
- * `enabled={false}` skips the check while keeping the children mounted, so a
- * host without a server yet can turn the gate on without remounting the app.
- */
 export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabled?: boolean }>> = ({ children, enabled = true }) => {
   const { t } = useI18n();
   const [compatibility, setCompatibility] = React.useState<OpenCodeCompatibility | null>(null);
@@ -51,8 +44,6 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
 
   React.useEffect(() => {
     if (compatibility?.state === 'incompatible') {
-      // The application cannot initialize against v1. Recovery replaces it,
-      // including dismissal of the HTML loading overlay.
       document.getElementById('initial-loading')?.remove();
     }
   }, [compatibility]);
@@ -77,7 +68,6 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
   if (!enabled || compatibility?.state !== 'incompatible') return <>{children}</>;
   const external = compatibility.installation === 'external';
   const bundled = compatibility.installation === 'bundled';
-  // A 2.x below the minimum needs an update, not the v1 → v2 move.
   const minimum = compatibility.minimumVersion;
   const outdated = Boolean(minimum && compatibility.version?.startsWith('2.'));
   const descriptionKey = bundled
@@ -86,7 +76,7 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
       ? external ? 'opencodeCompatibility.outdatedExternal' : 'opencodeCompatibility.outdatedLocal'
       : external ? 'opencodeCompatibility.external' : 'opencodeCompatibility.local';
   return (
-    <section className="app-region-drag flex h-full min-h-0 items-center justify-center overflow-y-auto bg-background px-6 py-10 text-foreground select-none" aria-labelledby={titleId}>
+    <ScrollableOverlay as="section" outerClassName="h-full min-h-0 bg-background" className="app-region-drag flex items-center justify-center px-6 py-10 text-foreground select-none" aria-labelledby={titleId} disableHorizontal>
       <div className="flex w-full max-w-sm flex-col items-center text-center">
         <OpenChamberLogo width={48} height={48} />
         <h1 id={titleId} className="mt-6 text-xl font-semibold tracking-tight">{t(outdated ? 'opencodeCompatibility.outdatedTitle' : 'opencodeCompatibility.title')}</h1>
@@ -101,7 +91,6 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
             <span className="text-foreground">{outdated ? `${minimum}+` : '2.x'}</span>
           </div>
         )}
-        {/* With several installs, the path tells which one OpenChamber runs. */}
         {compatibility.binary && (
           <p className="mt-2 max-w-full break-all font-mono text-xs text-muted-foreground select-text">{compatibility.binary}</p>
         )}
@@ -131,6 +120,6 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
           <DesktopHostSwitcherInline />
         </div>
       </div>
-    </section>
+    </ScrollableOverlay>
   );
 };

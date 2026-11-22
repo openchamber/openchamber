@@ -4,6 +4,7 @@ import {
   clearRuntimeAuthCredentialProvider,
   clearRuntimeUrlAuthToken,
   getRuntimeBearerTokenSync,
+  hasSameOriginTunnelSession,
   refreshRuntimeUrlAuthToken,
   refreshLocalRuntimeUrlAuthToken,
   getLocalRuntimeUrlAuthTokenSync,
@@ -11,14 +12,79 @@ import {
   setRuntimeBearerToken,
   setRuntimeExtraHeaders,
 } from './runtime-auth';
+import { createRuntimeUrlResolver } from './runtime-url';
 
 describe('runtime auth headers', () => {
+  test('confirms only a same-origin authenticated tunnel session without forwarding runtime headers', async () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const previousFetch = globalThis.fetch;
+    let requestUrl = '';
+    let requestInit: RequestInit | undefined;
+    let scope = 'tunnel';
+    let fetchCalls = 0;
+    try {
+      setRuntimeExtraHeaders(null);
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: { location: { origin: 'https://host.example', href: 'https://host.example/' } },
+      });
+      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        fetchCalls += 1;
+        requestUrl = String(input);
+        requestInit = init;
+        return new Response(JSON.stringify({ authenticated: true, scope }), { status: 200 });
+      };
+
+      expect(await hasSameOriginTunnelSession('https://host.example/auth/session')).toBe(true);
+      expect(requestUrl).toBe('https://host.example/auth/session');
+      expect(requestInit?.credentials).toBe('same-origin');
+      expect(requestInit?.mode).toBe('same-origin');
+      expect(requestInit?.redirect).toBe('error');
+      expect(requestInit?.headers).toBeUndefined();
+
+      setRuntimeBearerToken('test-token');
+      expect(await hasSameOriginTunnelSession('https://host.example/auth/session')).toBe(false);
+      clearRuntimeAuthCredentialProvider();
+      setRuntimeExtraHeaders({ 'x-runtime-test': 'enabled' });
+      expect(await hasSameOriginTunnelSession('https://host.example/auth/session')).toBe(false);
+      setRuntimeExtraHeaders(null);
+
+      scope = 'user';
+      expect(await hasSameOriginTunnelSession('https://host.example/auth/session')).toBe(false);
+      expect(await hasSameOriginTunnelSession('https://other.example/auth/session')).toBe(false);
+      expect(fetchCalls).toBe(2);
+    } finally {
+      globalThis.fetch = previousFetch;
+      setRuntimeExtraHeaders(null);
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
+  });
+
   test('does not add authorization by default', async () => {
     clearRuntimeAuthCredentialProvider();
     const headers = await buildRuntimeAuthHeaders({ Accept: 'application/json' });
 
     expect(headers.get('Accept')).toBe('application/json');
     expect(headers.has('Authorization')).toBe(false);
+  });
+
+  test('abandons a stalled tunnel status read so normal terminal auth can continue', async () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const previousFetch = globalThis.fetch;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: new URL('https://host.example/') } });
+    let aborted = false;
+    try {
+      globalThis.fetch = (_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => { aborted = true; reject(init.signal?.reason); }, { once: true });
+      });
+      expect(await hasSameOriginTunnelSession('/auth/session')).toBe(false);
+      expect(aborted).toBe(true);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
   });
 
   test('adds bearer token when configured', async () => {
@@ -144,6 +210,30 @@ describe('runtime auth headers', () => {
       globalThis.fetch = previousFetch;
       clearRuntimeUrlAuthToken();
       setRuntimeExtraHeaders(null);
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('keeps a fresh URL token when the server clock is behind this device', async () => {
+    const previousFetch = globalThis.fetch;
+    try {
+      clearRuntimeUrlAuthToken();
+      setRuntimeBearerToken('runtime-token');
+      // Server clock 90 s behind: its absolute expiry is already past here.
+      const mintFromSlowServerClock: typeof fetch = async () => Response.json({
+        token: 'fresh-url-token',
+        expiresAt: Date.now() - 30_000,
+        expiresIn: 60_000,
+      });
+      globalThis.fetch = mintFromSlowServerClock;
+
+      await refreshRuntimeUrlAuthToken('https://runtime.example');
+      const socketUrl = new URL(createRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.example' }).websocket('/api/terminal/ws'));
+
+      expect(socketUrl.searchParams.get('oc_url_token')).toBe('fresh-url-token');
+    } finally {
+      globalThis.fetch = previousFetch;
+      clearRuntimeUrlAuthToken();
       clearRuntimeAuthCredentialProvider();
     }
   });

@@ -5,7 +5,6 @@ import type { LayoutDirection, Locale } from './runtime';
 
 export type I18nContextValue = {
   locale: Locale;
-  /** Layout direction of the active locale; also set as `dir` on <html>. */
   direction: LayoutDirection;
   locales: readonly Locale[];
   setLocale: (locale: Locale) => void;

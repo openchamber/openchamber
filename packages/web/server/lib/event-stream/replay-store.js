@@ -68,6 +68,14 @@ const sortAndDedupe = (entries) => {
 /**
  * Creates the durable replay store. Without a `filePath` it keeps the same records in memory, which
  * is what tests use to simulate a restart and what a hub runs with outside production.
+ *
+ * @param {{
+ *   filePath?: string | null,
+ *   now?: () => number,
+ *   warn?: (message: string) => void,
+ *   compactAfterRecords?: number,
+ *   compactAfterBytes?: number,
+ * }} [options]
  */
 export function createReplayStore({
   filePath = null,

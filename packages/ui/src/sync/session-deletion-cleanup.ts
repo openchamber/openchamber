@@ -7,6 +7,7 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { removeSessionActivityTimestamps } from './session-activity-timestamps';
+import { useSessionTabsStore } from '@/stores/useSessionTabsStore';
 
 export const cleanupPersistedSessionState = (identity: {
   runtimeKey: string;
@@ -17,13 +18,12 @@ export const cleanupPersistedSessionState = (identity: {
 
   const queueTarget = createMessageQueueTarget(identity.sessionId, identity.directory, identity.runtimeKey);
   if (queueTarget) {
-    // A server-owned queue drops the deleted session itself; only the local
-    // projection needs to go. VS Code owns its queue and clears it here.
     if (isServerOwnedMessageQueue()) useMessageQueueStore.getState().forgetQueue(queueTarget);
     else useMessageQueueStore.getState().clearQueue(queueTarget);
   }
   useSessionFoldersStore.getState().removeSessionEverywhere(identity.runtimeKey, identity.sessionId);
   useSessionMultiSelectStore.getState().removeMany([identity.sessionId]);
+  useSessionTabsStore.getState().removeTabs([identity.sessionId], identity.runtimeKey);
   useInlineCommentDraftStore.getState().clearSessionDrafts(identity.runtimeKey, identity.directory, identity.sessionId);
   const inputHistoryIdentity = createInputHistoryIdentity(identity.runtimeKey, identity.directory, identity.sessionId);
   if (inputHistoryIdentity) useInputHistoryStore.getState().clearSession(inputHistoryIdentity);

@@ -4,12 +4,17 @@ import type { BtwSelection } from '@/stores/useBtwStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSession } from '@/sync/sync-context';
 
-/**
- * What a pinned composer sends with: the picks saved for its session first,
- * then the session record, which is what OpenCode 2 runs the next prompt on.
- * An effort saved for the picked agent and model wins over the record's; an
- * effort saved as `null` is an explicit "Default".
- */
+const isNoEffort = (variant: string) => variant === 'default';
+
+const recordVariant = (record: Pick<Session, 'model'> | undefined): string | undefined => {
+    const variant = record?.model?.variant?.trim();
+    return variant && !isNoEffort(variant) ? variant : undefined;
+};
+
+const savedPick = (variant: string | null): string | null => (
+    variant !== null && isNoEffort(variant.trim()) ? null : variant
+);
+
 export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVariant, record }: {
     savedAgent: string | null;
     savedModel: { providerId: string; modelId: string } | null;
@@ -22,17 +27,10 @@ export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVa
     return {
         agent: savedAgent ?? (record?.agent?.trim() || undefined),
         model: savedModel ?? recordModel,
-        variant: savedVariant !== undefined ? savedVariant : record?.model?.variant?.trim() || undefined,
+        variant: savedVariant !== undefined ? savedPick(savedVariant) : recordVariant(record),
     };
 };
 
-/**
- * The model, agent and effort a pinned column's composer (a chat open in the
- * side panel) sends with. The app-wide current model belongs to the main
- * chat, so a pinned composer keeps its own: what was picked in it, saved for
- * its session the way the `/btw` composer saves its picks, and otherwise what
- * the session record names. Null outside a pinned column.
- */
 export const usePinnedComposerSelection = ({ enabled, sessionId, directory }: {
     enabled: boolean;
     sessionId: string | null;

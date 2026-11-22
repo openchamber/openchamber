@@ -16,8 +16,11 @@ Diese drei Dateien sind eine funktionierende Erweiterung. Sie verbindet einen Gi
   "private": true,
   "openchamber": {
     "apiVersion": 1,
+    "id": "my-repos",
+    "name": "Repos",
+    "icon": "github",
     "contributes": {
-      "panel": { "id": "my-repos", "name": "Repos", "icon": "github", "entry": "panel/index.html" },
+      "panel": { "entry": "panel/index.html" },
       "attach": "panel",
       "integration": {
         "name": "GitHub (token)",

@@ -20,6 +20,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 export type ForkSessionExecution = {
@@ -69,13 +70,9 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const [instructions, setInstructions] = React.useState(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
   const [createWorktree, setCreateWorktree] = React.useState(false);
   const [runAsGoal, setRunAsGoal] = React.useState(false);
-  const showCreateWorktree = !isVSCodeRuntime() && isGitRepository === true;
-  // The goal loop lives in the web server; VS Code only renders goal state.
+  const showCreateWorktree = !isVSCodeRuntime() && isGitRepository === true && !isSpaceDirectory(projectDirectory) && !isSpaceDirectory(resolvedWorktreeProjectDirectory);
   const showRunAsGoal = React.useMemo(() => !isVSCodeRuntime(), []);
 
-  // Toggling goal mode swaps the prefilled instructions between the
-  // report-back default and the assertive execute-to-completion variant —
-  // but never clobbers text the user has edited.
   const handleToggleRunAsGoal = React.useCallback((next: boolean) => {
     setRunAsGoal(next);
     setInstructions((current) => {
@@ -97,9 +94,6 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     void ensureGitStatus(resolvedWorktreeProjectDirectory, git);
   }, [ensureGitStatus, git, open, resolvedWorktreeProjectDirectory]);
 
-  // Reset only when the dialog transitions to open. Reading the store snapshot
-  // here (instead of subscribing) avoids clobbering in-progress user edits when
-  // the config store refreshes in the background while the dialog is open.
   React.useEffect(() => {
     if (!open) return;
     const config = useConfigStore.getState();

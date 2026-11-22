@@ -24,13 +24,13 @@ interface SessionGoalArm {
   ignoreLimit: boolean;
 }
 
+
 interface SessionGoalArmStore extends SessionGoalArm {
   setArmed: (
     armed: boolean,
     objectiveOverride?: string | null,
     options?: { settled?: boolean; briefAgent?: boolean; ignoreLimit?: boolean },
   ) => void;
-  /** Read-and-clear in one step at send time. */
   consume: () => SessionGoalArm;
 }
 

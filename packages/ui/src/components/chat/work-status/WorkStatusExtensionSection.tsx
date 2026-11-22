@@ -12,30 +12,14 @@ import type { GuestStatusControlBinding } from '@/lib/guests/status-controls';
 import { useUIStore } from '@/stores/useUIStore';
 import { WorkStatusCollapsibleSection } from './WorkStatusPrimitives';
 import { StatusHeaderControls } from './StatusHeaderControls';
+import { GuestStatusViewBody } from './WorkStatusGuestView';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { extensionSectionId } from './sections';
 
-// Loaded only when an extension section is expanded; most panels never need it.
 const PluginPane = React.lazy(() => import('@/components/layout/PluginPane').then((module) => ({ default: module.PluginPane })));
 
-/**
- * Last height each extension's page asked for, for this app session. Folding a
- * section unmounts its frame; reopening starts at the height the page last had
- * instead of jumping from the manifest default. One number per installed
- * extension (keyed by id and version), so it stays tiny; not persisted.
- */
 const rememberedHeights = new Map<string, number>();
 
-/**
- * An extension's own section (`contributes.statusSection`): the host draws the
- * header from the extension's title and icon, the body is its sandboxed page.
- *
- * The frame exists only while the section is expanded — the collapsible drops
- * its children when folded, and the panel drops the section when it is hidden
- * or the panel itself is — so a folded section costs nothing. Its height is
- * what the guest last asked for through `setHeight`, clamped by the SDK range
- * and remembered for the session; taller content scrolls inside the frame.
- */
 export const WorkStatusExtensionSection: React.FC<{
   guest: InstalledGuest;
   directory: string | null;
@@ -67,7 +51,7 @@ export const WorkStatusExtensionSection: React.FC<{
     <WorkStatusCollapsibleSection
       id={sectionId}
       title={guest.statusTitle ?? guest.name}
-      iconNode={<GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-3.5 shrink-0 text-muted-foreground" />}
+      iconNode={<GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-[13px] shrink-0 text-muted-foreground" />}
       defaultExpanded={guest.statusDefaultExpanded ?? true}
       actionLayout={actionLayout}
       action={expanded && statusControls ? (
@@ -78,20 +62,34 @@ export const WorkStatusExtensionSection: React.FC<{
         />
       ) : undefined}
     >
-      <div data-guest-status-body={guest.id} className="mx-1 overflow-hidden rounded-md" style={{ height }}>
-        <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
-          <React.Suspense fallback={null}>
-            <PluginPane
-              mode={pluginModeFromId(guest.id)}
-              surface="status"
-              item={null}
-              onResize={handleResize}
-              statusDirectory={directory}
+      {guest.statusSource ? (
+        <div data-guest-status-body={guest.id}>
+          <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
+            <GuestStatusViewBody
+              key={`${guest.id}:${directory ?? ''}`}
+              guestId={guest.id}
+              source={guest.statusSource}
+              directory={directory}
               onStatusControls={setStatusControls}
             />
-          </React.Suspense>
-        </ErrorBoundary>
-      </div>
+          </ErrorBoundary>
+        </div>
+      ) : (
+        <div data-guest-status-body={guest.id} className="mx-1 overflow-hidden rounded-md" style={{ height }}>
+          <ErrorBoundary fallback={<div className="px-1 text-xs text-muted-foreground">{t('contextPanel.plugin.loadFailed')}</div>}>
+            <React.Suspense fallback={null}>
+              <PluginPane
+                mode={pluginModeFromId(guest.id)}
+                surface="status"
+                item={null}
+                onResize={handleResize}
+                statusDirectory={directory}
+                onStatusControls={setStatusControls}
+              />
+            </React.Suspense>
+          </ErrorBoundary>
+        </div>
+      )}
     </WorkStatusCollapsibleSection>
   );
 };

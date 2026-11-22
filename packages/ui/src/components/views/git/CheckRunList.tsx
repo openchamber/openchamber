@@ -9,6 +9,7 @@ import type { CIRun } from '@/lib/source-control/types';
 import { cn } from '@/lib/utils';
 
 import { formatElapsedDuration, isFailedConclusion, type CheckRunExpansion } from './checkRunState';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 
 const CheckRunDetails: React.FC<{
@@ -32,17 +33,17 @@ const CheckRunDetails: React.FC<{
       </div>
 
       {run.output?.title ? (
-        <div className="typography-micro text-foreground">{run.output.title}</div>
+        <div dir="auto" className="typography-micro text-foreground">{run.output.title}</div>
       ) : null}
       {run.output?.summary ? (
-        <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words">
+        <div dir="auto" className="typography-micro text-muted-foreground whitespace-pre-wrap break-words">
           {run.output.summary}
         </div>
       ) : null}
       {run.output?.text ? (
-        <div className="rounded oc-tile-inset px-2 py-2 typography-micro text-muted-foreground whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+        <ScrollableOverlay outerClassName="max-h-48 rounded oc-tile-inset" className="px-2 py-2 typography-micro text-muted-foreground whitespace-pre-wrap break-words" disableHorizontal>
           {run.output.text}
-        </div>
+        </ScrollableOverlay>
       ) : null}
 
       {run.annotationsTruncated ? (
@@ -67,11 +68,11 @@ const CheckRunDetails: React.FC<{
                   {annotation.startLine !== undefined ? `:${annotation.startLine}` : ''}
                   {annotation.endLine !== undefined && annotation.endLine !== annotation.startLine ? `-${annotation.endLine}` : ''}
                 </div>
-                <div className="typography-micro text-foreground whitespace-pre-wrap break-words mt-1">
+                <div dir="auto" className="typography-micro text-foreground whitespace-pre-wrap break-words mt-1">
                   {annotation.message}
                 </div>
                 {annotation.rawDetails ? (
-                  <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words mt-1">
+                  <div dir="auto" className="typography-micro text-muted-foreground whitespace-pre-wrap break-words mt-1">
                     {annotation.rawDetails}
                   </div>
                 ) : null}
@@ -126,13 +127,8 @@ const CheckRunDetails: React.FC<{
   );
 };
 
-/**
- * A change request's check runs, each opening to its output, failed
- * annotations and steps. Shared by the PR panel and the board's checks dialog.
- */
 export const CheckRunList: React.FC<{
   runs: CIRun[];
-  /** The clock running checks count their time against. */
   now: number;
   expansion: CheckRunExpansion;
   formatTimestamp: (value?: string) => string;
@@ -172,7 +168,7 @@ export const CheckRunList: React.FC<{
             ) : (
               <Icon name="checkbox-circle" className="size-4 shrink-0 text-[var(--status-success)]" />
             )}
-            <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+            <span dir="auto" className="oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label text-foreground">
               {workflowName && workflowName !== run.name ? `${workflowName} / ${run.name}` : run.name}
             </span>
             {durationLabel ? (
@@ -183,7 +179,7 @@ export const CheckRunList: React.FC<{
             ) : null}
           </button>
           {expanded && hasDetails ? (
-            <div className="min-w-0 overflow-hidden border-t border-border/40 p-2.5">
+            <div className="min-w-0 overflow-hidden border-t border-edge-muted p-2.5">
               <CheckRunDetails run={run} expansion={expansion} formatTimestamp={formatTimestamp} />
             </div>
           ) : null}

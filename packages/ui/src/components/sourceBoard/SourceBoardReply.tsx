@@ -3,43 +3,43 @@ import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { toast } from '@/components/ui';
+import { ButtonTooltip, TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubReference, SourceControlReadContext } from '@/lib/api/types';
+import type { RepositoryReference, SourceControlReadContext } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
-import type { ReviewChangeRequestInput, ReviewVerdict } from '@/lib/source-control/types';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { reviewLabelsOf } from '@/lib/source-control/reviewLabels';
+import type { ChangeRequestVoteLabel, ReviewChangeRequestInput, ReviewVerdict } from '@/lib/source-control/types';
 import { newMutationKey } from './mutationKey';
+import { SourceBoardVotes } from './SourceBoardVotes';
 
-type Busy = 'comment' | 'thread' | ReviewVerdict | null;
+type Busy = 'comment' | 'thread' | 'vote' | ReviewVerdict | null;
 
-/**
- * Below an issue's or pull request's activity: write a comment, or on an
- * open pull request approve it or request changes with the text as the
- * review's body. The text stays in the box until the host has it.
- */
 export const SourceBoardReply: React.FC<{
-    reference: GitHubReference;
+    reference: RepositoryReference;
     context: SourceControlReadContext;
-    /**
-     * The item's feed and the list read again: after a write so it shows, and
-     * after a refused review, which is most often a push since the preview
-     * was read.
-     */
     onRefresh: () => void;
-}> = ({ reference, context, onRefresh }) => {
+    voteLabels?: ChangeRequestVoteLabel[];
+    onLatestRevision?: boolean;
+    latestRevision?: string;
+}> = ({ reference, context, onRefresh, voteLabels, onLatestRevision = true, latestRevision }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     const [text, setText] = React.useState('');
     const [busy, setBusy] = React.useState<Busy>(null);
+    const [votes, setVotes] = React.useState<Record<string, number>>({});
 
-    const label = referenceNumberLabel(reference);
+    const descriptor = useSourceControlProvider(reference.provider);
+    const review = reviewLabelsOf(descriptor, { voteLabels });
+    const label = referenceNumberLabel(reference, descriptor);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     const openPull = reference.kind === 'pull' && reference.state === 'open' ? reference : null;
-    // GitLab threads any merge request comment; GitHub's only start from a line in a review.
-    const canStartThread = reference.kind === 'pull' && reference.provider === 'gitlab';
+    // external: https://docs.gitlab.com/api/discussions/#create-a-new-thread-in-the-merge-request GitLab threads general MR comments; GitHub starts review threads on diff lines.
+    const canStartThread = reference.kind === 'pull' && descriptor.features.startThread;
     const body = text.trim() ? text : null;
     const shortcut = formatShortcutForDisplay('mod+enter');
 
@@ -49,6 +49,7 @@ export const SourceBoardReply: React.FC<{
         try {
             const payload = { ...context, idempotencyKey: newMutationKey(), target: { project, number: reference.number }, body };
             if (reference.kind === 'pull') await sourceControl.changeRequestComment(payload);
+            else if (reference.kind === 'discussion') await sourceControl.discussionComment(payload);
             else await sourceControl.issueComment(payload);
             setText('');
             toast.success(t('sourceBoard.reply.toast.commented', { reference: label }));
@@ -75,14 +76,14 @@ export const SourceBoardReply: React.FC<{
         }
     };
 
-    const review = async (verdict: ReviewVerdict) => {
-        if (!openPull || busy || (verdict === 'request-changes' && !body)) return;
+    const sendVerdict = async (verdict: ReviewVerdict) => {
+        const option = review.model === 'verdict' ? review.labels[0].options.find((entry) => entry.verdict === verdict) : null;
+        if (!openPull || busy || !option || (option.requiresBody && !body)) return;
         setBusy(verdict);
         try {
             const input: ReviewChangeRequestInput = {
                 ...context,
                 idempotencyKey: newMutationKey(),
-                // The verdict is for the commit shown; a push since refuses it.
                 target: { project, number: openPull.number, headSha: openPull.headSha },
                 verdict,
             };
@@ -90,8 +91,7 @@ export const SourceBoardReply: React.FC<{
             const receipt = await sourceControl.changeRequestReview(input);
             const doneKey = verdict === 'approve' ? 'sourceBoard.reply.toast.approved' : 'sourceBoard.reply.toast.changesRequested';
             if (body && !receipt.result.commented) {
-                // GitLab posts the verdict and its text separately: the verdict
-                // stands, the text stays here to post again.
+                // external: https://docs.gitlab.com/api/merge_request_approvals/#approve-merge-request GitLab posts the verdict separately from its text; a failed text post leaves the verdict in place.
                 toast.warning(t(doneKey, { reference: label }), { description: t('sourceBoard.reply.toast.textNotPosted') });
             } else {
                 setText('');
@@ -100,6 +100,34 @@ export const SourceBoardReply: React.FC<{
             onRefresh();
         } catch (error) {
             toast.error(t('sourceBoard.reply.toast.reviewFailed', { reference: label }), { description: error instanceof Error ? error.message : String(error) });
+            onRefresh();
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const sendVotes = async () => {
+        if (!openPull || busy || review.model !== 'votes' || Object.keys(votes).length === 0) return;
+        setBusy('vote');
+        try {
+            const input: ReviewChangeRequestInput = {
+                ...context,
+                idempotencyKey: newMutationKey(),
+                target: { project, number: openPull.number, headSha: latestRevision ?? openPull.headSha },
+                votes,
+            };
+            if (body) input.body = body;
+            const receipt = await sourceControl.changeRequestReview(input);
+            setVotes({});
+            if (body && !receipt.result.commented) {
+                toast.warning(t('sourceBoard.vote.toast.voted', { reference: label }), { description: t('sourceBoard.reply.toast.textNotPosted') });
+            } else {
+                setText('');
+                toast.success(t('sourceBoard.vote.toast.voted', { reference: label }));
+            }
+            onRefresh();
+        } catch (error) {
+            toast.error(t('sourceBoard.vote.toast.failed', { reference: label }), { description: error instanceof Error ? error.message : String(error) });
             onRefresh();
         } finally {
             setBusy(null);
@@ -117,7 +145,7 @@ export const SourceBoardReply: React.FC<{
     const busyIcon = (kind: Busy) => (busy === kind ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null);
 
     return (
-        <section className="flex flex-col gap-2 border-t border-border/60 pt-4" aria-label={t('sourceBoard.reply.label')}>
+        <section className="flex flex-col gap-2 border-t border-edge pt-4" aria-label={t('sourceBoard.reply.label')}>
             <Textarea
                 value={text}
                 onChange={(event) => setText(event.target.value)}
@@ -127,47 +155,66 @@ export const SourceBoardReply: React.FC<{
                 disabled={busy !== null}
                 rows={3}
             />
+            {openPull && review.model === 'votes' ? (
+                onLatestRevision ? (
+                    <SourceBoardVotes labels={review.labels} votes={votes} onChange={setVotes} disabled={busy !== null} />
+                ) : (
+                    <p className="typography-meta text-muted-foreground">{t('sourceBoard.vote.olderRevision')}</p>
+                )
+            ) : null}
             <div className="flex flex-wrap items-center justify-end gap-2">
-                {openPull ? (
+                {openPull && review.model === 'votes' && onLatestRevision && review.labels.some((entry) => entry.permitted.length > 0) ? (
+                    <ButtonTooltip label={t('contextTooltips.tracker.sendVotes')}>
+                        <Button size="sm" variant="outline" onClick={() => void sendVotes()} disabled={busy !== null || Object.keys(votes).length === 0}>
+                            {busyIcon('vote') ?? <Icon name="check" className="size-3.5" />}
+                            {t('sourceBoard.vote.send')}
+                        </Button>
+                    </ButtonTooltip>
+                ) : null}
+                {openPull && review.model === 'verdict' ? (
                     <>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void review('request-changes')}
-                            disabled={busy !== null || !body}
-                            // Disabled buttons show no tooltip; the hint is for the enabled one too.
-                            title={t('sourceBoard.reply.requestChangesHint')}
-                        >
-                            {busyIcon('request-changes') ?? <Icon name="file-edit" className="size-3.5" />}
-                            {t('sourceBoard.reply.requestChanges')}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => void review('approve')} disabled={busy !== null}>
-                            {busyIcon('approve') ?? <Icon name="check" className="size-3.5" />}
-                            {t('sourceBoard.reply.approve')}
-                        </Button>
+                        <ButtonTooltip label={t('sourceBoard.reply.requestChangesHint')}>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void sendVerdict('request-changes')}
+                                disabled={busy !== null || !body}
+                            >
+                                {busyIcon('request-changes') ?? <Icon name="file-edit" className="size-3.5" />}
+                                {t('sourceBoard.reply.requestChanges')}
+                            </Button>
+                        </ButtonTooltip>
+                        <ButtonTooltip label={t('contextTooltips.tracker.approve')}>
+                            <Button size="sm" variant="outline" onClick={() => void sendVerdict('approve')} disabled={busy !== null}>
+                                {busyIcon('approve') ?? <Icon name="check" className="size-3.5" />}
+                                {t('sourceBoard.reply.approve')}
+                            </Button>
+                        </ButtonTooltip>
                     </>
                 ) : null}
                 {canStartThread ? (
+                    <ButtonTooltip label={t('sourceBoard.reply.startThreadHint')}>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void startThread()}
+                            disabled={busy !== null || !body}
+                        >
+                            {busyIcon('thread') ?? <Icon name="chat-thread" className="size-3.5" />}
+                            {t('sourceBoard.reply.startThread')}
+                        </Button>
+                    </ButtonTooltip>
+                ) : null}
+                <ButtonTooltip label={<TooltipLabelWithShortcut label={t('sourceBoard.reply.comment')} shortcut={shortcut} />}>
                     <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => void startThread()}
+                        onClick={() => void comment()}
                         disabled={busy !== null || !body}
-                        title={t('sourceBoard.reply.startThreadHint')}
                     >
-                        {busyIcon('thread') ?? <Icon name="chat-thread" className="size-3.5" />}
-                        {t('sourceBoard.reply.startThread')}
+                        {busyIcon('comment') ?? <Icon name="chat-1" className="size-3.5" />}
+                        {t('sourceBoard.reply.comment')}
                     </Button>
-                ) : null}
-                <Button
-                    size="sm"
-                    onClick={() => void comment()}
-                    disabled={busy !== null || !body}
-                    title={t('sourceBoard.reply.commentShortcut', { shortcut })}
-                >
-                    {busyIcon('comment') ?? <Icon name="chat-1" className="size-3.5" />}
-                    {t('sourceBoard.reply.comment')}
-                </Button>
+                </ButtonTooltip>
             </div>
         </section>
     );

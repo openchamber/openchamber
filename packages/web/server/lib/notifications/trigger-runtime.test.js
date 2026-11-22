@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTriggerRuntime } from './runtime.js';
 import { createNotificationTemplateRuntime } from './template-runtime.js';
+import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 /**
  * The "ready" push is built from the translated `message.updated` events.
@@ -10,10 +11,11 @@ import { createNotificationTemplateRuntime } from './template-runtime.js';
  * agent and model from the start, a user abort announces nothing, and an
  * active goal (which lives in OpenChamber's own metadata) silences the push.
  */
-const makeRuntime = ({ metadata = {} } = {}) => {
+const makeRuntime = ({ metadata = {}, settings = {}, isInAutoReview, isAnyUiVisible } = {}) => {
   const emitDesktopNotification = vi.fn(() => true);
+  const broadcastUiNotification = vi.fn();
   const runtime = createNotificationTriggerRuntime({
-    readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true }),
+    readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true, ...settings }),
     prepareNotificationLastMessage: async ({ message }) => message,
     buildTemplateVariables: async () => ({}),
     extractLastMessageText: () => 'done',
@@ -21,15 +23,17 @@ const makeRuntime = ({ metadata = {} } = {}) => {
     resolveNotificationTemplate: () => '',
     shouldApplyResolvedTemplateMessage: () => false,
     emitDesktopNotification,
-    broadcastUiNotification: vi.fn(),
+    broadcastUiNotification,
     sendPushToAllUiSessions: vi.fn(async () => undefined),
     sendApnsToAllUiSessions: vi.fn(async () => undefined),
     isAnyInteractiveClientVisible: () => true,
+    isAnyUiVisible,
     buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
     getOpenCodeAuthHeaders: () => ({}),
     readSessionMetadata: async () => metadata,
+    isInAutoReview,
   });
-  return { runtime, emitDesktopNotification };
+  return { runtime, emitDesktopNotification, broadcastUiNotification };
 };
 
 const stepStarted = (sessionID, id) => ({
@@ -60,9 +64,42 @@ describe('ready notification on v2 step events', () => {
     expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
     expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
       kind: 'ready',
-      title: 'Build agent is ready',
+      title: 'Build is ready',
       body: 'Claude Sonnet 5 completed the task',
     });
+  });
+
+  it('announces in the interface language when the templates are left empty', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime({ settings: { locale: 'zh-CN' } });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
+      kind: 'ready',
+      title: 'Build 已完成',
+      body: 'Claude Sonnet 5 已完成任务',
+    });
+  });
+
+  it('reaches no open window while another client is in use, unless the mode shows notifications in focus', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cases = [
+      { notificationMode: 'hidden-only', visible: true, shown: false },
+      { notificationMode: 'hidden-only', visible: false, shown: true },
+      { notificationMode: 'always', visible: true, shown: true },
+    ];
+    for (const { notificationMode, visible, shown } of cases) {
+      const { runtime, emitDesktopNotification, broadcastUiNotification } = makeRuntime({
+        settings: { notificationMode },
+        isAnyUiVisible: () => visible,
+      });
+      await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+      await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+      expect(emitDesktopNotification).toHaveBeenCalledTimes(shown ? 1 : 0);
+      expect(broadcastUiNotification).toHaveBeenCalledTimes(shown ? 1 : 0);
+    }
   });
 
   it('announces nothing for a user abort', async () => {
@@ -87,17 +124,132 @@ describe('ready notification on v2 step events', () => {
 
     expect(emitDesktopNotification).not.toHaveBeenCalled();
   });
+
+  it('stays quiet for a step of an auto-review and announces the review once when it ends', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { locale: 'uk' },
+      isInAutoReview: (sessionId) => sessionId === 'ses_reviewed',
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_reviewed', 'msg_4'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_reviewed'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+
+    await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'disputed' });
+    await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'failed', error: 'The reviewer session is gone.' });
+    expect(emitDesktopNotification.mock.calls.map(([payload]) => payload)).toMatchObject([
+      { kind: 'review', sessionId: 'ses_reviewed', title: 'Ревʼю чекає твого рішення', body: 'Щодо деяких зауважень досі суперечка' },
+      { kind: 'review', title: 'Ревʼю не вдалося', body: 'The reviewer session is gone.' },
+    ]);
+  });
+
+  it('announces no review end where a ready notification would not show', async () => {
+    for (const settings of [{ notifyOnCompletion: false }, { nativeNotificationsEnabled: false }]) {
+      const { runtime, emitDesktopNotification } = makeRuntime({ settings });
+      await runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'clean' });
+      expect(emitDesktopNotification).not.toHaveBeenCalled();
+    }
+    const focused = makeRuntime({ settings: { notificationMode: 'hidden-only' } });
+    focused.runtime.setGetIsWindowFocused(() => true);
+    await focused.runtime.notifyAutoReviewEnded({ sessionId: 'ses_reviewed', directory: '/repo', status: 'clean' });
+    expect(focused.emitDesktopNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('error notification on v2 step failures', () => {
+  const stepFailed = (sessionID, id, error) => translateWireEvent({
+    type: 'session.step.failed',
+    id: `evt_${id}`,
+    created: 3,
+    data: { sessionID, assistantMessageID: id, error },
+  })[0];
+
+  it('announces a failed turn, but not one the user interrupted', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger(stepFailed('ses_4', 'msg_4', { type: 'aborted', message: 'Step interrupted' }));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+
+    await runtime.maybeSendPushForTrigger(stepFailed('ses_5', 'msg_5', {
+      type: 'provider.transport',
+      message: 'Timed out waiting for response data',
+    }));
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ kind: 'error' });
+  });
+
+  it('announces exhausted auto-resume attempts and provider execution failures', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeRuntime();
+    const execution = (sessionID, error) => translateWireEvent({
+      type: 'session.execution.failed',
+      id: `evt_${sessionID}`,
+      created: 4,
+      data: { sessionID, error },
+    });
+
+    for (const event of execution('ses_6', {
+      type: 'aborted',
+      message: 'Execution was interrupted repeatedly and will not be resumed automatically.',
+    })) {
+      await runtime.maybeSendPushForTrigger(event);
+    }
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ kind: 'error', sessionId: 'ses_6' });
+
+    for (const event of execution('ses_7', { type: 'provider.transport', message: 'Connection reset' })) {
+      await runtime.maybeSendPushForTrigger(event);
+    }
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(2);
+    expect(emitDesktopNotification.mock.calls[1][0]).toMatchObject({ kind: 'error', sessionId: 'ses_7' });
+  });
 });
 
 describe('ready notification while background subagents run', () => {
-  const stubOpenCode = ({ active, children }) => {
+  // Without `jobs` it is an OpenCode before 2.2.6, which has no job list.
+  const stubOpenCode = ({ active, children, jobs }) => {
     vi.stubGlobal('fetch', vi.fn(async (input) => {
       const url = new URL(String(input));
+      if (url.pathname === '/api/experimental/job') {
+        return jobs ? Response.json({ data: jobs() }) : new Response(null, { status: 404 });
+      }
       if (url.pathname === '/api/session/active') return Response.json({ data: active() });
-      if (url.pathname === '/api/session') return Response.json({ data: children, cursor: {} });
+      const child = children.find((record) => url.pathname === `/api/session/${record.id}`);
+      if (child) return Response.json({ data: child });
       return Response.json({});
     }));
   };
+
+  it('stays silent while the job list shows a subagent, and ignores a running command', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const job = (kind, sessionID) => ({ kind, sessionID, status: 'running', time: { started: 1 } });
+    let jobs = [job('subagent', 'ses_1'), job('shell', 'ses_child')];
+    stubOpenCode({ active: () => ({}), children: [], jobs: () => jobs });
+    const { runtime, emitDesktopNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+
+    // A dev server the subagent left running must not hold "ready" forever.
+    jobs = [job('shell', 'ses_child')];
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('stays silent while a child session that is no OpenCode job runs', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubOpenCode({ active: () => ({ ses_workflow: { type: 'running' } }), children: [{ id: 'ses_workflow', parentID: 'ses_1' }], jobs: () => [] });
+    const { runtime, emitDesktopNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
 
   it('stays silent on the pause and announces the real turn end', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -690,6 +842,73 @@ describe('input-needed notification for an MCP elicitation', () => {
   });
 });
 
+describe('notification project through the trigger runtime', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('names the project of the session record, not the active project', async () => {
+    const settings = {
+      nativeNotificationsEnabled: true,
+      notificationMode: 'always',
+      notifyOnCompletion: true,
+      locale: 'en',
+      activeProjectId: 'project-a',
+      projects: [
+        { id: 'project-a', label: 'Project A', path: '/work/project-a' },
+        { id: 'project-b', label: 'Project B', path: '/work/project-b' },
+      ],
+      notificationTemplates: {
+        completion: { title: '{project_name} · {session_name}', message: '{last_message}' },
+      },
+    };
+    const readSettingsFromDisk = async () => settings;
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/session/active') return Response.json({ data: {} });
+      if (url.pathname === '/api/session') return Response.json({ data: [], cursor: {} });
+      if (url.pathname === '/api/session/ses_b') {
+        return Response.json({ data: { id: 'ses_b', title: 'Session B', parentID: null, location: { directory: '/work/project-b' } } });
+      }
+      return new Response(null, { status: 404 });
+    }));
+
+    const templates = createNotificationTemplateRuntime({
+      readSettingsFromDisk,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      resolveGitBinaryForSpawn: () => 'git',
+    });
+    const emitDesktopNotification = vi.fn(() => true);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk,
+      readSessionMetadata: async () => ({}),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: templates.buildTemplateVariables,
+      extractLastMessageText: () => 'done',
+      fetchLastAssistantMessageText: async () => 'done',
+      resolveNotificationTemplate: templates.resolveNotificationTemplate,
+      shouldApplyResolvedTemplateMessage: templates.shouldApplyResolvedTemplateMessage,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions: vi.fn(async () => undefined),
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => true,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_b', 'msg_b'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_b'));
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
+      kind: 'ready',
+      title: 'Project B · Session B',
+    });
+  });
+});
+
 describe('notifications for a chat of an isolated space', () => {
   // The chat lives in the OpenCode inside the space; the host's OpenCode answers 404 for it.
   const SPACE = '32aa0c80b805';
@@ -735,7 +954,7 @@ describe('notifications for a chat of an isolated space', () => {
       isAnyInteractiveClientVisible: () => false,
       buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
       getOpenCodeAuthHeaders: () => ({}),
-      spaceFetchFor: (spaceId) => (spaceId === SPACE ? inside : null),
+      getSpacesHost: () => ({ openCodeFetchFor: (spaceId) => (spaceId === SPACE ? inside : null) }),
     });
     runtime.setGetIsSessionAutoAccepting(isAutoAnswered);
     return { runtime, hostFetch, inside, emitDesktopNotification, sendApnsToAllUiSessions, isAutoAnswered, readSessionMetadata };
@@ -1045,4 +1264,437 @@ describe('session parent cache bounds (#974)', () => {
     expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
+});
+
+describe('clearing a pushed notification once its cause is handled', () => {
+  // A question resolves its session's root through OpenCode before it is
+  // pushed; answer at once that there is none, so the ask opens in its own
+  // session instead of waiting on a real network call under fake timers.
+  const noSessionRecords = () => vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
+
+  const makeClearRuntime = ({
+    desktopVisible = false,
+    buildTemplateVariables = async () => ({ session_name: 'Login fix' }),
+    openPushTagsStore = null,
+    getIsSessionAutoAccepting = async () => false,
+    spaceFetchFor,
+    spaceIdForSession,
+  } = {}) => {
+    const sendPushToAllUiSessions = vi.fn(async () => undefined);
+    const sendApnsToAllUiSessions = vi.fn(async () => undefined);
+    const clearApnsNotifications = vi.fn(async () => undefined);
+    noSessionRecords();
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: false, notificationMode: 'always', notifyOnCompletion: true, notifyOnQuestion: true }),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables,
+      extractLastMessageText: () => 'done',
+      fetchLastAssistantMessageText: async () => 'done',
+      resolveNotificationTemplate: () => '',
+      shouldApplyResolvedTemplateMessage: () => false,
+      emitDesktopNotification: vi.fn(() => true),
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions,
+      sendApnsToAllUiSessions,
+      clearApnsNotifications,
+      openPushTagsStore,
+      isAnyInteractiveClientVisible: typeof desktopVisible === 'function' ? desktopVisible : () => desktopVisible,
+      getIsSessionAutoAccepting,
+      getSpacesHost: spaceFetchFor ? () => ({
+        openCodeFetchFor: spaceFetchFor,
+        index: { claimedBy: spaceIdForSession ?? (() => null) },
+      }) : undefined,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      readSessionMetadata: async () => ({}),
+    });
+    return { runtime, sendPushToAllUiSessions, sendApnsToAllUiSessions, clearApnsNotifications };
+  };
+
+  const entryOf = (tag) => expect.stringMatching(new RegExp(`^${tag}@\\d+$`));
+  const translated = (type, data) => translateWireEvent({ type, id: `evt_${type}`, created: 10, data });
+  const formCreated = (id) => ({ type: 'form.created', properties: { sessionID: 'ses_1', form: { id, sessionID: 'ses_1', title: 'Pick', fields: [] } } });
+  const permissionAsked = (id) => ({ type: 'permission.asked', properties: { sessionID: 'ses_1', id, action: 'bash', resources: ['ls'] } });
+
+  const readyFor = async (runtime, sessionID) => {
+    // No running subagents or jobs, so the idle announces.
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: [] })));
+    await runtime.maybeSendPushForTrigger(stepStarted(sessionID, `msg_${sessionID}`));
+    await runtime.maybeSendPushForTrigger(turnEnded(sessionID));
+    noSessionRecords();
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('tags each phone push so a clearing push can find it', async () => {
+    const { runtime, sendApnsToAllUiSessions } = makeClearRuntime();
+    await readyFor(runtime, 'ses_1');
+    expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ tag: 'ready-ses_1', data: { sessionId: 'ses_1', tag: 'ready-ses_1', nid: expect.stringMatching(/^\d+$/) } });
+  });
+
+  it('clears the session notifications on the phones when its next turn starts', async () => {
+    const { runtime, clearApnsNotifications } = makeClearRuntime();
+    await readyFor(runtime, 'ses_1');
+    await readyFor(runtime, 'ses_2');
+
+    // A later busy status of a running turn is no new turn.
+    await runtime.maybeSendPushForTrigger({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } });
+    expect(clearApnsNotifications).not.toHaveBeenCalled();
+
+    for (const event of translated('session.execution.started', { sessionID: 'ses_1' })) {
+      await runtime.maybeSendPushForTrigger(event);
+    }
+    expect(clearApnsNotifications).toHaveBeenCalledTimes(1);
+    expect(clearApnsNotifications.mock.calls[0][0]).toEqual({ tags: [entryOf('ready-ses_1')], badge: 1 });
+  });
+
+  it('clears a question when its form is answered, and never notifies one answered within the debounce', async () => {
+    vi.useFakeTimers();
+    const { runtime, sendApnsToAllUiSessions, clearApnsNotifications } = makeClearRuntime();
+
+    await runtime.maybeSendPushForTrigger(formCreated('frm_1'));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(sendApnsToAllUiSessions).toHaveBeenCalledTimes(1);
+
+    for (const event of translated('form.replied', { sessionID: 'ses_1', id: 'frm_1' })) {
+      await runtime.maybeSendPushForTrigger(event);
+    }
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual([entryOf('question-ses_1')]);
+
+    await runtime.maybeSendPushForTrigger(formCreated('frm_2'));
+    await runtime.maybeSendPushForTrigger({ type: 'form.settled', properties: { sessionID: 'ses_1', formID: 'frm_2' } });
+    await vi.advanceTimersByTimeAsync(600);
+    expect(sendApnsToAllUiSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a permission notification while it shows a request still waiting', async () => {
+    vi.useFakeTimers();
+    const { runtime, clearApnsNotifications } = makeClearRuntime();
+
+    await runtime.maybeSendPushForTrigger(permissionAsked('per_1'));
+    await vi.advanceTimersByTimeAsync(600);
+    await runtime.maybeSendPushForTrigger(permissionAsked('per_2'));
+    await vi.advanceTimersByTimeAsync(600);
+
+    // The phone shows per_2 under the session's permission tag; per_1's reply leaves it.
+    await runtime.maybeSendPushForTrigger({ type: 'permission.replied', properties: { sessionID: 'ses_1', requestID: 'per_1' } });
+    expect(clearApnsNotifications).not.toHaveBeenCalled();
+    await runtime.maybeSendPushForTrigger({ type: 'permission.replied', properties: { sessionID: 'ses_1', requestID: 'per_2' } });
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual([entryOf('permission-ses_1')]);
+  });
+
+  it('clears every notification of a session the user viewed, and only once', async () => {
+    vi.useFakeTimers();
+    const { runtime, clearApnsNotifications } = makeClearRuntime();
+    await runtime.maybeSendPushForTrigger(formCreated('frm_1'));
+    await runtime.maybeSendPushForTrigger(permissionAsked('per_1'));
+    await vi.advanceTimersByTimeAsync(600);
+
+    await runtime.clearSessionPushNotifications('ses_1');
+    await runtime.clearSessionPushNotifications('ses_1');
+    expect(clearApnsNotifications).toHaveBeenCalledTimes(1);
+    expect(clearApnsNotifications.mock.calls[0][0].tags.sort()).toEqual([entryOf('permission-ses_1'), entryOf('question-ses_1')]);
+  });
+
+  it('clears nested native and metadata-linked child notifications after restart without touching unrelated sessions', async () => {
+    const entry = (id, nid) => [`question-${id}`, { sessionId: id, cause: id, native: true, nid }];
+    const write = vi.fn(async () => {});
+    const openPushTagsStore = {
+      read: async () => ({
+        open: [entry('ses_1', '11'), entry('ses_nested', '12'), entry('ses_operator', '15'), entry('ses_other', '13'), entry('ses_missing', '14')],
+      }),
+      write,
+    };
+    const { runtime, clearApnsNotifications } = makeClearRuntime({ openPushTagsStore });
+    const records = {
+      ses_1: { id: 'ses_1', metadata: { openchamber: { kind: 'workflow-agent', parentID: 'ses_parent' } } },
+      ses_nested: { id: 'ses_nested', parentID: 'ses_1' },
+      ses_operator: { id: 'ses_operator', metadata: { openchamber: { kind: 'operator-child', parentID: 'ses_nested' } } },
+      ses_other: { id: 'ses_other' },
+    };
+    const fetchRecord = vi.fn(async (url) => {
+      const id = new URL(url).pathname.split('/').at(-1);
+      return records[id] ? Response.json({ data: records[id] }) : new Response(null, { status: 503 });
+    });
+    vi.stubGlobal('fetch', fetchRecord);
+    await runtime.clearSessionPushNotifications('ses_parent', { turnStart: true });
+    expect(fetchRecord).not.toHaveBeenCalled();
+    await runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual(['question-ses_1@11', 'question-ses_nested@12', 'question-ses_operator@15']);
+    expect(write).toHaveBeenLastCalledWith(expect.objectContaining({
+      open: [entry('ses_other', '13'), entry('ses_missing', '14')].map(([tag, claim]) => [tag, { ...claim, skipTurnStart: false }]),
+    }));
+    expect(fetchRecord).toHaveBeenCalledTimes(5);
+  });
+
+  it('uses the space session records to clear a subagent push', async () => {
+    vi.useFakeTimers();
+    const host = vi.fn();
+    vi.stubGlobal('fetch', host);
+    const inside = vi.fn(async () => Response.json({ data: { id: 'ses_1', parentID: 'ses_parent' } }));
+    const { runtime, clearApnsNotifications } = makeClearRuntime({
+      spaceFetchFor: (spaceId) => spaceId === 'space-a' ? inside : null,
+      spaceIdForSession: (id) => id === 'ses_parent' ? 'space-a' : null,
+    });
+    await runtime.maybeSendPushForTrigger(formCreated('frm_1'), { spaceId: 'space-a' });
+    await vi.advanceTimersByTimeAsync(600);
+    await runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual([entryOf('question-ses_1')]);
+    expect(host).not.toHaveBeenCalled();
+  });
+
+  it('leaves a saved space child until the viewed session has a known source', async () => {
+    const host = vi.fn();
+    vi.stubGlobal('fetch', host);
+    let parentSpace = null;
+    const inside = vi.fn(async (url) => {
+      const id = new URL(url).pathname.split('/').at(-1);
+      return Response.json({ id, parentID: id === 'ses_child' ? 'ses_parent' : null });
+    });
+    const { runtime, clearApnsNotifications } = makeClearRuntime({
+      openPushTagsStore: {
+        read: async () => ({
+          open: [['question-ses_child', { sessionId: 'ses_child', spaceId: 'space-a', native: true, nid: '11' }]],
+        }),
+        write: vi.fn(async () => {}),
+      },
+      spaceFetchFor: (spaceId) => spaceId === 'space-a' ? inside : null,
+      spaceIdForSession: (id) => id === 'ses_parent' ? parentSpace : null,
+    });
+    await runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
+    expect(inside).not.toHaveBeenCalled();
+    expect(host).not.toHaveBeenCalled();
+    expect(clearApnsNotifications).not.toHaveBeenCalled();
+    parentSpace = 'space-a';
+    await runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual(['question-ses_child@11']);
+  });
+
+  it('clears the old banner while a newer question is being prepared during the view', async () => {
+    vi.useFakeTimers();
+    const record = Promise.withResolvers();
+    const nextQuestion = Promise.withResolvers();
+    const buildTemplateVariables = vi.fn().mockResolvedValueOnce({}).mockReturnValueOnce(nextQuestion.promise);
+    const { runtime, sendApnsToAllUiSessions, clearApnsNotifications } = makeClearRuntime({ buildTemplateVariables });
+    // Each question first asks OpenCode for its root session (answered at
+    // once: none); the view's own lineage read is the one held open.
+    vi.stubGlobal('fetch', vi.fn(() => record.promise)
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockImplementationOnce(() => record.promise)
+      .mockResolvedValueOnce(new Response(null, { status: 404 })));
+    await runtime.maybeSendPushForTrigger(formCreated('frm_1'));
+    await vi.advanceTimersByTimeAsync(600);
+    const oldId = sendApnsToAllUiSessions.mock.calls[0][0].data.nid;
+    const viewing = runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
+    await runtime.maybeSendPushForTrigger(formCreated('frm_2'));
+    await vi.advanceTimersByTimeAsync(600);
+    record.resolve(Response.json({ id: 'ses_1', parentID: 'ses_parent' }));
+    await viewing;
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual([`question-ses_1@${oldId}`]);
+    nextQuestion.resolve({});
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendApnsToAllUiSessions).toHaveBeenCalledTimes(2);
+    expect(Number(sendApnsToAllUiSessions.mock.calls[1][0].data.nid)).toBeGreaterThan(Number(oldId));
+  });
+
+  it.each([false, true])('clears only the banner open at view time when a replacement is sent (web only: %s)', async (webOnly) => {
+    vi.useFakeTimers();
+    const record = Promise.withResolvers();
+    const nextQuestion = Promise.withResolvers();
+    const buildTemplateVariables = vi.fn().mockResolvedValueOnce({}).mockReturnValueOnce(nextQuestion.promise);
+    let desktopVisible = false;
+    const { runtime, sendApnsToAllUiSessions, sendPushToAllUiSessions, clearApnsNotifications } = makeClearRuntime({
+      buildTemplateVariables, desktopVisible: () => desktopVisible,
+    });
+    // The two questions' root-session reads answer at once (none); the
+    // view's lineage read is the one held open.
+    vi.stubGlobal('fetch', vi.fn(() => record.promise)
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 })));
+    await runtime.maybeSendPushForTrigger(formCreated('frm_1'));
+    await vi.advanceTimersByTimeAsync(600);
+    const oldId = sendApnsToAllUiSessions.mock.calls[0][0].data.nid;
+    await runtime.maybeSendPushForTrigger(formCreated('frm_2'));
+    await vi.advanceTimersByTimeAsync(600);
+    const viewing = runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
+    desktopVisible = webOnly;
+    nextQuestion.resolve({});
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendPushToAllUiSessions).toHaveBeenCalledTimes(2);
+    const newId = sendPushToAllUiSessions.mock.calls[1][0].data.nid;
+    record.resolve(Response.json({ id: 'ses_1', parentID: 'ses_parent' }));
+    await viewing;
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual([`question-ses_1@${oldId}`]);
+
+    await runtime.clearSessionPushNotifications('ses_1');
+    expect(clearApnsNotifications.mock.calls.flatMap(([request]) => request.tags))
+      .toEqual(webOnly ? [`question-ses_1@${oldId}`] : [`question-ses_1@${oldId}`, `question-ses_1@${newId}`]);
+  });
+
+  it('repeats the phone clear after restart while a newer web-only banner remains open', async () => {
+    vi.useFakeTimers();
+    const record = Promise.withResolvers();
+    let saved = { open: [['question-ses_1', { sessionId: 'ses_1', native: true, nid: '11' }]] };
+    const openPushTagsStore = {
+      read: async () => saved,
+      write: async (state) => { saved = state; },
+    };
+    const { runtime, clearApnsNotifications } = makeClearRuntime({ openPushTagsStore, desktopVisible: true });
+    vi.stubGlobal('fetch', vi.fn(() => record.promise));
+    const viewing = runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.maybeSendPushForTrigger(formCreated('frm_2'));
+    await vi.advanceTimersByTimeAsync(600);
+    record.resolve(Response.json({ id: 'ses_1', parentID: 'ses_parent' }));
+    await viewing;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual(['question-ses_1@11']);
+
+    const restarted = makeClearRuntime({ openPushTagsStore });
+    await readyFor(restarted.runtime, 'ses_other');
+    expect(restarted.sendApnsToAllUiSessions.mock.calls[0][0].data.clear).toBe('question-ses_1@11');
+  });
+
+  it('clears a snapshotted child banner even if other notifications evict its tag', async () => {
+    vi.useFakeTimers();
+    const record = Promise.withResolvers();
+    const open = [['question-ses_1', { sessionId: 'ses_1', native: true, nid: '11' }]];
+    for (let n = 0; n < 499; n++) {
+      open.push([`question-ses_filler_${n}`, { sessionId: `ses_filler_${n}`, spaceId: 'space-other', native: true, nid: '12' }]);
+    }
+    const { runtime, clearApnsNotifications } = makeClearRuntime({
+      openPushTagsStore: { read: async () => ({ open }), write: async () => {} },
+    });
+    vi.stubGlobal('fetch', vi.fn(() => record.promise));
+    const viewing = runtime.clearSessionPushNotifications('ses_parent', { viewed: true });
+    await vi.advanceTimersByTimeAsync(0);
+    await runtime.maybeSendPushForTrigger({ ...formCreated('frm_other'), properties: { sessionID: 'ses_other', form: { id: 'frm_other' } } });
+    await vi.advanceTimersByTimeAsync(600);
+    record.resolve(Response.json({ id: 'ses_1', parentID: 'ses_parent' }));
+    await viewing;
+    expect(clearApnsNotifications.mock.calls[0]?.[0].tags).toEqual(['question-ses_1@11']);
+  });
+
+  it('sends no clearing push for a notification the phones never got, but still drops it in browsers', async () => {
+    const { runtime, sendPushToAllUiSessions, clearApnsNotifications } = makeClearRuntime({ desktopVisible: true });
+    await readyFor(runtime, 'ses_1');
+    await runtime.clearSessionPushNotifications('ses_1');
+    expect(clearApnsNotifications).not.toHaveBeenCalled();
+
+    // The next push carries the handled tag for devices that missed the clearing.
+    await readyFor(runtime, 'ses_2');
+    expect(sendPushToAllUiSessions.mock.calls[1][0].clear).toEqual([entryOf('ready-ses_1')]);
+  });
+
+  it('lists recently cleared tags on later pushes, but never the push own tag', async () => {
+    const { runtime, sendApnsToAllUiSessions } = makeClearRuntime();
+    await readyFor(runtime, 'ses_1');
+    await runtime.clearSessionPushNotifications('ses_1');
+    await readyFor(runtime, 'ses_2');
+    expect(sendApnsToAllUiSessions.mock.calls[1][0].data.clear).toEqual(entryOf('ready-ses_1'));
+
+    // ses_1 notifies again, past the ready cooldown: its new notification must
+    // not be dropped by its own push.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 10_000);
+    await readyFor(runtime, 'ses_1');
+    expect(sendApnsToAllUiSessions.mock.calls[2][0].data.clear).toBeUndefined();
+  });
+
+  it('names the push a clearing covers, so a newer one under the tag stays on the phone', async () => {
+    vi.useFakeTimers();
+    const { runtime, sendApnsToAllUiSessions, clearApnsNotifications } = makeClearRuntime();
+    await runtime.maybeSendPushForTrigger(permissionAsked('per_1'));
+    await vi.advanceTimersByTimeAsync(600);
+    const firstId = sendApnsToAllUiSessions.mock.calls[0][0].data.nid;
+    await runtime.maybeSendPushForTrigger({ type: 'permission.replied', properties: { sessionID: 'ses_1', requestID: 'per_1' } });
+    expect(clearApnsNotifications.mock.calls[0][0].tags).toEqual([`permission-ses_1@${firstId}`]);
+
+    await vi.advanceTimersByTimeAsync(5);
+    await runtime.maybeSendPushForTrigger(permissionAsked('per_2'));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(Number(sendApnsToAllUiSessions.mock.calls[1][0].data.nid)).toBeGreaterThan(Number(firstId));
+  });
+
+  it('sends nothing for a question answered while its text was prepared', async () => {
+    vi.useFakeTimers();
+    let release;
+    const prepared = new Promise((resolve) => { release = resolve; });
+    const buildTemplateVariables = async () => { await prepared; return { session_name: 'Login fix' }; };
+    const { runtime, sendApnsToAllUiSessions, sendPushToAllUiSessions } = makeClearRuntime({ buildTemplateVariables });
+
+    await runtime.maybeSendPushForTrigger(formCreated('frm_1'));
+    await vi.advanceTimersByTimeAsync(600);
+    await runtime.maybeSendPushForTrigger({ type: 'form.settled', properties: { sessionID: 'ses_1', formID: 'frm_1' } });
+    release();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('sends no ready for a turn the session moved on from while it was prepared', async () => {
+    vi.useFakeTimers();
+    let release;
+    const prepared = new Promise((resolve) => { release = resolve; });
+    const buildTemplateVariables = async () => { await prepared; return {}; };
+    const { runtime, sendApnsToAllUiSessions } = makeClearRuntime({ buildTemplateVariables });
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: [] })));
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    const ready = runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+    await vi.advanceTimersByTimeAsync(20);
+    for (const event of translated('session.execution.started', { sessionID: 'ses_1' })) {
+      await runtime.maybeSendPushForTrigger(event);
+    }
+    release();
+    await ready;
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('clears after a restart what the earlier run pushed, saved before the push left', async () => {
+    let saved = null;
+    const store = { read: async () => saved, write: async (state) => { saved = JSON.parse(JSON.stringify(state)); } };
+    const first = makeClearRuntime({ openPushTagsStore: store });
+    await pushReadyFor(first.runtime);
+    expect(saved.open.map(([tag]) => tag)).toEqual(['ready-ses_1']);
+
+    const second = makeClearRuntime({ openPushTagsStore: store });
+    await second.runtime.clearSessionPushNotifications('ses_1');
+    expect(second.clearApnsNotifications.mock.calls[0][0].tags).toEqual([entryOf('ready-ses_1')]);
+  });
+
+  it('sends no question or permission for a session viewed during the debounce', async () => {
+    vi.useFakeTimers();
+    const { runtime, sendApnsToAllUiSessions } = makeClearRuntime();
+    await runtime.maybeSendPushForTrigger(formCreated('frm_1'));
+    await runtime.maybeSendPushForTrigger(permissionAsked('per_1'));
+    await vi.advanceTimersByTimeAsync(100);
+    await runtime.clearSessionPushNotifications('ses_1');
+    await vi.advanceTimersByTimeAsync(600);
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  it('sends no permission replied to while the auto-accept policy was looked up', async () => {
+    vi.useFakeTimers();
+    let answer;
+    const lookup = new Promise((resolve) => { answer = resolve; });
+    const { runtime, sendApnsToAllUiSessions } = makeClearRuntime({ getIsSessionAutoAccepting: () => lookup });
+    const asked = runtime.maybeSendPushForTrigger(permissionAsked('per_1'));
+    await runtime.maybeSendPushForTrigger({ type: 'permission.replied', properties: { sessionID: 'ses_1', requestID: 'per_1' } });
+    answer(false);
+    await asked;
+    await vi.advanceTimersByTimeAsync(600);
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
+  // A ready push with fake timers: the subagent check reads no running work.
+  const pushReadyFor = async (runtime) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: [] })));
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_1', 'msg_1'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_1'));
+    vi.unstubAllGlobals();
+  };
 });

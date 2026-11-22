@@ -2,6 +2,8 @@ import { describe, expect, mock, test } from 'bun:test';
 
 let requestCount = 0;
 let requestPaths: string[] = [];
+type GrantBody = { callId?: string; sources: string[] };
+let lastGrantBody: GrantBody | null = null;
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==',
   'base64',
@@ -18,7 +20,8 @@ const runtimeFetch = mock(async (path: string, init?: RequestInit & { query?: Re
     return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } });
   }
   requestCount += 1;
-  const body = JSON.parse(String(init?.body)) as { sources: string[] };
+  const body = JSON.parse(String(init?.body)) as GrantBody;
+  lastGrantBody = body;
   return new Response(JSON.stringify({
     results: body.sources.map((source) => ({ source, status: 'ready', path: `/repo/${source}` })),
   }), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -32,7 +35,7 @@ const resolver = {
 };
 
 mock.module('@/lib/runtime-fetch', () => ({ runtimeFetch }));
-mock.module('@/lib/runtime-url', () => ({ getRuntimeUrlResolver: () => resolver }));
+mock.module('@/lib/runtime-url', () => ({ getRuntimeUrlResolver: () => resolver, configureRuntimeUrlResolver: () => {} }));
 
 class TestFileReader {
   result: string | ArrayBuffer | null = null;
@@ -60,20 +63,15 @@ const {
 } = await import('./markdownImageAssets');
 
 describe('Markdown image asset preparation', () => {
-  test('prepares many images in one message-level request', async () => {
+  test('names the page whose images it prepares, apart from the same images in text', async () => {
     requestCount = 0;
-    const sources = Array.from({ length: 12 }, (_, index) => `${index}.png`);
+    const request = { sources: ['poster.png'], directory: '/repo', sessionId: 'ses_page', messageId: 'msg_page', signal: new AbortController().signal };
 
-    const result = await prepareLocalMarkdownImages({
-      sources,
-      directory: '/repo',
-      sessionId: 'ses_batch',
-      messageId: 'msg_batch',
-      signal: new AbortController().signal,
-    });
+    await prepareLocalMarkdownImages({ ...request, callId: 'call_1' });
+    expect(lastGrantBody).toMatchObject({ callId: 'call_1', sources: ['poster.png'] });
+    await prepareLocalMarkdownImages(request);
 
-    expect(result.size).toBe(12);
-    expect(requestCount).toBe(1);
+    expect(requestCount).toBe(2);
   });
 
   test('reuses preparation for one thousand messages after virtualized remounts', async () => {

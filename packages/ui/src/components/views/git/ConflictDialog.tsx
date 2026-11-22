@@ -13,8 +13,9 @@ import { useInputStore } from '@/sync/input-store';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { loadMagicPrompts } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface ConflictDialogProps {
   open: boolean;
@@ -47,7 +48,6 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   const [conflictDetails, setConflictDetails] = React.useState<MergeConflictDetails | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
-  // Fetch conflict details when dialog opens
   React.useEffect(() => {
     if (!open || !directory) return;
 
@@ -79,12 +79,13 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
     const headRef = conflictDetails.headInfo || (operation === 'merge' ? 'MERGE_HEAD' : 'REBASE_HEAD');
     const continueCmd = operation === 'merge' ? 'git commit --no-edit' : 'git rebase --continue';
 
-    const visibleText = await renderMagicPrompt('git.conflict.resolve.visible', {
+    const prompts = await loadMagicPrompts(directory);
+    const visibleText = prompts.render('git.conflict.resolve.visible', {
       operation_label: operationLabel,
       head_ref: headRef,
     });
 
-    const instructionsText = await renderMagicPrompt('git.conflict.resolve.instructions', {
+    const instructionsText = prompts.render('git.conflict.resolve.instructions', {
       operation_label: operationLabel,
       directory,
       operation,
@@ -108,6 +109,15 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
     return { visibleText, instructionsText, payloadText };
   }, [conflictDetails, directory, operation]);
 
+  const prepareConflictContext = async () => {
+    try {
+      return await buildConflictContext();
+    } catch (error) {
+      toast.error(t('magicPrompts.toast.loadFailed'), { description: error instanceof Error ? error.message : undefined });
+      return undefined;
+    }
+  };
+
   const handleAbort = () => {
     onAbort();
     onOpenChange(false);
@@ -119,7 +129,8 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   };
 
   const handleResolveInCurrentSession = async () => {
-    const context = await buildConflictContext();
+    const context = await prepareConflictContext();
+    if (context === undefined) return;
     if (!context) {
       toast.error(t('gitView.conflict.noDetailsAvailable'));
       return;
@@ -130,7 +141,6 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
       return;
     }
 
-    // Set the visible text in the input and the synthetic parts for when user sends
     setPendingInputText(context.visibleText, 'replace');
     setPendingSyntheticParts([
       { text: context.instructionsText, synthetic: true },
@@ -143,13 +153,13 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   };
 
   const handleResolveInNewSession = async () => {
-    const context = await buildConflictContext();
+    const context = await prepareConflictContext();
+    if (context === undefined) return;
     if (!context) {
       toast.error(t('gitView.conflict.noDetailsAvailable'));
       return;
     }
 
-    // Open new session with the conflict context as initial prompt + synthetic parts
     openNewSessionDraft({
       directoryOverride: directory,
       initialPrompt: context.visibleText,
@@ -201,7 +211,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
                   {displayFiles.length}
                 </span>
               </div>
-              <div className="bg-[var(--surface-elevated)] rounded-lg p-3 max-h-40 overflow-y-auto overflow-x-hidden">
+              <ScrollableOverlay outerClassName="max-h-40 rounded-lg bg-[var(--surface-elevated)]" className="p-3" disableHorizontal>
                 <ul className="space-y-1">
                   {displayFiles.map((file) => (
                     <li
@@ -213,16 +223,16 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
                     </li>
                   ))}
                 </ul>
-              </div>
+              </ScrollableOverlay>
             </div>
           )}
 
           {conflictDetails?.headInfo && (
             <div className="space-y-1 overflow-hidden">
               <p className="typography-meta text-muted-foreground">{t('gitView.conflict.headInfo')}</p>
-              <div className="typography-micro text-foreground font-mono bg-[var(--surface-elevated)] rounded-lg p-3 max-h-24 overflow-y-auto break-words whitespace-pre-wrap">
+              <ScrollableOverlay outerClassName="max-h-24 rounded-lg bg-[var(--surface-elevated)]" className="typography-micro text-foreground font-mono p-3 break-words whitespace-pre-wrap" disableHorizontal>
                 {conflictDetails.headInfo}
-              </div>
+              </ScrollableOverlay>
             </div>
           )}
 

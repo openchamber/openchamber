@@ -1,56 +1,30 @@
-/**
- * Which autocomplete a caret position asks for.
- *
- * The composer has four pickers (command, skill, snippet, file/agent mention)
- * and the rule that opens each of them used to be inlined in a single 90-line
- * `updateAutocompleteState` callback, duplicating the boundary logic that
- * `scanPrefixTokens` and `scanMentions` already own. This module answers the
- * one question the composer actually asks — "given the text and the caret,
- * what should be open?" — as a pure function, so the editor layer only has to
- * report the caret and render the result.
- *
- * Exactly one trigger can be active, and order matters: the command palette
- * (a leading `/`) outranks the skill picker (`$`, anywhere in the text), which
- * outranks snippets, which outrank mentions. Commands and skills use separate
- * sigils so the palette lists commands only.
- */
 
 import {
     getFileMentionAutocompleteQuery,
     type FileMentionAutocompleteInputSource,
 } from '../../fileMentionAutocompleteState';
+import { matchEmojiTrigger } from '@/lib/emoji/shortcodes';
+import { lastPrefixSigilIndex, type TokenPrefix } from './prefixTokens';
 
-export type AutocompleteKind = 'command' | 'skill' | 'snippet' | 'mention';
+export type AutocompleteKind = 'command' | 'skill' | 'snippet' | 'mention' | 'emoji';
 
 export interface AutocompleteTrigger {
     kind: AutocompleteKind;
-    /** Text typed after the sigil, used to filter the picker. */
     query: string;
 }
 
 export interface TriggerContext {
-    /** Shell mode (`!cmd`) disables every picker. */
     inputMode: 'normal' | 'shell';
     mentionsEnabled?: boolean;
-    /** Whether the change that moved the caret came from a paste. */
     inputSource?: FileMentionAutocompleteInputSource;
-    /** The text that change inserted, when known. */
     insertedText?: string;
+    mentionContinuesPastSpace?: (query: string) => boolean;
+    mentionIsCompleted?: (start: number) => boolean;
 }
 
-/**
- * A sigil opens a picker only at a word boundary — the start of the text or
- * directly after whitespace. This mirrors `scanPrefixTokens`, but works
- * backwards from the caret because the token is still being typed.
- */
 const isWordBoundaryBefore = (text: string, index: number): boolean =>
     index <= 0 || /\s/.test(text[index - 1]);
 
-/**
- * The command palette is reserved for a `/` in the very first column, with the
- * caret still inside the command word and no argument typed yet. Once a space
- * appears the message is a command invocation, not a search.
- */
 function matchCommandPalette(value: string, cursorPosition: number): AutocompleteTrigger | null {
     if (!value.startsWith('/')) return null;
 
@@ -64,18 +38,14 @@ function matchCommandPalette(value: string, cursorPosition: number): Autocomplet
     return { kind: 'command', query: value.substring(1, commandEnd) };
 }
 
-/**
- * A `$skill` or `#snippet` still being typed: the nearest sigil before the
- * caret, at a word boundary, with no separator between it and the caret.
- */
 function matchInlineToken(
     value: string,
     cursorPosition: number,
-    sigil: '$' | '#',
+    prefix: TokenPrefix,
     kind: AutocompleteKind,
 ): AutocompleteTrigger | null {
     const textBeforeCursor = value.substring(0, cursorPosition);
-    const sigilIndex = textBeforeCursor.lastIndexOf(sigil);
+    const sigilIndex = lastPrefixSigilIndex(textBeforeCursor, prefix);
     if (sigilIndex === -1) return null;
     if (!isWordBoundaryBefore(textBeforeCursor, sigilIndex)) return null;
 
@@ -85,19 +55,10 @@ function matchInlineToken(
     return { kind, query };
 }
 
-/**
- * The `#snippet` query being typed at the caret, or null. For text fields that
- * offer only the snippet picker (comment inputs), with the composer's rule.
- */
 export function matchSnippetTrigger(value: string, cursorPosition: number): string | null {
     return matchInlineToken(value, cursorPosition, '#', 'snippet')?.query ?? null;
 }
 
-/**
- * Resolve the single autocomplete that the caret asks for, or null when none
- * applies. Pure: the caller supplies the text and caret, and decides what to
- * do with the answer.
- */
 export function resolveAutocompleteTrigger(
     value: string,
     cursorPosition: number,
@@ -108,7 +69,14 @@ export function resolveAutocompleteTrigger(
     return matchCommandPalette(value, cursorPosition)
         ?? matchInlineToken(value, cursorPosition, '$', 'skill')
         ?? matchInlineToken(value, cursorPosition, '#', 'snippet')
-        ?? matchMention(value, cursorPosition, context);
+        ?? matchMention(value, cursorPosition, context)
+        ?? matchEmoji(value, cursorPosition, context);
+}
+
+function matchEmoji(value: string, cursorPosition: number, context: TriggerContext): AutocompleteTrigger | null {
+    if (context.inputSource === 'paste') return null;
+    const query = matchEmojiTrigger(value, cursorPosition);
+    return query === null ? null : { kind: 'emoji', query };
 }
 
 function matchMention(
@@ -122,6 +90,8 @@ function matchMention(
         cursorPosition,
         inputSource: context.inputSource,
         insertedText: context.insertedText,
+        continuesPastSpace: context.mentionContinuesPastSpace,
+        isCompleted: context.mentionIsCompleted,
     });
     return query === null ? null : { kind: 'mention', query };
 }

@@ -2,6 +2,7 @@ import type { Session } from "@/lib/opencode/model";
 import type { SessionListOptions, SessionPage } from "@/lib/opencode/client";
 import type { SpaceMark } from "@/lib/spaces/spaces-store";
 import { runSessionListNetworkTask } from '@/lib/background-network';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import { retry } from "@/sync/retry";
 import { stripSessionListDetails } from "@/sync/sanitize";
 import { startSessionLoadPerformanceEvent } from "@/sync/session-load-performance";
@@ -21,15 +22,19 @@ export const filterManagedChatsForRuntime = (sessions: Session[], vscode: boolea
         : sessions
 );
 
-/** OpenChamber owns archive state; a session is archived when it carries a timestamp. */
 const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(session.time?.archived);
 
-/**
- * Split a session list into active and archived buckets. Restored sessions
- * carry `time.archived === 0` (see `UNARCHIVED_TIMESTAMP` in
- * `sync/session-actions.ts`), so the truthiness check classifies them as
- * active.
- */
+export const addUnlistedLiveSessions = (active: Session[], archived: readonly Session[], live?: readonly Session[]): Session[] => {
+  if (!live || live.length === 0) return active;
+  const listed = new Set([...active, ...archived].map((session) => session.id));
+  const unlisted = live.filter((session) => {
+    if (listed.has(session.id)) return false;
+    listed.add(session.id);
+    return true;
+  });
+  return unlisted.length > 0 ? [...active, ...unlisted] : active;
+};
+
 export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
     sessions: T[],
 ): { active: T[]; archived: T[] } => {
@@ -42,7 +47,6 @@ export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
     return { active, archived };
 };
 
-/** One page request. Injected so callers and tests can supply their own transport. */
 export type SessionPageLister = (options: SessionListOptions) => Promise<SessionPage>;
 
 /**
@@ -58,18 +62,22 @@ export type SessionPageLister = (options: SessionListOptions) => Promise<Session
 // while an ever-new cursor stream still terminates instead of looping.
 const GLOBAL_SESSION_MAX_PAGES = 1_000;
 
+
 export async function listGlobalSessionPages(
     listPage: SessionPageLister,
     options: {
         directory?: string;
+        parentID?: string;
         pageSize: number;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
-        /** The first page's isolated-space marks: `null` when the page carried none. */
+        stopAfterPage?: (sessions: GlobalSessionRecord[]) => boolean;
         onSpaces?: (spaces: SpaceMark[] | null) => void;
     },
 ): Promise<GlobalSessionRecord[]> {
     const all: GlobalSessionRecord[] = [];
+    const isCurrent = captureRuntimeInstance();
     const seenIds = new Set<string>();
+    const seenCursors = new Set<string>();
     let cursor: string | undefined;
     let pagesFetched = 0;
     const operation = options.directory ? "bootstrap.sessions.all" : "global-sessions.all";
@@ -82,20 +90,26 @@ export async function listGlobalSessionPages(
         });
         const page = await retry(
             () => runSessionListNetworkTask(async () => {
+                if (!isCurrent()) throw new Error('Runtime instance changed');
                 attempts += 1;
                 return await listPage({
                     ...(options.directory ? { directory: options.directory } : { global: true }),
+                    parentID: options.parentID,
                     limit: options.pageSize,
                     ...(cursor !== undefined ? { cursor } : {}),
                 });
             }),
-            { attempts: 3, delay: 500, retryIf: () => true },
+            { attempts: 3, delay: 500, retryIf: () => isCurrent() },
         ).catch((error) => {
             finishPerformanceEvent("error", { retryCount: Math.max(0, attempts - 1) });
             throw error;
         });
 
         pagesFetched += 1;
+        if (page === undefined) {
+            finishPerformanceEvent("error", { retryCount: Math.max(0, attempts - 1) });
+            throw new Error('Runtime instance changed');
+        }
         if (cursor === undefined) options.onSpaces?.(page.spaces ?? null);
         const payload = page.sessions.map((session) => stripSessionListDetails(session) as GlobalSessionRecord);
         finishPerformanceEvent("complete", {
@@ -115,8 +129,12 @@ export async function listGlobalSessionPages(
         }
 
         const next = page.cursor.next;
-        // No next cursor, or a page that added nothing new: stop rather than spin.
-        if (!next || next === cursor || accepted.length === 0) break;
+        if (!next) break;
+        if (seenCursors.has(next) || accepted.length === 0) {
+            throw new Error("Session pagination did not advance; retaining the previous snapshot");
+        }
+        seenCursors.add(next);
+        if (options.stopAfterPage?.(accepted)) break;
         // A server handing out ever-new cursors must not loop this walk
         // forever: past the cap, fail loudly instead of returning a partial
         // list dressed up as complete.

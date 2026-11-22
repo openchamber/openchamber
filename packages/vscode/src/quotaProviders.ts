@@ -3,7 +3,9 @@ import { OPENCODE_CONFIG_DIR, OPENCODE_DATA_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fetchOpenCodeGoUsage, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
+import { fetchOpenCodeGoUsage, isOpenCodeGoKeyRefusal, OPENCODE_GO_KEY_EXPIRED, type OpenCodeGoApiKeyCredential, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
+import { fetchOpenCodeZenUsage, type OpenCodeZenCredential } from '../../web/server/lib/quota/providers/opencode-zen.js';
+import { fetchMistralUsage } from '../../web/server/lib/quota/providers/mistral-billing.js';
 import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { MAX_CONFIG_FILE_BYTES, readCappedFileSync, readConfig } from './opencodeConfig';
@@ -11,7 +13,13 @@ import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
 import { QUOTA_RESPONSE_MAX_BYTES, readBoundedResponseBody, ResponseBodyTooLargeError } from './bounded-response-body';
 import { refreshGoogleAccessToken } from '../../web/server/lib/quota/providers/google/oauth.js';
+import { readConsoleBudgets, withConsoleBudgets, type ConsoleBudgets } from '../../web/server/lib/quota/console-budgets.js';
 import { antigravityHeaders, warnIfGeminiGroupMissing } from '../../web/server/lib/quota/providers/antigravity/client.js';
+import { miniMaxStatusError } from '../../web/server/lib/quota/providers/minimax-status.js';
+import { readCodexCliLogin, signInEmailOf } from '../../web/server/lib/quota/providers/codex-cli.js';
+import { isUsageTimeout, requestCodexUsage, requestUsageWithDeadline, type UsageResponse } from './usageRequest';
+import { formatCredits } from '../../web/server/lib/quota/utils/formatters.js';
+import { fetchCursorSummaryWindow } from '../../web/server/lib/quota/providers/cursor-summary.js';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -19,6 +27,7 @@ type AuthFile = Record<string, AuthEntry>;
 type UsageWindowGiftReset = {
   recordId: number;
   expireAt: number;
+  grantType?: string;
 };
 
 type UsageWindow = {
@@ -30,6 +39,8 @@ type UsageWindow = {
   resetAtFormatted: string | null;
   resetAfterFormatted: string | null;
   valueLabel?: string | null;
+  value?: { kind: 'requests'; count: number } | { kind: 'spend'; spent: number | null; limit: number | null };
+  creditsUsed?: number;
   giftReset?: UsageWindowGiftReset | null;
 };
 
@@ -37,9 +48,11 @@ type ProviderUsage = {
   windows: Record<string, UsageWindow>;
   models?: Record<string, ProviderUsage>;
   usageAvailability?: 'console-only';
+  consoleBudgets?: ConsoleBudgets;
 };
 
 type OpenAiUsagePayload = {
+  email?: string;
   rate_limit?: {
     primary_window?: {
       used_percent?: number;
@@ -58,6 +71,7 @@ type OpenAiUsagePayload = {
   };
   spend_control?: {
     individual_limit?: {
+      unit?: string;
       limit?: number | string;
       used?: number | string;
       used_percent?: number | string;
@@ -93,8 +107,6 @@ type ZaiLimit = {
   percentage?: number;
 };
 
-// CREDIT_LIMIT entries carry `usage` (total credits) and `currentValue` (consumed);
-// TOKENS_LIMIT entries only carry a percentage.
 const formatZaiCreditAmount = (value: number): string => {
   if (value < 1000) return value.toLocaleString('en-US');
   return `${Math.round(value / 100) / 10}k`;
@@ -121,6 +133,7 @@ type ZaiGiftResetRecord = {
   recordId?: number;
   expireTime?: string;
   available?: boolean;
+  grantType?: string;
 };
 
 type ZaiGiftResetPayload = {
@@ -156,8 +169,6 @@ type ZhipuaiPayload = {
   };
 };
 
-// Mirrors the Z.ai credit label (same monitor API family): `usage` is the
-// total, `currentValue` the consumed amount.
 const formatZhipuaiCreditAmount = (value: number): string => {
   if (value < 1000) return value.toLocaleString('en-US');
   return `${Math.round(value / 100) / 10}k`;
@@ -185,8 +196,6 @@ const resolveZhipuaiUsedPercent = (limit: ZhipuaiLimit): number | null => {
   return clampPercent(Math.round((used / total) * 100));
 };
 
-// bigmodel.cn reports business failures inside HTTP 200 bodies
-// (`{code, msg, success: false}`); a missing envelope is treated as legacy success.
 const zhipuaiEnvelopeError = (payload: ZhipuaiPayload): string | null => {
   const code = payload?.code;
   if (payload?.success !== false && !(code !== undefined && code !== null && code !== 200)) {
@@ -271,6 +280,7 @@ type ProviderResult = {
   failureClass?: string;
   /** Epoch ms of the provider's last successful read in this process, or null when none has succeeded yet. */
   lastSuccessAt?: number | null;
+  accountLabel?: string | null;
 };
 
 
@@ -301,8 +311,6 @@ const GOOGLE_ENDPOINTS = [
   GOOGLE_PRIMARY_ENDPOINT,
 ];
 
-// Antigravity reaches the production daily host first and never the autopush
-// sandbox; Gemini CLI keeps the endpoint order above.
 const ANTIGRAVITY_ENDPOINTS = [
   'https://daily-cloudcode-pa.googleapis.com',
   'https://daily-cloudcode-pa.sandbox.googleapis.com',
@@ -413,7 +421,7 @@ const asNonEmptyString = (value: unknown): string | null => {
  */
 type QuotaJsonValue = string | number | boolean | null | QuotaJsonValue[] | { [key: string]: QuotaJsonValue };
 
-const readQuotaJson = async (response: Response): Promise<QuotaJsonValue> => {
+const readQuotaJson = async (response: Pick<Response, 'headers' | 'body' | 'json'>): Promise<QuotaJsonValue> => {
   // Test doubles pass a plain { ok, json } without a body; real responses
   // go through the bounded reader.
   if (!response.body) {
@@ -505,14 +513,7 @@ export const toTimestamp = (value: unknown): number | null => {
   return null;
 };
 
-// OpenCode Console signs in through the shared `opencode` integration and
-// records the Console server and selected organization on the credential. Only
-// a Console sign-in counts: its OAuth access token is not interchangeable with
-// an `opencode-go` service key. Credentials are global and OpenCode marks one
-// active per integration, so this is the selected account and organization.
 const CONSOLE_SERVER = 'https://opencode.ai/console';
-// Console workspaces carry a `wrk_` id on current sign-ins; older stored
-// credentials still carry `org_`, so both prefixes count and nothing else.
 const CONSOLE_ORGANIZATION_ID_PATTERN = /^(?:org|wrk)_[A-Za-z0-9]+$/;
 const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredential | null => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
@@ -521,21 +522,25 @@ const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredentia
   const orgID = asNonEmptyString(entry.orgID);
   if (!accessToken || entry.server !== CONSOLE_SERVER || !orgID || !CONSOLE_ORGANIZATION_ID_PATTERN.test(orgID)) return null;
   const expires = toNumber(entry.expires);
-  return { accessToken, orgID, expires };
+  return { accessToken, orgID, expires, label: asNonEmptyString(entry.label) };
 };
 
-// A key on `opencode-go` comes first. Otherwise an API key on the shared
-// `opencode` integration serves Go too: OpenCode loads the Console workspace's
-// providers with it and binds OpenCode Go to that integration when the
-// workspace has Go. Providers lists it under OpenCode Go too.
-const openCodeGoApiKey = (auth: AuthFile): OpenCodeGoApiKeyCredential | null => {
-  const own = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
-  const ownKey = asNonEmptyString(own?.key) ?? asNonEmptyString(own?.token);
-  if (ownKey) return { apiKey: ownKey, consoleKey: false };
-  const consoleEntry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
-  if (!consoleEntry || consoleEntry.type === 'oauth') return null;
-  const consoleKey = asNonEmptyString(consoleEntry.key) ?? asNonEmptyString(consoleEntry.token);
-  return consoleKey ? { apiKey: consoleKey, consoleKey: true } : null;
+const openCodeGoKey = (auth: AuthFile, integrationID: 'opencode' | 'opencode-go'): OpenCodeGoApiKeyCredential | null => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, [integrationID]));
+  if (!entry || entry.type === 'oauth') return null;
+  const apiKey = asNonEmptyString(entry.key) ?? asNonEmptyString(entry.token);
+  return apiKey ? { apiKey, consoleKey: integrationID === 'opencode', label: asNonEmptyString(entry.label) } : null;
+};
+
+const openCodeZenCredential = (auth: AuthFile): OpenCodeZenCredential | null => {
+  const consoleCredential = openCodeGoConsoleCredential(auth);
+  if (consoleCredential) {
+    return { accessToken: consoleCredential.accessToken, orgID: consoleCredential.orgID };
+  }
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
+  if (!entry || entry.type === 'oauth') return null;
+  const key = asNonEmptyString(entry.key) ?? asNonEmptyString(entry.token);
+  return key ? { apiKey: key } : null;
 };
 
 const formatResetTime = (timestamp: number) => {
@@ -545,14 +550,12 @@ const formatResetTime = (timestamp: number) => {
     const isToday = resetDate.toDateString() === now.toDateString();
 
     if (isToday) {
-      // Same day: show time only (e.g., "9:56 PM")
       return resetDate.toLocaleTimeString(undefined, {
         hour: 'numeric',
         minute: '2-digit',
       });
     }
 
-    // Different day: show date + weekday + time (e.g., "Feb 2, Sun 9:56 PM")
     return resetDate.toLocaleString(undefined, {
       month: 'short',
       day: 'numeric',
@@ -571,10 +574,10 @@ const calculateResetAfterSeconds = (resetAt: number | null) => {
   return delta < 0 ? 0 : delta;
 };
 
-const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null }) => {
+const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; value?: UsageWindow['value']; creditsUsed?: number }) => {
   const resetAfterSeconds = calculateResetAfterSeconds(data.resetAt);
   const resetFormatted = data.resetAt ? formatResetTime(data.resetAt) : null;
-  return {
+  const window: UsageWindow = {
     usedPercent: data.usedPercent,
     remainingPercent: data.usedPercent !== null ? Math.max(0, 100 - data.usedPercent) : null,
     windowSeconds: data.windowSeconds ?? null,
@@ -583,7 +586,10 @@ const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number
     resetAtFormatted: resetFormatted,
     resetAfterFormatted: resetFormatted,
     ...(data.valueLabel ? { valueLabel: data.valueLabel } : {}),
-  } satisfies UsageWindow;
+    ...(data.creditsUsed !== undefined ? { creditsUsed: data.creditsUsed } : {}),
+  };
+  if (data.value) window.value = data.value;
+  return window;
 };
 
 const buildResult = (data: {
@@ -594,6 +600,7 @@ const buildResult = (data: {
   usage?: ProviderUsage | null;
   error?: string;
   planLabel?: string | null;
+  accountLabel?: string | null;
 }): ProviderResult => {
   const result: ProviderResult = {
     providerId: data.providerId,
@@ -605,6 +612,7 @@ const buildResult = (data: {
     fetchedAt: Date.now(),
   };
   if (data.planLabel) result.planLabel = data.planLabel;
+  if (data.accountLabel) result.accountLabel = data.accountLabel;
   return result;
 };
 
@@ -653,11 +661,6 @@ const xaiAccessExpired = (entry: XaiAuthEntry, now = Date.now()): boolean => {
   return jwtExpiry !== null && jwtExpiry <= expiryDeadline;
 };
 
-// xAI rotates (and rejects the previous) refresh token on every exchange, and
-// OpenCode 2.x owns the credential store without exposing a refresh route. A
-// quota read that refreshed here would burn the token OpenCode still holds and
-// sign the user out. Claude's provider makes the same call; wait for OpenCode
-// to refresh and surface the stale state instead.
 const requireXaiAccessToken = (entry: XaiAuthEntry): string => {
   const access = asNonEmptyString(entry.access);
   if (!access || xaiAccessExpired(entry)) {
@@ -877,16 +880,24 @@ const durationToSeconds = (duration?: number, unit?: string) => {
   return null;
 };
 
-// OpenCode stores the Kimi For Coding plans as `kimi-code-plan-cn` (kimi.com)
-// and `kimi-code-plan-global` (kimi.ai). The China plan comes first: its key
-// works at the api.kimi.com usage address, and a pre-split `kimi-for-coding`
-// key left behind with a dead credential must not shadow it. The global plan
-// stays last, as before, since its key is not known to work at that address.
 const KIMI_AUTH_ALIASES = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
 
-const getKimiApiKey = (auth: AuthFile) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, KIMI_AUTH_ALIASES));
-  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+const collectKimiApiKeys = (auth: AuthFile): { apiKey: string; endpoint: string }[] => {
+  const keys: { apiKey: string; endpoint: string }[] = [];
+  const seen = new Set<string>();
+  for (const alias of KIMI_AUTH_ALIASES) {
+    const entry = normalizeAuthEntry(auth[alias] ?? null);
+    const apiKey = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+    const endpoint = alias === 'kimi-code-plan-global'
+      ? 'https://api.kimi.ai/coding/v1/usages'
+      : 'https://api.kimi.com/coding/v1/usages';
+    const identity = JSON.stringify([endpoint, apiKey]);
+    if (apiKey && !seen.has(identity)) {
+      seen.add(identity);
+      keys.push({ apiKey, endpoint });
+    }
+  }
+  return keys;
 };
 
 /**
@@ -977,13 +988,12 @@ const resolveCodexEntry = (auth: AuthFile) => {
 export const listConfiguredQuotaProviders = async ({ includeDisabled = false }: { includeDisabled?: boolean } = {}) => {
   const auth = await readOpenCodeCredentials();
   const configured = new Set<string>();
-  if (openCodeGoApiKey(auth) || openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
+  if (openCodeGoKey(auth, 'opencode-go') || openCodeGoKey(auth, 'opencode') || openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
+  if (openCodeZenCredential(auth)) configured.add('opencode');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
   if (readCredential('opendesign')) configured.add('opendesign');
 
-  // Ollama Cloud reads its key from OpenCode's credential store, so it is
-  // configured exactly when that integration has a key.
   const ollamaAuth = normalizeAuthEntry(getAuthEntry(auth, ['ollama-cloud', 'ollamacloud']));
   if (ollamaApiKeyFrom(ollamaAuth)) {
     configured.add('ollama-cloud');
@@ -1015,7 +1025,7 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false }: 
     configured.add('zhipuai-coding-plan');
   }
 
-  if (getKimiApiKey(auth)) {
+  if (collectKimiApiKeys(auth).length > 0) {
     configured.add('kimi-for-coding');
   }
 
@@ -1079,6 +1089,10 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false }: 
     configured.add('deepseek');
   }
 
+  if (getMistralApiKey(auth)) {
+    configured.add('mistral');
+  }
+
   const deepinfraAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepinfra', 'deep-infra', 'deep_infra']));
   if (keyOrTokenFrom(deepinfraAuth)) {
     configured.add('deepinfra');
@@ -1110,16 +1124,40 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false }: 
   return Array.from(configured);
 };
 
-// A 401 is not always an expired token: the usage endpoint refuses OpenCode's
-// `chatgpt-token-sharing` token with an access-enforcement body, and OpenAI has
-// no usage endpoint for that sign-in. Same wording as the web server's Codex provider.
 const codexErrorBodySchema = z.object({ error: z.object({ type: z.string() }) });
 
-const codexUnauthorizedMessage = async (response: Response): Promise<string> => {
-  const body = codexErrorBodySchema.safeParse(await readQuotaJson(response).catch(() => null));
-  return body.success && body.data.error.type === 'rejected_by_access_enforcement'
-    ? 'OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.'
-    : 'Session expired \u2014 please re-authenticate with OpenAI';
+// SAFETY: every field of the payload is read through toNumber/toTimestamp/asNonEmptyString, so a shape other than the one asserted yields no window rather than a wrong one.
+const codexUsagePayloadOf = async (response: UsageResponse) => await readQuotaJson(response) as OpenAiUsagePayload;
+
+const codexUsageResult = (payload: OpenAiUsagePayload, accountLabel: string | null = null): ProviderResult => buildResult({
+  providerId: 'codex',
+  providerName: 'Codex',
+  ok: true,
+  configured: true,
+  usage: { windows: codexUsageWindowsOf(payload) },
+  accountLabel,
+});
+
+const codexFailure = (error: string, configured = true): ProviderResult => buildResult({
+  providerId: 'codex',
+  providerName: 'Codex',
+  ok: false,
+  configured,
+  error,
+});
+
+const unlessTimedOut = (error: Error): null => {
+  if (isUsageTimeout(error)) throw error;
+  return null;
+};
+
+const codexUsageFromCli = async (): Promise<ProviderResult | null> => {
+  const login = readCodexCliLogin();
+  if (!login) return null;
+  const response = await requestCodexUsage(login.accessToken, login.accountId).catch(unlessTimedOut);
+  if (!response?.ok) return null;
+  const payload = await codexUsagePayloadOf(response);
+  return codexUsageResult(payload, asNonEmptyString(payload?.email) ?? signInEmailOf(login.accessToken));
 };
 
 // The usage endpoint passes its own computed percentages through, and a spend
@@ -1140,105 +1178,80 @@ export const fetchCodexQuota = async ({ readAuth = readOpenCodeCredentials }: Co
   const accessToken = accessOrTokenFrom(entry);
   const accountId = entry?.accountId as string | undefined;
 
-  if (!accessToken) {
-    return buildResult({
-      providerId: 'codex',
-      providerName: 'Codex',
-      ok: false,
-      configured: false,
-      error: 'Not configured',
-    });
-  }
+  if (!accessToken) return codexFailure('Not configured', false);
 
   try {
-    const response = await fetch('https://chatgpt.com/backend-api/wham/usage', {
-      method: 'GET',
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {}),
-      },
-    });
+    const response = await requestCodexUsage(accessToken, accountId);
+    if (response.ok) return codexUsageResult(await codexUsagePayloadOf(response));
+    if (response.status !== 401) return codexFailure(`API error: ${response.status}`);
 
-    if (!response.ok) {
-      return buildResult({
-        providerId: 'codex',
-        providerName: 'Codex',
-        ok: false,
-        configured: true,
-        error: response.status === 401 ? await codexUnauthorizedMessage(response) : `API error: ${response.status}`,
-      });
+    const body = codexErrorBodySchema.safeParse(await readQuotaJson(response).catch(unlessTimedOut));
+    if (!body.success || body.data.error.type !== 'rejected_by_access_enforcement') {
+      return codexFailure('Session expired \u2014 please re-authenticate with OpenAI');
     }
-
-    const payload = await readQuotaJson(response) as OpenAiUsagePayload;
-    const primary = payload?.rate_limit?.primary_window ?? null;
-    const secondary = payload?.rate_limit?.secondary_window ?? null;
-    const credits = payload?.credits ?? null;
-
-    const windows: Record<string, UsageWindow> = {};
-    if (primary) {
-      const windowSeconds = toNumber(primary.limit_window_seconds);
-      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toCodexUsedPercent(primary.used_percent),
-        windowSeconds,
-        resetAt: toTimestamp(primary.reset_at),
-      });
-    }
-    if (secondary) {
-      const windowSeconds = toNumber(secondary.limit_window_seconds);
-      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toCodexUsedPercent(secondary.used_percent),
-        windowSeconds,
-        resetAt: toTimestamp(secondary.reset_at),
-      });
-    }
-    if (credits) {
-      const balance = toNumber(credits.balance);
-      const unlimited = Boolean(credits.unlimited);
-      const valueLabel = unlimited
-        ? 'Unlimited'
-        : balance !== null
-          ? String(balance)
-          : null;
-      windows.credits_balance = toUsageWindow({
-        usedPercent: null,
-        windowSeconds: null,
-        resetAt: null,
-        valueLabel,
-      });
-    }
-    if (payload?.spend_control?.individual_limit) {
-      const spendLimit = payload.spend_control.individual_limit;
-      const used = toNumber(spendLimit.used);
-      const limit = toNumber(spendLimit.limit);
-      const valueLabel = used !== null && limit !== null
-        ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
-        : null;
-      windows.credits = toUsageWindow({
-        usedPercent: toCodexUsedPercent(spendLimit.used_percent),
-        windowSeconds: null,
-        resetAt: null,
-        valueLabel,
-      });
-    }
-
-    return buildResult({
-      providerId: 'codex',
-      providerName: 'Codex',
-      ok: true,
-      configured: true,
-      usage: { windows },
-    });
+    return await codexUsageFromCli()
+      ?? codexFailure('OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
   } catch (error) {
-    return buildResult({
-      providerId: 'codex',
-      providerName: 'Codex',
-      ok: false,
-      configured: true,
-      error: error instanceof Error ? error.message : 'Request failed',
+    if (isUsageTimeout(error)) return codexFailure('Request timed out');
+    return codexFailure(error instanceof Error ? error.message : 'Request failed');
+  }
+};
+
+const codexUsageWindowsOf = (payload: OpenAiUsagePayload) => {
+  const primary = payload?.rate_limit?.primary_window ?? null;
+  const secondary = payload?.rate_limit?.secondary_window ?? null;
+  const credits = payload?.credits ?? null;
+
+  const windows: Record<string, UsageWindow> = {};
+  if (primary) {
+    const windowSeconds = toNumber(primary.limit_window_seconds);
+    windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
+      usedPercent: toCodexUsedPercent(primary.used_percent),
+      windowSeconds,
+      resetAt: toTimestamp(primary.reset_at),
     });
   }
+  if (secondary) {
+    const windowSeconds = toNumber(secondary.limit_window_seconds);
+    windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
+      usedPercent: toCodexUsedPercent(secondary.used_percent),
+      windowSeconds,
+      resetAt: toTimestamp(secondary.reset_at),
+    });
+  }
+  if (credits) {
+    const balance = toNumber(credits.balance);
+    const unlimited = Boolean(credits.unlimited);
+    const valueLabel = unlimited
+      ? 'Unlimited'
+      : balance !== null
+        ? formatCredits(balance)
+        : null;
+    windows.credits_balance = toUsageWindow({
+      usedPercent: null,
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel,
+    });
+  }
+  if (payload?.spend_control?.individual_limit) {
+    const spendLimit = payload.spend_control.individual_limit;
+    const used = toNumber(spendLimit.used);
+    const limit = toNumber(spendLimit.limit);
+    const isUsd = spendLimit.unit === 'usd';
+    const valueLabel = used !== null && limit !== null
+      ? isUsd
+        ? `$${formatMoney(used)} / $${formatMoney(limit)}`
+        : `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+      : null;
+    windows[isUsd ? 'usage' : 'credits'] = toUsageWindow({
+      usedPercent: toCodexUsedPercent(spendLimit.used_percent),
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel,
+    });
+  }
+  return windows;
 };
 
 type GoogleAuthSource = {
@@ -1262,7 +1275,7 @@ const resolveGeminiCliAuth = (auth: AuthFile): GoogleAuthSource | null => {
   const accessToken = asNonEmptyString(oauthObject.access) ?? asNonEmptyString(oauthObject.token);
   const refreshParts = parseGoogleRefreshToken(oauthObject.refresh);
 
-  if (!accessToken && !refreshParts.refreshToken) {
+  if ((oauthObject.methodID !== undefined && !['oauth', 'gemini-cli'].includes(String(oauthObject.methodID))) || (!accessToken && !refreshParts.refreshToken)) {
     return null;
   }
 
@@ -1805,10 +1818,10 @@ let claudeCredentialFingerprint: string | null = null;
 let claudeCachedUsage: ProviderUsage | null = null;
 let claudeCooldownUntil = 0;
 
-const claudeCooldownFromResponse = (response: Response): number => {
+const claudeCooldownFromResponse = (response: UsageResponse): number => {
   const raw = response.headers.get('retry-after');
   const seconds = raw ? Number(raw) : Number.NaN;
-  if (Number.isFinite(seconds) && seconds > 0) {
+  if (Number.isFinite(seconds) && seconds >= 0) {
     return Math.min(seconds * 1000, CLAUDE_MAX_COOLDOWN_MS);
   }
   if (raw) {
@@ -1934,12 +1947,21 @@ export const fetchClaudeQuota = async ({ readAuth = readOpenCodeCredentials }: C
     claudeCachedUsage = null;
     claudeCooldownUntil = 0;
   }
+  const expiresAt = normalizeTimestamp(entry?.expires);
+  if (expiresAt !== null && expiresAt > 0 && expiresAt <= Date.now()) {
+    return buildResult({
+      providerId: 'claude',
+      providerName: 'Claude',
+      ok: false,
+      configured: true,
+      error: 'Claude session expired. Open Claude Code to sign in again.',
+    });
+  }
   if (Date.now() < claudeCooldownUntil) return buildClaudeRateLimitResult();
 
   try {
-    const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
+    const response = await requestUsageWithDeadline('https://api.anthropic.com/api/oauth/usage', {
       method: 'GET',
-      signal: AbortSignal.timeout(15_000),
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'anthropic-beta': 'oauth-2025-04-20',
@@ -1951,13 +1973,23 @@ export const fetchClaudeQuota = async ({ readAuth = readOpenCodeCredentials }: C
       return buildClaudeRateLimitResult();
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       return buildResult({
         providerId: 'claude',
         providerName: 'Claude',
         ok: false,
         configured: true,
         error: 'Claude session expired. Open Claude Code to sign in again.',
+      });
+    }
+
+    if (response.status === 403) {
+      return buildResult({
+        providerId: 'claude',
+        providerName: 'Claude',
+        ok: false,
+        configured: true,
+        error: 'Anthropic does not let this Claude token read usage. A token from `claude setup-token` cannot; a Claude Code sign-in (`/login`) can.',
       });
     }
 
@@ -1982,32 +2014,63 @@ export const fetchClaudeQuota = async ({ readAuth = readOpenCodeCredentials }: C
       usage,
     });
   } catch (error) {
+    const timedOut = isUsageTimeout(error);
     return buildResult({
       providerId: 'claude',
       providerName: 'Claude',
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed',
+      error: timedOut ? 'Request timed out' : (error instanceof Error ? error.message : 'Request failed'),
     });
   }
 };
 
-const buildCopilotWindows = (payload: Record<string, unknown>) => {
-  const quota = (payload.quota_snapshots as Record<string, unknown>) ?? {};
+type CopilotQuotaSnapshot = {
+  entitlement?: number | string;
+  remaining?: number | string;
+  quota_remaining?: number | string;
+  percent_remaining?: number | string;
+  unlimited?: boolean;
+  credits_used?: number | string;
+  has_quota?: boolean;
+};
+
+type CopilotUserPayload = {
+  access_type_sku?: string;
+  copilot_plan?: string;
+  can_signup_for_limited?: boolean;
+  quota_reset_date?: string | number;
+  quota_snapshots?: {
+    premium_interactions?: CopilotQuotaSnapshot;
+    chat?: CopilotQuotaSnapshot;
+    completions?: CopilotQuotaSnapshot;
+  };
+};
+
+const resolveCopilotPlanLabel = (payload: CopilotUserPayload | null | undefined): string | null => {
+  if (!payload) return null;
+  const sku = asNonEmptyString(payload.access_type_sku);
+  const plan = asNonEmptyString(payload.copilot_plan);
+  const canSignup = Boolean(payload.can_signup_for_limited);
+
+  if (sku === 'free_limited_copilot') return 'Copilot Free';
+  if (sku === 'free_educational_quota') return 'Copilot Student';
+  if (plan === 'individual_edu') return 'Copilot Student';
+  if (plan === 'individual') return 'Copilot Pro';
+  if (plan === 'individual_pro') return 'Copilot Pro+';
+  if (plan === 'individual_max') return 'Copilot Max';
+  if (plan === 'business') return 'Copilot Business';
+  if (plan === 'enterprise') return 'Copilot Enterprise';
+  if (canSignup) return 'Copilot Free';
+  return null;
+};
+
+const buildCopilotWindows = (payload: CopilotUserPayload) => {
+  const quota = payload.quota_snapshots;
   const resetAt = toTimestamp(payload.quota_reset_date);
   const windows: Record<string, UsageWindow> = {};
 
-  // Mirrors the quota semantics of microsoft/vscode-copilot-chat
-  // (CopilotUserQuotaInfo): each snapshot carries entitlement, remaining,
-  // unlimited, and percent_remaining. Unlimited plans report no usable
-  // entitlement; percent_remaining is a server-computed fallback.
-  // `usedPercent` is computed from remaining/entitlement, and the value label
-  // derives its credits from the same `entitlement - quota_remaining` axis
-  // GitHub's own Copilot panel uses, so the percent and the label agree.
-  // Premium interactions are credits rather than requests, and the endpoint
-  // reports them fractionally (`quota_remaining: 39078.5`), so the label keeps
-  // one decimal like GitHub's own panel ("20,836.9 / 60,000 used") instead of
-  // rounding the half credit away.
+  // external: https://github.com/microsoft/vscode-copilot-chat Copilot quota labels use spent entitlement credits and preserve fractional premium interactions.
   const formatCopilotCredits = (value: number): string => {
     const rounded = Math.round(value * 10) / 10;
     return Number.isInteger(rounded)
@@ -2015,25 +2078,26 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
       : rounded.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   };
 
-  const addWindow = (label: string, snapshot?: Record<string, unknown>) => {
+  const addWindow = (label: string, snapshot?: CopilotQuotaSnapshot) => {
     if (!snapshot) return;
 
     if (snapshot.unlimited === true) {
+      const creditsUsed = toNumber(typeof snapshot.credits_used === 'string'
+        ? asNonEmptyString(snapshot.credits_used)
+        : snapshot.credits_used);
+      const showCreditsUsed = snapshot.has_quota !== false && creditsUsed !== null && creditsUsed >= 0;
       windows[label] = toUsageWindow({
         usedPercent: null,
         windowSeconds: null,
         resetAt,
-        valueLabel: 'Unlimited',
+        valueLabel: showCreditsUsed ? null : 'Unlimited',
+        creditsUsed: showCreditsUsed ? creditsUsed : undefined,
       });
       return;
     }
 
     const entitlement = toNumber(snapshot.entitlement);
-    // `quota_remaining` is the precise twin of `remaining`: the endpoint sends it
-    // with one decimal (39078.5) and truncates it into `remaining` (39078).
-    // GitHub's own Copilot panel reports the used figure as
-    // `entitlement - quota_remaining` (60,000 - 39,078.5 = 20,921.5 used),
-    // so prefer it and fall back to the integer twin.
+    // external: https://github.com/microsoft/vscode-copilot-chat quota_remaining preserves fractional credits that remaining truncates.
     const remaining = toNumber(snapshot.quota_remaining) ?? toNumber(snapshot.remaining);
     let usedPercent = entitlement !== null && entitlement > 0 && remaining !== null
       ? Math.min(100, Math.max(0, 100 - (remaining / entitlement) * 100))
@@ -2044,13 +2108,6 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
         usedPercent = Math.min(100, Math.max(0, 100 - percentRemaining));
       }
     }
-    // `remaining` reports the axis opposite to everything else the quota UI
-    // renders (the percent above, the progress bar, the used/remaining toggle),
-    // so the old `remaining / entitlement left` label made OpenChamber state the
-    // opposite of GitHub's own Copilot panel for the same account. VS Code and
-    // GitHub both report `entitlement - quota_remaining` spent, so the label
-    // uses that axis and keeps the fractional credit rather than rounding it
-    // away, which also keeps it stable across the two twin fields.
     const used = entitlement === null || entitlement <= 0
       ? null
       : remaining !== null
@@ -2067,17 +2124,13 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
     });
   };
 
-  addWindow('premium_interactions', quota.premium_interactions as Record<string, unknown> | undefined);
+  addWindow('premium_interactions', quota?.premium_interactions);
 
   return windows;
 };
 
 const INVALID_COPILOT_ENTERPRISE_URL = 'Invalid GitHub Copilot Enterprise URL';
 
-// A Copilot login on GitHub Enterprise Server carries `enterpriseUrl`, and that
-// server hosts its own quota endpoint. Only a bare origin with a plausible DNS
-// hostname is accepted, so a value that is not a usable host is refused here
-// rather than turned into a request that carries the credential.
 const COPILOT_ENTERPRISE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
 
 const copilotUserUrl = (enterpriseUrl: string | undefined): string => {
@@ -2139,13 +2192,15 @@ export const fetchCopilotQuota = async ({ readAuth = readOpenCodeCredentials }: 
       });
     }
 
-    const payload = await readQuotaJson(response) as Record<string, unknown>;
+    const payload = await readQuotaJson(response) as CopilotUserPayload;
+    const planLabel = resolveCopilotPlanLabel(payload);
     return buildResult({
       providerId: 'github-copilot',
       providerName: 'GitHub Copilot',
       ok: true,
       configured: true,
       usage: { windows: buildCopilotWindows(payload) },
+      planLabel,
     });
   } catch (error) {
     return buildResult({
@@ -2178,12 +2233,6 @@ const computeKimiUsedPercent = (
   return null;
 };
 
-// The ratio-based `usages` block, in the order Kimi's own CLI renders it.
-// `limit_month_code` is not read: it is the code-typed share of
-// `limit_month_total`, not a second allowance, and a value label carrying it
-// would replace the monthly percent and stay a used figure when the panel shows
-// what remains. `limit_7d` arrives only on plans that still have a weekly
-// quota, and Kimi documents the client as rendering whichever entries are served.
 type KimiRatioWindow = { key: string; label: string; windowSeconds: number | null };
 
 const KIMI_RATIO_WINDOWS: KimiRatioWindow[] = [
@@ -2192,8 +2241,6 @@ const KIMI_RATIO_WINDOWS: KimiRatioWindow[] = [
   { key: 'limit_month_total', label: 'monthly', windowSeconds: null },
 ];
 
-// `used_ratio` is a 0-1 fraction. An entry without a finite ratio carries no
-// information, so it is skipped rather than shown as an unknown percentage.
 const toKimiRatioPercent = (entry: Record<string, unknown> | null): number | null => {
   const ratio = toNumber(entry?.used_ratio);
   return ratio === null ? null : Math.max(0, Math.min(100, ratio * 100));
@@ -2253,22 +2300,35 @@ type KimiQuotaDependencies = {
 
 const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
 
+const kimiRequestSignal = (refreshSignal: AbortSignal): AbortSignal => {
+  const controller = new AbortController();
+  for (const signal of [refreshSignal, AbortSignal.timeout(5_000)]) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), {
+      once: true,
+      signal: controller.signal,
+    });
+  }
+  return controller.signal;
+};
+
 type MoonshotBalancePayload = {
   data?: { available_balance?: number };
 };
 
-// Mirrors packages/web/server/lib/quota/providers/kimi.js: a pay-as-you-go Moonshot
-// platform key is refused by the Kimi Code usage address, so its balance is read instead.
-// Returns the credits_balance windows, or null when they cannot be read.
 const fetchMoonshotBalanceWindows = async (
   apiKey: string,
   fetchImpl: (url: string, options: RequestInit) => Promise<Response>,
+  refreshSignal: AbortSignal,
 ): Promise<Record<string, UsageWindow> | null> => {
   try {
     const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(15_000),
+      signal: kimiRequestSignal(refreshSignal),
     });
     if (!response.ok) return null;
     const balance = (await readQuotaJson(response) as MoonshotBalancePayload)?.data?.available_balance;
@@ -2287,9 +2347,9 @@ const fetchMoonshotBalanceWindows = async (
 };
 
 export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: KimiQuotaDependencies = {}): Promise<ProviderResult> => {
-  const apiKey = getKimiApiKey(await readAuth());
+  const apiKeys = collectKimiApiKeys(await readAuth());
 
-  if (!apiKey) {
+  if (apiKeys.length === 0) {
     return buildResult({
       providerId: 'kimi-for-coding',
       providerName: 'Kimi for Coding',
@@ -2300,18 +2360,35 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
   }
 
   try {
-    const response = await fetchImpl('https://api.kimi.com/coding/v1/usages', {
-      method: 'GET',
-      signal: AbortSignal.timeout(15_000),
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const refreshSignal = AbortSignal.timeout(25_000);
+    let firstError: string | null = null;
+    for (const { apiKey, endpoint } of apiKeys) {
+      refreshSignal.throwIfAborted();
+      const response = await fetchImpl(endpoint, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: kimiRequestSignal(refreshSignal),
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        const payload = asObject(await response.json());
+        const usages = asObject(payload?.usages);
+        const windows = usages ? kimiRatioWindows(usages) : kimiLegacyWindows(payload);
+
+        return buildResult({
+          providerId: 'kimi-for-coding',
+          providerName: 'Kimi for Coding',
+          ok: true,
+          configured: true,
+          usage: { windows },
+        });
+      }
+
       if (response.status === 401 || response.status === 403) {
-        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl);
+        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl, refreshSignal);
         if (balanceWindows) {
           return buildResult({
             providerId: 'kimi-for-coding',
@@ -2321,7 +2398,10 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
             usage: { windows: balanceWindows },
           });
         }
+        firstError ??= `API error: ${response.status}`;
+        continue;
       }
+
       return buildResult({
         providerId: 'kimi-for-coding',
         providerName: 'Kimi for Coding',
@@ -2331,19 +2411,12 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
       });
     }
 
-    const payload = asObject(await readQuotaJson(response));
-    // Kimi replaced the counted payload with a ratio-based `usages` map. Its own
-    // client reads only `usages`, so when that block is present the `limits[]`
-    // entry for the same 5-hour window is a coarser duplicate and is not read.
-    const usages = asObject(payload?.usages);
-    const windows = usages ? kimiRatioWindows(usages) : kimiLegacyWindows(payload);
-
     return buildResult({
       providerId: 'kimi-for-coding',
       providerName: 'Kimi for Coding',
-      ok: true,
+      ok: false,
       configured: true,
-      usage: { windows },
+      error: firstError ?? 'Request failed',
     });
   } catch (error) {
     return buildResult({
@@ -2397,15 +2470,14 @@ const fetchMiniMaxQuota = async (data: {
     }
 
     const payload = await readQuotaJson(response) as Record<string, unknown>;
-    const baseResp = asObject(payload.base_resp);
-    const statusCode = toNumber(baseResp?.status_code);
-    if (baseResp && statusCode !== 0) {
+    const statusError = miniMaxStatusError(asObject(payload.base_resp));
+    if (statusError) {
       return buildResult({
         providerId: data.providerId,
         providerName: data.providerName,
         ok: false,
         configured: true,
-        error: asNonEmptyString(baseResp.status_msg) ?? `API error: ${statusCode}`,
+        error: statusError,
       });
     }
 
@@ -2495,7 +2567,6 @@ const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   usageFieldsAreRemaining: true,
 });
 
-/** The active account's Ollama Cloud API key, the same one chat requests use. */
 const readOllamaCloudApiKey = async (): Promise<string | undefined> => {
   const entry = normalizeAuthEntry(getAuthEntry(await readOpenCodeCredentials(), ['ollama-cloud', 'ollamacloud']));
   return ollamaApiKeyFrom(entry) ?? undefined;
@@ -2504,10 +2575,6 @@ const readOllamaCloudApiKey = async (): Promise<string | undefined> => {
 const OLLAMA_BALANCE_URL = 'https://ollama.com/api/balance';
 const OLLAMA_ME_URL = 'https://ollama.com/api/me';
 
-/**
- * The account's credit pool, mirroring `toUsageWindows` in the web server's
- * `quota/providers/ollama-cloud.js`.
- */
 const fetchOllamaCloudUsage = async (
   apiKey: string,
   fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch,
@@ -2558,7 +2625,6 @@ const fetchOllamaCloudUsage = async (
   return windows;
 };
 
-/** The plan tier ("free", "pro", "max"), best-effort: a failure drops the label, not the reading. */
 const fetchOllamaCloudPlan = async (
   apiKey: string,
   fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch,
@@ -2579,10 +2645,6 @@ export const fetchOllamaCloudQuota = async ({
   readApiKey?: () => string | undefined | Promise<string | undefined>;
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
 } = {}): Promise<ProviderResult> => {
-  // The cookie this provider used to store is obsolete the first time we reach
-  // for the key instead. Removed on the first refresh whether or not a key is
-  // readable, so a user who only ever pasted a cookie never keeps a browser
-  // session cookie on disk. Mirrors the web server's cleanup.
   deleteLegacyOllamaCloudCredential();
 
   const apiKey = await (readApiKey ?? readOllamaCloudApiKey)();
@@ -2714,6 +2776,10 @@ const fetchCursorQuota = async (): Promise<ProviderResult> => {
         post('aiserver.v1.DashboardService/GetMe').catch(() => null),
       ]);
       const windows = cursorEnterpriseWindows(usage, plan, authUsage, hardLimit, cursorTeamMemberSpend(teamSpend, me?.userId));
+      if (!windows.billing_cycle) {
+        const summaryWindow = await fetchCursorSummaryWindow(accessToken).catch(() => null);
+        if (summaryWindow) windows.billing_cycle = summaryWindow;
+      }
       if (!windows.billing_cycle && !windows.on_demand) {
         return buildResult({ providerId: 'cursor', providerName: 'Cursor', ok: false, configured: true, error: 'No active Cursor subscription' });
       }
@@ -2751,17 +2817,10 @@ const isOpenRouterPeriod = (value: unknown): value is OpenRouterPeriod => (
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(PERIOD_SECONDS, value)
 );
 
+const openRouterSpendWindow = (spent: number | null) => toUsageWindow({ usedPercent: null, windowSeconds: null, resetAt: null, value: { kind: 'spend', spent, limit: null } });
+
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 
-// The stored key is valid for whichever gateway the configured baseURL points
-// at, so the usage lookup must ride the same base as chat. The endpoint shape
-// stays `<base>/key`; with nothing configured the base is OpenRouter itself.
-// OpenCode takes the address from `settings.baseURL`, legacy `options.baseURL`
-// or legacy `api`, and toProviderEntity folds all three. Each section is read
-// on its own so a v2 entry without an address cannot hide a v1 address that
-// another config file sets.
-// Mirrors packages/web/server/lib/quota/providers/openrouter.js (kept in sync
-// per the quota DOCUMENTATION.md parity note).
 const resolveOpenRouterConfigBase = (): string | null => {
   try {
     const config = readConfig();
@@ -2774,7 +2833,6 @@ const resolveOpenRouterConfigBase = (): string | null => {
     )?.replace(/\/+$/, '');
     return base || null;
   } catch {
-    // A config read failure must not take the default-endpoint lookup down.
     return null;
   }
 };
@@ -2845,47 +2903,27 @@ export const fetchOpenRouterQuota = async ({ readAuth = readOpenCodeCredentials 
       });
     }
 
-    const limit = toNumber(data.limit);
-    const limitRemaining = toNumber(data.limit_remaining);
-    if (limit !== null && limitRemaining === null) {
-      return buildResult({
-        providerId: 'openrouter',
-        providerName: 'OpenRouter',
-        ok: false,
-        configured: true,
-        error: 'No quota data in response',
-      });
-    }
+    const toAmount = (value: unknown) => (String(value).trim() === '' ? null : toNumber(value));
+    const toSpendAmount = (value: unknown) => {
+      const amount = toAmount(value);
+      return amount !== null && amount >= 0 ? amount : null;
+    };
+    const limit = toAmount(data.limit);
+    const limitRemaining = toAmount(data.limit_remaining);
+    const usageMonthly = toSpendAmount(data.usage_monthly);
+    const byokMonthly = toSpendAmount(data.byok_usage_monthly);
 
-    const usageMonthly = toNumber(data.usage_monthly);
-    if (limit === null && usageMonthly === null) {
-      return buildResult({
-        providerId: 'openrouter',
-        providerName: 'OpenRouter',
-        ok: false,
-        configured: true,
-        error: 'No quota data in response',
-      });
+    if ((limit === null || limitRemaining === null) && usageMonthly === null && byokMonthly === null) {
+      return buildResult({ providerId: 'openrouter', providerName: 'OpenRouter', ok: false, configured: true, error: 'No quota data in response' });
     }
 
     const nowMs = Date.now();
-    let windowKey: string;
-    let windowSeconds: number | null;
-    let resetAt: number | null;
-    let usedPercent: number | null;
-    let valueLabel: string;
+    const windows: Record<string, ReturnType<typeof toUsageWindow>> = {};
 
-    if (limit === null) {
-      windowKey = 'monthly';
-      windowSeconds = PERIOD_SECONDS.monthly;
-      resetAt = openRouterResetAt('monthly', nowMs);
-      usedPercent = null;
-      valueLabel = `$${formatMoney(usageMonthly)} spent`;
-    } else {
-      const used = Math.max(0, limit - (limitRemaining ?? 0));
-      const percent = limit > 0 ? (used / limit) * 100 : null;
-      usedPercent = percent === null ? null : Math.min(100, percent);
-      valueLabel = `$${formatMoney(used)} / $${formatMoney(limit)}`;
+    if (limit !== null && (limitRemaining !== null || limit > 0)) {
+      let windowKey: string;
+      let windowSeconds: number | null;
+      let resetAt: number | null;
 
       if (isOpenRouterPeriod(data.limit_reset)) {
         windowKey = data.limit_reset;
@@ -2896,23 +2934,33 @@ export const fetchOpenRouterQuota = async ({ readAuth = readOpenCodeCredentials 
         windowSeconds = null;
         resetAt = null;
       }
+
+      const used = limitRemaining === null ? null : Math.max(0, limit - limitRemaining);
+      const percent = used !== null && limit > 0 ? Math.min(100, (used / limit) * 100) : null;
+      windows[windowKey] = toUsageWindow(used === null
+        ? { usedPercent: null, windowSeconds, resetAt, value: { kind: 'spend', spent: null, limit } }
+        : { usedPercent: percent, windowSeconds, resetAt, valueLabel: `$${formatMoney(used)} / $${formatMoney(limit)}` });
     }
+
+    windows.monthly_total = toUsageWindow({
+      usedPercent: null,
+      windowSeconds: PERIOD_SECONDS.monthly,
+      resetAt: openRouterResetAt('monthly', nowMs),
+      value: {
+        kind: 'spend',
+        spent: usageMonthly !== null && byokMonthly !== null ? usageMonthly + byokMonthly : null,
+        limit: null,
+      },
+    });
+    if (usageMonthly !== 0) windows.monthly_credits = openRouterSpendWindow(usageMonthly);
+    if (byokMonthly !== 0) windows.monthly_byok = openRouterSpendWindow(byokMonthly);
 
     return buildResult({
       providerId: 'openrouter',
       providerName: 'OpenRouter',
       ok: true,
       configured: true,
-      usage: {
-        windows: {
-          [windowKey]: toUsageWindow({
-            usedPercent,
-            windowSeconds,
-            resetAt,
-            valueLabel,
-          }),
-        },
-      },
+      usage: { windows },
     });
   } catch (error) {
     const isTimeout = error instanceof DOMException && (error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted));
@@ -2956,7 +3004,6 @@ const resolveWindowLabel = (windowSeconds: number | null) => {
   return `${windowSeconds}s`;
 };
 
-// Gift reset timestamps come as 'YYYY-MM-DD HH:mm:ss' in UTC+8.
 const ZAI_RESET_TIME_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const ZAI_ALIASES = ['zai-coding-plan', 'zai', 'z.ai'];
 
@@ -2966,9 +3013,6 @@ const parseZaiResetExpire = (value: string | undefined): number | null => {
   return Number.isNaN(timestamp) ? null : timestamp;
 };
 
-// Keep only claimable resets: available, with a parseable, not-yet-expired time.
-// The nearest expiry is the one worth activating first; expired records are
-// pointless to show. z.ai flips `available` to false once a record expires.
 const pickZaiGiftReset = (records: ZaiGiftResetRecord[] | undefined): UsageWindowGiftReset | null => {
   if (!Array.isArray(records)) return null;
   const now = Date.now();
@@ -2980,6 +3024,10 @@ const pickZaiGiftReset = (records: ZaiGiftResetRecord[] | undefined): UsageWindo
     if (expireAt === null || expireAt <= now) continue;
     if (best === null || expireAt < best.expireAt) {
       best = { recordId: record.recordId, expireAt };
+      const grantType = asNonEmptyString(record.grantType);
+      if (grantType) {
+        best.grantType = grantType;
+      }
     }
   }
   return best;
@@ -2989,7 +3037,6 @@ const ZAI_GIFT_RESET_URL = 'https://api.z.ai/api/biz/customer-package-reset/list
 const ZAI_FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 const ZAI_WEEK_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
-// Supplementary call: gift reset info must never fail the quota result.
 const attachZaiGiftResets = async (windows: Record<string, UsageWindow>, apiKey: string): Promise<void> => {
   try {
     const response = await fetch(ZAI_GIFT_RESET_URL, {
@@ -3069,8 +3116,6 @@ export const fetchZaiQuota = async ({ readAuth = readOpenCodeCredentials }: ZaiQ
     }
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows: Record<string, UsageWindow> = {};
-    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,
-    // so both limit types map to the same windows.
     for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
       const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
       const windowLabel = resolveWindowLabel(windowSeconds);
@@ -3120,7 +3165,7 @@ const ZAI_GIFT_RESET_TYPES = ['FIVE_HOUR', 'WEEK'] as const;
 
 export type QuotaGiftResetType = (typeof ZAI_GIFT_RESET_TYPES)[number];
 
-const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaGiftResetType }): Promise<void> => {
+const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaGiftResetType; grantType?: string }): Promise<void> => {
   const auth = await readOpenCodeCredentials();
   // SAFETY: auth.json is untyped storage; the cast only reads the optional
   // key/token fields and no other shape is consumed.
@@ -3132,7 +3177,10 @@ const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaG
   if (!apiKey) {
     throw new Error('Not configured');
   }
-  if (!Number.isFinite(input.recordId) || !ZAI_GIFT_RESET_TYPES.includes(input.resetType)) {
+  const grantType = asNonEmptyString(input.grantType);
+  if (!Number.isFinite(input.recordId)
+    || !ZAI_GIFT_RESET_TYPES.includes(input.resetType)
+    || (input.grantType !== undefined && grantType === null)) {
     throw new Error('Invalid gift reset request');
   }
 
@@ -3148,6 +3196,7 @@ const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaG
       resetType: input.resetType,
       recordId: input.recordId,
       requestId: crypto.randomUUID(),
+      grantType: grantType ?? 'GLOBAL',
     }),
   });
 
@@ -3161,7 +3210,7 @@ const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaG
 
 export const activateQuotaGiftReset = async (
   providerId: string,
-  input: { recordId: number; resetType: QuotaGiftResetType },
+  input: { recordId: number; resetType: QuotaGiftResetType; grantType?: string },
 ): Promise<void> => {
   if (!ZAI_ALIASES.includes(providerId)) {
     throw new Error('Unsupported provider');
@@ -3225,9 +3274,6 @@ export const fetchZhipuaiCodingPlanQuota = async ({ readAuth = readOpenCodeCrede
 
     const windows: Record<string, UsageWindow> = {};
 
-    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the
-    // same, so both limit types map to the same windows. Unit 3 marks hourly
-    // blocks (5h), unit 6 weekly.
     for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
       const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
       const windowLabel = resolveWindowLabel(windowSeconds);
@@ -3241,10 +3287,8 @@ export const fetchZhipuaiCodingPlanQuota = async ({ readAuth = readOpenCodeCrede
       });
     }
 
-    // Handle TIME_LIMIT (MCP tools monthly window)
     const mcpToolsTimeLimit = limits.find((limit) => limit?.type === 'TIME_LIMIT');
     if (mcpToolsTimeLimit) {
-      // TIME_LIMIT unit=5 means 1 month (30 days)
       const monthSeconds = 30 * 24 * 60 * 60;
       const resetAt = mcpToolsTimeLimit?.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null;
       const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? clampPercent(mcpToolsTimeLimit.percentage) : null;
@@ -3344,7 +3388,6 @@ export const fetchNanoGptQuota = async ({ readAuth = readOpenCodeCredentials }: 
     const payload = nanoGptUsageSchema.parse(await readQuotaJson(response));
     const windows: ProviderUsage['windows'] = {};
     const state = payload.state ?? 'active';
-    // A null current daily quota means no daily cap; only absent fields use legacy data.
     const daily = payload.dailyInputTokens !== undefined ? payload.dailyInputTokens : payload.daily;
     const quotas = [
       {
@@ -3532,9 +3575,6 @@ const fetchWaferQuota = async (): Promise<ProviderResult> => {
 
 const NEURALWATT_QUOTA_URL = 'https://api.neuralwatt.com/v1/quota';
 
-// 30d month / 365d year are fixed approximations; real calendars vary but the
-// window is for the UI's progress bar label, not billing decisions.
-// Accepts both subscription (month/year) and allowance (monthly/weekly/daily) shapes.
 const neuralwattWindowSeconds = (period: string | null | undefined): number | null => {
   if (period === 'daily') return 86400;
   if (period === 'weekly') return 604800;
@@ -3600,9 +3640,6 @@ export const fetchNeuralwattQuota = async ({ readAuth = readOpenCodeCredentials 
       const plan = typeof subscription.plan === 'string' && subscription.plan.trim()
         ? subscription.plan.trim()
         : null;
-      // Subscription window title is the plan name; subscription limits reset
-      // monthly even on annual billing plans, but the API exposes no kWh window
-      // start to derive windowSeconds — pass null rather than fabricating a guess.
       const subKey = plan ?? 'plan_limit';
       const usedPercent = inOverage
         ? 100
@@ -3620,8 +3657,6 @@ export const fetchNeuralwattQuota = async ({ readAuth = readOpenCodeCredentials 
     if (allowance) {
       const spent = toNumber(allowance.spent_usd);
       const limit = toNumber(allowance.limit_usd);
-      // Credits wallet is reduced by each period's spend before the allowance cap
-      // bites, so the real ceiling is min(limit, creditsRemaining + spent).
       const effectiveSpent = spent ?? 0;
       const effectiveLimit = limit !== null && creditsRemaining !== null
         ? Math.min(limit, creditsRemaining + effectiveSpent)
@@ -3635,8 +3670,6 @@ export const fetchNeuralwattQuota = async ({ readAuth = readOpenCodeCredentials 
         : (spent !== null && effectiveLimit !== null && effectiveLimit > 0
             ? Math.max(0, Math.min(100, (spent / effectiveLimit) * 100))
             : null);
-      // Window title is the localized period label (daily/weekly/monthly); the
-      // usage value stays a percent so the UI's display-mode toggle applies.
       const periodKey = (period === 'daily' || period === 'weekly' || period === 'monthly' || period === 'month')
         ? (period === 'month' ? 'monthly' : period)
         : 'billing_cycle';
@@ -3692,9 +3725,6 @@ export const fetchNeuralwattQuota = async ({ readAuth = readOpenCodeCredentials 
 
 const CLINE_PASS_USAGE_URL = 'https://api.cline.bot/api/v1/users/me/plan/usage-limits';
 
-// Cline reports a rolling five-hour window, a rolling weekly window, and a
-// calendar-month limit. Each window carries its duration so consumers can rank
-// limits by how soon they run out; the calendar month has no fixed duration.
 const CLINE_WINDOW_KINDS = new Map<string, ClineWindowKind>([
   ['five_hour', { key: '5h', windowSeconds: 5 * 60 * 60 }],
   ['weekly', { key: 'weekly', windowSeconds: 7 * 24 * 60 * 60 }],
@@ -3851,11 +3881,8 @@ export const fetchDeepinfraQuota = async ({ readAuth = readOpenCodeCredentials }
     // SAFETY: every DeepinfraPayload field is optional and the balance is parsed
     // below, so an unexpected body ends as "No quota data in response".
     const payload = await readQuotaJson(response) as DeepinfraPayload;
-    // Documented at https://docs.deepinfra.com/api-reference/account/me:
-    // checklist.stripe_balance is negative when funds are ready to spend and
-    // positive when money is owed, so the spendable credit is its negation.
+    // external: https://docs.deepinfra.com/api-reference/account/me stripe_balance is negative for spendable funds and positive for money owed.
     const rawBalance = payload?.checklist?.stripe_balance;
-    // A blank or absent balance is missing data, not a $0.00 balance.
     const stripeBalance = String(rawBalance ?? '').trim() === '' ? null : toNumber(rawBalance);
 
     if (stripeBalance === null) {
@@ -4687,6 +4714,38 @@ type XaiQuotaDependencies = {
   fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
 };
 
+const openCodeGoUsageFields = ({ windows, planLabel }: Awaited<ReturnType<typeof fetchOpenCodeGoUsage>>) => (
+  planLabel ? { usage: { windows }, planLabel } : { usage: { windows } }
+);
+
+const fetchOpenCodeGoQuota = async (): Promise<ProviderResult> => {
+  const providerId = 'opencode-go';
+  try {
+    deleteLegacyOpenCodeGoCredential();
+    const auth = await readOpenCodeCredentials();
+    const consoleCredential = openCodeGoConsoleCredential(auth) ?? openCodeGoKey(auth, 'opencode');
+    const apiKey = openCodeGoKey(auth, 'opencode-go');
+    let consoleFailure: Error | null = null;
+    if (consoleCredential) {
+      try {
+        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, ...openCodeGoUsageFields(await fetchOpenCodeGoUsage(consoleCredential)), accountLabel: consoleCredential.label });
+      } catch (consoleError) {
+        const consoleKey = 'apiKey' in consoleCredential;
+        if (!apiKey || (consoleKey && !isOpenCodeGoKeyRefusal(consoleError))) throw consoleError;
+        if (!consoleKey) consoleFailure = consoleError instanceof Error ? consoleError : new Error('Request failed');
+      }
+    }
+    if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
+    try {
+      return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, ...openCodeGoUsageFields(await fetchOpenCodeGoUsage(apiKey)), accountLabel: apiKey.label });
+    } catch (keyError) {
+      throw consoleFailure && keyError instanceof Error && keyError.message === OPENCODE_GO_KEY_EXPIRED ? consoleFailure : keyError;
+    }
+  } catch (error) {
+    return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+  }
+};
+
 export const fetchXaiQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: XaiQuotaDependencies = {}): Promise<ProviderResult> => {
   try {
     const entry = resolveXaiAuth(await readAuth());
@@ -4766,7 +4825,7 @@ const mistralApiKeyFrom = (entry: ReturnType<typeof normalizeAuthEntry>): string
 
 type MistralQuotaDependencies = {
   readAuth?: () => AuthFile | Promise<AuthFile>;
-  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+  fetchImpl?: (input: string | Request | URL, init?: RequestInit) => Promise<Response>;
 };
 
 /**
@@ -4779,9 +4838,15 @@ type MistralQuotaDependencies = {
  * 401/403 -> the unauthorized class; a 200 without `data` -> the malformed
  * class. No usage or balance figures are ever emitted.
  */
+const getMistralApiKey = (auth: AuthFile): string | null => mistralApiKeyFrom(normalizeAuthEntry(getAuthEntry(auth, ['mistral'])));
+
+/**
+ * Mistral usage: the organization's billing read, as on the web provider
+ * (`mistral.ts`). A standard API key on a plan without a billing allowance
+ * answers that read with 404, and then the key-validity read below decides.
+ */
 export const fetchMistralQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: MistralQuotaDependencies = {}): Promise<ProviderResult> => {
-  const entry = normalizeAuthEntry(getAuthEntry(await readAuth(), ['mistral']));
-  const apiKey = mistralApiKeyFrom(entry);
+  const apiKey = getMistralApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -4793,6 +4858,18 @@ export const fetchMistralQuota = async ({ readAuth = readOpenCodeCredentials, fe
     });
   }
 
+  try {
+    const { windows, planLabel } = await fetchMistralUsage(apiKey, fetchImpl);
+    return buildResult({ providerId: 'mistral', providerName: 'Mistral AI', ok: true, configured: true, usage: { windows }, planLabel });
+  } catch (error) {
+    if (!(error instanceof Error && 'status' in error && error.status === 404)) {
+      return buildResult({ providerId: 'mistral', providerName: 'Mistral AI', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+    }
+  }
+  return fetchMistralKeyValidity(apiKey, fetchImpl);
+};
+
+const fetchMistralKeyValidity = async (apiKey: string, fetchImpl: NonNullable<MistralQuotaDependencies['fetchImpl']>): Promise<ProviderResult> => {
   const timeoutSignal = AbortSignal.timeout(15_000);
 
   try {
@@ -5093,27 +5170,24 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
     case 'wafer':
       return fetchWaferQuota();
     case 'opencode-go': {
+      const [result, consoleBudgets] = await Promise.all([fetchOpenCodeGoQuota(), readConsoleBudgets()]);
+      return withConsoleBudgets(result, consoleBudgets);
+    }
+    case 'opencode': {
       try {
-        deleteLegacyOpenCodeGoCredential();
         const auth = await readOpenCodeCredentials();
-        // A Console sign-in serves OpenCode Go once it exists; the
-        // API key is the fallback for accounts without one, and for a Console
-        // read that fails (no Go in that org, an endpoint change, a hiccup).
-        const consoleCredential = openCodeGoConsoleCredential(auth);
-        const apiKey = openCodeGoApiKey(auth);
-        if (consoleCredential) {
-          try {
-            const consoleUsage = await fetchOpenCodeGoUsage(consoleCredential);
-            return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: consoleUsage.windows }, planLabel: consoleUsage.planLabel });
-          } catch (consoleError) {
-            if (!apiKey) throw consoleError;
-          }
-        }
-        if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
-        const apiKeyUsage = await fetchOpenCodeGoUsage(apiKey);
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: apiKeyUsage.windows }, planLabel: apiKeyUsage.planLabel });
+        const credential = openCodeZenCredential(auth);
+        if (!credential) return buildResult({ providerId, providerName: 'OpenCode Zen', ok: false, configured: false, error: 'Not configured' });
+        const usage = await fetchOpenCodeZenUsage(credential);
+        return buildResult({
+          providerId,
+          providerName: 'OpenCode Zen',
+          ok: true,
+          configured: true,
+          usage: { ...usage, models: Object.keys(usage.models).length ? usage.models : undefined },
+        });
       } catch (error) {
-        return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
+        return buildResult({ providerId, providerName: 'OpenCode Zen', ok: false, configured: true, error: error instanceof Error ? error.message : 'Request failed' });
       }
     }
     case 'cursor':

@@ -86,6 +86,10 @@ export const setPoolPlanLink = (store, target, planID, dataDir) => {
 
 // Links are read through `GET /api/model-routes/health`, which resolves each
 // target's plan, so this module exposes only the write.
+/**
+ * @param {import('../shared/http-contracts.js').Application} app
+ * @param {{ openchamberDataDir?: string, loadPlanStore?: typeof readPlanStore }} [options]
+ */
 export const registerPoolPlanLinkRoutes = (app, { openchamberDataDir, loadPlanStore = readPlanStore } = {}) => {
   app.put('/api/model-routes/plan-links', express.json({ limit: '4kb' }), (req, res) => {
     try {

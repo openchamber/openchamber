@@ -5,6 +5,7 @@ import {
   applyWaitingPageEvent,
   resetGlobalBlockingRequests,
   readHostBlockingRequestsSnapshot,
+  settledPageKeys,
   useGlobalBlockingRequestsStore,
   type BlockingFormRequest,
   type BlockingPermissionRequest,
@@ -55,6 +56,21 @@ describe('global blocking requests index', () => {
   test('seeds waiting pages from the host', async () => {
     await readHostBlockingRequestsSnapshot(hostSnapshot({ s1: { permissions: [], forms: [], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick' }] } }), () => '/other');
     expect(bySession().get('s1')?.pages.map((page) => page.id)).toEqual(['call_1']);
+  });
+
+  test('reports a page the host snapshot settled after its end event was missed, and only that one', async () => {
+    const waiting = (sessionID: string, id: string) => ({ type: 'openchamber.page-waiting' as const, properties: { sessionID, directory: '/repo', page: { id, title: 'Pick' } } });
+    applyWaitingPageEvent(waiting('s1', 'call_1'), () => null);
+    applyWaitingPageEvent(waiting('s1', 'call_2'), () => null);
+    applyWaitingPageEvent(waiting('s2', 'call_3'), () => null);
+    const before = bySession();
+
+    await readHostBlockingRequestsSnapshot(hostSnapshot({
+      s1: { permissions: [], forms: [], pages: [{ id: 'call_2', sessionID: 's1', title: 'Pick' }] },
+      s2: { permissions: [], forms: [], pages: [{ id: 'call_3', sessionID: 's2', title: 'Pick' }] },
+    }), () => '/repo');
+
+    expect(settledPageKeys(before, bySession())).toEqual(['s1:call_1']);
   });
 
   test('tracks asks per session and settles them by request id', () => {

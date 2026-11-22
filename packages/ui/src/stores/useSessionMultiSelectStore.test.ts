@@ -38,6 +38,33 @@ describe('useSessionMultiSelectStore logical ranges', () => {
     expect([...useSessionMultiSelectStore.getState().selectedIds]).toEqual(['parent', 'child']);
   });
 
+  test('a range skips the sessions of a folded work, which have no row', () => {
+    const zone: SessionRowOrderEntry[] = [
+      { id: 'first', rowKey: 'activity:work:first', scopeKey: 'activity:work', archived: false },
+      { id: 'folded', rowKey: null, scopeKey: 'activity:work', archived: false },
+      { id: 'last', rowKey: 'activity:work:last', scopeKey: 'activity:work', archived: false },
+    ];
+    useSessionMultiSelectStore.getState().setRange('activity:work:first', 'activity:work:last', zone, [], 'activity:work');
+
+    expect([...useSessionMultiSelectStore.getState().selectedIds]).toEqual(['first', 'last']);
+  });
+
+  test('a selected session shown again in another scope unchecks there and keeps the rest', () => {
+    const store = useSessionMultiSelectStore.getState;
+    store().toggleSelected('in-work-a', 'activity:work', ['in-work-a-child'], 'activity:work:in-work-a');
+    store().toggleSelected('in-work-b', 'activity:work', [], 'activity:work:in-work-b');
+    // The same session's row under its project.
+    store().toggleSelected('in-work-a', 'project-a', ['in-work-a-child'], 'project:in-work-a');
+
+    expect([...store().selectedIds]).toEqual(['in-work-b']);
+    expect(store().scopeKey).toBe('activity:work');
+
+    // A row of another scope that is not selected still starts a new selection.
+    store().toggleSelected('session-c', 'project-b', [], 'other:session-c');
+    expect([...store().selectedIds]).toEqual(['session-c']);
+    expect(store().scopeKey).toBe('project-b');
+  });
+
   test('an anchorless shift selection starts at the clicked occurrence', () => {
     useSessionMultiSelectStore.getState().setRange(null, 'project:session-a', entries, ['session-b-child'], 'project-a');
 

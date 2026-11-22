@@ -78,7 +78,7 @@ export const modelRouteSchema = z
     variantRules: z.array(z.object({ match: z.string(), map: variantMapSchema })).optional(),
     cache_format: z.enum(['anthropic', 'alibaba']).optional(),
     limit: contextLimitSchema.optional(),
-    nestedTimeout: z.enum(['longest', 'shortest']).optional(),
+    nestedTimeout: z.enum(['longest', 'shortest', 'own']).optional(),
     autonomy: z.enum(AUTONOMY_LEVELS).optional(),
     selection: z.enum(['ordered', 'round-robin', 'weighted']).optional(),
     weights: z.record(z.string(), z.number()).optional(),

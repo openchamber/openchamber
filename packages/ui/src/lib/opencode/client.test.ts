@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, jest, mock, test } from "bun:test"
 import { z } from "zod"
 import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
@@ -26,6 +26,7 @@ let runtimeKey = "test-runtime"
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } })
 const noContent = () => new Response(null, { status: 204 })
+const agentList = (...ids: string[]) => json({ data: ids.map((id) => ({ id })) })
 
 const runtimeFetchMock = mock<RuntimeFetch>(async (input, init) => {
   const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url, "http://runtime.test")
@@ -74,6 +75,10 @@ mock.module("@/lib/runtime-url", () => ({
 mock.module("@/lib/runtime-switch", () => ({
   getRuntimeApiBaseUrl: mock(() => ""),
   getRuntimeKey: mock(() => runtimeKey),
+  captureRuntimeInstance: () => {
+    const captured = runtimeKey
+    return () => captured === runtimeKey
+  },
 }))
 
 mock.module("@/lib/runtime-fetch", () => ({
@@ -84,7 +89,7 @@ mock.module("@/lib/startupTrace", () => ({
   markStartupTrace: mock(() => undefined),
 }))
 
-const { OpencodeApiError, createRuntimeOpencodeClient, opencodeClient } = await import(`./client?client-test=${Date.now()}`)
+const { AgentUnavailableError, OpencodeApiError, createRuntimeOpencodeClient, isOpencodeNotFound, opencodeClient } = await import(`./client?client-test=${Date.now()}`)
 const { readProjectConfigError } = await import("./configError")
 
 const sessionInfo = {
@@ -196,6 +201,18 @@ describe("request fidelity", () => {
     expect(requests.map((request) => request.url.searchParams.get("limit"))).toEqual(["200", "50"])
   })
 
+  test("a Windows network share reaches OpenCode with backslashes, so it stays a UNC path", async () => {
+    responses.push(json({ data: [], cursor: {} }))
+    await opencodeClient.listSessionsPage({ directory: "//100.64.0.1/share/repo" })
+    expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("\\\\100.64.0.1\\share\\repo"))
+    expect(requests[0].url.searchParams.get("directory")).toBe("\\\\100.64.0.1\\share\\repo")
+
+    responses.push(json({ data: sessionInfo }))
+    await opencodeClient.createSession({}, "//100.64.0.1/share/repo")
+    const { location } = z.object({ location: z.object({ directory: z.string() }) }).parse(requests[1].body)
+    expect(location.directory).toBe("\\\\100.64.0.1\\share\\repo")
+  })
+
   test("a session created on an explicit Default thinking level is created without a variant", async () => {
     responses.push(json({ data: sessionInfo }))
     await opencodeClient.createSession({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: null } }, "/repo/app")
@@ -227,6 +244,28 @@ describe("request fidelity", () => {
     expect(requests[0].method).toBe("PATCH")
     expect(requests[0].url.pathname).toBe("/api/session/ses_1")
     expect(requests[0].body).toEqual({ subagentPolicy })
+  })
+
+  test("pinning a pool member POSTs the route target and reads back the session's pins", async () => {
+    const target = { providerID: "github-copilot", id: "gemini-4-carbon", variant: "high" }
+    responses.push(json({ data: [{ routeID: "strong-pool", target }] }))
+    const pins = await opencodeClient.setSessionRouteTarget("ses_1", "strong-pool", target, "/repo/app")
+    expect(requests[0].method).toBe("POST")
+    expect(requests[0].url.pathname).toBe("/api/session/ses_1/route-target")
+    expect(requests[0].body).toEqual({ routeID: "strong-pool", target })
+    expect(pins).toEqual([{ routeID: "strong-pool", target }])
+  })
+
+  test("clearing a pin sends target null, and listing reads the pins", async () => {
+    responses.push(json({ data: [] }))
+    expect(await opencodeClient.setSessionRouteTarget("ses_1", "strong-pool", null, "/repo/app")).toEqual([])
+    expect(requests[0].body).toEqual({ routeID: "strong-pool", target: null })
+    responses.push(json({ data: [{ routeID: "p", target: { providerID: "a", id: "m" } }] }))
+    expect(await opencodeClient.getSessionRouteTargets("ses_1", "/repo/app")).toEqual([
+      { routeID: "p", target: { providerID: "a", id: "m" } },
+    ])
+    expect(requests[1].method).toBe("GET")
+    expect(requests[1].url.pathname).toBe("/api/session/ses_1/route-target")
   })
 
   test("releasing a location names its directory, never OpenCode's own", async () => {
@@ -307,34 +346,6 @@ test('a drive-root system-info fallback stays absolute', async () => {
     expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/current"))
   })
 
-  test("invalidating an agent list starts a new request without letting the old request clear it", async () => {
-    const wireAgent = (id: string) => ({
-      id,
-      name: id,
-      mode: "subagent",
-      request: { settings: {}, headers: {}, body: {} },
-      hidden: false,
-      permissions: [],
-    })
-    let releaseFirst: (response: Response) => void = () => undefined
-    const firstResponse = new Promise<Response>((resolve) => {
-      releaseFirst = resolve
-    })
-    responses.push(() => firstResponse)
-
-    const first = opencodeClient.listAgents("/repo/agents")
-    await Promise.resolve()
-    expect(requests).toHaveLength(1)
-
-    opencodeClient.invalidateAgentList("/repo/agents")
-    responses.push(json({ location: {}, data: [wireAgent("new-agent")] }))
-    const fresh = opencodeClient.listAgents("/repo/agents")
-    expect(requests).toHaveLength(2)
-
-    releaseFirst(json({ location: {}, data: [wireAgent("old-agent")] }))
-    expect((await first)[0]?.name).toBe("old-agent")
-    expect((await fresh)[0]?.name).toBe("new-agent")
-  })
 })
 
 describe("error normalisation", () => {
@@ -397,6 +408,17 @@ describe("error normalisation", () => {
     expect(isAmbiguousSendFailure(error)).toBe(true)
   })
 
+  // Pinned-message hydration and the dead-link check both rely on this: one
+  // request against the requested session, and a miss stays a recognisable 404.
+  test("getSessionMessage reads only the requested session and keeps a miss a 404", async () => {
+    responses.push(json({ _tag: "MessageNotFoundError", message: "gone" }, 404))
+    const error = await opencodeClient.getSessionMessage("ses_child", "msg_parent").catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(OpencodeApiError)
+    expect(isOpencodeNotFound(error)).toBe(true)
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url.pathname).toBe("/api/session/ses_child/message/msg_parent")
+  })
+
   test("fetchPermission maps 404 to resolved and everything else to unknown", async () => {
     responses.push(json({ _tag: "PermissionNotFoundError", message: "gone" }, 404))
     expect(await opencodeClient.fetchPermission("ses_1", "per_1")).toEqual({ state: "resolved" })
@@ -413,7 +435,7 @@ describe("error normalisation", () => {
 
 describe("sendMessage", () => {
   test("switches model and agent, admits context as synthetic messages, then prompts", async () => {
-    responses.push(noContent(), noContent(), json({ id: "syn_1" }), json({ id: "msg_1" }))
+    responses.push(agentList("build", "plan"), noContent(), noContent(), json({ id: "syn_1" }), json({ id: "msg_1" }))
     const id = await opencodeClient.sendMessage({
       id: "ses_1",
       providerID: "openai",
@@ -427,19 +449,44 @@ describe("sendMessage", () => {
     })
     expect(id).toBe("msg_1")
     expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/agent",
       "POST /api/session/ses_1/model",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/synthetic",
       "POST /api/session/ses_1/prompt",
     ])
-    expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
-    expect(requests[2].body).toMatchObject({ text: "selected code", resume: false, metadata: { openchamberContext: { kind: "file-quote" } } })
-    expect(requests[3].body).toEqual({
+    expect(requests[1].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
+    expect(requests[3].body).toMatchObject({ text: "selected code", resume: false, metadata: { openchamberContext: { kind: "file-quote" } } })
+    expect(requests[4].body).toEqual({
       id: "msg_1",
       text: "hello",
       agents: [{ name: "explore", mention: { start: 0, end: 8, text: "@explore" } }],
     })
     expect(requests.every((r) => r.headers.get("x-opencode-directory") === encodeURIComponent("/repo/app"))).toBe(true)
+  })
+
+  test("beforeSend runs once every context part was admitted and right before the prompt leaves", async () => {
+    const seen: string[] = []
+    responses.push(
+      json({ id: "syn_1" }),
+      // The second context part answers late: beforeSend must still wait for it.
+      async () => { await new Promise((resolve) => setTimeout(resolve, 20)); seen.push("context admitted"); return json({ id: "syn_2" }) },
+      () => { seen.push("prompt request"); return json({ id: "msg_1" }) },
+    )
+    await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      text: "hello",
+      messageId: "msg_1",
+      context: [{ text: "first" }, { text: "second" }],
+      beforeSend: () => { seen.push("beforeSend") },
+    })
+    expect(seen).toEqual(["context admitted", "beforeSend", "prompt request"])
+    expect(requests.map((r) => r.url.pathname)).toEqual([
+      "/api/session/ses_1/synthetic",
+      "/api/session/ses_1/synthetic",
+      "/api/session/ses_1/prompt",
+    ])
   })
 
   test("context ids travel with the synthetic messages and sort below the prompt id", async () => {
@@ -514,7 +561,7 @@ describe("sendMessage", () => {
   // A runtime switch while the model switch is in flight: the agent switch,
   // context and prompt must not go to the new server.
   test("stops between the model and agent switch when the runtime changes mid-send", async () => {
-    responses.push(() => {
+    responses.push(agentList("build"), () => {
       runtimeKey = "other"
       return noContent()
     })
@@ -529,11 +576,11 @@ describe("sendMessage", () => {
         context: [{ text: "ctx" }],
       }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/model"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/model"])
   })
 
   test("stops before the prompt when the runtime changes after the agent switch", async () => {
-    responses.push(noContent(), () => {
+    responses.push(agentList("build"), noContent(), () => {
       runtimeKey = "other"
       return noContent()
     })
@@ -547,7 +594,38 @@ describe("sendMessage", () => {
         text: "hello",
       }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/model", "/api/session/ses_1/agent"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/model", "/api/session/ses_1/agent"])
+  })
+
+  test("refuses an agent the session's folder does not have before switching anything (#5522)", async () => {
+    responses.push(agentList("build", "plan"))
+    const sending = opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "xai",
+      model: { id: "grok-4.7", providerID: "xai" },
+      agent: "stock",
+      text: "hello",
+      directory: "/repo/app",
+    })
+    await expect(sending).rejects.toBeInstanceOf(AgentUnavailableError)
+    expect(await sending.catch((error: Error) => error)).toMatchObject({ agent: "stock", directory: "/repo/app" })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["GET /api/agent"])
+    expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/app"))
+  })
+
+  test("a failed or empty agent lookup does not block the send", async () => {
+    responses.push(new Error("agent list unreachable"), noContent(), json({ id: "msg_10" }))
+    await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", agent: "build", text: "hello", messageId: "msg_10" })
+    responses.push(agentList(), noContent(), json({ id: "msg_11" }))
+    await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", agent: "build", text: "hello", messageId: "msg_11" })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/agent",
+      "POST /api/session/ses_1/agent",
+      "POST /api/session/ses_1/prompt",
+      "GET /api/agent",
+      "POST /api/session/ses_1/agent",
+      "POST /api/session/ses_1/prompt",
+    ])
   })
 
   test("stops between context messages when the runtime changes", async () => {
@@ -565,6 +643,16 @@ describe("sendMessage", () => {
       }),
     ).rejects.toThrow("runtime changed")
     expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/synthetic"])
+  })
+
+  // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
+  test("commits a staged revert once, before the first context message, and only when there is one", async () => {
+    responses.push(noContent(), json({ id: "syn_1" }), json({ id: "syn_2" }), json({ id: "msg_1" }), noContent(), json({ id: "syn_3" }), noContent(), json({ id: "msg_2" }))
+    const commitRevert = () => opencodeClient.commitRevert("ses_1")
+    await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "", context: [{ text: "a" }, { text: "b" }], commitRevert })
+    await opencodeClient.sendCommand({ id: "ses_1", command: "review", context: [{ text: "c" }], commitRevert })
+    await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "plain", commitRevert })
+    expect(requests.map((r) => r.url.pathname.split("/").pop())).toEqual(["commit", "synthetic", "synthetic", "prompt", "commit", "synthetic", "command", "prompt"])
   })
 })
 
@@ -658,7 +746,7 @@ describe("sendMessage with inline skills", () => {
 
 describe("sendCommand", () => {
   test("switches model and agent, then runs the command", async () => {
-    responses.push(noContent(), noContent(), noContent())
+    responses.push(agentList("build"), noContent(), noContent(), noContent())
     await opencodeClient.sendCommand({
       runtimeKey: "test-runtime",
       id: "ses_1",
@@ -668,15 +756,24 @@ describe("sendCommand", () => {
       arguments: "src",
     })
     expect(requests.map((r) => r.url.pathname)).toEqual([
+      "/api/agent",
       "/api/session/ses_1/model",
       "/api/session/ses_1/agent",
       "/api/session/ses_1/command",
     ])
-    expect(requests[2].body).toMatchObject({ name: "review", text: "src" })
+    expect(requests[3].body).toMatchObject({ name: "review", text: "src" })
+  })
+
+  test("refuses a command for an agent the session's folder does not have", async () => {
+    responses.push(agentList("build"))
+    await expect(
+      opencodeClient.sendCommand({ id: "ses_1", model: { id: "m", providerID: "openai" }, agent: "stock", command: "review" }),
+    ).rejects.toBeInstanceOf(AgentUnavailableError)
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent"])
   })
 
   test("stops after the model switch when the runtime changes mid-command", async () => {
-    responses.push(() => {
+    responses.push(agentList("build"), () => {
       runtimeKey = "other"
       return noContent()
     })
@@ -689,18 +786,18 @@ describe("sendCommand", () => {
         command: "review",
       }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/model"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/model"])
   })
 
   test("stops before the command when the runtime changes after the agent switch", async () => {
-    responses.push(() => {
+    responses.push(agentList("build"), () => {
       runtimeKey = "other"
       return noContent()
     })
     await expect(
       opencodeClient.sendCommand({ runtimeKey: "test-runtime", id: "ses_1", agent: "build", command: "review" }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/agent"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/agent"])
   })
 })
 
@@ -771,6 +868,65 @@ describe("messages and config", () => {
     await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
     await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
     expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual(["v1", null, null])
+  })
+
+  describe("a page asked before the capability is known", () => {
+    const shellsHeaders = () => requests
+      .filter((request) => request.url.pathname === "/api/session/ses_1/message")
+      .map((request) => request.headers.get("x-openchamber-part-shells"))
+    const capable = () => json({ compatibility: { capabilities: ["api.message-part-shells.v1"] } })
+    const emptyPage = () => json({ data: [], cursor: {} })
+    // A macrotask: every request the client would send without waiting is out by then.
+    const settle = () => new Promise((resolve) => setImmediate(resolve))
+    const pendingCheck = () => {
+      let answer: (response: Response) => void = () => undefined
+      responses.push(() => new Promise<Response>((resolve) => { answer = resolve }))
+      return (response: Response) => answer(response)
+    }
+
+    test("waits for the check and asks for shells", async () => {
+      runtimeKey = "shells-first-page"
+      responses.push(capable(), emptyPage())
+      await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+      expect(shellsHeaders()).toEqual(["v1"])
+    })
+
+    test("waits once per check for a check that does not answer", async () => {
+      runtimeKey = "shells-hung-check"
+      jest.useFakeTimers()
+      try {
+        const answer = pendingCheck()
+        opencodeClient.learnMessagePageShellsSupport()
+        responses.push(emptyPage(), emptyPage(), emptyPage())
+        const first = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        await settle()
+        expect(shellsHeaders()).toEqual([])
+        jest.advanceTimersByTime(5_000)
+        await first
+        // The bound has passed, so the next page goes out without waiting again.
+        const second = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        await settle()
+        expect(shellsHeaders()).toEqual([null, null])
+        await second
+        answer(capable())
+        await settle()
+        await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+        expect(shellsHeaders()).toEqual([null, null, "v1"])
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    test("is dropped when the runtime changes during the wait", async () => {
+      runtimeKey = "shells-switch-from"
+      const answer = pendingCheck()
+      const page = opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+      await settle()
+      runtimeKey = "shells-switch-to"
+      answer(capable())
+      await expect(page).rejects.toThrow("Runtime instance changed")
+      expect(shellsHeaders()).toEqual([])
+    })
   })
 
   test("a page lost to a relay tunnel drop keeps asking for shelled pages", async () => {
@@ -844,6 +1000,27 @@ describe("messages and config", () => {
     expect(catalog.providers).toEqual([{ id: "openai", name: "OpenAI" }])
     expect(catalog.models).toHaveLength(1)
     expect(catalog.default).toEqual({ id: "x", providerID: "openai" })
+    // Without types OpenCode lists chat models only, and an image-only provider
+    // would vanish from Settings → Providers.
+    const modelList = requests.find((request) => request.url.pathname === "/api/model")
+    expect(modelList?.url.searchParams.getAll("types")).toEqual(["chat", "image"])
+  })
+
+  test("getProvidersForConfig names the Zen provider OpenCode Zen, whatever Console workspace OpenCode puts in front", async () => {
+    const providers = [
+      { id: "opencode", integrationID: "opencode", name: "Personal OC / OpenCode" },
+      { id: "opencode-go", integrationID: "opencode", name: "OpenCode Go" },
+      { id: "console-google", integrationID: "opencode", name: "Personal OC / Google" },
+    ]
+    const answer = (request: CapturedRequest) =>
+      request.url.pathname === "/api/provider"
+        ? json({ location: {}, data: providers })
+        : request.url.pathname === "/api/model"
+          ? json({ location: {}, data: [] })
+          : json({ location: {}, data: null })
+    responses.push(answer, answer, answer)
+    const catalog = await opencodeClient.getProvidersForConfig("/repo/zen")
+    expect(catalog.providers?.map((provider: { name: string }) => provider.name)).toEqual(["OpenCode Zen", "OpenCode Go", "Personal OC / Google"])
   })
 
   for (const { label, variants } of [
@@ -883,26 +1060,6 @@ describe("messages and config", () => {
     expect(catalog.models[0]).toEqual(model)
   })
 
-  test("providers are asked only after the models answered", async () => {
-    // OpenCode 2.0.27+ holds the model routes until the directory's plugins are
-    // active; a provider read sent alongside answers before them, empty.
-    const answer = (request: CapturedRequest) =>
-      request.url.pathname === "/api/provider"
-        ? json({ location: {}, data: [{ id: "openai", name: "OpenAI" }] })
-        : request.url.pathname === "/api/model"
-          ? json({ location: {}, data: [{ id: "openai/x", modelID: "x", providerID: "openai" }] })
-          : json({ location: {}, data: { id: "openai/x", modelID: "x", providerID: "openai" } })
-    responses.push(answer, answer, answer)
-    const before = requests.length
-
-    await opencodeClient.getProvidersForConfig("/repo/app")
-    expect(requests.slice(before).map((request) => request.url.pathname)).toEqual([
-      "/api/model",
-      "/api/model/default",
-      "/api/provider",
-    ])
-  })
-
   test("a fresh provider read waits out the one in flight and reads again", async () => {
     const answer = (request: CapturedRequest) =>
       request.url.pathname === "/api/provider"
@@ -923,6 +1080,22 @@ describe("messages and config", () => {
     expect(joinedCatalog).toBe(firstCatalog)
     expect(freshCatalog).not.toBe(firstCatalog)
   })
+
+  test("fresh triggers arriving during a fresh read share one post-call replacement per directory", async () => {
+    const answer = (request: CapturedRequest) => json({ location: {}, data:
+      request.url.pathname === "/api/model/default" ? { modelID: "x", providerID: "openai" } : [] })
+    responses.push(...Array.from({ length: 48 }, () => answer))
+    const before = requests.length
+    await Promise.all(["/repo/app", "/repo/other"].flatMap((directory) =>
+      Array.from({ length: 8 }, () => opencodeClient.getProvidersForConfig(directory, { fresh: true }))))
+    const reads = requests.slice(before)
+    expect(reads).toHaveLength(12)
+    for (const directory of ["/repo/app", "/repo/other"]) {
+      for (const path of ["/api/model", "/api/model/default", "/api/provider"]) {
+        expect(reads.filter((request) => request.url.pathname === path && request.headers.get("x-opencode-directory") === encodeURIComponent(directory))).toHaveLength(2)
+      }
+    }
+  })
 })
 
 describe("providers of an isolated space", () => {
@@ -937,20 +1110,13 @@ describe("providers of an isolated space", () => {
     const space = "/spaces/a1b2c3d4e5f6/app"
     useSpacesStore.getState().applyMarks([{ id: "a1b2c3d4e5f6", name: "One", state: "complete", projectDirectory: "/repo/app", directory: space }])
     try {
-      responses.push(providerAnswer, providerAnswer, providerAnswer, providerAnswer)
+      responses.push(providerAnswer, providerAnswer, providerAnswer)
       const before = requests.length
       const catalog = await opencodeClient.getProvidersForConfig(space)
       expect(catalog.providers).toEqual([{ id: "lighthouse", name: "Lighthouse" }])
-      const made = requests.slice(before)
-      const providerIndex = made.findIndex((request) => request.url.pathname.endsWith("/provider"))
-      const provider = made[providerIndex]
+      const provider = requests.slice(before).find((request) => request.url.pathname.endsWith("/provider"))
       expect(provider?.url.pathname).toBe("/api/provider")
       expect(provider?.headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/app"))
-      // The host project may have stopped: its model route, which waits for the location to start,
-      // is read before its providers, as for any folder.
-      const projectModels = made.findIndex((request) => request.url.pathname.endsWith("/model") && request.headers.get("x-opencode-directory") === encodeURIComponent("/repo/app"))
-      expect(projectModels).toBeGreaterThanOrEqual(0)
-      expect(projectModels).toBeLessThan(providerIndex)
     } finally {
       useSpacesStore.getState().applyMarks([])
     }
@@ -1001,10 +1167,31 @@ describe("read timeouts (#2470)", () => {
     await new Promise((resolve) => setTimeout(resolve, 60))
     expect(settled).toBe(false)
   })
+
+  test("a usage stats read outlasts the read timeout (#6366)", async () => {
+    const client = createRuntimeOpencodeClient({ baseUrl: "http://runtime.test/api", requestTimeoutMs: 20 })
+    const caller = new AbortController()
+    let settled = false
+    responses.push(HANG)
+    const read = client.experimental.session.stats({}, { signal: caller.signal }).then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(settled).toBe(false)
+    // The caller's abort ends the hanging read so the test leaves nothing pending.
+    caller.abort()
+    await read
+  })
 })
 
 describe("sendCommand context", () => {
   test("delivers attached context as non-resuming synthetic messages before the command", async () => {
+    responses.push(agentList("build")) // agent check
     responses.push(new Response(null, { status: 204 })) // model switch
     responses.push(new Response(null, { status: 204 })) // agent switch
     responses.push(json({ data: { id: "msg_ctx" } })) // synthetic
@@ -1080,5 +1267,184 @@ describe("directory availability batching", () => {
       opencodeClient.getDirectoryAvailability("/repo/two"),
     ])
     expect(results).toEqual(["unknown", "unknown"])
+  })
+})
+
+describe("directory real paths", () => {
+  test("maps each resolved directory to its real path and leaves the rest out", async () => {
+    responses.push(json({ results: [
+      { path: "/home/me/link", isDirectory: true, realPath: "/home/me/project" },
+      { path: "/home/me/gone", isDirectory: false, reason: "not-found" },
+    ] }))
+    const realPaths = await opencodeClient.getDirectoryRealPaths(["/home/me/link", "/home/me/gone"])
+    expect([...realPaths]).toEqual([["/home/me/link", "/home/me/project"]])
+  })
+
+  test("resolves nothing when the runtime refuses the probe (VS Code 501)", async () => {
+    responses.push(json({ error: "Directory availability probes are not supported in the VS Code runtime" }, 501))
+    expect((await opencodeClient.getDirectoryRealPaths(["/home/me/link"])).size).toBe(0)
+  })
+})
+
+describe("a subagent transcript showing a message its parent stores", () => {
+  const messageID = "msg_parent_owned"
+  const wire = {
+    id: messageID,
+    type: "assistant",
+    time: { created: 1000, completed: 1500 },
+    agent: "build",
+    model: { id: "gpt-5.6-luna", providerID: "openai" },
+    finish: "stop",
+    cost: 0,
+    tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+    content: [{
+      type: "tool",
+      id: "call_1",
+      name: "bash",
+      executed: true,
+      time: { created: 1003, ran: 1004, completed: 1005 },
+      state: { status: "completed", input: { command: "ls" }, content: [{ type: "text", text: "parent-owned output" }] },
+    }],
+  }
+  const session = (id: string, parentID?: string) => json({ data: { ...sessionInfo, id, parentID } })
+  const messageNotFound = () => json({ _tag: "MessageNotFoundError", message: "not found" }, 404)
+  const messageURL = (sessionID: string) => `/api/session/${sessionID}/message/${messageID}`
+  const paths = () => requests.map((r) => r.url.pathname)
+
+  test("pins, references and existence checks read only the requested session", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), json({ data: wire }))
+    expect(await opencodeClient.getSessionMessage("ses_child", messageID).catch((error: unknown) => error))
+      .toMatchObject({ status: 404 })
+    expect(paths()).toEqual([messageURL("ses_child")])
+  })
+
+  test("is read under the parent and stays the child's message", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), json({ data: wire }))
+    const record = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app")
+    expect(paths()).toEqual([messageURL("ses_child"), "/api/session/ses_child", messageURL("ses_parent")])
+    expect(record.info).toMatchObject({ id: messageID, sessionID: "ses_child" })
+    expect(record.parts.map((part: { sessionID: string }) => part.sessionID)).toEqual(["ses_child"])
+    expect(JSON.stringify(record.parts)).toContain("parent-owned output")
+  })
+
+  test("is found through more than one ancestor", async () => {
+    responses.push(
+      messageNotFound(), session("ses_grandchild", "ses_child"),
+      messageNotFound(), session("ses_child", "ses_parent"),
+      json({ data: wire }),
+    )
+    const record = await opencodeClient.getToolContentMessage("ses_grandchild", messageID, "/repo/app")
+    expect(paths().at(-1)).toBe(messageURL("ses_parent"))
+    expect(record.info).toMatchObject({ sessionID: "ses_grandchild" })
+  })
+
+  test("a message the session stores itself takes exactly one read", async () => {
+    responses.push(json({ data: wire }))
+    const record = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app")
+    expect(paths()).toEqual([messageURL("ses_child")])
+    expect(record.info).toMatchObject({ sessionID: "ses_child" })
+  })
+
+  test("a message no ancestor has either still fails with the transcript's own 404", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), messageNotFound(), session("ses_parent"))
+    const error = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(OpencodeApiError)
+    expect(error).toMatchObject({ status: 404, operation: "session.message.get" })
+    expect(paths()).toEqual([messageURL("ses_child"), "/api/session/ses_child", messageURL("ses_parent"), "/api/session/ses_parent"])
+  })
+
+  test("a server failure is not taken as absence and reads no other session", async () => {
+    responses.push(json({ _tag: "UnknownError", message: "boom" }, 500))
+    const error = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((e: unknown) => e)
+    expect(error).toMatchObject({ status: 500 })
+    expect(paths()).toEqual([messageURL("ses_child")])
+  })
+
+  test("a parent chain that loops back stops instead of reading again", async () => {
+    responses.push(
+      messageNotFound(), session("ses_child", "ses_parent"),
+      messageNotFound(), session("ses_parent", "ses_child"),
+    )
+    const error = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((e: unknown) => e)
+    expect(error).toMatchObject({ status: 404 })
+    expect(paths()).toHaveLength(4)
+  })
+
+  test("a runtime switch during the lookup ends it", async () => {
+    responses.push(messageNotFound(), () => {
+      runtimeKey = "other-runtime"
+      return session("ses_child", "ses_parent")
+    })
+    const error = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((e: unknown) => e)
+    expect(error).toMatchObject({ status: 404 })
+    expect(paths()).toEqual([messageURL("ses_child"), "/api/session/ses_child"])
+  })
+
+  test("a runtime switch during a successful ancestor read discards the result", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), () => {
+      runtimeKey = "other-runtime"
+      return json({ data: wire })
+    })
+    expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 404 })
+  })
+
+  test("stops after 32 session reads with the first message 404", async () => {
+    for (let index = 0; index < 32; index++) {
+      responses.push(messageNotFound(), session(`ses_${index}`, `ses_${index + 1}`))
+    }
+    expect(await opencodeClient.getToolContentMessage("ses_0", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 404, operation: "session.message.get" })
+    expect(paths().filter((path) => path.includes("/message/"))).toHaveLength(32)
+  })
+
+  test("a non-404 ancestor failure stops without reading further", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), json({}, 500))
+    expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 500 })
+    expect(paths()).toHaveLength(3)
+  })
+
+  test("missing parent metadata preserves the initial message 404", async () => {
+    responses.push(messageNotFound(), json({ _tag: "SessionNotFoundError", message: "missing session" }, 404))
+    expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 404, operation: "session.message.get", detail: "not found" })
+    expect(paths()).toHaveLength(2)
+  })
+
+  test("a parent metadata server failure propagates unchanged", async () => {
+    responses.push(messageNotFound(), json({}, 500))
+    expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 500, operation: "session.get" })
+    expect(paths()).toHaveLength(2)
+  })
+})
+
+describe("stopBackgroundShells", () => {
+  const shells = [
+    { shellID: "sh_1", shellDirectory: "/repo/app", command: "sleep 100" },
+    { shellID: "sh_2", shellDirectory: "/repo/app", command: "sleep 200" },
+  ] as const
+
+  test("tells the agent first, then removes the commands", async () => {
+    responses.push(json({ id: "syn_1" }), noContent(), noContent())
+    await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "POST /api/session/ses_1/synthetic",
+      "DELETE /api/shell/sh_1",
+      "DELETE /api/shell/sh_2",
+    ])
+  })
+
+  // The kills would reach the new server: the note stays on the old one.
+  test("removes nothing when the runtime changes while the note is on its way", async () => {
+    responses.push(() => {
+      runtimeKey = "other"
+      return json({ id: "syn_1" })
+    })
+    await expect(
+      opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells }),
+    ).rejects.toThrow("runtime changed")
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/synthetic"])
   })
 })

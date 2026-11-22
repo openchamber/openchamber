@@ -5,7 +5,6 @@ import { resolvePrColors } from './themes/prColors';
 /** Fill behind a pull request state pill: its colour at this share over the page. */
 export const PR_PILL_TINT = 0.18;
 
-/** Host-owned text colors shared by app CSS and extension snapshots. */
 export function getReadableThemeColors(theme: Theme) {
   const { surface, primary, status, interactive } = theme.colors;
   const dark = theme.metadata.variant === 'dark';

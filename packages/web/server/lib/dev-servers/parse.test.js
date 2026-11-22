@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   isLocallyReachableHost,
+  parseLsofCwds,
   parseLsofListeners,
   parseProcNetTcpListeners,
   parseNetstatListeners,
@@ -63,6 +64,23 @@ describe('lsof listener parsing', () => {
   test('records a null pid when the pid field has trailing junk', () => {
     expect(parseLsofListeners(['p123junk', 'cnode', 'n127.0.0.1:5173'].join('\n')))
       .toEqual([{ port: 5173, pid: null, command: 'node' }]);
+  });
+});
+
+describe('lsof working directory parsing', () => {
+  test('maps every process to the folder it runs in', () => {
+    const output = ['p10', 'fcwd', 'n/Users/me/site', 'p11', 'fcwd', 'n/'].join('\n');
+    expect(parseLsofCwds(output)).toEqual(new Map([[10, '/Users/me/site'], [11, '/']]));
+  });
+
+  test('leaves out a process whose folder lsof could not name', () => {
+    const output = ['p10', 'fcwd', 'n/Users/me/site', 'p12', 'fcwd', 'ncwd (readlink: Permission denied)'].join('\n');
+    expect(parseLsofCwds(output)).toEqual(new Map([[10, '/Users/me/site']]));
+  });
+
+  test('tolerates empty output', () => {
+    expect(parseLsofCwds('')).toEqual(new Map());
+    expect(parseLsofCwds(null)).toEqual(new Map());
   });
 });
 

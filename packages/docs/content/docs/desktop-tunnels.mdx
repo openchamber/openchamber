@@ -1,11 +1,11 @@
 ---
 title: Desktop Tunnels
-description: Create Cloudflare or Ngrok tunnels from the desktop app.
+description: Create Cloudflare, Ngrok or Tailscale tunnels from the desktop app.
 ---
 
 # Desktop Tunnels
 
-The desktop app can create a public tunnel from **Settings → OpenChamber → Tunnel**. You do not need to start OpenChamber from the CLI for this path.
+The desktop app can create a tunnel from **Settings → OpenChamber → Tunnel**. You do not need to start OpenChamber from the CLI for this path.
 
 ## Install a provider
 
@@ -22,14 +22,16 @@ Cloudflare uses `cloudflared`. Ngrok requires an ngrok account and an authtoken 
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+For Tailscale, install the [Tailscale app](https://tailscale.com/download) and sign in.
+
 ## Start from the app
 
 1. Open **Settings → OpenChamber → Tunnel**.
-2. Choose **Cloudflare** or **Ngrok**.
-3. Start a quick tunnel.
+2. Choose **Cloudflare**, **Ngrok** or **Tailscale**.
+3. Choose the tunnel type and select **Start tunnel**.
 4. Scan the generated QR code from your phone.
 
-Ngrok currently supports quick tunnels. Cloudflare supports quick tunnels and managed Cloudflare modes.
+Ngrok currently supports quick tunnels. Cloudflare supports quick tunnels and managed Cloudflare modes. Tailscale offers **Serve**, which only devices in your tailnet can open, and **Funnel**, which anyone on the internet can open. If Tailscale first needs you to turn on HTTPS or Funnel for your tailnet, an **Open approval page** button appears next to the error; approve there and start again.
 
 ## Access protection
 

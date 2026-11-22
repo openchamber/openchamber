@@ -219,8 +219,6 @@ export const SubsessionModelsControl: React.FC<SubsessionModelsControlProps> = R
                         over.providerID,
                         over.modelID,
                     )}
-                    reorderFavoriteAriaLabel={t('chat.modelControls.reorderFavoriteAria')}
-                    reorderFavoriteTitle={t('chat.modelControls.reorderFavoriteTitle')}
                     providerOrder={providerOrder}
                     onReorderProvider={setProviderOrder}
                     reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}

@@ -1,7 +1,9 @@
 import React from 'react';
 import {
+  gitRemoteHost,
   identityAccountConnected,
   instanceHost,
+  instanceSshHostsFrom,
   remoteTraits,
   selectableIdentities,
   type RemoteTraits,
@@ -55,9 +57,7 @@ type SourceControlBindingSettingsProps = {
   directory: string;
 };
 
-/** Selects inside the binding editors fill their stacked field instead of the shared settings width cap. */
 const EDITOR_CONTROL_CLASS = 'max-w-none';
-/** Action row under each editor: primary save first, quiet removal second. */
 const EDITOR_ACTIONS_CLASS = 'flex flex-wrap items-center gap-2';
 
 const EditorStatus = ({ error, children }: { error?: boolean; children: React.ReactNode }) => (
@@ -84,14 +84,6 @@ const hydrationRequirements = (operation: GitNetworkOperation | undefined): GitC
   return entries;
 };
 
-/**
- * The remotes the repository's identity does not reach.
- *
- * Every remote follows the repository's identity: the System identity reaches
- * all of them, any other identity those on its own host and protocol. What is
- * left — a remote on another host, or one reached over the other protocol —
- * is listed here with a choice of the identities that can reach it.
- */
 export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps> = ({ directory, className }) => {
   const { t } = useI18n();
   const { git, sourceControl } = useRuntimeAPIs();
@@ -100,6 +92,8 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
   const globalGitIdentity = useGitIdentitiesStore((state) => state.globalIdentity);
   const connectedAccountIds = useConnectedAccountIds();
   const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
+  const sourceControlIdentities = useSourceControlAuthStore((state) => state.identities);
+  const instanceSshHosts = React.useMemo(() => instanceSshHostsFrom(sourceControlIdentities), [sourceControlIdentities]);
   const [pending, setPending] = React.useState('');
   const [error, setError] = React.useState(false);
   const requestRef = React.useRef(0);
@@ -117,12 +111,6 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
       (profile) => isCompleteIdentity(profile) && identityAccountConnected(profile, connectedAccountIds)),
     [connectedAccountIds, gitIdentityProfiles, globalGitIdentity],
   );
-  // A grant whose address moved under it, or whose account is in question, is
-  // as unusable as none at all, so it is offered here beside the remotes that
-  // never had one. The identity's own remote is the repository's, and the
-  // identity button already says when that one needs attention.
-  // A repository nobody configured uses the machine's Git for every remote,
-  // so it is read through the effective binding rather than as "no grants".
   const effective = read ? effectiveRepositoryBinding(read) : null;
   const primaryRemote = effective?.providers[0]?.primaryRemote
     ?? effective?.remotes[0]?.name ?? 'origin';
@@ -169,14 +157,14 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
               identities={identities}
               onSelect={(profile) => void grant(remote.name, profile)}
               isApplying={pending === remote.name}
-              applicability={(profile) => identityApplicability(profile, traits)}
+              applicability={(profile) => identityApplicability(profile, traits, instanceSshHosts)}
               triggerClassName="shrink-0 border border-border"
               onOpen={() => void refreshIdentityAccounts(sourceControl, gitIdentityProfiles.map((profile) => profile.account))}
             />
           </div>
         );
       })}
-      {error ? <EditorStatus error>{t('settings.gitlab.status.operationFailed')}</EditorStatus> : null}
+      {error ? <EditorStatus error>{t('settings.sourceControl.instance.status.operationFailed')}</EditorStatus> : null}
     </SettingsControlGroup>
   );
 };
@@ -199,6 +187,8 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
   const loadGlobalGitIdentity = useGitIdentitiesStore((state) => state.loadGlobalIdentity);
   const connectedAccountIds = useConnectedAccountIds();
   const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
+  const sourceControlIdentities = useSourceControlAuthStore((state) => state.identities);
+  const instanceSshHosts = React.useMemo(() => instanceSshHostsFrom(sourceControlIdentities), [sourceControlIdentities]);
   const repositoryAuthor = useGitIdentity(directory);
   const latest = recovery.entry?.reads.at(-1)?.operation;
   const requirements = latest?.target.operation === 'checkout-hydration'
@@ -229,11 +219,6 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
     void loadGlobalGitIdentity();
   }, [loadGitIdentityProfiles, loadGlobalGitIdentity, open]);
 
-  // A submodule or LFS server is authenticated the same way a remote is, so it
-  // is answered with an identity rather than with a transport and a credential
-  // chosen apart from it. Identities kept from an earlier release name no
-  // account and no transport, so they have nothing to grant an endpoint with
-  // and are not offered here.
   const availableIdentities = React.useMemo(
     () => selectableIdentities(gitIdentityProfiles, globalGitIdentity,
       (identity) => isCompleteIdentity(identity) && identityAccountConnected(identity, connectedAccountIds)),
@@ -242,17 +227,8 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
   const endpointUrl = selected?.endpoint.displayUrl ?? '';
   const endpoint = React.useMemo((): RemoteTraits | null => endpointUrl ? remoteTraits(endpointUrl) : null, [endpointUrl]);
   const applicabilityOf = React.useCallback((identity: GitIdentityProfile): IdentityApplicability =>
-    endpoint ? identityApplicability(identity, endpoint) : { applicable: true }, [endpoint]);
+    endpoint ? identityApplicability(identity, endpoint, instanceSshHosts) : { applicable: true }, [endpoint, instanceSshHosts]);
 
-  /**
-   * The identity this endpoint is proposed with.
-   *
-   * A submodule on the repository's own host is the ordinary case, and the
-   * repository already answered who it acts as there, so that identity is
-   * offered and only has to be confirmed. An endpoint on another host is a
-   * question OpenChamber cannot answer — no identity on file speaks for it —
-   * so nothing is proposed and the person names one.
-   */
   const proposedIdentity = React.useMemo(() => {
     const applicable = availableIdentities.filter((identity) => applicabilityOf(identity).applicable);
     const signedAs = repositoryAuthor?.userName && repositoryAuthor.userEmail
@@ -261,9 +237,10 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
       : undefined;
     return signedAs
       ?? applicable.find((identity) => identity.account && endpoint?.host
-        && instanceHost(identity.account.instance) === endpoint.host)
+        && (instanceHost(identity.account.instance) === endpoint.host
+          || gitRemoteHost(instanceSshHosts[identity.account.instance] ?? '') === endpoint.host))
       ?? null;
-  }, [applicabilityOf, availableIdentities, endpoint, repositoryAuthor]);
+  }, [applicabilityOf, availableIdentities, endpoint, instanceSshHosts, repositoryAuthor]);
   const identity = (identityChoice?.endpoint === selected?.endpoint.fingerprint
     ? availableIdentities.find((entry) => entry.id === identityChoice?.id)
     : null) ?? proposedIdentity;
@@ -328,17 +305,11 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
     }
   };
 
-  // The operation card carries the server's own code and message, which names
-  // the mechanism rather than the next step. Beside the endpoints it stopped
-  // on, this says what to do about them.
   const authorizationNeeded = Boolean(requirements.length && latest && 'error' in latest
     && latest.error.code === 'AUTHENTICATION_REQUIRED');
 
   const kindLabel = (kind: GitCheckoutHydrationRequirement['kind']) => t(kind === 'submodule' ? 'gitView.hydration.kind.submodule' : 'gitView.hydration.kind.lfs');
 
-  // Most repositories have neither submodules nor LFS, and the endpoint list
-  // only appears once a parent remote is chosen and the checkout is inspected.
-  // The block therefore stays closed until someone asks for it.
   return (
     <Collapsible open={open} onOpenChange={setOpen} className={cn('min-w-0', className)}>
       <CollapsibleTrigger className="w-auto justify-start gap-1.5">
@@ -397,7 +368,7 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
       {latest?.hydration?.status === 'client-missing' ? <p role="alert" className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-warning)]')}>
         {t('gitView.hydration.lfsMissing')}
       </p> : null}
-      {error ? <EditorStatus error>{t('settings.gitlab.status.operationFailed')}</EditorStatus> : null}
+      {error ? <EditorStatus error>{t('settings.sourceControl.instance.status.operationFailed')}</EditorStatus> : null}
       <div className={EDITOR_ACTIONS_CLASS}>
         <Button size="sm" variant="outline" disabled={!parentRemote || recovery.blocked || saving} onClick={() => void retryHydration()}>
           {t('gitView.hydration.retry')}

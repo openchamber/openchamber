@@ -16,10 +16,10 @@ import { ShortcutRecordingDialog } from './ShortcutRecordingDialog';
 import type { DesktopQuakeMode } from './useDesktopQuakeMode';
 
 const QUAKE_HEIGHT_OPTIONS = [0.3, 0.35, 0.4, 0.45, 0.5, 0.6, 1];
+const formatHeight = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
 type DesktopQuakeModeSettingsProps = {
   quake: DesktopQuakeMode;
-  // The Mini Chat global combo, a conflict source for the Quake recorder.
   miniChatCombo: string | null;
   onReleaseMiniChatShortcut: () => void;
 };
@@ -37,8 +37,6 @@ export const DesktopQuakeModeSettings: React.FC<DesktopQuakeModeSettingsProps> =
     () => getCustomizableShortcutActions().find((action) => action.id === 'quake_mode_global') ?? null,
     [],
   );
-  // Recording the Mini Chat combo offers a replace instead of a silent
-  // collision the main process would then refuse to register.
   const recorderOverrides = React.useMemo(
     () => (miniChatCombo ? { ...shortcutOverrides, mini_chat_global: miniChatCombo } : shortcutOverrides),
     [miniChatCombo, shortcutOverrides],
@@ -146,12 +144,12 @@ export const DesktopQuakeModeSettings: React.FC<DesktopQuakeModeSettingsProps> =
               className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
               aria-label={t('settings.openchamber.desktopNetwork.field.quakeModeHeightAria')}
             >
-              <SelectValue />
+              <SelectValue>{formatHeight(Number(heightValue))}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {QUAKE_HEIGHT_OPTIONS.map((option) => (
                 <SelectItem key={option} value={String(option)}>
-                  {`${Math.round(option * 100)}%`}
+                  {formatHeight(option)}
                 </SelectItem>
               ))}
             </SelectContent>
