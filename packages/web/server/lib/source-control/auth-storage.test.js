@@ -5,7 +5,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { configureSourceControlVaultReader, createSourceControlAuthStore } from './auth-storage.js';
+import { createSourceControlAuthStore } from './auth-storage.js';
+import { configureSourceControlVaultReader } from './vault-token.js';
 
 const execFileAsync = promisify(execFile);
 const authStorageModuleUrl = pathToFileURL(path.resolve(import.meta.dirname, 'auth-storage.js')).href;

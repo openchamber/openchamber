@@ -198,7 +198,7 @@ import { createEnvironmentStore } from './lib/environment/store.js';
 import { composeEnvironmentRuntime } from './lib/environment/composition.js';
 import { createVaultResolver } from './lib/environment/vault.js';
 import { configureGitHubVaultReader } from './lib/github/auth.js';
-import { configureSourceControlVaultReader } from './lib/source-control/auth-storage.js';
+import { configureSourceControlVaultReader } from './lib/source-control/vault-token.js';
 import { configureLinearVaultReader } from './lib/linear/auth.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
 import { OPENCODE_CONFIG_DIR } from './lib/opencode/config-files.js';

@@ -7,7 +7,8 @@ import { normalizeOriginInstance } from './origin-instance.js';
 import { isExtensionProviderId, isProviderId } from './provider-id.js';
 import { normalizeSshUrl } from './ssh-url.js';
 import { isVaultReference } from '../environment/vault.js';
-import { readBoundedFile } from '../shared/bounded-file-read.js';
+import { isStoredVaultAccount, withVaultToken } from './vault-token.js';
+import { readAuthFileText } from './auth-file-read.js';
 import { renameWithRetry } from '../shared/atomic-rename.js';
 
 export type AuthJson = null | boolean | number | string | AuthJson[] | { [key: string]: AuthJson };
@@ -148,11 +149,8 @@ const userId = (value: AuthJson | undefined, provider: string | undefined): valu
 type CredentialInput = Omit<OriginCredential, 'providerUserId' | 'user' | 'invalidReason' | 'refreshToken' | 'expiresAt'> & {
   providerUserId: AuthJson; user: AuthJson; invalidReason?: AuthJson; refreshToken?: AuthJson; expiresAt?: AuthJson;
 };
-// A token account keeps its token, or, added from a vault, only the reference
-// to it (`tokenReference`, op://…), read when the token is used.
 const hasTokenOrReference = (value: { [key: string]: AuthJson }) => (Object.hasOwn(value, 'tokenReference')
-  ? !Object.hasOwn(value, 'token') && value.source === 'pat' && validText(value.tokenReference) && isVaultReference(value.tokenReference)
-  : validText(value.token));
+  ? isStoredVaultAccount(value, validText) : validText(value.token));
 const credentialInput = (value: AuthJson, provider: string): value is CredentialInput => jsonObject(value)
   && exactKeys(value, ['credentialId', 'revision', 'providerUserId', 'user', 'source', 'scope', 'status'],
     ['invalidReason', 'refreshToken', 'expiresAt', 'token', 'tokenReference'])
@@ -402,33 +400,6 @@ function publicInstance<Credential extends AuthCredential>(instance: AuthInstanc
 }
 
 const REFRESH_MARGIN_MS = 5 * 60_000;
-const AUTH_FILE_MAX_BYTES = 1_048_576;
-
-// Reads a vault reference's secret (`readSecret` of ../environment/vault.js),
-// set once by the server. Without it an account added from a vault has no token.
-type VaultSecretReader = (reference: string) => Promise<{ ok: true; value: string } | { ok: false; reason: string }>;
-let readVaultSecret: VaultSecretReader | null = null;
-
-/** The server's vault reader, for accounts that keep a token reference. */
-export const configureSourceControlVaultReader = (reader: VaultSecretReader | null) => {
-  readVaultSecret = reader;
-};
-
-/** A vault reference's token, for checking it before an account keeps the reference. */
-export const readSourceControlVaultToken = (reference: string) => (readVaultSecret
-  ? readVaultSecret(reference)
-  : Promise.resolve({ ok: false as const, reason: 'vault-unavailable' }));
-
-/**
- * The credential with the token filled in from its vault reference. A token
- * that cannot be read leaves the token empty and names why in `tokenReadError`;
- * the stored credential is unchanged.
- */
-const withVaultToken = async <Credential extends { tokenReference?: string | undefined; token?: string } | null | undefined>(credential: Credential): Promise<Credential> => {
-  if (!credential?.tokenReference) return credential;
-  const outcome = await readSourceControlVaultToken(credential.tokenReference);
-  return outcome.ok ? { ...credential, token: outcome.value } : { ...credential, token: '', tokenReadError: outcome.reason };
-};
 const RENEW_LOCK_WAIT_MS = 15_000;
 
 export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_000, refreshOAuthToken, now = Date.now }: AuthStoreOptions) {
@@ -447,24 +418,8 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     }
   };
   const readState = async (): Promise<AuthState> => {
-    // Bounded: a FIFO or an oversized file at this path is refused instead of read whole.
-    const result = fsImpl === fs ? await readBoundedFile(filePath, AUTH_FILE_MAX_BYTES) : null;
-    let encoded;
-    if (result) {
-      if (!result.ok) {
-        if (result.reason === 'missing') return emptyState();
-        if (result.reason === 'not-regular') throw invalidState(new Error('Auth file is not a regular file', { cause: result }));
-        if (result.reason === 'too-large') throw invalidState(new Error('Auth file exceeds size limit', { cause: result }));
-        throw invalidState(new Error('Failed to read auth file', { cause: result }));
-      }
-      encoded = result.buffer.toString('utf8');
-    } else {
-      try { encoded = await fsImpl.readFile(filePath, 'utf8'); }
-      catch (error) {
-        if (hasSourceControlErrorCode(error) && error.code === 'ENOENT') return emptyState();
-        throw error;
-      }
-    }
+    const encoded = await readAuthFileText(filePath, fsImpl, invalidState);
+    if (encoded === null) return emptyState();
     let value;
     try { value = JSON.parse(encoded); }
     catch (error) { throw invalidState(error); }

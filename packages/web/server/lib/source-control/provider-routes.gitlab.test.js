@@ -6,7 +6,7 @@ import { registerProviderRoutes } from './provider-routes.js';
 import { createProviderDescriptors } from './provider-descriptors.js';
 import { createSourceControlProviders } from './provider-registry.js';
 import { gitlabDescriptor } from '../gitlab/descriptor.js';
-import { configureSourceControlVaultReader as configureGitLabVaultReader } from './auth-storage.js';
+import { configureSourceControlVaultReader as configureGitLabVaultReader } from './vault-token.js';
 
 /**
  * GitLab served by the shared route shell, with the options the GitLab routes
