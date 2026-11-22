@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from '@/components/icon/Icon';
 import { ModelPickerList, type ModelPickerEntry } from '@/components/model-picker/ModelPickerList';
 import { useModelLists } from '@/hooks/useModelLists';
-import { useI18n } from '@/lib/i18n';
+import { formatMessage, useI18n, useI18nStore } from '@/lib/i18n';
 import type { SubagentPolicy } from '@/lib/opencode/model';
 import {
     createSubagentPolicyWriter,
@@ -99,10 +99,10 @@ export const SubsessionModelsControl: React.FC<SubsessionModelsControlProps> = R
             }),
             onError: (error) => {
                 console.error('[SubsessionModelsControl] Failed to update subsession models:', error);
-                toast.error(t('chat.subsessionModels.saveFailed'));
+                toast.error(formatMessage(useI18nStore.getState().dictionary, 'chat.subsessionModels.saveFailed'));
             },
         });
-    }, [directory, sessionId, t]);
+    }, [directory, sessionId]);
 
     const handleOpenChange = React.useCallback((nextOpen: boolean) => {
         setOpen(nextOpen);
@@ -194,7 +194,7 @@ export const SubsessionModelsControl: React.FC<SubsessionModelsControlProps> = R
                             title={t('chat.subsessionModels.readOnly')}
                         >
                             <Icon name="check" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
-                            <span className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">{selector}</span>
+                            <span dir="ltr" className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">{selector}</span>
                             <span className="shrink-0 typography-micro text-muted-foreground">
                                 {t('chat.subsessionModels.readOnly')}
                             </span>

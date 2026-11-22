@@ -5,7 +5,7 @@ import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 import type { Session, SubagentPolicy } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
-import { I18nProvider } from '@/lib/i18n';
+import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -231,12 +231,17 @@ describe('SubsessionModelsControl', () => {
       // Entries set through config stay visible as read-only lines.
       expect(document.body.textContent).toContain('other/*');
 
-      // Two toggles before the first save settles: both show at once.
+      // Two toggles before the first save settles: both show at once. A
+      // language change between them must not start a second save queue.
       await act(async () => { row('Beta').click(); });
+      await act(async () => { useI18nStore.getState().setLocale('de'); });
+      await settle();
       await act(async () => { row('Gamma').click(); });
       await settle();
       expect(checkedNames()).toEqual(['Alpha', 'Beta', 'Gamma']);
       expect(writes).toHaveLength(1);
+      await act(async () => { useI18nStore.getState().setLocale('en'); });
+      await settle();
 
       await act(async () => { releases[0]?.(); });
       await settle();
