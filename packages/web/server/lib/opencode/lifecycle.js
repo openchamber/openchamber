@@ -2334,6 +2334,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       warmedOpenCodeDirectories = [directory, ...warmedOpenCodeDirectories.filter((entry) => entry !== directory)];
     },
     getManagedServersSnapshot,
+    /** A replaced OpenCode still runs the turns that were busy at the handoff. */
+    hasDrainingOpenCode: () => drainingOpenCode.snapshot().length > 0,
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;

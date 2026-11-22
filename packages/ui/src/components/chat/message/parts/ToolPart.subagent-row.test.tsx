@@ -14,6 +14,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { subagentCancellationNote } from '@/lib/opencode/subagent-run';
+import { applyGlobalSessionStatusEvents, reconcileGlobalSessionStatusWithActive } from '@/sync/global-session-status';
 
 // Bun does not implement Vite's worker asset-query imports.
 plugin({
@@ -254,6 +255,36 @@ test('a background subagent drops the background label once its report arrives',
       }] },
     }));
     expect(container.textContent).toContain('Look around');
+    expect(container.textContent).not.toContain('in background');
+    expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+  });
+});
+
+// The reported bug, end to end on the row: the child's end never reached this
+// page, so the cross-directory index still says it runs and the row offers a
+// stop for finished work. OpenCode's running list (empty here) is the oracle;
+// once the index is checked against it the row stops reading as running.
+test('a background subagent whose end was lost stops reading as running once OpenCode says it is not', async () => {
+  const backgrounded: ToolPartData = {
+    ...parent,
+    id: 'lost-end-call',
+    state: {
+      status: 'completed', input: { description: 'Look around', agent: 'explore' },
+      output: 'The subagent is working in the background.', metadata: { status: 'running', sessionID: 'lost-child' }, time: { start: 100, end: 110 },
+    },
+  };
+  await withHarness(backgrounded, false, async (_store, container) => {
+    await act(async () => applyGlobalSessionStatusEvents('/workspace', [
+      { type: 'session.status', properties: { sessionID: 'lost-child', status: { type: 'busy' } } },
+    ]));
+    expect(container.textContent).toContain('in background');
+    expect(container.querySelector('button[aria-label="Stop subagent"]')).not.toBeNull();
+
+    // Two reads in a row must miss it: one miss could be a turn resuming after a restart.
+    await act(async () => reconcileGlobalSessionStatusWithActive(async () => new Set(['other-running']), () => true));
+    expect(container.querySelector('button[aria-label="Stop subagent"]')).not.toBeNull();
+    await act(async () => reconcileGlobalSessionStatusWithActive(async () => new Set(['other-running']), () => true));
+
     expect(container.textContent).not.toContain('in background');
     expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
   });
