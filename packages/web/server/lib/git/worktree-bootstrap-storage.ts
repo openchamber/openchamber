@@ -37,7 +37,7 @@ const SAFE_ERROR_MESSAGES: Readonly<Record<PropertyKey, string>> = Object.freeze
   TIMEOUT: 'Worktree checkout hydration timed out',
   OUTCOME_UNKNOWN: 'Worktree bootstrap completion is unknown. Inspect the checkout and repair setup before use.',
   RUNTIME_UNSUPPORTED: 'Worktree checkout hydration is unsupported by this runtime',
-  UNKNOWN: 'Worktree bootstrap completion is unknown. Inspect the checkout and repair setup before use.',
+  UNKNOWN: 'Worktree setup failed. Git\'s message is in the server log.',
   GIT_LFS_CLIENT_MISSING: 'Git LFS is required but unavailable',
   CHECKOUT_TOO_LARGE: 'Worktree checkout has too many files to inspect',
   PATH_LENGTH_LIMIT: 'Git reported "File name too long". The worktree checkout path exceeds this system\'s path-length limit. Enable OS long paths or use a shorter repository path.',
@@ -50,6 +50,16 @@ function errorMessageFor<Code>(code: Code): BootstrapFailureMessage | undefined;
 function errorMessageFor(code: PropertyKey) { return SAFE_ERROR_MESSAGES[code]; }
 
 export const worktreeBootstrapFailureMessage = <Code>(code: Code) => errorMessageFor(code) ?? null;
+
+const KNOWN_FAILURE_CODES = new Map<string, string>([
+  ['SOURCE_CONTROL_BINDING_STALE', 'STALE_BINDING'],
+  ['SOURCE_CONTROL_BINDING_REPOSITORY_MISMATCH', 'STALE_REPOSITORY'],
+  ['SOURCE_CONTROL_BINDING_CONTEXT_MISMATCH', 'STALE_CONFIG'],
+  ...['BRANCH_NAME_CONFLICT', 'STALE_BINDING', 'STALE_REPOSITORY', 'STALE_CONFIG', 'REMOTE_CHANGED', 'TIMEOUT', 'CANCELLED', 'RUNTIME_UNSUPPORTED', 'OUTCOME_UNKNOWN']
+    .map((code): [string, string] => [code, code]),
+]);
+
+export const knownWorktreeBootstrapFailureCode = <Code>(code: Code) => isString(code) ? KNOWN_FAILURE_CODES.get(code) ?? null : null;
 
 function hasOwnMessage<Code>(code: Code): boolean;
 function hasOwnMessage(code: PropertyKey) { return Object.hasOwn(SAFE_ERROR_MESSAGES, code); }

@@ -2772,7 +2772,7 @@ export function createNetworkOperations({
     }, deadline);
     await registerWithAudit(plans);
     const result = await executeOperation(operationId, deadline);
-    return result.hydration;
+    return result.hydration ?? (result.error ? rethrow(Object.assign(new Error(result.error.message), { code: result.error.code })) : undefined);
   };
 
   return Object.freeze({

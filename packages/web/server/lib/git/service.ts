@@ -17,7 +17,7 @@ import { overlayEnvironment } from '../environment/variables.js';
 import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { resolveSshAuthSock } from './ssh-auth-sock.js';
 import { randomUUID } from 'crypto';
-import { worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
+import { knownWorktreeBootstrapFailureCode, worktreeBootstrapFailureMessage } from './worktree-bootstrap-storage.js';
 import { BRANCH_CREATION_SOURCE_RE, findRestackedParent, isOwnRemoteCopy } from './branch-restack.js';
 import type { SimpleGit, BranchSummary, FileStatusResult, RemoteWithRefs } from 'simple-git';
 import type { ChildProcess } from 'node:child_process';
@@ -110,7 +110,7 @@ const setWorktreeBootstrapState = async <ErrorValue, Hydration, ErrorCode>(direc
         phase === WORKTREE_BOOTSTRAP_PHASE_SETUP_READY ? WORKTREE_BOOTSTRAP_PHASE_GIT_READY : phase,
         WORKTREE_BOOTSTRAP_RECOVERY_ERROR,
         undefined,
-        'UNKNOWN',
+        'OUTCOME_UNKNOWN',
       );
       worktreeBootstrapState.set(key, blocker);
       throw Object.assign(new Error(WORKTREE_BOOTSTRAP_RECOVERY_ERROR, { cause }), {
@@ -5906,8 +5906,7 @@ const bootstrapFailureCode = <Failure>(error: Failure, pathLengthFailure: boolea
   if (hasErrorFields(error) && error.hydration) return error.code;
   if (pathLengthFailure) return 'PATH_LENGTH_LIMIT';
   if (errorField(error, 'reason') === 'needs-attention' || errorField(error, 'code') === 'AUTHENTICATION_REQUIRED') return 'AUTHENTICATION_REQUIRED';
-  if (errorField(error, 'code') === 'BRANCH_NAME_CONFLICT') return 'BRANCH_NAME_CONFLICT';
-  return 'UNKNOWN';
+  return knownWorktreeBootstrapFailureCode(errorField(error, 'code')) ?? 'UNKNOWN';
 };
 
 const inspectWorktreeBootstrapRecovery = async (directory: string) => {
@@ -5918,7 +5917,7 @@ const inspectWorktreeBootstrapRecovery = async (directory: string) => {
       WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
       WORKTREE_BOOTSTRAP_RECOVERY_ERROR,
       undefined,
-      'UNKNOWN',
+      'OUTCOME_UNKNOWN',
     );
   }
   const head = await runGitCommand(directory, ['rev-parse', '--verify', 'HEAD']);
@@ -5931,7 +5930,7 @@ const inspectWorktreeBootstrapRecovery = async (directory: string) => {
     checkoutPopulated ? WORKTREE_BOOTSTRAP_PHASE_GIT_READY : WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
     WORKTREE_BOOTSTRAP_RECOVERY_ERROR,
     undefined,
-    'UNKNOWN',
+    'OUTCOME_UNKNOWN',
   );
 };
 

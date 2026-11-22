@@ -2218,7 +2218,7 @@ describe('createWorktree', () => {
 
     await expect(getWorktreeBootstrapStatus(directory, { bootstrapStore })).resolves.toMatchObject({
       status: 'failed',
-      errorCode: 'UNKNOWN',
+      errorCode: 'OUTCOME_UNKNOWN',
       error: expect.stringContaining('repair'),
     });
     expect(bootstrapStore.write).toHaveBeenCalledOnce();
@@ -2233,7 +2233,7 @@ describe('createWorktree', () => {
 
     await expect(getWorktreeBootstrapStatus(directory, { bootstrapStore })).resolves.toMatchObject({
       status: 'failed',
-      errorCode: 'UNKNOWN',
+      errorCode: 'OUTCOME_UNKNOWN',
     });
   });
 
@@ -2644,6 +2644,24 @@ describe('createWorktree', () => {
     expect(hydrateCheckout).toHaveBeenCalledWith({ directory: created.path, parentRemoteName: 'upstream' });
     // The branch it started from is recorded as its parent.
     expect(readBranchConfig(created.path, 'feature/from-local', 'gh-merge-base')).toBe('main');
+  });
+
+  it('reports a known checkout failure by its cause, not as an unknown outcome', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+    const hydrateCheckout = vi.fn(async () => {
+      throw Object.assign(new Error('Git transport remote binding changed'), { code: 'SOURCE_CONTROL_BINDING_STALE' });
+    });
+    const bootstrapStore = createWorktreeBootstrapStore({ filePath: path.join(createTempDir(), 'bootstrap.json') });
+    const created = await createWorktree(repo, { mode: 'new', branchName: 'stale', worktreeName: 'stale' }, { hydrateCheckout, bootstrapStore });
+    await expect.poll(async () => (await getWorktreeBootstrapStatus(created.path, { bootstrapStore })).status, { timeout: 5_000 }).toBe('failed');
+    await expect(getWorktreeBootstrapStatus(created.path, { bootstrapStore })).resolves.toMatchObject({
+      errorCode: 'STALE_BINDING', error: 'Worktree source control binding changed',
+    });
   });
 
   it('hydrates a checkout whose remote is a path on disk without naming that remote', async () => {
@@ -3221,7 +3239,10 @@ describe('createWorktree', () => {
         { timeout: 5_000 },
       ).toBe('failed');
       await waitForActiveWorktreeBootstrap(created.path);
-      await expect(bootstrapStore.read(created.path)).resolves.toMatchObject({ errorCode: 'UNKNOWN' });
+      // Git's own text stays out of the record; the failure is reported as one, not as an unknown outcome.
+      await expect(bootstrapStore.read(created.path)).resolves.toMatchObject({
+        errorCode: 'UNKNOWN', error: 'Worktree setup failed. Git\'s message is in the server log.',
+      });
     } finally {
       if (previousGitBinary === undefined) delete process.env.OPENCHAMBER_GIT_BINARY;
       else process.env.OPENCHAMBER_GIT_BINARY = previousGitBinary;
