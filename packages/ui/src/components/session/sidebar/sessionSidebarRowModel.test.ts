@@ -1090,6 +1090,35 @@ describe('headerless sidebar', () => {
     expect(sessionIds(buildSessionSidebarRowModel({ ...input, headerless: true }).rows)).toEqual(['parent']);
   });
 
+  test('a range selection never reaches the subsessions it does not draw', () => {
+    const child: SessionNode = { session: session('child', 'parent'), children: [], worktree: null };
+    const model = buildSessionSidebarRowModel({ ...args([project([group([node('parent', [child])])])]), headerless: true });
+
+    expect(sessionIds(model.rows)).toEqual(['parent']);
+    expect(model.selectionEntries.find((entry) => entry.id === 'parent')?.descendantRange).toBeUndefined();
+  });
+
+  test('search lists a matching subsession as a flat row of its own', () => {
+    const child: SessionNode = { session: session('child', 'parent'), children: [], worktree: null };
+    const parent = node('parent', [child]);
+    const main = group([parent]);
+    const input = args([project([main])]);
+    input.mode = 'search';
+    input.normalizedQuery = 'child';
+    input.groupSearchDataByGroup.set(main, {
+      filteredNodes: [parent],
+      matchedSessionCount: 1,
+      folderNameMatchCount: 0,
+      groupMatches: false,
+      hasMatch: true,
+    });
+
+    const rows = buildSessionSidebarRowModel({ ...input, headerless: true }).rows.filter((row) => row.kind === 'session');
+
+    expect(rows.map((row) => row.node.session.id)).toEqual(['parent', 'child']);
+    expect(new Set(rows.map((row) => row.depth)).size).toBe(1);
+  });
+
   test('reveals twenty rows and twenty more from one whole-list Show more', () => {
     const sessions = Array.from({ length: 25 }, (_, index) => node(`s${index}`));
     const input = args([project([group(sessions)])]);

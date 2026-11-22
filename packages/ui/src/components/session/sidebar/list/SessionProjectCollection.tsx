@@ -656,18 +656,21 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     pinnedItems.forEach((item) => addNode(item.node));
     workItems.forEach((item) => addNode(item.node));
     attentionItems.forEach((items) => items.forEach((item) => addNode(item.node)));
+    // A headerless list ignores collapse, so it draws sessions from collapsed
+    // projects and sections too; their status has to load like any other row's.
+    const headerless = view.headerlessSidebar;
     if (timeListMode) {
-      if (!projectView.collapsedActivities.has('timeline')) timelineItems.forEach((item) => addNode(item.node));
+      if (headerless || !projectView.collapsedActivities.has('timeline')) timelineItems.forEach((item) => addNode(item.node));
       return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers], gitlabRefs: [...gitlabRefs.values()] };
     }
     if (timelineMode) {
       timelineItems.forEach((item) => {
-        if (!item.projectId || !projectView.collapsedProjects.has(item.projectId)) addNode(item.node);
+        if (headerless || !item.projectId || !projectView.collapsedProjects.has(item.projectId)) addNode(item.node);
       });
       return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers], gitlabRefs: [...gitlabRefs.values()] };
     }
     projectSections.forEach((section) => {
-      if (projectView.collapsedProjects.has(section.project.id)) return;
+      if (!headerless && projectView.collapsedProjects.has(section.project.id)) return;
       section.groups.forEach((group) => {
         if (group.isArchivedBucket) return;
         // Root sessions show linked PRs too; only worktree groups have a
@@ -679,7 +682,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       });
     });
     return { targets, linkedRefs: [...linkedRefs.values()], linkedIssueRefs: [...linkedIssueRefs.values()], linearIdentifiers: [...linearIdentifiers], gitlabRefs: [...gitlabRefs.values()] };
-  }, [attentionItems, pinnedItems, projectSections, projectView.collapsedActivities, projectView.collapsedProjects, timeListMode, timelineItems, timelineMode, topology.gitBranches, topology.isVSCode, workItems]);
+  }, [attentionItems, pinnedItems, projectSections, projectView.collapsedActivities, projectView.collapsedProjects, timeListMode, timelineItems, timelineMode, topology.gitBranches, topology.isVSCode, view.headerlessSidebar, workItems]);
   const shownPrTargets = shownPrs.targets;
   // The discovery effect below subscribes to bindings and reads them; keep its
   // input stable while the shown branches are the same, so ordinary sidebar

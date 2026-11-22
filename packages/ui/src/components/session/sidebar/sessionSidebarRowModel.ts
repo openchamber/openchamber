@@ -568,7 +568,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
             : options.secondaryMeta ?? null,
         });
         const subtreeRange = options.indexedNodes?.subtreeRangeByNode.get(current.node);
-        const descendantRange = subtreeRange && subtreeRange[1] > subtreeRange[0] + 1
+        // A headerless list draws no subsession rows, so a range selection
+        // must not reach the hidden descendants either.
+        const descendantRange = !headerless && subtreeRange && subtreeRange[1] > subtreeRange[0] + 1
           ? Object.freeze([
             (options.selectionPoolOffset ?? 0) + subtreeRange[0] + 1,
             (options.selectionPoolOffset ?? 0) + subtreeRange[1],
@@ -586,12 +588,13 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         }
       }
       // A headerless list is flat: subsessions stay reachable through their
-      // parent's actions, but no row expands to show them.
-      if (headerless) continue;
+      // parent's actions, but no row expands to show them. Search still lists
+      // a matching subsession, as a flat row of its own.
+      if (headerless && !search) continue;
       if (!search && !args.expandedParents.has(expandedKey(options.renderContext, options.archived, current.node.session.id))) continue;
       for (let index = current.node.children.length - 1; index >= 0; index -= 1) {
         const child = current.node.children[index];
-        if (child) stack.push({ node: child, depth: current.depth + 1, directory });
+        if (child) stack.push({ node: child, depth: headerless ? current.depth : current.depth + 1, directory });
       }
     }
   };
