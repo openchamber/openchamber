@@ -48,7 +48,7 @@ describe('top-level projects in bindings', () => {
       rename: async (from, to) => { files.set(to, files.get(from)); files.delete(from); },
       open: async (file, flags) => {
         // The lock opens exclusively ('wx'); the bounded state read opens to read.
-        if (typeof flags === 'string' && flags.includes('x')) {
+        if (flags === 'wx') {
           if (files.has(file)) throw Object.assign(new Error('exists'), { code: 'EEXIST' });
           files.set(file, '');
           return { writeFile: async (text) => { files.set(file, text); }, stat: async () => ({ dev: 1n, ino: 1n }), close: async () => {} };

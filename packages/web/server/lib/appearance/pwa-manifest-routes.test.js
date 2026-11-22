@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { registerPwaManifestRoute } from './pwa-manifest-routes.js';
 
+const trimmedOr = (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback;
+
 const createResponse = () => ({
   headers: new Map(),
   contentType: '',
@@ -52,8 +54,8 @@ describe('PWA manifest route', () => {
         buildOpenCodeUrl: (route) => route,
         getOpenCodeAuthHeaders: () => ({}),
         readSettingsFromDiskMigrated: async () => ({}),
-        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaAppName: trimmedOr,
+        normalizePwaOrientation: trimmedOr,
         isRequestAuthorized: async () => true,
       });
 
@@ -105,8 +107,8 @@ describe('PWA manifest route', () => {
         buildOpenCodeUrl: (route) => route,
         getOpenCodeAuthHeaders: () => ({}),
         readSettingsFromDiskMigrated: async () => ({}),
-        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaAppName: trimmedOr,
+        normalizePwaOrientation: trimmedOr,
         isRequestAuthorized: async () => true,
       });
 
@@ -149,8 +151,8 @@ describe('PWA manifest route', () => {
         buildOpenCodeUrl: (route) => route,
         getOpenCodeAuthHeaders: () => ({}),
         readSettingsFromDiskMigrated: async () => ({}),
-        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaAppName: trimmedOr,
+        normalizePwaOrientation: trimmedOr,
         isRequestAuthorized: async () => true,
       });
       const handler = routes.get('/manifest.webmanifest');
@@ -181,8 +183,8 @@ describe('PWA manifest route', () => {
         buildOpenCodeUrl: (route) => route,
         getOpenCodeAuthHeaders: () => ({}),
         readSettingsFromDiskMigrated: async () => ({}),
-        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaAppName: trimmedOr,
+        normalizePwaOrientation: trimmedOr,
         isRequestAuthorized: async () => true,
       });
       const handler = routes.get('/manifest.webmanifest');
@@ -220,8 +222,8 @@ describe('PWA manifest route', () => {
         buildOpenCodeUrl: (route) => route,
         getOpenCodeAuthHeaders: () => ({}),
         readSettingsFromDiskMigrated: async () => ({}),
-        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaAppName: trimmedOr,
+        normalizePwaOrientation: trimmedOr,
         isRequestAuthorized: async () => false,
       });
 
@@ -255,8 +257,8 @@ describe('PWA manifest route', () => {
         buildOpenCodeUrl: (route) => route,
         getOpenCodeAuthHeaders: () => ({}),
         readSettingsFromDiskMigrated: async () => ({}),
-        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaAppName: trimmedOr,
+        normalizePwaOrientation: trimmedOr,
         isRequestAuthorized: async () => true,
       });
       const handler = routes.get('/manifest.webmanifest');
@@ -290,8 +292,8 @@ describe('PWA manifest route', () => {
       buildOpenCodeUrl: (route) => route,
       getOpenCodeAuthHeaders: () => ({}),
       readSettingsFromDiskMigrated: async () => ({}),
-      normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-      normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+      normalizePwaAppName: trimmedOr,
+      normalizePwaOrientation: trimmedOr,
       isRequestAuthorized: async () => false,
     });
     const handler = routes.get('/manifest.webmanifest');
@@ -317,8 +319,8 @@ describe('PWA manifest route', () => {
         buildOpenCodeUrl: (route) => route,
         getOpenCodeAuthHeaders: () => ({}),
         readSettingsFromDiskMigrated: async () => ({}),
-        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaAppName: trimmedOr,
+        normalizePwaOrientation: trimmedOr,
         isRequestAuthorized: async () => true,
       });
       const handler = routes.get('/manifest.webmanifest');
@@ -355,8 +357,8 @@ describe('PWA manifest route', () => {
         buildOpenCodeUrl: (route) => route,
         getOpenCodeAuthHeaders: () => ({}),
         readSettingsFromDiskMigrated: async () => ({}),
-        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
-        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaAppName: trimmedOr,
+        normalizePwaOrientation: trimmedOr,
         isRequestAuthorized: async () => true,
       });
       const handler = routes.get('/manifest.webmanifest');

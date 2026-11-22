@@ -1,14 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Mock child_process to prevent real spawnSync calls that would hang in tests
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(),
-  spawnSync: vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })),
-}));
+// Every probe goes through this instead of spawning a package manager.
+const spawnSync = vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' }));
 
 // Windows probes run a quoted absolute shim path through the shell; other
 // shell strings are install commands.
@@ -19,7 +15,7 @@ function splitProbe(command, args) {
   return [path.win32.basename(match[1]).replace(/\.[^.]+$/, ''), match[2].trim().split(' ').filter(Boolean)];
 }
 
-// The mocked spawnSync sees Windows probes only for managers a PATH directory holds.
+// The injected spawnSync sees Windows probes only for managers a PATH directory holds.
 const windowsShimDir = process.platform === 'win32' ? fs.mkdtempSync(path.join(os.tmpdir(), 'oc-pm-shims-')) : null;
 if (windowsShimDir) {
   for (const manager of ['npm', 'pnpm', 'yarn']) fs.writeFileSync(path.join(windowsShimDir, `${manager}.cmd`), '');
@@ -31,9 +27,8 @@ afterAll(() => {
   if (windowsShimDir) fs.rmSync(windowsShimDir, { recursive: true, force: true });
 });
 
-// Upstream's detection cases run through the real probe with child_process
-// mocked; the fork's own detection tests inject spawnSync instead
-// (package-manager.test.js).
+// Upstream's detection cases, with the probe injected as the fork's own
+// detection tests do (package-manager.test.js).
 describe('detectPackageManagerDetails', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -69,7 +64,7 @@ describe('detectPackageManagerDetails', () => {
       const resolvePaths = packagePaths.getWebPackagePaths;
       vi.spyOn(packagePaths, 'getWebPackagePaths').mockImplementation((url) =>
         url ? resolvePaths(url) : { ...packagePaths.webPackagePaths, root });
-      expect(detectPackageManagerDetails()).toMatchObject({
+      expect(detectPackageManagerDetails({ spawnSync })).toMatchObject({
         packageManager: 'npm',
         packagePath: root,
         reason: 'global-root-owner',
@@ -112,13 +107,13 @@ describe('detectPackageManagerDetails', () => {
       root: packagePath,
     });
 
-    expect(detectPackageManagerDetails()).toMatchObject({
+    expect(detectPackageManagerDetails({ spawnSync })).toMatchObject({
       packageManager,
       packagePath,
       reason: 'hinted-visible-install',
       globalNodeModulesRoot: null,
     });
-    expect(getUpdateCommand()).toBe(packageManager === 'pnpm'
+    expect(getUpdateCommand(packageManager, { spawnSync })).toBe(packageManager === 'pnpm'
       ? 'pnpm add -g @openchamber/web@latest'
       : 'npm install -g @openchamber/web@latest');
   });
@@ -131,8 +126,8 @@ describe('detectPackageManagerDetails', () => {
     vi.resetModules();
     const { detectPackageManagerDetails, isUnmanagedInstall } = await import('./package-manager.js');
 
-    expect(detectPackageManagerDetails().reason).toBe('unmanaged-install');
-    expect(detectPackageManagerDetails().reason).toBe('unmanaged-install');
+    expect(detectPackageManagerDetails({ spawnSync }).reason).toBe('unmanaged-install');
+    expect(detectPackageManagerDetails({ spawnSync }).reason).toBe('unmanaged-install');
     expect(isUnmanagedInstall()).toBe(true);
   });
 });

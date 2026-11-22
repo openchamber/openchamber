@@ -15,7 +15,8 @@ import * as jsoncParser from 'jsonc-parser';
 import { readSectionEntry, readMcpEntry } from './config-v2.js';
 import { resolveWorktreeDirectory } from './worktree-directory.js';
 import { writeFileAtomic } from './atomic-write.js';
-import { readBoundedFileSync } from '../shared/bounded-file-read.js';
+import { MAX_CONFIG_FILE_BYTES, assertSerializedConfigWithinCap, isConfigFileTooLargeError, readCappedConfigFileSync } from './config-file-cap.js';
+import { reorderConfigProperties } from './config-property-order.js';
 import type { ParseError, JSONPath, FormattingOptions } from 'jsonc-parser';
 import type { JsonValue } from '../shared/json-values.js';
 import type { SectionKind } from './config-v2.js';
@@ -200,42 +201,6 @@ function isInvalidJsoncError(error: unknown): error is InvalidJsoncError {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === INVALID_JSONC);
 }
 
-const CONFIG_FILE_TOO_LARGE = 'CONFIG_FILE_TOO_LARGE';
-
-// Config files are hand-written JSONC; the precedent caps in this server run
-// 1-4 MiB (AGENTS.md 1 MiB, SKILL.md 4 MiB). 4 MiB is generous for a config
-// while keeping a cloned project's oversized opencode.json(c) from being
-// buffered whole, synchronously, on every settings/plugin/MCP read.
-const MAX_CONFIG_FILE_BYTES = 4 * 1024 * 1024;
-
-function isConfigFileTooLargeError(error: unknown): error is Error & { code: string } {
-  return error instanceof Error && 'code' in error && error.code === CONFIG_FILE_TOO_LARGE;
-}
-
-// Open once and judge from the handle (design #1254): a
-// stat-by-path-then-readFile-by-path gate lets a config grown or swapped
-// after the stat buffer whole past the cap. The shared bounded read fixes
-// the file identity at open, judges the size from the handle, and reads at
-// most one byte over the cap, so growth is refused, never buffered. Its
-// missing and non-regular answers are mapped back onto this module's
-// existing contract: a file that vanishes after the exists check throws the
-// ENOENT a stat would have thrown, and a non-regular file throws the EISDIR
-// a read would have thrown.
-function readCappedConfigFileSync(filePath: string) {
-  const result = readBoundedFileSync(filePath, MAX_CONFIG_FILE_BYTES);
-  if (result.ok) {
-    return result.buffer.toString('utf8');
-  }
-  if (result.reason === 'too-large') {
-    throw Object.assign(new Error(
-      `OpenCode configuration at ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be loaded safely`,
-    ), { code: CONFIG_FILE_TOO_LARGE });
-  }
-  if (result.reason === 'missing') {
-    throw Object.assign(new Error(`ENOENT: no such file or directory, open '${filePath}'`), { code: 'ENOENT' });
-  }
-  throw Object.assign(new Error(`EISDIR: illegal operation on a directory, read '${filePath}'`), { code: 'EISDIR' });
-}
 
 function formatJsoncParseError(filePath: string, errors: ParseError[]) {
   const first = Array.isArray(errors) && errors.length > 0 ? errors[0] : null;
@@ -602,37 +567,6 @@ function parsedConfigEquals(text: string, desired: JsonValue) {
   return deepEqualJsonValue(parsed, desired);
 }
 
-// Some config maps have a visible order, such as model pools. Move only their
-// property nodes after the value edits so comments inside values and all trivia
-// between properties survive. Ordinary config objects stay order-insensitive.
-function reorderConfigProperties(text: string, desired: JsonValue, orderedPaths: string[][]) {
-  let reordered = text;
-  for (const propertyPath of orderedPaths) {
-    const root = parseTree(reordered, [], { allowTrailingComma: true });
-    const object = root ? findNodeAtLocation(root, propertyPath) : undefined;
-    if (object?.type !== 'object' || !object.children) continue;
-    let next: JsonValue | undefined = desired;
-    for (const key of propertyPath) next = isPlainObject(next) ? next[key] : undefined;
-    if (!isPlainObject(next)) continue;
-    const keys = Object.keys(next);
-    const properties = object.children;
-    const currentKeys = properties.map((property) => property.children?.[0]?.value);
-    if (keys.length !== properties.length || keys.every((key, index) => key === currentKeys[index])) continue;
-    const bodies = new Map(properties.map((property) => [
-      property.children?.[0]?.value,
-      reordered.slice(property.offset, property.offset + property.length),
-    ]));
-    const edits = properties.map((property, index) => ({
-      offset: property.offset,
-      length: property.length,
-      content: bodies.get(keys[index]),
-    }));
-    const complete = edits.flatMap((edit) => (edit.content === undefined ? [] : [{ ...edit, content: edit.content }]));
-    if (complete.length !== edits.length) throw new Error('Could not preserve ordered config properties');
-    reordered = applyEdits(reordered, complete);
-  }
-  return reordered;
-}
 
 function buildConfigFileContent(desired: JsonValue, existingRaw: string, existingParse: ConfigParseResult | null, orderedPaths: string[][] = []) {
   if (!existingRaw.trim()) {
@@ -673,16 +607,7 @@ function writeConfig(config: OpenCodeConfigLayer, filePath = CONFIG_FILE, { orde
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const desired: JsonValue = JSON.parse(JSON.stringify(config));
     const content = buildConfigFileContent(desired, existingRaw, existingParse, orderedPaths);
-    // Enforce the cap on the serialized result too: writing a config that
-    // crosses the read cap would strand the layer — later reads omit it as
-    // CONFIG_FILE_TOO_LARGE and later writes refuse it, so the user could
-    // not undo the change through OpenChamber. Reject before replacing the
-    // file, preserving the readable original.
-    if (Buffer.byteLength(content, 'utf8') > MAX_CONFIG_FILE_BYTES) {
-      throw Object.assign(new Error(
-        `Serialized OpenCode configuration for ${filePath} exceeds the ${MAX_CONFIG_FILE_BYTES}-byte limit and cannot be written safely`,
-      ), { code: CONFIG_FILE_TOO_LARGE });
-    }
+    assertSerializedConfigWithinCap(filePath, content);
     // The backup is part of the write, so it is created only once the
     // write is known acceptable: a refused write (unparseable, over-cap,
     // or a serialized result over the cap) leaves the previous backup —
@@ -703,27 +628,6 @@ function writeConfig(config: OpenCodeConfigLayer, filePath = CONFIG_FILE, { orde
   }
 }
 
-/**
- * Every config file OpenCode 2 reads, lowest priority first, each with its
- * parsed content: the global files, `OPENCODE_CONFIG`, then the files found
- * walking up from the project folder (`getFolderConfigPaths`). Readers that
- * take an entry from the last file defining it, as OpenCode's MCP and model
- * route plugins do, use this list in place of `readConfigLayers`' single
- * project file and deep merge. `required` marks the global and
- * `OPENCODE_CONFIG` files, whose parse error a reader may surface; a broken
- * folder file carries its `error` and an empty config.
- */
-function readConfigSources(workingDirectory?: string | null) {
-  const layers = readConfigLayers(workingDirectory);
-  const { userPath, userOverridePath, customPath } = layers.paths;
-  const required = (filePath: string, config: OpenCodeConfigLayer) => ({ path: filePath, config, error: getLayerError(layers, filePath), required: true });
-  return [
-    required(userPath, layers.userConfig),
-    ...(userOverridePath ? [required(userOverridePath, layers.userOverrideConfig)] : []),
-    ...(customPath ? [required(customPath, layers.customConfig)] : []),
-    ...getFolderConfigPaths(workingDirectory).map((filePath) => ({ path: filePath, ...readConfigLayer(filePath), required: false })),
-  ];
-}
 
 function getLayerError(layers: OpenCodeConfigLayers, filePath?: string | null) {
   if (!filePath || !Array.isArray(layers?.layerErrors)) {
@@ -856,7 +760,6 @@ export {
   readConfigLayer,
   isPlainObject,
   readConfigLayers,
-  readConfigSources,
   readConfig,
   readWorktreeDirectorySetting,
   getConfigForPath,

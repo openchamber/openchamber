@@ -5,11 +5,11 @@ import {
   AGENT_SCOPE,
   readConfigFile,
   readConfigLayers,
-  readConfigSources,
   getJsonWriteTarget,
   getProjectConfigCandidates,
   writeConfig,
 } from './config-files.js';
+import { readConfigSources } from './config-sources.js';
 import {
   toMcpEntity,
   readMcpEntries,

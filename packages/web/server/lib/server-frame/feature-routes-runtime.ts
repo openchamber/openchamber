@@ -1,5 +1,5 @@
 import { registerFsRoutes } from '../fs/routes.js';
-import { DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE, branchNameFromTemplate, uniqueBranchName } from '../git/branch-name-template.js';
+import { changeRequestWorktreeTarget, type ChangeRequestBranchOptions } from '../git/change-request-branch.js';
 import { createRipgrepResolver } from '../fs/ripgrep.js';
 import { registerEnvironmentRoutes } from '../environment/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
@@ -7,7 +7,6 @@ import { createExtensionQuotaProviders } from '../quota/extension-quotas.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
-import { registerGoalSpecJobRoutes } from '../session-goal/spec-jobs.js';
 import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
 import { registerSessionTodosRoutes } from '../session-todos/routes.js';
 import { setWarmingDuration, setWarmingEnabled } from '../opencode/websearch-config.js';
@@ -44,23 +43,14 @@ import { registerPrWatchRoutes } from '../pr-watch/runtime.js';
 import { registerExtensionWaitsRoutes } from '../extension-waits/runtime.js';
 import { registerWorkflowRoutes } from '../workflows/routes.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
-import { registerModelRouteRoutes } from '../routing/model-routes.js';
-import { registerModelRouteStatsRoutes } from '../routing/model-route-stats.js';
-import { registerMessageModelAttributionRoutes } from '../routing/message-model-attribution.js';
-import { registerPlanRoutes } from '../routing/plan-routes.js';
-import { registerPoolPlanLinkRoutes } from '../routing/pool-plan-links.js';
-import { isLocalOpenCode, registerPoolHealthRoutes } from '../routing/pool-health.js';
-import { registerPoolRotation } from '../routing/pool-rotation.js';
-import { registerRouteRulesRoutes } from '../routing/route-rules-routes.js';
-import { createJevClient } from '../routing/jev.js';
-import { isEnterpriseMode } from '../enterprise-mode.js';
+import { integrationOperationsOf, registerForkFeatureRoutes, type ForkFeatureRouteDependencies } from './fork-feature-routes.js';
 import { registerConfigEntityRoutes } from '../opencode/config-entity-routes.js';
 import { createThemeFolderWatch } from '../appearance/theme-watch.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from '../appearance/project-icon-routes.js';
 import { registerProviderLogoRoutes } from '../appearance/provider-logo-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
-import { createScheduledTaskRunHistory } from '../scheduled-tasks/run-history.js';
+import { createScheduledTaskRunHistorySlot } from '../scheduled-tasks/run-history-slot.js';
 import { fillScheduledWorktreeBridge } from '../scheduled-tasks/worktree-bridge.js';
 import { createTrackedItemsService } from '../tracked-items/service.js';
 import { createProviderReadCache } from '../provider-read-cache/index.js';
@@ -69,8 +59,6 @@ import { createTrackedItemsPersistence } from '../tracked-items/persistence.js';
 import { registerTrackedItemsRoutes } from '../tracked-items/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
-import { registerDeviceSettingsRoutes } from '../device-settings/routes.js';
-import { registerModelChoiceRoutes } from '../model-choices/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from '../opencode/skill-routes.js';
 import { registerPluginRoutes } from '../opencode/plugin-routes.js';
@@ -99,7 +87,7 @@ import {
   encodePluginId,
   decodePluginId,
 } from '../opencode/plugins.js';
-import { SKILL_DIR, SKILL_SCOPE, readConfigLayers, readConfigSources, getConfigForPath, writeConfig, CONFIG_FILE } from '../opencode/config-files.js';
+import { SKILL_DIR, SKILL_SCOPE } from '../opencode/config-files.js';
 import { readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from '../opencode/skill-files.js';
 import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from '../opencode/skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
@@ -218,10 +206,7 @@ type RouteDependencies =
     routingRuntime: Parameters<typeof registerRoutingRoutes>[1];
     globalEventHub: GlobalMessageStreamHub | null;
     workflowRuntime?: Parameters<typeof registerWorkflowRoutes>[1] | null;
-    deviceSettingsStore?: Parameters<typeof registerDeviceSettingsRoutes>[1]['store'] | null;
-    modelChoiceService?: Parameters<typeof registerModelChoiceRoutes>[1]['modelChoiceService'] | null;
-    goalSpecJobRuntime?: Parameters<typeof registerGoalSpecJobRoutes>[1] | null;
-  };
+  } & ForkFeatureRouteDependencies;
 
 export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependencies) => {
   const {
@@ -261,7 +246,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
   let networkOperations: ReturnType<typeof createNetworkOperations> | null = null;
   let gitWorktreeCreation: ReturnType<typeof registerGitRoutes> | null = null;
   let guestOperations: ReturnType<typeof registerGuestRoutes> | null = null;
-  let scheduledTaskRunHistory: ReturnType<typeof createScheduledTaskRunHistory> | null = null;
+  const scheduledTaskRunHistory = createScheduledTaskRunHistorySlot();
   let linearOperations: ReturnType<typeof registerLinearRoutes> | null = null;
   const getWalkthroughService = async () => {
     if (!walkthroughService) {
@@ -311,30 +296,9 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
     });
   };
 
-  /**
-   * A worktree from a pull or merge request given by number, the same kind
-   * the New worktree dialog makes: the server reads the change request with
-   * the project's own account and creates the worktree through the Git
-   * routes' contributor pipeline. It checks out the request's branch, or with
-   * `branchOff` starts a new branch from its head. `branchName` defaults to
-   * the head branch, or for a new branch to `branchTemplate` filled with
-   * `name` (else the head branch), the number and the head, past any of
-   * `existingBranches` that has it; `name` defaults to the branch.
-   */
-  const createChangeRequestWorktree = async ({
-    directory,
-    number,
-    name,
-    branchName,
-    branchOff = false,
-    branchTemplate = DEFAULT_PULL_REQUEST_BRANCH_TEMPLATE,
-    existingBranches = new Set<string>(),
-    startCommand,
-    createCommand,
-  }: {
-    directory: string; number: number; name?: string; branchName?: string; branchOff?: boolean;
-    branchTemplate?: string; existingBranches?: Set<string>; startCommand?: string; createCommand?: string;
-  }) => {
+  const createChangeRequestWorktree = async ({ directory, number, startCommand, createCommand, ...branchOptions }: {
+    directory: string; number: number; startCommand?: string; createCommand?: string;
+  } & ChangeRequestBranchOptions) => {
     if (!(gitWorktreeCreation?.createWorktree instanceof Function)
       || !(walkthroughBindingService?.resolveChangeRequestWorktreeSource instanceof Function)) {
       throw Object.assign(new Error('Worktrees from pull requests are unavailable'), {
@@ -342,13 +306,8 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       });
     }
     const { headBranch, sourceRequest } = await walkthroughBindingService.resolveChangeRequestWorktreeSource({ directory, number });
-    const branch = branchName || (branchOff
-      ? uniqueBranchName(branchNameFromTemplate(branchTemplate, { name: name || headBranch, pr: number, head: headBranch }), existingBranches)
-      : headBranch);
     const input: ChangeRequestWorktreeInput<typeof sourceRequest> = {
-      mode: branchOff ? 'new' : 'existing',
-      branchName: branch,
-      worktreeName: name || branch,
+      ...changeRequestWorktreeTarget(branchOptions, { number, headBranch }),
       changeRequestSource: sourceRequest,
     };
     if (startCommand) input.startCommand = startCommand;
@@ -418,8 +377,6 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       scheduledTaskService,
       openChamberSessionService,
       openChamberControlService,
-      deviceSettingsStore,
-      modelChoiceService,
       waitForOpenCodeReady,
       getOpenChamberEventClients,
       writeSseEvent,
@@ -427,7 +384,6 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       permissionAutoAcceptRuntime,
       worktreeBootstrapStore,
       messageQueueRuntime,
-      goalSpecJobRuntime = null,
       autoReviewRuntime,
       prWatchRuntime = null,
       extensionWaitsRuntime = null,
@@ -449,37 +405,11 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
     registerMessageQueueRoutes(app, messageQueueRuntime);
-    if (goalSpecJobRuntime) registerGoalSpecJobRoutes(app, goalSpecJobRuntime);
     registerAutoReviewRoutes(app, autoReviewRuntime);
     if (prWatchRuntime) registerPrWatchRoutes(app, prWatchRuntime);
     if (extensionWaitsRuntime) registerExtensionWaitsRoutes(app, extensionWaitsRuntime);
     registerRoutingRoutes(app, routingRuntime);
-    registerModelRouteRoutes(app, {
-      readConfigLayers,
-      getConfigForPath,
-      writeConfig,
-      CONFIG_FILE,
-      isEnterpriseMode,
-      refreshOpenCodeAfterConfigChange,
-      resolveOptionalProjectDirectory,
-      readConfigSources,
-    });
-    registerModelRouteStatsRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
-    registerMessageModelAttributionRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
-    registerPlanRoutes(app);
-    registerPoolPlanLinkRoutes(app, { openchamberDataDir });
-    const isOpenCodeLocal = () => isLocalOpenCode(buildOpenCodeUrl);
-    registerPoolHealthRoutes(app, { readConfigLayers, openchamberDataDir, isOpenCodeLocal });
-    registerPoolRotation(app, {
-      readConfigLayers,
-      readConfigSources,
-      openchamberDataDir,
-      buildOpenCodeUrl,
-      getOpenCodeAuthHeaders,
-      isAutoSession: routingRuntime.isAutoSession,
-      isOpenCodeLocal,
-    });
-    registerRouteRulesRoutes(app, { routingRuntime, jev: createJevClient() });
+    registerForkFeatureRoutes(app, routeDependencies);
     registerRoutingPromptRewrite(app, routingRuntime);
 
     registerOpenCodeRoutes(app, {
@@ -514,12 +444,6 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       resolveGitBinaryForSpawn,
     });
 
-    if (!scheduledTaskRunHistory) {
-      scheduledTaskRunHistory = createScheduledTaskRunHistory({
-        filePath: path.join(openchamberDataDir, 'scheduled-task-run-history.jsonl'),
-        logger: console,
-      });
-    }
     registerProviderLogoRoutes(app, {
       fsPromises,
       path,
@@ -535,7 +459,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       projectConfigRuntime,
       scheduledTasksRuntime,
       scheduledTaskService,
-      scheduledTaskRunHistory,
+      scheduledTaskRunHistory: scheduledTaskRunHistory.open(openchamberDataDir),
       getOpenChamberEventClients,
       writeSseEvent,
     });
@@ -555,8 +479,6 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
 
     registerOpenChamberControlRoutes(app, { controlService: openChamberControlService, laterPages: laterPagesRuntime });
     if (workflowRuntime) registerWorkflowRoutes(app, workflowRuntime);
-    if (deviceSettingsStore) registerDeviceSettingsRoutes(app, { store: deviceSettingsStore });
-    if (modelChoiceService) registerModelChoiceRoutes(app, { modelChoiceService });
 
     registerMarkdownImageGrantRoutes(app, {
       fsPromises,
@@ -621,7 +543,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
 
     const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');
 
-    registerQuotaRoutes(app);
+    registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
     registerSessionGoalRoutes(app);
     const gitBinary = resolveGitBinaryForSpawn();
@@ -945,7 +867,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       getOpenCodeAuthHeaders,
     }));
     stopGuestPackageWatch();
-    guestOperations = registerGuestRoutes(app, {
+    ({ stopPackageWatch: stopGuestPackageWatch } = guestOperations = registerGuestRoutes(app, {
       openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService,
       onGuestDeactivated: settleGuestDeactivationListeners([
         { name: 'hand back an extension role', listener: onGuestDeactivated },
@@ -972,8 +894,7 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
       watchFolderInstalls: true,
       surfaceViewerHeaders, trackers,
       opencodePlugins: { delivery: getOpenCodePluginDelivery, readGlobalEntries: readGlobalPluginEntries, addGlobalEntry: addGlobalPluginEntry },
-    });
-    stopGuestPackageWatch = guestOperations.stopPackageWatch;
+    }));
     await extensionSourceControlProviders.reconcile().catch((error) => {
       console.warn('Failed to load extension Git hosts:', error?.message ?? error);
     });
@@ -1116,22 +1037,9 @@ export const createFeatureRoutesRuntime = (dependencies: FeatureRuntimeDependenc
     registerRoutes,
     hydrateBoundCheckout,
     createChangeRequestWorktree,
-    /**
-     * The integration operations the routes use, for the `openchamber` agent
-     * tool; null until the routes are registered.
-     */
-    getIntegrationOperations: () => (walkthroughBindingService && guestOperations && linearOperations
-      ? {
-          github: walkthroughBindingService.accountOperations.github,
-          gitlab: walkthroughBindingService.accountOperations.gitlab,
-          bindings: walkthroughBindingService.bindingOperations,
-          linear: linearOperations,
-          extensions: guestOperations,
-        }
-      : null),
+    getIntegrationOperations: () => integrationOperationsOf({ sourceControl: walkthroughBindingService, guests: guestOperations, linear: linearOperations }),
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
-    /** Records one scheduled-task run event into the durable run history (#2174 Gap 1); a no-op until the routes are registered. */
-    recordScheduledTaskRun: (event: Parameters<ReturnType<typeof createScheduledTaskRunHistory>['recordEvent']>[0]) => { scheduledTaskRunHistory?.recordEvent(event); },
+    recordScheduledTaskRun: scheduledTaskRunHistory.record,
     stopFolderWatches: () => {
       themeFolderWatch?.stop();
       themeFolderWatch = null;
