@@ -1,5 +1,4 @@
-// Run against an isolated server with fold-resize.txt in its selected project:
-// node scripts/test-mobile-workspace-resize.mjs http://127.0.0.1:3000 /tmp/fold-proof
+// Manual CDP check. See scripts/perf/DOCUMENTATION.md for setup and execution.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

@@ -73,14 +73,18 @@ describe('observability contract v1 conformance (design #612, #614)', () => {
       expect(notReady.watcherReady).toBe(false);
       expect(notReady.sessions).toEqual({});
 
-      // Any watcher payload marks readiness; a payload that names no
-      // session leaves the map empty. Empty + ready is a valid read:
-      // the watcher is live and no session has reported activity.
+      // Readiness is owned by BOTH signals (#1441): a watcher payload
+      // alone does not mark it, and neither does a connection that has
+      // delivered nothing. Together they mark it; a disconnect drops it.
       runtime.processOpenCodeSsePayload({ type: 'server.connected', properties: {} });
+      expect(runtime.getSessionActivitySnapshot().watcherReady).toBe(false);
+      runtime.setWatcherConnected(true);
       const emptyReady = runtime.getSessionActivitySnapshot();
       expect(emptyReady.watcherReady).toBe(true);
       expect(emptyReady.sessions).toEqual({});
       expectNoSecretKeys(emptyReady);
+      runtime.setWatcherConnected(false);
+      expect(runtime.getSessionActivitySnapshot().watcherReady).toBe(false);
     } finally {
       runtime.dispose();
     }

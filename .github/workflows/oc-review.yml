@@ -148,6 +148,14 @@ jobs:
           nix eval --raw .#packages.x86_64-linux.default.drvPath
           nix eval --raw .#devShells.x86_64-linux.default.drvPath
           nix eval --raw .#devShells.x86_64-linux.fleet.drvPath
+      # The start-wrapper guard check (#2056) pins the generated wrapper
+      # bytes for the code#2562 single-instance guard defect. It is a
+      # check, not a package, so the drvPath evals above never reach
+      # it, and the upstream nix-eval.yml that would run flake checks
+      # is gated to openchamber/openchamber. Build it here — this job
+      # is Linux-only (ubuntu-24.04) and the check is Linux-only.
+      - name: Build the start-wrapper guard check (#2056)
+        run: nix build .#checks.x86_64-linux.start-wrapper-guard
 
   # On failure of any main job above, hand the failure to the central
   # pm-dispatch ci-fix task (developing-today/code#2672). The wrapper is

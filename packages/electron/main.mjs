@@ -1,4 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
+import { createWindowGeometryState } from './window-geometry-state.mjs';
 import { OPEN_IN_APP_SPAWN_TIMEOUT_MS, WHERE_SPAWN_TIMEOUT_MS, WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS } from './spawn-sync-timeouts.mjs';
 import { compareSemver } from './semver-compare.mjs';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
@@ -24,6 +25,7 @@ import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveAttachedLocalServerUrl, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
+import { getInstalledAppsCacheResponse, refreshInstalledAppsCache } from './installed-apps-cache.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
 import {
   BACKGROUND_START_ARG,
@@ -315,8 +317,6 @@ const state = {
   quakeNormalBounds: null,
   quakeNormalMaximized: false,
   focusedWindowIds: new Set(),
-  windowGeometryRevisions: new Map(),
-  windowGeometryTimers: new Map(),
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
@@ -920,33 +920,9 @@ const writeWindowState = async (browserWindow) => {
   });
 };
 
+const windowGeometryState = createWindowGeometryState({ persist: writeWindowState });
 const debounceWindowStatePersist = (browserWindow, immediate = false) => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  const key = String(browserWindow.id);
-  const revision = (state.windowGeometryRevisions.get(key) || 0) + 1;
-  state.windowGeometryRevisions.set(key, revision);
-
-  const existingTimer = state.windowGeometryTimers.get(key);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-    state.windowGeometryTimers.delete(key);
-  }
-
-  const persist = async () => {
-    if (state.windowGeometryRevisions.get(key) !== revision) return;
-    state.windowGeometryTimers.delete(key);
-    await writeWindowState(browserWindow);
-  };
-
-  if (immediate) {
-    void persist();
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    void persist();
-  }, 300);
-  state.windowGeometryTimers.set(key, timer);
+  windowGeometryState.schedule(browserWindow, immediate);
 };
 
 const buildHealthUrl = (url) => {
@@ -1416,7 +1392,8 @@ const clearSessionNotifications = (sessionId) => {
   const ids = deliveredNotificationIdsBySession.get(sessionId);
   if (!ids) return;
   deliveredNotificationIdsBySession.delete(sessionId);
-  Notification.remove(ids);
+  // Notification.remove is Electron 44+; see setZoomMode in createBrowserWindow.
+  if (typeof Notification.remove === 'function') Notification.remove(ids);
 };
 
 const getNativeNotificationClaimKey = (payload) => {
@@ -2743,6 +2720,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     debounceWindowStatePersist(browserWindow, true);
   });
   browserWindow.on('closed', () => {
+    windowGeometryState.cancel(browserWindow);
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       state.mainWindow = null;
@@ -2866,7 +2844,15 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
 
   // The app scales itself (View > Zoom changes the interface scale), so
   // Chromium's page zoom from pinch or Ctrl+wheel stays off.
-  browserWindow.webContents.setZoomMode('disabled');
+  // setZoomMode is Electron 44+. On an older runtime (a packager that
+  // supplies its own Electron) the call threw before the window was shown,
+  // leaving a black app, so fall back to resetting the zoom factor.
+  if (typeof browserWindow.webContents.setZoomMode === 'function') {
+    browserWindow.webContents.setZoomMode('disabled');
+  } else {
+    browserWindow.webContents.setZoomFactor(1);
+    browserWindow.webContents.on('zoom-changed', () => browserWindow.webContents.setZoomFactor(1));
+  }
   attachRendererRecovery(browserWindow, { log, label: 'window' });
   attachDevWindowTape(app, browserWindow);
 
@@ -5134,24 +5120,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         cache = JSON.parse(await fsp.readFile(cachePath, 'utf8'));
       } catch {
       }
-      const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
-      const hasCache = Boolean(cache);
-      const isCacheStale = !cache
-        || cache.version !== INSTALLED_APPS_CACHE_VERSION
-        || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
-      const refresh = async () => {
-        const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
-        await fsp.mkdir(path.dirname(cachePath), { recursive: true });
-        await fsp.writeFile(cachePath, JSON.stringify({ version: INSTALLED_APPS_CACHE_VERSION, updatedAt: now, apps }, null, 2));
-        emitToAllWindows('openchamber:installed-apps-updated', apps);
-      };
-      if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
-        return { apps: [], hasCache: false, isCacheStale: false, supported: false };
-      }
-      if (!hasCache || isCacheStale || args.force === true) {
-        void refresh();
-      }
-      return { apps: cachedApps, hasCache, isCacheStale };
+      return getInstalledAppsCacheResponse({
+        cache,
+        now,
+        version: INSTALLED_APPS_CACHE_VERSION,
+        ttlSecs: INSTALLED_APPS_CACHE_TTL_SECS,
+        force: args.force === true,
+        supported: process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux',
+        refresh: () => refreshInstalledAppsCache({
+          cachePath,
+          now,
+          version: INSTALLED_APPS_CACHE_VERSION,
+          apps: Array.isArray(args.apps) ? args.apps : [],
+          buildApps: buildPlatformInstalledApps,
+          mkdir: () => fsp.mkdir(path.dirname(cachePath), { recursive: true }),
+          writeFile: fsp.writeFile.bind(fsp),
+          emit: emitToAllWindows,
+        }),
+        log,
+      });
     }
 
     case 'desktop_hosts_get': {
@@ -6504,11 +6491,14 @@ app.whenReady().then(async () => {
     try {
       const enabled = await readLinuxAutostartEnabled();
       if (enabled) {
-        await setLinuxAutostartEnabled({
+        const result = await setLinuxAutostartEnabled({
           enabled: true,
           appName: app.getName(),
           backgroundArg: BACKGROUND_START_ARG,
         });
+        if (!result.supported) {
+          log.info('[electron] Linux autostart entry is owned by another application', result);
+        }
       }
     } catch (error) {
       log.warn('[electron] failed to reconcile Linux autostart entry', error);

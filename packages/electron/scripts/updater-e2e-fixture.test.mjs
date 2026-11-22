@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createFixtureServer, stageUpdaterFixture } from './updater-e2e-fixture.mjs';
+import { createFixtureServer, parseArguments, stageUpdaterFixture } from './updater-e2e-fixture.mjs';
 import { parseUpdateManifest, verifyUpdateManifest } from './verify-update-manifest.mjs';
 
 test('stages architecture-specific generic updater fixtures with valid metadata', () => {
@@ -33,6 +33,32 @@ test('stages architecture-specific generic updater fixtures with valid metadata'
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('rejects options a command does not read, per command (#2057)', () => {
+  // stage reads no --port: it used to exit 0 with the flag swallowed.
+  assert.throws(
+    () => parseArguments(['stage', '--arch', 'x64', '--next', 'n.AppImage', '--version', '2', '--dir', 'feed', '--port', '45678']),
+    /Unknown option --port for stage/,
+  );
+  // A typo is swallowed the same lenient way without the allowlist.
+  assert.throws(
+    () => parseArguments(['serve', '--dir', 'feed', '--verison', '2']),
+    /Unknown option --verison for serve/,
+  );
+  // The documented option sets still parse for every command.
+  assert.deepEqual(
+    parseArguments(['stage', '--arch', 'x64', '--next', 'n.AppImage', '--version', '2', '--dir', 'feed']).options,
+    { arch: 'x64', next: 'n.AppImage', version: '2', dir: 'feed' },
+  );
+  assert.deepEqual(
+    parseArguments(['serve', '--dir', 'feed', '--port', '45678']).options,
+    { dir: 'feed', port: '45678' },
+  );
+  assert.deepEqual(
+    parseArguments(['run', '--arch', 'arm64', '--current', 'c.AppImage', '--next', 'n.AppImage', '--version', '2', '--dir', 'feed', '--port', '45678']).options,
+    { arch: 'arm64', current: 'c.AppImage', next: 'n.AppImage', version: '2', dir: 'feed', port: '45678' },
+  );
 });
 
 test('serves only staged fixture files over loopback', async () => {

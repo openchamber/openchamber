@@ -19,14 +19,18 @@ import {
 // the factory's injected fsPromises seam — the seam is load-bearing (tests
 // and embedders simulate I/O failure through it), so the shared bounded
 // reader, which opens real node:fs handles, cannot be used here; this is
-// its equivalent on the seam: stat judges regularity and size before the
-// read (a FIFO is refused from its stat, promptly, without opening it),
-// and the read's byte length is rechecked after, so a file grown past the
-// cap between the two is still refused, never used. A refusal is a thrown
-// non-ENOENT error, so every reader's existing failure mapping applies
-// unchanged: lenient -> {}, preferences -> { status: 'failed' }, strict
-// throws (never {}, which identity-regenerating callers would misread as
-// a first run), readJsonFile -> throw (missing alone still answers null).
+// its equivalent on the seam. The path's stat judges regularity and size
+// first (a FIFO is refused from its stat, promptly, without opening it),
+// but a stat alone cannot hold the path to its answer (#2268): the file is
+// then opened — non-blocking, so opening a FIFO cannot hang — and the
+// opened handle is judged again and read to the cap, so a path swapped
+// for a FIFO (or a larger file) after the stat is refused from the handle,
+// and a file grown past the cap during the read is refused, never used.
+// A refusal is a thrown non-ENOENT error, so every reader's existing
+// failure mapping applies unchanged: lenient -> {}, preferences ->
+// { status: 'failed' }, strict throws (never {}, which
+// identity-regenerating callers would misread as a first run),
+// readJsonFile -> throw (missing alone still answers null).
 const SETTINGS_FILE_MAX_BYTES = 8 * 1024 * 1024;
 const boundedReadError = (filePath, result) => Object.assign(
   new Error(result.reason === 'too-large'
@@ -136,12 +140,40 @@ export const createSettingsRuntime = (deps) => {
     if (stat.size > SETTINGS_FILE_MAX_BYTES) {
       throw boundedReadError(filePath, { reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', size: stat.size, limit: SETTINGS_FILE_MAX_BYTES });
     }
-    const raw = await fsPromises.readFile(filePath, 'utf8');
-    const bytes = Buffer.byteLength(raw, 'utf8');
-    if (bytes > SETTINGS_FILE_MAX_BYTES) {
-      throw boundedReadError(filePath, { reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', size: bytes, limit: SETTINGS_FILE_MAX_BYTES });
+    // The stat above cannot hold the path to its answer (#2268): between
+    // the stat and a read by path, the file can be swapped for a FIFO,
+    // whose read would hang indefinitely. Open the file instead — with
+    // O_NONBLOCK where the platform has it, so opening a FIFO returns at
+    // once (same pattern as project-config's bounded reader) — judge the
+    // opened handle, and read through it to the cap: the handle names the
+    // file that was judged, whatever the path names by then.
+    const constants = fsPromises.constants ?? {};
+    const openFlags = process.platform === 'win32' || constants.O_NONBLOCK === undefined
+      ? 'r'
+      : constants.O_RDONLY | constants.O_NONBLOCK;
+    const handle = await fsPromises.open(filePath, openFlags);
+    try {
+      const openedStat = await handle.stat();
+      if (!openedStat.isFile()) {
+        throw boundedReadError(filePath, { reason: 'not-regular', code: 'BOUNDED_FILE_NOT_REGULAR' });
+      }
+      if (openedStat.size > SETTINGS_FILE_MAX_BYTES) {
+        throw boundedReadError(filePath, { reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', size: openedStat.size, limit: SETTINGS_FILE_MAX_BYTES });
+      }
+      const buffer = Buffer.alloc(SETTINGS_FILE_MAX_BYTES + 1);
+      let total = 0;
+      while (total < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+      }
+      if (total > SETTINGS_FILE_MAX_BYTES) {
+        throw boundedReadError(filePath, { reason: 'too-large', code: 'BOUNDED_FILE_TOO_LARGE', size: total, limit: SETTINGS_FILE_MAX_BYTES });
+      }
+      return buffer.toString('utf8', 0, total);
+    } finally {
+      await handle.close();
     }
-    return raw;
   };
 
   const readJsonFile = async (filePath) => {

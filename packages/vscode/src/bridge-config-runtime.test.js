@@ -829,3 +829,79 @@ describe('VS Code config bridge skill supporting-file size gate (#1158)', () => 
     expect(afterDelete?.error).toContain('not found');
   });
 });
+
+describe('VS Code config bridge skill supporting-file traversal (#2304)', () => {
+  const createProjectSkillWithSecret = () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-skill-traversal-'));
+    tempRoots.push(root);
+    const skillDir = path.join(root, '.opencode', 'skills', 'traversal-test-skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: traversal-test-skill\ndescription: Traversal test skill\n---\n\nBody.\n',
+      'utf8',
+    );
+    // Two levels above the skill dir: <root>/secret.txt
+    fs.writeFileSync(path.join(root, 'secret.txt'), 'sibling-secret', 'utf8');
+    return root;
+  };
+
+  const callFiles = (root, method, filePath, content) => handleConfigBridgeMessage({
+    id: 'skill-file-traversal',
+    type: 'api:config/skills/files',
+    payload: { method, name: 'traversal-test-skill', filePath, content },
+  }, createCtx(root), deps);
+
+  test('rejects a traversal GET without returning the sibling content', async () => {
+    const root = createProjectSkillWithSecret();
+
+    const response = await callFiles(root, 'GET', '../../secret.txt');
+
+    expect(response?.success).toBe(false);
+    expect(response?.error).toBe('Invalid file path');
+    expect(JSON.stringify(response)).not.toContain('sibling-secret');
+  });
+
+  test('rejects backslash and absolute traversal variants', async () => {
+    const root = createProjectSkillWithSecret();
+
+    for (const filePath of ['..\\..\\secret.txt', '/etc/passwd', 'nested/../../secret.txt']) {
+      const response = await callFiles(root, 'GET', filePath);
+      expect(response?.success).toBe(false);
+      expect(response?.error).toBe('Invalid file path');
+    }
+  });
+
+  test('rejects a traversal PUT and creates nothing outside the skill dir', async () => {
+    const root = createProjectSkillWithSecret();
+
+    const response = await callFiles(root, 'PUT', '../../pwned.txt', 'pwned');
+
+    expect(response?.success).toBe(false);
+    expect(response?.error).toBe('Invalid file path');
+    expect(fs.existsSync(path.join(root, 'pwned.txt'))).toBe(false);
+    expect(fs.existsSync(path.join(root, '.opencode', 'pwned.txt'))).toBe(false);
+  });
+
+  test('rejects a traversal DELETE and removes nothing outside the skill dir', async () => {
+    const root = createProjectSkillWithSecret();
+
+    const response = await callFiles(root, 'DELETE', '../../secret.txt');
+
+    expect(response?.success).toBe(false);
+    expect(response?.error).toBe('Invalid file path');
+    expect(fs.readFileSync(path.join(root, 'secret.txt'), 'utf8')).toBe('sibling-secret');
+  });
+
+  test('still serves a legitimate nested supporting file', async () => {
+    const root = createProjectSkillWithSecret();
+    const skillDir = path.join(root, '.opencode', 'skills', 'traversal-test-skill');
+    fs.mkdirSync(path.join(skillDir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'docs', 'guide.md'), 'guide', 'utf8');
+
+    const response = await callFiles(root, 'GET', 'docs/guide.md');
+
+    expect(response?.success).toBe(true);
+    expect(response?.data).toEqual({ content: 'guide' });
+  });
+});

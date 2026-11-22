@@ -7,7 +7,7 @@ import {
   getWorktreeBootstrapStatus as getWorktreeBootstrapStatusDefault,
   listStashes as listStashesDefault,
   removeWorktree as removeWorktreeDefault,
-  resolvePrimaryWorktreeRoot,
+  resolvePrimaryWorktreeRoot as resolvePrimaryWorktreeRootDefault,
   resolveWorktreeTopLevel as resolveWorktreeTopLevelDefault,
   stashApply as stashApplyDefault,
   stashDrop as stashDropDefault,
@@ -376,7 +376,7 @@ const parseArchiveRequest = (payload) => {
   return { ok: true, ids: parsed.ids, archivedAt: archivedAt ?? Date.now() };
 };
 
-const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
+const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath, resolvePrimaryWorktreeRoot = resolvePrimaryWorktreeRootDefault }) => {
   const projectID = asNonEmptyString(payload?.projectId) || asNonEmptyString(payload?.projectID);
   if (projectID) {
     const settings = await readSettingsFromDiskMigrated();
@@ -500,6 +500,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     updateSessionMetadata = null,
     createOpenCodeClient = defaultCreateOpenCodeClient,
     createWorktree = createWorktreeDefault,
+    resolvePrimaryWorktreeRoot = resolvePrimaryWorktreeRootDefault,
     getWorktreeBootstrapStatus = getWorktreeBootstrapStatusDefault,
     // What moving a session into a new worktree needs from git beyond creation.
     removeWorktree = removeWorktreeDefault,
@@ -676,6 +677,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       readSettingsFromDiskMigrated,
       sanitizeProjects,
       validateDirectoryPath,
+      resolvePrimaryWorktreeRoot,
     }).catch(() => null);
     return resolved?.ok ? resolved.projectPath ?? resolved.directory : directory;
   };
@@ -1071,6 +1073,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       readSettingsFromDiskMigrated,
       sanitizeProjects,
       validateDirectoryPath,
+      resolvePrimaryWorktreeRoot,
     });
     if (!resolvedDirectory.ok) {
       throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
@@ -1265,6 +1268,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         readSettingsFromDiskMigrated,
         sanitizeProjects,
         validateDirectoryPath,
+        resolvePrimaryWorktreeRoot,
       });
       if (!resolvedDirectory.ok) {
         throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
@@ -1433,6 +1437,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       readSettingsFromDiskMigrated,
       sanitizeProjects,
       validateDirectoryPath,
+      resolvePrimaryWorktreeRoot,
     });
     if (!resolved.ok) throw new OpenChamberControlError(resolved.error, resolved.status || 400);
     return resolved.directory;

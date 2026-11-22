@@ -6,6 +6,8 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createTierChooserAction } from './tier-chooser-action.js';
+import { createQuotaFallbackAction } from './quota-fallback-action.js';
 import { branchesOffPullRequestsByDefault } from '../git/worktree-start-ref.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
@@ -114,18 +116,28 @@ const buildSchedule = (input) => {
     throw new OpenChamberControlError('Provide exactly one of daily, weekly, once, or cron', 400);
   }
   const timezone = asNonEmptyString(input.timezone);
-  if (daily) return { kind: 'daily', times: [daily], ...(timezone ? { timezone } : {}) };
+  if (daily) {
+    const schedule = { kind: 'daily', times: [daily] };
+    if (timezone) schedule.timezone = timezone;
+    return schedule;
+  }
   if (weekly) {
     const time = asNonEmptyString(input.time);
     if (!time) throw new OpenChamberControlError('time is required with weekly', 400);
-    return { kind: 'weekly', weekdays: parseWeekdays(weekly), times: [time], ...(timezone ? { timezone } : {}) };
+    const schedule = { kind: 'weekly', weekdays: parseWeekdays(weekly), times: [time] };
+    if (timezone) schedule.timezone = timezone;
+    return schedule;
   }
   if (once) {
     const time = asNonEmptyString(input.time);
     if (!time) throw new OpenChamberControlError('time is required with once', 400);
-    return { kind: 'once', date: once, time, ...(timezone ? { timezone } : {}) };
+    const schedule = { kind: 'once', date: once, time };
+    if (timezone) schedule.timezone = timezone;
+    return schedule;
   }
-  return { kind: 'cron', cron, ...(timezone ? { timezone } : {}) };
+  const schedule = { kind: 'cron', cron };
+  if (timezone) schedule.timezone = timezone;
+  return schedule;
 };
 
 const buildScheduledTask = (input) => {
@@ -142,18 +154,19 @@ const buildScheduledTask = (input) => {
   if (goalTokenBudget !== undefined && (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget < 1000 || goalTokenBudget > 100_000_000)) {
     throw new OpenChamberControlError('goalTokenBudget must be from 1000 to 100000000', 400);
   }
+  const execution = {
+    prompt,
+    ...model,
+  };
+  if (asNonEmptyString(input.agent)) execution.agent = input.agent.trim();
+  if (asNonEmptyString(input.variant)) execution.variant = input.variant.trim();
+  if (input.goal === true) execution.goalEnabled = true;
+  if (goalTokenBudget !== undefined) execution.goalTokenBudget = goalTokenBudget;
   const task = {
     name,
     enabled: input.disabled !== true,
     schedule: buildSchedule(input),
-    execution: {
-      prompt,
-      ...model,
-      ...(asNonEmptyString(input.agent) ? { agent: input.agent.trim() } : {}),
-      ...(asNonEmptyString(input.variant) ? { variant: input.variant.trim() } : {}),
-      ...(input.goal === true ? { goalEnabled: true } : {}),
-      ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
-    },
+    execution,
   };
   if (input.targetSessionId !== undefined) task.targetSessionId = targetSessionId ?? input.targetSessionId;
   return task;
@@ -301,12 +314,11 @@ export const createOpenChamberControlService = (dependencies) => {
   // wants the origin. Per-directory scoping is a request header.
   const getClient = async (directory = '') => {
     if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
+    const headers = { ...getOpenCodeAuthHeaders() };
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
     return createClient({
       baseUrl: new URL(buildOpenCodeUrl('/api/info', '')).origin,
-      headers: {
-        ...getOpenCodeAuthHeaders(),
-        ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
-      },
+      headers,
       fetch,
     });
   };
@@ -425,18 +437,17 @@ export const createOpenChamberControlService = (dependencies) => {
     await modifySettings((settings) => {
       const existingProjects = sanitizeProjects(settings?.projects || []) || [];
       existing = existingProjects.find((project) => project.path === resolvedPath) || null;
-      const nextProjects = existing
-        ? existingProjects
-        : [
-            ...existingProjects,
-            {
-              id: createProjectIdFromPath(resolvedPath),
-              path: resolvedPath,
-              ...(label ? { label } : {}),
-              addedAt: now(),
-              lastOpenedAt: now(),
-            },
-          ];
+      let nextProjects = existingProjects;
+      if (!existing) {
+        const project = {
+          id: createProjectIdFromPath(resolvedPath),
+          path: resolvedPath,
+        };
+        if (label) project.label = label;
+        project.addedAt = now();
+        project.lastOpenedAt = now();
+        nextProjects = [...existingProjects, project];
+      }
       entry = existing ?? nextProjects[nextProjects.length - 1];
       return {
         projects: nextProjects,
@@ -516,6 +527,17 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
+  // `render.tierChooser` (#14 slice 2) and `render.quotaFallback`
+  // (#14 slice 3): the cards' production callers — catalog pricing
+  // assembled and the cards built here; the agent shows each through
+  // render.page's wait and applies the answer.
+  const listCatalogModels = async (directory) => {
+    const client = await getClient(asNonEmptyString(directory) || '');
+    const catalog = await client.model.list();
+    return catalog.data;
+  };
+  const tierChooser = createTierChooserAction({ listModels: listCatalogModels });
+  const quotaFallback = createQuotaFallbackAction({ listModels: listCatalogModels });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -609,7 +631,7 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const sessionStatus = async (client, sessionID) => {
     const statuses = await activeSessions(client);
-    return asPublicStatus(statuses[sessionID]);
+    return asPublicStatus(Object.hasOwn(statuses, sessionID) ? statuses[sessionID] : undefined);
   };
 
   // The message list is cursor-paginated and `order: 'desc'` puts the newest
@@ -639,11 +661,13 @@ export const createOpenChamberControlService = (dependencies) => {
     let cursor;
     let truncated = false;
     for (let page = 0; page < MAX_PAGES_PER_WALK; page += 1) {
-      const response = await client.message.list({
+      const request = {
         sessionID,
         limit: fetchLimit ?? MESSAGE_PAGE_LIMIT,
-        ...(cursor ? { cursor } : fetchLimit ? { order: 'desc' } : {}),
-      });
+      };
+      if (cursor) request.cursor = cursor;
+      else if (fetchLimit) request.order = 'desc';
+      const response = await client.message.list(request);
       const raw = Array.isArray(response?.data) ? response.data : [];
       collected.push(...raw);
       const next = asNonEmptyString(response?.cursor?.next);
@@ -747,12 +771,13 @@ export const createOpenChamberControlService = (dependencies) => {
       return { status: 'not-scheduled', reason: 'The prompt was not dispatched, so there is no result to return.' };
     }
     try {
-      await dispatchResults.register({
+      const registration = {
         parentSessionId: parentSessionID,
         sessionId: result.sessionId,
         dispatchedAt,
-        ...(afterIdleId !== undefined ? { afterIdleId } : {}),
-      });
+      };
+      if (afterIdleId !== undefined) registration.afterIdleId = afterIdleId;
+      await dispatchResults.register(registration);
       return { status: 'pending', note: RESULT_PENDING_NOTE };
     } catch (error) {
       return {
@@ -871,24 +896,24 @@ export const createOpenChamberControlService = (dependencies) => {
       const resolvedSessionDirectory = await resolveSessionDirectory(sessionID);
       if (resolvedSessionDirectory) directory = resolvedSessionDirectory;
     }
-    const payload = {
-      ...(directory ? { directory } : {}),
-      ...(asNonEmptyString(input.projectId) ? { projectId: input.projectId.trim() } : {}),
-      ...(asNonEmptyString(input.title) ? { title: input.title.trim() } : {}),
-      ...(asNonEmptyString(input.prompt) ? { prompt: input.prompt.trim() } : {}),
-      ...(asNonEmptyString(input.model) ? { model: input.model.trim() } : {}),
-      ...(asNonEmptyString(input.agent) ? { agent: input.agent.trim() } : {}),
-      ...(asNonEmptyString(input.variant) ? { variant: input.variant.trim() } : {}),
-      ...(input.goal === true ? { goal: true } : {}),
-      ...(input.goalTokenBudget !== undefined ? { goalTokenBudget: input.goalTokenBudget } : {}),
-      ...(asNonEmptyString(input.worktree) ? { worktree: {
-        name: input.worktree.trim(),
-        ...(asNonEmptyString(input.branch) ? { branchName: input.branch.trim() } : {}),
-        ...(asNonEmptyString(input.startRef) ? { startRef: input.startRef.trim() } : {}),
-      } } : {}),
-      ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
-      ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
-    };
+    const payload = {};
+    if (directory) payload.directory = directory;
+    if (asNonEmptyString(input.projectId)) payload.projectId = input.projectId.trim();
+    if (asNonEmptyString(input.title)) payload.title = input.title.trim();
+    if (asNonEmptyString(input.prompt)) payload.prompt = input.prompt.trim();
+    if (asNonEmptyString(input.model)) payload.model = input.model.trim();
+    if (asNonEmptyString(input.agent)) payload.agent = input.agent.trim();
+    if (asNonEmptyString(input.variant)) payload.variant = input.variant.trim();
+    if (input.goal === true) payload.goal = true;
+    if (input.goalTokenBudget !== undefined) payload.goalTokenBudget = input.goalTokenBudget;
+    if (asNonEmptyString(input.worktree)) {
+      const worktree = { name: input.worktree.trim() };
+      if (asNonEmptyString(input.branch)) worktree.branchName = input.branch.trim();
+      if (asNonEmptyString(input.startRef)) worktree.startRef = input.startRef.trim();
+      payload.worktree = worktree;
+    }
+    if (typeof input.setUpstream === 'boolean') payload.setUpstream = input.setUpstream;
+    if (asNonEmptyString(input.messageId)) payload.messageId = input.messageId.trim();
     // Forwarded unchanged on create once it passes the same object check
     // the update path applies: OpenCode owns the policy shape and its
     // checks. Send and fork keep the policy the session already has.
@@ -1165,6 +1190,22 @@ export const createOpenChamberControlService = (dependencies) => {
           signal: options.signal,
         });
       }
+      if (action === 'render.tierChooser') {
+        return await tierChooser(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+        });
+      }
+      if (action === 'render.quotaFallback') {
+        return await quotaFallback(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+        });
+      }
       if (action === 'file.open') {
         if (!fileOpen) {
           throw new OpenChamberControlError('The file viewer is not available on this server', 503);
@@ -1324,7 +1365,7 @@ export const createOpenChamberControlService = (dependencies) => {
             const statuses = await activeSessions(client).catch(() => null);
             sessions = sessions.map((session) => ({
               ...session,
-              status: statuses ? asPublicStatus(statuses[session.id]) : { type: 'unknown' },
+              status: statuses ? asPublicStatus(Object.hasOwn(statuses, session.id) ? statuses[session.id] : undefined) : { type: 'unknown' },
             }));
           }
           return { sessions, limit, directory, archived: input.all === true ? 'included' : 'excluded' };

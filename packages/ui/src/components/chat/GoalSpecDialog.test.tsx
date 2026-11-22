@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { I18nProvider } from '@/lib/i18n';
-import type { GoalSpecResult, GoalSubmitChoice } from '@/lib/goalWriter';
+import type { BackgroundGoalSpec, GoalSpecResult, GoalSubmitChoice } from '@/lib/goalWriter';
 import type { GoalSpecDialogRequest } from './GoalSpecDialog';
 import { useConfigStore } from '@/stores/useConfigStore';
 
@@ -56,13 +56,15 @@ describe('GoalSpecDialog', () => {
   let dom: ReturnType<typeof installDom>;
   let choices: GoalSubmitChoice[];
   let cancels: number;
+  let backgrounds: BackgroundGoalSpec[];
 
-  const render = (request: Omit<GoalSpecDialogRequest, 'id'>) => act(async () => root.render(
+  const render = (request: Omit<GoalSpecDialogRequest, 'id'> | null) => act(async () => root.render(
     <I18nProvider>
       <GoalSpecDialog
-        request={{ id: 1, ...request }}
+        request={request ? { id: 1, ...request } : null}
         onCancel={() => { cancels += 1; }}
         onSubmit={(choice) => { choices.push(choice); }}
+        onBackground={(pending) => { backgrounds.push(pending); }}
       />
     </I18nProvider>,
   ));
@@ -76,6 +78,7 @@ describe('GoalSpecDialog', () => {
   beforeEach(() => {
     choices = [];
     cancels = 0;
+    backgrounds = [];
     dom = installDom();
     root = createRoot(dom.container);
   });
@@ -211,13 +214,7 @@ describe('GoalSpecDialog', () => {
     expect(choices).toEqual([{ kind: 'spec', spec: '## Objective\nDark mode', sendMode: 'with-message', ignoreLimit: true }]);
   });
 
-  test('an effort picked in the window is recorded once per pick, when it writes', async () => {
-    const recorded: unknown[] = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input).includes('/api/openchamber/model-choices')) recorded.push(JSON.parse(String(init?.body)));
-      return new Response('{}', { status: 200 });
-    }, { preconnect: async () => {} });
+  const withWriterModels = async (body: () => Promise<void>) => {
     const previousProviders = useConfigStore.getState().providers;
     useConfigStore.setState({ providers: [{
       id: 'p', name: 'p', activation: 'enabled', package: 'p',
@@ -227,41 +224,58 @@ describe('GoalSpecDialog', () => {
         time: { released: 0 }, cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }], status: 'active', enabled: true, limit: { context: 0, output: 0 },
       }],
     }] });
-    // A Base UI select opens on a press and commits an option only after a hover
-    // has highlighted it; each step runs in its own act (as in PoolAdvancedFields.test).
-    const fire = (target: Element, type: string) => {
-      const init = { bubbles: true, cancelable: true, button: 0 };
-      target.dispatchEvent(type.startsWith('pointer') ? new window.PointerEvent(type, { ...init, pointerType: 'mouse' }) : new window.MouseEvent(type, init));
-    };
-    const pickEffort = async (label: string) => {
-      const trigger = document.querySelector<HTMLElement>('[aria-label="Goal writer effort"]');
-      if (!trigger) throw new Error(`No effort select in: ${document.body.textContent}`);
-      await act(async () => {
-        fire(trigger, 'pointerdown');
-        fire(trigger, 'mousedown');
-      });
-      const option = Array.from(document.querySelectorAll('[role="option"]')).find((element) => element.textContent?.trim() === label);
-      if (!option) throw new Error(`No effort "${label}" in: ${document.body.textContent}`);
-      await act(async () => {
-        for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']) fire(option, type);
-      });
-      await act(async () => {
-        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) fire(option, type);
-      });
-      expect(trigger.textContent).toBe(label);
-    };
     try {
-      await render({ ...base, sessionModel: { providerID: 'p', modelID: 'm' }, inputLength: 3_000, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: async () => written });
-      await pickEffort('Low');
-      expect(recorded).toEqual([]);
-      await click('Write again');
-      await click('Write again');
-      await pickEffort('High');
-      await click('Write again');
-      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      await body();
+    } finally {
+      useConfigStore.setState({ providers: previousProviders });
+    }
+  };
+  // A Base UI select opens on a press and commits an option only after a hover
+  // has highlighted it; each step runs in its own act (as in PoolAdvancedFields.test).
+  // The effort select and the model selector report through the same writer
+  // change, so an effort pick stands in for picking another writer.
+  const fire = (target: Element, type: string) => {
+    const init = { bubbles: true, cancelable: true, button: 0 };
+    target.dispatchEvent(type.startsWith('pointer') ? new window.PointerEvent(type, { ...init, pointerType: 'mouse' }) : new window.MouseEvent(type, init));
+  };
+  const pickEffort = async (label: string) => {
+    const trigger = document.querySelector<HTMLElement>('[aria-label="Goal writer effort"]');
+    if (!trigger) throw new Error(`No effort select in: ${document.body.textContent}`);
+    await act(async () => {
+      fire(trigger, 'pointerdown');
+      fire(trigger, 'mousedown');
+    });
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find((element) => element.textContent?.trim() === label);
+    if (!option) throw new Error(`No effort "${label}" in: ${document.body.textContent}`);
+    await act(async () => {
+      for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']) fire(option, type);
+    });
+    await act(async () => {
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) fire(option, type);
+    });
+    expect(trigger.textContent).toBe(label);
+  };
+
+  test('an effort picked in the window is recorded once per pick, when it writes', async () => {
+    const recorded: unknown[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/api/openchamber/model-choices')) recorded.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200 });
+    }, { preconnect: async () => {} });
+    try {
+      await withWriterModels(async () => {
+        await render({ ...base, sessionModel: { providerID: 'p', modelID: 'm' }, inputLength: 3_000, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: async () => written });
+        // A pick starts a run for it, so it is recorded at once.
+        await pickEffort('Low');
+        await click('Write again');
+        await click('Write again');
+        await pickEffort('High');
+        await click('Write again');
+        await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      });
     } finally {
       globalThis.fetch = originalFetch;
-      useConfigStore.setState({ providers: previousProviders });
     }
 
     const choice = (variant: string) => ({
@@ -273,5 +287,97 @@ describe('GoalSpecDialog', () => {
       inputSize: 'long',
     });
     expect(recorded).toEqual([choice('low'), choice('high')]);
+  });
+
+  // Oracle: the run the window shows or hands off is always the one for the
+  // writer picked last. Each write call gets its own deferred result, so an
+  // earlier run can be made to finish after the newer one.
+  const controlledWrites = () => {
+    const calls: Array<{ signal: AbortSignal; variant: string | null; resolve: (result: GoalSpecResult) => void }> = [];
+    const write: GoalSpecDialogRequest['write'] = (signal, options) => new Promise<GoalSpecResult>((resolve) => {
+      calls.push({ signal, variant: options.writer?.variant ?? null, resolve });
+    });
+    return { calls, write };
+  };
+  const specFor = (text: string): GoalSpecResult => ({ ...written, spec: `## Objective\n${text}` });
+
+  test('picking another writer while writing starts a run for it, and the earlier run never lands', async () => {
+    await withWriterModels(async () => {
+      const writes = controlledWrites();
+      await render({ ...base, sessionModel: { providerID: 'p', modelID: 'm' }, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: writes.write });
+      expect(writes.calls).toHaveLength(1);
+
+      await pickEffort('High');
+      expect(writes.calls.map((call) => call.variant)).toEqual([null, 'high']);
+      expect(writes.calls[0].signal.aborted).toBe(true);
+
+      await act(async () => { writes.calls[0].resolve(specFor('From the first writer')); });
+      // Read now, asserted once the newer run settled: a failed assertion
+      // here would leave that run pending and the test hanging.
+      const shownAfterStale = document.querySelector('textarea')?.value ?? null;
+
+      await act(async () => { writes.calls[1].resolve(specFor('From the high-effort writer')); });
+      expect(shownAfterStale).toBeNull();
+      expect(document.querySelector('textarea')?.value).toBe('## Objective\nFrom the high-effort writer');
+
+      // The late first result stays dropped after the newer one is shown.
+      expect(choices).toEqual([]);
+    });
+  });
+
+  test('a ready spec is written again for a newly picked writer', async () => {
+    await withWriterModels(async () => {
+      const writes = controlledWrites();
+      await render({ ...base, sessionModel: { providerID: 'p', modelID: 'm' }, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: writes.write });
+      await act(async () => { writes.calls[0].resolve(specFor('First')); });
+      expect(document.querySelector('textarea')?.value).toBe('## Objective\nFirst');
+
+      await pickEffort('Low');
+      expect(writes.calls.map((call) => call.variant)).toEqual([null, 'low']);
+      await act(async () => { writes.calls[1].resolve(specFor('Second')); });
+      expect(document.querySelector('textarea')?.value).toBe('## Objective\nSecond');
+    });
+  });
+
+  test('send when ready hands the current run to the composer, which keeps it after the window closes', async () => {
+    await withWriterModels(async () => {
+      const writes = controlledWrites();
+      await render({ ...base, sessionModel: { providerID: 'p', modelID: 'm' }, trigger: 'auto-create', review: true, defaultSendMode: 'goal-as-message', write: writes.write });
+      await pickEffort('Low');
+      await click('Send when ready');
+
+      expect(backgrounds).toHaveLength(1);
+      expect(backgrounds[0]).toMatchObject({ sendMode: 'goal-as-message', ignoreLimit: false });
+      // The composer closes the window once it takes the send.
+      await render(null);
+      expect(backgrounds[0].controller.signal.aborted).toBe(false);
+      expect(writes.calls[1].signal.aborted).toBe(false);
+
+      // The replaced run finishing late does not become the handed-off result.
+      writes.calls[0].resolve(specFor('Stale'));
+      writes.calls[1].resolve(specFor('Current'));
+      expect(await backgrounds[0].result).toEqual(specFor('Current'));
+      expect(choices).toEqual([]);
+      expect(cancels).toBe(0);
+    });
+  });
+
+  test('a window that sends when written keeps writing when closed; a review window is cancelled', async () => {
+    const writes = controlledWrites();
+    const pressEscape = () => act(async () => {
+      (document.activeElement ?? document).dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    await render({ ...base, trigger: 'armed', review: false, defaultSendMode: 'with-message', write: writes.write });
+    await pressEscape();
+    expect(backgrounds).toHaveLength(1);
+    expect(cancels).toBe(0);
+    await render(null);
+    expect(writes.calls[0].signal.aborted).toBe(false);
+
+    await render({ ...base, trigger: 'armed', review: true, defaultSendMode: 'with-message', write: writes.write });
+    await pressEscape();
+    expect(backgrounds).toHaveLength(1);
+    expect(cancels).toBe(1);
   });
 });

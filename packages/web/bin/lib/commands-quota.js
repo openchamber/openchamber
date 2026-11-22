@@ -2,7 +2,6 @@ import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { isJsonMode, isQuietMode, printJson } from '../cli-output.js';
 import { asNonEmptyString } from '../../server/lib/shared/guards.js';
 
-const DEFAULT_OPENCODE_PORT = 4096;
 
 // A whole number from the environment, else null. Only a plain decimal
 // spelling counts: a bare parseInt would read '1e3' as 1, '4096junk' as
@@ -36,11 +35,12 @@ USAGE:
   An argument that resolves to nothing is a usage error.
   A provider with several stored credentials prints one block per
   credential, labeled with the credential and the account it metered.
-  Quota is read from the running OpenCode, the same read the Usage page makes.
-  When no OpenCode server answers, credentials are read from OpenCode's
-  local store on this machine instead; every result then names the
-  source that served it (credentialSource in --json, a note on stderr
-  otherwise), and one provider's failure or timeout never hides the rest.
+  Quota is read from OpenCode's credential store on this machine,
+  directly — the same direct store read the aggregator gatherer uses
+  (code#2490's single source) — so the CLI and the gatherer resolve
+  the same credentials the same way. Every result names that source
+  (credentialSource: local in --json), and one provider's failure or
+  timeout never hides the rest.
 
 OUTPUT OPTIONS:
   --all                   Include providers OpenCode has turned off
@@ -51,29 +51,8 @@ OUTPUT OPTIONS:
   successful result at all.
 
 ENVIRONMENT:
-  OPENCODE_HOST                   OpenCode server base URL (default: http://127.0.0.1:4096)
-  OPENCODE_PORT                   OpenCode server port when OPENCODE_HOST is unset
-  OPENCODE_SERVER_PASSWORD        Password of a secured OpenCode server
   OPENCHAMBER_QUOTA_TIMEOUT_MS    Per-provider fetch timeout in milliseconds (default: 10000)
 `;
-
-// The web server resolves the OpenCode endpoint from its own runtime state.
-// A standalone CLI read has only the external-OpenCode settings, so it uses
-// OPENCODE_HOST when set and the default local serve address otherwise. The
-// auth header matches server/lib/opencode/auth-state-runtime.js: Basic
-// `opencode:<password>` from OPENCODE_SERVER_PASSWORD, no header when unset.
-const resolveOpenCodeBaseUrl = (env) => {
-  const host = asNonEmptyString(env.OPENCODE_HOST);
-  if (host) return host.replace(/\/+$/, '');
-  const port = parsePlainDecimalInt(env.OPENCODE_PORT);
-  return `http://127.0.0.1:${port !== null && port >= 1 && port <= 65535 ? port : DEFAULT_OPENCODE_PORT}`;
-};
-
-const buildOpenCodeAuthHeaders = (env) => {
-  const password = asNonEmptyString(env.OPENCODE_SERVER_PASSWORD);
-  if (!password) return {};
-  return { Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}` };
-};
 
 const formatWindowValue = (window) => {
   if (Number.isFinite(window?.usedPercent)) {
@@ -161,93 +140,11 @@ const defaultLoadQuotaRuntime = async () => {
   ]);
   return {
     configureOpenCodeCredentials: authModule.configureOpenCodeCredentials,
-    openCodeCredentialSource: authModule.openCodeCredentialSource,
     openCodeLocalCredentialSource: authModule.openCodeLocalCredentialSource,
     listConfiguredQuotaProviders: quotaModule.listConfiguredQuotaProviders,
     listQuotaProviderCatalogue: quotaModule.listQuotaProviderCatalogue,
     fetchQuotaForProviderInstances: quotaModule.fetchQuotaForProviderInstances,
   };
-};
-
-const TRANSPORT_ERROR_CODES = new Set([
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'ECONNABORTED',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'ETIMEDOUT',
-  'EPIPE',
-]);
-
-/**
- * Whether a credential read failed because OpenCode could not be reached
- * at all, as opposed to the server answering and refusing. The OpenCode
- * client marks its own transport failures with `reason: 'Transport'` (an
- * HTTP answer is a different reason and stays authoritative); the walk
- * down the cause chain covers the fetch and socket errors underneath.
- */
-const isTransportFailure = (error) => {
-  let current = error;
-  for (let depth = 0; current && depth < 8; depth += 1) {
-    if (current.reason === 'Transport') return true;
-    if (TRANSPORT_ERROR_CODES.has(asNonEmptyString(current.code) ?? '')) return true;
-    const message = asNonEmptyString(current.message) ?? '';
-    if (message.startsWith('Transport:') || message === 'fetch failed') return true;
-    current = current.cause;
-  }
-  return false;
-};
-
-/**
- * The server credential source with the local store behind it. The first
- * transport failure switches every later read in the run to the local
- * store — a server that is down does not come back mid-run — and
- * `servedBy()` reports which source the run's reads came from, so the
- * output never presents a store read as a live server read. Writes and
- * the launch environment always stay with the server source.
- * `usesLocalStore()` forwards the server source's answer, so a resolver
- * that gates a direct store read on a known-local source (the
- * Antigravity fallback) works through this combined source too; the
- * server source only claims local for a managed or loopback OpenCode,
- * so a remote server is never answered with this machine's store.
- * `getLaunchEnvironment()` forwards only the server source's own answer,
- * because the direct store read resolves the store's location from it.
- * A standalone CLI never launched the server, so its server source has
- * no launch environment to forward and the direct read stays off: this
- * machine's shell environment is not the environment the connected
- * server resolves its database from, and substituting it would read a
- * different store. The environment the fallback source reads when the
- * server is down stays with that source, where `servedBy()` reports it
- * as `local`; a live server that is only known-local gets no launch
- * environment, exactly as a remote server gets no `usesLocalStore()`.
- */
-const createFallbackCredentialSource = (primary, fallback) => {
-  let fellBack = false;
-  const source = {
-    servedBy: () => (fellBack ? 'local' : 'server'),
-    usesLocalStore: () => primary.usesLocalStore?.() ?? false,
-    getLaunchEnvironment: () => primary.getLaunchEnvironment?.() ?? null,
-    list: async () => {
-      if (fellBack) return fallback.list();
-      try {
-        return await primary.list();
-      } catch (error) {
-        if (!isTransportFailure(error)) throw error;
-        fellBack = true;
-        try {
-          return await fallback.list();
-        } catch (fallbackError) {
-          const reason = error instanceof Error ? error.message : 'OpenCode server unreachable';
-          const storeReason = fallbackError instanceof Error ? fallbackError.message : 'local credential store unreadable';
-          throw new Error(`${reason}; the local credential store could not be read either (${storeReason})`);
-        }
-      }
-    },
-  };
-  if (primary.create) source.create = (input) => primary.create(input);
-  if (primary.remove) source.remove = (credentialID) => primary.remove(credentialID);
-  if (primary.listEnvironmentKeys) source.listEnvironmentKeys = () => primary.listEnvironmentKeys();
-  return source;
 };
 
 const QUOTA_FETCH_CONCURRENCY = 6;
@@ -402,11 +299,16 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
     }
 
     const runtime = await loadQuotaRuntime();
-    const serverSource = runtime.openCodeCredentialSource({
-      buildOpenCodeUrl: (requestPath) => `${resolveOpenCodeBaseUrl(env)}${requestPath ?? ''}`,
-      getOpenCodeAuthHeaders: () => buildOpenCodeAuthHeaders(env),
-    });
-    const credentialSource = createFallbackCredentialSource(serverSource, runtime.openCodeLocalCredentialSource());
+    // The single credential source (code#2490, openchamber #2282):
+    // OpenCode's credential store read directly from its database —
+    // the same read the aggregator gatherer performs — with no
+    // server round-trip and no server-first/store-fallback split, so
+    // this CLI cannot diverge from the gatherer about which
+    // credentials exist. The servedBy()/local reporting collapses
+    // accordingly: every read is a store read, stamped
+    // credentialSource 'local' below, and the help text says so —
+    // there is no server read left to mistake it for.
+    const credentialSource = runtime.openCodeLocalCredentialSource();
     runtime.configureOpenCodeCredentials(credentialSource);
     const timeoutMs = resolveQuotaTimeoutMs(env);
 
@@ -428,12 +330,7 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
       results = await fetchProviders(runtime, configured, catalogue, timeoutMs);
     }
 
-    const credentialSourceName = credentialSource.servedBy();
-    results = results.map((result) => ({ ...result, credentialSource: credentialSourceName }));
-
-    if (credentialSourceName === 'local' && !isJsonMode(options)) {
-      process.stderr.write('note: the OpenCode server was unreachable, so credentials came from the local OpenCode store.\n');
-    }
+    results = results.map((result) => ({ ...result, credentialSource: 'local' }));
 
     if (isJsonMode(options)) {
       printJson({ providers: results });
@@ -459,11 +356,7 @@ function createQuotaCommand({ loadQuotaRuntime = defaultLoadQuotaRuntime, env = 
 
 export {
   createQuotaCommand,
-  resolveOpenCodeBaseUrl,
-  buildOpenCodeAuthHeaders,
   formatQuotaResultLines,
   formatQuotaQuietLine,
-  isTransportFailure,
-  createFallbackCredentialSource,
   resolveQuotaTimeoutMs,
 };

@@ -5,6 +5,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -13,6 +14,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -146,6 +148,7 @@ export const dict = {
   ...sessionMenuHintsI18n.de,
   ...sessionErrorRecoveryI18n.de,
   ...sidebarLayoutI18n.de,
+  ...activityTimesI18n.de,
   ...projectKnowledgeI18n.de,
   ...linearPanelI18n.de,
   ...routingI18n.de,
@@ -154,6 +157,7 @@ export const dict = {
   ...fileArtifactsI18n.de,
   ...fileContentSearchI18n.de,
   ...htmlRenderI18n.de,
+  ...sessionLocationI18n.de,
   ...sessionNoticesI18n.de,
   ...usageStatsI18n.de,
   ...webSearchI18n.de,
@@ -2323,6 +2327,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Failover von',
   'chat.messageBody.modelChanged.notice': 'Modell geändert: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Modell geändert: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Vorheriges bevorzugen',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Modellpools einen Tag lang {model} bevorzugen lassen',
+  'chat.currentModel.label': 'Aktuelles Modell: {model}',
+  'chat.currentModel.labelWithPool': 'Aktuelles Modell: {model} aus Pool {pool}',
+  'chat.currentModel.menu.openHint': 'Klicken, um ein Modell zu wählen',
+  'chat.currentModel.menu.timing': 'Wechseln',
+  'chat.currentModel.menu.directPickHelp': 'Eine direkte Auswahl beendet den Pool-Fallback, bis Sie zum Pool zurückkehren.',
+  'chat.currentModel.timing.immediately': 'Sofort (startet eine laufende Antwort neu)',
+  'chat.currentModel.timing.nextStep': 'Beim nächsten Schritt',
+  'chat.currentModel.timing.nextInput': 'Mit der nächsten Nachricht',
+  'chat.currentModel.menu.members': 'Modelle im Pool {pool}',
+  'chat.currentModel.menu.returnToPool': 'Zurück zum Pool {pool}',
+  'chat.currentModel.toast.failed': 'Das Modell konnte nicht gewechselt werden',
   'chat.generatedResult.actions.copy': 'Kopieren',
   'chat.generatedResult.actions.copied': 'Kopiert',
   'chat.generatedResult.commit.title': 'Generierte Commit-Nachricht',
@@ -3845,8 +3862,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Diesen behalten',
   'multirun.overview.addModel.action': 'Modell hinzufügen',
   'multirun.overview.addModel.hint': 'Derselbe Prompt auf einem weiteren Modell in diesem Lauf',
-  'chat.parallel.settings.whereShared': 'Projektverzeichnis',
-  'chat.parallel.settings.whereSharedHint': 'Alle Läufe arbeiten in deinem Checkout. Am besten für Fragen und Recherche.',
+  'chat.parallel.settings.whereShared': 'Gemeinsames Verzeichnis',
+  'chat.parallel.settings.whereSharedHint': 'Alle Läufe arbeiten in dem Verzeichnis, auf das dieser Entwurf zeigt. Am besten für Fragen und Recherche.',
   'chat.parallel.settings.whereWorktrees': 'Getrennte Worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Jeder Lauf bekommt einen eigenen Branch, Codeänderungen kollidieren nie. Behalte den besten.',
   'chat.parallel.settings.baseBranchTitle': 'Basis-Branch',

@@ -53,6 +53,40 @@ describe('createWorkspaceFileNameIndex', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('does not resurrect an evicted workspace when its listing finishes last', async () => {
+    // Children finish only when the test completes them, so the order is
+    // deterministic: nine concurrent loads, the eight newer listings
+    // complete first, the evicted oldest completes last (#2161).
+    const children = [];
+    const spawn = () => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.kill = () => { child.killed = true; };
+      children.push(child);
+      return child;
+    };
+    const finish = (child) => {
+      child.stdout.emit('data', Buffer.from(listing));
+      child.emit('close', 0);
+    };
+    const index = createWorkspaceFileNameIndex({ spawn, resolveGitBinary: () => 'git' });
+    const dirs = Array.from({ length: 9 }, (_, i) => `/ws${i}`);
+    const pending = dirs.map((directory) => index.find(directory, 'util.ts'));
+    expect(children).toHaveLength(9);
+    for (let i = 8; i >= 1; i--) finish(children[i]);
+    finish(children[0]);
+    await Promise.all(pending);
+    // The evicted oldest entry was not reinserted on completion: looking
+    // it up again starts a fresh listing instead of reusing the result.
+    const again = index.find(dirs[0], 'util.ts');
+    expect(children).toHaveLength(10);
+    finish(children[9]);
+    await again;
+    // A workspace that stayed resident is still served from the cache.
+    await index.find(dirs[8], 'util.ts');
+    expect(children).toHaveLength(10);
+  });
+
   it('gives no match for a listing over the size cap or past the deadline', async () => {
     const big = createWorkspaceFileNameIndex({ spawn: fakeSpawn([listing]).spawn, resolveGitBinary: () => 'git', maxOutputBytes: 8 });
     expect(await big.find('/repo', 'util.ts')).toEqual([]);

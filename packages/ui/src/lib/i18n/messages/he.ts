@@ -5,6 +5,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -13,6 +14,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -2518,6 +2520,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'עבר לגיבוי מ-',
   'chat.messageBody.modelChanged.notice': 'המודל השתנה מ-{from} אל {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'המודל השתנה מ-{from} אל {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'העדף את הקודם',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'גרום למאגרי המודלים להעדיף את {model} למשך יום',
+  'chat.currentModel.label': 'המודל הנוכחי: {model}',
+  'chat.currentModel.labelWithPool': 'המודל הנוכחי: {model} מהמאגר {pool}',
+  'chat.currentModel.menu.openHint': 'לחץ כדי לבחור מודל',
+  'chat.currentModel.menu.timing': 'החלפה',
+  'chat.currentModel.menu.directPickHelp': 'בחירה ישירה מפסיקה את המעבר למודל גיבוי במאגר עד לחזרה למאגר.',
+  'chat.currentModel.timing.immediately': 'עכשיו (מפעיל מחדש תשובה שרצה)',
+  'chat.currentModel.timing.nextStep': 'בשלב הבא',
+  'chat.currentModel.timing.nextInput': 'עם ההודעה הבאה',
+  'chat.currentModel.menu.members': 'מודלים במאגר {pool}',
+  'chat.currentModel.menu.returnToPool': 'חזרה למאגר {pool}',
+  'chat.currentModel.toast.failed': 'לא ניתן היה להחליף את המודל',
   'chat.generatedResult.actions.copy': 'העתק',
   'chat.generatedResult.actions.copied': 'הועתק',
   'chat.generatedResult.commit.title': 'הודעת קומיט שנוצרה',
@@ -3744,8 +3759,8 @@ export const dict = {
   'multirun.overview.card.keep': 'שמור את זו',
   'multirun.overview.addModel.action': 'הוסף מודל',
   'multirun.overview.addModel.hint': 'מריץ את אותה הנחיה על מודל נוסף בהרצה הזו',
-  'chat.parallel.settings.whereShared': 'תיקיית הפרויקט',
-  'chat.parallel.settings.whereSharedHint': 'כל ההרצות עובדות בעותק שלך של הקוד. הכי מתאים לשאלות ולמחקר.',
+  'chat.parallel.settings.whereShared': 'תיקייה משותפת',
+  'chat.parallel.settings.whereSharedHint': 'כל ההרצות עובדות בתיקייה שנבחרה לטיוטה הזו. הכי מתאים לשאלות ולמחקר.',
   'chat.parallel.settings.whereWorktrees': 'עצי עבודה נפרדים',
   'chat.parallel.settings.whereWorktreesHint': 'כל הרצה מקבלת ענף משלה, כך ששינויי קוד לעולם לא מתנגשים. בסוף שומרים את הטובה ביותר.',
   'chat.parallel.settings.baseBranchTitle': 'ענף בסיס',
@@ -3827,6 +3842,7 @@ export const dict = {
   ...sessionMenuHintsI18n.he,
   ...sessionErrorRecoveryI18n.he,
   ...sidebarLayoutI18n.he,
+  ...activityTimesI18n.he,
   ...projectKnowledgeI18n.he,
   ...linearPanelI18n.he,
   ...routingI18n.he,
@@ -3835,6 +3851,7 @@ export const dict = {
   ...fileArtifactsI18n.he,
   ...fileContentSearchI18n.he,
   ...htmlRenderI18n.he,
+  ...sessionLocationI18n.he,
   ...sessionNoticesI18n.he,
   ...usageStatsI18n.he,
   ...webSearchI18n.he,

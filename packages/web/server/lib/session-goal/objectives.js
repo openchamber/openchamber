@@ -9,6 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { z } from 'zod';
+import { writeDurableJsonFile } from '../shared/durable-json-store.js';
 
 export const GOAL_OBJECTIVE_CHAR_LIMIT = 5_000;
 // The Settings bounds for both limits below; the upper one also caps a goal
@@ -26,6 +27,11 @@ const GOAL_CHECK_OBJECTIVE_CHAR_LIMIT = 20_000;
 // changes the text appends a version and the oldest beyond this cap is pruned,
 // so the history file stays bounded next to the objective it describes.
 export const GOAL_OBJECTIVE_VERSION_CAP = 20;
+// The most bytes a bounded versions read may buffer (#2295): the version
+// cap entries at the objective read bound each, plus per-entry JSON
+// framing - the largest history writeVersionList can ever produce.
+const GOAL_VERSIONS_MAX_READ_BYTES =
+  GOAL_OBJECTIVE_VERSION_CAP * (GOAL_OBJECTIVE_MAX_READ_BYTES + 256);
 
 const asCharLimit = (value, fallback) => (
   Number.isInteger(value) && value >= MIN_CHAR_LIMIT && value <= GOAL_OBJECTIVE_HARD_CAP ? value : fallback
@@ -69,8 +75,16 @@ const clampContent = (content) => {
   return last >= 0xd800 && last <= 0xdbff ? clamped.slice(0, -1) : clamped;
 };
 
+// Both goal files go through the durable writer (temp file in the same
+// directory + rename) so a failed or interrupted save can never truncate
+// the stored objective or version history in place (#2330). The stated
+// mode is the one these files are created with today (writeFile's default
+// 0o666 before umask). `options.fs` is the durable helper's own seam,
+// threaded through so tests can inject a failing write.
+const GOAL_FILE_MODE = 0o666;
+
 /** Write (or overwrite — a new goal replaces the old one) the session's objective. */
-export const writeObjective = async (sessionId, content) => {
+export const writeObjective = async (sessionId, content, options = {}) => {
   if (!isValidObjectiveKey(sessionId)) {
     throw Object.assign(new Error('invalid session id'), { statusCode: 400 });
   }
@@ -78,8 +92,7 @@ export const writeObjective = async (sessionId, content) => {
   if (!text) {
     throw Object.assign(new Error('objective content is required'), { statusCode: 400 });
   }
-  await fs.promises.mkdir(goalsDir(), { recursive: true });
-  await fs.promises.writeFile(objectiveFilePath(sessionId), text, 'utf8');
+  await writeDurableJsonFile(objectiveFilePath(sessionId), text, { mode: GOAL_FILE_MODE, fs: options.fs });
   return { content: text };
 };
 
@@ -156,10 +169,36 @@ const StoredVersionSchema = z.object({
 // past must never lose the present objective or its healthy neighbours.
 const readVersionList = async (sessionId) => {
   let raw;
+  let handle;
   try {
-    raw = await fs.promises.readFile(versionsFilePath(sessionId), 'utf8');
+    // The history file lives in the same user-reachable data dir as the
+    // objective, so it gets the same bounded read (#2295): open
+    // non-blocking (POSIX) so a FIFO with no writer cannot wedge the
+    // open, judge the handle stat, and read at most the byte bound a
+    // full history can need. A whole-file readFile hangs on a FIFO and
+    // buffers an oversized file whole; an over-bound file reads as
+    // empty history, like a malformed one.
+    const flags = process.platform === 'win32' || fs.constants.O_NONBLOCK === undefined
+      ? 'r'
+      : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK;
+    handle = await fs.promises.open(versionsFilePath(sessionId), flags);
+    const stat = await handle.stat();
+    if (!stat.isFile()) return [];
+    const chunks = [];
+    let total = 0;
+    while (total <= GOAL_VERSIONS_MAX_READ_BYTES) {
+      const chunk = Buffer.alloc(Math.min(64 * 1024, GOAL_VERSIONS_MAX_READ_BYTES + 1 - total));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+    if (total > GOAL_VERSIONS_MAX_READ_BYTES) return [];
+    raw = Buffer.concat(chunks, total).toString('utf8');
   } catch {
     return [];
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
   let parsed;
   try {
@@ -176,9 +215,11 @@ const readVersionList = async (sessionId) => {
   return versions;
 };
 
-const writeVersionList = async (sessionId, versions) => {
-  await fs.promises.mkdir(goalsDir(), { recursive: true });
-  await fs.promises.writeFile(versionsFilePath(sessionId), JSON.stringify(versions), 'utf8');
+const writeVersionList = async (sessionId, versions, options = {}) => {
+  await writeDurableJsonFile(versionsFilePath(sessionId), JSON.stringify(versions), {
+    mode: GOAL_FILE_MODE,
+    fs: options.fs,
+  });
 };
 
 /**
@@ -188,7 +229,7 @@ const writeVersionList = async (sessionId, versions) => {
  * version id (null when nothing was recorded) and the retained versions,
  * newest first.
  */
-export const appendObjectiveVersion = async (sessionId, content, now = Date.now()) => {
+export const appendObjectiveVersion = async (sessionId, content, now = Date.now(), options = {}) => {
   if (!isValidObjectiveKey(sessionId)) {
     throw Object.assign(new Error('invalid session id'), { statusCode: 400 });
   }
@@ -200,7 +241,7 @@ export const appendObjectiveVersion = async (sessionId, content, now = Date.now(
   if (versions[0]?.content === text) return { versions, versionId: null };
   const version = { id: createVersionId(), content: text, savedAt: now };
   const next = [version, ...versions].slice(0, GOAL_OBJECTIVE_VERSION_CAP);
-  await writeVersionList(sessionId, next);
+  await writeVersionList(sessionId, next, options);
   return { versions: next, versionId: version.id };
 };
 

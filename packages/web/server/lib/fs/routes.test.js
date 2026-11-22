@@ -354,7 +354,9 @@ const createStreamingResponse = () => {
 
 // File bytes as `fs/promises` hands them to the raw route: an open handle that streams a span.
 const openBytes = (bytes) => vi.fn(async () => ({
+  stat: async () => ({ isFile: () => true, size: bytes.length }),
   createReadStream: ({ start, end }) => Readable.from([bytes.subarray(start, end + 1)]),
+  close: vi.fn(async () => {}),
 }));
 
 // A pre-read handle over fixed bytes for the fs/write identical-content
@@ -975,6 +977,47 @@ describe('fs upload', () => {
     expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.bin');
   });
 
+  it('preserves the existing file mode when overwrite is explicit', async () => {
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isDirectory: () => false, mode: 0o100755 })),
+      open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
+      chmod: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, { overwrite: true });
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
+    const tmp = fsPromises.open.mock.calls[0][0];
+    // Permission bits only: the stat mode's file-type bits are masked off.
+    expect(fsPromises.chmod).toHaveBeenCalledWith(tmp, 0o755);
+    // The mode is set on the temp file before the rename, so content and
+    // mode commit together and readers never see a wrong-mode file.
+    expect(fsPromises.chmod.mock.invocationCallOrder[0]).toBeLessThan(fsPromises.rename.mock.invocationCallOrder[0]);
+    expect(fsPromises.rename).toHaveBeenCalledWith(tmp, '/repo/file.bin');
+  });
+
+  it('does not chmod a new-file upload (no existing mode to preserve)', async () => {
+    const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
+    const fsPromises = {
+      open: vi.fn(async () => ({ write, close: vi.fn(async () => undefined) })),
+      chmod: vi.fn(async () => undefined),
+      link: vi.fn(async () => undefined),
+      rename: vi.fn(async () => undefined),
+      unlink: vi.fn(async () => undefined),
+    };
+    const handler = registerUpload(fsPromises);
+
+    const res = await callUpload(handler, {});
+
+    expect(res.body).toEqual({ success: true, path: '/repo/file.bin' });
+    expect(fsPromises.chmod).not.toHaveBeenCalled();
+  });
+
   it('rejects an existing directory before reading the upload body', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
@@ -1149,7 +1192,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => 'shared'),
+      open: openText('shared'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1157,13 +1200,13 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('shared');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/shared/target.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/shared/target.txt', expect.anything());
   });
 
-  it('rejects a file over MAX_READ_BYTES with 413 before calling readFile', async () => {
+  it('rejects a file over MAX_READ_BYTES with 413 before reading', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 + 1 })),
-      readFile: vi.fn(async () => 'too large'),
+      open: vi.fn(async () => { throw new Error('must not open'); }),
     };
     const handler = registerRead(fsPromises);
 
@@ -1171,13 +1214,47 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(413);
     expect(res.body).toEqual({ error: 'File too large to read' });
-    expect(fsPromises.readFile).not.toHaveBeenCalled();
+    expect(fsPromises.open).not.toHaveBeenCalled();
+  });
+
+  it('rejects a file that grows past MAX_READ_BYTES after the stat, judged by the read itself (#1605)', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => true, size: 16 * 1024 * 1024 + 1 }),
+        read: vi.fn(async () => ({ bytesRead: 0 })),
+        close: vi.fn(async () => {}),
+      })),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/grown.log' });
+
+    expect(res.statusCode).toBe(413);
+    expect(res.body).toEqual({ error: 'File too large to read' });
+  });
+
+  it('rejects a file swapped for a non-regular file after the stat (#1605)', async () => {
+    const fsPromises = {
+      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
+      open: vi.fn(async () => ({
+        stat: async () => ({ isFile: () => false, size: 0 }),
+        read: vi.fn(async () => ({ bytesRead: 0 })),
+        close: vi.fn(async () => {}),
+      })),
+    };
+    const handler = registerRead(fsPromises);
+
+    const res = await callRead(handler, { path: '/repo/swapped.txt' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is not a file' });
   });
 
   it('reads a file at exactly MAX_READ_BYTES', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 16 * 1024 * 1024 })),
-      readFile: vi.fn(async () => 'at cap'),
+      open: openText('at cap'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1185,13 +1262,13 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('at cap');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/repo/big.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/repo/big.txt', expect.anything());
   });
 
   it('reads outside workspace files without a grant', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
-      readFile: vi.fn(async () => 'secret'),
+      open: openText('secret'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1199,13 +1276,13 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('secret');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/etc/passwd', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/etc/passwd', expect.anything());
   });
 
   it('ignores a legacy grant parameter when reading an outside file', async () => {
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => 'secret'),
+      open: openText('secret'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1217,7 +1294,7 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('secret');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/outside/b.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/outside/b.txt', expect.anything());
   });
 
   it('reads outside raw files without a grant and sets no-referrer', async () => {
@@ -1284,14 +1361,14 @@ describe('fs read', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fsPromises = {
       stat: vi.fn(async () => ({ isFile: () => true, size: 3 })),
-      readFile: vi.fn(async () => ''),
+      open: openText(''),
     };
     const handler = registerRead(fsPromises);
 
     const res = await callRead(handler, { path: '/repo/file.txt' });
 
     expect(res.body).toBe('');
-    expect(fsPromises.readFile).toHaveBeenCalledTimes(4);
+    expect(fsPromises.open).toHaveBeenCalledTimes(4);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Read retry exhausted for /repo/file.txt'));
     warn.mockRestore();
   });
@@ -1306,7 +1383,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 5 })),
-      readFile: vi.fn(async () => 'hello'),
+      open: openText('hello'),
     };
     const handler = registerRead(fsPromises);
 
@@ -1314,7 +1391,7 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('hello');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/outside/shared/file.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/outside/shared/file.txt', expect.anything());
   });
 
   it('rejects reads of canonical paths outside the workspace that no workspace symlink reaches', async () => {
@@ -1344,7 +1421,7 @@ describe('fs read', () => {
         return targetPath;
       }),
       stat: vi.fn(async () => ({ isFile: () => true, size: 4 })),
-      readFile: vi.fn(async () => 'data'),
+      open: openText('data'),
     };
     const handler = registerRead(fsPromises, async () => ({
       directory: '/real/proj',
@@ -1359,7 +1436,7 @@ describe('fs read', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe('data');
-    expect(fsPromises.readFile).toHaveBeenCalledWith('/real/proj/file.txt', 'utf8');
+    expect(fsPromises.open).toHaveBeenCalledWith('/real/proj/file.txt', expect.anything());
     warn.mockRestore();
   });
 
@@ -1644,7 +1721,7 @@ describe('fs raw byte ranges', () => {
     expect(response.res.getHeader('content-length')).toBe('7');
     expect(response.res.getHeader('accept-ranges')).toBe('bytes');
     expect(response.body).toBe('3456789');
-    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
     expect(readFile).not.toHaveBeenCalled();
   });
 
@@ -1660,7 +1737,7 @@ describe('fs raw byte ranges', () => {
     expect(response.res.getHeader('content-length')).toBe('10');
     expect(response.res.getHeader('content-range')).toBeUndefined();
     expect(response.body).toBe('0123456789');
-    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
     expect(readFile).not.toHaveBeenCalled();
   });
 
@@ -1770,6 +1847,54 @@ describe('fs raw byte ranges', () => {
     expect(res.getHeader('content-range')).toBe('bytes */10');
     expect(res.end).toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('refuses a path swapped for a FIFO after stat instead of hanging on open (#2298)', async () => {
+    // Oracle: the path stat says a regular file, but the handle opened for
+    // streaming is a FIFO (isFile() false). The handler must judge from the
+    // opened handle and refuse promptly with the not-a-file 400, closing
+    // the handle - a blocking open or a path-stat-only check would hang or
+    // stream the FIFO instead.
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      stat: async () => ({ isFile: () => false, isFIFO: () => true, size: 10 }),
+      createReadStream: () => { throw new Error('must not stream a FIFO'); },
+      close,
+    }));
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open,
+    });
+    const res = createMockResponse();
+
+    await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is not a file' });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the handle when its stat rejects after the FIFO-safe open (#2298)', async () => {
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      stat: async () => { throw new Error('handle stat failed'); },
+      createReadStream: () => { throw new Error('must not stream when stat failed'); },
+      close,
+    }));
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open,
+    });
+    const res = createMockResponse();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+      expect(res.statusCode).toBe(500);
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 
@@ -2346,6 +2471,7 @@ describe('fs stat directory error handling', () => {
       await copyFile(new URL('../shared/atomic-rename.js', import.meta.url), path.join(directory, 'shared/atomic-rename.js'));
       await copyFile(new URL('../shared/parse-int.js', import.meta.url), path.join(directory, 'shared/parse-int.js'));
       await copyFile(new URL('../shared/traversal-budget.js', import.meta.url), path.join(directory, 'shared/traversal-budget.js'));
+      await copyFile(new URL('../shared/bounded-file-read.js', import.meta.url), path.join(directory, 'shared/bounded-file-read.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',
@@ -2746,6 +2872,114 @@ describe('canonical managed roots with real filesystem aliases', () => {
   });
 });
 
+describe('fs delete workspace containment', () => {
+  const setup = async (context, { chatsSubpath } = {}) => {
+    const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-fs-delete-containment-'));
+    context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
+    const workspace = path.join(root, 'workspace');
+    const managedRoot = path.join(root, 'config');
+    await nativeFs.mkdir(workspace);
+    await nativeFs.mkdir(managedRoot);
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => root },
+      path,
+      fsPromises: nativeFs,
+      normalizeDirectoryPath: value => value,
+      resolveProjectDirectory: async () => ({ directory: workspace }),
+      openchamberUserConfigRoot: managedRoot,
+      managedChatsRoot: chatsSubpath ? path.join(managedRoot, chatsSubpath) : undefined,
+    });
+    return { getRoute, root, workspace, managedRoot };
+  };
+
+  it('rejects deleting a directory that contains a relocated chats root', async context => {
+    const { getRoute, managedRoot } = await setup(context, { chatsSubpath: path.join('storage', 'chats') });
+    const chatsRoot = path.join(managedRoot, 'storage', 'chats');
+    const sentinel = path.join(chatsRoot, 'keep.txt');
+    await nativeFs.mkdir(chatsRoot, { recursive: true });
+    await nativeFs.writeFile(sentinel, 'chat sentinel');
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: path.join(managedRoot, 'storage') } }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('chat sentinel');
+  });
+
+  it('rejects deletion through an intermediate symlink that escapes the workspace', async context => {
+    const { getRoute, root, workspace } = await setup(context);
+    const outside = path.join(root, 'outside');
+    await nativeFs.mkdir(path.join(workspace, 'linked'));
+    await nativeFs.mkdir(outside);
+    const victim = path.join(outside, 'victim.txt');
+    await nativeFs.writeFile(victim, 'outside sentinel');
+    await nativeFs.symlink(outside, path.join(workspace, 'linked', 'jump'));
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({
+      body: { path: path.join(workspace, 'linked', 'jump', 'victim.txt') },
+    }, response);
+
+    expect(response.statusCode).toBe(403);
+    expect(await nativeFs.readFile(victim, 'utf8')).toBe('outside sentinel');
+  });
+
+  it('rejects deleting the workspace root and still deletes an ordinary child', async context => {
+    const { getRoute, workspace } = await setup(context);
+    const sentinel = path.join(workspace, 'keep.txt');
+    const deletable = path.join(workspace, 'remove.txt');
+    await nativeFs.writeFile(sentinel, 'workspace sentinel');
+    await nativeFs.writeFile(deletable, 'ordinary file');
+
+    const rootResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: workspace } }, rootResponse);
+
+    expect(rootResponse.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('workspace sentinel');
+
+    const childResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: deletable } }, childResponse);
+
+    expect(childResponse.statusCode).toBe(200);
+    await expect(nativeFs.stat(deletable)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects deleting a managed root', async context => {
+    const { getRoute, managedRoot } = await setup(context);
+    const sentinel = path.join(managedRoot, 'keep.txt');
+    await nativeFs.writeFile(sentinel, 'managed sentinel');
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: managedRoot } }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('managed sentinel');
+  });
+
+  it('rejects deleting the nested chats root while allowing a chat child', async context => {
+    const { getRoute, managedRoot } = await setup(context);
+    const chatsRoot = path.join(managedRoot, 'chats');
+    const sentinel = path.join(chatsRoot, 'keep.txt');
+    const deletable = path.join(chatsRoot, 'delete.txt');
+    await nativeFs.mkdir(chatsRoot);
+    await nativeFs.writeFile(sentinel, 'chat sentinel');
+    await nativeFs.writeFile(deletable, 'ordinary chat file');
+
+    const rootResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: chatsRoot } }, rootResponse);
+
+    expect(rootResponse.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('chat sentinel');
+
+    const childResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: deletable } }, childResponse);
+
+    expect(childResponse.statusCode).toBe(200);
+    await expect(nativeFs.stat(deletable)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
 describe('fs html preview grants', () => {
   const files = new Map([
     ['/workspace/site/index.html', '<img src="logo.png">'],
@@ -2774,6 +3008,19 @@ describe('fs html preview grants', () => {
           return { isFile: () => true, size: files.get(targetPath).length };
         },
         readFile: async (targetPath) => Buffer.from(files.get(targetPath)),
+        open: async (targetPath) => {
+          if (!files.has(targetPath)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          const bytes = Buffer.from(files.get(targetPath));
+          return {
+            stat: async () => ({ isFile: () => true, size: bytes.length }),
+            read: async (buffer, offset, length, position) => {
+              const chunk = bytes.subarray(position, position + length);
+              chunk.copy(buffer, offset);
+              return { bytesRead: chunk.length, buffer };
+            },
+            close: async () => {},
+          };
+        },
       },
       spawn: vi.fn(),
       crypto: { randomUUID: () => `grant-${++uuid}` },

@@ -35,6 +35,14 @@ export const ARCHIVE_ENTRY_MAX_BYTES = 1024 * 1024;
 // All the chats of one space are taken out within this, however slowly the space answers; the
 // rest counts as not saved, so a space cannot hold its own delete.
 const SAVE_TIMEOUT_MS = 30 * 60_000;
+// The total staging budget for one save (#2321). The per-chat cap
+// (CHAT_EXPORT_MAX_BYTES, 256 MiB in space-opencode.js) times the chat cap
+// (ARCHIVE_MAX_CHATS, 1000) would otherwise let one space delete stage
+// ~256 GiB in .incoming-<spaceId> before the all-or-nothing refusal is even
+// reached. Four per-chat caps' worth of archive is generous for real chats
+// and bounds the staged bytes absolutely; a chat that would cross the
+// budget counts as not saved, like one that runs past the deadline.
+export const ARCHIVE_MAX_TOTAL_BYTES = 4 * 256 * 1024 * 1024;
 // A title from a space is shown as text; this much of it is enough to name the chat.
 const TITLE_SHOWN_CHARACTERS = 200;
 
@@ -75,7 +83,7 @@ const titleShown = (title) => {
  * `hostOpenCode.importChat(chat)` imports one chat into the host's OpenCode and
  * `hostOpenCode.removeChat(id)` deletes one again, for a save that is taken back.
  */
-export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, now = () => Date.now() }) {
+export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, now = () => Date.now(), maxStagedBytes = ARCHIVE_MAX_TOTAL_BYTES }) {
   const root = path.join(dataDir, 'spaces', 'archive');
   const directoryOf = (spaceId) => path.join(root, spaceId);
   const entryFileOf = (spaceId) => path.join(root, `${spaceId}.json`);
@@ -233,6 +241,7 @@ export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, no
     fs.mkdirSync(incoming, { recursive: true, mode: 0o700 });
     try {
       const taken = new Map();
+      let stagedBytes = 0;
       for (const chat of chosen) {
         if (now() > deadline) {
           failed += 1;
@@ -240,7 +249,22 @@ export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, no
         }
         try {
           const exported = await source.exportChat(chat.id);
-          fs.writeFileSync(path.join(incoming, `${chat.id}.json`), JSON.stringify(exported), { mode: 0o600 });
+          const serialized = JSON.stringify(exported);
+          const bytes = Buffer.byteLength(serialized);
+          if (stagedBytes + bytes > maxStagedBytes) {
+            failed += 1;
+            // A strict save is refused as soon as any chat fails, so taking
+            // out the remaining chats would only waste the exports: stop.
+            // A lenient save keeps going - a later, smaller chat may fit.
+            if (!allowUnsaved) {
+              logger.warn?.(`[spaces] chat ${chat.id} of space ${spaceId} was not taken out: the archive staging budget of ${maxStagedBytes} bytes is exhausted (${stagedBytes} already staged)`);
+              break;
+            }
+            logger.warn?.(`[spaces] chat ${chat.id} of space ${spaceId} was not taken out: the archive staging budget of ${maxStagedBytes} bytes is exhausted (${stagedBytes} already staged)`);
+            continue;
+          }
+          fs.writeFileSync(path.join(incoming, `${chat.id}.json`), serialized, { mode: 0o600 });
+          stagedBytes += bytes;
           taken.set(chat.id, exported.info.parentID ?? null);
         } catch (error) {
           if (error?.code === 'chat_too_large') tooLarge.push(titleShown(chat.title) ?? chat.id);

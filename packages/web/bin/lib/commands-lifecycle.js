@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { requestServerShutdown } from './cli-http.js';
 import { isPortAvailable } from './cli-ports.js';
@@ -15,6 +17,9 @@ import {
   stopInstanceProcess,
 } from './cli-process.js';
 import { SELF_HANDOFF_SIGNAL, isSelfHandoffEnabled, resolveHandoffTimeoutMs } from '../../server/lib/opencode/self-handoff.js';
+import { getDataDir } from './cli-paths.js';
+import { asNonEmptyString, isString } from '../../server/lib/shared/guards.js';
+import { writeHandoffRequest } from '../../server/lib/opencode/handoff-request.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -393,10 +398,33 @@ async function restartCommand(options, serveCommand) {
 // Asks a running instance to hand off: it starts a successor on its own listening socket and exits once the
 // successor serves. The pid file moves to the successor only after that, so it is the signal that the handoff
 // worked. A failed handoff leaves the old pid in place: the old process keeps serving.
-async function handOffInstance(instance) {
+const readHandoffTarget = (entryOverride) => {
+  const entryArg = entryOverride || process.argv[1];
+  if (!asNonEmptyString(entryArg)) throw new Error('Unable to resolve this OpenChamber CLI entry.');
+  const entry = fs.realpathSync(path.resolve(entryArg));
+  const packagePath = path.resolve(path.dirname(entry), '..', 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  if (pkg?.name !== '@openchamber/web' || !isString(pkg.version)) throw new Error('The selected entry is not an OpenChamber installation.');
+  return { entry, version: pkg.version };
+};
+
+async function handOffInstance(instance, options = {}) {
   const pidFilePath = await getPidFilePath(instance.port);
   const fromPid = instance.pid;
   if (!Number.isInteger(fromPid) || fromPid <= 0) return { port: instance.port, ok: false, reason: 'unknown-pid' };
+  try {
+    const target = readHandoffTarget(options.handoffEntry);
+    writeHandoffRequest({
+      dataDir: getDataDir(),
+      requesterPid: process.pid,
+      entry: target.entry,
+      execPath: process.execPath,
+      version: target.version,
+      allowDowngrade: options.allowDowngrade === true,
+    });
+  } catch (error) {
+    return { port: instance.port, ok: false, reason: 'request-failed', message: error?.message };
+  }
   try {
     process.kill(fromPid, SELF_HANDOFF_SIGNAL);
   } catch (error) {
@@ -450,7 +478,7 @@ async function handoffCommand(options) {
         if (showOutput) logStatus('warning', `port ${instance.port} is managed by OpenChamber Desktop`, 'cannot be handed off with this command');
         continue;
       }
-      const result = await handOffInstance(instance);
+      const result = await handOffInstance(instance, options);
       results.push(result);
       if (showOutput) {
         if (result.ok) logStatus('success', `port ${result.port} handed off`, `PID ${result.fromPid} -> ${result.pid}`);

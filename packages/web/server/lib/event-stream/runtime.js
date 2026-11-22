@@ -8,6 +8,7 @@ import {
   MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS,
   MESSAGE_STREAM_WS_MAX_PAYLOAD_BYTES,
   serializeMessageStreamWsEvent,
+  sendMessageStreamWsFrame,
   sendSerializedMessageStreamWsFrame,
 } from './protocol.js';
 import { createGlobalMessageStreamHub, parseGlobalBlock } from './global-hub.js';
@@ -129,6 +130,22 @@ export function createMessageStreamWsRuntime({
     const isGlobalStream = pathname === MESSAGE_STREAM_GLOBAL_WS_PATH;
     const requestedLastEventId = requestUrl.searchParams.get('lastEventId')?.trim() || '';
     const requestedDirectory = requestUrl.searchParams.get('directory')?.trim() || '';
+
+    // A repeated scope parameter is ambiguous: never silently stream under
+    // its first value (issue #2315). The sibling directory-scoped HTTP
+    // surfaces reject the same input with a 400; this socket is already
+    // upgraded, so refuse with an error frame and a policy close instead.
+    if (requestUrl.searchParams.getAll('directory').length > 1 || requestUrl.searchParams.getAll('lastEventId').length > 1) {
+      sendMessageStreamWsFrame(socket, {
+        type: 'error',
+        message: 'Ambiguous message stream parameters: directory and lastEventId may each appear at most once',
+      });
+      try {
+        socket.close(1008, 'Ambiguous message stream parameters');
+      } catch {
+      }
+      return;
+    }
 
     if (isGlobalStream) {
       globalBridge.accept(socket, {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { EntryTimes } from '../EntryTimes';
 
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 import { Icon } from '@/components/icon/Icon';
@@ -381,7 +382,7 @@ export function ShownPage({ part }: { part: ToolPart }) {
     // its answer state again on every render.
     const { t } = useI18n();
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    return page ? <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} /> : null;
+    return page ? <><EntryTimes part={part} /><HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} /></> : null;
 }
 
 interface HtmlRenderFrameProps {

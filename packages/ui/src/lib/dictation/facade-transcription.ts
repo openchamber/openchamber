@@ -34,23 +34,18 @@ export const buildTranscriptionUrl = (opencodeBaseUrl: string): string => {
 /** Default concrete ref: the phase-1 end-to-end registration (§8.1). */
 export const DEFAULT_TRANSCRIPTION_MODEL = 'openai/whisper-1';
 
-/**
- * Concrete refs registered in the façade's TRANSCRIPTION_MODELS registry
- * (opencode packages/core/src/transcription-facade.ts). Every phase-1
- * registration is a hosted HTTP backend, so every one of these refs has
- * `audio_leaves_machine = true` in the registry (design §3/§5.3).
- */
-const HOSTED_TRANSCRIPTION_MODELS: ReadonlyArray<string> = [
-    'openai/whisper-1',
-    'deepgram/nova-3',
-    'google/gemini-3.5-transcribe',
-    'assemblyai/universal-3-5-pro',
-    'elevenlabs/scribe_v2',
-];
-
 /** §5.2 caps: bounded by default, never silently unlimited. */
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MiB
 export const MAX_AUDIO_DURATION_SECONDS = 600;
+
+/**
+ * Client deadline for one façade submit (#2305): comfortably above the
+ * façade's own 120 s provider deadline (opencode
+ * packages/core/src/transcription-facade.ts), so a request that never
+ * settles — or a response body that never completes — still reaches a
+ * terminal state instead of wedging the composer in `submitting`.
+ */
+export const FACADE_TRANSCRIPTION_DEADLINE_MS = 150_000;
 
 /**
  * §5.2 accepted containers floor (phase-1 registrations): a file is
@@ -106,6 +101,7 @@ export type FacadeTranscriptionErrorCode =
     | 'permission_denied'
     | 'capture_unsupported'
     | 'network_error'
+    | 'timeout'
     | 'invalid_response'
     | 'unknown_error';
 
@@ -115,6 +111,7 @@ const RETRYABLE_CODES: ReadonlySet<FacadeTranscriptionErrorCode> = new Set([
     'upstream_failure',
     'no_route_candidate',
     'network_error',
+    'timeout',
 ]);
 
 export class FacadeTranscriptionError extends Error {
@@ -389,6 +386,7 @@ export const buildTranscriptionFormData = (
 interface TranscriptionFetchInit {
     method: string;
     body: FormData;
+    signal?: AbortSignal;
 }
 
 interface TranscriptionFetchResponse {
@@ -411,6 +409,18 @@ interface TranscribeViaFacadeInput {
     model?: string;
     language?: string;
     prompt?: string;
+    /**
+     * Caller-owned abandonment signal (hook teardown / supersede):
+     * aborting it settles the call with a retryable `timeout` error and
+     * cancels the underlying fetch and body read.
+     */
+    signal?: AbortSignal;
+    /**
+     * Client deadline for the whole call, fetch and body read included.
+     * Defaults to FACADE_TRANSCRIPTION_DEADLINE_MS; tests inject a short
+     * deadline instead of faking timers.
+     */
+    deadlineMs?: number;
 }
 
 /**
@@ -430,27 +440,80 @@ export const transcribeViaFacade = async (input: TranscribeViaFacadeInput): Prom
     if (invalid) {
         throw invalid;
     }
-    let response: TranscriptionFetchResponse;
-    try {
-        response = await input.fetchFn(input.url, {
-            method: 'POST',
-            body: buildTranscriptionFormData(input.file, input.filename, {
-                model: input.model,
-                language: input.language,
-                prompt: input.prompt,
-            }),
-        });
-    } catch (cause) {
-        throw new FacadeTranscriptionError(
-            'network_error',
-            cause instanceof Error ? `Could not reach the transcription server: ${cause.message}` : 'Could not reach the transcription server.',
+    // #2305: the call always settles. A composed AbortController carries
+    // the client deadline and any caller abandonment into the fetch AND
+    // the body read, and a race against the abort settles the promise
+    // even when the transport ignores the signal entirely.
+    const deadlineMs = input.deadlineMs ?? FACADE_TRANSCRIPTION_DEADLINE_MS;
+    const controller = new AbortController();
+    let timedOut = false;
+    const onCallerAbort = () => controller.abort();
+    if (input.signal) {
+        if (input.signal.aborted) {
+            controller.abort();
+        } else {
+            input.signal.addEventListener('abort', onCallerAbort, { once: true });
+        }
+    }
+    const timeoutError = () =>
+        new FacadeTranscriptionError(
+            'timeout',
+            timedOut
+                ? `The transcription request did not finish within ${Math.round(deadlineMs / 1000)} seconds. You can retry or discard the recording.`
+                : 'The transcription request was aborted before it finished. You can retry or discard the recording.',
         );
+    const aborted = new Promise<never>((_resolve, reject) => {
+        if (controller.signal.aborted) {
+            reject(timeoutError());
+            return;
+        }
+        controller.signal.addEventListener('abort', () => reject(timeoutError()), { once: true });
+    });
+    const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, deadlineMs);
+    const work = (async (): Promise<TranscriptionResult> => {
+        let response: TranscriptionFetchResponse;
+        try {
+            response = await input.fetchFn(input.url, {
+                method: 'POST',
+                body: buildTranscriptionFormData(input.file, input.filename, {
+                    model: input.model,
+                    language: input.language,
+                    prompt: input.prompt,
+                }),
+                signal: controller.signal,
+            });
+        } catch (cause) {
+            if (controller.signal.aborted) {
+                throw timeoutError();
+            }
+            throw new FacadeTranscriptionError(
+                'network_error',
+                cause instanceof Error ? `Could not reach the transcription server: ${cause.message}` : 'Could not reach the transcription server.',
+            );
+        }
+        const data: unknown = await response.json().catch(() => undefined);
+        if (!response.ok) {
+            throw parseFacadeError(response.status, data);
+        }
+        return parseTranscriptionEnvelope(data);
+    })();
+    try {
+        return await Promise.race([work, aborted]);
+    } catch (cause) {
+        if (cause instanceof FacadeTranscriptionError) {
+            throw cause;
+        }
+        if (controller.signal.aborted) {
+            throw timeoutError();
+        }
+        throw cause;
+    } finally {
+        clearTimeout(timer);
+        input.signal?.removeEventListener('abort', onCallerAbort);
     }
-    const data: unknown = await response.json().catch(() => undefined);
-    if (!response.ok) {
-        throw parseFacadeError(response.status, data);
-    }
-    return parseTranscriptionEnvelope(data);
 };
 
 /**

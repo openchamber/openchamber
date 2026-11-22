@@ -7,12 +7,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { configureOpenCodeCredentials, readLocalOpenCodeCredentials } from '../../server/lib/opencode/auth.js';
 import {
   createQuotaCommand,
-  resolveOpenCodeBaseUrl,
-  buildOpenCodeAuthHeaders,
   formatQuotaResultLines,
   formatQuotaQuietLine,
-  isTransportFailure,
-  createFallbackCredentialSource,
   resolveQuotaTimeoutMs,
 } from './commands-quota.js';
 import { EXIT_CODE } from './cli-errors.js';
@@ -80,26 +76,23 @@ const createFakeRuntime = ({
   configured = [],
   results = {},
   catalogue = fakeCatalogue,
-  serverListError = null,
+  storeListError = null,
   fetchDelays = {},
 } = {}) => {
   const calls = { fetch: [], list: [] };
   const flight = { inFlight: 0, maxInFlight: 0 };
   let activeSource = null;
+  const localSource = {
+    list: async () => {
+      if (storeListError) throw storeListError;
+      return [];
+    },
+  };
   const runtime = {
     configureOpenCodeCredentials: vi.fn((source) => {
       activeSource = source;
     }),
-    openCodeCredentialSource: vi.fn((deps) => ({
-      deps,
-      list: async () => {
-        if (serverListError) throw serverListError;
-        return [];
-      },
-    })),
-    openCodeLocalCredentialSource: vi.fn(() => ({
-      list: async () => [],
-    })),
+    openCodeLocalCredentialSource: vi.fn(() => localSource),
     listQuotaProviderCatalogue: vi.fn(async () => catalogue),
     listConfiguredQuotaProviders: vi.fn(async (options) => {
       calls.list.push(options);
@@ -133,7 +126,7 @@ const createFakeRuntime = ({
       }
     }),
   };
-  return { runtime, calls, flight };
+  return { runtime, calls, flight, localSource };
 };
 
 const codexLegacyResult = {
@@ -160,33 +153,6 @@ const codexSharingResult = {
 const createCommand = (runtime, env = {}) => createQuotaCommand({
   loadQuotaRuntime: async () => runtime,
   env,
-});
-
-describe('quota endpoint resolution', () => {
-  it('uses OPENCODE_HOST and strips trailing slashes', () => {
-    expect(resolveOpenCodeBaseUrl({ OPENCODE_HOST: ' http://example.test:1234/ ' })).toBe('http://example.test:1234');
-  });
-
-  it('falls back to OPENCODE_PORT on loopback, then the default serve port', () => {
-    expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: '4098' })).toBe('http://127.0.0.1:4098');
-    expect(resolveOpenCodeBaseUrl({})).toBe('http://127.0.0.1:4096');
-    expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: 'nope' })).toBe('http://127.0.0.1:4096');
-  });
-
-  it('honours OPENCODE_PORT only as a plain decimal port in range', () => {
-    expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: '4097' })).toBe('http://127.0.0.1:4097');
-    expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: '65535' })).toBe('http://127.0.0.1:65535');
-    for (const spelling of ['1e3', '4096junk', '99999', '65536', '0', '0x10', '40.96']) {
-      expect(resolveOpenCodeBaseUrl({ OPENCODE_PORT: spelling })).toBe('http://127.0.0.1:4096');
-    }
-  });
-
-  it('builds the Basic header only when a server password is set', () => {
-    expect(buildOpenCodeAuthHeaders({})).toEqual({});
-    expect(buildOpenCodeAuthHeaders({ OPENCODE_SERVER_PASSWORD: 'pw' })).toEqual({
-      Authorization: `Basic ${Buffer.from('opencode:pw').toString('base64')}`,
-    });
-  });
 });
 
 describe('quota formatting', () => {
@@ -244,12 +210,9 @@ describe('quota formatting', () => {
 });
 
 describe('quota command', () => {
-  it('wires the credential source with the resolved endpoint before fetching', async () => {
-    const { runtime } = createFakeRuntime({ results: { codex: codexResult } });
-    const quotaCommand = createCommand(runtime, {
-      OPENCODE_HOST: 'http://example.test:1234/',
-      OPENCODE_SERVER_PASSWORD: 'pw',
-    });
+  it('wires the direct local credential-store source before fetching', async () => {
+    const { runtime, localSource } = createFakeRuntime({ results: { codex: codexResult } });
+    const quotaCommand = createCommand(runtime);
     const out = captureStdout();
     try {
       await quotaCommand({}, 'codex');
@@ -257,13 +220,11 @@ describe('quota command', () => {
       out.restore();
     }
 
-    expect(runtime.openCodeCredentialSource).toHaveBeenCalledTimes(1);
-    const deps = runtime.openCodeCredentialSource.mock.calls[0][0];
-    expect(deps.buildOpenCodeUrl('')).toBe('http://example.test:1234');
-    expect(deps.getOpenCodeAuthHeaders()).toEqual({
-      Authorization: `Basic ${Buffer.from('opencode:pw').toString('base64')}`,
-    });
+    // The single source (code#2490, #2282): the direct store read,
+    // wired as-is — no server source is composed in front of it.
+    expect(runtime.openCodeLocalCredentialSource).toHaveBeenCalledTimes(1);
     expect(runtime.configureOpenCodeCredentials).toHaveBeenCalledTimes(1);
+    expect(runtime.configureOpenCodeCredentials).toHaveBeenCalledWith(localSource);
     expect(out.text()).toContain('weekly: 7% used');
   });
 
@@ -349,7 +310,7 @@ describe('quota command', () => {
     expect(payload.providers).toEqual([{
       ...codexResult,
       elapsedMs: expect.any(Number),
-      credentialSource: 'server',
+      credentialSource: 'local',
     }]);
   });
 
@@ -403,6 +364,8 @@ describe('quota command', () => {
     }
     expect(loadQuotaRuntime).not.toHaveBeenCalled();
     expect(out.text()).toContain('openchamber quota [PROVIDER');
+    expect(out.text()).toContain('credential store');
+    expect(out.text()).not.toContain('OPENCODE_HOST');
   });
 });
 
@@ -546,93 +509,7 @@ const captureStderr = () => {
   };
 };
 
-/** The error the OpenCode client throws when the server cannot be reached at all. */
-const transportError = () => {
-  const socket = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:4096'), { code: 'ECONNREFUSED' });
-  const fetchFailure = new TypeError('fetch failed');
-  fetchFailure.cause = socket;
-  const clientError = new Error('Transport: fetch failed');
-  clientError.name = 'ClientError';
-  clientError.reason = 'Transport';
-  clientError.cause = fetchFailure;
-  return clientError;
-};
-
-describe('quota transport failure detection', () => {
-  it('recognizes the client transport error and bare network failures', () => {
-    expect(isTransportFailure(transportError())).toBe(true);
-    expect(isTransportFailure(new TypeError('fetch failed'))).toBe(true);
-    const reset = new Error('read ECONNRESET');
-    reset.code = 'ECONNRESET';
-    expect(isTransportFailure(reset)).toBe(true);
-  });
-
-  it('does not treat an answered server or an unrelated error as transport failure', () => {
-    const answered = new Error('Unexpected status 500');
-    answered.reason = 'UnexpectedStatus';
-    expect(isTransportFailure(answered)).toBe(false);
-    expect(isTransportFailure(new Error('boom'))).toBe(false);
-    expect(isTransportFailure(null)).toBe(false);
-  });
-});
-
-describe('quota fallback credential source', () => {
-  it('serves from the server while it answers and reports the server as the source', async () => {
-    const primary = { list: vi.fn(async () => ['server-row']) };
-    const fallback = { list: vi.fn(async () => ['local-row']) };
-    const source = createFallbackCredentialSource(primary, fallback);
-    await expect(source.list()).resolves.toEqual(['server-row']);
-    expect(source.servedBy()).toBe('server');
-    expect(fallback.list).not.toHaveBeenCalled();
-  });
-
-  it('switches to the local store on a transport failure and stays there for the run', async () => {
-    const primary = { list: vi.fn(async () => { throw transportError(); }) };
-    const fallback = { list: vi.fn(async () => ['local-row']) };
-    const source = createFallbackCredentialSource(primary, fallback);
-    await expect(source.list()).resolves.toEqual(['local-row']);
-    await expect(source.list()).resolves.toEqual(['local-row']);
-    expect(primary.list).toHaveBeenCalledTimes(1);
-    expect(source.servedBy()).toBe('local');
-  });
-
-  it('lets a non-transport failure through without touching the local store', async () => {
-    const answered = new Error('Unexpected status 401');
-    answered.reason = 'UnexpectedStatus';
-    const primary = { list: vi.fn(async () => { throw answered; }) };
-    const fallback = { list: vi.fn(async () => ['local-row']) };
-    const source = createFallbackCredentialSource(primary, fallback);
-    await expect(source.list()).rejects.toBe(answered);
-    expect(fallback.list).not.toHaveBeenCalled();
-    expect(source.servedBy()).toBe('server');
-  });
-
-  it('forwards usesLocalStore from the server source, so a known-local server enables the store fallback', () => {
-    const fallback = { list: vi.fn(async () => ['local-row']) };
-    const localPrimary = { list: vi.fn(async () => ['server-row']), usesLocalStore: () => true };
-    expect(createFallbackCredentialSource(localPrimary, fallback).usesLocalStore()).toBe(true);
-    const remotePrimary = { list: vi.fn(async () => ['server-row']), usesLocalStore: () => false };
-    expect(createFallbackCredentialSource(remotePrimary, fallback).usesLocalStore()).toBe(false);
-  });
-
-  it('reports usesLocalStore as false when the server source does not say', () => {
-    const primary = { list: vi.fn(async () => ['server-row']) };
-    const fallback = { list: vi.fn(async () => ['local-row']) };
-    expect(createFallbackCredentialSource(primary, fallback).usesLocalStore()).toBe(false);
-  });
-
-  it('forwards getLaunchEnvironment from the server source when it has one', () => {
-    const launchEnvironment = { OPENCODE_DB: 'managed.db' };
-    const primary = {
-      list: vi.fn(async () => ['server-row']),
-      usesLocalStore: () => true,
-      getLaunchEnvironment: () => launchEnvironment,
-    };
-    const fallback = { list: vi.fn(async () => ['local-row']) };
-    const source = createFallbackCredentialSource(primary, fallback);
-    expect(source.getLaunchEnvironment()).toBe(launchEnvironment);
-  });
-
+describe('direct local-store read (readLocalOpenCodeCredentials)', () => {
   it('lets the direct local-store read resolve the store the server was launched with', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-quota-managed-test-'));
     try {
@@ -654,15 +531,15 @@ describe('quota fallback credential source', () => {
       db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)')
         .run('cred_google', 'google', 'default', JSON.stringify({ type: 'key', key: 'managed-store-key' }), 1, 100, 100);
       db.close();
-      // The CLI launched this server, so the launch environment is the one
-      // the server resolves its store from and the direct read may use it.
+      // The wired source is the running server OpenChamber launched, so
+      // the launch environment is the one the server resolves its store
+      // from and the direct read may use it.
       const primary = {
         list: vi.fn(async () => []),
         usesLocalStore: () => true,
         getLaunchEnvironment: () => ({ HOME: root, XDG_DATA_HOME: dataHome }),
       };
-      const fallback = { list: vi.fn(async () => []) };
-      configureOpenCodeCredentials(createFallbackCredentialSource(primary, fallback));
+      configureOpenCodeCredentials(primary);
       await expect(readLocalOpenCodeCredentials()).resolves.toEqual({
         google: { type: 'api', key: 'managed-store-key' },
       });
@@ -672,131 +549,58 @@ describe('quota fallback credential source', () => {
     }
   });
 
-  it('a loopback-only server source establishes no launch environment of its own', () => {
-    // readLocalOpenCodeCredentials resolves the store from the launch
-    // environment and refuses without one. A live loopback server the CLI
-    // did not launch has no environment to forward, and the CLI's own
-    // shell environment is not it: substituting it would read a store the
-    // server may not use. The direct read stays off for this server.
-    const cliEnvironment = { HOME: '/cli-home', XDG_DATA_HOME: '/cli-data' };
-    const fallback = { list: vi.fn(async () => ['local-row']) };
-    const localPrimary = {
-      list: vi.fn(async () => ['server-row']),
+  it('refuses when the wired source establishes no launch environment', async () => {
+    // readLocalOpenCodeCredentials resolves the store from the wired
+    // source's launch environment and refuses without one: a source
+    // with no environment to forward cannot establish which store the
+    // connected OpenCode uses, and no other environment may be
+    // substituted for it.
+    const primary = {
+      list: vi.fn(async () => []),
       usesLocalStore: () => true,
       getLaunchEnvironment: () => null,
     };
-    // The combined source takes no CLI environment: passing one cannot
-    // turn it into the connected server's launch environment.
-    expect(createFallbackCredentialSource(localPrimary, fallback, cliEnvironment).getLaunchEnvironment()).toBe(null);
-    const remotePrimary = {
-      list: vi.fn(async () => ['server-row']),
-      usesLocalStore: () => false,
-      getLaunchEnvironment: () => null,
-    };
-    expect(createFallbackCredentialSource(remotePrimary, fallback, cliEnvironment).getLaunchEnvironment()).toBe(null);
-  });
-
-  it('a loopback-only server source does not enable the direct local-store read', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-quota-combined-test-'));
+    configureOpenCodeCredentials(primary);
     try {
-      const dataHome = path.join(root, 'data');
-      const dbPath = path.join(dataHome, 'opencode', 'opencode.db');
-      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      const db = new DatabaseSync(dbPath);
-      db.exec(`create table credential (
-        id text primary key,
-        integration_id text,
-        label text not null,
-        value text not null,
-        connector_id text,
-        method_id text,
-        active integer,
-        time_created integer not null,
-        time_updated integer not null
-      )`);
-      db.prepare('insert into credential (id, integration_id, label, value, active, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?)')
-        .run('cred_google', 'google', 'default', JSON.stringify({ type: 'key', key: 'cli-store-key' }), 1, 100, 100);
-      db.close();
-      // A live loopback server whose projection withholds the secret: it
-      // says it is local but, being external to the CLI, has no launch
-      // environment. The direct read resolves the store from that
-      // environment alone, so it cannot reach this CLI's store here. The
-      // fallback source still reads the CLI's store when the server is
-      // down, and servedBy() labels that read 'local'.
-      const primary = {
-        list: vi.fn(async () => []),
-        usesLocalStore: () => true,
-        getLaunchEnvironment: () => null,
-      };
-      const fallback = { list: vi.fn(async () => []) };
-      const cliEnvironment = { HOME: root, XDG_DATA_HOME: dataHome };
-      configureOpenCodeCredentials(createFallbackCredentialSource(primary, fallback, cliEnvironment));
       await expect(readLocalOpenCodeCredentials()).rejects.toThrow(/store location is unknown/);
     } finally {
       configureOpenCodeCredentials(null);
-      fs.rmSync(root, { recursive: true, force: true });
     }
-  });
-
-  it('reports no launch environment when the server source does not say it is local', () => {
-    const primary = { list: vi.fn(async () => ['server-row']) };
-    const fallback = { list: vi.fn(async () => ['local-row']) };
-    expect(createFallbackCredentialSource(primary, fallback).getLaunchEnvironment()).toBe(null);
-  });
-
-  it('names both failures when the server is down and the store cannot be read', async () => {
-    const primary = { list: vi.fn(async () => { throw transportError(); }) };
-    const fallback = { list: vi.fn(async () => { throw new Error('store missing'); }) };
-    const source = createFallbackCredentialSource(primary, fallback);
-    await expect(source.list()).rejects.toThrow('Transport: fetch failed');
-    await expect(source.list()).rejects.toThrow('store missing');
   });
 });
 
-describe('quota command with the server down', () => {
-  it('reads credentials from the local store and says so on every result', async () => {
-    const { runtime } = createFakeRuntime({
-      configured: ['codex'],
-      results: { codex: codexResult },
-      serverListError: transportError(),
-    });
+describe('quota command credential store failures', () => {
+  it('fails the run with the store error when the store cannot be read', async () => {
+    // There is no second source to fall back to: the direct store
+    // read is the single source, so its failure is the run's failure.
+    const storeError = new Error('store missing');
+    const { runtime } = createFakeRuntime({ storeListError: storeError });
     const quotaCommand = createCommand(runtime);
-    const out = captureStdout();
-    try {
-      await quotaCommand({ json: true }, null);
-    } finally {
-      out.restore();
-    }
-    const payload = JSON.parse(out.text());
-    expect(payload.providers).toHaveLength(1);
-    expect(payload.providers[0]).toMatchObject({ providerId: 'codex', ok: true, credentialSource: 'local' });
+    await expect(quotaCommand({}, null)).rejects.toBe(storeError);
   });
 
-  it('notes the local store on stderr in human mode', async () => {
+  it('stamps every result as a local store read, with no stderr note', async () => {
     const { runtime } = createFakeRuntime({
       configured: ['codex'],
       results: { codex: codexResult },
-      serverListError: transportError(),
     });
     const quotaCommand = createCommand(runtime);
     const out = captureStdout();
     const err = captureStderr();
+    let payload;
     try {
+      await quotaCommand({ json: true }, null);
+      payload = JSON.parse(out.text());
       await quotaCommand({}, null);
     } finally {
       out.restore();
       err.restore();
     }
+    expect(payload.providers[0]).toMatchObject({ providerId: 'codex', ok: true, credentialSource: 'local' });
     expect(out.text()).toContain('Codex (codex)');
-    expect(err.text()).toContain('local OpenCode store');
-  });
-
-  it('still fails the run when the server answers with an error', async () => {
-    const answered = new Error('Unexpected status 500');
-    answered.reason = 'UnexpectedStatus';
-    const { runtime } = createFakeRuntime({ serverListError: answered });
-    const quotaCommand = createCommand(runtime);
-    await expect(quotaCommand({}, null)).rejects.toBe(answered);
+    // Every read is a store read by design now, so there is no
+    // fallback note to print; the help text names the source instead.
+    expect(err.text()).toBe('');
   });
 });
 
@@ -838,7 +642,7 @@ describe('quota fetch timeout and concurrency', () => {
     }
     const payload = JSON.parse(out.text());
     expect(payload.providers.map((entry) => entry.providerId)).toEqual(['codex', 'slow']);
-    expect(payload.providers[0]).toMatchObject({ ok: true, credentialSource: 'server' });
+    expect(payload.providers[0]).toMatchObject({ ok: true, credentialSource: 'local' });
     expect(payload.providers[0].elapsedMs).toEqual(expect.any(Number));
     const slow = payload.providers[1];
     expect(slow).toMatchObject({ providerId: 'slow', providerName: 'Slow Provider', ok: false, status: 'timeout' });

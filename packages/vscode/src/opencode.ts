@@ -111,12 +111,17 @@ function isValidOpenCodePassword(password: string): boolean {
 }
 
 // The shared settings file only needs to yield `opencodeBinary` here; cap
-// the read at the same 4 MiB the package's bounded config reader uses so a
-// grown or non-regular settings.json cannot buffer whole (or wedge the
-// extension host on a FIFO) on every CLI resolution. Over-cap and
+// the read so a grown or non-regular settings.json cannot buffer whole (or
+// wedge the extension host on a FIFO) on every CLI resolution. Over-cap and
 // non-regular failures throw into the bare catch below and degrade to {}
-// exactly as a read failure does today.
-export const MAX_OPENCHAMBER_SETTINGS_BYTES = 4 * 1024 * 1024;
+// exactly as a read failure does today. The cap is 8 MiB: settings.json is
+// one shared file with one cap, matching the web readers of the same file
+// (SETTINGS_FILE_MAX_BYTES in packages/web/server/lib/github/auth.js and
+// packages/web/server/lib/linear/auth.js). The 4 MiB this carried from
+// #1650 matched this package's own config reader instead, so a 4-8 MiB
+// settings.json read normally on web but silently degraded to {} here
+// (#1746).
+export const MAX_OPENCHAMBER_SETTINGS_BYTES = 8 * 1024 * 1024;
 
 function readOpenChamberSettings(): Record<string, unknown> {
   const settingsPath = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');

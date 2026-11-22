@@ -144,10 +144,22 @@ const checkRateLimit = async (req) => {
   }
 
   if (!record || now - record.lastAttempt > RATE_LIMIT_WINDOW_MS) {
+    // Reserve the slot this attempt is about to use (#2103). Admission
+    // and failure accounting are separate calls, so without an
+    // in-flight count every concurrent attempt reads the same
+    // pre-attempt counter and the per-IP budget is exceeded before
+    // the first failure is recorded. recordFailedAttempt converts a
+    // reservation into a counted failure; clearRateLimit (success)
+    // deletes the record, reservations included.
+    try {
+      loginRateLimiter.set(key, { count: 0, inFlight: 1, lastAttempt: now });
+    } catch (err) {
+      console.error('[RateLimit] Failed to reserve attempt', { key, error: err.message });
+    }
     return {
       allowed: true,
       limit: maxAttempts,
-      remaining: maxAttempts,
+      remaining: maxAttempts - 1,
       reset: Math.ceil((now + RATE_LIMIT_WINDOW_MS) / 1000)
     };
   }
@@ -155,7 +167,7 @@ const checkRateLimit = async (req) => {
   if (record.count >= maxAttempts) {
     const lockedUntil = now + RATE_LIMIT_LOCKOUT_MS;
     try {
-      loginRateLimiter.set(key, { count: record.count + 1, lastAttempt: now, lockedUntil });
+      loginRateLimiter.set(key, { count: record.count + 1, inFlight: record.inFlight || 0, lastAttempt: now, lockedUntil });
     } catch (err) {
       console.error('[RateLimit] Failed to set lockout', { key, error: err.message });
     }
@@ -169,12 +181,32 @@ const checkRateLimit = async (req) => {
     };
   }
 
-  const remaining = maxAttempts - record.count;
+  // Throttle (without locking out) when the recorded failures plus
+  // the attempts currently in flight already fill the budget (#2103):
+  // the in-flight attempts may still succeed and clear the record, so
+  // this is a transient rejection, not a lockout.
+  const inFlight = record.inFlight || 0;
   const reset = Math.ceil((record.lastAttempt + RATE_LIMIT_WINDOW_MS) / 1000);
+  if (record.count + inFlight >= maxAttempts) {
+    return {
+      allowed: false,
+      retryAfter: 1,
+      locked: false,
+      limit: maxAttempts,
+      remaining: 0,
+      reset
+    };
+  }
+
+  try {
+    loginRateLimiter.set(key, { count: record.count, inFlight: inFlight + 1, lastAttempt: record.lastAttempt });
+  } catch (err) {
+    console.error('[RateLimit] Failed to reserve attempt', { key, error: err.message });
+  }
   return {
     allowed: true,
     limit: maxAttempts,
-    remaining,
+    remaining: maxAttempts - record.count - inFlight - 1,
     reset
   };
 };
@@ -189,14 +221,18 @@ const recordFailedAttempt = async (req) => {
 
   if (!record || now - record.lastAttempt > RATE_LIMIT_WINDOW_MS) {
     try {
-      loginRateLimiter.set(key, { count: 1, lastAttempt: now });
+      loginRateLimiter.set(key, { count: 1, inFlight: 0, lastAttempt: now });
     } catch (err) {
       console.error('[RateLimit] Failed to record attempt', { key, error: err.message });
     }
   } else {
     const newCount = record.count + 1;
     try {
-      loginRateLimiter.set(key, { count: newCount, lastAttempt: now });
+      loginRateLimiter.set(key, {
+        count: newCount,
+        inFlight: Math.max(0, (record.inFlight || 0) - 1),
+        lastAttempt: now
+      });
     } catch (err) {
       console.error('[RateLimit] Failed to record attempt', { key, error: err.message });
     }

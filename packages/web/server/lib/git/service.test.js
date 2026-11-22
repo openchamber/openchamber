@@ -1472,6 +1472,43 @@ describe('getStatus', () => {
     expect(status.diffStats.staged['staged.txt']).toEqual({ insertions: 3, deletions: 0 });
     expect(status.diffStats.working['staged.txt']).toBeUndefined();
   });
+
+  it('does not count an untracked file past the new-file size cap', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'tracked\n');
+    runGit(repo, ['add', 'tracked.txt']);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    // One line past the 1 MiB new-file cap: skipped, never counted whole.
+    fs.writeFileSync(path.join(repo, 'big.txt'), 'x'.repeat(1024 * 1024) + '\n');
+
+    const status = await getStatus(repo);
+
+    expect(status.diffStats.working['big.txt']).toBeUndefined();
+  });
+
+  it('does not wedge status on an untracked FIFO where a new file is expected', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'tracked.txt'), 'tracked\n');
+    runGit(repo, ['add', 'tracked.txt']);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    execFileSync('mkfifo', [path.join(repo, 'pipe.txt')]);
+
+    const status = await getStatus(repo);
+
+    expect(status.diffStats.working['pipe.txt']).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

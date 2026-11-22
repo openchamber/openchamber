@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { fetchExeDevUsage } from './exeDevQuota';
 import { QUOTA_RESPONSE_MAX_BYTES, readBoundedResponseJson } from './bounded-response-body';
 import { renameSyncWithRetry } from './bridge-atomic-write';
+import { readCappedFileSync } from './opencodeConfig';
 
 export type ManagedProvider = 'exe-dev' | 'cursor' | 'zenmux' | 'opendesign';
 type ManagedCredential = Record<string, string>;
@@ -12,6 +13,7 @@ type ManagedCredential = Record<string, string>;
  * credential surface (bridge allowlist, manifest conformance) derives from. */
 export const MANAGED_PROVIDERS: readonly ManagedProvider[] = ['exe-dev', 'cursor', 'zenmux', 'opendesign'];
 const providers = new Set<ManagedProvider>(MANAGED_PROVIDERS);
+const QUOTA_CREDENTIAL_MAX_BYTES = 64 * 1024;
 
 // Open Design session validation, mirroring the quota fetcher in
 // quotaProviders.ts (which cannot be imported here: it imports this module).
@@ -44,7 +46,14 @@ export const normalizeCredential = (provider: ManagedProvider, value: unknown): 
 };
 
 export const readCredential = (provider: ManagedProvider) => {
-  try { return normalizeCredential(provider, JSON.parse(fs.readFileSync(target(provider), 'utf8'))); }
+  try {
+    const filePath = target(provider);
+    const raw = readCappedFileSync(filePath, QUOTA_CREDENTIAL_MAX_BYTES, {
+      tooLarge: (file) => new Error(`Quota credential at ${file} exceeds the ${QUOTA_CREDENTIAL_MAX_BYTES}-byte limit`),
+      notRegular: (file) => Object.assign(new Error(`EISDIR: illegal operation on a directory, read '${file}'`), { code: 'EISDIR' }),
+    });
+    return normalizeCredential(provider, JSON.parse(raw));
+  }
   catch (error) { if ((error as { code?: string }).code !== 'ENOENT') console.warn(`Failed to read ${provider} quota credentials`); return null; }
 };
 export const credentialStatus = (provider: ManagedProvider) => {

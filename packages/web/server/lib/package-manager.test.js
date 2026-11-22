@@ -1,19 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { spawnSync } from 'node:child_process';
-
-// Mock child_process to prevent real spawnSync calls that would hang in tests
-vi.mock('node:child_process', () => ({
-  spawn: vi.fn(),
-  spawnSync: vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })),
-}));
-
-const {
-  checkForUpdates,
-  detectPackageManager,
-  executeUpdate,
-  getCurrentVersion,
-  getUpdateCommand,
-} = await import('./package-manager.js');
+const spawnSync = vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' }));
+const packageManager = await import('./package-manager.js');
+const { checkForUpdates, detectPackageManager, executeUpdate, getCurrentVersion } = packageManager;
+const getUpdateCommand = (pm, options) => packageManager.getUpdateCommand(pm, { ...options, spawnSync });
 
 /** Helper: create a fetch mock that routes by URL pattern */
 function createFetchMock() {
@@ -285,7 +274,7 @@ describe('getUpdateCommand', () => {
 
 describe('executeUpdate', () => {
   it('never runs the package manager and points at the fork release', () => {
-    vi.mocked(spawnSync).mockClear();
+    spawnSync.mockClear();
 
     const result = executeUpdate('npm', { targetVersion: '1.10.0' });
 
@@ -309,11 +298,10 @@ describe('detectPackageManagerDetails', () => {
     // No package manager answers, as on a server where an unpacked tarball runs.
     spawnSync.mockImplementation(() => ({ status: 1, stdout: '', stderr: '' }));
     vi.resetModules();
-    const { detectPackageManagerDetails, isUnmanagedInstall } = await import('./package-manager.js');
+    const { detectPackageManagerDetails } = await import('./package-manager.js');
 
-    expect(detectPackageManagerDetails().reason).toBe('unmanaged-install');
-    expect(detectPackageManagerDetails().reason).toBe('unmanaged-install');
-    expect(isUnmanagedInstall()).toBe(true);
+    expect(detectPackageManagerDetails({ spawnSync }).reason).toBe('unmanaged-install');
+    expect(detectPackageManagerDetails({ spawnSync }).reason).toBe('unmanaged-install');
   });
 });
 

@@ -283,7 +283,7 @@ type ShellMessage = MessageBase & {
 
 export type CompactionMessage = MessageBase & {
   role: "compaction"
-  time: { created: number }
+  time: { created: number; completed?: number }
   status: "running" | "completed" | "failed"
   reason: "auto" | "manual"
   summary: string
@@ -347,6 +347,8 @@ type PartBase = {
   id: string
   sessionID: string
   messageID: string
+  /** Exact boundaries, separate from legacy streaming/display bounds. */
+  displayTime?: { start?: number; end?: number }
 }
 
 export type TextPart = PartBase & {
@@ -354,6 +356,12 @@ export type TextPart = PartBase & {
   text: string
   /** Set while the text is still streaming; `end` lands with the final text. */
   time?: { start: number; end?: number }
+  /**
+   * `message` when `time` is the owning message's span rather than the
+   * part's own: OpenCode stores no times for a text item, so a page read
+   * from history can only bound it by its message.
+   */
+  timeSource?: "message"
   metadata?: Metadata
 }
 
@@ -361,6 +369,8 @@ export type ReasoningPart = PartBase & {
   type: "reasoning"
   text: string
   time: { start: number; end?: number }
+  /** `message` when the stored item had no times of its own (see `TextPart`). */
+  timeSource?: "message"
 }
 
 export type FilePart = PartBase & {

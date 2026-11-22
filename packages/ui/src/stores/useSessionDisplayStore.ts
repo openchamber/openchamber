@@ -18,6 +18,29 @@ export type SidebarViewMode = 'projects' | 'timeline';
 type ListSessionGrouping = 'project' | 'time';
 type ProjectDisplayMode = 'all' | 'single';
 
+const sessionTimestampSortSchema = z.object({
+  field: z.enum(['lifecycle', 'created', 'input', 'output', 'activity']),
+  direction: z.enum(['asc', 'desc']),
+});
+type SessionTimestampSort = z.infer<typeof sessionTimestampSortSchema>;
+
+const SESSION_TIME_FIELDS = ['created', 'input', 'output', 'activity'] as const;
+/**
+ * Which session times a row shows and where, and how its duration counts.
+ * Defaults keep today's rows: times only in the row's hover card, the
+ * duration only while a turn runs or waits to be read.
+ */
+const sessionTimesSchema = z.object({
+  display: z.enum(['off', 'hover', 'inline']).catch('hover'),
+  fields: z.array(z.enum(SESSION_TIME_FIELDS)).catch([...SESSION_TIME_FIELDS]),
+  /** Idle rows show how long their last run took instead of the date. */
+  lastRunWhenIdle: z.boolean().catch(false),
+  /** A running row counts from the last prompt, across auto-continues and background waits. */
+  countFromInput: z.boolean().catch(false),
+});
+type SessionTimesPreferences = z.infer<typeof sessionTimesSchema>;
+const DEFAULT_SESSION_TIMES: SessionTimesPreferences = { display: 'hover', fields: [...SESSION_TIME_FIELDS], lastRunWhenIdle: false, countFromInput: false };
+
 /** Tree zone rows (Pinned, In work): one line like the tree, or two with branch, PR and model. */
 export type SessionRowLines = 'one' | 'two';
 
@@ -109,6 +132,11 @@ export const sessionRowDisplaySchema = z.object({
 }));
 
 type SessionDisplayStore = {
+  /** Local sort choice; grouping and profile settings remain independent. */
+  sessionTimestampSort: SessionTimestampSort;
+  setSessionTimestampSort: (sort: SessionTimestampSort) => void;
+  sessionTimes: SessionTimesPreferences;
+  setSessionTimes: (patch: Partial<SessionTimesPreferences>) => void;
   projectDisplayMode: ProjectDisplayMode;
   singleProjectId: string | null;
   setProjectDisplayMode: (mode: ProjectDisplayMode) => void;
@@ -230,6 +258,10 @@ export const migrateSessionDisplayState = (
 export const useSessionDisplayStore = create<SessionDisplayStore>()(
   persist(
     (set) => ({
+      sessionTimestampSort: { field: 'lifecycle', direction: 'desc' },
+      setSessionTimestampSort: (sessionTimestampSort) => set({ sessionTimestampSort }),
+      sessionTimes: DEFAULT_SESSION_TIMES,
+      setSessionTimes: (patch) => set((state) => ({ sessionTimes: { ...state.sessionTimes, ...patch } })),
       animatedActivityIndicators: false,
       setAnimatedActivityIndicators: (enabled) => set({ animatedActivityIndicators: enabled }),
       projectDisplayMode: 'all',
@@ -296,9 +328,13 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
         const stored = (persisted ?? {}) as Partial<SessionDisplayStore>;
         const layout = stored.sidebarLayout === undefined ? null : sidebarLayoutSchema.safeParse(stored.sidebarLayout);
         const rowDisplay = stored.sessionRowDisplay === undefined ? null : sessionRowDisplaySchema.safeParse(stored.sessionRowDisplay);
+        const timestampSort = sessionTimestampSortSchema.safeParse(stored.sessionTimestampSort);
+        const sessionTimes = sessionTimesSchema.safeParse(stored.sessionTimes);
         return {
           ...current,
           ...stored,
+          sessionTimestampSort: timestampSort.success ? timestampSort.data : current.sessionTimestampSort,
+          sessionTimes: sessionTimes.success ? sessionTimes.data : current.sessionTimes,
           sidebarLayout: layout?.success ? layout.data : current.sidebarLayout,
           sessionRowDisplay: rowDisplay?.success ? rowDisplay.data : current.sessionRowDisplay,
         };

@@ -16,7 +16,7 @@ the UI is on a different machine.
   message once and verifies every exact image source before reading files.
 - Authorization recognizes the same common inline and reference-style image
   destinations collected by the UI, including balanced parentheses, while
-  excluding fenced and inline code.
+  excluding fenced and inline code, HTML comments, and raw HTML blocks.
 - The local images an `openchamber_render` page in the same message names are
   referenced too (`renderPageImageSources` in
   `../openchamber-control/render-page.js`): the page's HTML is the call's

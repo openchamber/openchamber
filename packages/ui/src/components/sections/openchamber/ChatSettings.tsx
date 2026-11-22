@@ -26,6 +26,7 @@ import {
   type InputHistoryScope,
 } from '@/lib/inputHistoryScope';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { QUESTION_TIMEOUT_MINUTES_MAX, QUESTION_TIMEOUT_MINUTES_MIN } from '@/lib/questionTimeout';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore, type FollowUpBehavior } from '@/stores/messageQueueStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
@@ -367,6 +368,10 @@ const ComposerTab: React.FC = () => {
   const inputHistoryLimit = useInputHistoryStore((state) => state.entryLimit);
   const applyInputHistoryScope = useInputHistoryStore((state) => state.applyScope);
   const applyInputHistoryLimit = useInputHistoryStore((state) => state.applyEntryLimit);
+  const questionTimeoutMinutes = useUIStore((state) => state.questionTimeoutMinutes);
+  const setQuestionTimeoutMinutes = useUIStore((state) => state.setQuestionTimeoutMinutes);
+  const questionsInBackground = useUIStore((state) => state.questionsInBackground);
+  const setQuestionsInBackground = useUIStore((state) => state.setQuestionsInBackground);
   const followUpOptions = useChipOptions(FOLLOW_UP_BEHAVIOR_OPTIONS);
   const historyScopeOptions = useChipOptions(INPUT_HISTORY_SCOPE_OPTIONS);
   const enterSendSelected = enterToSendConfigured ? enterToSend : !isMobile;
@@ -533,6 +538,38 @@ const ComposerTab: React.FC = () => {
               </span>
             </div>
           </SettingsFieldRow>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title={t('settings.chat.questionTimeout.section')} contentClassName="space-y-3">
+        <SettingsFieldRow
+          label={t('settings.chat.questionTimeout.field')}
+          info={t('settings.chat.questionTimeout.info')}
+          settingsItem="chat.question-timeout"
+        >
+          <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+            <NumberInput
+              value={questionTimeoutMinutes}
+              onValueChange={setQuestionTimeoutMinutes}
+              min={QUESTION_TIMEOUT_MINUTES_MIN}
+              max={QUESTION_TIMEOUT_MINUTES_MAX}
+              step={1}
+              className={SETTINGS_NUMBER_INPUT_CLASS}
+              deferExternalValueWhileFocused
+              aria-label={t('settings.chat.questionTimeout.aria')}
+            />
+            <span className={SETTINGS_NUMBER_UNIT_CLASS}>{t('settings.chat.questionTimeout.unit')}</span>
+          </div>
+        </SettingsFieldRow>
+        <div className={SETTINGS_OPTION_STACK_CLASS}>
+          <SettingsCheckboxRow
+            checked={questionsInBackground}
+            onChange={setQuestionsInBackground}
+            label={t('settings.chat.questionsInBackground.field')}
+            ariaLabel={t('settings.chat.questionsInBackground.field')}
+            info={t('settings.chat.questionsInBackground.info')}
+            settingsItem="chat.questions-in-background"
+          />
         </div>
       </SettingsSection>
     </>

@@ -34,7 +34,11 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
 
   // Per-run history (#2174 Gap 1): one durable row per completed run,
   // newest first. since/until accept epoch milliseconds or any
-  // Date.parse-able string; limit defaults to 200 (max 1000).
+  // Date.parse-able string; limit defaults to 200 (max 1000). A supplied
+  // non-empty bound that parses as neither, or a repeated bound (array), is
+  // rejected with 400 (#2155, #2371): forwarding it as undefined would
+  // silently widen the request into an unfiltered one. An absent or empty
+  // bound stays "no filter".
   app.get('/api/projects/:projectId/scheduled-tasks/run-history', async (req, res) => {
     const projectID = parseProjectID(req);
     if (!projectID) {
@@ -50,13 +54,46 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
       const parsed = Date.parse(value);
       return Number.isFinite(parsed) ? parsed : undefined;
     };
-    const limitRaw = typeof req.query?.limit === 'string' ? Number(req.query.limit) : undefined;
+    const parseTimeFilter = (name, value) => {
+      if (value !== undefined && typeof value !== 'string') {
+        return { error: `${name} must be a single value` };
+      }
+      const parsed = parseTime(value);
+      if (typeof value === 'string' && value.length > 0 && parsed === undefined) {
+        return { error: `${name} must be epoch milliseconds or a parseable date string` };
+      }
+      return { value: parsed };
+    };
+    const since = parseTimeFilter('since', req.query?.since);
+    if (since.error) {
+      return res.status(400).json({ error: since.error });
+    }
+    const until = parseTimeFilter('until', req.query?.until);
+    if (until.error) {
+      return res.status(400).json({ error: until.error });
+    }
+    // #2156: an omitted limit stays undefined so listRuns applies the
+    // documented default; a supplied limit must be a single plain-decimal
+    // integer spelling (the shared parse-int judgement in
+    // shared/parse-int.js). A malformed, empty, or repeated limit is a
+    // 400, never a silent fallback to the default — a caller's typo must
+    // not page at 200 rows without saying so. A valid integer keeps the
+    // downstream 1-1000 clamp (so 0 still clamps to 1).
+    const limitParam = req.query?.limit;
+    let limit;
+    if (limitParam !== undefined) {
+      const text = typeof limitParam === 'string' ? limitParam.trim() : '';
+      if (!/^\d+$/.test(text) || !Number.isSafeInteger(Number(text))) {
+        return res.status(400).json({ error: 'limit must be a single integer' });
+      }
+      limit = Number(text);
+    }
     const runs = scheduledTaskRunHistory.listRuns({
       projectID,
       taskID: asNonEmptyString(req.query?.taskId) ?? undefined,
-      since: parseTime(req.query?.since),
-      until: parseTime(req.query?.until),
-      limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+      since: since.value,
+      until: until.value,
+      limit,
     });
     return res.json({ runs });
   });

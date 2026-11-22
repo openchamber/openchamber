@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { setSessionProjectContextPin, syncSessionKnowledge } from './sessionKnowledgeApi';
+import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, syncSessionKnowledge } from './sessionKnowledgeApi';
+import { switchRuntimeEndpoint } from './runtime-switch';
 
 const SPACE_DIRECTORY = '/spaces/a1b2c3d4e5f6/repo';
 
@@ -41,5 +42,45 @@ describe('session knowledge writes for a session in an isolated space', () => {
     await syncSessionKnowledge('/home/me/repo', 'session-1');
     await setSessionProjectContextPin('/home/me/repo', 'session-1', 'note', 'note-1', true);
     expect(paths).toEqual(['/api/session-knowledge/sync -', '/api/session-knowledge/pin -']);
+  });
+});
+
+// Issue #2160: the summary cache was keyed by directory + session only, so a
+// fetch made just before a runtime switch answered for the new runtime until
+// the freshness window expired.
+describe('session knowledge summary cache across a runtime switch', () => {
+  test('a post-switch fetch requests the new runtime instead of reusing the cached promise', async () => {
+    const directory = '/home/me/knowledge-cache-runtime-switch';
+    let calls = 0;
+    request = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      // switchRuntimeEndpoint also mints a URL auth token through fetch;
+      // only summary requests count here.
+      if (!url.includes('/api/session-knowledge/summary')) {
+        return Response.json({});
+      }
+      calls += 1;
+      const fromA = url.startsWith('http://runtime-a.test');
+      return Response.json({
+        notes: [{ id: fromA ? 'note-a' : 'note-b', body: fromA ? 'from runtime A' : 'from runtime B' }],
+        plans: [],
+        memory: { global: 0, project: 0 },
+      });
+    });
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.test', runtimeKey: 'runtime-a' });
+    const first = await fetchSessionKnowledgeSummary(directory, 'session-1');
+    expect(first.notes.map((note) => note.id)).toEqual(['note-a']);
+    expect(calls).toBe(1);
+
+    // Same runtime, inside the freshness window: the cached promise serves.
+    const again = await fetchSessionKnowledgeSummary(directory, 'session-1');
+    expect(again.notes.map((note) => note.id)).toEqual(['note-a']);
+    expect(calls).toBe(1);
+
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-b.test', runtimeKey: 'runtime-b' });
+    const afterSwitch = await fetchSessionKnowledgeSummary(directory, 'session-1');
+    expect(afterSwitch.notes.map((note) => note.id)).toEqual(['note-b']);
+    expect(calls).toBe(2);
   });
 });

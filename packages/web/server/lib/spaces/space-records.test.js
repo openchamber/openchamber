@@ -1,10 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createSpaceRecords, networkSchema } from './space-records.js';
+import { createSpaceRecords, MAX_RECORD_BYTES, networkSchema } from './space-records.js';
 
 const ID = 'a1b2c3d4e5f6';
 const folders = [];
@@ -52,6 +53,28 @@ describe('space records', () => {
     expect(records.read(ID)).toEqual({ status: 'unreadable', record: null });
     expect(records.update(ID, { history: 'sent' })).toEqual({ status: 'unreadable', record: null });
     expect(fs.readFileSync(path.join(directory, `${ID}.json`), 'utf8')).toBe('not json');
+  });
+
+  it('reports an oversized record as unreadable, never as a fresh record, and does not write over it', () => {
+    const dataDir = temporary();
+    const records = createSpaceRecords({ dataDir, logger: quiet });
+    const directory = path.join(dataDir, 'spaces', 'records');
+    fs.mkdirSync(directory, { recursive: true });
+    const oversized = 'x'.repeat(MAX_RECORD_BYTES + 1);
+    fs.writeFileSync(path.join(directory, `${ID}.json`), oversized);
+    expect(records.read(ID)).toEqual({ status: 'unreadable', record: null });
+    expect(records.update(ID, { history: 'sent' })).toEqual({ status: 'unreadable', record: null });
+    expect(fs.readFileSync(path.join(directory, `${ID}.json`), 'utf8')).toBe(oversized);
+  });
+
+  it('reports a record that is not a regular file as unreadable, without hanging on it', () => {
+    if (process.platform === 'win32') return;
+    const dataDir = temporary();
+    const records = createSpaceRecords({ dataDir, logger: quiet });
+    const directory = path.join(dataDir, 'spaces', 'records');
+    fs.mkdirSync(directory, { recursive: true });
+    execFileSync('mkfifo', [path.join(directory, `${ID}.json`)]);
+    expect(records.read(ID)).toEqual({ status: 'unreadable', record: null });
   });
 
   it('remembers a grant without its value, and refuses one that carries a value under any name', () => {

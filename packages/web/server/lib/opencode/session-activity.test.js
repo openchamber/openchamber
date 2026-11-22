@@ -23,6 +23,25 @@ const createProbe = (sessions, { failureId, timeoutMs = 10_000, delayMs = 0 } = 
 describe('queue descendant activity', () => {
   const running = { type: 'running' };
 
+  // Oracle: the session.active wire schema. Invalid success bodies must
+  // never provide empty authority to the stale-session cleanup.
+  it('rejects malformed running-list bodies and accepts authoritative empty', async () => {
+    for (const body of [null, [], { lost: {} }, { lost: { type: 'idle' } }, { '': running }]) {
+      const probe = createSessionActivityProbe({
+        buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+        getOpenCodeAuthHeaders: () => ({}),
+        fetchImpl: async () => Response.json({ data: body }),
+      });
+      expect(await probe.fetchActiveSessionStatuses()).toBeNull();
+    }
+    const probe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async () => Response.json({ data: {} }),
+    });
+    expect(await probe.fetchActiveSessionStatuses()).toEqual({});
+  });
+
   it('detects a live grandchild through an idle intermediate session', async () => {
     const { probe, reads } = createProbe({ child: { id: 'child', parentID: 'root' }, grandchild: { id: 'grandchild', parentID: 'child' } });
     expect(await probe.hasWorkingDescendants('root', { grandchild: running })).toBe(true);
@@ -130,5 +149,44 @@ describe('queue descendant activity', () => {
     const { probe, reads } = createProbe({ child: { id: 'child', parentID: 'parent' } }, { timeoutMs: 1, delayMs: 10 });
     expect(await probe.hasWorkingDescendants('root', { child: running })).toBeNull();
     expect(reads).toEqual(['child']);
+  });
+
+  it('does not treat a prototype-named child as working (#2311)', async () => {
+    const probe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async (url) => {
+        if (new URL(url).pathname === '/api/session') {
+          return Response.json({ data: [{ id: 'constructor' }, { id: 'ses_child' }], cursor: {} });
+        }
+        return new Response(null, { status: 404 });
+      },
+    });
+    // 'constructor' is a child id but not an own key of the status map: the
+    // inherited Object.prototype member must not read as a working child.
+    expect(await probe.hasWorkingChildren('root', JSON.parse('{}'))).toBe(false);
+    expect(await probe.hasWorkingChildren('root', JSON.parse('{"ses_child":{"type":"running"}}'))).toBe(true);
+    expect(await probe.hasWorkingChildren('root', JSON.parse('{"constructor":{"type":"running"}}'))).toBe(true);
+  });
+});
+
+describe('active-session snapshot authority', () => {
+  // Oracle: the OpenCode 2.x schema requires an object of nonempty IDs with
+  // { type: 'running' }. Malformed success must never authorize cleanup.
+  it('rejects malformed success and accepts authoritative empty', async () => {
+    let body;
+    const probe = createSessionActivityProbe({
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async () => Response.json({ data: body }),
+    });
+    for (const invalid of [null, [], { session: {} }, { session: { type: 'idle' } }, { '': { type: 'running' } }]) {
+      body = invalid;
+      expect(await probe.fetchActiveSessionStatuses()).toBeNull();
+    }
+    body = {};
+    expect(await probe.fetchActiveSessionStatuses()).toEqual({});
+    body = { session: { type: 'running' } };
+    expect(await probe.fetchActiveSessionStatuses()).toEqual(body);
   });
 });

@@ -93,10 +93,6 @@ export class HighlightResultCache<T> {
     return this.map.size;
   }
 
-  get bytes(): number {
-    return this.totalBytes;
-  }
-
   get(key: string): T | undefined {
     const entry = this.map.get(key);
     if (entry === undefined) return undefined;

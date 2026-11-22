@@ -177,10 +177,10 @@ export async function getRepositoryRootFor(directory, rawSource, rawReadContext)
  * Stop a running generation. Only an explicit request does this — leaving the
  * page does not.
  */
-export async function cancelWalkthroughGeneration({ directory, source: rawSource, readContext: rawReadContext }) {
+export async function cancelWalkthroughGeneration({ directory, source: rawSource, readContext: rawReadContext }, deps = {}) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
-  const repoRoot = await getRepositoryRoot(directory);
+  const repoRoot = await (deps.getRepositoryRoot || getRepositoryRoot)(directory);
   const job = jobs.get(jobKey(repoRoot, sourceKey(source), readContext));
   if (!job) return addReadContext({ cancelled: false }, readContext);
   job.controller.abort();
@@ -202,7 +202,7 @@ const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
 // own choosing, the walkthrough stays on that provider rather than on
 // whichever provider happens to be connected, and on that model when the
 // provider has no small one.
-const resolveModel = (directory, explicitModel, providerID, modelID) => describeSmallModel({
+const resolveModel = (directory, explicitModel, providerID, modelID, describeModel = describeSmallModel) => describeModel({
   directory,
   outputReserveTokens: walkthroughOutputTokens,
   overrideModel: explicitModel || readWalkthroughModelOverride(),
@@ -275,7 +275,7 @@ const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) 
 export async function getWalkthrough({ directory, source: rawSource, model: explicitModel, providerID, modelID, language: rawLanguage, readContext: rawReadContext }, deps = {}) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
-  const repoRoot = await getRepositoryRoot(directory);
+  const repoRoot = await (deps.getRepositoryRoot || getRepositoryRoot)(directory);
   const key = sourceKey(source);
   const language = normalizeLanguage(rawLanguage);
 
@@ -285,7 +285,7 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   // the whole git pipeline twice.
   const [built, model] = await Promise.all([
     loadCurrentDiff(directory, source, deps, readContext),
-    resolveModel(directory, explicitModel, providerID, modelID).catch(() => null),
+    resolveModel(directory, explicitModel, providerID, modelID, deps.describeSmallModel).catch(() => null),
   ]);
   const { files } = built;
   const hunkIndex = indexHunks(files);
@@ -413,7 +413,7 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
 export async function generateWalkthrough({ directory, source: rawSource, force = false, model: explicitModel, providerID, modelID, language: rawLanguage, readContext: rawReadContext }, deps = {}) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
-  const repoRoot = await getRepositoryRoot(directory);
+  const repoRoot = await (deps.getRepositoryRoot || getRepositoryRoot)(directory);
   const key = sourceKey(source);
   const language = normalizeLanguage(rawLanguage);
 
@@ -436,7 +436,7 @@ export async function generateWalkthrough({ directory, source: rawSource, force 
 
 async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, providerID, modelID, language, readContext, signal }, deps) {
 
-  const model = await resolveModel(directory, explicitModel, providerID, modelID);
+  const model = await resolveModel(directory, explicitModel, providerID, modelID, deps.describeSmallModel);
   if (!model) {
     throw fail('No model is available — sign in to a provider first', 404, { code: 'no-model' });
   }
@@ -514,7 +514,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     );
   }
 
-  const run = (options) => generateSmallModelText({
+  const run = (options) => (deps.generateSmallModelText || generateSmallModelText)({
     prompt: options.prompt,
     system: options.system,
     directory,

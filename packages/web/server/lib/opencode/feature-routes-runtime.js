@@ -31,6 +31,7 @@ import { registerMessageModelAttributionRoutes } from '../routing/message-model-
 import { registerPlanRoutes } from '../routing/plan-routes.js';
 import { registerPoolPlanLinkRoutes } from '../routing/pool-plan-links.js';
 import { isLocalOpenCode, registerPoolHealthRoutes } from '../routing/pool-health.js';
+import { registerPoolRotation } from '../routing/pool-rotation.js';
 import { registerRouteRulesRoutes } from '../routing/route-rules-routes.js';
 import { createJevClient } from '../routing/jev.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
@@ -106,14 +107,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     id: `server_${crypto.randomUUID()}`,
     platform: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'desktop' : 'web',
   });
-
-  let quotaProviders = null;
-  const getQuotaProviders = async () => {
-    if (!quotaProviders) {
-      quotaProviders = await import('../quota/index.js');
-    }
-    return quotaProviders;
-  };
 
   let smallModelService = null;
   const getSmallModelService = async () => {
@@ -323,7 +316,17 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerMessageModelAttributionRoutes(app, { isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
     registerPlanRoutes(app);
     registerPoolPlanLinkRoutes(app, { openchamberDataDir });
-    registerPoolHealthRoutes(app, { readConfigLayers, openchamberDataDir, isOpenCodeLocal: () => isLocalOpenCode(buildOpenCodeUrl) });
+    const isOpenCodeLocal = () => isLocalOpenCode(buildOpenCodeUrl);
+    registerPoolHealthRoutes(app, { readConfigLayers, openchamberDataDir, isOpenCodeLocal });
+    registerPoolRotation(app, {
+      readConfigLayers,
+      readConfigSources,
+      openchamberDataDir,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      isAutoSession: routingRuntime.isAutoSession,
+      isOpenCodeLocal,
+    });
     registerRouteRulesRoutes(app, { routingRuntime, jev: createJevClient() });
     // Before the generic OpenCode proxy: swallows the `openchamber/auto` model
     // switch and routes the sends that follow it.
@@ -455,7 +458,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');
 
-    registerQuotaRoutes(app, { getQuotaProviders });
+    registerQuotaRoutes(app);
     registerSmallModelRoutes(app, { getSmallModelService });
     registerSessionGoalRoutes(app);
     const gitBinary = resolveGitBinaryForSpawn();

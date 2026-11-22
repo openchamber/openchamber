@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'goal-objectives-'));
 process.env.OPENCHAMBER_DATA_DIR = dataDir;
 const {
+  GOAL_OBJECTIVE_HARD_CAP,
   GOAL_OBJECTIVE_VERSION_CAP,
   appendObjectiveVersion,
   deleteObjectiveVersion,
@@ -173,6 +174,30 @@ describe('goal objective version history (#1830)', () => {
     await expect(appendObjectiveVersion('../escape', 'x')).rejects.toMatchObject({ statusCode: 400 });
     await expect(listObjectiveVersions('../escape')).resolves.toEqual([]);
   });
+
+  it('rejects a FIFO at the versions path promptly instead of blocking (#2295)', async () => {
+    fs.mkdirSync(goalsDir, { recursive: true });
+    execFileSync('mkfifo', [versionsFile('ses_verfifo')]);
+    const settled = await Promise.race([
+      listObjectiveVersions('ses_verfifo').then((value) => ({ value })),
+      new Promise((resolve) => { setTimeout(() => resolve({ value: 'did-not-settle' }), 2_000); }),
+    ]);
+    expect(settled.value).toEqual([]);
+  });
+
+  it('reads a directory at the versions path as empty history (#2295)', async () => {
+    fs.mkdirSync(versionsFile('ses_verdir'), { recursive: true });
+    await expect(listObjectiveVersions('ses_verdir')).resolves.toEqual([]);
+  });
+
+  it('reads an over-bound versions file as empty instead of buffering it whole (#2295)', async () => {
+    fs.mkdirSync(goalsDir, { recursive: true });
+    const huge = JSON.stringify([
+      { id: 'vbig', content: 'x'.repeat(GOAL_OBJECTIVE_VERSION_CAP * GOAL_OBJECTIVE_HARD_CAP * 4 + 1_000_000), savedAt: 1 },
+    ]);
+    fs.writeFileSync(versionsFile('ses_verbig'), huge);
+    await expect(listObjectiveVersions('ses_verbig')).resolves.toEqual([]);
+  });
 });
 
 describe('objective clamp surrogate-pair boundary (#1949)', () => {
@@ -192,5 +217,43 @@ describe('objective clamp surrogate-pair boundary (#1949)', () => {
     const written = await writeObjective('ses_pair2', content);
     expect(written.content).toBe(content);
     expect(written.content.length).toBe(1_000_000);
+  });
+});
+
+describe('goal objective durable writes (#2330)', () => {
+  const goalsDir = path.join(dataDir, 'goals');
+  // An fs whose writeFile always fails the way a full disk would, threaded
+  // through the durable helper's own fs seam. Everything else (mkdir,
+  // rename, rm) stays real, so only the write itself is broken.
+  const failingFs = {
+    ...fs.promises,
+    writeFile: async () => {
+      throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+    },
+  };
+  const tempFiles = () => fs.readdirSync(goalsDir).filter((name) => name.includes('.tmp-'));
+
+  it('a failed objective write leaves the previous objective readable and unchanged', async () => {
+    await writeObjective('ses_atomic1', 'the original objective');
+    await expect(writeObjective('ses_atomic1', 'the replacement', { fs: failingFs }))
+      .rejects.toThrow('ENOSPC');
+    await expect(readObjective('ses_atomic1')).resolves.toBe('the original objective');
+    expect(tempFiles()).toEqual([]);
+  });
+
+  it('a failed version-history write leaves the previous versions readable and unchanged', async () => {
+    await appendObjectiveVersion('ses_atomic2', 'version one', 1_000);
+    const before = await listObjectiveVersions('ses_atomic2');
+    expect(before).toHaveLength(1);
+    await expect(appendObjectiveVersion('ses_atomic2', 'version two', 2_000, { fs: failingFs }))
+      .rejects.toThrow('ENOSPC');
+    await expect(listObjectiveVersions('ses_atomic2')).resolves.toEqual(before);
+    expect(tempFiles()).toEqual([]);
+  });
+
+  it('written goal files carry the mode they were created with before the durable writer', async () => {
+    await writeObjective('ses_atomic3', 'mode check');
+    const stat = fs.statSync(path.join(goalsDir, 'ses_atomic3.md'));
+    expect(stat.mode & 0o777).toBe(0o666 & ~process.umask());
   });
 });

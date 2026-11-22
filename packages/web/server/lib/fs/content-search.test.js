@@ -34,6 +34,14 @@ describe('content search with ripgrep', () => {
     await writeFile(path.join(repo, '.gitignore'), 'ignored.txt\n');
     await writeFile(path.join(repo, 'node_modules', 'pkg', 'index.js'), 'needle in a dependency\n');
     await writeFile(path.join(repo, 'blob.bin'), Buffer.concat([Buffer.from('needle'), Buffer.from([0, 1, 2])]));
+    // #2152: an emoji straddling the trailing preview edge (line 1: the
+    // pair starts at code unit 199 of a 200-unit window) and one
+    // straddling the leading cut (line 2: the raw cut, match start - 24,
+    // lands exactly on the pair's low surrogate).
+    await writeFile(path.join(repo, 'src', 'emoji.ts'), [
+      `const trail = "quarry${'x'.repeat(193)}😀tail";`,
+      `const lead = "${'y'.repeat(100)}😀${'z'.repeat(23)}quarry${'w'.repeat(80)}";`,
+    ].join('\n') + '\n');
     search = createContentSearchRuntime({ spawn, path, resolveRipgrepBinary }).searchFileContents;
   });
 
@@ -83,6 +91,22 @@ describe('content search with ripgrep', () => {
     expect(minified.text.slice(...minified.ranges[0])).toBe('needle');
     expect(minified.ranges[0][0]).toBe(24);
     expect(minified.column).toBe('const minified = "'.length + 300 + 1);
+  });
+
+  it('never splits a surrogate pair at either preview edge (#2152)', async () => {
+    const result = await find({ query: 'quarry' });
+    expect(result.status).toBe('ok');
+    const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const trailing = result.matches.find((match) => match.relativePath === 'src/emoji.ts' && match.line === 1);
+    expect(trailing.text.length).toBeLessThanOrEqual(200);
+    expect(trailing.text).not.toMatch(loneSurrogate);
+    expect(trailing.text.slice(...trailing.ranges[0])).toBe('quarry');
+    const leading = result.matches.find((match) => match.relativePath === 'src/emoji.ts' && match.line === 2);
+    expect(leading.cutStart).toBe(true);
+    expect(leading.text).not.toMatch(loneSurrogate);
+    expect(leading.text.startsWith('z')).toBe(true);
+    expect(leading.text.slice(...leading.ranges[0])).toBe('quarry');
+    expect(leading.column).toBe('const lead = "'.length + 100 + 2 + 23 + 1);
   });
 
   it('skips gitignored, hidden, binary and node_modules files unless told otherwise', async () => {

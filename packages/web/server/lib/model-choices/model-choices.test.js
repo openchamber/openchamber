@@ -118,7 +118,8 @@ describe('model choice store', () => {
     expect(await store.snapshot()).toEqual({ events: data.events, decisions: data.decisions });
   });
 
-  it('refuses a FIFO at the store path promptly and still serves the next operation (#1610)', async () => {
+  // mkfifo is unavailable on native Windows, so this test is skipped there.
+  it.skipIf(process.platform === 'win32')('refuses a FIFO at the store path promptly and still serves the next operation (#1610)', async () => {
     const store = makeStore();
     execFileSync('mkfifo', [store.filePath]);
     const settled = await Promise.race([

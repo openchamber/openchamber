@@ -936,6 +936,94 @@ describe('skill-routes delete location', () => {
     expect(response.status).toBe(400);
   });
 
+  it.each([
+    ['repeated scope', 'scope=user&scope=project'],
+    ['repeated source', 'source=opencode&source=agents'],
+    ['both repeated filters', 'scope=user&scope=project&source=opencode&source=agents'],
+    ['non-string scope', 'scope%5Bvalue%5D=user&source=opencode'],
+    ['non-string source', 'scope=project&source%5Bvalue%5D=agents'],
+    ['empty supplied filter', 'scope=&source=opencode'],
+    ['both filters supplied empty', 'scope=&source='],
+  ])('rejects %s before deleting any copies', async (_label, query) => {
+    projectRoot = createTempProject();
+    const skillCopy = writeProjectSkill(projectRoot, '.agents', 'malformed-filter-skill');
+    const deleteSkillMock = vi.fn();
+    appHandle = startSkillsApp({ projectRoot, overrides: { deleteSkill: deleteSkillMock } });
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/malformed-filter-skill?${query}`, { method: 'DELETE' });
+
+    expect(response.status).toBe(400);
+    expect(deleteSkillMock).not.toHaveBeenCalled();
+    expect(fs.existsSync(skillCopy)).toBe(true);
+  });
+
+  it('preserves unfiltered delete-all behavior when both filters are absent', async () => {
+    projectRoot = createTempProject();
+    const deleteSkillMock = vi.fn();
+    appHandle = startSkillsApp({ projectRoot, overrides: { deleteSkill: deleteSkillMock } });
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/any-skill`, { method: 'DELETE' });
+
+    expect(response.ok).toBe(true);
+    expect(deleteSkillMock).toHaveBeenCalledWith('any-skill', projectRoot, undefined);
+  });
+
+  it('rejects a repeated scope query param without deleting copies', async () => {
+    projectRoot = createTempProject();
+    appHandle = startSkillsApp({ projectRoot });
+    const agentsCopy = writeProjectSkill(projectRoot, '.agents', 'repeated-scope-skill');
+    const claudeCopy = writeProjectSkill(projectRoot, '.claude', 'repeated-scope-skill');
+    const query = `directory=${encodeURIComponent(projectRoot)}`;
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/repeated-scope-skill?${query}&scope=user&scope=project`, { method: 'DELETE' });
+
+    expect(response.status).toBe(400);
+    expect(fs.existsSync(agentsCopy)).toBe(true);
+    expect(fs.existsSync(claudeCopy)).toBe(true);
+  });
+
+  it('rejects a repeated source query param without deleting copies', async () => {
+    projectRoot = createTempProject();
+    appHandle = startSkillsApp({ projectRoot });
+    const agentsCopy = writeProjectSkill(projectRoot, '.agents', 'repeated-source-skill');
+    const claudeCopy = writeProjectSkill(projectRoot, '.claude', 'repeated-source-skill');
+    const query = `directory=${encodeURIComponent(projectRoot)}`;
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/repeated-source-skill?${query}&source=opencode&source=claude`, { method: 'DELETE' });
+
+    expect(response.status).toBe(400);
+    expect(fs.existsSync(agentsCopy)).toBe(true);
+    expect(fs.existsSync(claudeCopy)).toBe(true);
+  });
+
+  it('rejects both scope and source repeated without deleting copies', async () => {
+    projectRoot = createTempProject();
+    appHandle = startSkillsApp({ projectRoot });
+    const agentsCopy = writeProjectSkill(projectRoot, '.agents', 'both-repeated-skill');
+    const claudeCopy = writeProjectSkill(projectRoot, '.claude', 'both-repeated-skill');
+    const query = `directory=${encodeURIComponent(projectRoot)}`;
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/both-repeated-skill?${query}&scope=user&scope=project&source=opencode&source=claude`, { method: 'DELETE' });
+
+    expect(response.status).toBe(400);
+    expect(fs.existsSync(agentsCopy)).toBe(true);
+    expect(fs.existsSync(claudeCopy)).toBe(true);
+  });
+
+  it('preserves delete-all-copies behavior when both filters are absent', async () => {
+    projectRoot = createTempProject();
+    appHandle = startSkillsApp({ projectRoot });
+    const agentsCopy = writeProjectSkill(projectRoot, '.agents', 'absent-filters-skill');
+    const claudeCopy = writeProjectSkill(projectRoot, '.claude', 'absent-filters-skill');
+    const query = `directory=${encodeURIComponent(projectRoot)}`;
+
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills/absent-filters-skill?${query}`, { method: 'DELETE' });
+
+    expect(response.ok).toBe(true);
+    expect(fs.existsSync(agentsCopy)).toBe(false);
+    expect(fs.existsSync(claudeCopy)).toBe(false);
+  });
+
   it('flags a supporting-files listing the directory cap truncated (#1365)', async () => {
     projectRoot = createTempProject();
     const skillDir = path.join(projectRoot, '.agents', 'skills', 'wide-skill');

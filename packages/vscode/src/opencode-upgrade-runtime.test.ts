@@ -1,4 +1,4 @@
-import { afterEach, describe, mock, test } from 'node:test';
+import { afterEach, beforeEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getOpenCodeUpgradeStatus, setInfoProbeDeadlineForTest, upgradeManagedOpenCode, type OpenCodeUpgradeManager } from './opencode-upgrade-runtime';
 import { OPENCODE_INFO_RESPONSE_MAX_BYTES } from './bounded-response-body';
@@ -16,6 +16,18 @@ afterEach(() => {
   else process.env.NPM_CONFIG_REGISTRY = originalRegistry;
   if (originalUserConfig === undefined) delete process.env.npm_config_userconfig;
   else process.env.npm_config_userconfig = originalUserConfig;
+});
+
+// #2308 (twin of #1289): every test in this file must resolve the npm
+// registry deterministically. Pin npm_config_userconfig to a missing
+// file and clear any inherited registry override before each test, so
+// the machine's ~/.npmrc (e.g. a registry mirror) can never leak into
+// a test that did not pin it itself; tests 1-2 above override these
+// values with their own pins. afterEach restores the originals.
+beforeEach(() => {
+  process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
+  delete process.env.npm_config_registry;
+  delete process.env.NPM_CONFIG_REGISTRY;
 });
 
 const createManager = (mode: 'managed' | 'external' = 'managed'): OpenCodeUpgradeManager => ({

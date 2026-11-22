@@ -486,6 +486,12 @@
         "mobile"
       ]
     },
+    "questionTimeoutMinutes": {
+      "scope": "profile"
+    },
+    "questionsInBackground": {
+      "scope": "profile"
+    },
     "autoCreateWorktree": {
       "scope": "profile"
     },

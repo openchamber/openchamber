@@ -28,6 +28,7 @@ import { LOCALES } from '@/lib/i18n/runtime';
 import { useI18nStore } from '@/lib/i18n/store';
 import { isInputHistoryLimit, isInputHistoryScope, type InputHistoryScope } from '@/lib/inputHistoryScope';
 import { LIVE_BROWSER_TABS_MAX, LIVE_BROWSER_TABS_MIN } from '@/lib/browser/liveTabs';
+import { QUESTION_TIMEOUT_MINUTES_MAX, QUESTION_TIMEOUT_MINUTES_MIN } from '@/lib/questionTimeout';
 import { normalizeMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isTerminalShell } from '@/lib/terminalShell';
 import {
@@ -497,6 +498,8 @@ export const SETTINGS_REGISTRY = {
   openLinksInBrowserPanel: field({ scope: 'profile', surfaces: ['desktop'], parse: parseBoolean, ui: uiStore('openLinksInBrowserPanel', (v) => useUIStore.getState().setOpenLinksInBrowserPanel(v)) }),
   liveBrowserTabLimit: field({ scope: 'profile', surfaces: ['desktop'], parse: parseIntegerInRange(LIVE_BROWSER_TABS_MIN, LIVE_BROWSER_TABS_MAX), ui: uiStore('liveBrowserTabLimit', (v) => useUIStore.getState().setLiveBrowserTabLimit(v)) }),
   openTrackerLinksOnBoard: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('openTrackerLinksOnBoard', (v) => useUIStore.getState().setOpenTrackerLinksOnBoard(v)) }),
+  questionTimeoutMinutes: field({ scope: 'profile', parse: parseIntegerInRange(QUESTION_TIMEOUT_MINUTES_MIN, QUESTION_TIMEOUT_MINUTES_MAX), ui: uiStore('questionTimeoutMinutes', (v) => useUIStore.getState().setQuestionTimeoutMinutes(v)) }),
+  questionsInBackground: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('questionsInBackground', (v) => useUIStore.getState().setQuestionsInBackground(v)) }),
   autoCreateWorktree: field({ scope: 'profile', parse: parseBoolean, ui: configField('settingsAutoCreateWorktree') }),
   worktreeStartFrom: field({ scope: 'profile', parse: parseOneOf(WORKTREE_START_FROM_OPTIONS), ui: configField('settingsWorktreeStartFrom') }),
   worktreeStartFromOverrides: field({ scope: 'profile', parse: parseWorktreeStartFromOverrides, ui: configField('settingsWorktreeStartFromOverrides') }),

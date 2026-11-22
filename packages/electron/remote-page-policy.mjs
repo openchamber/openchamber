@@ -12,7 +12,42 @@ export const isSplashColor = (value) => SPLASH_COLOR_PATTERN.test(String(value))
 // A remote page may list the saved hosts (its host switcher), but the
 // credentials of every host stay with local pages: one server must not read
 // the tokens or auth headers the user saved for another.
+// URL-embedded basic-auth credentials are credentials too: a saved host's
+// url/apiUrl may carry user:password@, which the field drops above do not
+// touch. Strip the userinfo from the redacted copy only — the stored host
+// keeps it, so local probing still authenticates at use time. Values
+// without userinfo pass through byte-identical.
+const stripUrlUserinfo = (value) => {
+  if (!value.includes('@')) {
+    return value;
+  }
+  try {
+    const parsed = new URL(value);
+    if (!parsed.username && !parsed.password) {
+      return value;
+    }
+    parsed.username = '';
+    parsed.password = '';
+    return parsed.toString();
+  } catch {
+    return value.replace(/^([a-zA-Z][a-zA-Z\d+.-]*:\/\/)[^/@\s]+@/, '$1');
+  }
+};
+
+// A host saved without a label gets its URL as the label, credentials included.
+const URL_BEARING_HOST_FIELDS = ['label', 'url', 'apiUrl'];
+
+const redactHostForRemote = ({ clientToken: _clientToken, requestHeaders: _requestHeaders, ...host }) => {
+  const redacted = { ...host };
+  for (const field of URL_BEARING_HOST_FIELDS) {
+    if (field in host) {
+      redacted[field] = stripUrlUserinfo(host[field]);
+    }
+  }
+  return redacted;
+};
+
 export const redactHostsConfigForRemote = (config) => ({
   ...config,
-  hosts: config.hosts.map(({ clientToken: _clientToken, requestHeaders: _requestHeaders, ...host }) => host),
+  hosts: config.hosts.map(redactHostForRemote),
 });

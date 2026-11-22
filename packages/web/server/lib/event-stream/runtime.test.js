@@ -364,6 +364,58 @@ describe('message stream websocket runtime', () => {
     await runtime.close();
   });
 
+  it('refuses repeated directory or lastEventId params instead of silently first-picking one (#2315)', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    let fetchCalls = 0;
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        fetchCalls += 1;
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: true,
+          blocks: [],
+        });
+      },
+    });
+
+    const ambiguousUrls = [
+      '/api/event/ws?directory=/tmp/one&directory=/tmp/two',
+      '/api/event/ws?directory=/tmp/one&lastEventId=1&lastEventId=2',
+      '/api/global/event/ws?lastEventId=1&lastEventId=2',
+    ];
+
+    for (const url of ambiguousUrls) {
+      const socket = new FakeSocket();
+      runtime.wsServer.emit('connection', socket, { url });
+
+      expect(socket.sent).toEqual([
+        {
+          type: 'error',
+          message: 'Ambiguous message stream parameters: directory and lastEventId may each appear at most once',
+        },
+      ]);
+      expect(socket.closeCalls).toEqual([{ code: 1008, reason: 'Ambiguous message stream parameters' }]);
+    }
+
+    // No ambiguous connection reached an upstream reader or a bridge.
+    expect(fetchCalls).toBe(0);
+
+    await runtime.close();
+  });
+
   it('closes the websocket and triggers health check on initial upstream unavailable response', async () => {
     const server = new EventEmitter();
     const wsClients = new Set();

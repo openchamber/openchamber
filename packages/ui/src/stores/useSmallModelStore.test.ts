@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-let responses: Array<{ status: number; body: unknown }> = [];
+let responses: Array<{ status: number; body: unknown } | Promise<Response>> = [];
 let calls: string[] = [];
 
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: async (url: string) => {
     calls.push(url);
     const next = responses.shift() ?? { status: 200, body: { available: true } };
+    if (next instanceof Promise) return next;
     return new Response(JSON.stringify(next.body), { status: next.status, headers: { 'Content-Type': 'application/json' } });
   },
 }));
@@ -19,6 +20,18 @@ mock.module('@/lib/configSync', () => ({
 }));
 
 const { useSmallModelStore, selectSmallModelAvailability } = await import('./useSmallModelStore');
+
+const deferredResponse = (body: unknown, status = 200) => {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>((res) => {
+    resolve = res;
+  });
+  return {
+    promise,
+    resolve: () =>
+      resolve(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })),
+  };
+};
 
 describe('useSmallModelStore', () => {
   beforeEach(() => {
@@ -69,5 +82,40 @@ describe('useSmallModelStore', () => {
     await useSmallModelStore.getState().ensureFresh('/p');
     expect(selectSmallModelAvailability(useSmallModelStore.getState(), '/p')).toBe('available');
     expect(calls).toHaveLength(2);
+  });
+
+  test('a response that lands after invalidation cannot overwrite the fresh answer', async () => {
+    const stale = deferredResponse({ available: false });
+    responses = [stale.promise];
+    const requestA = useSmallModelStore.getState().ensureFresh('/p');
+    useSmallModelStore.getState().invalidate();
+    const fresh = deferredResponse({ available: true });
+    responses = [fresh.promise];
+    const requestB = useSmallModelStore.getState().ensureFresh('/p');
+    fresh.resolve();
+    await requestB;
+    expect(selectSmallModelAvailability(useSmallModelStore.getState(), '/p')).toBe('available');
+    stale.resolve();
+    await requestA;
+    expect(selectSmallModelAvailability(useSmallModelStore.getState(), '/p')).toBe('available');
+    expect(calls).toHaveLength(2);
+  });
+
+  test('a stale request finishing cannot evict a newer in-flight request', async () => {
+    const stale = deferredResponse({ error: 'down' }, 500);
+    responses = [stale.promise];
+    const requestA = useSmallModelStore.getState().ensureFresh('/p');
+    useSmallModelStore.getState().invalidate();
+    const fresh = deferredResponse({ available: true });
+    responses = [fresh.promise];
+    const requestB = useSmallModelStore.getState().ensureFresh('/p');
+    stale.resolve();
+    await requestA;
+    // B is still in flight; another reader must coalesce onto it, not fetch.
+    void useSmallModelStore.getState().ensureFresh('/p');
+    expect(calls).toHaveLength(2);
+    fresh.resolve();
+    await requestB;
+    expect(selectSmallModelAvailability(useSmallModelStore.getState(), '/p')).toBe('available');
   });
 });

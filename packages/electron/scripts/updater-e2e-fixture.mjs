@@ -21,7 +21,17 @@ The run command stages N+1, serves it on 127.0.0.1, and launches N with only the
 runtime E2E gates. Use the Desktop update UI to check, download, apply, and restart.
 Keep this process running until the restarted N+1 is verified, then press Ctrl-C.`;
 
-const parseArguments = (argv) => {
+// The options each command actually reads. Anything else is rejected:
+// a lenient parser silently swallows a flag meant for another command
+// (`stage --port 45678` exited 0 with the flag having zero effect) and
+// typos (`--verison`) the same way (#2057).
+const COMMAND_OPTIONS = new Map([
+  ['stage', new Set(['arch', 'next', 'version', 'dir'])],
+  ['serve', new Set(['dir', 'port'])],
+  ['run', new Set(['arch', 'current', 'next', 'version', 'dir', 'port'])],
+]);
+
+export const parseArguments = (argv) => {
   const [command, ...rest] = argv;
   const options = {};
   for (let index = 0; index < rest.length; index += 2) {
@@ -29,6 +39,12 @@ const parseArguments = (argv) => {
     const value = rest[index + 1];
     if (!key?.startsWith('--') || value === undefined) throw new Error(usage);
     options[key.slice(2)] = value;
+  }
+  const allowed = COMMAND_OPTIONS.get(command);
+  if (allowed) {
+    for (const name of Object.keys(options)) {
+      if (!allowed.has(name)) throw new Error(`Unknown option --${name} for ${command}\n\n${usage}`);
+    }
   }
   return { command, options };
 };

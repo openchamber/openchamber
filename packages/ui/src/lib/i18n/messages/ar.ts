@@ -5,6 +5,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -13,6 +14,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -2518,6 +2520,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'تم التحويل الاحتياطي من',
   'chat.messageBody.modelChanged.notice': 'تغيّر النموذج من {from} إلى {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'تغيّر النموذج من {from} إلى {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'تفضيل السابق',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'اجعل مجموعات النماذج تفضّل {model} لمدة يوم',
+  'chat.currentModel.label': 'النموذج الحالي: {model}',
+  'chat.currentModel.labelWithPool': 'النموذج الحالي: {model} من المجموعة {pool}',
+  'chat.currentModel.menu.openHint': 'انقر لاختيار نموذج',
+  'chat.currentModel.menu.timing': 'التبديل',
+  'chat.currentModel.menu.directPickHelp': 'يوقف الاختيار المباشر التبديل الاحتياطي بين نماذج المجموعة حتى تعود إليها.',
+  'chat.currentModel.timing.immediately': 'الآن (يعيد تشغيل الرد الجاري)',
+  'chat.currentModel.timing.nextStep': 'في الخطوة التالية',
+  'chat.currentModel.timing.nextInput': 'مع الرسالة التالية',
+  'chat.currentModel.menu.members': 'النماذج في المجموعة {pool}',
+  'chat.currentModel.menu.returnToPool': 'العودة إلى المجموعة {pool}',
+  'chat.currentModel.toast.failed': 'تعذّر تبديل النموذج',
   'chat.generatedResult.actions.copy': 'نسخ',
   'chat.generatedResult.actions.copied': 'تم النسخ',
   'chat.generatedResult.commit.title': 'رسالة الإيداع المولَّدة',
@@ -3744,8 +3759,8 @@ export const dict = {
   'multirun.overview.card.keep': 'الاحتفاظ بهذا',
   'multirun.overview.addModel.action': 'إضافة نموذج',
   'multirun.overview.addModel.hint': 'يشغّل الطلب نفسه على نموذج إضافي في هذا التشغيل',
-  'chat.parallel.settings.whereShared': 'مجلد المشروع',
-  'chat.parallel.settings.whereSharedHint': 'تعمل جميع عمليات التشغيل في نسختك المحلية. الأفضل للأسئلة والبحث.',
+  'chat.parallel.settings.whereShared': 'مجلد مشترك',
+  'chat.parallel.settings.whereSharedHint': 'تعمل جميع عمليات التشغيل في المجلد المحدد لهذه المسودة. الأفضل للأسئلة والبحث.',
   'chat.parallel.settings.whereWorktrees': 'أشجار عمل منفصلة',
   'chat.parallel.settings.whereWorktreesHint': 'يحصل كل تشغيل على فرعه الخاص، فلا تتعارض تغييرات الشيفرة أبدًا. احتفظ بالأفضل.',
   'chat.parallel.settings.baseBranchTitle': 'الفرع الأساسي',
@@ -3827,6 +3842,7 @@ export const dict = {
   ...sessionMenuHintsI18n.ar,
   ...sessionErrorRecoveryI18n.ar,
   ...sidebarLayoutI18n.ar,
+  ...activityTimesI18n.ar,
   ...projectKnowledgeI18n.ar,
   ...linearPanelI18n.ar,
   ...routingI18n.ar,
@@ -3835,6 +3851,7 @@ export const dict = {
   ...fileArtifactsI18n.ar,
   ...fileContentSearchI18n.ar,
   ...htmlRenderI18n.ar,
+  ...sessionLocationI18n.ar,
   ...sessionNoticesI18n.ar,
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,

@@ -73,8 +73,18 @@ export const createScheduledTaskRunHistory = ({
       if (length > 0) fs.readSync(fd, buffer, 0, length, readStart);
       let raw = buffer.toString('utf8');
       if (readStart > 0) {
-        const firstNewline = raw.indexOf('\n');
-        raw = firstNewline === -1 ? '' : raw.slice(firstNewline + 1);
+        // Drop the first fragment only when the window truly begins
+        // mid-line: when the byte before readStart is a newline, the
+        // window starts exactly on a line boundary and its first row
+        // is complete and must be kept (#2267). A 0x0A byte never
+        // occurs inside a multi-byte UTF-8 sequence, so the byte
+        // check is exact.
+        const prevByte = Buffer.alloc(1);
+        fs.readSync(fd, prevByte, 0, 1, readStart - 1);
+        if (prevByte[0] !== 0x0a) {
+          const firstNewline = raw.indexOf('\n');
+          raw = firstNewline === -1 ? '' : raw.slice(firstNewline + 1);
+        }
       }
       for (const line of raw.split('\n')) {
         const trimmed = line.trim();
@@ -155,11 +165,30 @@ export const createScheduledTaskRunHistory = ({
         // from the retained in-memory rows so disk growth is bounded
         // by the same cap; scheduled runs are infrequent, so the
         // rewrite cost is paid only on appends past the cap.
+        //
+        // The replacement is failure-atomic (#2120): stage the retained
+        // rows in a sibling temp file and rename it over the history
+        // file, and only drop the aged-out rows from memory and the
+        // dedupe set after the rename succeeds. An in-place rewrite
+        // that failed mid-write (ENOSPC after truncate) erased the
+        // whole durable history while the caller was allowed to
+        // continue; here a failed compaction leaves the previous valid
+        // file — which now also holds the just-appended row — and the
+        // in-memory mirror exactly as they were, and the next append
+        // past the cap retries the compaction.
+        const retained = rows.slice(rows.length - rowCap);
+        const tempPath = `${filePath}.tmp-${process.pid}`;
+        try {
+          fs.writeFileSync(tempPath, retained.map((kept) => `${JSON.stringify(kept)}\n`).join(''));
+          fs.renameSync(tempPath, filePath);
+        } catch (compactionError) {
+          try { fs.rmSync(tempPath, { force: true }); } catch { /* best effort */ }
+          throw compactionError;
+        }
         const dropped = rows.splice(0, rows.length - rowCap);
         for (const oldRow of dropped) {
           appendedTerminalKeys.delete(`${runKey(oldRow.projectId, oldRow.taskId, oldRow.sessionId)}\0${oldRow.finishedAt}\0${oldRow.outcome}`);
         }
-        fs.writeFileSync(filePath, rows.map((kept) => `${JSON.stringify(kept)}\n`).join(''));
       }
     } catch (error) {
       // History is evidence, never a reason to break the run itself.
