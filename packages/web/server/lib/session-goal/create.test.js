@@ -4,22 +4,16 @@ const writeObjectiveMock = vi.fn(async () => undefined);
 const appendObjectiveVersionMock = vi.fn(async () => ({ versions: [], versionId: null }));
 const generateSmallModelTextMock = vi.fn(async () => ({ text: '' }));
 
-vi.mock('./objectives.js', () => ({
-  GOAL_OBJECTIVE_CHAR_LIMIT: 5_000,
-  GOAL_OBJECTIVE_HARD_CAP: 1_000_000,
-  goalObjectiveLimits: () => ({ objective: 5_000, check: 20_000 }),
-  writeObjective: writeObjectiveMock,
-  appendObjectiveVersion: appendObjectiveVersionMock,
-}));
-
-vi.mock('../small-model/index.js', () => ({
-  generateSmallModelText: generateSmallModelTextMock,
-}));
-
 // Every call names its writer settings, so the user's own never reach these tests.
-const WRITER_OFF = { model: undefined, rewriteAll: false };
+const WRITER_OFF = { model: undefined, rewriteAll: false, charLimit: 5_000 };
 
-const { buildGoalIntroText, createSessionGoal } = await import('./create.js');
+const { buildGoalIntroText, createSessionGoal: createSessionGoalImpl } = await import('./create.js');
+const createSessionGoal = (options) => createSessionGoalImpl({
+  ...options,
+  writeObjectiveFile: writeObjectiveMock,
+  appendObjectiveVersionFile: appendObjectiveVersionMock,
+  generateSmallModelText: generateSmallModelTextMock,
+});
 
 describe('session goal objective cuts are surrogate-pair safe (#1909)', () => {
   const EMOJI = '\u{1F600}';

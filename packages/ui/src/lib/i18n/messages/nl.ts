@@ -13,6 +13,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -154,6 +155,7 @@ export const dict = {
   ...fileArtifactsI18n.nl,
   ...fileContentSearchI18n.nl,
   ...htmlRenderI18n.nl,
+  ...sessionLocationI18n.nl,
   ...sessionNoticesI18n.nl,
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
@@ -2600,6 +2602,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Failover vanaf',
   'chat.messageBody.modelChanged.notice': 'Model gewijzigd: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Model gewijzigd: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Vorige voorkeur geven',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Laat modelpools een dag lang {model} verkiezen',
+  'chat.currentModel.label': 'Huidig model: {model}',
+  'chat.currentModel.labelWithPool': 'Huidig model: {model} uit pool {pool}',
+  'chat.currentModel.menu.openHint': 'Klik om een model te kiezen',
+  'chat.currentModel.menu.timing': 'Wisselen',
+  'chat.currentModel.menu.directPickHelp': 'Een directe keuze stopt de automatische uitwijking van de pool totdat u terugkeert naar de pool.',
+  'chat.currentModel.timing.immediately': 'Nu (start een lopend antwoord opnieuw)',
+  'chat.currentModel.timing.nextStep': 'Bij de volgende stap',
+  'chat.currentModel.timing.nextInput': 'Met het volgende bericht',
+  'chat.currentModel.menu.members': 'Modellen in pool {pool}',
+  'chat.currentModel.menu.returnToPool': 'Terug naar pool {pool}',
+  'chat.currentModel.toast.failed': 'Kon het model niet wisselen',
   'chat.generatedResult.actions.copy': 'Kopiëren',
   'chat.generatedResult.actions.copied': 'Gekopieerd',
   'chat.generatedResult.commit.title': 'Gegenereerd commitbericht',
@@ -3846,8 +3861,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Deze behouden',
   'multirun.overview.addModel.action': 'Een model toevoegen',
   'multirun.overview.addModel.hint': 'Voert dezelfde prompt uit op nog één model in deze uitvoering',
-  'chat.parallel.settings.whereShared': 'Projectmap',
-  'chat.parallel.settings.whereSharedHint': 'Alle runs werken in dezelfde checkout. Het beste voor vragen en onderzoek.',
+  'chat.parallel.settings.whereShared': 'Gedeelde map',
+  'chat.parallel.settings.whereSharedHint': 'Alle runs werken in de map waar dit concept op staat. Het beste voor vragen en onderzoek.',
   'chat.parallel.settings.whereWorktrees': 'Aparte worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Elke run krijgt een eigen branch, zodat codewijzigingen elkaar nooit botsen. Houd de beste over.',
   'chat.parallel.settings.baseBranchTitle': 'Basisbranch',

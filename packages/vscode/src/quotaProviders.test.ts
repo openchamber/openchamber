@@ -57,7 +57,7 @@ const baseCredentialList = (): CredentialEntry[] => [
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
 
-import { activateQuotaGiftReset, fetchClaudeQuota, fetchClinePassQuota, fetchCodexQuota, fetchCopilotQuota, fetchDeepinfraQuota, fetchDeepseekQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchMetaQuota, fetchMistralQuota, fetchCommandCodeQuota, fetchOpenDesignQuota, fetchNanoGptQuota, fetchNeuralwattQuota, fetchOllamaCloudQuota, fetchOpenRouterQuota, fetchZaiQuota, fetchZhipuaiCodingPlanQuota, listConfiguredQuotaProviders, resetMetaQuotaCache, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, normalizeTimestamp, toTimestamp } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClaudeQuota, fetchClinePassQuota, fetchCodexQuota, fetchCopilotQuota, fetchDeepinfraQuota, fetchDeepseekQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchMetaQuota, fetchMistralQuota, fetchCommandCodeQuota, fetchOpenDesignQuota, fetchNanoGptQuota, fetchNeuralwattQuota, fetchOllamaCloudQuota, fetchOpenRouterQuota, fetchZaiQuota, fetchZhipuaiCodingPlanQuota, listConfiguredQuotaProviders, readJsonFile, readKiloOrganizationIdFromUserConfig, resetMetaQuotaCache, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, normalizeTimestamp, toTimestamp } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -110,6 +110,31 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
   copilotEnterpriseUrl = undefined;
+});
+
+test('quota local JSON readers preserve their null fallback for over-cap files', () => {
+  const authPath = path.join(temporaryQuotaDataDirectory, 'oversized-auth.json');
+  const configPath = path.join(temporaryQuotaDataDirectory, 'oversized-opencode.json');
+  const authDirectory = path.join(temporaryQuotaDataDirectory, 'auth-directory');
+  const configDirectory = path.join(temporaryQuotaDataDirectory, 'config-directory');
+  fs.writeFileSync(authPath, JSON.stringify({ providers: { meta: { access_token: 'small-test-token' } } }));
+  fs.writeFileSync(configPath, JSON.stringify({ provider: { kilo: { options: { organizationId: 'small-org' } } } }));
+  assert.deepEqual(readJsonFile(authPath), { providers: { meta: { access_token: 'small-test-token' } } });
+  assert.equal(readKiloOrganizationIdFromUserConfig(configPath), 'small-org');
+  fs.writeFileSync(authPath, 'x'.repeat(1024 * 1024 + 1));
+  fs.writeFileSync(configPath, 'x'.repeat(4 * 1024 * 1024 + 1));
+  fs.mkdirSync(authDirectory);
+  fs.mkdirSync(configDirectory);
+  const previousWarn = console.warn;
+  console.warn = () => undefined;
+  try {
+    assert.equal(readJsonFile(authPath), null);
+    assert.equal(readKiloOrganizationIdFromUserConfig(configPath), null);
+    assert.equal(readJsonFile(authDirectory), null);
+    assert.equal(readKiloOrganizationIdFromUserConfig(configDirectory), null);
+  } finally {
+    console.warn = previousWarn;
+  }
 });
 
 const stubFetchReturning = (resolver: (url: string, init?: RequestInit) => Promise<unknown>): void => {

@@ -14,6 +14,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -155,6 +156,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileArtifactsI18n.ja,
   ...fileContentSearchI18n.ja,
   ...htmlRenderI18n.ja,
+  ...sessionLocationI18n.ja,
   ...sessionNoticesI18n.ja,
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
@@ -2596,6 +2598,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': 'フェイルオーバー元',
   'chat.messageBody.modelChanged.notice': 'モデルが変更されました: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'モデルが変更されました: {from} → {to}（{reason}）',
+  'chat.messageBody.modelChanged.preferPrevious': '前のモデルを優先',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'モデルプールで1日間 {model} を優先する',
+  'chat.currentModel.label': '現在のモデル: {model}',
+  'chat.currentModel.labelWithPool': '現在のモデル: {model}（プール {pool}）',
+  'chat.currentModel.menu.openHint': 'クリックしてモデルを選択',
+  'chat.currentModel.menu.timing': '切り替え',
+  'chat.currentModel.menu.directPickHelp': '直接選択すると、プールに戻るまでプールのフェイルオーバーが停止します。',
+  'chat.currentModel.timing.immediately': '今すぐ（実行中の応答をやり直します）',
+  'chat.currentModel.timing.nextStep': '次のステップで',
+  'chat.currentModel.timing.nextInput': '次のメッセージで',
+  'chat.currentModel.menu.members': 'プール {pool} のモデル',
+  'chat.currentModel.menu.returnToPool': 'プール {pool} に戻る',
+  'chat.currentModel.toast.failed': 'モデルを切り替えられませんでした',
   'chat.generatedResult.actions.copy': 'コピー',
   'chat.generatedResult.actions.copied': 'コピーしました',
   'chat.generatedResult.commit.title': '生成されたコミットメッセージ',
@@ -3846,8 +3861,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': 'これを残す',
   'multirun.overview.addModel.action': 'モデルを追加',
   'multirun.overview.addModel.hint': 'この実行で同じプロンプトをもう1つのモデルに送ります',
-  'chat.parallel.settings.whereShared': 'プロジェクトディレクトリ',
-  'chat.parallel.settings.whereSharedHint': 'すべての実行があなたの作業コピーで動きます。質問や調査に最適です。',
+  'chat.parallel.settings.whereShared': '共有ディレクトリ',
+  'chat.parallel.settings.whereSharedHint': 'すべての実行がこの下書きで選んだディレクトリで動きます。質問や調査に最適です。',
   'chat.parallel.settings.whereWorktrees': '個別のワークツリー',
   'chat.parallel.settings.whereWorktreesHint': '実行ごとに専用のブランチを使うので、コードの変更が衝突しません。一番良いものを残せます。',
   'chat.parallel.settings.baseBranchTitle': 'ベースブランチ',

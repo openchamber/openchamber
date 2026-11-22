@@ -14,6 +14,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -165,6 +166,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileArtifactsI18n['pt-BR'],
   ...fileContentSearchI18n['pt-BR'],
   ...htmlRenderI18n['pt-BR'],
+  ...sessionLocationI18n['pt-BR'],
   ...sessionNoticesI18n['pt-BR'],
   ...usageStatsI18n['pt-BR'],
   ...webSearchI18n['pt-BR'],
@@ -2566,6 +2568,19 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.modelAttribution.failoverLabel": "Failover a partir de",
   "chat.messageBody.modelChanged.notice": "Modelo alterado: {from} → {to}",
   "chat.messageBody.modelChanged.noticeWithReason": "Modelo alterado: {from} → {to} ({reason})",
+  "chat.messageBody.modelChanged.preferPrevious": "Preferir o anterior",
+  "chat.messageBody.modelChanged.preferPreviousTitle": "Fazer os pools de modelos preferirem {model} por um dia",
+  "chat.currentModel.label": "Modelo atual: {model}",
+  "chat.currentModel.labelWithPool": "Modelo atual: {model} do pool {pool}",
+  "chat.currentModel.menu.openHint": "Clique para escolher um modelo",
+  "chat.currentModel.menu.timing": "Trocar",
+  "chat.currentModel.menu.directPickHelp": "Uma escolha direta interrompe a troca automática de modelo até você voltar ao pool.",
+  "chat.currentModel.timing.immediately": "Agora (reinicia uma resposta em andamento)",
+  "chat.currentModel.timing.nextStep": "No próximo passo",
+  "chat.currentModel.timing.nextInput": "Com a próxima mensagem",
+  "chat.currentModel.menu.members": "Modelos do pool {pool}",
+  "chat.currentModel.menu.returnToPool": "Voltar ao pool {pool}",
+  "chat.currentModel.toast.failed": "Não foi possível trocar o modelo",
   "chat.generatedResult.actions.copy": "Copiar",
   "chat.generatedResult.actions.copied": "Copiado",
   "chat.generatedResult.commit.title": "Mensagem de commit gerada",
@@ -3847,8 +3862,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': 'Manter este',
   'multirun.overview.addModel.action': 'Adicionar um modelo',
   'multirun.overview.addModel.hint': 'O mesmo prompt em mais um modelo nesta execução',
-  'chat.parallel.settings.whereShared': 'Diretório do projeto',
-  'chat.parallel.settings.whereSharedHint': 'Todas as execuções trabalham na sua cópia. Ideal para perguntas e pesquisa.',
+  'chat.parallel.settings.whereShared': 'Diretório compartilhado',
+  'chat.parallel.settings.whereSharedHint': 'Todas as execuções trabalham no diretório escolhido para este rascunho. Ideal para perguntas e pesquisa.',
   'chat.parallel.settings.whereWorktrees': 'Worktrees separados',
   'chat.parallel.settings.whereWorktreesHint': 'Cada execução tem sua própria branch, então as alterações de código nunca colidem. Mantenha a melhor.',
   'chat.parallel.settings.baseBranchTitle': 'Branch base',

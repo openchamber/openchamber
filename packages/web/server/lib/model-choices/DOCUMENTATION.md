@@ -27,8 +27,9 @@ One event per manual choice, in `<dataDir>/model-choices.json`:
 Message text is never recorded: the store's schema drops any field it does
 not name. The file keeps the newest 5,000 events from the last 90 days;
 older ones are dropped on every write and ignored on every read. Decisions
-have no expiry (a declined suggestion stays declined), so they are bounded
-by count alone: the newest 5,000, dropped on every write the same way.
+have no time-based expiry, but are bounded by count: only the newest 5,000
+are kept, and older decisions are dropped on every write. An evicted decision
+is forgotten, so a suggestion that was declined may be offered again.
 Reads go through the shared bounded reader (`readBoundedFile`, #1610) under
 a documented 64 MiB cap with over 2x headroom over that legitimate maximum:
 an over-cap or non-regular file (a FIFO, a directory) is refused promptly
@@ -55,8 +56,9 @@ so nothing is recorded there and the Settings controls are hidden.
   effort (`sessionGoalWriterModel`, `sessionGoalWriterVariant`): among the last
   20 goal-writer events one choice must appear at least 5 times and make up at
   least 70 percent, and differ from the current setting. Once approved or
-  declined, a suggestion with that id is never offered again. No suggestion is
-  offered while recording is off.
+  declined, a suggestion with that id is not offered again while its decision
+  remains among the newest 5,000 stored decisions; after eviction, it may be
+  offered again. No suggestion is offered while recording is off.
 - Selection and suggestion identities are versioned hashes (`v2:`) of the
   canonical tuple `[model, variant]`, JSON-encoded with the variant kept as
   null when unset, so default effort and a literal `default` variant are

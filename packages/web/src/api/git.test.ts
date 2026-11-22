@@ -1,12 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
-
-// Every export is auto-stubbed from the real module. The previous hand-written
-// list of ~70 names silently fell behind the source: `getGitRangeDiff` was added
-// upstream, the list was not, and the whole file failed on an unrelated change.
-vi.mock('@openchamber/ui/lib/gitApiHttp', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return Object.fromEntries(Object.keys(actual).map((name) => [name, vi.fn()]));
-});
+import { describe, expect, it } from 'vitest';
 
 describe('createWebGitAPI', () => {
   it('exposes bulk stage and unstage methods', async () => {

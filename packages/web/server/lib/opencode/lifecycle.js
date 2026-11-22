@@ -245,6 +245,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     listBusySessionIds = () => [],
     spawnProcess = spawn,
     spawnSyncProcess = spawnSync,
+    recordStartupPerformanceEvent = recordStartupPerformance,
     execFileProcess = execFileAsync,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     readRegistryEntries = readManagedProcessEntries,
@@ -1194,7 +1195,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   const startOpenCodeOnce = async (attempt, handoffContext = null) => {
     const attemptStartedAt = performance.now();
     let phaseStartedAt = attemptStartedAt;
-    recordStartupPerformance('opencode.attempt.start', { attempt });
+    recordStartupPerformanceEvent('opencode.attempt.start', { attempt });
     const desiredPort = env.ENV_CONFIGURED_OPENCODE_PORT ?? 0;
     const recordedState = readManagedOpenCodeState(managedPaths.statePath);
     const recordedOwner = recordedState ? otherServerOwning(recordedState.pid) : null;
@@ -1227,7 +1228,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const preflight = checkOpenCodeBinary(resolveManagedOpenCodeLaunchSpec(resolvedBinary));
     managedPreflight = preflight.then(() => true, () => false);
     await preflight;
-    recordStartupPerformance('opencode.binary.ready', {
+    recordStartupPerformanceEvent('opencode.binary.ready', {
       attempt,
       durationMs: performance.now() - phaseStartedAt,
       totalDurationMs: performance.now() - attemptStartedAt,
@@ -1254,7 +1255,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
     const managedOpenCodeEnv = await getManagedOpenCodeEnv({ agentToolToken: rotateCredentials ? null : (savedState?.agentToolToken ?? null) });
-    recordStartupPerformance('opencode.environment.ready', {
+    recordStartupPerformanceEvent('opencode.environment.ready', {
       attempt,
       durationMs: performance.now() - phaseStartedAt,
       totalDurationMs: performance.now() - attemptStartedAt,
@@ -1387,7 +1388,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (!serverInstance || !serverInstance.url) {
         throw new Error('OpenCode server started but URL is missing');
       }
-      recordStartupPerformance('opencode.process.ready', {
+      recordStartupPerformanceEvent('opencode.process.ready', {
         attempt,
         durationMs: performance.now() - phaseStartedAt,
         totalDurationMs: performance.now() - attemptStartedAt,
@@ -1418,7 +1419,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
 
-        recordStartupPerformance('opencode.health.ready', {
+        recordStartupPerformanceEvent('opencode.health.ready', {
           attempt,
           durationMs: performance.now() - phaseStartedAt,
           totalDurationMs: performance.now() - attemptStartedAt,
@@ -1447,7 +1448,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       state.lastOpenCodeError = message;
       if (!handoffContext) state.openCodePort = null;
       syncToHmrState();
-      recordStartupPerformance('opencode.attempt.error', {
+      recordStartupPerformanceEvent('opencode.attempt.error', {
         attempt,
         totalDurationMs: performance.now() - attemptStartedAt,
         outcome: 'error',
@@ -1779,7 +1780,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const bootstrapStartedAt = performance.now();
     let bootstrapError = null;
     let unsupportedExternalVersion = null;
-    recordStartupPerformance('opencode.bootstrap.start');
+    recordStartupPerformanceEvent('opencode.bootstrap.start');
     try {
       // Before doing anything, reap any OpenCode process WE spawned in a prior
       // run that was orphaned by a crash/hard-exit. Verified + scoped to our own
@@ -1791,7 +1792,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           ...readDrainingOpenCodeRecords(managedPaths.drainingPath).map((record) => record.pid),
         ].filter(Number.isInteger);
         const { reaped } = await reapManagedOrphanedProcesses({ log: (msg) => console.log(msg), keepPids });
-        recordStartupPerformance('opencode.orphan-reap.ready', {
+        recordStartupPerformanceEvent('opencode.orphan-reap.ready', {
           durationMs: performance.now() - orphanReapStartedAt,
           totalDurationMs: performance.now() - bootstrapStartedAt,
         });
@@ -1879,7 +1880,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       state.lastOpenCodeError = error.message;
     }
     diagnosticJournal.record(bootstrapError ? 'bootstrap failed' : 'bootstrap ready');
-    recordStartupPerformance(
+    recordStartupPerformanceEvent(
       bootstrapError ? 'opencode.bootstrap.error' : 'opencode.bootstrap.ready',
       {
         totalDurationMs: performance.now() - bootstrapStartedAt,
@@ -2333,6 +2334,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       warmedOpenCodeDirectories = [directory, ...warmedOpenCodeDirectories.filter((entry) => entry !== directory)];
     },
     getManagedServersSnapshot,
+    /** A replaced OpenCode still runs the turns that were busy at the handoff. */
+    hasDrainingOpenCode: () => drainingOpenCode.snapshot().length > 0,
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;

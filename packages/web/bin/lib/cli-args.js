@@ -63,6 +63,7 @@ const SESSION = ['session'];
 const SESSION_OR_SCHEDULE = ['session', 'schedule'];
 const TUNNEL = ['tunnel'];
 const LOGS = ['logs'];
+const HANDOFF = ['handoff'];
 const COMMAND_OWNED_FLAGS = new Map([
   ['daily', SCHEDULE], ['weekly', SCHEDULE], ['once', SCHEDULE], ['time', SCHEDULE], ['cron', SCHEDULE],
   ['timezone', SCHEDULE], ['disabled', SCHEDULE], ['task', SCHEDULE],
@@ -78,6 +79,7 @@ const COMMAND_OWNED_FLAGS = new Map([
   ['token-file', TUNNEL], ['token-stdin', TUNNEL], ['connect-ttl', TUNNEL], ['session-ttl', TUNNEL],
   ['show-secrets', TUNNEL], ['dry-run', TUNNEL], ['force', TUNNEL],
   ['lines', LOGS], ['no-follow', LOGS],
+  ['entry', HANDOFF], ['allow-downgrade', HANDOFF],
 ]);
 
 function parseArgs(argv = process.argv.slice(2)) {
@@ -146,6 +148,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     timeout: undefined,
     lastAssistant: false,
     withStatus: false,
+    handoffEntry: undefined,
+    allowDowngrade: false,
   };
 
   const removedFlagErrors = [];
@@ -194,7 +198,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 
         i = nextIndex;
 
-        if (typeof value !== 'string' || value.trim().length === 0) {
+        if (!value || !value.trim()) {
           throw new TunnelCliError('Missing value for --port.', EXIT_CODE.USAGE_ERROR);
         }
 
@@ -228,6 +232,15 @@ function parseArgs(argv = process.argv.slice(2)) {
         i = nextIndex;
         options.uiPassword = typeof value === 'string' ? value : '';
         options.explicitUiPassword = true;
+        break;
+      }
+      case 'entry': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          throw new TunnelCliError('Missing value for --entry.', EXIT_CODE.USAGE_ERROR);
+        }
+        options.handoffEntry = value.trim();
         break;
       }
       case 'provider': {
@@ -449,6 +462,9 @@ function parseArgs(argv = process.argv.slice(2)) {
         break;
       case 'all':
         options.all = true;
+        break;
+      case 'allow-downgrade':
+        options.allowDowngrade = true;
         break;
       case 'last':
         options.last = true;

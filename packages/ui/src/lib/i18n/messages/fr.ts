@@ -13,6 +13,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -154,6 +155,7 @@ export const dict = {
   ...fileArtifactsI18n.fr,
   ...fileContentSearchI18n.fr,
   ...htmlRenderI18n.fr,
+  ...sessionLocationI18n.fr,
   ...sessionNoticesI18n.fr,
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
@@ -3523,6 +3525,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Basculé depuis',
   'chat.messageBody.modelChanged.notice': 'Modèle changé : {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Modèle changé : {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Préférer le précédent',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Faire privilégier {model} par les pools de modèles pendant une journée',
+  'chat.currentModel.label': 'Modèle actuel : {model}',
+  'chat.currentModel.labelWithPool': 'Modèle actuel : {model} du pool {pool}',
+  'chat.currentModel.menu.openHint': 'Cliquez pour choisir un modèle',
+  'chat.currentModel.menu.timing': 'Changer',
+  'chat.currentModel.menu.directPickHelp': 'Un choix direct désactive le basculement du pool jusqu\'à votre retour au pool.',
+  'chat.currentModel.timing.immediately': 'Maintenant (relance une réponse en cours)',
+  'chat.currentModel.timing.nextStep': 'À la prochaine étape',
+  'chat.currentModel.timing.nextInput': 'Avec le prochain message',
+  'chat.currentModel.menu.members': 'Modèles du pool {pool}',
+  'chat.currentModel.menu.returnToPool': 'Revenir au pool {pool}',
+  'chat.currentModel.toast.failed': 'Impossible de changer de modèle',
   'planView.tts.readAloud': 'Lire le plan à voix haute',
   'planView.tts.stopSpeaking': 'Arrêter la lecture',
   'filesView.tts.readAloud': 'Lire le fichier à voix haute',
@@ -3845,8 +3860,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Garder celui-ci',
   'multirun.overview.addModel.action': 'Ajouter un modèle',
   'multirun.overview.addModel.hint': 'Le même prompt sur un modèle de plus dans cette exécution',
-  'chat.parallel.settings.whereShared': 'Dossier du projet',
-  'chat.parallel.settings.whereSharedHint': 'Toutes les exécutions travaillent dans votre copie. Idéal pour les questions et la recherche.',
+  'chat.parallel.settings.whereShared': 'Dossier partagé',
+  'chat.parallel.settings.whereSharedHint': 'Toutes les exécutions travaillent dans le dossier choisi pour ce brouillon. Idéal pour les questions et la recherche.',
   'chat.parallel.settings.whereWorktrees': 'Worktrees séparés',
   'chat.parallel.settings.whereWorktreesHint': 'Chaque exécution a sa propre branche, les modifications de code ne se heurtent jamais. Gardez la meilleure.',
   'chat.parallel.settings.baseBranchTitle': 'Branche de base',

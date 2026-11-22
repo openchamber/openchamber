@@ -186,6 +186,16 @@ describe("request fidelity", () => {
     expect(page.cursor).toEqual({ next: "c2" })
   })
 
+  // OpenCode answers 400 to a session.list limit above 200, which failed every
+  // sidebar refresh when callers asked for 500 sessions a page.
+  test("a session list page asks for at most OpenCode's 200-session ceiling", async () => {
+    responses.push(json({ data: [sessionInfo], cursor: {} }))
+    responses.push(json({ data: [sessionInfo], cursor: {} }))
+    await opencodeClient.listSessionsPage({ global: true, limit: 500 })
+    await opencodeClient.listSessionsPage({ global: true, limit: 50 })
+    expect(requests.map((request) => request.url.searchParams.get("limit"))).toEqual(["200", "50"])
+  })
+
   test("a session created on an explicit Default thinking level is created without a variant", async () => {
     responses.push(json({ data: sessionInfo }))
     await opencodeClient.createSession({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: null } }, "/repo/app")

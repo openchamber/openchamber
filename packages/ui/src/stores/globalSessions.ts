@@ -52,10 +52,11 @@ export type SessionPageLister = (options: SessionListOptions) => Promise<Session
  * archived filter, so callers take the whole list and split it with
  * `splitGlobalSessionsByArchived`.
  */
-// Pathology guard, not a product limit: callers page 200-500 sessions at a
-// time, so 100 pages is 20,000-50,000 sessions - far above any real list -
+// Pathology guard, not a product limit: callers page at most 200 sessions at a
+// time (OpenCode's session.list ceiling), so 1,000 pages is 200,000 sessions -
+// far above any real list (one long-lived database here holds ~28,000) -
 // while an ever-new cursor stream still terminates instead of looping.
-const GLOBAL_SESSION_MAX_PAGES = 100;
+const GLOBAL_SESSION_MAX_PAGES = 1_000;
 
 export async function listGlobalSessionPages(
     listPage: SessionPageLister,

@@ -4,6 +4,7 @@ import express from 'express';
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
 import { readBoundedResponseJson, readBoundedResponseText } from '../shared/response-body.js';
 import { readBoundedFile } from '../shared/bounded-file-read.js';
+import { renameWithRetry } from '../shared/atomic-rename.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -756,7 +757,18 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         await fs.promises.mkdir(parentDir, { recursive: true });
       }
 
-      await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
+      // Atomic write: write to a temp sibling then rename, so a partial
+      // failure or interruption preserves the previous file and concurrent
+      // readers never observe an empty/partial file. rename replaces the
+      // destination itself (including a symlink), it does not follow it.
+      const tmp = `${AGENTS_MD_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      try {
+        await fs.promises.writeFile(tmp, content, 'utf8');
+        await renameWithRetry((from, to) => fs.promises.rename(from, to), tmp, AGENTS_MD_PATH);
+      } catch (error) {
+        await fs.promises.unlink(tmp).catch(() => {});
+        throw error;
+      }
 
       return res.json(buildAppliedResponse(
         'AGENTS.md saved.',

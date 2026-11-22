@@ -97,6 +97,14 @@ export const useFacadeVoiceCapture = (options: UseFacadeVoiceCaptureOptions): Fa
     // its tracks immediately instead of starting an ownerless recording.
     const acquisitionRef = React.useRef(0);
     const acquiringRef = React.useRef(false);
+    // Submit ownership (#2305), mirroring acquisitionRef: bumped when a
+    // submit attempt starts and whenever the capture is torn down or the
+    // attempt is abandoned. The in-flight attempt's AbortController is
+    // aborted on teardown so a stalled request is cancelled, and a
+    // resolution that lands under a stale generation is discarded
+    // instead of calling onInsert.
+    const submitRef = React.useRef(0);
+    const submitControllerRef = React.useRef<AbortController | null>(null);
     const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
     const pendingRef = React.useRef<PendingAudio | null>(null);
     const onInsertRef = React.useRef(options.onInsert);
@@ -276,6 +284,9 @@ export const useFacadeVoiceCapture = (options: UseFacadeVoiceCaptureOptions): Fa
         if (!pending) {
             return;
         }
+        const attempt = ++submitRef.current;
+        const controller = new AbortController();
+        submitControllerRef.current = controller;
         setError(null);
         dispatch({ type: 'submit' });
         try {
@@ -288,19 +299,32 @@ export const useFacadeVoiceCapture = (options: UseFacadeVoiceCaptureOptions): Fa
                 durationSeconds: pending.durationSeconds,
                 model: options.model ?? DEFAULT_TRANSCRIPTION_MODEL,
                 language: options.language,
+                signal: controller.signal,
             });
+            if (attempt !== submitRef.current) {
+                // Abandoned (teardown / superseded) while in flight: the
+                // late result is discarded, never inserted (#2305).
+                return;
+            }
             setResult(transcription);
             dispatch({ type: 'submit_succeeded' });
             // §6.3: inserted as editable draft text — never auto-sent. The
             // audio is retained locally until the user discards it.
             onInsertRef.current(transcription.text);
         } catch (cause) {
+            if (attempt !== submitRef.current) {
+                return;
+            }
             setError(
                 cause instanceof FacadeTranscriptionError
                     ? cause
                     : new FacadeTranscriptionError('unknown_error', 'Transcription failed unexpectedly.'),
             );
             dispatch({ type: 'submit_failed' });
+        } finally {
+            if (submitControllerRef.current === controller) {
+                submitControllerRef.current = null;
+            }
         }
     }, [options.language, options.model]);
 
@@ -310,6 +334,8 @@ export const useFacadeVoiceCapture = (options: UseFacadeVoiceCaptureOptions): Fa
     }, []);
 
     const discard = React.useCallback(() => {
+        submitRef.current += 1;
+        submitControllerRef.current?.abort();
         setPending(null);
         setError(null);
         setResult(null);
@@ -322,6 +348,8 @@ export const useFacadeVoiceCapture = (options: UseFacadeVoiceCaptureOptions): Fa
         () => () => {
             acquisitionRef.current += 1;
             acquiringRef.current = false;
+            submitRef.current += 1;
+            submitControllerRef.current?.abort();
             stopTracks();
             if (pendingRef.current) {
                 URL.revokeObjectURL(pendingRef.current.url);

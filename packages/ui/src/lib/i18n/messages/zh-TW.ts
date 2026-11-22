@@ -14,6 +14,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -155,6 +156,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileArtifactsI18n['zh-TW'],
   ...fileContentSearchI18n['zh-TW'],
   ...htmlRenderI18n['zh-TW'],
+  ...sessionLocationI18n['zh-TW'],
   ...sessionNoticesI18n['zh-TW'],
   ...usageStatsI18n['zh-TW'],
   ...webSearchI18n['zh-TW'],
@@ -2575,6 +2577,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': '故障轉移自',
   'chat.messageBody.modelChanged.notice': '模型已變更：{from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': '模型已變更：{from} → {to}（{reason}）',
+  'chat.messageBody.modelChanged.preferPrevious': '優先使用上一個',
+  'chat.messageBody.modelChanged.preferPreviousTitle': '讓模型池在一天內優先使用 {model}',
+  'chat.currentModel.label': '目前模型：{model}',
+  'chat.currentModel.labelWithPool': '目前模型：{model}（來自模型池 {pool}）',
+  'chat.currentModel.menu.openHint': '點擊以選擇模型',
+  'chat.currentModel.menu.timing': '切換',
+  'chat.currentModel.menu.directPickHelp': '直接選擇會停止模型池的故障轉移，直到你返回模型池。',
+  'chat.currentModel.timing.immediately': '立即（重新開始進行中的回覆）',
+  'chat.currentModel.timing.nextStep': '在下一步',
+  'chat.currentModel.timing.nextInput': '隨下一則訊息',
+  'chat.currentModel.menu.members': '模型池 {pool} 中的模型',
+  'chat.currentModel.menu.returnToPool': '返回模型池 {pool}',
+  'chat.currentModel.toast.failed': '無法切換模型',
   'chat.generatedResult.actions.copy': '複製',
   'chat.generatedResult.actions.copied': '已複製',
   'chat.generatedResult.commit.title': '生成的提交訊息',
@@ -3846,8 +3861,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': '保留這個',
   'multirun.overview.addModel.action': '新增模型',
   'multirun.overview.addModel.hint': '在此執行中讓另一個模型處理同一提示詞',
-  'chat.parallel.settings.whereShared': '專案目錄',
-  'chat.parallel.settings.whereSharedHint': '所有執行都在你的工作副本中進行。最適合提問與研究。',
+  'chat.parallel.settings.whereShared': '共用目錄',
+  'chat.parallel.settings.whereSharedHint': '所有執行都在此草稿選定的目錄中進行。最適合提問與研究。',
   'chat.parallel.settings.whereWorktrees': '獨立 worktree',
   'chat.parallel.settings.whereWorktreesHint': '每次執行使用自己的分支，程式碼變更不會衝突。保留最好的那個。',
   'chat.parallel.settings.baseBranchTitle': '基礎分支',

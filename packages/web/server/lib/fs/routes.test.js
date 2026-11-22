@@ -354,7 +354,9 @@ const createStreamingResponse = () => {
 
 // File bytes as `fs/promises` hands them to the raw route: an open handle that streams a span.
 const openBytes = (bytes) => vi.fn(async () => ({
+  stat: async () => ({ isFile: () => true, size: bytes.length }),
   createReadStream: ({ start, end }) => Readable.from([bytes.subarray(start, end + 1)]),
+  close: vi.fn(async () => {}),
 }));
 
 // A pre-read handle over fixed bytes for the fs/write identical-content
@@ -1719,7 +1721,7 @@ describe('fs raw byte ranges', () => {
     expect(response.res.getHeader('content-length')).toBe('7');
     expect(response.res.getHeader('accept-ranges')).toBe('bytes');
     expect(response.body).toBe('3456789');
-    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
     expect(readFile).not.toHaveBeenCalled();
   });
 
@@ -1735,7 +1737,7 @@ describe('fs raw byte ranges', () => {
     expect(response.res.getHeader('content-length')).toBe('10');
     expect(response.res.getHeader('content-range')).toBeUndefined();
     expect(response.body).toBe('0123456789');
-    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
     expect(readFile).not.toHaveBeenCalled();
   });
 
@@ -1845,6 +1847,54 @@ describe('fs raw byte ranges', () => {
     expect(res.getHeader('content-range')).toBe('bytes */10');
     expect(res.end).toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('refuses a path swapped for a FIFO after stat instead of hanging on open (#2298)', async () => {
+    // Oracle: the path stat says a regular file, but the handle opened for
+    // streaming is a FIFO (isFile() false). The handler must judge from the
+    // opened handle and refuse promptly with the not-a-file 400, closing
+    // the handle - a blocking open or a path-stat-only check would hang or
+    // stream the FIFO instead.
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      stat: async () => ({ isFile: () => false, isFIFO: () => true, size: 10 }),
+      createReadStream: () => { throw new Error('must not stream a FIFO'); },
+      close,
+    }));
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open,
+    });
+    const res = createMockResponse();
+
+    await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', identicalCheckFlags);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is not a file' });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the handle when its stat rejects after the FIFO-safe open (#2298)', async () => {
+    const close = vi.fn(async () => {});
+    const open = vi.fn(async () => ({
+      stat: async () => { throw new Error('handle stat failed'); },
+      createReadStream: () => { throw new Error('must not stream when stat failed'); },
+      close,
+    }));
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open,
+    });
+    const res = createMockResponse();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+      expect(res.statusCode).toBe(500);
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 
@@ -2819,6 +2869,114 @@ describe('canonical managed roots with real filesystem aliases', () => {
       home: reportedHome, chatsRoot: rawChats,
       canonicalChatsRoot: canonicalChats, canonicalLegacyChatsRoot: canonicalChats,
     });
+  });
+});
+
+describe('fs delete workspace containment', () => {
+  const setup = async (context, { chatsSubpath } = {}) => {
+    const root = await nativeFs.mkdtemp(path.join(tmpdir(), 'oc-fs-delete-containment-'));
+    context.onTestFinished(() => nativeFs.rm(root, { recursive: true, force: true }));
+    const workspace = path.join(root, 'workspace');
+    const managedRoot = path.join(root, 'config');
+    await nativeFs.mkdir(workspace);
+    await nativeFs.mkdir(managedRoot);
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => root },
+      path,
+      fsPromises: nativeFs,
+      normalizeDirectoryPath: value => value,
+      resolveProjectDirectory: async () => ({ directory: workspace }),
+      openchamberUserConfigRoot: managedRoot,
+      managedChatsRoot: chatsSubpath ? path.join(managedRoot, chatsSubpath) : undefined,
+    });
+    return { getRoute, root, workspace, managedRoot };
+  };
+
+  it('rejects deleting a directory that contains a relocated chats root', async context => {
+    const { getRoute, managedRoot } = await setup(context, { chatsSubpath: path.join('storage', 'chats') });
+    const chatsRoot = path.join(managedRoot, 'storage', 'chats');
+    const sentinel = path.join(chatsRoot, 'keep.txt');
+    await nativeFs.mkdir(chatsRoot, { recursive: true });
+    await nativeFs.writeFile(sentinel, 'chat sentinel');
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: path.join(managedRoot, 'storage') } }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('chat sentinel');
+  });
+
+  it('rejects deletion through an intermediate symlink that escapes the workspace', async context => {
+    const { getRoute, root, workspace } = await setup(context);
+    const outside = path.join(root, 'outside');
+    await nativeFs.mkdir(path.join(workspace, 'linked'));
+    await nativeFs.mkdir(outside);
+    const victim = path.join(outside, 'victim.txt');
+    await nativeFs.writeFile(victim, 'outside sentinel');
+    await nativeFs.symlink(outside, path.join(workspace, 'linked', 'jump'));
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({
+      body: { path: path.join(workspace, 'linked', 'jump', 'victim.txt') },
+    }, response);
+
+    expect(response.statusCode).toBe(403);
+    expect(await nativeFs.readFile(victim, 'utf8')).toBe('outside sentinel');
+  });
+
+  it('rejects deleting the workspace root and still deletes an ordinary child', async context => {
+    const { getRoute, workspace } = await setup(context);
+    const sentinel = path.join(workspace, 'keep.txt');
+    const deletable = path.join(workspace, 'remove.txt');
+    await nativeFs.writeFile(sentinel, 'workspace sentinel');
+    await nativeFs.writeFile(deletable, 'ordinary file');
+
+    const rootResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: workspace } }, rootResponse);
+
+    expect(rootResponse.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('workspace sentinel');
+
+    const childResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: deletable } }, childResponse);
+
+    expect(childResponse.statusCode).toBe(200);
+    await expect(nativeFs.stat(deletable)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects deleting a managed root', async context => {
+    const { getRoute, managedRoot } = await setup(context);
+    const sentinel = path.join(managedRoot, 'keep.txt');
+    await nativeFs.writeFile(sentinel, 'managed sentinel');
+
+    const response = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: managedRoot } }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('managed sentinel');
+  });
+
+  it('rejects deleting the nested chats root while allowing a chat child', async context => {
+    const { getRoute, managedRoot } = await setup(context);
+    const chatsRoot = path.join(managedRoot, 'chats');
+    const sentinel = path.join(chatsRoot, 'keep.txt');
+    const deletable = path.join(chatsRoot, 'delete.txt');
+    await nativeFs.mkdir(chatsRoot);
+    await nativeFs.writeFile(sentinel, 'chat sentinel');
+    await nativeFs.writeFile(deletable, 'ordinary chat file');
+
+    const rootResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: chatsRoot } }, rootResponse);
+
+    expect(rootResponse.statusCode).toBe(400);
+    expect(await nativeFs.readFile(sentinel, 'utf8')).toBe('chat sentinel');
+
+    const childResponse = createMockResponse();
+    await getRoute('POST', '/api/fs/delete')({ body: { path: deletable } }, childResponse);
+
+    expect(childResponse.statusCode).toBe(200);
+    await expect(nativeFs.stat(deletable)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
 

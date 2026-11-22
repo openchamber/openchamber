@@ -63,7 +63,10 @@
             src = self;
             opencode = opencodePackage;
             inherit (openchamber) node_modules;
-            electron = pkgs.electron_43;
+            # Must match packages/electron/package.json ("electron": "^44.9.0"):
+            # main.mjs uses Electron 44 APIs (webContents.setZoomMode,
+            # Notification.remove), and on 43 the main window failed to open.
+            electron = pkgs.electron_44;
           };
           openchamber-desktop =
             if pkgs.stdenv.hostPlatform.isDarwin then

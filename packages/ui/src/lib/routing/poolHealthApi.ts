@@ -90,3 +90,45 @@ export const savePoolPlanLink = async (target: string, planID: string | null): P
   }
   return linksSchema.parse(payload);
 };
+
+const rotationMoveSchema = z.object({
+  at: z.number(),
+  poolID: z.string(),
+  sessionID: z.string(),
+  subagent: z.boolean(),
+  from: z.string(),
+  to: z.string(),
+});
+
+const rotationStateSchema = z.object({
+  settings: z.object({ enabled: z.boolean(), intervalMinutes: z.number() }),
+  moves: z.array(rotationMoveSchema),
+});
+
+export type RotationState = z.infer<typeof rotationStateSchema>;
+type RotationSettings = RotationState['settings'];
+
+/** Staggered rotation: its settings and the sessions it moved since the server started. */
+export const fetchRotation = async (): Promise<RotationState> => {
+  const response = await runtimeFetch('/api/model-routes/rotation');
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const failure = errorSchema.safeParse(payload);
+    throw new Error(failure.success ? failure.data.error : `Rotation request failed (${response.status})`);
+  }
+  return rotationStateSchema.parse(payload);
+};
+
+export const saveRotation = async (patch: Partial<RotationSettings>): Promise<RotationState> => {
+  const response = await runtimeFetch('/api/model-routes/rotation', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const failure = errorSchema.safeParse(payload);
+    throw new Error(failure.success ? failure.data.error : `Could not save rotation settings (${response.status})`);
+  }
+  return rotationStateSchema.parse(payload);
+};

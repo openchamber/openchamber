@@ -1,4 +1,11 @@
 import { publicEnterprisePolicy } from '../enterprise-mode.js';
+import { spawn as defaultSpawn, spawnSync as defaultSpawnSync } from 'node:child_process';
+import {
+  checkForUpdates as defaultCheckForUpdates,
+  detectPackageManagerDetails as defaultDetectPackageManagerDetails,
+  getUpdateCommand as defaultGetUpdateCommand,
+  isUnmanagedInstall as defaultIsUnmanagedInstall,
+} from '../package-manager.js';
 
 const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
 
@@ -74,6 +81,12 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     fetchFreeZenModels,
     getCachedZenModels,
     desktopUpdater,
+    spawnChild = defaultSpawn,
+    spawnSync = defaultSpawnSync,
+    checkForUpdates = defaultCheckForUpdates,
+    getUpdateCommand = defaultGetUpdateCommand,
+    detectPackageManagerDetails = defaultDetectPackageManagerDetails,
+    isUnmanagedInstall = defaultIsUnmanagedInstall,
   } = dependencies;
 
   let desktopRestartError = null;
@@ -165,7 +178,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           updateOwner: 'electron-updater',
         };
       } else {
-        const { checkForUpdates, isUnmanagedInstall } = await import('../package-manager.js');
         updateInfo = await checkForUpdates(updateRequest);
         // Tell clients up front that the install route will refuse, so they
         // show manual steps instead of an Update button that fails.
@@ -232,14 +244,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         });
         return;
       }
-
-      const { spawn: spawnChild, spawnSync } = await import('child_process');
-      const {
-        checkForUpdates,
-        getUpdateCommand,
-        detectPackageManagerDetails,
-        isUnmanagedInstall,
-      } = await import('../package-manager.js');
 
       const updateInfo = await checkForUpdates();
       if (!updateInfo.available) {

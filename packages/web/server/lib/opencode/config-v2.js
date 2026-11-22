@@ -810,14 +810,20 @@ const hasConfigKey = (config, key) => config != null && Object.hasOwn(config, ke
  * writes to, or `null`. OpenCode loads user config and `OPENCODE_CONFIG`
  * before discovered project files. For whole-section keys such as `websearch`
  * and `messaging`, the highest-priority project file with the key decides.
- * Global JSON and JSONC files cannot re-enter through the project walk.
+ * Global JSON and JSONC files cannot re-enter through the project walk:
+ * the files this function excludes are the user files (`userPath` /
+ * `userOverridePath`) and the legacy global files under `~/.opencode`
+ * (`legacyGlobalPaths`, populated by `readConfigLayers` in shared.js —
+ * this module stays pure and only reads the list it is handed).
  * `projectFiles` lists files in descending precedence. When the winning
  * file is itself the Settings write target, a Settings write still applies.
  */
 function findProjectConfigOverride(key, layers, projectFiles) {
+  const legacyGlobalPaths = layers.paths.legacyGlobalPaths ?? [];
   const file = projectFiles.find((file) =>
     file.path !== layers.paths.userPath
     && file.path !== layers.paths.userOverridePath
+    && !legacyGlobalPaths.includes(file.path)
     && hasConfigKey(file.config, key),
   );
   return file && file.path !== layers.paths.customPath ? file.path : null;

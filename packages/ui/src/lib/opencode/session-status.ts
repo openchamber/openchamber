@@ -40,6 +40,10 @@ export const hostSessionStatusSnapshotSchema = z.object({
     pages: z.array(hostPageRequestSchema).optional().default([]),
   })).optional(),
   serverTime: z.number(),
+  // A replaced OpenCode still runs the turns busy at its handoff, and the
+  // current OpenCode's running list does not name them. Hosts predating the
+  // field, and the VS Code shim, omit it.
+  openCodeDraining: z.boolean().optional(),
 })
 
 export type HostSessionStatusSnapshot = z.infer<typeof hostSessionStatusSnapshotSchema>

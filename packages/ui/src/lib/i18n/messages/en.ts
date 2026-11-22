@@ -12,6 +12,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -153,6 +154,7 @@ export const dict = {
   ...fileArtifactsI18n.en,
   ...fileContentSearchI18n.en,
   ...htmlRenderI18n.en,
+  ...sessionLocationI18n.en,
   ...sessionNoticesI18n.en,
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
@@ -2600,6 +2602,19 @@ export const dict = {
   'chat.messageBody.modelAttribution.failoverLabel': 'Failed over from',
   'chat.messageBody.modelChanged.notice': 'Model changed: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'Model changed: {from} → {to} ({reason})',
+  'chat.messageBody.modelChanged.preferPrevious': 'Prefer previous',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'Have model pools favor {model} for a day',
+  'chat.currentModel.label': 'Current model: {model}',
+  'chat.currentModel.labelWithPool': 'Current model: {model} from pool {pool}',
+  'chat.currentModel.menu.openHint': 'Click to pick a model',
+  'chat.currentModel.menu.timing': 'Switch',
+  'chat.currentModel.menu.directPickHelp': 'A direct pick stops pool failover until you return to the pool.',
+  'chat.currentModel.timing.immediately': 'Now (restarts a running reply)',
+  'chat.currentModel.timing.nextStep': 'At the next step',
+  'chat.currentModel.timing.nextInput': 'With the next message',
+  'chat.currentModel.menu.members': 'Models in pool {pool}',
+  'chat.currentModel.menu.returnToPool': 'Return to pool {pool}',
+  'chat.currentModel.toast.failed': 'Couldn\'t switch the model',
   'chat.generatedResult.actions.copy': 'Copy',
   'chat.generatedResult.actions.copied': 'Copied',
   'chat.generatedResult.commit.title': 'Generated commit message',
@@ -3846,8 +3861,8 @@ export const dict = {
   'multirun.overview.card.keep': 'Keep this',
   'multirun.overview.addModel.action': 'Add a model',
   'multirun.overview.addModel.hint': 'Runs the same prompt on one more model in this run',
-  'chat.parallel.settings.whereShared': 'Project directory',
-  'chat.parallel.settings.whereSharedHint': 'All runs work in your checkout. Best for questions and research.',
+  'chat.parallel.settings.whereShared': 'Shared directory',
+  'chat.parallel.settings.whereSharedHint': 'All runs work in the directory this draft is set to. Best for questions and research.',
   'chat.parallel.settings.whereWorktrees': 'Separate worktrees',
   'chat.parallel.settings.whereWorktreesHint': 'Each run gets its own branch, so code changes never collide. Keep the best one.',
   'chat.parallel.settings.baseBranchTitle': 'Base branch',

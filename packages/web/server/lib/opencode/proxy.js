@@ -384,6 +384,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     // the host's own answers go out exactly as before spaces.
     mergeSpaceSessionList = null,
     spaceEventHub = null,
+    createProxyMiddleware: createProxyMiddlewareImpl = createProxyMiddleware,
   } = deps;
 
   /**
@@ -1305,7 +1306,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   // `apiProxy`.
   const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
 
-  const createApiProxy = (timeoutMs) => createProxyMiddleware({
+  const createApiProxy = (timeoutMs) => createProxyMiddlewareImpl({
     target: resolveProxyTarget(),
     get agent() {
       return resolveOpenCodeProxyAgent();

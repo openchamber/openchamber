@@ -32,10 +32,6 @@ export class MessageFreshnessDetector {
         this.sessionStartTimes.set(sessionId, Date.now());
     }
 
-    getSessionStartTime(sessionId: string): number | undefined {
-        return this.sessionStartTimes.get(sessionId);
-    }
-
     private recordSeenMessage(messageId: string): void {
         this.seenMessageIds.add(messageId);
         while (this.seenMessageIds.size > MAX_SEEN_MESSAGE_IDS) {
