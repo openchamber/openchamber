@@ -9,6 +9,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import { ModelDefaultsPanel } from '@/components/sections/providers/ModelDefaultsPanel';
 import { useI18n } from '@/lib/i18n';
 import type { ModelRouteTarget } from '@/lib/routing/modelRoutesApi';
 import { fetchWaitEstimate, type WaitEstimate } from '@/lib/routing/routeRulesApi';
@@ -79,8 +80,6 @@ export const PoolMemberRow: React.FC<{
   const hidden = useUIStore((state) => pickerRef !== null
     && state.hiddenModels.some((entry) => entry.providerID === pickerRef.providerID && entry.modelID === pickerRef.modelID));
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
-  const modelDefault = useUIStore((state) => (kind.kind === 'model' ? state.modelDefaultVariants[`${kind.providerID}/${kind.modelID}`] : undefined));
-  const setModelDefaultVariant = useUIStore((state) => state.setModelDefaultVariant);
 
   // A stored effort the catalog does not list yet stays selectable, so it is shown as it is.
   const choices = effort.mode !== 'provider' && !variants.includes(effort.variant) ? [...variants, effort.variant] : [...variants];
@@ -244,22 +243,7 @@ export const PoolMemberRow: React.FC<{
             </label>
           )}
           {kind.kind === 'model' ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="typography-meta text-muted-foreground">{t('settings.pools.member.modelDefault')}</span>
-              <SettingsInfoHint>{t('settings.pools.member.modelDefaultInfo')}</SettingsInfoHint>
-              <Select
-                value={modelDefault ?? PROVIDER_DEFAULT}
-                onValueChange={(next) => setModelDefaultVariant(kind.providerID, kind.modelID, next === PROVIDER_DEFAULT ? undefined : next)}
-              >
-                <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('settings.pools.member.modelDefaultAria', { name })}>
-                  <SelectValue>{modelDefault ? levelLabel(modelDefault) : t('settings.pools.member.providerDefault')}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={PROVIDER_DEFAULT}>{t('settings.pools.member.providerDefault')}</SelectItem>
-                  {variants.map((variant) => <SelectItem key={variant} value={variant}>{levelLabel(variant)}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            <ModelDefaultsPanel providerID={kind.providerID} modelID={kind.modelID} variants={variants} name={name} />
           ) : null}
         </div>
       ) : null}

@@ -652,6 +652,9 @@
     "modelDefaultVariants": {
       "scope": "profile"
     },
+    "modelDefaultVariantLocks": {
+      "scope": "profile"
+    },
     "providerOrder": {
       "scope": "profile"
     },

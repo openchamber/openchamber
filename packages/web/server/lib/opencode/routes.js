@@ -24,7 +24,14 @@ import {
   isProviderConnectRequest,
 } from '../enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery.js';
-import { readDisabledProviders, readProviderOffState, setProviderDisabled } from './providers.js';
+import {
+  parseModelSettingsRequest,
+  readDisabledProviders,
+  readModelSettings,
+  readProviderOffState,
+  setProviderDisabled,
+  writeModelSettings,
+} from './providers.js';
 import { getModelsMetadata, peekModelsMetadata } from './models-metadata.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 
@@ -430,6 +437,34 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   app.use((req, res, next) => (
     isProviderConnectRequest(req.method, req.path) ? refuseInEnterpriseMode(req, res, next) : next()
   ));
+
+  // OpenCode's own per-model settings (hidden, defaultVariant, lockVariant):
+  // the catalog OpenChamber reads drops them, so Settings reads and writes
+  // the config files here. The write lands in the user file only.
+  app.get('/api/config/opencode-model-settings', async (req, res) => {
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      return res.json({ ...readModelSettings(resolved.directory || null), writable: !isEnterpriseMode() });
+    } catch (error) {
+      console.error('Failed to read OpenCode model settings:', error);
+      return res.status(500).json({ error: 'Failed to read OpenCode model settings' });
+    }
+  });
+
+  app.put('/api/config/opencode-model-settings', refuseInEnterpriseMode, async (req, res) => {
+    const request = parseModelSettingsRequest(req.body);
+    if (!request.success) return res.status(400).json({ error: request.error });
+    const { providerID, modelID, settings } = request.data;
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      const state = writeModelSettings(providerID, modelID, settings, resolved.directory || null);
+      return res.json({ ...state, writable: true, ...buildAppliedResponse('Model settings updated.') });
+    } catch (error) {
+      if (error?.statusCode === 409) return res.status(409).json({ error: error.message });
+      console.error('Failed to write OpenCode model settings:', error);
+      return res.status(500).json({ error: 'Failed to write OpenCode model settings' });
+    }
+  });
 
   // Every stored key, secrets included (OpenCode 2.0.20): this server reads it
   // for itself through `auth.js`, and no client gets it through the proxy.

@@ -63,6 +63,7 @@ import {
   parseManagedRemoteTunnelPresetTokens,
   parseManagedRemoteTunnelPresets,
   parseModelRefs,
+  parseModelDefaultVariantLocks,
   parseModelDefaultVariants,
   parseNonEmptyString,
   parseNonEmptyTrimmedString,
@@ -590,6 +591,7 @@ export const SETTINGS_REGISTRY = {
   favoriteAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('favoriteAgents', setUi('favoriteAgents'), { autoSave: false }) }),
   recentEfforts: field({ scope: 'profile', parse: parseRecentEfforts, ui: uiStore('recentEfforts', setUi('recentEfforts'), { autoSave: false }) }),
   modelDefaultVariants: field({ scope: 'profile', parse: parseModelDefaultVariants, ui: uiStore('modelDefaultVariants', setUi('modelDefaultVariants'), { autoSave: false }) }),
+  modelDefaultVariantLocks: field({ scope: 'profile', parse: parseModelDefaultVariantLocks, ui: uiStore('modelDefaultVariantLocks', setUi('modelDefaultVariantLocks'), { autoSave: false }) }),
   providerOrder: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('providerOrder', (v) => useUIStore.getState().setProviderOrder(v)) }),
 
   // ── Sessions and summaries (profile) ──

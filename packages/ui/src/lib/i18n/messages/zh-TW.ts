@@ -12,6 +12,7 @@ import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { poolSettingsI18n } from './pool-settings.i18n';
+import { modelDefaultsI18n } from './model-defaults.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
@@ -158,6 +159,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearPanelI18n['zh-TW'],
   ...routingI18n['zh-TW'],
   ...poolSettingsI18n['zh-TW'],
+  ...modelDefaultsI18n['zh-TW'],
   ...pluginPanelI18n['zh-TW'],
   ...surfacePanelI18n['zh-TW'],
   ...fileArtifactsI18n['zh-TW'],

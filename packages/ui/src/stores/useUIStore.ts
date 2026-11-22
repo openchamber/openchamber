@@ -1133,6 +1133,8 @@ interface UIStore {
   recentEfforts: Record<string, string[]>;
   /** Per-model baseline effort. An absent key sends no effort unless another explicit default applies. */
   modelDefaultVariants: Record<string, string>;
+  /** `provider/model` keys whose default effort is locked: every send to the model runs at it. */
+  modelDefaultVariantLocks: string[];
 
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
@@ -1452,6 +1454,8 @@ interface UIStore {
   toggleFavoriteAgent: (agentName: string) => void;
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
   setModelDefaultVariant: (providerID: string, modelID: string, variant: string | undefined) => void;
+  /** Locks or unlocks a model's default effort; there is nothing to lock without one. */
+  setModelDefaultVariantLocked: (providerID: string, modelID: string, locked: boolean) => void;
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   /** The layout setting for every diff, dropping the per-file choices (the Changes header toggle). */
   setDiffLayoutForAllFiles: (mode: 'inline' | 'side-by-side') => void;
@@ -1699,6 +1703,7 @@ export const useUIStore = create<UIStore>()(
         favoriteAgents: [],
         recentEfforts: {},
         modelDefaultVariants: {},
+        modelDefaultVariantLocks: [],
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
@@ -3285,7 +3290,22 @@ export const useUIStore = create<UIStore>()(
             const next = { ...state.modelDefaultVariants };
             if (variant) next[key] = variant;
             else delete next[key];
-            return { modelDefaultVariants: next };
+            // Back to the provider default leaves nothing to lock.
+            const locks = variant ? state.modelDefaultVariantLocks : state.modelDefaultVariantLocks.filter((item) => item !== key);
+            return { modelDefaultVariants: next, modelDefaultVariantLocks: locks };
+          });
+        },
+
+        setModelDefaultVariantLocked: (providerID, modelID, locked) => {
+          const key = `${providerID}/${modelID}`;
+          set((state) => {
+            const has = state.modelDefaultVariantLocks.includes(key);
+            if (locked === has || (locked && !state.modelDefaultVariants[key])) return state;
+            return {
+              modelDefaultVariantLocks: locked
+                ? [...state.modelDefaultVariantLocks, key]
+                : state.modelDefaultVariantLocks.filter((item) => item !== key),
+            };
           });
         },
 
@@ -3974,6 +3994,7 @@ export const useUIStore = create<UIStore>()(
           favoriteAgents: state.favoriteAgents,
           recentEfforts: state.recentEfforts,
           modelDefaultVariants: state.modelDefaultVariants,
+          modelDefaultVariantLocks: state.modelDefaultVariantLocks,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
           diffHideWhitespace: state.diffHideWhitespace,

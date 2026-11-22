@@ -7,6 +7,8 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useUIStore } from '@/stores/useUIStore';
+import { modelVariantNames } from '@/lib/modelVariants';
+import { ModelDefaultsPanel } from '@/components/sections/providers/ModelDefaultsPanel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
@@ -137,6 +139,8 @@ export const ProvidersPage: React.FC = () => {
   const customProviderIcons = useUIStore((state) => state.customProviderIcons);
   const setCustomProviderIcon = useUIStore((state) => state.setCustomProviderIcon);
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
+  // The model whose own defaults are open below its row.
+  const [openModelOptions, setOpenModelOptions] = React.useState<string | null>(null);
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
 
@@ -1034,6 +1038,7 @@ export const ProvidersPage: React.FC = () => {
                   if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: "brain-ai-3", label: t('settings.providers.page.models.capability.reasoning') });
                   if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: "file-image", label: t('settings.providers.page.models.capability.imageInput') });
 
+                  const optionsOpen = openModelOptions === modelId;
                   return (
                     <div key={modelId} className="py-1.5">
                       <div
@@ -1094,8 +1099,28 @@ export const ProvidersPage: React.FC = () => {
                         >
                           {isHidden ? <Icon name="eye-off" className="h-3.5 w-3.5" /> : <Icon name="eye" className="h-3.5 w-3.5" />}
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setOpenModelOptions(optionsOpen ? null : modelId)}
+                          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50"
+                          aria-expanded={optionsOpen}
+                          aria-label={t('settings.modelDefaults.optionsAria', { name: modelName })}
+                          title={t('settings.modelDefaults.optionsAria', { name: modelName })}
+                        >
+                          <Icon name="more-2" className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                       </div>
+                      {optionsOpen ? (
+                        <div className="ps-2 pt-2 pb-1">
+                          <ModelDefaultsPanel
+                            providerID={selectedProvider.id}
+                            modelID={modelId}
+                            variants={modelVariantNames(model)}
+                            name={modelName}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

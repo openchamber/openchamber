@@ -22,9 +22,12 @@ export const resolveSessionDefaults = ({ settings, project }) => {
   // to the default model; no entry means no effort, the provider's default.
   const modelDefaults = settings?.modelDefaultVariants;
   const key = model ? `${model.providerID}/${model.modelID}` : '';
-  const variant = configured ?? (model && modelDefaults && Object.hasOwn(modelDefaults, key)
-    ? text(modelDefaults[key])
-    : null);
+  const personal = model && modelDefaults && Object.hasOwn(modelDefaults, key) ? text(modelDefaults[key]) : null;
+  // A locked default runs every message to the model at it, over the configured one too.
+  const locked = Array.isArray(settings?.modelDefaultVariantLocks) && settings.modelDefaultVariantLocks.includes(key)
+    ? personal
+    : null;
+  const variant = locked ?? configured ?? personal;
   return {
     providerID: model?.providerID ?? null,
     modelID: model?.modelID ?? null,

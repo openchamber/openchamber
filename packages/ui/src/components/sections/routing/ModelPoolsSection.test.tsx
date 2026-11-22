@@ -67,6 +67,7 @@ mock.module('@/lib/routing/modelRoutesApi', () => ({
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 const { useUIStore } = await import('@/stores/useUIStore');
+const { useOpenCodeModelSettings } = await import('@/lib/opencodeModelSettings');
 
 const DOM_GLOBAL_NAMES = [
   'window',
@@ -278,7 +279,9 @@ describe('ModelPoolsSection', () => {
       ],
     } as never);
     useRoutingStore.setState({ decisions: {} } as never);
-    useUIStore.setState({ hiddenModels: [], modelDefaultVariants: {} });
+    useUIStore.setState({ hiddenModels: [], modelDefaultVariants: {}, modelDefaultVariantLocks: [] });
+    // The OpenCode settings group stays out unless a test seeds it as loaded.
+    useOpenCodeModelSettings.setState({ status: 'unavailable', models: {}, path: null, writable: false, error: null });
   });
 
   afterEach(async () => {
@@ -517,6 +520,59 @@ describe('ModelPoolsSection', () => {
     }
   });
 
+  // Oracle: OpenChamber's lock is a profile setting; OpenCode's keys go through the
+  // config route (opencodeModelSettings.save); neither touches the pool.
+  test('a model\'s own defaults lock in OpenChamber and save OpenCode\'s keys, leaving the pool alone', async () => {
+    Object.assign(serverRoutes, { kept: { targets: ['p/luna'] } });
+    const saves: unknown[] = [];
+    useOpenCodeModelSettings.setState({
+      status: 'ready',
+      writable: true,
+      path: '/u/opencode.json',
+      models: {},
+      save: async (providerID, modelID, settings) => {
+        saves.push({ providerID, modelID, settings });
+      },
+    });
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container);
+      await clickLabelled(dom.container, 'Options for p/luna');
+      await pickOption(dom.container, 'Default effort for p/luna when picked directly', 'Medium');
+      await clickCheckbox(dom.container, 'Lock the default effort of p/luna');
+      expect(useUIStore.getState().modelDefaultVariantLocks).toEqual(['p/luna']);
+      // Back to the provider default leaves nothing to lock.
+      await pickOption(dom.container, 'Default effort for p/luna when picked directly', 'Provider default');
+      expect(useUIStore.getState().modelDefaultVariantLocks).toEqual([]);
+      await clickCheckbox(dom.container, "Hide p/luna in OpenCode's config");
+      await pickOption(dom.container, "Default effort for p/luna in OpenCode's config", 'High');
+      expect(saves).toEqual([
+        { providerID: 'p', modelID: 'luna', settings: { hidden: true } },
+        { providerID: 'p', modelID: 'luna', settings: { defaultVariant: 'high' } },
+      ]);
+      expect(routeSaves).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a pool of pools can let each pool inside keep its own wait', async () => {
+    Object.assign(serverRoutes, {
+      slow: { targets: ['p/cheap'], health: { firstTokenTimeoutMs: 120_000 } },
+      top: { targets: ['opencode-route/slow'], nestedTimeout: 'longest', health: { firstTokenTimeoutMs: 120_000 } },
+    });
+    Object.assign(serverTimeouts, { top: { applied: 120_000, longest: 120_000, shortest: 120_000, nested: ['slow'] } });
+    const { dom, cleanup } = await renderSection();
+    try {
+      await expandPool(dom.container, 'top');
+      await clickButton(dom.container, 'Each pool its own');
+      // The server writes 30 seconds for the pool's own models on save.
+      expect(lastSave().top).toEqual({ targets: ['opencode-route/slow'], nestedTimeout: 'own' });
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('a locked member warns that the pool offers no effort, and unlocking keeps the same effort at every level', async () => {
     Object.assign(serverRoutes, { kept: { targets: ['p/luna#high', 'p/cheap'] } });
     const { dom, cleanup } = await renderSection();
@@ -555,7 +611,7 @@ describe('ModelPoolsSection', () => {
     const { dom, cleanup } = await renderSection();
     try {
       await expandPool(dom.container);
-      expect(dom.container.textContent).toContain('Not saved yet: OpenCode still waits 10 seconds.');
+      expect(dom.container.textContent).toContain('Not saved yet: older OpenCode versions still wait 10 seconds here.');
       await clickButton(dom.container, 'No limit');
       expect(lastSave().kept.health).toEqual({ firstTokenTimeoutMs: false });
       expect(dom.container.textContent).toContain("OpenCode waits for a model's first output without a time limit.");
@@ -598,7 +654,7 @@ describe('ModelPoolsSection', () => {
     Object.assign(serverRoutes, { kept: { targets: ['p/cheap'] }, done: { targets: ['p/dear'], health: { firstTokenTimeoutMs: 30_000 } } });
     const { dom, cleanup } = await renderSection();
     try {
-      expect(dom.container.textContent).toContain('OpenCode gives their models only 10 seconds');
+      expect(dom.container.textContent).toContain('older OpenCode versions give their models only 10 seconds');
       await clickButton(dom.container, 'Save waits now');
       expect(routeSaves).toHaveLength(1);
       expect(Object.keys(routeSaves[0] as object)).toEqual(['kept', 'done']);

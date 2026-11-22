@@ -458,10 +458,13 @@ request, so enterprise mode already covers it. The OpenCode `plan_info` pool
 
 OpenCode applies `health.firstTokenTimeoutMs` (and `attempts`, `hedgeAfterMs`)
 only from the pool a session picked; a nested pool's own values are ignored,
-and a pool that names no wait gets OpenCode's 10 seconds. A slow model in a
-pool inside a pool was therefore cut off by the outer pool's default. Every
-`PUT /api/model-routes` passes the map through `normalizePoolTimeouts`
-(`pool-timeouts.js`) before writing:
+and before developing-today-forks/opencode#2674 a pool that names no wait got
+10 seconds. A slow model in a pool inside a pool was therefore cut off by the
+outer pool's default. Every `PUT /api/model-routes` passes the map through
+`normalizePoolTimeouts` (`pool-timeouts.js`) before writing, so older OpenCode
+versions get explicit values. From #2674 on, OpenCode applies the same rules
+itself (`firstTokenTimeout` in its `config/plugin/model-routes.ts`), so a
+hand-written config and a saved one behave alike:
 
 - A pool's own wait without `nestedTimeout` is kept as written, `false` (no
   limit) included.
@@ -471,6 +474,11 @@ pool inside a pool was therefore cut off by the outer pool's default. Every
   "longest"`. With `nestedTimeout` set the value is recomputed on every save,
   so a change to a nested pool reaches the pools around it. `"shortest"` takes
   the shortest; `false` counts as the longest and `"shortest"` passes over it.
+- `nestedTimeout: "own"` keeps the pool's own wait (30 seconds when it names
+  none) for its own models, and OpenCode lets each nested pool's models wait as
+  long as that pool would. A pool around an `own` pool counts every wait the
+  `own` pool applies, so it waits for the slowest model inside. An OpenCode
+  before #2674 drops the key and applies the pool's own wait to every model.
 - Any other pool without a wait gets 30 seconds. A cycle is cut where it
   closes and contributes 30 seconds, so the result is the same on every save
   (`pool-timeouts.test.js` checks idempotence and explicit values over
@@ -479,20 +487,20 @@ pool inside a pool was therefore cut off by the outer pool's default. Every
 Only pools in the user file take part: the validator already refuses a route
 reference to a pool that is not in the saved map. `GET` and `PUT` also return
 `timeouts`, per pool the wait OpenCode applies now and what longest and
-shortest would pick, which the pool page shows. OpenCode cannot give each
-nested pool its own wait; that would need a change in OpenCode.
+shortest would pick, which the pool page shows.
 
 The order of the pools is the key order of the map. `PUT` writes it with
 `writeConfig`'s `orderedPaths` (see `../opencode/DOCUMENTATION.md`), since the
 writer otherwise ignores key order. OpenCode's catalog, and with it the model
-picker, keeps that order with one exception: pools with a `levels` list or a
-`#effort` member come after the others, in their own config order (OpenCode
-2.0.30, checked 2026-11-22 against a private `opencode serve`). JavaScript
+picker, keeps that order. OpenCode 2.0.30 put pools with a `levels` list or a
+`#effort` member after the others (checked 2026-11-22 against a private
+`opencode serve`); #2674 restores config order for them. JavaScript
 lists keys that look like whole numbers first, so a pool id such as `2` always
 sorts before the others.
 
-OpenCode logs `omitted unknown setting` for `nestedTimeout`, as it does for
-`description` and `details`, and drops the key; the route loads unchanged.
+OpenCode before #2674 logs `omitted unknown setting` for `nestedTimeout`, as
+every version does for `description` and `details`, and drops the key; the
+route loads unchanged.
 
 `route-match.js` restates OpenCode's `match` grammar (terms joined by `and`,
 `or`, `not` and parentheses; `re:` patterns compiled with the `i` flag), so the

@@ -13,6 +13,7 @@ type ModelPrefsPayload = {
   favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
   modelDefaultVariants: Record<string, string>;
+  modelDefaultVariantLocks: string[];
   customProviderIcons: Record<string, CustomProviderIcon>;
 };
 
@@ -59,6 +60,7 @@ const snapshotModelPrefs = (): ModelPrefsPayload => {
     favoriteAgents: state.favoriteAgents,
     recentEfforts: state.recentEfforts,
     modelDefaultVariants: state.modelDefaultVariants,
+    modelDefaultVariantLocks: state.modelDefaultVariantLocks,
     customProviderIcons: state.customProviderIcons,
   };
 };
@@ -75,6 +77,7 @@ const modelPrefsEqual = (a: ModelPrefsPayload, b: ModelPrefsPayload): boolean =>
     Object.keys(a.modelDefaultVariants).length === Object.keys(b.modelDefaultVariants).length
     && Object.entries(a.modelDefaultVariants).every(([key, value]) => b.modelDefaultVariants[key] === value)
   )) &&
+  stringsEqual(a.modelDefaultVariantLocks, b.modelDefaultVariantLocks) &&
   customProviderIconsEqual(a.customProviderIcons, b.customProviderIcons)
 );
 
@@ -87,6 +90,7 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   favoriteAgents: prefs.favoriteAgents.slice(),
   recentEfforts: Object.fromEntries(Object.entries(prefs.recentEfforts).map(([key, variants]) => [key, variants.slice()])),
   modelDefaultVariants: { ...prefs.modelDefaultVariants },
+  modelDefaultVariantLocks: prefs.modelDefaultVariantLocks.slice(),
   customProviderIcons: { ...prefs.customProviderIcons },
 });
 
@@ -123,6 +127,7 @@ export const startModelPrefsAutoSave = () => {
       favoriteAgents: state.favoriteAgents,
       recentEfforts: state.recentEfforts,
       modelDefaultVariants: state.modelDefaultVariants,
+      modelDefaultVariantLocks: state.modelDefaultVariantLocks,
       customProviderIcons: state.customProviderIcons,
     };
     const prev = {
@@ -134,6 +139,7 @@ export const startModelPrefsAutoSave = () => {
       favoriteAgents: prevState.favoriteAgents,
       recentEfforts: prevState.recentEfforts,
       modelDefaultVariants: prevState.modelDefaultVariants,
+      modelDefaultVariantLocks: prevState.modelDefaultVariantLocks,
       customProviderIcons: prevState.customProviderIcons,
     };
     if (modelPrefsEqual(next, prev)) {

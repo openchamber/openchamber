@@ -234,6 +234,9 @@ const useUIStore = create(() => ({
   activeRunModelChangeBehavior: 'next-message' as 'next-message' | 'restart',
   modelChoiceRecordingEnabled: true,
   hiddenModels: [],
+  // A model's own default effort and its lock (the effort picker reads the lock).
+  modelDefaultVariants: {},
+  modelDefaultVariantLocks: [],
   favoriteAgents: [],
   toggleFavoriteAgent: () => undefined,
   providerOrder: [],

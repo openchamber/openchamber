@@ -10,6 +10,7 @@ import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { poolSettingsI18n } from './pool-settings.i18n';
+import { modelDefaultsI18n } from './model-defaults.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
@@ -156,6 +157,7 @@ export const dict = {
   ...linearPanelI18n.en,
   ...routingI18n.en,
   ...poolSettingsI18n.en,
+  ...modelDefaultsI18n.en,
   ...pluginPanelI18n.en,
   ...surfacePanelI18n.en,
   ...fileArtifactsI18n.en,

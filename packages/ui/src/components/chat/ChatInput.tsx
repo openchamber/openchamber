@@ -2,6 +2,7 @@ import React from 'react';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
+import { useLockedVariant } from '@/lib/modelEffortLock';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { applyChatRoute } from '@/lib/routing/chatRoute';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
@@ -637,7 +638,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ? getModelMetadata(currentProviderId, currentModelId)
         : undefined;
     const configVariant = useConfigStore((state) => state.currentVariant);
-    const currentVariant = pinnedComposerSelection ? pinnedComposerSelection.variant ?? undefined : configVariant;
+    // A locked effort (Settings, or OpenCode's lockVariant) is what every message to this model runs at.
+    const lockedVariant = useLockedVariant(currentProviderId, currentModelId);
+    const currentVariant = lockedVariant ?? (pinnedComposerSelection ? pinnedComposerSelection.variant ?? undefined : configVariant);
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
     const configAgentName = useConfigStore((state) => state.currentAgentName);
     const currentAgentName = pinnedComposerSelection?.agent ?? configAgentName;
@@ -1962,7 +1965,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const providerIdToSend = capturedSendConfig?.providerID ?? (isBtwActive ? effectiveBtwSelection.model?.providerId : currentProviderId);
         const modelIdToSend = capturedSendConfig?.modelID ?? (isBtwActive ? effectiveBtwSelection.model?.modelId : currentModelId);
         const agentNameToSend = capturedSendConfig?.agent ?? (isBtwActive ? effectiveBtwSelection.agent : currentAgentName);
-        const variantToSend = capturedSendConfig?.variant ?? (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
+        // The model this send goes to may be a by-the-way or queued one, so its own lock is read here.
+        const lockedToSend = providerIdToSend && modelIdToSend
+            ? useConfigStore.getState().getLockedVariantForModel(providerIdToSend, modelIdToSend)
+            : undefined;
+        const variantToSend = lockedToSend ?? capturedSendConfig?.variant ?? (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
 
         // The isolated space the message targets, if any: a session by its directory, a draft by
         // the creation request it still waits on or by its directory.

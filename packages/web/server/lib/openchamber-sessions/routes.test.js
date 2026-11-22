@@ -1753,6 +1753,28 @@ describe('openchamber session routes', () => {
     });
   });
 
+  // Oracle: a locked default (Settings) is what every message to the model runs at.
+  it('runs a model with a locked default at it, over the effort the request names', async () => {
+    useCatalog({
+      models: [{ id: 'requested', modelID: 'requested', providerID: 'openai', variants: [{ id: 'low' }, { id: 'high' }] }],
+    });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        modelDefaultVariants: { 'openai/requested': 'low' },
+        modelDefaultVariantLocks: ['openai/requested'],
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions/ses_source/send')
+      .send({ directory: '/repo/app', prompt: 'Continue', model: 'openai/requested', variant: 'high', agent: 'build' })
+      .expect(200);
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_source',
+      model: { id: 'requested', providerID: 'openai', variant: 'low' },
+    });
+  });
+
   it('applies the config default model variant when the prompt omits a model', async () => {
     useCatalog({
       config: [{

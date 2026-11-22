@@ -166,6 +166,12 @@ export const parseModelDefaultVariants = fromSchema(
     .refine((entries) => Object.keys(entries).length <= 1024),
 );
 
+// The models whose own default effort is locked: every send runs at it. Keys only,
+// so a lock never outlives the default it locks (the store drops both together).
+export const parseModelDefaultVariantLocks = fromSchema(
+  z.array(z.string().regex(/^[^/#\s]+\/[^#\s]+$/)).max(1024),
+);
+
 export const parseRecentEfforts = fromSchema(
   looseObject.transform((record) => {
     const result: Record<string, string[]> = {};

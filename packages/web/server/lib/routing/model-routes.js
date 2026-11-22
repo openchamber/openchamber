@@ -64,7 +64,9 @@ const DATE_ENTRY_PATTERN = /^(\d{4}-\d{2}-\d{2})(?:\/(\d{4}-\d{2}-\d{2}))?$/;
  * one policy from the addressed route). So Settings writes the outer pool's
  * value from its inner pools: the longest by default, or the shortest.
  */
-const NESTED_TIMEOUT_POLICIES = ["longest", "shortest"];
+// `own` needs an OpenCode that knows nestedTimeout (developing-today-forks/opencode#2674);
+// an older one applies the pool's own wait to every model, nested ones included.
+const NESTED_TIMEOUT_POLICIES = ["longest", "shortest", "own"];
 /**
  * The first-output timeout Settings writes for a pool that names none.
  * OpenCode's own default is 10 seconds (core model-route.ts DEFAULT_POLICY),
@@ -791,7 +793,7 @@ export const validateModelRoute = (id, route, expandedTargets, dynamicTargets = 
   const matchingProblem = validateMatching(id, route);
   if (matchingProblem) return matchingProblem;
   if (route.nestedTimeout !== undefined && !NESTED_TIMEOUT_POLICIES.includes(route.nestedTimeout))
-    return `route "${id}" nestedTimeout must be longest or shortest`;
+    return `route "${id}" nestedTimeout must be longest, shortest or own`;
   if (route.cache_format !== undefined && !CACHE_FORMATS.includes(route.cache_format))
     return `route "${id}" cache_format must be ${CACHE_FORMATS.join(' or ')}`;
   if (route.limit !== undefined) {
