@@ -242,9 +242,9 @@ export function createLinearTracker(libraries: TrackerLibraries): TrackerImpleme
     }
   };
 
-  const mappingView = (stored: ReturnType<TrackerLibraries['readStoredLinearMapping']>, teams: readonly LinearTeam[]) => {
+  const mappingView = (stored: ReturnType<TrackerLibraries['readStoredLinearMapping']>, teams: readonly LinearTeam[], teamsMore: boolean) => {
     const view = mergeLinearMappingView(stored, teams);
-    return { connected: true as const, defaultProjectPath: view.defaultProjectPath, containers: view.teams };
+    return { connected: true as const, defaultProjectPath: view.defaultProjectPath, containers: view.teams, containersMore: teamsMore };
   };
 
   return {
@@ -288,7 +288,7 @@ export function createLinearTracker(libraries: TrackerLibraries): TrackerImpleme
     states: async (containerId) => {
       const result = await listLinearIssueStates(containerId);
       if (result.connected === false) return { connected: false };
-      return { connected: true, states: (result.states ?? []).map(toTrackerWorkflowState) };
+      return { connected: true, states: (result.states ?? []).map(toTrackerWorkflowState), statesMore: result.statesMore === true };
     },
 
     updateState: async ({ id, stateId }) => {
@@ -320,7 +320,7 @@ export function createLinearTracker(libraries: TrackerLibraries): TrackerImpleme
       get: async () => {
         const teams = await listLinearTeams();
         if (teams.connected === false) return { connected: false };
-        return mappingView(readStoredLinearMapping(), teams.teams);
+        return mappingView(readStoredLinearMapping(), teams.teams, teams.teamsMore === true);
       },
       set: async (input) => {
         if (!(await getValidLinearAccessToken())) return { connected: false };
@@ -329,7 +329,7 @@ export function createLinearTracker(libraries: TrackerLibraries): TrackerImpleme
           teamProjectPaths: input?.containerProjectPaths,
         });
         const teams = await listLinearTeams();
-        return mappingView(stored, teams.connected === false ? [] : teams.teams);
+        return mappingView(stored, teams.connected === false ? [] : teams.teams, teams.connected !== false && teams.teamsMore === true);
       },
     },
 

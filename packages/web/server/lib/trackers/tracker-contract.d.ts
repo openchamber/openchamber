@@ -101,6 +101,7 @@ export type TrackerDescriptor = {
 export type TrackerMappingView = {
   defaultProjectPath: string | null | undefined;
   containers: { id: string; key: string | null; name: string; projectPath: string | object | null }[];
+  containersMore?: boolean;
 };
 export type TrackerMappingRequest = { defaultProjectPath: unknown; containerProjectPaths: object };
 export type TrackerPreferences = { sessionComments: boolean };
@@ -143,7 +144,7 @@ export interface TrackerImplementation {
   };
   list(options: TrackerListOptions): Promise<Connected<{ items: TrackerItemSummary[]; cursor: string | null; hasMore: boolean }>>;
   get(id: string): Promise<Connected<{ item: TrackerItem | null }>>;
-  states(containerId: string): Promise<Connected<{ states: TrackerWorkflowState[] }>>;
+  states(containerId: string): Promise<Connected<{ states: TrackerWorkflowState[]; statesMore?: boolean }>>;
   updateState(input: { id: string; stateId: string }): Promise<Connected<{ item: TrackerItem | null }>>;
   liveSummaries(identifiers: string[]): Promise<Connected<{ items: TrackerLiveSummaryWire[] }>>;
   matchUrl(url: string): string | null;

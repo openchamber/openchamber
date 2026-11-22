@@ -142,7 +142,7 @@ const workflowStateSchema: z.ZodType<TrackerWorkflowState> = z.object({
 
 export const statesResultSchema: z.ZodType<TrackerStatesResult> = z.union([
   disconnected,
-  z.object({ connected: z.literal(true), states: listOf(workflowStateSchema) }),
+  z.object({ connected: z.literal(true), states: listOf(workflowStateSchema), statesMore: z.boolean().optional().catch(undefined) }),
 ]);
 
 const accountSchema: z.ZodType<TrackerAccount> = z.object({
@@ -201,6 +201,7 @@ export const mappingResultSchema: z.ZodType<TrackerMappingResult> = z.union([
     connected: z.literal(true),
     defaultProjectPath: optionalText,
     containers: listOf(z.object({ id: text, key: optionalText, name: text, projectPath: optionalText })),
+    containersMore: z.boolean().optional().catch(undefined),
   }),
 ]);
 

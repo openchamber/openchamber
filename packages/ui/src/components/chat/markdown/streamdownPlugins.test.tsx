@@ -400,3 +400,59 @@ describe('literal text a person typed', () => {
     expect(result.textContent).toContain('C:\\x\\.y');
   });
 });
+
+// Cases from the fork's Markdown pipeline (markdownCore.test.ts) that the
+// Streamdown renderer has to keep.
+describe('fork Markdown cases on Streamdown', () => {
+  const hrefs = (body: ReturnType<typeof render>): string[] => Array.from(body.querySelectorAll('a')).map((anchor) => decodeURI(anchor.getAttribute('href') ?? ''));
+  // CPU time, so other processes holding the cores do not count.
+  const cpuMs = (run: () => void): number => {
+    const start = process.cpuUsage();
+    run();
+    const used = process.cpuUsage(start);
+    return (used.user + used.system) / 1000;
+  };
+  const renderStreaming = (source: string) => renderToStaticMarkup(<Streamdown
+    mode="streaming" parseIncompleteMarkdown controls={false}
+    parseMarkdownIntoBlocksFn={parseMarkdownBlocksWithMath}
+    plugins={{ math: markdownMath, cjk: getMarkdownCjk(false) }}
+    {...getMarkdownProcessingOptions(false, false, false)}
+    urlTransform={(value) => value}
+  >{source}</Streamdown>);
+
+  test('a bare URL stops before CJK punctuation and annotations', () => {
+    expect(hrefs(render('访问 https://example.com/docs（中文说明）了解更多'))).toEqual(['https://example.com/docs']);
+    expect(hrefs(render('地址 https://example.com/guide，详见'))).toEqual(['https://example.com/guide']);
+    expect(hrefs(render('官网 https://example.com。'))).toEqual(['https://example.com']);
+  });
+
+  test('correct links are unaffected', () => {
+    expect(hrefs(render('官方文档见 [这里](https://docs.example.com)（中文说明）'))).toEqual(['https://docs.example.com']);
+    expect(hrefs(render('[下载](https://dl.example.com/安装包（正式版）)'))).toEqual(['https://dl.example.com/安装包（正式版）']);
+    expect(hrefs(render('[a](url(1))'))).toEqual(['url(1)']);
+    expect(hrefs(render('[a](url "title")'))).toEqual(['url']);
+  });
+
+  test('long messages of short paragraphs and large code blocks keep linkify', () => {
+    const cjkLink = 'https://example.com。 ';
+    const log = Array.from({ length: 400 }, (_, i) => `line ${i}: status ok`).join('\n');
+    expect(hrefs(render(`See ${cjkLink}\n\n\`\`\`\n${log}\n\`\`\``))).toEqual(['https://example.com']);
+    const crlf = Array.from({ length: 200 }, () => `See ${cjkLink}`).join('\r\n\r\n');
+    const links = hrefs(render(crlf));
+    expect(links).toHaveLength(200);
+    expect(new Set(links)).toEqual(new Set(['https://example.com']));
+  });
+
+  // remend 1.2.1 took about 3 s per stream step on this list (#4204). A healed
+  // streaming render must cost about as much as a whole one.
+  test('healing a long streamed block full of underscores stays fast', () => {
+    const list = Array.from({ length: 5000 }, (_, i) => `- row_${i} has value_a and value_b_${i}`).join('\n');
+    expect(list.length).toBeGreaterThan(190_000);
+    render(list);
+    const whole = cpuMs(() => { render(list); });
+    let html = '';
+    const streamed = cpuMs(() => { html = renderStreaming(list); });
+    expect(streamed).toBeLessThan(5 * whole);
+    expect(html).toContain('row_4999 has value_a and value_b_4999');
+  }, 60_000);
+});

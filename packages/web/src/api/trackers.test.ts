@@ -160,6 +160,16 @@ describe('web trackers: the neutral routes', () => {
     expect(result.item.childrenMore).toBe(true);
   });
 
+  it('keeps the tracker\'s statesMore signal and reads its absence as complete', async () => {
+    const state = { id: 's-todo', name: 'Todo', category: 'todo', position: 0 };
+    trackerServer(() => Response.json({ connected: true, states: [state], statesMore: true }));
+    const api = createWebTrackerAPI({ fetch: fetchMock });
+    await expect(api.states('linear', 'team-eng')).resolves.toEqual({ connected: true, states: [state], statesMore: true });
+    trackerServer(() => Response.json({ connected: true, states: [state] }));
+    const result = await api.states('linear', 'team-eng');
+    expect(result.connected && result.statesMore).toBeFalsy();
+  });
+
   it('passes a disconnected answer through and rejects a failed one', async () => {
     trackerServer(() => Response.json({ connected: false }));
     const api = createWebTrackerAPI({ fetch: fetchMock });
@@ -248,6 +258,22 @@ describe('web trackers: a server from before /api/tracker', () => {
       cursor: null,
       hasMore: false,
     });
+  });
+
+  it('keeps the truncated-states signal on the legacy wire', async () => {
+    legacyServer(() => Response.json({ connected: true, states: [{ id: 's-todo', name: 'Todo', type: 'unstarted', position: 0 }], statesMore: true }));
+    const result = await createWebTrackerAPI({ fetch: fetchMock }).states('linear', 'team-eng');
+    expect(result.connected && result.statesMore).toBe(true);
+  });
+
+  it('keeps the truncated-teams signal on both wires', async () => {
+    const team = { id: 'team-eng', key: 'ENG', name: 'Engineering', projectPath: null };
+    legacyServer(() => Response.json({ connected: true, defaultProjectPath: null, teams: [team], teamsMore: true }));
+    const legacy = await createWebTrackerAPI({ fetch: fetchMock }).mappingGet('linear');
+    expect(legacy.connected && legacy.containersMore).toBe(true);
+    trackerServer(() => Response.json({ connected: true, defaultProjectPath: null, containers: [team], containersMore: true }));
+    const current = await createWebTrackerAPI({ fetch: fetchMock }).mappingGet('linear');
+    expect(current.connected && current.containersMore).toBe(true);
   });
 
   it('writes in Linear field names and refuses any other tracker', async () => {

@@ -6,6 +6,7 @@ import type { Root, RootContent } from 'mdast';
 import rehypeSanitize from 'rehype-sanitize';
 import { remarkAlerts, MARKDOWN_ALERT_KINDS } from './remarkAlerts';
 import { remarkDisclosures } from './remarkDisclosures';
+import { remarkBoundedAutolinkLiteral } from './remarkBoundedAutolinkLiteral';
 import { remarkMathCompatibility } from './remarkMathCompatibility';
 import { rehypeMarkdownPolicy, rehypeRestoreMarkdownLinks } from './rehypeMarkdownPolicy';
 import { rehypeTextDirection } from './rehypeTextDirection';
@@ -109,7 +110,7 @@ function remarkVisibleBlocks() {
 
 function createOptions(allowRawHtml: boolean, isVSCode: boolean, singleTilde: boolean): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
   return {
-    remarkPlugins: [...(singleTilde ? Object.values(defaultRemarkPlugins) : defaultRemarkPluginList), remarkDisclosures, remarkAlerts, remarkVisibleBlocks, remarkSessionLinks],
+    remarkPlugins: [...(singleTilde ? Object.values(defaultRemarkPlugins) : defaultRemarkPluginList), remarkBoundedAutolinkLiteral, remarkDisclosures, remarkAlerts, remarkVisibleBlocks, remarkSessionLinks],
     rehypePlugins: [
       ...(allowRawHtml ? [defaultRehypePlugins.raw] : []),
       [rehypeMarkdownPolicy, { isVSCode }],

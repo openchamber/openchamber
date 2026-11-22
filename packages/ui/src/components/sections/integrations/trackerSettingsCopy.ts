@@ -33,6 +33,7 @@ type TrackerSettingsCopy = {
     containerAria: I18nKey;
     emptyProjects: I18nKey;
     emptyContainers: I18nKey;
+    containersTruncated: I18nKey | null;
     loadFailed: I18nKey;
   };
   sessionComments: {
@@ -76,6 +77,7 @@ const GENERIC_COPY: TrackerSettingsCopy = {
     containerAria: 'settings.integrations.tracker.mapping.containers.aria',
     emptyProjects: 'settings.integrations.tracker.mapping.emptyProjects',
     emptyContainers: 'settings.integrations.tracker.mapping.emptyContainers',
+    containersTruncated: null,
     loadFailed: 'settings.integrations.tracker.mapping.loadFailed',
   },
   sessionComments: {
@@ -101,6 +103,7 @@ const LINEAR_COPY: TrackerSettingsCopy = {
     containerAria: 'settings.integrations.linear.mapping.teams.aria',
     emptyProjects: 'settings.integrations.linear.mapping.emptyProjects',
     emptyContainers: 'settings.integrations.linear.mapping.emptyTeams',
+    containersTruncated: 'settings.integrations.linear.mapping.teams.truncated',
   },
 };
 

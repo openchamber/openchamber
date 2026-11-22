@@ -151,6 +151,10 @@ Text references are trimmed as prose, but an href's encoded edge spaces identify
 
 The code reference keeps `role="button"` and Enter/Space activation, but Chromium focuses any tab stop on mousedown before it decides whether the gesture is a drag. A drag that starts inside the now-focused reference never becomes a text selection, so the release reads as a plain click and opens the file. Removing `tabindex` for the press and restoring it on the next task leaves keyboard access intact while the browser starts the selection as it would in ordinary prose. A reference drawn as a link keeps its `href`: the browser owns a link drag from it, and disarming the link for the press would take that away.
 
+### Why the GFM literal autolink check is memoized
+
+Before each email, www or protocol literal, `micromark-extension-gfm-autolink-literal` walks back over the paragraph's events to an unbalanced `[` (`previousUnbalanced`) and declines when it finds one. It remembers only walks that found none, so after an unbalanced `[` every attempt walks back to it and the paragraph costs the square of its length: the pretty-printed JSON dump from openchamber/openchamber#4204, which opens with `[`, took seconds. `remarkBoundedAutolinkLiteral`, right after GFM in `streamdownPlugins.ts`, answers the same question first and remembers the label it found, so the attempt declines at once with the answer the tokenizer's own walk would give. The output is unchanged; `remarkBoundedAutolinkLiteral.test.tsx` compares it with the pipeline without the plugin, including URL shapes the tokenizer and the later mdast pass link differently.
+
 ### Why a flow construct plus a block merge and not a text construct
 
 Multiline bracket math uses a concrete micromark flow construct because text constructs end at paragraph breaks; concrete flow keeps blank lines and Markdown-looking formula content inside the equation, while rejecting lazy container continuation. The equation ends at the first line that is a standalone `\]` or ends in `\]`, the same close the text construct accepts, so prose after `x\]` never joins a formula that a later `\]` would otherwise close.

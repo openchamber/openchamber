@@ -107,7 +107,7 @@ type Connected<T> = { connected: false } | ({ connected: true } & T);
 
 export type TrackerListResult = Connected<{ items: TrackerItemSummary[]; cursor: string | null; hasMore: boolean }>;
 export type TrackerItemResult = Connected<{ item: TrackerItem | null }>;
-export type TrackerStatesResult = Connected<{ states: TrackerWorkflowState[] }>;
+export type TrackerStatesResult = Connected<{ states: TrackerWorkflowState[]; statesMore?: boolean }>;
 export type TrackerStateUpdateInput = { id: string; stateId: string };
 
 export type TrackerAuthMethod = 'oauth' | 'token';
@@ -133,7 +133,7 @@ export type TrackerDescriptor = {
 };
 
 export type TrackerContainerMapping = TrackerContainer & { projectPath: string | null };
-export type TrackerMappingResult = Connected<{ defaultProjectPath: string | null; containers: TrackerContainerMapping[] }>;
+export type TrackerMappingResult = Connected<{ defaultProjectPath: string | null; containers: TrackerContainerMapping[]; containersMore?: boolean }>;
 export type TrackerMappingWrite = { defaultProjectPath: string | null; containerProjectPaths: { [containerId: string]: string } };
 
 export type TrackerPreferences = {

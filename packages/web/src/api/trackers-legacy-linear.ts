@@ -201,7 +201,8 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
     connected: z.literal(true),
     defaultProjectPath: optionalText,
     teams: listOf(z.object({ id: text, key: optionalText, name: text, projectPath: optionalText })),
-  }).transform(({ defaultProjectPath, teams }) => ({ connected: true as const, defaultProjectPath, containers: teams })));
+    teamsMore: z.boolean().optional().catch(undefined),
+  }).transform(({ defaultProjectPath, teams, teamsMore }) => ({ connected: true as const, defaultProjectPath, containers: teams, containersMore: teamsMore })));
 
   return {
     authStatus: (provider) => call(provider, '/auth/status', GET, authStatusSchema, 'Failed to load Linear status'),
@@ -245,6 +246,7 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
       connected: z.literal(true),
       states: listOf(z.object({ id: text, name: text, type: optionalText, position: z.number().catch(0) })
         .transform(({ id, name, type, position }) => ({ id, name, category: linearStateCategory(type), position }))),
+      statesMore: z.boolean().optional().catch(undefined),
     })), 'Failed to load Linear workflow states'),
 
     updateState: (provider, input) => call(provider, '/issues/update', { method: 'POST', body: JSON.stringify({ id: input.id, stateId: input.stateId }) }, itemResult(provider), 'Failed to update Linear issue'),

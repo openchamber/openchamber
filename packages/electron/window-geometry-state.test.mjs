@@ -52,6 +52,28 @@ test('repeated geometry updates replace timers and only persist the latest revis
   assert.deepEqual(fakeTimers.pending(), []);
 });
 
+test('a completed save releases its timer, so the next change starts clean and persists again', async () => {
+  const fakeTimers = createFakeTimers();
+  const cleared = [];
+  const persisted = [];
+  const geometry = createWindowGeometryState({
+    persist: async (window) => persisted.push(window.id),
+    ...fakeTimers,
+    clearTimeoutFn: (id) => cleared.push(id),
+  });
+  const window = createWindow(9);
+
+  geometry.schedule(window);
+  await fakeTimers.fire(fakeTimers.pending()[0]);
+  geometry.schedule(window);
+  await fakeTimers.fire(fakeTimers.pending()[0]);
+
+  // A finished timer is forgotten: the next change has nothing to clear.
+  assert.deepEqual(cleared, []);
+  assert.deepEqual(persisted, [9, 9]);
+  assert.deepEqual(fakeTimers.pending(), []);
+});
+
 test('closing with a pending timer cancels it and prevents persistence', async () => {
   const fakeTimers = createFakeTimers();
   const persisted = [];
