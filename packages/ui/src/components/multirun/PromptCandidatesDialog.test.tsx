@@ -19,7 +19,7 @@ Object.assign(globalThis, {
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
-const { opencodeClient } = await import('@/lib/opencode/client');
+const { OpencodeApiError, opencodeClient } = await import('@/lib/opencode/client');
 // This component reaches the draft store. Give its startup home discovery a
 // deterministic result so unrelated bootstrap work cannot change draft scope.
 spyOn(opencodeClient, 'getSystemInfo').mockResolvedValue({ homeDirectory: '/home/test' });
@@ -84,6 +84,24 @@ test('partial generation failure keeps successful candidates selectable', async 
   await describePrompts();
   await click('Generate candidates');
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Successful candidates remain available');
+  await click('Successful');
+  await click('Add selected prompts (1)');
+  expect(submitted).toEqual([['Keep this prompt']]);
+});
+
+test('project-only model errors explain the cause and leave successful candidates selectable', async () => {
+  const submitted: string[][] = [];
+  generateSpy.mockImplementation(async (_prompt, options) => {
+    if (options?.model?.id === 'm2') throw new OpencodeApiError('generate.text', 'Model unavailable: p/m2', { status: 400 });
+    return JSON.stringify({ candidates: [{ title: 'Successful', text: 'Keep this prompt', kind: 'new' }] });
+  });
+  await mount((texts) => { submitted.push(texts); });
+  await describePrompts();
+  await click('Generate candidates');
+  const error = document.querySelector('[role="alert"]')?.textContent ?? '';
+  expect(error).toContain('server-wide settings');
+  expect(error).toContain('p/m2');
+  expect(error).toContain('Configure them globally');
   await click('Successful');
   await click('Add selected prompts (1)');
   expect(submitted).toEqual([['Keep this prompt']]);

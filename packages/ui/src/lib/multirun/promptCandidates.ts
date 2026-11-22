@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { ModelSelection } from '@/lib/opencode/model';
-import { opencodeClient } from '@/lib/opencode/client';
+import { OpencodeApiError, opencodeClient } from '@/lib/opencode/client';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { generateUuid } from '@/lib/uuid';
 
@@ -14,6 +14,7 @@ const candidateSchema = z.object({
 const candidatesSchema = z.object({ candidates: z.array(candidateSchema).min(1).max(20) });
 
 export type PromptCandidate = z.infer<typeof candidateSchema> & { id: string; model: ModelSelection };
+type PromptGenerationFailure = { model: ModelSelection; reason: 'model-unavailable' | 'generation' };
 
 export function parsePromptCandidates(output: string): Array<z.infer<typeof candidateSchema>> {
   const text = output.trim();
@@ -28,7 +29,7 @@ export async function generatePromptCandidates(input: {
   directory: string;
 }, generate: typeof opencodeClient.generateText = (prompt, options) => opencodeClient.generateText(prompt, options)): Promise<{
   candidates: PromptCandidate[];
-  failedModels: ModelSelection[];
+  failures: PromptGenerationFailure[];
 }> {
   if (!input.description.trim() || input.models.length === 0 || !input.directory.trim()) throw new Error('Describe prompts, select a generation model, and choose a directory');
   const runtime = getRuntimeKey();
@@ -51,12 +52,20 @@ export async function generatePromptCandidates(input: {
   }));
   assertCurrent();
   const candidates: PromptCandidate[] = [];
-  const failedModels: ModelSelection[] = [];
+  const failures: PromptGenerationFailure[] = [];
   outcomes.forEach((outcome, index) => {
     if (outcome.status === 'fulfilled') candidates.push(...outcome.value);
-    else failedModels.push(input.models[index]);
+    else {
+      const error = outcome.reason;
+      // The stateless route deliberately resolves models from server-wide
+      // configuration, even when a scoped client sends a directory header.
+      const unavailable = error instanceof OpencodeApiError && error.operation === 'generate.text'
+        && ((error.status === 400 && error.detail.startsWith('Model unavailable: '))
+          || error.tag === 'ModelNotFoundError' || error.tag === 'ProviderNotFoundError');
+      failures.push({ model: input.models[index], reason: unavailable ? 'model-unavailable' : 'generation' });
+    }
   });
-  return { candidates, failedModels };
+  return { candidates, failures };
 }
 
 /** Selection is explicit; no candidate is admitted merely because it was generated. */
