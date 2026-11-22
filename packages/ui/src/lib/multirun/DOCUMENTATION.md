@@ -159,13 +159,13 @@ Running sources and sources moved to different projects are rejected. Duplicate
 source IDs count once. Each pass appends a new session; sources stay active in
 their original worktrees, including ignored files.
 
-- **Answers mode** (a source shares a directory, or nothing changed): the
+- **Answers mode** (a source shares a directory, or no source has changes or a code-fusion receipt): the
   fusion session runs in the project directory and receives the task prompts
   and final answers.
 - **Code mode** (every source has a worktree and at least one changed files or carries a code-fusion receipt):
    every source is snapshotted to a unique per-pass ref, the fusion gets its own worktree (a fresh `<slug>/fusion-<UUID>` branch) at the lanes'
   starting commit, and receives a manifest: task, final
-  answer, change counts and snapshot commit per lane. Diffs are inlined only
+  answer, uncommitted change counts and snapshot commit per lane. Diffs are inlined only
   when they fit a tenth of the judge's context window (`shouldInlineDiffs`);
   otherwise the judge reads them with git, as the editable magic prompt
    `session.fusion.codeInstructions` tells it.
