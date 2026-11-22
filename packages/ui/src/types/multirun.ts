@@ -38,7 +38,7 @@ export interface CreateMultiRunParams {
   worktreeBaseBranch?: string;
   /** The Settings start for parallel runs, used when no base branch was picked; absent means the project root. */
   worktreeStartFrom?: WorktreeStartFrom;
-  /** Separate worktrees per lane; off, or a project that is not a git repository, shares `sharedDirectory`. */
+  /** Separate worktrees require Git; false explicitly chooses shared files. */
   isolateRuns?: boolean;
   /** Where lanes work when they share a directory: the draft's checkout. The project directory when absent. */
   sharedDirectory?: string;

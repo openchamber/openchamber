@@ -27,6 +27,8 @@ import { uniqueLaneBranchName } from '@/lib/multirun/laneBranches';
 import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
 import { generateUuid } from '@/lib/uuid';
 
+export const MULTIRUN_ISOLATION_UNAVAILABLE = 'multirun-isolation-unavailable';
+
 export const toGitSafeSlug = (value: string): string => {
   return value
     .toLowerCase()
@@ -214,6 +216,10 @@ export const useMultiRunStore = create<MultiRunStore>()(
 
           const isGit = await checkIsGitRepository(directory);
           assertCurrent();
+          if (!isGit && params.isolateRuns !== false) {
+            set({ error: MULTIRUN_ISOLATION_UNAVAILABLE, isLoading: false });
+            return null;
+          }
           const shouldIsolateRuns = isGit && params.isolateRuns !== false;
 
           const groupSlug = toGitSafeSlug(groupName) || 'multi-run';

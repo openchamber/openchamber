@@ -68,6 +68,7 @@ describe('resolveCreatedWorktreeStartDirectory', () => {
   const cleanup = (overrides: Partial<CreatedWorktreeStartDeps> = {}) => {
     const removed: string[] = [];
     const d: CreatedWorktreeStartDeps = {
+      waitForCheckout: async () => {},
       resolve: async (_project, root) => `${root}/ai`,
       remove: async (_project, worktree) => { removed.push(worktree.path); },
       ...overrides,
@@ -78,6 +79,31 @@ describe('resolveCreatedWorktreeStartDirectory', () => {
   test('answers the start folder and keeps the worktree', async () => {
     const { d, removed } = cleanup();
     expect(await resolveCreatedWorktreeStartDirectory(project, created, d)).toBe('/wt/feat/ai');
+    expect(removed).toEqual([]);
+  });
+
+  // Oracle: the new-checkout state machine cannot resolve a dispatch directory
+  // until its Git-ready transition. Existing-root resolution above stays fast.
+  test('new repository-root work waits for checkout before returning the dispatch directory', async () => {
+    const calls: string[] = [];
+    let ready: (() => void) | undefined;
+    const checkout = new Promise<void>((resolve) => { ready = resolve; });
+    const { d } = cleanup({
+      waitForCheckout: async () => { calls.push('wait'); await checkout; },
+      resolve: async (_project, root) => { calls.push('resolve'); return root; },
+    });
+    const directory = resolveCreatedWorktreeStartDirectory({ id: 'p', path: '/repo' }, created, d);
+    await Promise.resolve();
+    expect(calls).toEqual(['wait']);
+    if (!ready) throw new Error('Empty checkout-wait premise');
+    ready();
+    expect(await directory).toBe('/wt/feat');
+    expect(calls).toEqual(['wait', 'resolve']);
+  });
+
+  test('an unavailable readiness check preserves the checkout and its artifacts', async () => {
+    const { d, removed } = cleanup({ waitForCheckout: async () => { throw new Error('Readiness request failed'); } });
+    await expect(resolveCreatedWorktreeStartDirectory(project, created, d)).rejects.toThrow('Readiness request failed');
     expect(removed).toEqual([]);
   });
 

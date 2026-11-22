@@ -1,7 +1,7 @@
 import type { Session } from '@/lib/opencode/model';
 import { getMultiRunIdentity, type MultiRunIdentity } from './identity';
 
-/** One member session of a run: a lane (`run`) or a fused result (`fusion`). */
+/** A lane, fused result, or parent conversation belonging to a run. */
 export type MultiRunMember = {
   sessionId: string;
   identity: MultiRunIdentity;
@@ -16,7 +16,9 @@ export type MultiRunSummary = {
   lanes: readonly MultiRunMember[];
   /** Fused results, newest first. */
   fusions: readonly MultiRunMember[];
-  /** Fusions first, then lanes: the order rows and cards render in. */
+  /** Parent conversations coordinate the run without becoming fusion sources. */
+  parents: readonly MultiRunMember[];
+  /** Parents, fusions, then lanes: the order rows and cards render in. */
   memberIds: readonly string[];
   /** Distinct lane providers in lane order, for the stacked logos. */
   providerIDs: readonly string[];
@@ -90,7 +92,9 @@ export function buildMultiRunIndex(
     const fusions = list
       .filter((entry) => entry.identity.role === 'fusion')
       .sort((a, b) => b.session.time.created - a.session.time.created || a.session.id.localeCompare(b.session.id));
-    const ordered = [...fusions, ...lanes];
+    const parents = list.filter((entry) => entry.identity.role === 'parent')
+      .sort((a, b) => a.session.time.created - b.session.time.created || a.session.id.localeCompare(b.session.id));
+    const ordered = [...parents, ...fusions, ...lanes];
     const titled = ordered.find((entry) => entry.identity.title);
     const withAutoFusion = lanes.find((entry) => entry.identity.autoFusion);
     runs.set(key, Object.freeze({
@@ -99,6 +103,7 @@ export function buildMultiRunIndex(
       groupSlug: list[0].identity.groupSlug,
       lanes: Object.freeze(lanes.map(({ session, identity }) => ({ sessionId: session.id, identity }))),
       fusions: Object.freeze(fusions.map(({ session, identity }) => ({ sessionId: session.id, identity }))),
+      parents: Object.freeze(parents.map(({ session, identity }) => ({ sessionId: session.id, identity }))),
       memberIds: Object.freeze(ordered.map((entry) => entry.session.id)),
       providerIDs: Object.freeze([...new Set(lanes.map((entry) => entry.identity.providerID))]),
       variants: Object.freeze([...new Set(lanes.map((entry) => entry.identity.runGroup))]),
