@@ -5062,11 +5062,14 @@ describe("dismissOpenFormsForSession", () => {
       form: { "session-grandchild": [buildForm("q-grandchild", "session-grandchild")] },
     })
     const childStores = createChildStores([["/test/project", store]])
+    // The sync index holds the store's records and no longer the trimmed parent.
+    sessionRecords.delete("session-child")
+    for (const session of store.getState().session) sessionRecords.set(session.id, session)
 
     const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
     setActionRefs(childStores, () => "/test/project")
 
-    expect(await dismissOpenFormsForSession("session-a")).toBe(true)
+    expect((await dismissOpenFormsForSession("session-a")).dismissed).toBe(true)
     expect(replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)).toEqual(["q-grandchild"])
     expect(store.getState().form["session-grandchild"]).toBe(undefined)
   })

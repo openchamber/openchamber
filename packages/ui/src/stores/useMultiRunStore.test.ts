@@ -48,7 +48,9 @@ let releaseBootstrap = () => {};
 let bootstrapGate = Promise.resolve();
 let markBootstrapStarted = () => {};
 let bootstrapStarted = Promise.resolve();
+let setupFinished = false;
 const readyBootstrap = { status: 'ready', phase: 'setup-ready', error: null, updatedAt: 1 };
+const checkoutReadyBootstrap = { status: 'pending', phase: 'git-ready', error: null, updatedAt: 1 };
 
 environment.respond(async (url, init) => {
   const body = init?.body ? recordSchema.parse(JSON.parse(String(init.body))) : {};
@@ -130,7 +132,9 @@ environment.respond(async (url, init) => {
   if (url.pathname === '/api/git/worktrees/bootstrap-status') {
     operationOrder.push(`wait:${url.searchParams.get('directory')}`);
     markBootstrapStarted();
-    await bootstrapGate;
+    // A session starts once the checkout is populated, which it is as soon as
+    // it is asked about; the setup commands finish when the test releases them.
+    if (!setupFinished) return Response.json(checkoutReadyBootstrap);
     bootstrapReady = true;
     return Response.json(readyBootstrap);
   }
@@ -200,7 +204,9 @@ beforeEach(async () => {
   createdCount = 0;
   rejectNextMembership = isGitRepository = waitForWorktreeSetup = bootstrapReady = false;
   onCreate = () => {};
+  setupFinished = false;
   bootstrapGate = new Promise<void>((resolve) => { releaseBootstrap = resolve; });
+  void bootstrapGate.then(() => { setupFinished = true; });
   bootstrapStarted = new Promise<void>((resolve) => { markBootstrapStarted = resolve; });
   useMultiRunStore.setState({ isLoading: false, error: null });
 });

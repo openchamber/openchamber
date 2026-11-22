@@ -542,7 +542,8 @@ describe('SyncProvider active-session watchdog status poll', () => {
         const store = manager.getChild(DIRECTORY)
         if (!store) throw new Error('Directory store was not created')
         const otherDirectory = '/repo/healthy'
-        const other = manager.ensureChild(otherDirectory)
+        // Without a bootstrap: its session list would replace the busy session set below.
+        const other = manager.ensureChild(otherDirectory, { bootstrap: false })
         for (const { directory, child } of [{ directory: DIRECTORY, child: store }, { directory: otherDirectory, child: other }]) {
           const id = directory === DIRECTORY ? 'ses_parent' : 'ses_healthy'
           child.setState({

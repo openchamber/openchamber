@@ -543,13 +543,25 @@ describe('settings search anchors', () => {
     const redirects = collectRedirects(sources);
 
     const { ids, idFields } = readSearchIndex();
-    // Every `id:` field is a literal or the one shortcut construction. A new
-    // entry that builds its id another way would slip past the anchor scan, so
-    // it has to be taught here first.
+    // Entries generated per source-control provider or tracker the server
+    // serves, each with the component construction that anchors the same id.
+    const generatedIdAnchors = new Map<string, { file: string; anchor: string }>([
+      ['`${id}.connect`', { file: 'SourceControlProviderCard.tsx', anchor: 'data-settings-item={`${settingsItem}.connect`}' }],
+      ['`${id}.add-workspace`', { file: 'TrackerSettings.tsx', anchor: 'data-settings-item={`${settingsItem}.add-workspace`}' }],
+      ['`${id}.mapping`', { file: 'TrackerProjectMapping.tsx', anchor: 'settingsItem={`integrations.${providerId}.mapping`}' }],
+    ]);
+    // Every `id:` field is a literal, the one shortcut construction or a
+    // generated entry above. A new entry that builds its id another way would
+    // slip past the anchor scan, so it has to be taught here first.
     const unseenIdFields = idFields.filter(
-      (field) => field !== 'shortcutSearchItemId(action.id)' && !/^'[^']+'$/.test(field),
+      (field) => field !== 'shortcutSearchItemId(action.id)' && !generatedIdAnchors.has(field) && !/^'[^']+'$/.test(field),
     );
     expect(unseenIdFields).toEqual([]);
+    const unanchoredGenerated = [...generatedIdAnchors].filter(([, { file, anchor }]) => {
+      const source = [...sources.entries()].find(([filePath]) => filePath.endsWith(`/${file}`))?.[1] ?? '';
+      return !source.includes(anchor);
+    }).map(([field]) => field);
+    expect(unanchoredGenerated).toEqual([]);
     // Every literal id plus one generated entry per in-app shortcut; a lower
     // count means the scan stopped seeing entries, not that the index shrank.
     expect(ids.length).toBeGreaterThan(250);

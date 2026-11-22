@@ -2,7 +2,7 @@ import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { clampLiveBrowserTabs } from '@/lib/browser/liveTabs';
 import { isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
 import { clampQuestionTimeoutMinutes } from '@/lib/questionTimeout';
-import { normalizeActiveRunModelChangeBehavior, normalizeAgentTerminalsPlacement, normalizeLargeTextPasteBehavior, normalizeFileEditorKeymap } from './preferences';
+import { clipPairSafe, normalizeActiveRunModelChangeBehavior, normalizeAgentTerminalsPlacement, normalizeLargeTextPasteBehavior, normalizeFileEditorKeymap } from './preferences';
 import type { UIStoreSlice } from './types';
 
 export const createPreferenceActions: UIStoreSlice<
@@ -551,7 +551,7 @@ export const createPreferenceActions: UIStoreSlice<
   },
 
   setFileEditorVimMappings: (value) => {
-    set({ fileEditorVimMappings: value.slice(0, 10_000) });
+    set({ fileEditorVimMappings: clipPairSafe(value, 10_000) });
   },
 
 });

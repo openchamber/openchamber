@@ -261,36 +261,6 @@ export const watchGlobalSessionStatusWrites = () => {
   return { touched, stop: () => { statusWriteWatchers.delete(touched); } };
 };
 
-type ActiveListReconcileDependencies = {
-  skip: (sessionId: string) => boolean;
-  covers: (directory: string) => boolean;
-  resolveDirectory: (sessionId: string) => string | null;
-};
-
-export const buildActiveListReconcileEvents = (
-  activeSessionIds: ReadonlySet<string>,
-  deps: ActiveListReconcileDependencies,
-): Map<string, SyncEvent[]> => {
-  const { statusById } = useGlobalSessionStatusStore.getState();
-  const eventsByDirectory = new Map<string, SyncEvent[]>();
-  const push = (directory: string, sessionID: string, type: 'idle' | 'busy') => {
-    const events = eventsByDirectory.get(directory) ?? [];
-    events.push({ type: 'session.status', properties: { sessionID, status: { type } } });
-    eventsByDirectory.set(directory, events);
-  };
-  for (const [sessionId, entry] of statusById) {
-    if (activeSessionIds.has(sessionId) || deps.skip(sessionId) || !deps.covers(entry.directory)) continue;
-    push(entry.directory, sessionId, 'idle');
-  }
-  for (const sessionId of activeSessionIds) {
-    if (statusById.has(sessionId) || deps.skip(sessionId)) continue;
-    const directory = deps.resolveDirectory(sessionId);
-    if (!directory || !deps.covers(directory)) continue;
-    push(directory, sessionId, 'busy');
-  }
-  return eventsByDirectory;
-};
-
 export const applyGlobalSessionStatusEvents = (directory: string, payloads: readonly SyncEvent[]): void => {
   if (payloads.length === 0) return;
   if (statusWriteWatchers.size > 0) {

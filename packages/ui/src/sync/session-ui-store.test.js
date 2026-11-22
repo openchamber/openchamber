@@ -1794,6 +1794,9 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
   beforeEach(() => {
     sendMessageCalls.length = 0;
     createSessionCalls.length = 0;
+    // The drafts and the chat the user moves to are in projects the user added,
+    // so opening either session needs no admission.
+    useProjectsStore.setState({ projects: [{ id: 'alpha', path: '/projects/alpha' }, { id: 'beta', path: '/projects/beta' }] });
 
     const childStore = {
       getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),

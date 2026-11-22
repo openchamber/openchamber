@@ -8,7 +8,9 @@ import { upsertSessionRecord } from "./session-records"
 import { syncDebug } from "./debug"
 import { opencodeClient } from "@/lib/opencode/client"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
-import { reconcileGlobalSessionStatusWithActive } from "./global-session-status"
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import type { SyncEvent } from "@/lib/opencode/events"
+import { applyGlobalSessionStatusEvents, reconcileGlobalSessionStatusWithActive, useGlobalSessionStatusStore, watchGlobalSessionStatusWrites } from "./global-session-status"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { type EventRoutingIndex, setIndexedSessionDirectory, setIndexedSessionMessages, ingestDirectoryStateIntoRoutingIndex } from "./event-routing-index"
@@ -109,21 +111,42 @@ export const isCoveredByHostActiveList = (sessionId: string, directory: string):
   !isSpaceDirectory(directory) && !hasPromptInFlight(sessionId)
 )
 
+const raiseSessionsActiveAfterGap = (active: ReadonlySet<string>, writtenDuringRead: ReadonlySet<string>): void => {
+  const { statusById } = useGlobalSessionStatusStore.getState()
+  const { entityById } = useGlobalSessionsStore.getState()
+  const raised = new Map<string, SyncEvent[]>()
+  for (const sessionID of active) {
+    if (statusById.has(sessionID) || writtenDuringRead.has(sessionID)) continue
+    const session = entityById.get(sessionID)
+    const directory = session ? resolveGlobalSessionDirectory(session) : null
+    if (!directory || !isCoveredByHostActiveList(sessionID, directory)) continue
+    raised.set(directory, [...(raised.get(directory) ?? []), { type: "session.status", properties: { sessionID, status: { type: "busy" } } }])
+  }
+  for (const [directory, events] of raised) applyGlobalSessionStatusEvents(directory, events)
+}
+
 /**
  * A deferred store that looked idle before a stream gap may own a session
  * that started a turn, or asked a permission or form, during it. OpenCode's
  * active-session list is global, so one read finds those stores without
- * reading any directory, and settles the cross-directory status of sessions
- * whose end fell into the gap. A failed read leaves both as before.
+ * reading any directory, settles the cross-directory status of sessions
+ * whose end fell into the gap (on the second read that misses them, see
+ * `reconcileGlobalSessionStatusWithActive`), and raises sessions that began
+ * during it. A failed read leaves all of them as before.
  */
 export async function reconcileActivityAfterGap(childStores: ChildStoreManager): Promise<void> {
   const runtime = currentCatalogRuntime()
-  const activeRead = opencodeClient.getActiveSessionStatuses()
-  await reconcileGlobalSessionStatusWithActive(
-    () => settlingActiveSessionIds(activeRead, runtime),
-    isCoveredByHostActiveList,
-  )
-  const active = await activeRead
-  if (!active || !isCatalogRuntimeCurrent(runtime)) return
-  childStores.refreshStaleDirectoriesWithActiveSessions(new Set(Object.keys(active)))
+  const writes = watchGlobalSessionStatusWrites()
+  try {
+    const activeRead = opencodeClient.getActiveSessionStatuses()
+    const settlingRead = settlingActiveSessionIds(activeRead, runtime)
+    await reconcileGlobalSessionStatusWithActive(() => settlingRead, isCoveredByHostActiveList)
+    const settling = await settlingRead
+    if (settling && isCatalogRuntimeCurrent(runtime)) raiseSessionsActiveAfterGap(settling, writes.touched)
+    const active = await activeRead
+    if (!active || !isCatalogRuntimeCurrent(runtime)) return
+    childStores.refreshStaleDirectoriesWithActiveSessions(new Set(Object.keys(active)))
+  } finally {
+    writes.stop()
+  }
 }

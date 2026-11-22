@@ -87,7 +87,7 @@ let lifecycleHooked = false;
 const schedulePersist = (): void => {
   dirty = true;
   if (!timer) timer = setTimeout(flushSessionActivityTimestamps, PERSIST_INTERVAL_MS);
-  if (lifecycleHooked || !('window' in globalThis)) return;
+  if (lifecycleHooked || !('window' in globalThis) || !('document' in globalThis)) return;
   lifecycleHooked = true;
   window.addEventListener('pagehide', flushSessionActivityTimestamps, { capture: true });
   document.addEventListener('visibilitychange', () => {

@@ -26,6 +26,12 @@ const listCommandsMock = async (directory?: string | null) => {
   listCommandsCalls += 1;
   return listCommandsImpl(directory);
 };
+// A request reaches the server after a number of microtasks that depends on
+// how runtimeFetch builds it; wait for the server to see it.
+const untilListCommandsCalls = async (count: number) => {
+  for (let step = 0; step < 100 && listCommandsCalls < count; step += 1) await Promise.resolve();
+  expect(listCommandsCalls).toBe(count);
+};
 
 // These tests read entries per command, as against a server without the batch
 // route; `batchEntries` answers that route when a test sets it.
@@ -169,13 +175,11 @@ describe('useCommandsStore', () => {
     useCommandsStore.getState().setCommandDraft(draft);
     listCommandsImpl = () => old.promise;
     const oldLoad = useCommandsStore.getState().loadCommands();
-    await Promise.resolve();
-    await Promise.resolve();
+    await untilListCommandsCalls(1);
     useCommandsStore.getState().resetForRuntimeSwitch();
     listCommandsImpl = () => fresh.promise;
     const newLoad = useCommandsStore.getState().loadCommands();
-    await Promise.resolve();
-    await Promise.resolve();
+    await untilListCommandsCalls(2);
     old.resolve([{ name: 'old-command' }]);
     expect(await oldLoad).toBe(false);
     expect(useCommandsStore.getState().isLoading).toBe(true);

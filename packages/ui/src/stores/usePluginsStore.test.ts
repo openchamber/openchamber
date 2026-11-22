@@ -102,10 +102,9 @@ const requestBody = (callIndex: number): unknown => {
   return init?.body ? JSON.parse(String(init.body)) : undefined;
 };
 
-const flushPluginFollowUps = async (): Promise<void> => {
-  await Promise.resolve();
-  await Promise.resolve();
-};
+// Follow-up reads start after however many microtasks runtimeFetch takes to
+// build a request, which grows when a read is coalesced.
+const flushPluginFollowUps = (): Promise<void> => environment.settle();
 
 describe('usePluginsStore', () => {
   beforeEach(() => {

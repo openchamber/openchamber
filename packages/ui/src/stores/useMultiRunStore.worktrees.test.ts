@@ -89,7 +89,10 @@ const fakeOpencodeClient = {
   },
 };
 
+// Read for real before the mocks below: the goal path reaches the rest of the sync layer through it.
+const realSessionUIStore = { ...await import('@/sync/session-ui-store') };
 mock.module('@/sync/session-ui-store', () => ({
+  ...realSessionUIStore,
   routeMessage: async ({ sessionId }: { sessionId: string }) => { dispatchedSessionIds.push(sessionId); },
   useSessionUIStore: {
     getState: () => ({

@@ -31,12 +31,13 @@ describe('environment API', () => {
       names: ['GITHUB_TOKEN'],
       references: { GITHUB_TOKEN: 'op://Vertex SRE/github_token/credential' },
       vault: { GITHUB_TOKEN: { state: 'failed', reason: 'op-not-installed' } },
+      secrets: [],
     });
   });
 
   // A server from before 2026-10 answers names only.
   test('an older server reads as no references', async () => {
     serve({ names: ['API_TOKEN'] });
-    expect(await fetchUserEnvironment()).toEqual({ names: ['API_TOKEN'], references: {}, vault: {} });
+    expect(await fetchUserEnvironment()).toEqual({ names: ['API_TOKEN'], references: {}, vault: {}, secrets: [] });
   });
 });
