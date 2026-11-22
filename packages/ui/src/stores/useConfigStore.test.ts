@@ -30,10 +30,11 @@ let checkHealthImpl = async () => true;
 let probeHealthImpl: (() => Promise<'healthy' | 'unhealthy' | 'unreachable'>) | null = null;
 let probeHealthOptions: Array<{ waitMs?: number } | undefined> = [];
 let loadSettingsImpl: (() => Promise<DesktopSettings | null>) | null = null;
-let projectsState: {
+type TestProjectsState = {
   activeProjectId: string | null;
   projects: Array<{ id: string; path: string; label: string; defaultAgent?: string; defaultModel?: string; defaultVariant?: string }>;
-} = {
+};
+let projectsState: TestProjectsState = {
   activeProjectId: 'project',
   projects: [
     { id: 'project', path: DIRECTORY, label: 'Project' },
@@ -3439,7 +3440,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('in-flight loadAgents does not restore pre-await sync config defaults after a clearing event', async () => {
     const pendingAgents = deferred<TestAgent[]>();
-    const syncConfigs = new Map<string, Record<string, unknown>>([
+    const syncConfigs = new Map<string, Config>([
       [DIRECTORY, { default_agent: 'review', model: 'openai/gpt-5.5' }],
     ]);
     setSyncRefs(

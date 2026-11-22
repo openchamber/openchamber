@@ -6,9 +6,9 @@
 // This check counts only what the merge itself adds:
 //
 //   rules: for each anti-slop rule, the total over every file either side
-//   changed since the merge base must satisfy merged <= fork + upstream - base.
-//   Totals over the whole set, not per file, so upstream's moves and splits are
-//   not new.
+//   changed since the merge base must not exceed the sum of each file's
+//   fork + upstream - base, clamped at 0. Totals over the whole set, not per
+//   file, so upstream's moves and splits are not new.
 //
 //   length: a source file over the size limit may not exceed its larger parent
 //   plus the lines the fork itself added to that path since the base. A file
@@ -126,13 +126,29 @@ const ruleTotals = (counts) => {
   return totals;
 };
 
-/** Rules whose merged total exceeds fork + upstream - base. */
+/**
+ * Per rule, the totals of each side and the allowance: each file's
+ * fork + upstream - base, clamped at 0, summed. Unclamped, a path both sides
+ * removed or moved (base had findings, neither side has them there) would
+ * take its base findings off the allowance for every other file.
+ */
 export const findMergeRatchetViolations = ({ base, fork, upstream, merged }) => {
-  const rules = new Set([...base.keys(), ...fork.keys(), ...upstream.keys(), ...merged.keys()]);
-  return [...rules].sort().map((rule) => {
-    const counts = { base: base.get(rule) ?? 0, fork: fork.get(rule) ?? 0, upstream: upstream.get(rule) ?? 0, merged: merged.get(rule) ?? 0 };
-    return { rule, ...counts, allowed: counts.fork + counts.upstream - counts.base };
-  });
+  const [baseTotals, forkTotals, upstreamTotals, mergedTotals] = [base, fork, upstream, merged].map(ruleTotals);
+  const allowed = new Map();
+  for (const key of new Set([...base.keys(), ...fork.keys(), ...upstream.keys()])) {
+    const rule = key.split('\0')[1];
+    const share = Math.max(0, (fork.get(key) ?? 0) + (upstream.get(key) ?? 0) - (base.get(key) ?? 0));
+    allowed.set(rule, (allowed.get(rule) ?? 0) + share);
+  }
+  const rules = new Set([...baseTotals.keys(), ...forkTotals.keys(), ...upstreamTotals.keys(), ...mergedTotals.keys()]);
+  return [...rules].sort().map((rule) => ({
+    rule,
+    base: baseTotals.get(rule) ?? 0,
+    fork: forkTotals.get(rule) ?? 0,
+    upstream: upstreamTotals.get(rule) ?? 0,
+    allowed: allowed.get(rule) ?? 0,
+    merged: mergedTotals.get(rule) ?? 0,
+  }));
 };
 
 /** Lines each path gained on the fork since the base, from `git diff --numstat`. */
@@ -215,10 +231,8 @@ const main = () => {
   };
 
   const counts = Object.fromEntries(Object.entries(sides).map(([side, contents]) => [side, fileRuleCounts(contents)]));
-  const rows = findMergeRatchetViolations({
-    base: ruleTotals(counts.base), fork: ruleTotals(counts.fork), upstream: ruleTotals(counts.upstream), merged: ruleTotals(counts.merged),
-  });
-  console.log('\n▶ rules (merged <= fork + upstream - base)');
+  const rows = findMergeRatchetViolations(counts);
+  console.log('\n▶ rules (merged <= sum of each file\'s max(0, fork + upstream - base))');
   console.log('rule\tbase\tfork\tupstream\tallowed\tmerged');
   for (const row of rows) console.log(`${row.rule}\t${row.base}\t${row.fork}\t${row.upstream}\t${row.allowed}\t${row.merged}${row.merged > row.allowed ? '\tOVER' : ''}`);
   const ruleViolations = rows.filter((row) => row.merged > row.allowed);
@@ -227,12 +241,13 @@ const main = () => {
     // A file's findings can come from either parent under another path, so
     // this lists where to look, not what is new.
     for (const { rule } of ruleViolations) {
-      console.log(`\n  ${rule}: files with more findings than either parent`);
+      console.log(`\n  ${rule}: files over their own share`);
       for (const [key, merged] of counts.merged) {
         const [file, keyRule] = key.split('\0');
         if (keyRule !== rule) continue;
-        const parent = Math.max(counts.fork.get(key) ?? 0, counts.upstream.get(key) ?? 0);
-        if (merged > parent) console.log(`    ${file}: ${merged} (fork ${counts.fork.get(key) ?? 0}, upstream ${counts.upstream.get(key) ?? 0})`);
+        const [forkCount, upstreamCount, baseCount] = [counts.fork, counts.upstream, counts.base].map((side) => side.get(key) ?? 0);
+        const share = Math.max(0, forkCount + upstreamCount - baseCount);
+        if (merged > share) console.log(`    ${file}: ${merged}, its share ${share} (base ${baseCount}, fork ${forkCount}, upstream ${upstreamCount})`);
       }
     }
   }
