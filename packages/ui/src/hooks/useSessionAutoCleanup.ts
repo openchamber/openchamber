@@ -66,6 +66,7 @@ export const useSessionAutoCleanup = ({ autoRun = true, enabled = true }: Cleanu
         }
       }).catch((error) => {
         console.error('[SessionRetention] Cleanup failed', error);
+        if (attemptGeneration === generation) schedule(RETENTION_INTERVAL_MS);
       });
     };
     const unsubscribe = subscribeRuntimeEndpointChanged(() => {

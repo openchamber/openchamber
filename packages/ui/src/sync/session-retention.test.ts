@@ -164,11 +164,20 @@ describe('retention execution', () => {
     expect(useSessionRetentionRunStore.getState().isRunning).toBe(false);
   });
 
-  test('refuses a failed global load even when fallback sessions remain', async () => {
+  test('a failed global load preserves fallback sessions and starts the normal cooldown', async () => {
     seed([session('old')]);
     useGlobalSessionsStore.setState({ status: 'error' });
     const remove = spyOn(opencodeClient, 'deleteSession');
-    await expect(runSessionRetentionCleanup({ force: true })).rejects.toThrow('complete session list');
+    spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
+      autoDeleteEnabled: true,
+      autoDeleteAfterDays: 30,
+      sessionRetentionOnlyArchived: false,
+      sessionRetentionAction: 'delete',
+    }));
+    const startedAt = Date.now();
+    await expect(runSessionRetentionCleanup()).rejects.toThrow('complete session list');
+    expect(useUIStore.getState().autoDeleteLastRunAt).toBeGreaterThanOrEqual(startedAt);
+    expect((await runSessionRetentionCleanup()).skippedReason).toBe('cooldown');
     expect(remove.mock.calls).toHaveLength(0);
     expect(useGlobalSessionsStore.getState().entityById.has('old')).toBe(true);
   });
