@@ -82,6 +82,12 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // False until the watcher stream delivers its first payload in this
   // process.
   let watcherSawPayload = false;
+  // Candidates live only during reconciliation reads. Even a throttled busy
+  // event protects a restarted turn and invalidates any earlier missing read.
+  let missingBefore = new Set();
+  const pendingStatusReads = new Set();
+  let statusGeneration = 0;
+  let statusReconcileTimer = null;
 
   const getOrCreatePendingRequests = (sessionId) => {
     let entry = pendingRequestsBySession.get(sessionId);
@@ -253,6 +259,9 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
 
   const updateSessionState = (sessionId, status, eventId, metadata = {}) => {
     if (!sessionId || typeof sessionId !== 'string') return;
+
+    missingBefore.delete(sessionId);
+    for (const candidates of pendingStatusReads) candidates.delete(sessionId);
 
     const now = Date.now();
     const existing = sessionStates.get(sessionId);
@@ -495,6 +504,68 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     return { sessionIds: [...interruptedSessionIds] };
   };
 
+  // Missed completion events leave this host map busy and seed stale activity
+  // into new windows. `readActiveSessionIds` answers with
+  // OpenCode's own running list (`/api/session/active`), or null when it could
+  // not be read; that list never names a session inside an isolated space, and
+  // a session updated after the read started keeps that update.
+  //
+  // A session is settled only when two reads in a row miss it. Right after
+  // OpenCode restarts, a turn it resumes is not on the list until its drain
+  // starts again; one miss must not end a turn that is about to continue.
+  const reconcileBusySessionsWithActive = async (readActiveSessionIds) => {
+    if (pendingStatusReads.size > 0) return [];
+    const generation = statusGeneration;
+    const candidates = new Set(sessionStates.keys());
+    pendingStatusReads.add(candidates);
+    let active;
+    try {
+      active = await readActiveSessionIds();
+    } catch (error) {
+      if (generation === statusGeneration) missingBefore.clear();
+      throw error;
+    } finally {
+      pendingStatusReads.delete(candidates);
+    }
+    if (generation !== statusGeneration) return [];
+    if (!active) {
+      missingBefore.clear();
+      return [];
+    }
+    const missing = new Set();
+    for (const [sessionId, state] of sessionStates) {
+      if (state.status !== 'busy' && state.status !== 'retry') continue;
+      if (active.has(sessionId) || !candidates.has(sessionId)) continue;
+      if (sessionActivityPhases.get(sessionId)?.spaceId) continue;
+      missing.add(sessionId);
+    }
+    const settled = [...missing].filter((sessionId) => missingBefore.has(sessionId));
+    for (const sessionId of settled) {
+      missing.delete(sessionId);
+      updateSessionState(sessionId, 'idle', `reconciled-${Date.now()}`);
+    }
+    missingBefore = missing;
+    return settled;
+  };
+
+  const hasBusySessions = () => {
+    for (const state of sessionStates.values()) {
+      if (state.status === 'busy' || state.status === 'retry') return true;
+    }
+    return false;
+  };
+
+  const startStatusReconciliation = (readActiveSessionIds) => {
+    if (statusReconcileTimer) return;
+    // Two reads at this cadence confirm a missing completion within a minute
+    // without polling idle hosts. The stream remains the immediate path.
+    statusReconcileTimer = setInterval(() => {
+      if (!hasBusySessions()) return;
+      void reconcileBusySessionsWithActive(readActiveSessionIds).catch(() => {});
+    }, 30_000);
+    statusReconcileTimer.unref?.();
+  };
+
   const cleanupOldSessionStates = () => {
     const now = Date.now();
     for (const [sessionId, data] of sessionStates) {
@@ -540,6 +611,11 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   };
 
   const dispose = () => {
+    statusGeneration += 1;
+    pendingStatusReads.clear();
+    missingBefore.clear();
+    clearInterval(statusReconcileTimer);
+    statusReconcileTimer = null;
     clearInterval(cleanupInterval);
     for (const timer of sessionActivityCooldowns.values()) {
       clearTimeout(timer);
@@ -558,6 +634,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // connection state here; readiness in the snapshot is this state AND
   // the first-payload mark, never either one alone (#1441).
   const setWatcherConnected = (connected) => {
+    if (!connected) {
+      statusGeneration += 1;
+      missingBefore.clear();
+    }
     watcherConnected = connected === true;
   };
 
@@ -578,6 +658,9 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     markUserMessageSent,
     resetAllSessionActivityToIdle,
     interruptBusySessionsAfterRestart,
+    reconcileBusySessionsWithActive,
+    hasBusySessions,
+    startStatusReconciliation,
     dispose,
   };
 };
