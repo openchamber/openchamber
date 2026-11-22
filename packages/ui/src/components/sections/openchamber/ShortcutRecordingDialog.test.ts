@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { getShortcutBindingConflicts } from '@/lib/shortcuts';
 import { settleShortcutRecordingState, updateShortcutRecordingState } from './ShortcutRecordingDialog';
 
 const emptyState = { chords: [], livePreview: null, settled: false };
@@ -99,5 +100,26 @@ describe('ShortcutRecordingDialog recording state', () => {
     expect(updateShortcutRecordingState(
       emptyState, keyEvent('n', { shiftKey: true, altKey: true, metaKey: true }), 'keydown', 1, { macModifiers: true },
     ).chords).toEqual([]);
+  });
+});
+
+describe('rebinding Move to background to Ctrl+B', () => {
+  const record = (macModifiers: boolean) => settleShortcutRecordingState(
+    updateShortcutRecordingState(emptyState, keyEvent('b', { ctrlKey: true }), 'keydown', 2, { macModifiers }),
+  ).chords.join(' ');
+
+  test('on macOS records Control as its own modifier, with nothing to replace', () => {
+    const combo = record(true);
+    expect(combo).toBe('ctrl+b');
+    expect(getShortcutBindingConflicts('background_session_work', combo)).toEqual([]);
+  });
+
+  test('elsewhere records it as mod+b, whose only conflict is the replaceable sidebar toggle', () => {
+    const combo = record(false);
+    expect(combo).toBe('mod+b');
+    const conflicts = getShortcutBindingConflicts('background_session_work', combo);
+    expect(conflicts.map((conflict) => [conflict.action.id, conflict.kind, conflict.action.customizable])).toEqual([
+      ['toggle_sidebar', 'exact', true],
+    ]);
   });
 });
