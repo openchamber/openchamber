@@ -18,7 +18,7 @@ export const isSplashColor = (value) => SPLASH_COLOR_PATTERN.test(String(value))
 // keeps it, so local probing still authenticates at use time. Values
 // without userinfo pass through byte-identical.
 const stripUrlUserinfo = (value) => {
-  if (typeof value !== 'string' || !value.includes('@')) {
+  if (!value.includes('@')) {
     return value;
   }
   try {
@@ -34,11 +34,20 @@ const stripUrlUserinfo = (value) => {
   }
 };
 
+// A host saved without a label gets its URL as the label, credentials included.
+const URL_BEARING_HOST_FIELDS = ['label', 'url', 'apiUrl'];
+
+const redactHostForRemote = ({ clientToken: _clientToken, requestHeaders: _requestHeaders, ...host }) => {
+  const redacted = { ...host };
+  for (const field of URL_BEARING_HOST_FIELDS) {
+    if (field in host) {
+      redacted[field] = stripUrlUserinfo(host[field]);
+    }
+  }
+  return redacted;
+};
+
 export const redactHostsConfigForRemote = (config) => ({
   ...config,
-  hosts: config.hosts.map(({ clientToken: _clientToken, requestHeaders: _requestHeaders, ...host }) => ({
-    ...host,
-    ...(host.url !== undefined ? { url: stripUrlUserinfo(host.url) } : {}),
-    ...(host.apiUrl !== undefined ? { apiUrl: stripUrlUserinfo(host.apiUrl) } : {}),
-  })),
+  hosts: config.hosts.map(redactHostForRemote),
 });

@@ -75,4 +75,15 @@ describe('redactHostsConfigForRemote', () => {
     // at use time are unaffected.
     expect(config.hosts[0].url).toContain('user:pass@');
   });
+
+  test('strips credentials from a label generated from the URL', () => {
+    const config = {
+      hosts: [{ id: 'c', label: 'https://user:pass@auto.test/base', url: 'https://user:pass@auto.test/base' }],
+    };
+
+    const redacted = redactHostsConfigForRemote(config);
+
+    expect(redacted.hosts[0].label).toBe('https://auto.test/base');
+    expect(JSON.stringify(redacted)).not.toContain('pass');
+  });
 });
