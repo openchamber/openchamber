@@ -244,6 +244,7 @@ export const SETTINGS_REGISTRY = {
   agentRenderToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentRenderToolEnabled', (v) => useUIStore.getState().setAgentRenderToolEnabled(v)) }),
   agentUsageToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentUsageToolEnabled', (v) => useUIStore.getState().setAgentUsageToolEnabled(v)) }),
   agentTerminalToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentTerminalToolEnabled', (v) => useUIStore.getState().setAgentTerminalToolEnabled(v)) }),
+  agentActionsToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentActionsToolEnabled', (v) => useUIStore.getState().setAgentActionsToolEnabled(v)) }),
   agentImageToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentImageToolEnabled', (v) => useUIStore.getState().setAgentImageToolEnabled(v)) }),
   agentImageModel: field({ scope: 'instance', parse: parseNonEmptyString, ui: uiStore('agentImageModel', (v) => useUIStore.getState().setAgentImageModel(v)) }),
   agentSecretToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentSecretToolEnabled', (v) => useUIStore.getState().setAgentSecretToolEnabled(v)) }),

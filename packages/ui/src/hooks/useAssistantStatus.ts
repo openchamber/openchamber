@@ -211,6 +211,13 @@ const OPENCHAMBER_STATUS = new Map(Object.entries<ToolActionStatus>({
     },
     openchamber_notify: { fallback: 'chat.agentStatus.notify' },
     openchamber_usage: { fallback: 'chat.agentStatus.usage' },
+    openchamber_actions: {
+        fallback: 'chat.agentStatus.actions',
+        actions: {
+            'actions.run': 'chat.agentStatus.actions.run',
+            'actions.stop': 'chat.agentStatus.actions.stop',
+        },
+    },
     openchamber_render: { fallback: 'chat.agentStatus.render' },
     openchamber_image: { fallback: 'chat.agentStatus.image' },
     openchamber_secret: { fallback: 'chat.agentStatus.secret', actions: { 'secret.run': 'chat.agentStatus.secretRun' } },

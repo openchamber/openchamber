@@ -394,6 +394,7 @@ export const uiStorePersistOptions = {
     agentNotifyToolEnabled: state.agentNotifyToolEnabled,
     agentUsageToolEnabled: state.agentUsageToolEnabled,
     agentTerminalToolEnabled: state.agentTerminalToolEnabled,
+    agentActionsToolEnabled: state.agentActionsToolEnabled,
     agentImageToolEnabled: state.agentImageToolEnabled,
     agentImageModel: state.agentImageModel,
     agentMemoryDreamingEnabled: state.agentMemoryDreamingEnabled,

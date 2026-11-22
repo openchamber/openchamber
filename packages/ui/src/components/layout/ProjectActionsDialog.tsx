@@ -19,7 +19,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import type { OpenChamberProjectAction } from '@/lib/openchamberConfig';
 import { useObserveProjectActionRuns, useProjectActions } from './projectActionsRunnerContext';
-import { ProjectActionRunIndicator } from './ProjectActionRunIndicator';
+import { ProjectActionAgentBadge, ProjectActionRunIndicator } from './ProjectActionRunIndicator';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
 
 const CONFIGURE_ITEM_VALUE = '__configure_project_actions__';
@@ -93,6 +93,7 @@ export const ProjectActionsDialog: React.FC = () => {
                             {t('projectActions.menu.sharedBadge')}
                           </span>
                         ) : null}
+                        <ProjectActionAgentBadge run={run} />
                         <ProjectActionRunIndicator run={run} showIdle className="ms-auto" />
                       </CommandItem>
                     );

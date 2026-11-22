@@ -91,6 +91,7 @@ const AGENT_TOOL_BOOLEAN_KEYS = [
   'agentControlToolEnabled', 'agentScheduleToolEnabled', 'agentMemoryToolEnabled', 'agentMemoryDreamingEnabled',
   'agentKnowledgeToolEnabled', 'agentWorkflowToolEnabled', 'agentWorkflowAutoApprove', 'agentWorkflowAutoApproveLeads', 'agentNotifyToolEnabled',
   'agentRenderToolEnabled', 'agentImageToolEnabled', 'agentSecretToolEnabled', 'agentUsageToolEnabled', 'agentTerminalToolEnabled',
+  'agentActionsToolEnabled',
 ] as const;
 
 const dreamingModelSchema = z.string().trim().refine((value) => value === '' || /^[^/\s]+\/\S+$/.test(value));

@@ -817,7 +817,7 @@ export const useProjectActionsRunner = ({
         }
         adoptedExecutionId = created.purpose?.type === 'project-action' ? created.purpose.executionId : requestedExecutionId;
         activeSessionId = created.sessionId;
-        setTabPurpose(executionDirectory, tabId, { type: 'project-action', actionId: discovered.id, executionId: adoptedExecutionId });
+        setTabPurpose(executionDirectory, tabId, created.purpose?.type === 'project-action' ? created.purpose : { type: 'project-action', actionId: discovered.id, executionId: adoptedExecutionId });
         setTabSessionId(executionDirectory, tabId, activeSessionId, { expectedExecutionId: adoptedExecutionId });
         setConnecting(executionDirectory, tabId, false, { expectedExecutionId: adoptedExecutionId });
       }
@@ -852,7 +852,7 @@ export const useProjectActionsRunner = ({
               useTerminalStore.getState().replaceBuffer(executionDirectory, tabId, event.data ?? '', event.sequence ?? 0, terminalSnapshotSize(event));
               useTerminalStore.getState().setConnecting(executionDirectory, tabId, false, { expectedExecutionId: adoptedExecutionId });
               if (event.purpose?.type === 'project-action') {
-                useTerminalStore.getState().setTabPurpose(executionDirectory, tabId, { type: 'project-action', actionId: event.purpose.actionId, executionId: event.purpose.executionId });
+                useTerminalStore.getState().setTabPurpose(executionDirectory, tabId, event.purpose);
               }
               if (event.status === 'running') {
                 useTerminalStore.getState().setTabLifecycle(executionDirectory, tabId, 'running', { expectedExecutionId: adoptedExecutionId });

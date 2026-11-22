@@ -52,6 +52,20 @@ describe('terminal state reconciliation', () => {
 
   afterEach(() => useTerminalStore.getState().clearAll());
 
+  test('an action run an agent started keeps its agent mark while it runs, and loses it once it exits', () => {
+    setup();
+    const agentRun: TerminalServerSession = {
+      sessionId: 'agent-1', cwd: '/repo', status: 'running', createdAt: 100, mode: 'command',
+      purpose: { type: 'project-action', actionId: 'dev', executionId: 'agent-1', agentSessionId: 'ses_a' },
+    };
+    useTerminalStore.getState().reconcileServerSessions('/repo', [agentRun]);
+    const tab = () => useTerminalStore.getState().getDirectoryState('/repo')!.tabs.find((entry) => entry.purpose.type === 'project-action')!;
+    expect(tab().purpose).toEqual({ type: 'project-action', actionId: 'dev', executionId: 'agent-1', agentSessionId: 'ses_a' });
+
+    useTerminalStore.getState().reconcileServerSessions('/repo', [{ ...agentRun, status: 'exited' }]);
+    expect(tab().purpose).toEqual({ type: 'project-action', actionId: 'dev', executionId: null });
+  });
+
   test('reconciles unknown server sessions into the fresh placeholder tab', () => {
     setup();
     useTerminalStore.getState().reconcileServerSessions('/repo', [

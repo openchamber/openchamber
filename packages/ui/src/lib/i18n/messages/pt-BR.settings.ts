@@ -1238,6 +1238,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Os agentes avisam quando terminam ou ficam bloqueados.",
   'settings.openchamber.tools.field.agentTerminalTool': 'Painel de terminal',
   'settings.openchamber.tools.field.agentTerminalToolSummary': 'Permite que o agente liste os terminais desta pasta e leia o que eles imprimiram. Um terminal guarda tudo o que foi digitado nele, inclusive segredos, então isto fica desativado até você ativá-lo.',
+  'settings.openchamber.tools.field.agentActionsTool': "Ações do projeto",
+  'settings.openchamber.tools.field.agentActionsToolSummary': "Permite que o agente execute as ações deste projeto, como o servidor de desenvolvimento, leia o que elas imprimem e pare as execuções que ele iniciou. As execuções dele aparecem no menu de ações como iniciadas pelo agente.",
   'settings.openchamber.tools.field.agentKnowledgeTool': "Ferramenta de conhecimento do projeto",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Ferramenta de conhecimento do projeto",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Os agentes leem e atualizam as notas, tarefas e planos do projeto.",

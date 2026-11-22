@@ -31,6 +31,12 @@ Schakel **URL automatisch openen** in voor een actie die een server start. OpenC
 
 Heeft de server een vast adres, vul het dan in het URL-veld van de actie in. `{worktree}` en `{branch}` vullen de checkout in waarin de actie draait, zodat één actie in elke worktree werkt. Met [portless](https://github.com/vercel-labs/portless) opent `https://{worktree}.myapp.localhost` in een worktree op `feature/auth` het adres `https://auth.myapp.localhost` en in de hoofdcheckout `https://myapp.localhost`. Vaak is het veld niet eens nodig: als portless zijn adres toont, opent OpenChamber dat adres in plaats van de poort erachter. Op een desktop die met een externe instantie is verbonden, opent het in plaats daarvan de poort, omdat alleen loopbackpoorten via de tunnel naar de externe machine gaan.
 
+## De agent acties laten uitvoeren
+
+Ook een agent kan de acties van het project uitvoeren, zodat hij je ontwikkelserver start met het commando dat je hebt opgeslagen. Zet **Projectacties** aan in **Instellingen → Algemeen → OpenChamber-tools**; standaard staat het uit. Sessies in een project met acties krijgen ze dan te horen.
+
+De agent toont de acties voor deze computer, voert er een uit in dezelfde map als jij, leest wat die printte en stopt hem weer. Zijn run staat in het actiemenu met het label **door agent**, zodat je geen tweede kopie start. Draai je de actie al zelf, dan gebruikt de agent jouw run en kan hij die niet stoppen. De runs van de agent stoppen wanneer zijn sessie wordt gearchiveerd of OpenChamber afsluit. Sessies in een geïsoleerde ruimte krijgen de tool niet.
+
 ## Zie ook
 
 - [Repositoryconfiguratie](/nl/repository-config/) om acties en inrichtingsopdrachten met het hele team te delen

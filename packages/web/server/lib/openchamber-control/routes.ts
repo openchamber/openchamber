@@ -1,5 +1,5 @@
 import express from 'express';
-import { OPENCHAMBER_TERMINAL_ACTIONS } from './actions.js';
+import { OPENCHAMBER_PROJECT_ACTIONS_ACTIONS, OPENCHAMBER_TERMINAL_ACTIONS } from './actions.js';
 import { asControlError } from './error.js';
 import type { Application } from '../shared/http-contracts.js';
 import type { ControlInput } from './contracts.js';
@@ -21,7 +21,10 @@ interface ControlRequestFields {
 const isAction = (value: unknown): value is string => typeof value === 'string';
 const isControlInput = (value: unknown): value is ControlInput => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-const AGENT_TOOL_ONLY_ACTIONS = new Set(OPENCHAMBER_TERMINAL_ACTIONS);
+const AGENT_TOOL_ONLY_ACTIONS = new Map<string, string>([
+  ...OPENCHAMBER_TERMINAL_ACTIONS.map((action): [string, string] => [action, 'openchamber_terminal']),
+  ...OPENCHAMBER_PROJECT_ACTIONS_ACTIONS.map((action): [string, string] => [action, 'openchamber_actions']),
+]);
 
 export const registerOpenChamberControlRoutes = (app: Application, { controlService, laterPages = null }: ControlRoutesOptions) => {
   app.post('/api/openchamber/control', express.json({ limit: '1mb' }), async (req, res) => {
@@ -34,8 +37,9 @@ export const registerOpenChamberControlRoutes = (app: Application, { controlServ
     try {
       const body: ControlRequestFields | undefined = req.body == null ? undefined : Object(req.body);
       const action = isAction(body?.action) ? body.action : '';
-      if (AGENT_TOOL_ONLY_ACTIONS.has(action)) {
-        return res.status(403).json({ error: `${action} is available only to agents through the openchamber_terminal tool` });
+      const agentTool = AGENT_TOOL_ONLY_ACTIONS.get(action);
+      if (agentTool) {
+        return res.status(403).json({ error: `${action} is available only to agents through the ${agentTool} tool` });
       }
       const requestInput = body?.input;
       const input = isControlInput(requestInput)

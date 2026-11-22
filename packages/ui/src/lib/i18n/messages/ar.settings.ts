@@ -1270,6 +1270,8 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentNotifyToolSummary': 'السماح للوكلاء بتنبيهك عند انتهاء العمل أو عند تعثرهم.',
   'settings.openchamber.tools.field.agentTerminalTool': 'لوحة الطرفية',
   'settings.openchamber.tools.field.agentTerminalToolSummary': 'يتيح للوكيل سرد طرفيات هذا المجلد وقراءة ما طبعته. تحتفظ الطرفية بكل ما كُتب فيها، بما في ذلك الأسرار، لذا تبقى مطفأة حتى تشغّلها.',
+  'settings.openchamber.tools.field.agentActionsTool': "إجراءات المشروع",
+  'settings.openchamber.tools.field.agentActionsToolSummary': "يتيح للوكيل تشغيل إجراءات هذا المشروع، مثل خادم التطوير، وقراءة مخرجاتها وإيقاف التشغيلات التي بدأها. تظهر تشغيلاته في قائمة الإجراءات بعلامة أن الوكيل بدأها.",
   'settings.openchamber.tools.field.agentKnowledgeTool': "أداة معرفة المشروع",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "أداة معرفة المشروع",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "السماح للوكلاء بقراءة ملاحظات المشروع ومهامه وخططه وتحديثها.",

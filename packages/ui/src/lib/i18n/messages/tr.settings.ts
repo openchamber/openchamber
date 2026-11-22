@@ -1243,6 +1243,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentNotifyToolSummary": "İş bittiğinde ya da takıldıklarında agent'lar size haber verir.",
   'settings.openchamber.tools.field.agentTerminalTool': 'Terminal paneli',
   'settings.openchamber.tools.field.agentTerminalToolSummary': 'Ajanın bu klasördeki terminalleri listelemesini ve yazdırdıklarını okumasını sağlar. Bir terminal, gizli bilgiler dahil yazılan her şeyi tutar; bu nedenle siz açana kadar kapalı kalır.',
+  'settings.openchamber.tools.field.agentActionsTool': "Proje eylemleri",
+  'settings.openchamber.tools.field.agentActionsToolSummary': "Ajanın bu projenin geliştirme sunucusu gibi eylemlerini çalıştırmasına, çıktılarını okumasına ve kendi başlattığı çalıştırmaları durdurmasına izin verir. Ajanın çalıştırmaları eylemler menüsünde ajan başlattı olarak görünür.",
   'settings.openchamber.tools.field.agentKnowledgeTool': "Proje bilgisi aracı",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Proje bilgisi aracı",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Ajanlar projenin notlarını, yapılacaklarını ve planlarını okuyup günceller.",

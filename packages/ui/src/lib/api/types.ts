@@ -109,7 +109,7 @@ export interface TerminalSession {
 
 export type TerminalSessionPurpose =
   | { type: 'terminal' }
-  | { type: 'project-action'; actionId: string; executionId: string };
+  | { type: 'project-action'; actionId: string; executionId: string; agentSessionId?: string };
 
 export type TerminalShell = 'auto' | 'bash' | 'zsh' | 'sh' | 'fish' | 'pwsh' | 'powershell' | 'cmd' | 'dash' | 'ksh' | 'nu';
 

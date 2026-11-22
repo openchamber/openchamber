@@ -1271,6 +1271,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentNotifyToolSummary": "作業が終わったときや行き詰まったときにエージェントが知らせます。",
   'settings.openchamber.tools.field.agentTerminalTool': 'ターミナルパネル',
   'settings.openchamber.tools.field.agentTerminalToolSummary': 'エージェントがこのフォルダーのターミナルを一覧し、出力された内容を読めるようにします。ターミナルには入力された内容がすべて残り、秘密情報も含まれるため、オンにするまで無効のままです。',
+  'settings.openchamber.tools.field.agentActionsTool': "プロジェクトアクション",
+  'settings.openchamber.tools.field.agentActionsToolSummary': "開発サーバーなど、このプロジェクトのアクションをエージェントが実行し、その出力を読み、自分で起動した実行を停止できるようにします。エージェントの実行はアクションメニューに「エージェントが起動」と表示されます。",
   'settings.openchamber.tools.field.agentKnowledgeTool': "プロジェクトナレッジツール",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "プロジェクトナレッジツール",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "エージェントがプロジェクトのメモ、ToDo、プランを読み書きできます。",

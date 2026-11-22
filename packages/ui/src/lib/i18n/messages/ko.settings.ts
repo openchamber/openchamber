@@ -1238,6 +1238,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentNotifyToolSummary": "작업이 끝나거나 막히면 에이전트가 알려 줍니다.",
   'settings.openchamber.tools.field.agentTerminalTool': '터미널 패널',
   'settings.openchamber.tools.field.agentTerminalToolSummary': '에이전트가 이 폴더의 터미널을 나열하고 출력된 내용을 읽을 수 있습니다. 터미널에는 입력된 모든 내용이 비밀 정보까지 남으므로 켤 때까지 꺼져 있습니다.',
+  'settings.openchamber.tools.field.agentActionsTool': "프로젝트 작업",
+  'settings.openchamber.tools.field.agentActionsToolSummary': "에이전트가 개발 서버 같은 이 프로젝트의 작업을 실행하고, 출력을 읽고, 직접 시작한 실행을 중지할 수 있게 합니다. 에이전트의 실행은 작업 메뉴에 에이전트가 시작함으로 표시됩니다.",
   'settings.openchamber.tools.field.agentKnowledgeTool': "프로젝트 지식 도구",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "프로젝트 지식 도구",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "에이전트가 프로젝트의 메모, 할 일, 계획을 읽고 업데이트합니다.",

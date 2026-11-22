@@ -14,6 +14,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Project actions',
     'commandPalette.item.runProjectAction': 'Run: {name}',
     'commandPalette.item.stopProjectAction': 'Stop: {name}',
+    'projectActions.menu.agentBadge': 'by agent',
+    'projectActions.run.startedByAgent': 'Started by the agent',
   },
   de: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Projektaktionen öffnen',
@@ -29,6 +31,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Projektaktionen',
     'commandPalette.item.runProjectAction': 'Ausführen: {name}',
     'commandPalette.item.stopProjectAction': 'Stoppen: {name}',
+    'projectActions.menu.agentBadge': 'vom Agenten',
+    'projectActions.run.startedByAgent': 'Vom Agenten gestartet',
   },
   fr: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Ouvrir les actions du projet',
@@ -44,6 +48,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Actions du projet',
     'commandPalette.item.runProjectAction': 'Lancer : {name}',
     'commandPalette.item.stopProjectAction': 'Arrêter : {name}',
+    'projectActions.menu.agentBadge': 'par l’agent',
+    'projectActions.run.startedByAgent': "Lancée par l'agent",
   },
   nl: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Projectacties openen',
@@ -59,6 +65,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Projectacties',
     'commandPalette.item.runProjectAction': 'Starten: {name}',
     'commandPalette.item.stopProjectAction': 'Stoppen: {name}',
+    'projectActions.menu.agentBadge': 'door agent',
+    'projectActions.run.startedByAgent': 'Gestart door de agent',
   },
   es: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Abrir acciones del proyecto',
@@ -74,6 +82,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Acciones del proyecto',
     'commandPalette.item.runProjectAction': 'Ejecutar: {name}',
     'commandPalette.item.stopProjectAction': 'Detener: {name}',
+    'projectActions.menu.agentBadge': 'por el agente',
+    'projectActions.run.startedByAgent': 'Iniciada por el agente',
   },
   ja: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'プロジェクトアクションを開く',
@@ -89,6 +99,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'プロジェクトアクション',
     'commandPalette.item.runProjectAction': '実行: {name}',
     'commandPalette.item.stopProjectAction': '停止: {name}',
+    'projectActions.menu.agentBadge': 'エージェント',
+    'projectActions.run.startedByAgent': 'エージェントが起動',
   },
   'pt-BR': {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Abrir ações do projeto',
@@ -104,6 +116,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Ações do projeto',
     'commandPalette.item.runProjectAction': 'Executar: {name}',
     'commandPalette.item.stopProjectAction': 'Parar: {name}',
+    'projectActions.menu.agentBadge': 'pelo agente',
+    'projectActions.run.startedByAgent': 'Iniciada pelo agente',
   },
   uk: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Відкрити дії проєкту',
@@ -119,6 +133,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Дії проєкту',
     'commandPalette.item.runProjectAction': 'Запустити: {name}',
     'commandPalette.item.stopProjectAction': 'Зупинити: {name}',
+    'projectActions.menu.agentBadge': 'агент',
+    'projectActions.run.startedByAgent': 'Запустив агент',
   },
   ko: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': '프로젝트 작업 열기',
@@ -134,6 +150,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': '프로젝트 작업',
     'commandPalette.item.runProjectAction': '실행: {name}',
     'commandPalette.item.stopProjectAction': '중지: {name}',
+    'projectActions.menu.agentBadge': '에이전트',
+    'projectActions.run.startedByAgent': '에이전트가 시작함',
   },
   pl: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Otwórz akcje projektu',
@@ -149,6 +167,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Akcje projektu',
     'commandPalette.item.runProjectAction': 'Uruchom: {name}',
     'commandPalette.item.stopProjectAction': 'Zatrzymaj: {name}',
+    'projectActions.menu.agentBadge': 'przez agenta',
+    'projectActions.run.startedByAgent': 'Uruchomione przez agenta',
   },
   'zh-CN': {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': '打开项目操作',
@@ -164,6 +184,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': '项目操作',
     'commandPalette.item.runProjectAction': '运行：{name}',
     'commandPalette.item.stopProjectAction': '停止：{name}',
+    'projectActions.menu.agentBadge': '智能体',
+    'projectActions.run.startedByAgent': '由智能体启动',
   },
   'zh-TW': {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': '開啟專案操作',
@@ -179,6 +201,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': '專案操作',
     'commandPalette.item.runProjectAction': '執行：{name}',
     'commandPalette.item.stopProjectAction': '停止：{name}',
+    'projectActions.menu.agentBadge': '代理',
+    'projectActions.run.startedByAgent': '由代理啟動',
   },
   tr: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'Proje eylemlerini aç',
@@ -194,6 +218,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'Proje eylemleri',
     'commandPalette.item.runProjectAction': 'Çalıştır: {name}',
     'commandPalette.item.stopProjectAction': 'Durdur: {name}',
+    'projectActions.menu.agentBadge': 'ajan',
+    'projectActions.run.startedByAgent': 'Ajan başlattı',
   },
   ar: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'فتح إجراءات المشروع',
@@ -209,6 +235,8 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'إجراءات المشروع',
     'commandPalette.item.runProjectAction': 'تشغيل: {name}',
     'commandPalette.item.stopProjectAction': 'إيقاف: {name}',
+    'projectActions.menu.agentBadge': 'الوكيل',
+    'projectActions.run.startedByAgent': 'بدأها الوكيل',
   },
   he: {
     'settings.openchamber.keyboardShortcuts.action.open_project_actions.label': 'פתיחת פעולות הפרויקט',
@@ -224,5 +252,7 @@ export const projectActionsI18n = {
     'commandPalette.item.openProjectActions': 'פעולות הפרויקט',
     'commandPalette.item.runProjectAction': 'הרצה: {name}',
     'commandPalette.item.stopProjectAction': 'עצירה: {name}',
+    'projectActions.menu.agentBadge': 'סוכן',
+    'projectActions.run.startedByAgent': 'הופעל על ידי הסוכן',
   },
 } as const;

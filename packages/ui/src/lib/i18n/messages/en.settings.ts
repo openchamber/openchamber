@@ -1270,6 +1270,8 @@ export const settingsDict = {
   "settings.openchamber.tools.field.agentNotifyToolSummary": "Let agents ping you when work is done or they're stuck.",
   'settings.openchamber.tools.field.agentTerminalTool': 'Terminal panel',
   "settings.openchamber.tools.field.agentTerminalToolSummary": "Let the agent list this folder's terminals and read what they printed. A terminal holds whatever was typed into it, secrets included, so this stays off until you turn it on.",
+  'settings.openchamber.tools.field.agentActionsTool': "Project actions",
+  'settings.openchamber.tools.field.agentActionsToolSummary': "Let the agent run this project's actions, such as its dev server, read what they print and stop the runs it started. Its runs show in the actions menu marked as started by the agent.",
   'settings.openchamber.tools.field.agentKnowledgeTool': "Project knowledge tool",
   'settings.openchamber.tools.field.agentKnowledgeToolAria': "Project knowledge tool",
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Let agents read and update the project's notes, todos and plans.",

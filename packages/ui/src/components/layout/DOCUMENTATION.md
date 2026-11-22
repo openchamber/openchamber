@@ -205,6 +205,10 @@ so it survives the sidebar closing and reopening. A folder change remounts the t
   use the session checkout. Session lookup uses the store's own directory key
   normalization to avoid Windows path mismatches. Transient fetch failure retains
   known actions, and an unavailable saved pick falls back to the first action.
+- A run an agent started through its tool comes from the server's listing with
+  `agentSessionId` in its purpose; the run carries `startedByAgent` while it runs,
+  and the header, menu and dialog mark it, so the user does not start a second
+  copy. The user can still stop it from here.
 - Repository actions require shared-setup trust before execution; declining runs
   nothing. The action chooser sets its highlight only on opening so updates
   cannot move the user's selection.
