@@ -192,6 +192,9 @@ export const parseQueuedItemInput = (value) => {
   if (contextPreview) item.contextPreview = contextPreview;
   item.sendConfig = sendConfig ?? {};
   if (goal) item.goal = goal;
+  // A goal spec sent as the message is literal text: a spec that starts with
+  // `/` must not run a command. Kept only when true.
+  if (raw.promptOnly === true) item.promptOnly = true;
   if (provenance) {
     item.scheduledTask = { projectId, taskId };
     const agent = asNonEmptyString(raw.sendConfig?.agent);
@@ -625,7 +628,7 @@ export function createMessageQueueRuntime({
 
     // Resolved before anything is admitted: a failed command lookup fails the
     // whole send, so a retry does not admit the context twice.
-    const command = await resolveSlashCommand(item.text, directory);
+    const command = item.promptOnly ? null : await resolveSlashCommand(item.text, directory);
 
     // Standing project context is written into the session first, exactly as
     // a UI send does it; a failed write sends without it rather than not at all.
@@ -837,12 +840,21 @@ export function createMessageQueueRuntime({
     return sessionId;
   };
 
-  const enqueue = async (sessionIdInput, directoryInput, itemInput) => {
+  /**
+   * `options.itemId` is for in-process callers that must enqueue exactly once
+   * across restarts (the goal writer's jobs): an item with that id already in
+   * the session's queue makes the call a no-op.
+   */
+  const enqueue = async (sessionIdInput, directoryInput, itemInput, options = {}) => {
     const sessionId = requireSessionId(sessionIdInput);
     const directory = asNonEmptyString(directoryInput);
     if (!directory) throw new TypeError('directory is required');
     const parsed = parseQueuedItemInput(itemInput);
     await load();
+    const requestedId = asNonEmptyString(options.itemId);
+    if (requestedId && queues.get(sessionId)?.items.some((entry) => entry.id === requestedId)) {
+      return { revision, session: sessionSnapshot(sessionId), itemId: requestedId };
+    }
     if (parsed.scheduledTask) {
       for (const queue of queues.values()) {
         if (queue.items.some((entry) => entry.scheduledTask?.projectId === parsed.scheduledTask.projectId && entry.scheduledTask.taskId === parsed.scheduledTask.taskId)) {
@@ -859,7 +871,7 @@ export function createMessageQueueRuntime({
       throw httpError('message queue is full', 409);
     }
     const item = {
-      id: `queued-${now()}-${Math.random().toString(36).slice(2, 9)}`,
+      id: requestedId || `queued-${now()}-${Math.random().toString(36).slice(2, 9)}`,
       createdAt: now(),
       ...parsed,
     };
@@ -1051,6 +1063,8 @@ export function createMessageQueueRuntime({
     load,
     snapshot,
     sessionSnapshot,
+    /** Whether the session's queue still holds the item (sent items leave it). */
+    hasItem: (sessionId, itemId) => Boolean(queues.get(sessionId)?.items.some((item) => item.id === itemId)),
     enqueue,
     cancelScheduledTask,
     remove,

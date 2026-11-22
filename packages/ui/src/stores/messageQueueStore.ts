@@ -128,7 +128,7 @@ export interface QueuedMessage {
     scheduledTask?: z.infer<typeof scheduledTaskSchema>;
 }
 
-interface QueuedMessageInput {
+export interface QueuedMessageInput {
     content: string;
     /** Defaults to `content`. */
     text?: string;
@@ -292,6 +292,13 @@ const toAttachedFile = (attachment: ServerQueueAttachment): AttachedFile => {
     return file;
 };
 
+/** A goal writer job's held message as the server hands it back (`/api/goals/spec-jobs/:id/take`). */
+export const takenItemSchema = serverItemBaseSchema.omit({ id: true, createdAt: true });
+
+/** A taken goal job's message, as the composer reads it. */
+export const queuedMessageFromTakenItem = (item: z.infer<typeof takenItemSchema>, id: string): QueuedMessage =>
+    toQueuedMessage({ ...item, id, createdAt: Date.now() });
+
 const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     const message: QueuedMessage = {
         id: item.id,
@@ -341,7 +348,7 @@ const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInpu
     return input;
 };
 
-const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessageSendConfig): ServerQueueItemInput => {
+export const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessageSendConfig): ServerQueueItemInput => {
     const item: ServerQueueItemInput = {
         content: message.content,
         text: message.text ?? message.content,

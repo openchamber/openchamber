@@ -76,7 +76,7 @@ const chatInputLines = readFileSync(
 ).split('\n');
 
 const choiceCallSites = chatInputLines
-  .map((line, index) => (/^(else )?applyGoalChoice\(options\?\.goal\);$/.test(line.trim()) ? index : -1))
+  .map((line, index) => (line.trim() === 'applyGoalChoice(options?.goal);' ? index : -1))
   .filter((index) => index >= 0);
 
 const nextStatement = (index: number): string => {
@@ -94,21 +94,17 @@ describe('ChatInput applies the goal choice at every exit', () => {
   test('the auto-review queue exit applies the choice before queueing', () => {
     const site = choiceCallSites[0];
     expect(precedingContext(site)).toContain('autoReviewRunning');
-    // A send waiting on a background goal must not be queued without it.
-    expect(precedingContext(site)).toContain('!backgroundGoal');
     expect(nextStatement(site)).toBe('void handleQueueMessage(options?.presetText);');
   });
 
   test('the dismissed-permission and form queue exit applies the choice before queueing', () => {
     const site = choiceCallSites[1];
     expect(precedingContext(site)).toContain('deniedPermissions || dismissedForms');
-    expect(precedingContext(site)).toContain('!backgroundGoal');
     expect(nextStatement(site)).toBe('void handleQueueMessage(options?.presetText);');
   });
 
-  test('the normal send applies the choice, or clears the arm for a background goal, with no exit before sending', () => {
+  test('the normal send applies the choice with no exit before sending', () => {
     const site = choiceCallSites[2];
-    expect(chatInputLines[site - 1].trim()).toBe('if (backgroundGoal) useSessionGoalArmStore.getState().setArmed(false);');
     const sendLine = chatInputLines.findIndex((line, index) => index > site && line.trim().startsWith('const sendPromise = sessionActions.sendMessage('));
     expect(sendLine).toBeGreaterThan(site);
     const between = chatInputLines.slice(site + 1, sendLine).filter((line) => !line.trim().startsWith('//'));
