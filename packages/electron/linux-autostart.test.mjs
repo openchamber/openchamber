@@ -207,8 +207,8 @@ test('re-enabling a user-disabled managed entry clears the disabled markers', as
 });
 
 test('a failed write leaves the previous entry intact and no temp file behind', async (t) => {
-  if (process.geteuid?.() === 0) {
-    t.skip('permission-based failure does not fail for root');
+  if (process.platform === 'win32' || process.geteuid?.() === 0) {
+    t.skip('POSIX permission-based failure: no effect on Windows or for root');
     return;
   }
   const { env, homeDir, filePath } = await makeLab();
@@ -225,6 +225,48 @@ test('a failed write leaves the previous entry intact and no temp file behind', 
   } finally {
     await fs.chmod(path.dirname(filePath), 0o700).catch(() => {});
     await fs.rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('overlapping enables all succeed and leave one entry and no temp files', async () => {
+  const lab = await makeLab();
+  try {
+    const results = await Promise.allSettled(Array.from({ length: 6 }, () => enable(lab)));
+    assert.deepEqual(results.map((result) => result.status), Array(6).fill('fulfilled'));
+    assert.match(await fs.readFile(lab.filePath, 'utf8'), /X-OpenChamber-Managed=true/);
+    assert.deepEqual(await fs.readdir(path.dirname(lab.filePath)), ['openchamber.desktop']);
+  } finally {
+    await fs.rm(lab.homeDir, { recursive: true, force: true });
+  }
+});
+
+test('an edit made while the entry is being rewritten is kept, never replaced from the stale read', async (t) => {
+  const lab = await makeLab();
+  try {
+    await enable(lab);
+    const managed = await fs.readFile(lab.filePath, 'utf8');
+    // The user edits the entry after the ownership read, while the update
+    // writes its temp file. The edit drops the managed key, so the entry
+    // becomes the user's own and must be left untouched.
+    const userOwned = managed.replace('X-OpenChamber-Managed=true\n', '').concat('Comment=mine\n');
+    const writeFile = fs.writeFile.bind(fs);
+    let edited = false;
+    t.mock.method(fs, 'writeFile', async (target, ...rest) => {
+      if (!edited && String(target).endsWith('.tmp')) {
+        edited = true;
+        await writeFile(lab.filePath, userOwned);
+      }
+      return writeFile(target, ...rest);
+    });
+
+    const result = await enable(lab, { env: { ...lab.env, APPIMAGE: '/moved/OpenChamber.AppImage' } });
+
+    assert.equal(edited, true);
+    assert.equal(result.foreignEntry, true);
+    assert.equal(await fs.readFile(lab.filePath, 'utf8'), userOwned);
+    assert.deepEqual(await fs.readdir(path.dirname(lab.filePath)), ['openchamber.desktop']);
+  } finally {
+    await fs.rm(lab.homeDir, { recursive: true, force: true });
   }
 });
 

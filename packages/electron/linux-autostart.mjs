@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -176,22 +177,84 @@ export const readLinuxAutostartEnabled = async (options = {}) => {
   return !isHiddenByUser(entry.keys);
 };
 
-const writeIfChanged = async (filePath, contents) => {
+// Writes `contents` only while the file still holds `expected` (the revision
+// the caller built it from; null for no file). The re-read right before the
+// rename narrows the window in which a concurrent edit could be replaced; a
+// changed file is left as it is and reported as a conflict.
+const writeIfUnchangedSince = async (filePath, contents, expected) => {
+  const next = Buffer.from(contents, 'utf8');
   const current = await readFileOrNull(filePath);
-  if (current && current.equals(Buffer.from(contents, 'utf8'))) return false;
+  if (current && current.equals(next)) return 'unchanged';
+  const matchesExpected = (buffer) => (buffer === null
+    ? expected === null
+    : expected !== null && buffer.toString('utf8') === expected);
+  if (!matchesExpected(current)) return 'conflict';
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.tmp`;
+  // One temp file per call: two overlapping writes must not share a path.
+  const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await fsp.writeFile(tempPath, contents, 'utf8');
+    await fsp.writeFile(tempPath, next);
+    if (!matchesExpected(await readFileOrNull(filePath))) {
+      await fsp.rm(tempPath, { force: true });
+      return 'conflict';
+    }
     await fsp.rename(tempPath, filePath);
   } catch (error) {
     await fsp.rm(tempPath, { force: true });
     throw error;
   }
-  return true;
+  return 'written';
 };
 
-export const setLinuxAutostartEnabled = async ({
+const MAX_WRITE_ATTEMPTS = 3;
+
+const applyLinuxAutostartEnabled = async ({
+  enabled,
+  appName,
+  backgroundArg,
+  env,
+  execPath,
+  homeDir,
+}) => {
+  const directory = resolveLinuxAutostartDirectory({ env, homeDir });
+  const filePath = path.join(directory, AUTOSTART_FILE_NAME);
+  for (let attempt = 1; ; attempt += 1) {
+    const entry = await readAutostartEntry({ env, homeDir });
+    // The entry was written by the user or another integration under the same
+    // name: leave it exactly as it is and report the toggle unsupported.
+    if (entry && !isManagedEntry(entry.keys)) {
+      return { supported: false, enabled: enabled === true, filePath, foreignEntry: true };
+    }
+
+    if (!enabled) {
+      await fsp.rm(filePath, { force: true });
+      return { supported: true, enabled: false, filePath };
+    }
+
+    const contents = buildLinuxAutostartDesktopEntry({
+      appName,
+      backgroundArg,
+      env,
+      execPath,
+      previousContents: entry ? clearUserDisabledMarkers(entry.contents) : undefined,
+    });
+    const outcome = await writeIfUnchangedSince(filePath, contents, entry ? entry.contents : null);
+    if (outcome !== 'conflict') {
+      return { supported: true, enabled: true, filePath };
+    }
+    // Someone edited the entry after it was read: keep their version and
+    // re-check ownership against it before building again.
+    if (attempt >= MAX_WRITE_ATTEMPTS) {
+      throw new Error(`Autostart entry ${filePath} kept changing while it was being updated`);
+    }
+  }
+};
+
+// The IPC setter and the startup reconcile both write the entry; one chain
+// keeps their read-check-write sequences from interleaving.
+let autostartWriteChain = Promise.resolve();
+
+export const setLinuxAutostartEnabled = ({
   enabled,
   appName = 'OpenChamber',
   backgroundArg,
@@ -199,27 +262,9 @@ export const setLinuxAutostartEnabled = async ({
   execPath = process.execPath,
   homeDir = os.homedir(),
 } = {}) => {
-  const directory = resolveLinuxAutostartDirectory({ env, homeDir });
-  const filePath = path.join(directory, AUTOSTART_FILE_NAME);
-  const entry = await readAutostartEntry({ env, homeDir });
-  // The entry was written by the user or another integration under the same
-  // name: leave it exactly as it is and report the toggle unsupported.
-  if (entry && !isManagedEntry(entry.keys)) {
-    return { supported: false, enabled: enabled === true, filePath, foreignEntry: true };
-  }
-
-  if (!enabled) {
-    await fsp.rm(filePath, { force: true });
-    return { supported: true, enabled: false, filePath };
-  }
-
-  const contents = buildLinuxAutostartDesktopEntry({
-    appName,
-    backgroundArg,
-    env,
-    execPath,
-    previousContents: entry ? clearUserDisabledMarkers(entry.contents) : undefined,
-  });
-  await writeIfChanged(filePath, contents);
-  return { supported: true, enabled: true, filePath };
+  const run = autostartWriteChain.then(() => applyLinuxAutostartEnabled({
+    enabled, appName, backgroundArg, env, execPath, homeDir,
+  }));
+  autostartWriteChain = run.catch(() => {});
+  return run;
 };
