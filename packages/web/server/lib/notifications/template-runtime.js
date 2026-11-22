@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { summarizeText as summarizeSharedText } from '../text/summarization.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 export const createNotificationTemplateRuntime = (deps) => {
   const {
@@ -15,6 +16,10 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
   const GIT_TIMEOUT_MS = 3000;
+  const OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS = 3000;
+  const OPEN_CODE_SESSION_FETCH_TIMEOUT_MS = 2000;
+  // 16 MiB matches the session-list proxy cap and allows normal message pages.
+  const OPEN_CODE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
   // The sidebar's name for standalone chats; a chat's folder name is a generated id.
   const CHATS_PROJECT_LABEL = 'Chats';
 
@@ -22,11 +27,25 @@ export const createNotificationTemplateRuntime = (deps) => {
   // OpenCode inside a space for a session of that space (`runtime.js` builds that source).
   const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl: (...args) => fetch(...args) };
   const SESSION_INFO_CACHE_TTL_MS = 60 * 1000;
+  // Bounded like the step-meta caches in runtime.js: without a cap these
+  // maps keep one entry for every host session ever seen, for the life of
+  // the process.
+  const SESSION_CACHE_LIMIT = 500;
 
   const cachedZenModels = { models: [] };
 
   const sessionTitleCache = new Map();
   const sessionInfoCache = new Map();
+
+  // Insert (or refresh) an entry, then evict oldest-first past the limit:
+  // a Map iterates in insertion order, so the first key is the stalest.
+  const setBoundedCacheEntry = (cache, key, value) => {
+    cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > SESSION_CACHE_LIMIT) {
+      cache.delete(cache.keys().next().value);
+    }
+  };
 
   const createTimeoutSignal = (timeoutMs) => {
     const controller = new AbortController();
@@ -101,6 +120,15 @@ export const createNotificationTemplateRuntime = (deps) => {
     return typeof part.text === 'string' || typeof part.content === 'string';
   };
 
+  // A length cut must not split a surrogate pair: text cut right after a
+  // high surrogate drops that half so the extracted value never ends in a
+  // lone surrogate (which encodes as U+FFFD downstream).
+  const cutPairSafe = (text, maxLength) => {
+    const cut = text.slice(0, maxLength);
+    const last = cut.charCodeAt(cut.length - 1);
+    return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  };
+
   const extractTextFromParts = (parts, maxLength = NOTIFICATION_BODY_MAX_CHARS) => {
     if (!Array.isArray(parts) || parts.length === 0) return '';
 
@@ -112,7 +140,7 @@ export const createNotificationTemplateRuntime = (deps) => {
     let text = textParts.length > 0 ? textParts.join('\n').trim() : '';
 
     if (maxLength > 0 && text.length > maxLength) {
-      text = text.slice(0, maxLength);
+      text = cutPairSafe(text, maxLength);
     }
 
     return text;
@@ -135,7 +163,7 @@ export const createNotificationTemplateRuntime = (deps) => {
       if (textContent.length > 0) {
         let result = textContent.join('\n').trim();
         if (maxLength > 0 && result.length > maxLength) {
-          result = result.slice(0, maxLength);
+          result = cutPairSafe(result, maxLength);
         }
         return result;
       }
@@ -144,39 +172,71 @@ export const createNotificationTemplateRuntime = (deps) => {
     return '';
   };
 
+  // Page-walk bounds for the exact-message lookup below (#2154): at
+  // most OPEN_CODE_MESSAGE_MAX_PAGES pages of
+  // OPEN_CODE_MESSAGE_PAGE_SIZE, every page still under the
+  // per-request timeout and response-byte caps, and the whole walk
+  // under one overall deadline — a notification lookup must never
+  // hang or fetch unbounded history.
+  const OPEN_CODE_MESSAGE_PAGE_SIZE = 5;
+  const OPEN_CODE_MESSAGE_MAX_PAGES = 10;
+  const OPEN_CODE_MESSAGE_PAGE_WALK_DEADLINE_MS = 10000;
+
   const fetchLastAssistantMessageText = async (sessionId, messageId, maxLength = NOTIFICATION_BODY_MAX_CHARS, source = hostSource) => {
     if (!sessionId) return '';
 
     try {
       const url = source.buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/message`, '');
-      const response = await source.fetchImpl(`${url}?limit=5`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...source.getOpenCodeAuthHeaders(),
-        },
-        signal: AbortSignal.timeout(3000),
-      });
+      const deadline = Date.now() + OPEN_CODE_MESSAGE_PAGE_WALK_DEADLINE_MS;
+      let cursor = null;
 
-      if (!response.ok) return '';
+      for (let pageIndex = 0; pageIndex < OPEN_CODE_MESSAGE_MAX_PAGES; pageIndex += 1) {
+        if (pageIndex > 0 && Date.now() > deadline) return '';
+        const query = cursor
+          ? `?limit=${OPEN_CODE_MESSAGE_PAGE_SIZE}&cursor=${encodeURIComponent(cursor)}`
+          : `?limit=${OPEN_CODE_MESSAGE_PAGE_SIZE}`;
+        const response = await source.fetchImpl(`${url}${query}`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            ...source.getOpenCodeAuthHeaders(),
+          },
+          signal: AbortSignal.timeout(OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS),
+        });
 
-      // v2 pages messages as `{ data, cursor }`, newest first, and a message is
-      // a flat record: an assistant one carries `content[]`, not `parts`.
-      const page = await response.json().catch(() => null);
-      const messages = Array.isArray(page?.data) ? page.data : null;
-      if (!messages) return '';
+        if (!response.ok) return '';
 
-      let target = null;
-      if (messageId) {
-        target = messages.find((message) => message?.id === messageId && message?.type === 'assistant');
+        // v2 pages messages as `{ data, cursor }`, newest first, and a message is
+        // a flat record: an assistant one carries `content[]`, not `parts`.
+        const page = await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES);
+        const messages = Array.isArray(page?.data) ? page.data : null;
+        if (!messages) return '';
+
+        let target = null;
+        if (messageId) {
+          target = messages.find((message) => message?.id === messageId && message?.type === 'assistant') ?? null;
+        } else {
+          target = messages.find((message) => message?.type === 'assistant' && message?.finish === 'stop') ?? null;
+        }
+
+        if (target) {
+          if (!Array.isArray(target.content)) return '';
+          return extractTextFromParts(target.content, maxLength);
+        }
+
+        // Only an exact-ID lookup follows pages (#2154): the no-ID
+        // fallback is newest-first by definition, and an exact ID
+        // must never fall back to a different message (#2140).
+        if (!messageId) return '';
+
+        const next = typeof page?.cursor?.next === 'string' && page.cursor.next.length > 0
+          ? page.cursor.next
+          : null;
+        if (!next || next === cursor) return '';
+        cursor = next;
       }
-      if (!target) {
-        target = messages.find((message) => message?.type === 'assistant' && message?.finish === 'stop') ?? null;
-      }
 
-      if (!target || !Array.isArray(target.content)) return '';
-
-      return extractTextFromParts(target.content, maxLength);
+      return '';
     } catch {
       return '';
     }
@@ -184,7 +244,7 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const cacheSessionTitle = (sessionId, title) => {
     if (typeof sessionId === 'string' && sessionId.length > 0 && typeof title === 'string' && title.length > 0) {
-      sessionTitleCache.set(sessionId, title);
+      setBoundedCacheEntry(sessionTitleCache, sessionId, title);
     }
   };
 
@@ -208,8 +268,13 @@ export const createNotificationTemplateRuntime = (deps) => {
 
     const isHost = source === hostSource;
     const cached = isHost ? sessionInfoCache.get(sessionId) : undefined;
-    if (cached && Date.now() - cached.at < SESSION_INFO_CACHE_TTL_MS) {
-      return cached.data;
+    if (cached) {
+      if (Date.now() - cached.at < SESSION_INFO_CACHE_TTL_MS) {
+        return cached.data;
+      }
+      // Expired entries are removed, not merely ignored: left in place they
+      // would still count as retained sessions for the life of the process.
+      sessionInfoCache.delete(sessionId);
     }
 
     try {
@@ -220,15 +285,15 @@ export const createNotificationTemplateRuntime = (deps) => {
           Accept: 'application/json',
           ...source.getOpenCodeAuthHeaders(),
         },
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(OPEN_CODE_SESSION_FETCH_TIMEOUT_MS),
       });
       if (!response.ok) {
         console.warn(`[Notification] fetchSessionInfo: ${response.status} for session ${sessionId}`);
         return null;
       }
-      const data = unwrapOpenCodeResponse(await response.json().catch(() => null));
+      const data = unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES));
       if (data && typeof data === 'object') {
-        if (isHost) sessionInfoCache.set(sessionId, { data, at: Date.now() });
+        if (isHost) setBoundedCacheEntry(sessionInfoCache, sessionId, { data, at: Date.now() });
         return data;
       }
       return null;

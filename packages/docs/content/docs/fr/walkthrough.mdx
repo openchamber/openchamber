@@ -11,6 +11,20 @@ Il explique et ordonne. Il ne juge pas votre code et ne rend aucun verdict — c
 
 Ouvrez-le par l’icône **Parcours** dans la barre de droite, ou par le bouton **Parcours IA** dans les panneaux des modifications et de la pull request. Les deux se contentent d’ouvrir le panneau ; rien n’est généré tant que vous n’appuyez pas sur **Générer le parcours**.
 
+## Comment une étape est signalée
+
+Chaque étape nomme son sujet, l'explique en une phrase ou deux, puis montre exactement le code qu'elle décrit. Certaines étapes portent une petite étiquette à côté du titre :
+
+| Étiquette | Ce que cela signifie |
+| --- | --- |
+| **Changement clé** | Cette étape porte le reste du changement, ou l'essentiel de son risque. Lisez-la attentivement et en premier. |
+| **Contexte** | Un changement de soutien, inclus pour que le reste ait du sens. Peut être survolé. |
+| *(pas d'étiquette)* | Une étape ordinaire dans l'ordre de lecture. |
+
+L'étiquette concerne **l'endroit où porter votre attention**, pas la qualité du code. Une étape n'est jamais marquée parce que quelque chose y aurait été trouvé de travers — le parcours ne signale ni constats, ni sévérités, ni verdicts. Si vous voulez un jugement sur le code, c'est l'action **Review** dans [Git & GitHub](/git/).
+
+Les seules marques qui signalent vraiment un problème sont **Obsolète** et **Non couvert**, et toutes deux concernent le parcours lui-même qui devient obsolète, plutôt que votre code — voir plus bas.
+
 ## Ce qu’il peut parcourir
 
 | Portée | Ce qu’elle couvre |

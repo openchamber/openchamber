@@ -18,6 +18,12 @@ const SECOND = 1000;
 const MAX_ENTRIES = 300;
 // A larger answer (a merge request context with its diff) is served but not kept.
 const MAX_CACHED_BYTES = 2 * 1024 * 1024;
+// The per-entry cap above bounds one answer; this bounds the whole cache
+// (#1770, the Octokit ETag cache's shape after #848): with only the entry
+// count capped, 300 kept answers at the per-entry cap retain ~600 MiB of
+// response bodies in the long-lived server. Eviction runs while either
+// bound is exceeded. Only body bytes are counted.
+const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 
 const ROUTES = [
   { prefix: '/api/source-control/github', provider: 'github' },
@@ -48,12 +54,28 @@ const requestKey = (req, provider) => {
 
 const isConnectedAnswer = (body) => !(Object.prototype.toString.call(body) === '[object Object]' && body.connected === false);
 
-export function createProviderReadCache({ now = Date.now } = {}) {
+export function createProviderReadCache({
+  now = Date.now,
+  maxEntries = MAX_ENTRIES,
+  maxCachedBytes = MAX_CACHED_BYTES,
+  maxTotalBytes = MAX_TOTAL_BYTES,
+} = {}) {
   const entries = new Map();
   const inFlight = new Map();
+  // Retained body bytes across all kept entries; every delete path
+  // (evict, replace, expire, clear) settles it, so it always equals the
+  // true retained total.
+  let retainedBytes = 0;
+
+  const drop = (key) => {
+    const entry = entries.get(key);
+    if (!entry) return;
+    entries.delete(key);
+    retainedBytes -= entry.size;
+  };
 
   const clear = (provider) => {
-    for (const key of entries.keys()) if (!provider || key.startsWith(`${provider}|`)) entries.delete(key);
+    for (const key of [...entries.keys()]) if (!provider || key.startsWith(`${provider}|`)) drop(key);
     // Requests already running may carry the old state; they still answer
     // their own callers, but their result is not kept.
     for (const [key, flight] of inFlight) if (!provider || key.startsWith(`${provider}|`)) flight.stale = true;
@@ -61,10 +83,17 @@ export function createProviderReadCache({ now = Date.now } = {}) {
 
   const remember = (key, body, ttlMs) => {
     const size = Buffer.byteLength(JSON.stringify(body));
-    if (size > MAX_CACHED_BYTES) return;
-    entries.delete(key);
-    entries.set(key, { body, expiresAt: now() + ttlMs });
-    while (entries.size > MAX_ENTRIES) entries.delete(entries.keys().next().value);
+    if (size > maxCachedBytes) return;
+    // Re-remembering a key replaces it: settle its old bytes first so a
+    // key never counts twice.
+    drop(key);
+    entries.set(key, { body, expiresAt: now() + ttlMs, size });
+    retainedBytes += size;
+    while (entries.size > maxEntries || retainedBytes > maxTotalBytes) {
+      const oldest = entries.keys().next().value;
+      if (oldest === undefined) break;
+      drop(oldest);
+    }
   };
 
   /** Express middleware; register it before the provider routes. */
@@ -85,7 +114,7 @@ export function createProviderReadCache({ now = Date.now } = {}) {
     const key = requestKey(req, route.provider);
     const cached = entries.get(key);
     if (cached && cached.expiresAt > now()) return res.json(cached.body);
-    if (cached) entries.delete(key);
+    if (cached) drop(key);
 
     const pending = inFlight.get(key);
     if (pending) {

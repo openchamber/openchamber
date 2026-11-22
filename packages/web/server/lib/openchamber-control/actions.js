@@ -14,6 +14,7 @@ import { INTEGRATION_ACTION_DEFINITIONS } from './integration-actions.js';
 import { INTEGRATION_SERVICE_ACTION_DEFINITIONS } from './integration-service-actions.js';
 import { ENVIRONMENT_ACTION_DEFINITIONS } from './environment-actions.js';
 import { PROJECT_SETUP_ACTION_DEFINITIONS } from './project-setup-actions.js';
+import { MODEL_CHOICE_ACTION_DEFINITIONS } from './model-choice-actions.js';
 
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List configured projects', description: 'Projects with their per-project settings; no parameters' },
@@ -22,8 +23,9 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.remove', title: 'Remove a project', description: 'Remove projectId from configured projects. Only the configured entry goes; the checkout, its sessions and worktrees stay on disk' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
   { action: 'models.search', title: 'Search models', description: 'The model catalog, favorites and recent models first; optional query, provider, all, limit, offset' },
+  ...MODEL_CHOICE_ACTION_DEFINITIONS,
   { action: 'session.list', title: 'List sessions', description: 'Optional limit, all, withStatus' },
-  { action: 'session.create', title: 'Create a session', description: 'Prompt optional. Runs in a new git worktree by default, named from the prompt by the session model (worktreeNameModel overrides); worktree names it (absolute when it starts with /), newWorktree false uses the directory itself. The branch starts from startRef, else where the user\'s Settings say. pullRequest checks out that request\'s branch, or branches off its head with branchOff true; omit branchOff to follow Settings. A directory that is not a git repository stays in place' },
+  { action: 'session.create', title: 'Create a session', description: 'Prompt optional. Runs in a new git worktree by default, named from the prompt by the session model (worktreeNameModel overrides); worktree names it (absolute when it starts with /), newWorktree false uses the directory itself. The branch starts from startRef, else where the user\'s Settings say. pullRequest checks out that request\'s branch, or branches off its head with branchOff true; omit branchOff to follow Settings. A directory that is not a git repository stays in place. subagentPolicy ({ models, excludedModels, agentOverrides }) limits the models its subsessions may run' },
   { action: 'session.send', title: 'Send a prompt', description: 'New prompt to sessionId' },
   { action: 'session.fork', title: 'Fork a session', description: 'Fork sessionId at messageId; prompt optional' },
   { action: 'session.status', title: 'Check session status', description: 'Status of sessionId; directory defaults to that session\'s own' },
@@ -160,6 +162,8 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
  */
 export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
   { action: 'render.page', title: 'Show a page', description: 'Requires html and title' },
+  { action: 'render.tierChooser', title: 'Ask for a model tier', description: 'Build the tier chooser card (tiers: [{ tier, model }]); returns the page html to show with render.page awaitAnswer — the pick returns as that call\'s answer { tier, model }' },
+  { action: 'render.quotaFallback', title: 'Ask how to ride out a quota limit', description: 'Build the quota fallback card (tiers: [{ tier, model }], currentTier, resetAt when known); returns the page html to show with render.page awaitAnswer — the choice returns as that call\'s answer { action: "fallback", provider, tier }' },
 ]);
 
 export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
@@ -204,7 +208,7 @@ const uniqueMatch = (candidates, requested) => {
  */
 export const resolveAgentToolAction = (requested, toolName) => {
   const value = typeof requested === 'string' ? requested.trim() : '';
-  const scoped = ACTIONS_BY_TOOL[toolName] ?? null;
+  const scoped = Object.hasOwn(ACTIONS_BY_TOOL, toolName) ? ACTIONS_BY_TOOL[toolName] : null;
   const known = scoped ?? OPENCHAMBER_ALL_ACTIONS;
 
   if (value && known.includes(value)) {

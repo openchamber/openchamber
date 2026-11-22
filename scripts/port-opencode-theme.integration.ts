@@ -1,21 +1,59 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { convertTheme, saveTheme, sourceSchema, tokenColor } from './port-opencode-theme';
 import { compactTheme, requireTheme } from '../packages/ui/src/lib/theme/definition';
 import { colorHue, contrastRatio, mixColor } from '../packages/ui/src/lib/theme/color';
-import { resolveThemeVariant } from '../../opencode/packages/ui/src/theme/resolve';
-import { resolveThemeVariantV2 } from '../../opencode/packages/ui/src/theme/v2/resolve';
 
-// Explicit integration suite: requires the installed sibling OpenCode checkout.
-const sourceDirectory = resolve(import.meta.dirname, '../../opencode/packages/ui/src/theme/themes');
+// Integration suite for the OpenCode theme porter (./port-opencode-theme.ts),
+// collected by the root test run (scripts/run-isolated-tests.mjs).
+//
+// Precondition — a sibling OpenCode checkout. The porter converts themes from
+// a source checkout of OpenCode that must sit beside this repository:
+//
+//     <parent>/openchamber    this repository
+//     <parent>/opencode      the OpenCode checkout (read-only)
+//
+// Set OPENCHAMBER_OPENCODE_DIR to the checkout's path when it lives somewhere
+// else; the porter and this suite both honour it.
+//
+// When the checkout is absent the suite must not fail with a module-not-found
+// error before any test runs: the porter and the sibling resolvers are
+// imported dynamically only when the checkout is present, and every test is
+// registered as an explicit skip naming the missing paths, so the root test
+// run stays green and the skip is visible in its output.
+const siblingCheckout = process.env.OPENCHAMBER_OPENCODE_DIR
+  ? resolve(process.env.OPENCHAMBER_OPENCODE_DIR)
+  : resolve(import.meta.dirname, '../../opencode');
+const sourceDirectory = join(siblingCheckout, 'packages/ui/src/theme/themes');
+const siblingPaths = [
+  join(siblingCheckout, 'packages/ui/src/theme/resolve.ts'),
+  join(siblingCheckout, 'packages/ui/src/theme/v2/resolve.ts'),
+  sourceDirectory,
+];
+const missingSiblingPaths = siblingPaths.filter((siblingPath) => !existsSync(siblingPath));
+const skipReason = missingSiblingPaths.length
+  ? `requires the sibling OpenCode checkout (missing ${missingSiblingPaths.join(', ')}); see the header of scripts/port-opencode-theme.integration.ts`
+  : undefined;
+if (skipReason) console.warn(`port-opencode-theme.integration: all tests skipped — ${skipReason}`);
+
+const porter = skipReason ? undefined : await import('./port-opencode-theme');
+const { convertTheme, saveTheme, sourceSchema, tokenColor } = porter ?? {};
+const siblingResolve = skipReason ? undefined : await import(join(siblingCheckout, 'packages/ui/src/theme/resolve.ts'));
+const siblingResolveV2 = skipReason ? undefined : await import(join(siblingCheckout, 'packages/ui/src/theme/v2/resolve.ts'));
+const resolveThemeVariant = siblingResolve?.resolveThemeVariant;
+const resolveThemeVariantV2 = siblingResolveV2?.resolveThemeVariantV2;
+
+const integrationTest = (name: string, fn: () => Promise<void> | void) =>
+  skipReason ? test(name, { skip: skipReason }, fn) : test(name, fn);
+
 const cli = join(import.meta.dirname, 'port-opencode-theme.ts');
 const load = async (id: string) => sourceSchema.parse(JSON.parse(await readFile(join(sourceDirectory, `${id}.json`), 'utf8')));
 
-test('all App variants retain syntax and diff colors, readable roles and round-trip', async () => {
+integrationTest('all App variants retain syntax and diff colors, readable roles and round-trip', async () => {
   const files = (await readdir(sourceDirectory)).filter((name) => name.endsWith('.json'));
   assert.ok(files.length > 0);
   const ids = new Set<string>();
@@ -63,7 +101,7 @@ test('all App variants retain syntax and diff colors, readable roles and round-t
   assert.equal(ids.size, files.length * 2);
 });
 
-test('dark variants keep the authored accent and status seeds', async () => {
+integrationTest('dark variants keep the authored accent and status seeds', async () => {
   const { colors } = convertTheme(await load('dracula'), 'dark');
   assert.equal(colors.primary.base, '#bd93f9');
   assert.equal(colors.status?.error, '#ff5555');
@@ -71,7 +109,7 @@ test('dark variants keep the authored accent and status seeds', async () => {
   assert.equal(colors.status?.info, '#8be9fd');
 });
 
-test('authored v2 accents win over the seeds', async () => {
+integrationTest('authored v2 accents win over the seeds', async () => {
   // OpenCode's own theme keeps a legacy peach seed but authors a blue accent.
   const source = await load('oc-2');
   for (const mode of ['light', 'dark'] as const) {
@@ -81,7 +119,7 @@ test('authored v2 accents win over the seeds', async () => {
   }
 });
 
-test('v2 overrides drive the canvas and v1 syntax overrides stay exact', async () => {
+integrationTest('v2 overrides drive the canvas and v1 syntax overrides stay exact', async () => {
   const source = await load('tokyonight');
   source.dark.v2Overrides = { ...source.dark.v2Overrides, 'v2-background-bg-base': '#101020' };
   source.dark.overrides = { ...source.dark.overrides, 'syntax-string': '#12ab34', 'markdown-strong': '#ff00ff' };
@@ -91,7 +129,7 @@ test('v2 overrides drive the canvas and v1 syntax overrides stay exact', async (
   assert.notEqual(theme.colors.markdown?.bold, '#ff00ff');
 });
 
-test('color references retain alpha and reject missing, cyclic and unsupported values', () => {
+integrationTest('color references retain alpha and reject missing, cyclic and unsupported values', () => {
   assert.equal(tokenColor(new Map([['a', 'var(--b)'], ['b', 'rgba(255, 0, 12, 0.5)']]), 'a'), '#ff000c80');
   assert.throws(() => tokenColor(new Map([['a', 'var(--a)']]), 'a'), /Circular/);
   assert.throws(() => tokenColor(new Map(), 'a'), /Missing/);
@@ -99,7 +137,7 @@ test('color references retain alpha and reject missing, cyclic and unsupported v
   assert.throws(() => tokenColor(new Map([['a', 'color-mix(in srgb, red, blue)']]), 'a'), /Unsupported/);
 });
 
-test('publication is idempotent, refuses edits and symlinks, and leaves no temporary files', async () => {
+integrationTest('publication is idempotent, refuses edits and symlinks, and leaves no temporary files', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'app-theme-test-'));
   try {
     const theme = convertTheme(await load('tokyonight'), 'dark');
@@ -121,7 +159,7 @@ test('publication is idempotent, refuses edits and symlinks, and leaves no tempo
   }
 });
 
-test('CLI works outside the repo, dry-run writes nothing, and errors are nonzero', async () => {
+integrationTest('CLI works outside the repo, dry-run writes nothing, and errors are nonzero', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'app-theme-cli-test-'));
   const run = (...args: string[]) => spawnSync('bun', [cli, ...args], { cwd: directory, encoding: 'utf8' });
   try {

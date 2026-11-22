@@ -22,7 +22,12 @@
  */
 
 import { asNonEmptyString } from '../shared/guards.js';
-import { renameWithRetry } from '../shared/atomic-rename.js';
+import {
+  isJsonObject,
+  preserveMalformedJsonFile,
+  readDurableJsonFile,
+  writeDurableJsonFile,
+} from '../shared/durable-json-store.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
 
@@ -89,14 +94,12 @@ export const createOpenCodeSessionMetadata = ({
  * @param {{ read: Function, write: Function }} options.openCode See {@link createOpenCodeSessionMetadata}.
  * @param {typeof fsDefault.promises} [options.fsPromises]
  * @param {typeof pathDefault} [options.path]
- * @param {() => number} [options.now]
  */
 export const createSessionMetadataStore = ({
   dataDir,
   openCode,
   fsPromises = fsDefault.promises,
   path = pathDefault,
-  now = Date.now,
 }) => {
   const legacyPath = path.join(dataDir, LEGACY_FILE_NAME);
 
@@ -128,9 +131,10 @@ export const createSessionMetadataStore = ({
     return next;
   };
 
-  const parseLegacy = (raw) => {
-    const parsed = JSON.parse(raw);
-    if (!isPlainObject(parsed)) throw new Error('session metadata file is not a JSON object');
+  // The value judgement stays this store's: a JSON object (judged by the
+  // primitive's reader via isJsonObject) whose entries are plain-object
+  // metadata keyed by a non-empty session id; any other entry is dropped.
+  const parseLegacy = (parsed) => {
     const result = new Map();
     for (const [sessionID, value] of Object.entries(parsed)) {
       const id = asNonEmptyString(sessionID);
@@ -138,6 +142,8 @@ export const createSessionMetadataStore = ({
     }
     return result;
   };
+
+  const durableOptions = () => ({ fs: fsPromises, validateValue: isJsonObject });
 
   /**
    * Resolves once the legacy file has been read. A read failure rejects and
@@ -148,20 +154,40 @@ export const createSessionMetadataStore = ({
   const loadLegacy = () => {
     if (!legacyLoad) {
       legacyLoad = (async () => {
-        let raw;
-        try {
-          raw = await fsPromises.readFile(legacyPath, 'utf8');
-        } catch (error) {
-          if (error?.code === 'ENOENT') return;
-          throw new Error(`session metadata is unavailable: ${error?.message ?? error}`);
-        }
-        try {
-          for (const [id, metadata] of parseLegacy(raw)) unmigrated.set(id, metadata);
-        } catch (error) {
-          // Unreadable bytes are kept for the user; there is nothing to migrate.
-          const backup = `${legacyPath}.corrupt-${now()}`;
-          await fsPromises.rename(legacyPath, backup).catch(() => undefined);
-          console.warn(`[openchamber-sessions] legacy session metadata was unreadable and was moved to ${backup}: ${error?.message ?? error}`);
+        // Up to three attempts: a preserve that answers 'replaced' means a
+        // valid file landed while the malformed bytes were being judged -
+        // read that file instead of answering from the stale judgement.
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          let result;
+          try {
+            result = await readDurableJsonFile(legacyPath, durableOptions());
+          } catch (error) {
+            // A read failure other than absence (absence is 'missing') is
+            // not evidence that the file holds nothing: refuse, and let the
+            // next call retry once the file can be seen again.
+            throw new Error(`session metadata is unavailable: ${error?.message ?? error}`);
+          }
+          // No file yet (or an empty one) is the normal first run.
+          if (result.state === 'missing') return;
+          if (result.state === 'valid') {
+            for (const [id, metadata] of parseLegacy(result.value)) unmigrated.set(id, metadata);
+            return;
+          }
+          // Malformed bytes are preserved aside by the shared primitive
+          // under its collision-proof name; there is nothing to migrate.
+          // The raw bytes are never logged: a parse error can quote the file.
+          const preservation = await preserveMalformedJsonFile(legacyPath, durableOptions());
+          if (preservation.outcome === 'replaced') continue;
+          if (preservation.outcome === 'failed') {
+            // Fail closed (the primitive's contract): the bytes are still
+            // live at the path and a later write or retire would destroy
+            // them. Refuse like an unreadable file; a later load can retry.
+            throw new Error('session metadata is unavailable: the unreadable legacy file could not be preserved');
+          }
+          if (preservation.preserved) {
+            console.warn(`[openchamber-sessions] legacy session metadata was unreadable and was moved to ${preservation.preservedPath}`);
+          }
+          return;
         }
       })().catch((error) => {
         legacyLoad = null;
@@ -179,9 +205,23 @@ export const createSessionMetadataStore = ({
       });
       return;
     }
-    const tmpPath = `${legacyPath}.${process.pid}.tmp`;
-    await fsPromises.writeFile(tmpPath, JSON.stringify(Object.fromEntries(unmigrated)), 'utf8');
-    await renameWithRetry((from, to) => fsPromises.rename(from, to), tmpPath, legacyPath);
+    // Preserve-before-write, fail-closed (the primitive's contract): a
+    // malformed file that appeared after the load must be preserved before
+    // any write replaces it, and a failed preservation refuses the write.
+    const preservation = await preserveMalformedJsonFile(legacyPath, durableOptions());
+    if (preservation.outcome === 'failed') {
+      throw new Error('could not preserve the unreadable legacy session metadata file; refusing to overwrite it');
+    }
+    if (preservation.preserved) {
+      console.warn(`[openchamber-sessions] legacy session metadata was unreadable and was preserved at ${preservation.preservedPath}`);
+    }
+    // Atomic write through the primitive, at this store's previous
+    // effective mode (0o666, umask-governed): session metadata is
+    // per-session state, not secret-bearing.
+    await writeDurableJsonFile(legacyPath, JSON.stringify(Object.fromEntries(unmigrated)), {
+      fs: fsPromises,
+      mode: 0o666,
+    });
   });
 
   /**

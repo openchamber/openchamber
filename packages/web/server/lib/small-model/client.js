@@ -53,6 +53,19 @@ export function getSmallModelClient(directory) {
   return OpenCode.make({ baseUrl, headers });
 }
 
+/**
+ * Deadline for one catalog read. The SDK composes no default deadline, so
+ * without a signal a stalled OpenCode hangs model resolution forever -
+ * before the generation budget in index.js even starts. These reads are
+ * loopback calls that answer in well under a second on a healthy instance;
+ * 15 seconds (the deadline the quota providers use for the same kind of
+ * read) only ever fires on a genuine stall, and the callers' existing
+ * failure fallbacks take it from there.
+ */
+export const CATALOG_READ_TIMEOUT_MS = 15_000;
+
+const catalogRequestOptions = () => ({ signal: AbortSignal.timeout(CATALOG_READ_TIMEOUT_MS) });
+
 const MODEL_CACHE_TTL_MS = 30_000;
 let modelCache = null;
 let modelCacheKey = '';
@@ -78,7 +91,7 @@ export async function listModelInfos(client, directory) {
     return modelCache;
   }
   try {
-    const models = unwrap(await client.model.list());
+    const models = unwrap(await client.model.list(undefined, catalogRequestOptions()));
     if (models.length === 0) return models;
     modelCache = models;
     modelCacheKey = key;
@@ -93,7 +106,7 @@ export async function listModelInfos(client, directory) {
 
 export async function listProviderInfos(client) {
   try {
-    return unwrap(await client.provider.list());
+    return unwrap(await client.provider.list(undefined, catalogRequestOptions()));
   } catch {
     return [];
   }
@@ -104,7 +117,7 @@ export async function listProviderInfos(client) {
  */
 export async function getDefaultModelInfo(client) {
   try {
-    const payload = await client.model.default();
+    const payload = await client.model.default(undefined, catalogRequestOptions());
     const info = payload?.data ?? payload;
     return info && typeof info === 'object' && typeof info.id === 'string' ? info : null;
   } catch {
@@ -120,7 +133,7 @@ export async function getDefaultModelInfo(client) {
  */
 export async function getConfiguredSmallModelRef(client) {
   try {
-    const { model } = (await client.agent.get({ agentID: 'title' })).data;
+    const { model } = (await client.agent.get({ agentID: 'title' }, catalogRequestOptions())).data;
     return model ? { providerID: model.providerID, modelID: model.id } : null;
   } catch {
     // No `title` agent (removed in config, or a cold location still loading

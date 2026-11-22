@@ -1,15 +1,24 @@
-# Catches anything that breaks the flake's evaluation before merge: a PR
-# touching the flake must still evaluate every package. Read-only: no
-# builds, no cache, no write permissions.
+# Manual-only check that catches anything that breaks the flake's
+# evaluation: when dispatched upstream, it evaluates every package.
+# It does not run on pull_request or push, so it does not gate a
+# merge. In this repository the eval job is skipped (gated below to
+# openchamber/openchamber), so a dispatch here validates nothing
+# until the flakes are reconciled. Read-only: no builds, no cache,
+# no write permissions.
 name: nix-eval
 
 on:
-  pull_request:
-    paths:
-      - flake.nix
-      - flake.lock
-      - nix/**
   workflow_dispatch:
+
+# CI policy: .github/ci-policy.md (fleet design developing-today/code#1779;
+# Phase 1 code#1780, Phase 2 code#1781, Phase 3 code#1782).
+# Concurrency (design sec.4): runs are ref-keyed and cancel on
+# supersede. Trigger is workflow_dispatch only: no push, pull_request,
+# issues, or pull_request_target event and no queue: max, so the #84
+# validation trap cannot occur here.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -17,10 +26,11 @@ permissions:
 jobs:
   eval:
     # This fork keeps its own flake (aarch64-darwin app, dev shells, the
-    # developing-today/opencode input), which has none of the outputs this job
+    # developing-today-forks/opencode input), which has none of the outputs this job
     # evaluates or re-bakes. Runs only upstream until the flakes are reconciled.
     if: github.repository == 'openchamber/openchamber'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

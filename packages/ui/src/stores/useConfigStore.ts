@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { z } from "zod";
 import { listModelVariantIds, modelVariantNames } from "@/lib/modelVariants";
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
@@ -26,10 +27,13 @@ import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier
 import type { ModelRef } from "@/lib/settings/parsers";
 import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { readBoundedResponseText } from "@/lib/boundedResponse";
+import { ensureDisabledProviders } from "@/lib/disabledProviders";
 import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, updateVoiceApiKeys, type VoiceApiKeyKind, type VoiceApiKeyState } from "@/lib/voiceKeysApi";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
 import {
+    DEFAULT_AUTO_CREATE_WORKTREE,
     DEFAULT_WORKTREE_START_FROM,
     type PullRequestWorktreeMode,
     type WorktreeStartFrom,
@@ -42,6 +46,12 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-sw
 import { readCachedCatalog, shouldHoldFirstLoadAgainstCache, writeCachedCatalogWhenSettled, type CachedCatalog } from "./configCatalogCache";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
+
+// Mirrors the server twin in packages/web/server/lib/opencode/models-metadata.js
+// (#1006): the models.dev catalog is several megabytes, so the 16 MiB cap is
+// generous on purpose. The deadline bounds time, the cap bounds memory, and
+// an over-cap body throws like a fetch failure so the next source is tried.
+export const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
 
 const FALLBACK_PROVIDER_ID = "opencode";
@@ -218,7 +228,21 @@ const sanitizePersistedSelectedProviderId = (providerId: string | undefined): st
     providerId === ADD_PROVIDER_SENTINEL ? "" : (providerId ?? "")
 );
 
-const normalizeOptionalString = (value: unknown): string | undefined => {
+/**
+ * One field of a config-shaped document (settings, synced OpenCode config, a
+ * models.dev payload): values are JSON-shaped, and each normalizer/guard
+ * below narrows the field it owns.
+ */
+type ConfigFieldValue =
+    | string
+    | number
+    | boolean
+    | null
+    | undefined
+    | ConfigFieldValue[]
+    | { [key: string]: ConfigFieldValue };
+
+const normalizeOptionalString = (value: ConfigFieldValue): string | undefined => {
     if (typeof value !== "string") {
         return undefined;
     }
@@ -555,7 +579,7 @@ const resolveGitGenerationModelSelection = ({
     return null;
 };
 
-interface ModelsDevModelEntry {
+type ModelsDevModelEntry = {
     id?: string;
     name?: string;
     tool_call?: boolean;
@@ -582,24 +606,26 @@ interface ModelsDevModelEntry {
     last_updated?: string;
 }
 
-interface ModelsDevProviderEntry {
+type ModelsDevProviderEntry = {
     id?: string;
     models?: Record<string, ModelsDevModelEntry | undefined>;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+const storeRecordSchema = z.record(z.string(), z.unknown());
+
+const isRecord = (value: ConfigFieldValue): value is Record<string, ConfigFieldValue> =>
     typeof value === "object" && value !== null;
 
-const isStringArray = (value: unknown): value is string[] =>
+const isStringArray = (value: ConfigFieldValue): value is string[] =>
     Array.isArray(value) && value.every((item) => typeof item === "string");
 
-const isModelsDevModelEntry = (value: unknown): value is ModelsDevModelEntry => {
+const isModelsDevModelEntry = (value: ConfigFieldValue): value is ModelsDevModelEntry => {
     if (!isRecord(value)) {
         return false;
     }
-    const candidate = value as ModelsDevModelEntry;
-    if (candidate.modalities) {
-        const { input, output } = candidate.modalities;
+    const modalities = value.modalities;
+    if (isRecord(modalities)) {
+        const { input, output } = modalities;
         if (input && !isStringArray(input)) {
             return false;
         }
@@ -610,12 +636,11 @@ const isModelsDevModelEntry = (value: unknown): value is ModelsDevModelEntry => 
     return true;
 };
 
-const isModelsDevProviderEntry = (value: unknown): value is ModelsDevProviderEntry => {
+const isModelsDevProviderEntry = (value: ConfigFieldValue): value is ModelsDevProviderEntry => {
     if (!isRecord(value)) {
         return false;
     }
-    const candidate = value as ModelsDevProviderEntry;
-    return candidate.models === undefined || isRecord(candidate.models);
+    return value.models === undefined || isRecord(value.models);
 };
 
 const buildModelMetadataKey = (providerId: string, modelId: string) => {
@@ -662,7 +687,7 @@ const deriveModelMetadata = (providerId: string, model: ProviderModel): ModelMet
     };
 };
 
-const transformModelsDevResponse = (payload: unknown): Map<string, ModelMetadata> => {
+const transformModelsDevResponse = (payload: ConfigFieldValue): Map<string, ModelMetadata> => {
     const metadataMap = new Map<string, ModelMetadata>();
 
     if (!isRecord(payload)) {
@@ -675,7 +700,7 @@ const transformModelsDevResponse = (payload: unknown): Map<string, ModelMetadata
         }
 
         const providerId = typeof providerValue.id === 'string' && providerValue.id.length > 0 ? providerValue.id : providerKey;
-        const models = providerValue.models;
+        const models = isRecord(providerValue) ? providerValue.models : undefined;
         if (!models || !isRecord(models)) {
             continue;
         }
@@ -727,7 +752,7 @@ const transformModelsDevResponse = (payload: unknown): Map<string, ModelMetadata
     return metadataMap;
 };
 
-const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => {
+export const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => {
     if (typeof fetch !== 'function') {
         return new Map();
     }
@@ -762,8 +787,8 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
                 throw new Error(`Metadata request to ${source} returned status ${response.status}`);
             }
 
-            const data = await response.json();
-            return transformModelsDevResponse(data);
+            const data: unknown = JSON.parse(await readBoundedResponseText(response, MODELS_DEV_CATALOG_MAX_BYTES));
+            return transformModelsDevResponse(data as ConfigFieldValue);
         } catch (error: unknown) {
             if ((error as Error)?.name === 'AbortError') {
                 console.warn(`Model metadata request aborted (${source})`);
@@ -1158,6 +1183,9 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
     const context = captureConfigRuntimeContext();
     const cached = await readCachedCatalog(context.runtimeKey, directoryKey);
     if (!cached || !isConfigRuntimeContextCurrent(context)) return;
+    const disabledProviders = await ensureDisabledProviders();
+    if (!isConfigRuntimeContextCurrent(context)) return;
+    const disabledProviderIds = disabledProviders && disabledProviders.length > 0 ? new Set(disabledProviders) : null;
     const loadKey = getConfigLoadKey(context, directoryKey);
     useConfigStore.setState((state) => {
         const snapshot = state.directoryScoped[directoryKey] ?? createEmptyDirectoryScopedConfig();
@@ -1166,7 +1194,12 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
             || (isActive && (state.providersLoaded || state.providers.length > 0));
         const agentsLive = snapshot.agentsLoaded === true || snapshot.agents.length > 0
             || (isActive && (state.agentsLoaded || state.agents.length > 0));
-        const providers = !providersLive && cached.providers?.length ? cached.providers : null;
+        // The cache can predate a provider being turned off; the disabled
+        // list read for this runtime applies to it the same way it applies
+        // to a live catalog.
+        const providers = !providersLive && cached.providers?.length
+            ? (disabledProviderIds ? cached.providers.filter((provider) => !disabledProviderIds.has(provider.id)) : cached.providers)
+            : null;
         const agents = !agentsLive && cached.agents?.length ? cached.agents : null;
         if (!providers && !agents) return state;
         if (providers) _providersShownFromCache.set(loadKey, countCatalogModels(providers));
@@ -1812,7 +1845,7 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsDefaultAgent: undefined,
                 opencodeDefaultAgent: undefined,
                 opencodeDefaultModel: undefined,
-                settingsAutoCreateWorktree: false,
+                settingsAutoCreateWorktree: DEFAULT_AUTO_CREATE_WORKTREE,
                 settingsWorktreeStartFrom: DEFAULT_WORKTREE_START_FROM,
                 settingsWorktreeStartFromOverrides: {},
                 settingsPullRequestWorktree: 'check-out',
@@ -2177,7 +2210,7 @@ export const useConfigStore = create<ConfigStore>()(
                     set((state) => {
                         const nextState: Partial<ConfigStore> = {};
                         let scopedChanged = false;
-                        const nextDirectoryScoped: Record<string, DirectoryScopedConfig> = {
+                        const nextDirectoryScoped = {
                             ...state.directoryScoped,
                         };
 
@@ -2259,7 +2292,7 @@ export const useConfigStore = create<ConfigStore>()(
                     const existingSnapshot = get().directoryScoped[directoryKey];
                     const previousProviders = existingSnapshot?.providers ?? (get().activeDirectoryKey === directoryKey ? get().providers : []);
                     const previousDefaults = existingSnapshot?.defaultProviders ?? (get().activeDirectoryKey === directoryKey ? get().defaultProviders : {});
-                    let lastError: unknown = null;
+                    let lastError = null;
 
                     for (let attempt = 0; attempt < 3; attempt++) {
                         try {
@@ -2296,8 +2329,15 @@ export const useConfigStore = create<ConfigStore>()(
                             // A provider the user switched off, or one with no usable
                             // model, is not offerable — v2 replaced the `connected` list
                             // with these two facts.
+                            // A location OpenCode has not reloaded since a provider
+                            // was turned off still lists that provider. The list
+                            // read once per runtime filters it here, for every
+                            // location, until OpenCode catches up.
+                            const disabledProviders = await ensureDisabledProviders();
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            const disabledProviderIds = disabledProviders && disabledProviders.length > 0 ? new Set(disabledProviders) : null;
                             const processedProviders: ProviderWithModelList[] = providers
-                                .filter((provider) => provider.activation !== "disabled" && modelsByProvider.has(provider.id))
+                                .filter((provider) => provider.activation !== "disabled" && !disabledProviderIds?.has(provider.id) && modelsByProvider.has(provider.id))
                                 .map((provider) => ({
                                     ...provider,
                                     models: modelsByProvider.get(provider.id) ?? [],
@@ -2693,11 +2733,14 @@ export const useConfigStore = create<ConfigStore>()(
 
                 getDefaultVariantForModel: (providerId: string, modelId: string) => {
                     const state = get();
-                    return resolveConfiguredDefaultVariant({
+                    const defaults = {
                         ...getProjectDefaultsForConfigDirectory(fromDirectoryKey(state.activeDirectoryKey)),
                         settingsDefaultModel: state.settingsDefaultModel,
                         settingsDefaultVariant: state.settingsDefaultVariant,
-                    }, providerId, modelId);
+                    };
+                    const configured = resolveConfiguredDefaultVariant(defaults, providerId, modelId);
+                    const personal = useUIStore.getState().modelDefaultVariants[`${providerId}/${modelId}`];
+                    return configured ?? personal;
                 },
 
                 cycleCurrentVariant: () => {
@@ -2811,7 +2854,7 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsDefaultModel: edited ? state.settingsDefaultModel : defaults.defaultModel,
                             settingsDefaultVariant: edited ? state.settingsDefaultVariant : defaults.defaultVariant,
                             settingsDefaultAgent: edited ? state.settingsDefaultAgent : defaults.defaultAgent,
-                            settingsAutoCreateWorktree: edited ? state.settingsAutoCreateWorktree : defaults.autoCreateWorktree ?? false,
+                            settingsAutoCreateWorktree: edited ? state.settingsAutoCreateWorktree : defaults.autoCreateWorktree ?? DEFAULT_AUTO_CREATE_WORKTREE,
                             settingsWorktreeStartFrom: edited ? state.settingsWorktreeStartFrom : defaults.worktreeStartFrom ?? DEFAULT_WORKTREE_START_FROM,
                             settingsWorktreeStartFromOverrides: edited ? state.settingsWorktreeStartFromOverrides : defaults.worktreeStartFromOverrides ?? {},
                             settingsPullRequestWorktree: edited ? state.settingsPullRequestWorktree : defaults.pullRequestWorktree ?? 'check-out',
@@ -2893,7 +2936,7 @@ export const useConfigStore = create<ConfigStore>()(
                     markStartupTrace('loadAgents:start', { directoryKey, source, requestedDirectory, effectiveDirectory });
                     const existingSnapshot = get().directoryScoped[directoryKey];
                     const previousAgents = existingSnapshot?.agents ?? (get().activeDirectoryKey === directoryKey ? get().agents : []);
-                    let lastError: unknown = null;
+                    let lastError = null;
 
                     for (let attempt = 0; attempt < 3; attempt++) {
                         try {
@@ -4173,7 +4216,7 @@ export const useConfigStore = create<ConfigStore>()(
                     markStartupTrace('checkConnection:start');
                     const maxAttempts = 5;
                     let attempt = 0;
-                    let lastError: unknown = null;
+                    let lastError = null;
                     let lastProbe: OpencodeHealthProbe = 'unreachable';
 
                     while (attempt < maxAttempts) {
@@ -4428,12 +4471,12 @@ export const useConfigStore = create<ConfigStore>()(
                     const persisted = persistedState as Partial<ConfigStore> | undefined;
                     if (!persisted || persisted.configRuntimeKey !== getRuntimeKey()) return currentState;
 
-                    const storedScopes = isRecord(persisted.directoryScoped) && !Array.isArray(persisted.directoryScoped)
+                    const storedScopes = storeRecordSchema.safeParse(persisted.directoryScoped).success && !Array.isArray(persisted.directoryScoped)
                         ? persisted.directoryScoped
                         : currentState.directoryScoped;
                     const directoryScoped = { ...storedScopes };
                     for (const [directory, snapshot] of Object.entries(directoryScoped)) {
-                        if (!isRecord(snapshot)) {
+                        if (!storeRecordSchema.safeParse(snapshot).success) {
                             delete directoryScoped[directory];
                         } else if (snapshot.providers === undefined) {
                             // Version 1 persists selections without catalogs; give the

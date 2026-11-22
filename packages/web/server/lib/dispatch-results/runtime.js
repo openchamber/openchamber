@@ -17,7 +17,13 @@
 import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
-import { renameWithRetry } from '../shared/atomic-rename.js';
+import {
+  isJsonObject,
+  preserveMalformedJsonFile,
+  readDurableJsonFile,
+  writeDurableJsonFile,
+} from '../shared/durable-json-store.js';
+import { readBoundedResponseJson, readBoundedResponseText } from '../shared/response-body.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 
@@ -35,6 +41,10 @@ const SETTLE_RECHECKS = 3;
 const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
+// 16 MiB matches the session-list proxy cap and accommodates a 50-message page.
+const OPEN_CODE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
+// Error answers are only shown as a 200-char excerpt; cap the body read to match.
+const ERROR_DETAIL_MAX_BYTES = 1_024;
 const MESSAGE_PAGE_LIMIT = 50;
 // The answer travels into the parent's context; a session that wrote a book
 // is cut, and the agent can read the rest with session.messages.
@@ -95,8 +105,6 @@ const deletedEventSchema = z.object({
   type: z.literal('session.deleted'),
   properties: z.object({ sessionID: z.string().min(1) }),
 });
-
-const errorCodeSchema = z.object({ code: z.string() });
 
 const parse = (schema, value) => {
   const parsed = schema.safeParse(value);
@@ -170,9 +178,18 @@ export const readDispatchOutcome = (records, dispatchedAt, afterIdleId) => {
   };
 };
 
+// A fixed-offset cut can land between the halves of a surrogate pair,
+// leaving a lone surrogate that encodes as U+FFFD when the dispatch-result
+// message is encoded for the parent session; move a cut that lands inside
+// a pair back to the pair boundary.
+const dropSplitHead = (text) => {
+  const last = text.charCodeAt(text.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+};
+
 const outcomeBody = ({ state, text, errorMessage }, sessionId) => {
   const answer = text.length > ANSWER_CHAR_LIMIT
-    ? `${text.slice(0, ANSWER_CHAR_LIMIT)}\n\n[Cut at ${ANSWER_CHAR_LIMIT} characters; read the rest with session.messages for ${sessionId}.]`
+    ? `${dropSplitHead(text.slice(0, ANSWER_CHAR_LIMIT))}\n\n[Cut at ${ANSWER_CHAR_LIMIT} characters; read the rest with session.messages for ${sessionId}.]`
     : text;
   if (state === 'completed') return answer || 'The session finished without a text reply.';
   if (state === 'error') {
@@ -206,6 +223,7 @@ export function createDispatchResultsRuntime({
   // Archive is OpenChamber's: an archived parent records the answer but is not woken.
   isSessionArchived = async () => false,
   fetchImpl = fetch,
+  fsPromises = fs.promises,
   now = Date.now,
   quietMs = QUIET_MS,
   retryDelayMs = retryDelay,
@@ -228,27 +246,48 @@ export function createDispatchResultsRuntime({
 
   // --- persistence ---------------------------------------------------------
 
+  // This store rides the shared durable-store primitive (#976, phase 2 —
+  // #978). The value judgement is the one this store always made: a JSON
+  // object carrying an entries array. Anything else on disk (unparseable
+  // bytes, another shape) is malformed, and malformed bytes are pending
+  // deliveries, not "nothing pending": the primitive preserves them aside
+  // under its collision-proof name before any write can replace them.
+  // Parse errors are never logged: they can quote the file.
+  const isDispatchResultsValue = (value) => isJsonObject(value) && Array.isArray(value.entries);
+  const durableOptions = () => ({ fs: fsPromises, validateValue: isDispatchResultsValue });
+
   const readFile = async () => {
-    let raw;
-    try {
-      raw = await fs.promises.readFile(filePath, 'utf8');
-    } catch (error) {
-      if (parse(errorCodeSchema, error)?.code === 'ENOENT') return [];
-      throw error;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      // A read failure other than absence throws (the primitive's rule):
+      // a failed read must not pass for "nothing pending", because the
+      // next write would clobber the file; load() below keeps writes off
+      // until a load succeeds.
+      const result = await readDurableJsonFile(filePath, durableOptions());
+      if (result.state === 'missing') return [];
+      if (result.state === 'malformed') {
+        const preservation = await preserveMalformedJsonFile(filePath, durableOptions());
+        if (preservation.outcome === 'failed') {
+          // Fail closed, like a failed read: writes stay off rather than
+          // overwrite bytes whose preservation just failed.
+          throw new Error('failed to preserve the unreadable dispatch-results file; refusing to treat it as empty');
+        }
+        // A valid replacement landed while the malformed bytes were
+        // being judged: read that file instead of starting over.
+        if (preservation.outcome === 'replaced') continue;
+        if (preservation.preserved) {
+          console.warn(`[dispatch-results] file was unreadable and moved to ${preservation.preservedPath}`);
+        }
+        return [];
+      }
+      // One unreadable entry is dropped alone; the rest still deliver.
+      return (parse(storedFileSchema, result.value)?.entries ?? []).map((entry) => parse(entrySchema, entry)).filter(Boolean);
     }
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      // Malformed is a failure, not "nothing pending": keep the bytes and
-      // start over rather than overwrite them on the next write.
-      const backup = `${filePath}.corrupt-${now()}`;
-      await fs.promises.rename(filePath, backup).catch(() => undefined);
-      console.warn(`[dispatch-results] file was unreadable and moved to ${backup}: ${error?.message ?? error}`);
-      return [];
-    }
-    // One unreadable entry is dropped alone; the rest still deliver.
-    return (parse(storedFileSchema, parsed)?.entries ?? []).map((entry) => parse(entrySchema, entry)).filter(Boolean);
+    // Every attempt was superseded by a valid replacement while the
+    // malformed bytes were being judged, so no read ever reached a
+    // definitive result. Fail closed, like a failed read: returning []
+    // here would pass an unread file off as "nothing pending", and the
+    // next write would clobber the valid replacement.
+    throw new Error('the dispatch-results file kept being replaced while it was read; refusing to treat it as empty');
   };
 
   const load = () => {
@@ -267,18 +306,44 @@ export function createDispatchResultsRuntime({
     return loadPromise;
   };
 
+  // One write to the store. The returned promise rejects when the write
+  // is refused or fails, for callers that must know whether their write
+  // landed (register, #1503); the shared chain in writePromise never
+  // rejects — its catch warns and keeps later writes and flush() usable,
+  // which is the contract persist() below has always offered.
+  const persistWrite = () => {
+    const write = writePromise.then(async () => {
+      // Preserve before replacing, fail-closed (the primitive's
+      // contract): the load gate has normally judged the file already,
+      // but the write refuses on its own rather than trust that — a
+      // file that turned malformed since the load keeps its bytes.
+      // The thrown error lands in the chain's catch below, so the write
+      // is skipped and warned about, never forced through.
+      const preservation = await preserveMalformedJsonFile(filePath, durableOptions());
+      if (preservation.outcome === 'failed') {
+        throw new Error('failed to preserve the unreadable dispatch-results file; refusing to overwrite it');
+      }
+      if (preservation.preserved) {
+        console.warn(`[dispatch-results] file was unreadable and moved to ${preservation.preservedPath}`);
+      }
+      // The snapshot is taken here, when the write runs — not when it was
+      // queued. A registration whose queued write fails rolls its entry
+      // back before the next write in the chain runs, and a payload
+      // captured at queue time would still carry that rejected entry:
+      // the next write to succeed would put it back on disk, and a
+      // restart would restore a registration its caller was told had
+      // been refused (#1503, Codex review of #1511).
+      const payload = JSON.stringify({ version: FILE_VERSION, entries: Array.from(entries.values()) });
+      await writeDurableJsonFile(filePath, payload, { fs: fsPromises, mode: 0o600 });
+    });
+    writePromise = write.catch((error) => {
+      console.warn('[dispatch-results] failed to persist pending results:', error?.message ?? error);
+    });
+    return write;
+  };
+
   const persist = () => {
-    const payload = JSON.stringify({ version: FILE_VERSION, entries: Array.from(entries.values()) });
-    writePromise = writePromise
-      .then(async () => {
-        await fs.promises.mkdir(dataDir, { recursive: true });
-        const tmpPath = `${filePath}.${process.pid}.tmp`;
-        await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
-        await renameWithRetry((from, to) => fs.promises.rename(from, to), tmpPath, filePath);
-      })
-      .catch((error) => {
-        console.warn('[dispatch-results] failed to persist pending results:', error?.message ?? error);
-      });
+    persistWrite();
     return writePromise;
   };
 
@@ -295,10 +360,12 @@ export function createDispatchResultsRuntime({
     }
     const response = await fetchImpl(search ? `${base}?${search}` : base, init);
     if (!response.ok) {
-      const detail = await response.text().catch(() => '');
+      const detailRead = await readBoundedResponseText(response, ERROR_DETAIL_MAX_BYTES)
+        .catch(() => ({ tooLarge: true }));
+      const detail = detailRead.tooLarge ? '' : detailRead.text;
       throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
     }
-    return unwrapOpenCodeResponse(await response.json().catch(() => null));
+    return unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_RESPONSE_MAX_BYTES));
   };
 
   const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs: FETCH_TIMEOUT_MS, fetchImpl });
@@ -311,7 +378,7 @@ export function createDispatchResultsRuntime({
   const readWatchedSession = async (sessionId) => {
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
-    if (statuses[sessionId]) return { kind: 'running' };
+    if (Object.hasOwn(statuses, sessionId) && statuses[sessionId]) return { kind: 'running' };
     // A turn is over only when its subagents are done too: the session idles
     // while a background subagent works and runs again on its result.
     const subagentsWorking = await activityProbe.hasWorkingChildren(sessionId, statuses);
@@ -460,6 +527,21 @@ export function createDispatchResultsRuntime({
    * and delivers its result to `parentSessionId`. Resolves once the entry is
    * on disk, so a restart right after the tool answers still delivers.
    */
+  // Registrations are serialized with their writes and rollbacks. Two
+  // overlapping registrations otherwise interleave badly in both
+  // directions: a queued snapshot can carry an entry whose own write
+  // later fails and rolls back (leaving it on disk), and an earlier write
+  // executing late can commit an entry before its own write fails (same
+  // leak, mirrored). With one registration in flight at a time, the only
+  // write that can contain a new entry is its own, so a failed write plus
+  // the in-memory rollback fully undoes the registration (#1503).
+  let registrationChain = Promise.resolve();
+  const serializeRegistration = (task) => {
+    const run = registrationChain.then(task);
+    registrationChain = run.catch(() => {});
+    return run;
+  };
+
   const register = async ({ parentSessionId, sessionId, dispatchedAt, afterIdleId }) => {
     const parent = parse(sessionIdSchema, parentSessionId);
     const watched = parse(sessionIdSchema, sessionId);
@@ -468,6 +550,7 @@ export function createDispatchResultsRuntime({
     const at = parse(timeSchema, dispatchedAt);
     if (at === null) throw new TypeError('dispatchedAt must be a timestamp');
     await load();
+    return serializeRegistration(async () => {
     const entry = { id: `dispatch-${now()}-${Math.random().toString(36).slice(2, 9)}`, parentSessionId: parent, sessionId: watched, dispatchedAt: at };
     // Kept only when it is a real baseline (an id, or null for "none yet").
     const baseline = afterIdleSchema.safeParse(afterIdleId);
@@ -483,11 +566,25 @@ export function createDispatchResultsRuntime({
         console.warn(`[dispatch-results] too many pending results; no longer waiting on ${stale.sessionId} for ${stale.parentSessionId}`);
       }
     }
-    await persist();
+    try {
+      await persistWrite();
+    } catch (error) {
+      // The write was refused or failed, so the entry exists only in
+      // memory and a restart would drop it: reporting it as pending
+      // would strand the caller waiting for a result that can never
+      // arrive (#1503). Drop it and let the caller see the failure.
+      entries.delete(entry.id);
+      // A write outside this registration (a delivery's persist, say)
+      // may already have committed the entry before this write failed;
+      // persist the rollback so the disk converges back to memory.
+      void persist();
+      throw error;
+    }
     // The session may already be done: a short turn can end before this
     // entry existed, and its idle event would then have found nothing to arm.
     arm(watched);
     return { id: entry.id };
+    });
   };
 
   const processPayload = (payload) => {

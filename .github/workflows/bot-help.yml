@@ -8,8 +8,12 @@ on:
 # workflow+ref group is one shared group for every issue: with the
 # default single queue a third help command silently replaces the
 # pending second one. Key by issue and queue every run.
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  # queue: max cannot pair with cancel-in-progress: true; GitHub rejects
+  # the combo and every run dies at startup with zero jobs. Keep false
+  # so comment runs queue instead of failing validation.
   cancel-in-progress: false
   queue: max
 

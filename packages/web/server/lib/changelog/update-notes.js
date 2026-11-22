@@ -10,7 +10,13 @@
 // Any failure (network, 404, unexpected shape) yields null: the update is
 // still offered, only without notes.
 
-const CHANGELOG_INDEX_URL = 'https://raw.githubusercontent.com/developing-today/openchamber/main/changelog/index.json';
+import { readBoundedResponseText } from '../shared/response-body.js';
+
+const CHANGELOG_INDEX_URL = 'https://raw.githubusercontent.com/developing-today-forks/openchamber/main/changelog/index.json';
+
+// The index is a small JSON file; 1 MiB is generous. The deadline bounds time,
+// the cap bounds memory. Over-cap returns null like any other failure.
+export const CHANGELOG_INDEX_MAX_BYTES = 1 * 1024 * 1024;
 
 const GROUPS = [
   ['new', 'New'],
@@ -76,7 +82,23 @@ export async function fetchUpdateNotes(fromVersion, toVersion, compareVersions, 
   try {
     const response = await fetchImpl(CHANGELOG_INDEX_URL, { signal: AbortSignal.timeout(options.timeoutMs ?? 10_000) });
     if (!response.ok) return null;
-    return renderUpdateNotes(await response.json(), fromVersion, toVersion, compareVersions);
+    // Test doubles pass a plain { ok, json } without a body; real responses
+    // go through the bounded reader.
+    if (!response.body) {
+      if (response.json) {
+        return renderUpdateNotes(await response.json(), fromVersion, toVersion, compareVersions);
+      }
+      return null;
+    }
+    const bounded = await readBoundedResponseText(response, options.maxBytes ?? CHANGELOG_INDEX_MAX_BYTES);
+    if (bounded.tooLarge) return null;
+    let index;
+    try {
+      index = JSON.parse(bounded.text);
+    } catch {
+      return null;
+    }
+    return renderUpdateNotes(index, fromVersion, toVersion, compareVersions);
   } catch {
     return null;
   }

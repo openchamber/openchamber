@@ -4,15 +4,19 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -28,7 +32,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode 隨 OpenChamber 一起提供。請更新 OpenChamber 以取得 OpenCode v2。",
@@ -142,15 +148,19 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n['zh-TW'],
   ...referencePickerI18n['zh-TW'],
   ...sessionMenuHintsI18n['zh-TW'],
+  ...sessionErrorRecoveryI18n['zh-TW'],
   ...sidebarLayoutI18n['zh-TW'],
+  ...activityTimesI18n['zh-TW'],
   ...projectKnowledgeI18n['zh-TW'],
   ...linearPanelI18n['zh-TW'],
   ...routingI18n['zh-TW'],
+  ...poolSettingsI18n['zh-TW'],
   ...pluginPanelI18n['zh-TW'],
   ...surfacePanelI18n['zh-TW'],
   ...fileArtifactsI18n['zh-TW'],
   ...fileContentSearchI18n['zh-TW'],
   ...htmlRenderI18n['zh-TW'],
+  ...sessionLocationI18n['zh-TW'],
   ...sessionNoticesI18n['zh-TW'],
   ...usageStatsI18n['zh-TW'],
   ...webSearchI18n['zh-TW'],
@@ -166,7 +176,9 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-TW'],
   ...integrationsCatalogI18n['zh-TW'],
   ...sessionGoalWriterI18n['zh-TW'],
+  ...subsessionModelsI18n['zh-TW'],
   ...diffFindI18n['zh-TW'],
+  ...questionAnswersI18n['zh-TW'],
   'terminalView.actions.attachSelection': '附加所選輸出',
   'terminalView.actions.copySelection': '複製所選輸出',
   'terminalView.toast.selectionCopied': '已複製輸出',
@@ -504,6 +516,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': '已傳送',
   'sessions.scheduledTasks.dialog.status.skipped': '已略過',
   'sessions.scheduledTasks.dialog.status.cancelled': '已取消',
+  'sessions.scheduledTasks.dialog.status.timeout': '逾時',
   'sessions.scheduledTasks.dialog.nextRun.label': '下次',
   'sessions.scheduledTasks.dialog.lastRun.label': '上次執行',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': '正在執行',
@@ -621,6 +634,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showWork': '顯示進行中部分',
   'sessions.sidebar.header.displayMode.showPinned': '顯示已釘選部分',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細列',
+  'sessions.sidebar.header.displayMode.sidebarRows': '側邊列…',
   'sessions.sidebar.activity.pinnedTitle': '已釘選',
   'sessions.sidebar.header.displayMode.showArchived': '顯示已封存會話',
   'sessions.sidebar.header.displayMode.collapseAll': '全部摺疊',
@@ -649,6 +663,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '檢視',
   'sessions.sidebar.header.viewMode.projects': '樹狀',
   'sessions.sidebar.header.viewMode.timeline': '清單',
+  'sessions.sidebar.header.viewMode.headerless': '隱藏區段標題',
   'sessions.sidebar.activity.chatsEmpty': '尚無聊天。',
   'chat.chatInput.chooseProject': '選擇專案',
   'sessions.archivePage.allDirectories': '所有目錄',
@@ -1296,6 +1311,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.checks.openRun': '開啟',
   'gitView.pr.checks.failedAnnotations': '失敗的註解',
   'gitView.pr.checks.failedAnnotationsShown': '失敗的註解（顯示 {total} 則中的 {shown} 則）',
+  'gitView.pr.checks.annotationsTruncated': '註解不完整 — 此執行的註解數量超過可載入的數量。',
   'gitView.pr.field.baseBranch': '基底分支',
   'gitView.pr.field.description': '描述',
   'gitView.pr.field.title': '標題',
@@ -1354,7 +1370,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.mergeCompleted': '合併完成',
   'gitView.toast.mergeConflictsDetected': '偵測到合併衝突',
   'gitView.toast.mergedIntoBranch': '已將 {branch} 合併到 {currentBranch}',
-  'gitView.toast.pushedToUpstream': '已推送到上游',
+  'gitView.toast.pushedToUpstream': '已推送到 {name}',
   'gitView.toast.syncedChanges': '已同步變更',
   'gitView.toast.alreadyUpToDate': '已是最新狀態',
   'gitView.toast.rebaseAborted': 'Rebase 已中止',
@@ -1870,6 +1886,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': '此儲存庫沒有變更',
   'diffView.unavailable.untrackedDirectoryTitle': '新檔案資料夾',
   'diffView.unavailable.untrackedDirectoryDescription': '此資料夾中的新檔案太多，無法逐一列出。請暫存該資料夾，或若它不屬於儲存庫，將其加入 .gitignore。',
+  'diffView.unavailable.tooLargeTitle': '檔案太大，無法顯示差異',
+  'diffView.unavailable.tooLargeDescription': '它超過了檔案差異 20 MiB 的上限。',
   'diffView.submodule.title': '子模組',
   'diffView.submodule.commitChanged': '提交 {from} → {to}',
   'diffView.submodule.commitUnchanged': '仍在提交 {commit}',
@@ -2564,6 +2582,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': '故障轉移自',
   'chat.messageBody.modelChanged.notice': '模型已變更：{from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': '模型已變更：{from} → {to}（{reason}）',
+  'chat.messageBody.modelChanged.preferPrevious': '優先使用上一個',
+  'chat.messageBody.modelChanged.preferPreviousTitle': '讓模型池在一天內優先使用 {model}',
+  'chat.currentModel.label': '目前模型：{model}',
+  'chat.currentModel.labelWithPool': '目前模型：{model}（來自模型池 {pool}）',
+  'chat.currentModel.menu.openHint': '點擊以選擇模型',
+  'chat.currentModel.menu.timing': '切換',
+  'chat.currentModel.menu.directPickHelp': '直接選擇會停止模型池的故障轉移，直到你返回模型池。',
+  'chat.currentModel.timing.immediately': '立即（重新開始進行中的回覆）',
+  'chat.currentModel.timing.nextStep': '在下一步',
+  'chat.currentModel.timing.nextInput': '隨下一則訊息',
+  'chat.currentModel.menu.members': '模型池 {pool} 中的模型',
+  'chat.currentModel.menu.returnToPool': '返回模型池 {pool}',
+  'chat.currentModel.toast.failed': '無法切換模型',
   'chat.generatedResult.actions.copy': '複製',
   'chat.generatedResult.actions.copied': '已複製',
   'chat.generatedResult.commit.title': '生成的提交訊息',
@@ -3052,6 +3083,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '需要認證',
   'mcpDropdown.status.needsRegistration': '需要註冊：{error}',
   'mcpDropdown.empty.configureInConfig': '請在設定中設定 MCP 伺服器。',
+  "mcpDropdown.cacheNote": "切換關閉了 Code Mode 的伺服器後，執行中的工作階段下一輪不會使用提示快取。",
   'sessionAuth.error.rateLimitTitle': '嘗試次數過多',
   'sessionAuth.error.networkTitle': '無法連線伺服器',
   'sessionAuth.error.rateLimitDescriptionSingle': '請等待 {minutes} 分鐘後再試。',
@@ -3834,8 +3866,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': '保留這個',
   'multirun.overview.addModel.action': '新增模型',
   'multirun.overview.addModel.hint': '在此執行中讓另一個模型處理同一提示詞',
-  'chat.parallel.settings.whereShared': '專案目錄',
-  'chat.parallel.settings.whereSharedHint': '所有執行都在你的工作副本中進行。最適合提問與研究。',
+  'chat.parallel.settings.whereShared': '共用目錄',
+  'chat.parallel.settings.whereSharedHint': '所有執行都在此草稿選定的目錄中進行。最適合提問與研究。',
   'chat.parallel.settings.whereWorktrees': '獨立 worktree',
   'chat.parallel.settings.whereWorktreesHint': '每次執行使用自己的分支，程式碼變更不會衝突。保留最好的那個。',
   'chat.parallel.settings.baseBranchTitle': '基礎分支',

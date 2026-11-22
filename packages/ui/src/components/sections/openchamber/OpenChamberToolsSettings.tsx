@@ -95,6 +95,9 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const agentRenderToolEnabled = useUIStore((state) => state.agentRenderToolEnabled);
   const setAgentRenderToolEnabled = useUIStore((state) => state.setAgentRenderToolEnabled);
   const agentToolsCodeMode = useUIStore((state) => state.agentToolsCodeMode);
+  // False for an external OpenCode or a user-owned OPENCODE_CONFIG: there a switch waits
+  // for a restart, so it does not touch a running session's prompt cache.
+  const managedToolsApplyLive = useUIStore((state) => state.managedToolsApplyLive);
   const setAgentToolsCodeMode = useUIStore((state) => state.setAgentToolsCodeMode);
 
   const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
@@ -300,6 +303,17 @@ export const OpenChamberToolsSettings: React.FC = () => {
         ariaLabel={t('settings.openchamber.tools.field.agentToolsCodeModeAria')}
         info={t('settings.openchamber.tools.field.agentToolsCodeModeInfo')}
       />
+
+      {/* A direct tool is part of the request's tool list, which providers cache as
+          the start of the prompt. In code mode only the render tool stays direct;
+          the rest change a catalog that OpenCode appends as a message. */}
+      {managedToolsApplyLive ? (
+        <p className="mt-2 max-w-[44rem] typography-meta text-muted-foreground">
+          {agentToolsCodeMode
+            ? t('settings.openchamber.tools.cacheNote.codeMode')
+            : t('settings.openchamber.tools.cacheNote.direct')}
+        </p>
+      ) : null}
     </SettingsSection>
   );
 };

@@ -47,6 +47,7 @@ import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDro
 import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { SessionMenuItemHint } from '@/components/session/SessionMenuItemHint';
 import { MoveChatToProjectDialog } from '@/components/session/MoveChatToProjectDialog';
+import { ChangeSessionLocationDialog } from '@/components/session/ChangeSessionLocationDialog';
 import { HeaderSessionArchiveMenuItem } from './HeaderSessionArchiveMenuItem';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
@@ -411,6 +412,7 @@ export const Header: React.FC = () => {
   const pendingHeaderRenameRef = React.useRef<string | null>(null);
   const [headerSessionTitleDraft, setHeaderSessionTitleDraft] = React.useState('');
   const [moveChatDialogOpen, setMoveChatDialogOpen] = React.useState(false);
+  const [changeLocationDialogOpen, setChangeLocationDialogOpen] = React.useState(false);
   const hasProjects = useProjectsStore((state) => state.projects.length > 0);
   const [pendingHeaderRetentionAction, setPendingHeaderRetentionAction] = React.useState<{ action: 'archive' | 'delete'; sessionId: string } | null>(null);
   const headerRenameFormRef = React.useRef<HTMLFormElement | null>(null);
@@ -561,6 +563,26 @@ export const Header: React.FC = () => {
       messages: buildSessionTreeMoveMessages(t, {
         success: 'sessions.moveChatToProject.success',
         failure: 'sessions.moveChatToProject.failed',
+      }),
+    });
+  }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
+
+  // Any folder the user names. The session is read from every known session,
+  // archived ones included: a session whose folder was deleted is often
+  // archived, and the active list alone made this a silent no-op for it.
+  const changeCurrentSessionLocation = React.useCallback((directory: string) => {
+    if (!currentSessionId || !sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree) return;
+    const root = useGlobalSessionsStore.getState().entityById.get(currentSessionId);
+    if (!root) return;
+    requestSessionTreeMove({
+      kind: 'directory',
+      root,
+      descendants: collectSessionMoveDescendants(root, []),
+      sourceDirectory: sessionDirectory,
+      directory,
+      messages: buildSessionTreeMoveMessages(t, {
+        success: 'sessions.changeLocation.success',
+        failure: 'sessions.changeLocation.failed',
       }),
     });
   }, [currentSessionId, isCurrentSessionActive, isCurrentSessionMovingToWorktree, sessionDirectory, t]);
@@ -936,6 +958,7 @@ export const Header: React.FC = () => {
     const { Item, Separator } = components;
     const canMoveToWorktree = isActive && !isVSCode && !isChatContext && currentSession && !currentSession.parentId;
     const canMoveToProject = isActive && !isVSCode && isChatContext && currentSession && !currentSession.parentId && hasProjects;
+    const canChangeLocation = isActive && !isVSCode && currentSession && !currentSession.parentId;
     return (
       <>
         <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.rename')}>
@@ -993,6 +1016,22 @@ export const Header: React.FC = () => {
               >
                 <Icon name="folder-shared" className="me-1 size-4" />
                 {t('sessions.moveChatToProject.menu')}
+              </Item>
+            </span>
+          </SessionMenuItemHint>
+        ) : null}
+        {canChangeLocation ? (
+          <SessionMenuItemHint hint={isCurrentSessionActive
+            ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+            : t('sessions.changeLocation.hint')}>
+            <span className="block">
+              <Item
+                disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
+                onClick={() => setChangeLocationDialogOpen(true)}
+                className="w-full"
+              >
+                <Icon name="folder" className="me-1 size-4" />
+                {t('sessions.changeLocation.menu')}
               </Item>
             </span>
           </SessionMenuItemHint>
@@ -1223,6 +1262,23 @@ export const Header: React.FC = () => {
                         </span>
                       </SessionMenuItemHint>
                     ) : null}
+                    {!isVSCode && currentSession && !currentSession.parentId ? (
+                      <SessionMenuItemHint hint={isCurrentSessionActive
+                        ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+                        : t('sessions.changeLocation.hint')}>
+                        <span className="block">
+                          <DropdownMenuItem
+                            disabled={!sessionDirectory || isCurrentSessionActive || isCurrentSessionMovingToWorktree}
+                            onClick={() => setChangeLocationDialogOpen(true)}
+                            className="w-full"
+                            data-session-change-location="true"
+                          >
+                            <Icon name="folder" className="me-1 size-4" />
+                            {t('sessions.changeLocation.menu')}
+                          </DropdownMenuItem>
+                        </span>
+                      </SessionMenuItemHint>
+                    ) : null}
                     <DropdownMenuSeparator />
                     <HeaderSessionArchiveMenuItem
                       sessionId={currentSessionId}
@@ -1372,6 +1428,12 @@ export const Header: React.FC = () => {
         open={moveChatDialogOpen}
         onOpenChange={setMoveChatDialogOpen}
         onPick={moveCurrentChatToProject}
+      />
+      <ChangeSessionLocationDialog
+        open={changeLocationDialogOpen}
+        onOpenChange={setChangeLocationDialogOpen}
+        currentDirectory={sessionDirectory || null}
+        onPick={changeCurrentSessionLocation}
       />
       <Dialog open={pendingHeaderRetentionAction !== null} onOpenChange={(open) => { if (!open) setPendingHeaderRetentionAction(null); }}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">

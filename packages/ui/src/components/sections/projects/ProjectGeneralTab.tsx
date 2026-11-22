@@ -6,6 +6,7 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
+  SettingsCheckboxRow,
   SettingsFieldRow,
   SettingsSection,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
@@ -13,13 +14,16 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { updateSharedProjectSetup, type ProjectRef } from '@/lib/openchamberConfig';
 import { ensureSharedSetupTrusted, resetSharedSetupTrust } from '@/lib/sharedTrustConfirmation';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { Icon } from '@/components/icon/Icon';
+import type { ProjectEntry } from '@/lib/api/types';
 import type { useProjectIdentityForm } from './useProjectIdentityForm';
 import type { ProjectSetupState } from './useProjectSetup';
 import { ProjectSetupUnavailable } from './ProjectSettingsBits';
@@ -93,6 +97,32 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
           </Select>
         </SettingsFieldRow>
       ) : null}
+    </SettingsSection>
+  );
+};
+
+const SidebarVisibilitySection: React.FC<{ project: ProjectEntry }> = ({ project }) => {
+  const { t } = useI18n();
+  const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
+  return (
+    <SettingsSection
+      title={t('settings.projects.sidebar.title')}
+      info={t('settings.projects.sidebar.description')}
+      divider={false}
+      contentClassName="space-y-0"
+    >
+      <SettingsCheckboxRow
+        settingsItem="projects.sidebar.work"
+        checked={!project.hiddenFromWork}
+        onChange={(shown) => updateProjectMeta(project.id, { hiddenFromWork: !shown })}
+        label={t('settings.projects.sidebar.showInWork')}
+      />
+      <SettingsCheckboxRow
+        settingsItem="projects.sidebar.all"
+        checked={!project.hiddenFromAllSessions}
+        onChange={(shown) => updateProjectMeta(project.id, { hiddenFromAllSessions: !shown })}
+        label={t('settings.projects.sidebar.showInAllSessions')}
+      />
     </SettingsSection>
   );
 };
@@ -224,11 +254,13 @@ const TeamFileSection: React.FC<{ projectRef: ProjectRef; setupState: ProjectSet
 
 export const ProjectGeneralTab: React.FC<{
   form: ProjectIdentityFormState;
+  project: ProjectEntry;
   projectRef: ProjectRef;
   setupState: ProjectSetupState;
-}> = ({ form, projectRef, setupState }) => (
+}> = ({ form, project, projectRef, setupState }) => (
   <>
     <ChatDefaultsSection form={form} />
+    {isVSCodeRuntime() ? null : <SidebarVisibilitySection project={project} />}
     <TeamFileSection projectRef={projectRef} setupState={setupState} />
   </>
 );

@@ -1,11 +1,15 @@
+import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
+
 export const DEFAULT_OPENCODE_DRAIN_GRACE_MS = 30 * 60 * 1000;
 const DRAIN_POLL_MS = 1000;
 
 export const resolveOpenCodeDrainGraceMs = (env) => {
-  const raw = env.OPENCHAMBER_OPENCODE_DRAIN_GRACE_MS;
-  if (raw === undefined || raw === '') return DEFAULT_OPENCODE_DRAIN_GRACE_MS;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_OPENCODE_DRAIN_GRACE_MS;
+  // The strict plain-decimal judgement lives in shared/parse-int.js (design
+  // #802 phase 2, #804), matching the sibling strict readers: a bare
+  // Number(...) would silently honour '1e3' (a 1 s grace), '0x10' (16 ms),
+  // '5.9', '+5000', and '5000.0', and a whitespace-only value would become a
+  // zero grace instead of the default. An explicit '0' is a real zero grace.
+  return parseBoundedIntWithDefault(env.OPENCHAMBER_OPENCODE_DRAIN_GRACE_MS, DEFAULT_OPENCODE_DRAIN_GRACE_MS, 0, Number.MAX_SAFE_INTEGER);
 };
 
 // An OpenCode that has been replaced stays up until nothing depends on it: no proxied

@@ -18,6 +18,7 @@ import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
 import { SettingsChipGroup, SettingsFieldRow, SettingsSection, SettingsStackedField, SettingsGroupTitle, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
+import { displayedTunnelMode, isTunnelSearchRevealMode } from './tunnelSearchReveal';
 
 type TunnelState =
   | 'checking'
@@ -352,6 +353,8 @@ const createPresetId = (): string => {
 export const TunnelSettings: React.FC = () => {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
+  const tunnelModeRequested = useUIStore((state) => state.settingsTunnelModeRequested);
+  const setTunnelModeRequested = useUIStore((state) => state.setSettingsTunnelModeRequested);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const [state, setState] = React.useState<TunnelState>('checking');
   const checkingBlink = useWaitingBlink(state === 'checking');
@@ -368,6 +371,18 @@ export const TunnelSettings: React.FC = () => {
   const [dependencyInstallInfo, setDependencyInstallInfo] = React.useState<TunnelDependencyInstallInfo>(() => createTunnelDependencyInstallInfo('cloudflare'));
   const [providerCapabilities, setProviderCapabilities] = React.useState<TunnelProviderCapability[]>([]);
   const [tunnelMode, setTunnelMode] = React.useState<TunnelMode>('quick');
+  // A managed mode settings search asked this page to reveal, view-only
+  // (#1764). The saved tunnelMode above is never changed by a reveal; only
+  // the mode sections render for the revealed mode, via displayTunnelMode.
+  const [revealedTunnelMode, setRevealedTunnelMode] = React.useState<TunnelMode | null>(null);
+  const displayTunnelMode = displayedTunnelMode(tunnelMode, revealedTunnelMode);
+  React.useEffect(() => {
+    if (!isTunnelSearchRevealMode(tunnelModeRequested)) {
+      return;
+    }
+    setRevealedTunnelMode(tunnelModeRequested);
+    setTunnelModeRequested(null);
+  }, [tunnelModeRequested, setTunnelModeRequested]);
   const [managedLocalConfigPath, setManagedLocalConfigPath] = React.useState<string | null>(null);
   const [managedRemoteTunnelPresets, setManagedRemoteTunnelPresets] = React.useState<ManagedRemoteTunnelPreset[]>([]);
   const [expandedManagedRemoteTunnels, setExpandedManagedRemoteTunnels] = React.useState<Record<string, boolean>>({});
@@ -757,6 +772,8 @@ export const TunnelSettings: React.FC = () => {
     setManagedRemoteValidationError(null);
     setErrorMessage(null);
     const capability = providerCapabilities.find((entry) => entry.provider === provider);
+    // Saved mode only (#1764): a search-revealed mode is view-only and must
+    // never ride along into this save.
     const defaultMode = capability?.modes?.some((mode) => mode.key === tunnelMode)
       ? tunnelMode
       : toUiTunnelMode(capability?.modes?.[0]?.key);
@@ -1217,9 +1234,10 @@ export const TunnelSettings: React.FC = () => {
 
           <SettingsFieldRow label={t('settings.openchamber.tunnel.field.tunnelType')} settingsItem="tunnel.type">
             <SettingsChipGroup
-              value={tunnelMode}
+              value={displayTunnelMode}
               aria-label={t('settings.openchamber.tunnel.field.tunnelType')}
               onChange={(mode) => {
+                setRevealedTunnelMode(null);
                 void handleModeChange(mode);
               }}
               options={tunnelModeOptions.map((option) => ({
@@ -1232,7 +1250,7 @@ export const TunnelSettings: React.FC = () => {
           </SettingsFieldRow>
         </div>
 
-        {tunnelMode === 'quick' && (
+        {displayTunnelMode === 'quick' && (
           <div className="flex items-start gap-2 rounded-lg bg-[var(--status-warning)]/10 p-3">
             <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
             <div className="space-y-1">
@@ -1248,7 +1266,7 @@ export const TunnelSettings: React.FC = () => {
           </div>
         )}
 
-        {tunnelMode === 'managed-remote' && (
+        {displayTunnelMode === 'managed-remote' && (
           <p className={SETTINGS_HELPER_CLASS}>
             {t('settings.openchamber.tunnel.note.managedRemoteRequiresDomain')}
             {' '}
@@ -1265,7 +1283,7 @@ export const TunnelSettings: React.FC = () => {
           </p>
         )}
 
-        {tunnelMode === 'managed-local' && (
+        {displayTunnelMode === 'managed-local' && (
           <p className={SETTINGS_HELPER_CLASS}>
             {t('settings.openchamber.tunnel.note.managedLocalUsesConfig')}
             {' '}
@@ -1282,7 +1300,7 @@ export const TunnelSettings: React.FC = () => {
           </p>
         )}
 
-        {tunnelMode === 'managed-remote' && (
+        {displayTunnelMode === 'managed-remote' && (
           <div data-settings-item="tunnel.managed-remote" className="oc-tile space-y-2 rounded-lg p-3">
             {typeof suggestedConnectorPort === 'number' && (
               <div className="rounded-md bg-[var(--status-info-background)]/60 px-2 py-1.5">
@@ -1482,7 +1500,7 @@ export const TunnelSettings: React.FC = () => {
           </div>
         )}
 
-        {tunnelMode === 'managed-local' && (
+        {displayTunnelMode === 'managed-local' && (
           <div data-settings-item="tunnel.managed-local-config" className="oc-tile space-y-2 rounded-lg p-3">
             <div className="space-y-1.5">
               <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.configurationFile')}</p>

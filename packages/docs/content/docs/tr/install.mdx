@@ -36,3 +36,16 @@ OpenChamber'ı [VS Code Marketplace](https://marketplace.visualstudio.com/items?
 ## Mobil
 
 iPhone uygulamasını TestFlight ile ya da Android uygulamasını en son sürümden kurun, ardından bilgisayarınızla eşleştirin. [Mobil Uygulamalar ve PWA](/tr/mobile/) her iki adımı da anlatır.
+
+## Nix
+
+NixOS'ta ya da Nix'in olduğu herhangi bir Linux'ta, OpenChamber deposundaki flake aynı uygulamaları derler:
+
+```bash
+nix run github:openchamber/openchamber        # http://localhost:3000 adresinde web sunucusu
+nix run github:openchamber/openchamber#gui    # masaüstü uygulaması
+```
+
+Flake ayrıca `packages.openchamber` ve `packages.openchamber-desktop` paketlerini ve `host`, `port`, `openFirewall` ve `uiPasswordFile` içeren bir `nixosModules.openchamber` systemd modülünü sunar. Parola dosyası systemd'nin `LoadCredential` özelliğiyle okunur, bu yüzden root'a ait 0400 izinli bir gizli dosya varsayılan dinamik kullanıcıyla çalışır.
+
+Güncellemeler flake üzerinden yapılır. Paketlenmiş OpenCode CLI'sinin uygulama içi güncelleyicisi kapalıdır, çünkü bir Nix store yolu kendini güncelleyemez; güncellemek için flake'i çekip yeniden derleyin.

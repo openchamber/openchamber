@@ -12,7 +12,12 @@
  */
 
 import { asNonEmptyString } from '../shared/guards.js';
-import { renameWithRetry } from '../shared/atomic-rename.js';
+import {
+  isJsonObject,
+  preserveMalformedJsonFile,
+  readDurableJsonFile,
+  writeDurableJsonFile,
+} from '../shared/durable-json-store.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
 
@@ -73,11 +78,10 @@ export const createArchiveStore = ({
 
   const snapshot = () => Object.fromEntries(entries);
 
-  const parseStored = (raw) => {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('archive file is not a JSON object');
-    }
+  // The value judgement stays this store's: a JSON object (judged by the
+  // primitive's reader via isJsonObject) whose entries are positive
+  // timestamps or explicit null unarchives; any other entry value is dropped.
+  const parseValue = (parsed) => {
     const result = new Map();
     for (const [sessionID, value] of Object.entries(parsed)) {
       const id = asNonEmptyString(sessionID);
@@ -92,31 +96,49 @@ export const createArchiveStore = ({
     return result;
   };
 
-  const readFile = async () => {
-    let raw;
-    try {
-      raw = await fsPromises.readFile(filePath, 'utf8');
-    } catch (error) {
-      // No file yet is the normal first run: nothing is archived, and writing
-      // is safe because there is no state to lose.
-      if (error?.code === 'ENOENT') return { ok: true, stored: new Map() };
-      console.warn('[openchamber-sessions] could not read the archive file:', error?.message ?? error);
-      return { ok: false, stored: null };
-    }
+  const durableOptions = () => ({ fs: fsPromises, validateValue: isJsonObject });
 
-    try {
-      return { ok: true, stored: parseStored(raw) };
-    } catch (error) {
-      // Malformed bytes are kept for the user instead of being overwritten on
-      // the next archive, and whatever this process already knows stays in
-      // memory rather than collapsing to "nothing archived".
-      const backup = `${filePath}.corrupt-${now()}`;
-      await fsPromises.rename(filePath, backup).catch(() => undefined);
-      console.warn(
-        `[openchamber-sessions] archive file was unreadable and was moved to ${backup}: ${error?.message ?? error}`,
-      );
+  const readFile = async () => {
+    // Up to three attempts: a preserve that answers 'replaced' means a valid
+    // file landed while the malformed bytes were being judged - read that
+    // file instead of answering from the stale judgement.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let result;
+      try {
+        result = await readDurableJsonFile(filePath, durableOptions());
+      } catch (error) {
+        // A read failure other than absence (absence is 'missing') is not
+        // evidence that nothing is archived, and writing over a file we
+        // could not read would drop exactly the state we are protecting.
+        console.warn('[openchamber-sessions] could not read the archive file:', error?.message ?? error);
+        return { ok: false, stored: null };
+      }
+      // No file yet (or an empty one) is the normal first run: nothing is
+      // archived, and writing is safe because there is no state to lose.
+      if (result.state === 'missing') return { ok: true, stored: new Map() };
+      if (result.state === 'valid') return { ok: true, stored: parseValue(result.value) };
+      // Malformed bytes are preserved aside by the shared primitive under
+      // its collision-proof name instead of being overwritten on the next
+      // archive, and whatever this process already knows stays in memory
+      // rather than collapsing to "nothing archived". The raw bytes are
+      // never logged: a parse error can quote the file.
+      const preservation = await preserveMalformedJsonFile(filePath, durableOptions());
+      if (preservation.outcome === 'replaced') continue;
+      if (preservation.outcome === 'failed') {
+        // Fail closed (the primitive's contract): preservation failed, so
+        // the bytes are still live at the path and a write would destroy
+        // them. Refuse like an unreadable file; a later load can retry.
+        console.warn('[openchamber-sessions] could not preserve the unreadable archive file; writes are refused until it can be preserved');
+        return { ok: false, stored: null };
+      }
+      if (preservation.preserved) {
+        console.warn(
+          `[openchamber-sessions] archive file was unreadable and was preserved at ${preservation.preservedPath}`,
+        );
+      }
       return { ok: true, stored: new Map() };
     }
+    return { ok: true, stored: new Map() };
   };
 
   const load = () => {
@@ -143,13 +165,28 @@ export const createArchiveStore = ({
 
   /** Only ever called inside `runExclusive`, so two batches cannot interleave their renames. */
   const persist = async () => {
-    const payload = JSON.stringify(snapshot());
-    await fsPromises.mkdir(dataDir, { recursive: true });
-    // Temp file in the same directory so the rename is atomic on one device:
-    // a reader sees either the previous file or the complete new one.
-    const tmpPath = `${filePath}.${process.pid}.tmp`;
-    await fsPromises.writeFile(tmpPath, payload, 'utf8');
-    await renameWithRetry((from, to) => fsPromises.rename(from, to), tmpPath, filePath);
+    // Preserve-before-write, fail-closed (the primitive's contract): a
+    // malformed file that appeared after the load must be preserved before
+    // any write replaces it, and a failed preservation refuses the write -
+    // the batch then rolls back in applyBatchExclusive.
+    const preservation = await preserveMalformedJsonFile(filePath, durableOptions());
+    if (preservation.outcome === 'failed') {
+      throw new Error('could not preserve the unreadable archive file; refusing to overwrite it');
+    }
+    if (preservation.preserved) {
+      console.warn(
+        `[openchamber-sessions] archive file was unreadable and was preserved at ${preservation.preservedPath}`,
+      );
+    }
+    // Atomic write through the primitive: a unique temp file in the same
+    // directory, renamed over the destination, so a reader sees either the
+    // previous file or the complete new one. The mode is stated explicitly
+    // at this store's previous effective behaviour (0o666, umask-governed):
+    // archive stamps are session ids and timestamps, not secret-bearing.
+    await writeDurableJsonFile(filePath, JSON.stringify(snapshot()), {
+      fs: fsPromises,
+      mode: 0o666,
+    });
   };
 
   /** Applies a batch and rolls the memory back when the file write fails. */

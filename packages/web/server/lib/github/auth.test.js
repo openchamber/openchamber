@@ -194,3 +194,91 @@ describe('GitHub auth credentials', () => {
     expect(await octokit.getOctokitForAccountId('github.com#999')).toBeNull();
   });
 });
+
+describe('gh-CLI settings writes', () => {
+  const settingsPath = () => path.join(directory, 'settings.json');
+
+  it('refuses to write on a malformed settings.json and leaves it untouched', async () => {
+    const torn = '{"theme":"dark","ghCliActive":true,"nested":{"a":1';
+    await fs.writeFile(settingsPath(), torn);
+    expect(() => auth.setGhCliDisabled(true)).toThrowError(expect.objectContaining({ code: 'MALFORMED_SETTINGS' }));
+    expect(() => auth.setGhCliActive(true)).toThrowError(expect.objectContaining({ code: 'MALFORMED_SETTINGS' }));
+    await expect(fs.readFile(settingsPath(), 'utf8')).resolves.toBe(torn);
+  });
+
+  it('treats a non-object settings.json as malformed for writes', async () => {
+    for (const contents of ['42', '[]']) {
+      await fs.writeFile(settingsPath(), contents);
+      expect(() => auth.setGhCliDisabled(true)).toThrowError(expect.objectContaining({ code: 'MALFORMED_SETTINGS' }));
+      await expect(fs.readFile(settingsPath(), 'utf8')).resolves.toBe(contents);
+    }
+  });
+
+  it('writes the gh-CLI keys when settings.json is missing', async () => {
+    auth.setGhCliDisabled(true);
+    const stored = JSON.parse(await fs.readFile(settingsPath(), 'utf8'));
+    expect(stored).toEqual({ ghCliDisabled: true, ghCliActive: false });
+    expect(auth.isGhCliDisabled()).toBe(true);
+  });
+
+  it('round-trips a valid settings.json, preserving every unrelated key', async () => {
+    const original = { theme: 'dark', ghCliActive: true, openCodeGoPlan: 'pro', nested: { a: 1 }, profileName: 'work' };
+    await fs.writeFile(settingsPath(), JSON.stringify(original));
+    auth.setGhCliDisabled(true);
+    const stored = JSON.parse(await fs.readFile(settingsPath(), 'utf8'));
+    expect(stored).toEqual({ ...original, ghCliDisabled: true, ghCliActive: false });
+  });
+
+  it('keeps read-only gh-CLI getters lenient on a malformed settings.json', async () => {
+    await fs.writeFile(settingsPath(), '{"theme":');
+    expect(auth.isGhCliDisabled()).toBe(false);
+    expect(auth.isGhCliActive()).toBe(false);
+  });
+});
+
+describe('bounded reads (#1651)', () => {
+  const ONE_MIB = 1024 * 1024;
+  const EIGHT_MIB = 8 * 1024 * 1024;
+
+  it('store read over the 1 MiB cap fails as a read failure, not an empty state', async () => {
+    const filePath = path.join(directory, 'github-auth.json');
+    await fs.writeFile(filePath, 'x'.repeat(ONE_MIB + 1));
+    const store = auth.createGitHubAuthStore({ filePath });
+    await expect(store.listAccounts()).rejects.toMatchObject({ code: 'BOUNDED_FILE_TOO_LARGE' });
+  });
+
+  it('store read of a FIFO is refused promptly, not blocked on', async () => {
+    const filePath = path.join(directory, 'github-auth.json');
+    await execFileAsync('mkfifo', [filePath]);
+    const store = auth.createGitHubAuthStore({ filePath });
+    await expect(store.listAccounts()).rejects.toMatchObject({ code: 'BOUNDED_FILE_NOT_REGULAR' });
+  });
+
+  it('lenient settings read over the 8 MiB cap answers {} (defaults)', async () => {
+    const padded = JSON.stringify({ githubClientId: 'Ov23customclientid', pad: 'x'.repeat(EIGHT_MIB) });
+    await fs.writeFile(path.join(directory, 'settings.json'), padded);
+    expect(auth.getGitHubClientId()).toBe('Ov23lizomPOC3eFYo56r');
+  });
+
+  it('strict settings read over the 8 MiB cap throws and leaves the file untouched', async () => {
+    const filePath = path.join(directory, 'settings.json');
+    const padded = JSON.stringify({ githubClientId: 'Ov23customclientid', pad: 'x'.repeat(EIGHT_MIB) });
+    await fs.writeFile(filePath, padded);
+    expect(() => auth.setGhCliDisabled(true)).toThrow(expect.objectContaining({ code: 'BOUNDED_FILE_TOO_LARGE' }));
+    await expect(fs.readFile(filePath, 'utf8')).resolves.toBe(padded);
+  });
+
+  it('settings FIFO: lenient read answers defaults and strict read throws, both promptly', async () => {
+    await execFileAsync('mkfifo', [path.join(directory, 'settings.json')]);
+    expect(auth.getGitHubClientId()).toBe('Ov23lizomPOC3eFYo56r');
+    expect(() => auth.setGhCliDisabled(true)).toThrow(expect.objectContaining({ code: 'BOUNDED_FILE_NOT_REGULAR' }));
+  });
+
+  it('within-cap store and settings reads behave as before', async () => {
+    await auth.setGitHubAuth({ accessToken: 'ghp_ok', user: { id: 7, login: 'octo' }, source: 'pat' });
+    const [account] = await auth.getGitHubAuthAccounts();
+    expect(account).toMatchObject({ user: { login: 'octo' } });
+    await fs.writeFile(path.join(directory, 'settings.json'), JSON.stringify({ githubClientId: 'Ov23customclientid' }));
+    expect(auth.getGitHubClientId()).toBe('Ov23customclientid');
+  });
+});

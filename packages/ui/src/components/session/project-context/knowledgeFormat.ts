@@ -38,3 +38,22 @@ export const formatKnowledgeDate = (timestamp: number, now: Date = new Date()): 
     ? { month: 'short', day: 'numeric' }
     : { year: 'numeric', month: 'short', day: 'numeric' });
 };
+
+/** Plan cost badge text: exact cents at a cent or more, `<$0.01` below one cent, `$0` for a free session. */
+export const formatPlanCost = (costUsd: number): string => {
+  if (!Number.isFinite(costUsd) || costUsd <= 0) return '$0';
+  if (costUsd < 0.01) return '<$0.01';
+  return `$${costUsd.toFixed(2)}`;
+};
+
+/** Compact token count for the metrics tooltip: `950`, `1.2k`, `142k`, `1.5M`. */
+export const formatTokenCount = (tokens: number): string => {
+  if (!Number.isFinite(tokens) || tokens <= 0) return '0';
+  if (tokens < 1_000) return String(Math.round(tokens));
+  if (tokens < 1_000_000) {
+    const value = tokens / 1_000;
+    return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}k`;
+  }
+  const value = tokens / 1_000_000;
+  return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10}M`;
+};

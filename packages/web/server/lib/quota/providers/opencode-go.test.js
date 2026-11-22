@@ -12,11 +12,13 @@ import {
   fetchConsoleGoUsage,
   fetchOpenCodeGoUsage,
   fetchQuota,
+  fetchQuotaForCredential,
   isConfigured,
   parseConsoleBillingBalance,
   parseConsoleGoUsage,
   parseOpenCodeGoUsage,
 } from './opencode-go.js';
+import { OpenCodeUpstreamAuthError } from '../../opencode/credential-auth-error.js';
 
 const apiKeyAuth = () => ({ 'opencode-go': { key: 'test-key' } });
 
@@ -184,7 +186,26 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
       fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'go-plus' }))),
     });
     expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('go-plus');
     expect(result.usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('exposes the Console product as planLabel on the quota result', async () => {
+    const result = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'go' }))),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('go');
+  });
+
+  it('leaves planLabel unset on the API-key path', async () => {
+    const result = await fetchQuota({
+      readAuth: async () => apiKeyAuth(),
+      fetchImpl: async () => new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBeUndefined();
   });
 
   it('skips only the unusable meters and keeps the rest', () => {
@@ -209,7 +230,7 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
 
   it('calls the Console Go status endpoint with the Console token and organization', async () => {
     let request;
-    const windows = await fetchConsoleGoUsage(
+    const { windows, planLabel } = await fetchConsoleGoUsage(
       { access: 'console-access', orgID: 'org_TESTORG123', expires: Date.now() + 60_000 },
       async (url, options) => {
         request = { url, options };
@@ -225,6 +246,7 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(request.options.headers['x-opencode-session']).toBeUndefined();
     expect(request.options.redirect).toBe('error');
     expect(windows.weekly.usedPercent).toBe(40);
+    expect(planLabel).toBe('go');
   });
 
   it('prefers the selected Console account and organization over the legacy key', async () => {
@@ -476,5 +498,92 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     });
     expect(result.ok).toBe(true);
     expect(seen).toEqual(['https://opencode.ai/zen/go/v1/usage']);
+  });
+});
+
+describe('OpenCode Go quota provider — per-credential (per-workspace)', () => {
+  const consoleRow = (orgID, access = 'console-access') => ({
+    id: `cred_${orgID}`,
+    integrationID: 'opencode',
+    label: undefined,
+    active: false,
+    value: consoleAuth({ orgID, access }).opencode,
+  });
+
+  it('fetches one workspace row with that row\'s own Console token and organization', async () => {
+    const seen = [];
+    const result = await fetchQuotaForCredential(consoleRow('org_WORKSPACE1', 'ws-token'), {
+      fetchImpl: async (url, options) => {
+        seen.push({ url, options });
+        return new Response(JSON.stringify(url === CONSOLE_BILLING_STATUS_URL ? {} : consolePayload()));
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('go');
+    expect(result.accountLabel).toBe('org_WORKSPACE1');
+    const statusCall = seen.find((call) => call.url === CONSOLE_STATUS_URL);
+    expect(statusCall.options.headers.Authorization).toBe('Bearer ws-token');
+    expect(statusCall.options.headers['x-org-id']).toBe('org_WORKSPACE1');
+  });
+
+  it('answers distinct rows for two workspaces', async () => {
+    const fetchFor = (used) => async (url) => new Response(JSON.stringify(
+      url === CONSOLE_BILLING_STATUS_URL ? {} : consolePayload({ meters: {
+        fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '1000', usedMicroCents: used },
+      } }),
+    ));
+    const first = await fetchQuotaForCredential(consoleRow('org_FIRST123'), { fetchImpl: fetchFor('250') });
+    const second = await fetchQuotaForCredential(consoleRow('org_SECOND123'), { fetchImpl: fetchFor('900') });
+    expect(first.usage.windows['5h'].usedPercent).toBe(25);
+    expect(second.usage.windows['5h'].usedPercent).toBe(90);
+    expect(first.accountLabel).toBe('org_FIRST123');
+    expect(second.accountLabel).toBe('org_SECOND123');
+  });
+
+  it('keeps the API-key semantics for a key row on opencode-go', async () => {
+    const result = await fetchQuotaForCredential(
+      { id: 'cred_key', integrationID: 'opencode-go', active: true, value: { type: 'api', key: 'test-key' } },
+      { fetchImpl: async () => new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } })) },
+    );
+    expect(result).toMatchObject({ ok: true, configured: true });
+    expect(result.accountLabel).toBeUndefined();
+    expect(result.usage.windows['5h'].usedPercent).toBe(25);
+  });
+
+  it('keeps the absent-subscription meaning for a 403 on a key stored on opencode', async () => {
+    const result = await fetchQuotaForCredential(
+      { id: 'cred_console_key', integrationID: 'opencode', active: true, value: { type: 'api', key: 'console-key' } },
+      { fetchImpl: async () => new Response('', { status: 403 }) },
+    );
+    expect(result).toMatchObject({ ok: false, configured: true, error: 'No active OpenCode Go subscription on the selected Console account' });
+  });
+
+  it('returns its own error row instead of throwing when the workspace read fails', async () => {
+    const result = await fetchQuotaForCredential(consoleRow('org_BROKEN12'), {
+      fetchImpl: async () => new Response('', { status: 502 }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toMatch(/HTTP 502/);
+    expect(result.accountLabel).toBe('org_BROKEN12');
+  });
+
+  it('reports an empty row as not configured', async () => {
+    const result = await fetchQuotaForCredential({ id: 'cred_empty', integrationID: 'opencode', value: null });
+    expect(result).toMatchObject({ ok: false, configured: false, error: 'Not configured' });
+  });
+});
+
+describe('OpenCode Go quota provider — shared upstream-auth provenance (#1129)', () => {
+  it('rethrows a marked shared credential-path rejection instead of returning it as its own error', async () => {
+    const marked = new OpenCodeUpstreamAuthError('Authentication required');
+    await expect(fetchQuota({ readAuth: async () => { throw marked; } })).rejects.toBe(marked);
+  });
+
+  it('still returns a plain result for an unmarked credential-read failure', async () => {
+    const result = await fetchQuota({ readAuth: async () => { throw new Error('store unavailable'); } });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('store unavailable');
+    expect(result.errorKind).toBeUndefined();
   });
 });

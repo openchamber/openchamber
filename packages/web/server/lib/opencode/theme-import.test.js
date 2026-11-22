@@ -85,9 +85,9 @@ describe('theme import persistence', () => {
   });
 
   it('allows deleting a readable theme beside an unreadable sibling, but does not treat failed reads as absence', async () => {
-    const { runtime, themesDir } = await setup({ readFile: async (file, ...args) => {
+    const { runtime, themesDir } = await setup({ open: async (file, ...args) => {
       if (path.basename(file) === 'unreadable.json') throw Object.assign(new Error('denied'), { code: 'EACCES' });
-      return fs.readFile(file, ...args);
+      return fs.open(file, ...args);
     } });
     const theme = await runtime.saveImportedTheme(definition);
     await fs.writeFile(path.join(themesDir, 'unreadable.json'), JSON.stringify(definition));
@@ -133,6 +133,71 @@ describe('theme import persistence', () => {
   it('does not report a directory read failure as an empty theme library', async () => {
     const { runtime } = await setup({ readdir: async () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } });
     await expect(runtime.readCustomThemesFromDisk()).rejects.toMatchObject({ code: 'EACCES' });
+  });
+
+  it('does not delete a theme whose file grew past the cap after its path stat', async () => {
+    // Model the grow/swap race through the seam: the opened handle's stat
+    // claims 1024 bytes while the file on disk is a valid theme padded past
+    // the cap. The delete scan must skip it exactly like an already-over-cap
+    // file instead of buffering it whole and unlinking it.
+    let servedBytes = 0;
+    const { runtime, themesDir } = await setup({
+      lstat: async () => ({ isFile: () => true, isSymbolicLink: () => false, size: 1024 }),
+      open: async (file, ...args) => {
+        const handle = await fs.open(file, ...args);
+        return {
+          stat: async () => ({ isFile: () => true, size: 1024 }),
+          read: async (...readArgs) => {
+            const result = await handle.read(...readArgs);
+            servedBytes += result.bytesRead;
+            return result;
+          },
+          close: () => handle.close(),
+        };
+      },
+    });
+    await fs.mkdir(themesDir);
+    const cap = 512 * 1024;
+    const padded = { ...definition, metadata: { ...definition.metadata, id: 'grown-theme', description: 'x'.repeat(cap) } };
+    const filename = path.join(themesDir, 'grown.json');
+    await fs.writeFile(filename, JSON.stringify(padded));
+    expect((await fs.stat(filename)).size).toBeGreaterThan(cap);
+
+    await runtime.deleteImportedTheme('grown-theme');
+
+    expect(await fs.readdir(themesDir)).toEqual(['grown.json']);
+    expect(servedBytes).toBeLessThanOrEqual(cap + 1);
+  });
+
+  it('answers an import conflict from a bounded prefix of an over-cap existing file', async () => {
+    let servedBytes = 0;
+    const { runtime, themesDir } = await setup({
+      readFile: async (...readArgs) => {
+        const result = await fs.readFile(...readArgs);
+        servedBytes += Buffer.byteLength(result);
+        return result;
+      },
+      open: async (file, ...args) => {
+        const handle = await fs.open(file, ...args);
+        return {
+          stat: async () => ({ isFile: () => true, size: 1024 }),
+          read: async (...readArgs) => {
+            const result = await handle.read(...readArgs);
+            servedBytes += result.bytesRead;
+            return result;
+          },
+          close: () => handle.close(),
+        };
+      },
+    });
+    const theme = await runtime.saveImportedTheme(definition);
+    const cap = 512 * 1024;
+    const padded = { ...definition, metadata: { ...definition.metadata, id: theme.metadata.id, description: 'x'.repeat(cap) } };
+    await fs.writeFile(path.join(themesDir, `${theme.metadata.id}.json`), JSON.stringify(padded));
+    servedBytes = 0;
+
+    await expect(runtime.saveImportedTheme(definition)).rejects.toMatchObject({ code: 'conflict', status: 409 });
+    expect(servedBytes).toBeLessThanOrEqual(cap + 1);
   });
 
   it('rejects oversized imports without touching the themes directory', async () => {

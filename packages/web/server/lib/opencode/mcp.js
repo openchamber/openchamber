@@ -4,12 +4,10 @@ import {
   CONFIG_FILE,
   AGENT_SCOPE,
   readConfigFile,
-  readConfigLayer,
   readConfigLayers,
+  readConfigSources,
   getJsonWriteTarget,
-  getLayerError,
   getProjectConfigCandidates,
-  getFolderConfigPaths,
   writeConfig,
 } from './shared.js';
 import {
@@ -37,26 +35,6 @@ function validateMcpName(name) {
   if (!/^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/.test(name)) {
     throw new Error('MCP server name must be lowercase alphanumeric with hyphens/underscores');
   }
-}
-
-/**
- * Every config file OpenCode 2 reads MCP servers from, lowest priority first:
- * the global files, `OPENCODE_CONFIG`, then the files found walking up from the
- * project folder. A later file's server replaces an earlier one of the same
- * name, as in OpenCode's MCP config plugin. A broken global or
- * `OPENCODE_CONFIG` file fails the lookup that reaches it; a broken folder
- * file is skipped, as the project file always was.
- */
-function readMcpSources(workingDirectory) {
-  const layers = readConfigLayers(workingDirectory);
-  const { userPath, userOverridePath, customPath } = layers.paths;
-  const required = (filePath, config) => ({ path: filePath, config, error: getLayerError(layers, filePath), required: true });
-  return [
-    required(userPath, layers.userConfig),
-    ...(userOverridePath ? [required(userOverridePath, layers.userOverrideConfig)] : []),
-    ...(customPath ? [required(customPath, layers.customConfig)] : []),
-    ...getFolderConfigPaths(workingDirectory).map((filePath) => ({ path: filePath, ...readConfigLayer(filePath), required: false })),
-  ];
 }
 
 /** The file whose definition of `name` OpenCode uses, or null. */
@@ -103,7 +81,7 @@ function ensureProjectMcpConfigPath(workingDirectory) {
 }
 
 function listMcpConfigs(workingDirectory) {
-  const sources = readMcpSources(workingDirectory);
+  const sources = readConfigSources(workingDirectory);
   const names = readLayeredMcpEntries(sources.map((source) => source.config)).keys();
   return Array.from(names, (name) => toMcpConfigEntry(name, findMcpSource(sources, name), workingDirectory));
 }
@@ -112,7 +90,7 @@ function listMcpConfigs(workingDirectory) {
  * Get a single MCP server config by name
  */
 function getMcpConfig(name, workingDirectory) {
-  const source = findMcpSource(readMcpSources(workingDirectory), name);
+  const source = findMcpSource(readConfigSources(workingDirectory), name);
   return source ? toMcpConfigEntry(name, source, workingDirectory) : null;
 }
 
@@ -122,7 +100,7 @@ function getMcpConfig(name, workingDirectory) {
 function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
   validateMcpName(name);
 
-  if (findMcpSource(readMcpSources(workingDirectory), name)) {
+  if (findMcpSource(readConfigSources(workingDirectory), name)) {
     throw new Error(`MCP server "${name}" already exists`);
   }
   const layers = readConfigLayers(workingDirectory);
@@ -156,7 +134,7 @@ function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
  * v1 `mcp.<name>` key is rewritten into `mcp.servers` in the same file.
  */
 function updateMcpConfig(name, updates, workingDirectory) {
-  const source = findMcpSource(readMcpSources(workingDirectory), name);
+  const source = findMcpSource(readConfigSources(workingDirectory), name);
 
   if (!source) {
     throw new Error(`MCP server "${name}" not found`);
@@ -175,7 +153,7 @@ function updateMcpConfig(name, updates, workingDirectory) {
  * Delete an MCP server config entry from the file OpenCode reads it from.
  */
 function deleteMcpConfig(name, workingDirectory) {
-  const source = findMcpSource(readMcpSources(workingDirectory), name);
+  const source = findMcpSource(readConfigSources(workingDirectory), name);
 
   if (!source || !deleteMcpEntry(source.config, name)) {
     throw new Error(`MCP server "${name}" not found`);

@@ -112,6 +112,27 @@ describe('scheduled-tasks runtime helpers', () => {
     expect(title).toBe('Morning Sync 2025-03-10 07:05');
   });
 
+  it('never splits a surrogate pair at the session-title name cut (oracle: astral char straddling the cut)', () => {
+    const title = formatScheduledSessionTitle({
+      name: 'a'.repeat(102) + '😀' + 'zzzz',
+      schedule: { timezone: 'UTC' },
+    }, Date.UTC(2025, 2, 10, 7, 5, 0));
+
+    expect(title).toBe('a'.repeat(102) + ' 2025-03-10 07:05');
+    // A lone surrogate would encode as U+FFFD and not round-trip.
+    expect(new TextDecoder().decode(new TextEncoder().encode(title))).toBe(title);
+  });
+
+  it('still produces exactly 120 code units for an over-cap ASCII name, stamp included', () => {
+    const title = formatScheduledSessionTitle({
+      name: 'a'.repeat(130),
+      schedule: { timezone: 'UTC' },
+    }, Date.UTC(2025, 2, 10, 7, 5, 0));
+
+    expect(title).toBe('a'.repeat(103) + ' 2025-03-10 07:05');
+    expect(title.length).toBe(120);
+  });
+
   it('parses slash command prompt for scheduled command mode', () => {
     expect(parseScheduledCommandPrompt('/review src/components')).toEqual({
       command: 'review',
@@ -450,6 +471,76 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(patches[startIndex + 1]).toEqual({ lastSessionId: 'ses_failed' });
     expect(patches.at(-1)).toMatchObject({ lastStatus: 'error', lastSessionId: 'ses_failed' });
   });
+
+  it('cancels the run when the watchdog fires: nothing is dispatched after the timeout', async () => {
+    const posts = [];
+    let createSignal = null;
+    let stallCreate = true;
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push(pathname);
+      if (pathname === '/api/session' && init.method === 'POST' && stallCreate) {
+        createSignal = init.signal;
+        // A create that only settles when its signal aborts, the way a
+        // stalled OpenCode does once the watchdog cancels the run.
+        return new Promise((_, reject) => {
+          init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+        });
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_run' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      maxRunDurationMs: 50,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('timed out');
+    // The composed run signal reached the transport and aborted at the cap.
+    expect(createSignal?.aborted).toBe(true);
+    // The run was stopped by its configured limit (the factory cap passed
+    // as maxRunDurationMs): #765 records limit-stopped runs as 'timeout',
+    // not 'error', so a capped run is distinguishable from a crash.
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'timeout' });
+
+    // Give the losing run every chance to leak its prompt the way it used
+    // to (the creator probe saw it land 800 ms after the timeout record).
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(posts.filter((pathname) => pathname.endsWith('/prompt') || pathname.endsWith('/command') || pathname.endsWith('/synthetic'))).toEqual([]);
+
+    // The freed slot is truthful: a successor run completes normally.
+    stallCreate = false;
+    posts.length = 0;
+    const second = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+    expect(second.ok).toBe(true);
+    expect(posts.some((pathname) => pathname.endsWith('/prompt'))).toBe(true);
+  });
 });
 
 describe('scheduled-tasks runtime chats scope', () => {
@@ -550,5 +641,82 @@ describe('scheduled-tasks runtime chats scope', () => {
     } finally {
       await cleanup();
     }
+  });
+});
+
+describe('scheduled-tasks runtime run limit (#765)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const createHangingRuntime = ({ taskOverrides = {}, runtimeOverrides = {} } = {}) => {
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST' && pathname.endsWith('/prompt')) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_run' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+      ...taskOverrides,
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+      ...runtimeOverrides,
+    });
+    return { runtime, patches };
+  };
+
+  it('records a run stopped by its per-task limit as timeout, not error', async () => {
+    const { runtime, patches } = createHangingRuntime({ taskOverrides: { maxRunDurationMs: 25 } });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(false);
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'timeout' });
+    expect(patches.at(-1).lastError).toContain('exceeded its configured limit of 25 ms');
+    // Let the detached watchdog run settle while the fetch stub is still up.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  });
+
+  it('applies the server-wide limit when the task sets none; the per-task limit wins when both are set', async () => {
+    const server = createHangingRuntime({ runtimeOverrides: { resolveServerMaxRunDurationMs: async () => 25 } });
+    await server.runtime.start();
+    await server.runtime.runNow('proj', 'task-1');
+    server.runtime.stop();
+    expect(server.patches.at(-1)).toMatchObject({ lastStatus: 'timeout' });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const perTask = createHangingRuntime({
+      taskOverrides: { maxRunDurationMs: 5_000 },
+      runtimeOverrides: { resolveServerMaxRunDurationMs: async () => 25 },
+    });
+    await perTask.runtime.start();
+    const result = await perTask.runtime.runNow('proj', 'task-1');
+    perTask.runtime.stop();
+    expect(result.ok).toBe(true);
+    expect(perTask.patches.at(-1)).toMatchObject({ lastStatus: 'success' });
   });
 });

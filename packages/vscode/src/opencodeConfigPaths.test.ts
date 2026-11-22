@@ -22,6 +22,24 @@ test('unset and blank XDG keep the existing global directory', () => {
   }
 });
 
+test('data dir follows XDG_DATA_HOME and defaults to ~/.local/share/opencode', () => {
+  for (const [value, expected] of [
+    [undefined, path.join(os.homedir(), '.local', 'share', 'opencode')],
+    ['', path.join(os.homedir(), '.local', 'share', 'opencode')],
+    ['/scratch/data', path.join('/scratch/data', 'opencode')],
+  ]) {
+    const env = { ...process.env };
+    if (value === undefined) delete env.XDG_DATA_HOME;
+    else env.XDG_DATA_HOME = value;
+    const result = spawnSync(process.execPath, ['--eval', `
+      const { OPENCODE_DATA_DIR } = await import(${JSON.stringify(moduleUrl)});
+      process.stdout.write(OPENCODE_DATA_DIR);
+    `], { env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, expected);
+  }
+});
+
 test('global CRUD uses XDG while project writes stay in the project', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-xdg-'));
   const configHome = path.join(root, 'config');
@@ -45,6 +63,39 @@ test('global CRUD uses XDG while project writes stay in the project', () => {
       assert.match(fs.readFileSync(path.join(directory, 'commands', `${scope}-command.md`), 'utf8'), /Test command/);
       assert.match(fs.readFileSync(path.join(directory, 'skills', `${scope}-skill`, 'SKILL.md'), 'utf8'), /Test skill/);
     }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a refused over-cap skill create leaves no skill directory behind (#1444)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-overcap-'));
+  const configHome = path.join(root, 'config');
+  const project = path.join(root, 'project');
+  try {
+    const result = spawnSync(process.execPath, ['--eval', `
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const { createSkill } = await import(${JSON.stringify(configUrl)});
+      const project = ${JSON.stringify(project)};
+      let code = '';
+      try {
+        createSkill('overcap-skill', {
+          description: 'Has an oversized supporting file',
+          instructions: 'Do the thing.',
+          supportingFiles: [{ path: 'references/big.md', content: 'x'.repeat(1024 * 1024 + 1) }],
+        }, project, 'project');
+      } catch (error) {
+        code = error?.code ?? '';
+      }
+      const dir = path.join(project, '.opencode', 'skills', 'overcap-skill');
+      process.stdout.write(code + '|' + String(fs.existsSync(dir)));
+    `], {
+      env: { ...process.env, XDG_CONFIG_HOME: configHome, OPENCODE_CONFIG: '', OPENCODE_CONFIG_DIR: '' },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, 'skill_supporting_file_too_large|false');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

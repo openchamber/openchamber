@@ -68,6 +68,14 @@ function sanitizeByMode(text, mode) {
   return sanitizeForTTS(text);
 }
 
+// A clip must not split a surrogate pair: text cut right after a high
+// surrogate drops that half so the result never ends in a lone surrogate.
+const clipPairSafe = (text, end) => {
+  const clipped = text.slice(0, Math.max(0, end));
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
+
 function distillNoteFallback(text, maxLength) {
   const sanitized = sanitizeForNote(text);
   if (!sanitized) return '';
@@ -90,8 +98,8 @@ function distillNoteFallback(text, maxLength) {
 
   if (best.length <= idealLimit) return best;
 
-  const clipped = best.slice(0, Math.max(0, idealLimit - 1)).trim();
-  return clipped ? `${clipped}…` : best.slice(0, idealLimit).trim();
+  const clipped = clipPairSafe(best, idealLimit - 1).trim();
+  return clipped ? `${clipped}…` : clipPairSafe(best, idealLimit).trim();
 }
 
 function distillNotificationFallback(text, maxLength) {
@@ -106,8 +114,8 @@ function distillNotificationFallback(text, maxLength) {
   const limit = Number.isFinite(maxLength) ? Math.max(20, Math.floor(maxLength)) : 100;
   if (candidate.length <= limit) return candidate;
 
-  const clipped = candidate.slice(0, Math.max(0, limit - 1)).trim();
-  return clipped ? `${clipped}…` : candidate.slice(0, limit).trim();
+  const clipped = clipPairSafe(candidate, limit - 1).trim();
+  return clipped ? `${clipped}…` : clipPairSafe(candidate, limit).trim();
 }
 
 function fallbackByMode(text, maxLength, mode) {

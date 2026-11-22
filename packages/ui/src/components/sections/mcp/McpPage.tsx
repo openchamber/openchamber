@@ -1330,6 +1330,19 @@ export const McpPage: React.FC = () => {
               }}
               label={t('settings.mcp.page.server.enable')}
               ariaLabel={t('settings.mcp.page.server.enableAria')}
+              // A server whose tools are direct changes the request's tool list, which
+              // providers cache as the start of the prompt. Off is always direct. Default
+              // is direct when OpenCode's own defaults turn code mode off (servers that
+              // bring their own, such as executor); the config this page reads does not
+              // show that decision, so Default gets a "may". On keeps tools in the
+              // appended catalog. A new server's draft reaches OpenCode only on Create.
+              description={isNewServer
+                ? undefined
+                : codemode === 'off'
+                  ? t('settings.mcp.page.server.enableCacheNote')
+                  : codemode === 'default'
+                    ? t('settings.mcp.page.server.enableCacheNoteDefault')
+                    : undefined}
             />
 
         </SettingsSection>
@@ -1502,38 +1515,48 @@ export const McpPage: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-2 @xl:flex-row @xl:items-center @xl:gap-8">
-                      <div className="flex min-w-0 flex-row items-center gap-1 @xl:w-56 shrink-0">
-                        <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.advanced.codemode')}</span>
-                        <SettingsInfoHint>
-                          {t('settings.mcp.page.advanced.codemodeHint')}
-                          {' '}
-                          {t('settings.mcp.page.advanced.codemodeDefaultHint')}
-                        </SettingsInfoHint>
-                      </div>
-                      <Select
-                        value={codemode}
-                        onValueChange={(value) => {
-                          const next = MCP_CODEMODE_CHOICES.find((option) => option === value);
-                          if (!next) return;
-                          setCodemode(next);
-                          requestSave();
-                        }}
-                      >
-                        <SelectTrigger
-                          className="!h-7 w-fit max-w-[16rem] px-2"
-                          aria-label={t('settings.mcp.page.advanced.codemode')}
+                    <div className="space-y-1">
+                      <div className="flex flex-col gap-2 @xl:flex-row @xl:items-center @xl:gap-8">
+                        <div className="flex min-w-0 flex-row items-center gap-1 @xl:w-56 shrink-0">
+                          <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.advanced.codemode')}</span>
+                          <SettingsInfoHint>
+                            {t('settings.mcp.page.advanced.codemodeHint')}
+                            {' '}
+                            {t('settings.mcp.page.advanced.codemodeDefaultHint')}
+                          </SettingsInfoHint>
+                        </div>
+                        <Select
+                          value={codemode}
+                          onValueChange={(value) => {
+                            const next = MCP_CODEMODE_CHOICES.find((option) => option === value);
+                            if (!next) return;
+                            setCodemode(next);
+                            requestSave();
+                          }}
                         >
-                          <span className="truncate">{t(MCP_CODEMODE_LABEL_KEYS[codemode])}</span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {MCP_CODEMODE_CHOICES.map((option) => (
-                            <SelectItem key={option} value={option}>
-                              {t(MCP_CODEMODE_LABEL_KEYS[option])}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                          <SelectTrigger
+                            className="!h-7 w-fit max-w-[16rem] px-2"
+                            aria-label={t('settings.mcp.page.advanced.codemode')}
+                          >
+                            <span className="truncate">{t(MCP_CODEMODE_LABEL_KEYS[codemode])}</span>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {MCP_CODEMODE_CHOICES.map((option) => (
+                              <SelectItem key={option} value={option}>
+                                {t(MCP_CODEMODE_LABEL_KEYS[option])}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {/* Only a saved, enabled server has tools in a running session: a draft
+                          waits for Create and a disabled server has none. Indented past the
+                          label column (w-56 plus gap-8) so it reads under the selector. */}
+                      {!isNewServer && enabled ? (
+                        <p className="typography-meta text-muted-foreground @xl:ps-64">
+                          {t('settings.mcp.page.advanced.codemodeCacheNote')}
+                        </p>
+                      ) : null}
                     </div>
 
                     {mcpType === 'remote' && (

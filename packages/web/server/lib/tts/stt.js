@@ -8,6 +8,15 @@
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
+// Transcription is a synchronous user-facing call against a local model
+// server the user pointed the service at, and a CPU transcription of an
+// uploaded recording can legitimately run near realtime, so its deadline
+// is larger than the speech one: 120 s. It is still the whole budget, with
+// no SDK retries (the defaults are a 10 minute timeout and 2 retries,
+// which would hold the route for about half an hour on a wedged server).
+// The user re-issues the request; a stall retry only multiplies the wait.
+const TRANSCRIPTION_REQUEST_TIMEOUT_MS = 120_000;
+
 /**
  * Transcribe an audio buffer via an OpenAI-compatible /v1/audio/transcriptions endpoint.
  *
@@ -18,9 +27,10 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
  * @param {string} [opts.baseURL]    - Base URL of the compatible server (including /v1)
  * @param {string} [opts.apiKey]     - Optional API key for the compatible server
  * @param {string} [opts.language]   - Optional BCP-47 language hint (e.g. 'en')
+ * @param {number} [opts.timeoutMs]  - Request deadline (default TRANSCRIPTION_REQUEST_TIMEOUT_MS)
  * @returns {Promise<string>} Transcribed text
  */
-export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language }) {
+export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, apiKey, language, timeoutMs = TRANSCRIPTION_REQUEST_TIMEOUT_MS }) {
   const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
   if (normalizedBaseURLResult.error) {
     throw new Error(normalizedBaseURLResult.error);
@@ -38,6 +48,8 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
     apiKey: apiKey || 'not-required',
   };
   clientOpts.baseURL = normalizedBaseURL;
+  clientOpts.timeout = timeoutMs;
+  clientOpts.maxRetries = 0;
 
   const OpenAI = await loadOpenAI();
   const client = new OpenAI(clientOpts);

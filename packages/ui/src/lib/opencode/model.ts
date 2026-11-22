@@ -135,6 +135,38 @@ export type SessionStatus = SessionStatusWire
 
 export type SessionOutcome = "succeeded" | "failed" | "interrupted"
 
+/**
+ * One agent's entry in a session policy's `agentOverrides`.
+ *
+ * The fields mirror the OpenCode contract for `Session.AgentOverride`. They
+ * stay optional and are carried unchanged by this UI: the picker edits only
+ * the policy's `models` list and preserves every override as loaded.
+ */
+export type SubagentAgentOverride = {
+  model?: ModelRef
+  models?: string[]
+  excludedModels?: string[]
+  subagentModels?: string[]
+  subagentExcludedModels?: string[]
+  force?: boolean
+}
+
+/**
+ * The models a session's subsessions may run, as the session declares it.
+ *
+ * This follows the OpenCode contract for `Session.SubagentPolicy`: `models`
+ * and `excludedModels` hold model selectors, exact refs `provider/model` or
+ * wider forms such as `provider/*` and `provider/model#variant`. The
+ * generated `@opencode/client` types do not carry the field yet, so it is
+ * defined here at the API boundary (see `./client.ts` and
+ * `./projection.ts`) and can be dropped once the regenerated client ships it.
+ */
+export type SubagentPolicy = {
+  models?: string[]
+  excludedModels?: string[]
+  agentOverrides?: Record<string, SubagentAgentOverride>
+}
+
 export type Session = {
   id: string
   parentID?: string
@@ -158,6 +190,8 @@ export type Session = {
   }
   metadata?: Metadata
   permissions?: PermissionRuleset
+  /** Models this session's subsessions may run; absent means no policy is set. */
+  subagentPolicy?: SubagentPolicy
   revert?: SessionRevert
   fork?: {
     sessionID: string
@@ -249,7 +283,7 @@ type ShellMessage = MessageBase & {
 
 export type CompactionMessage = MessageBase & {
   role: "compaction"
-  time: { created: number }
+  time: { created: number; completed?: number }
   status: "running" | "completed" | "failed"
   reason: "auto" | "manual"
   summary: string
@@ -313,6 +347,8 @@ type PartBase = {
   id: string
   sessionID: string
   messageID: string
+  /** Exact boundaries, separate from legacy streaming/display bounds. */
+  displayTime?: { start?: number; end?: number }
 }
 
 export type TextPart = PartBase & {
@@ -320,6 +356,12 @@ export type TextPart = PartBase & {
   text: string
   /** Set while the text is still streaming; `end` lands with the final text. */
   time?: { start: number; end?: number }
+  /**
+   * `message` when `time` is the owning message's span rather than the
+   * part's own: OpenCode stores no times for a text item, so a page read
+   * from history can only bound it by its message.
+   */
+  timeSource?: "message"
   metadata?: Metadata
 }
 
@@ -327,6 +369,8 @@ export type ReasoningPart = PartBase & {
   type: "reasoning"
   text: string
   time: { start: number; end?: number }
+  /** `message` when the stored item had no times of its own (see `TextPart`). */
+  timeSource?: "message"
 }
 
 export type FilePart = PartBase & {

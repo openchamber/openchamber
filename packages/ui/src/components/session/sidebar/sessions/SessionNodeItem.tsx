@@ -1,5 +1,7 @@
 import { DirectoryActionIndicator } from './DirectoryActionIndicator';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
+import { SessionRunDuration } from './SessionRunDuration';
+import { SessionTimestamps } from './SessionTimestamps';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 import React from 'react';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
@@ -24,6 +26,7 @@ import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCo
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ChangeSessionLocationDialog } from '@/components/session/ChangeSessionLocationDialog';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { toggleSessionPin } from '@/sync/session-pins';
 import { Icon } from "@/components/icon/Icon";
@@ -424,6 +427,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isZoneRow = isMixedZoneContext(renderContext);
   const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
   const hidePinnedMarker = isZoneRow && pinnedSectionShown;
+  // Optional row elements (branch, PR badge, provider logo, project icon,
+  // goal, time). Live status and permission/question badges always show.
+  const rowElements = useSessionDisplayStore((state) => state.sessionRowDisplay);
+  const countFromInput = useSessionDisplayStore((state) => state.sessionTimes.countFromInput);
+  const lastRunWhenIdle = useSessionDisplayStore((state) => state.sessionTimes.lastRunWhenIdle);
+  // Two-line Chats and project rows in Tree keep their context (and the tree
+  // slot and expansion that come with it); only the row body opens its
+  // second line, the way a detailed zone row's body does.
+  const twoLineTreeRow = (renderContext === 'tree-chat' && rowElements.chatsLines === 'two')
+    || (renderContext === 'project' && rowElements.projectLines === 'two');
   // List rows in the zones, the combined list and the list by time show the
   // project's own icon (a chat its chat mark); the row reads exactly that one
   // project record, and `find` keeps the reference stable between renders.
@@ -643,6 +656,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // tick of the counter it only decides to mount.
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
+  const [changeLocationDialogOpen, setChangeLocationDialogOpen] = React.useState(false);
   const isAiRenaming = useIsSessionAiRenamePending(session.id, sessionDirectory);
   const isSessionActionPending = isMovingToWorktree || isAiRenaming;
   const currentWorktreeMetadata = node.worktree ?? useSessionUIStore.getState().getWorktreeMetadata(session.id) ?? null;
@@ -980,6 +994,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             statusDot={null}
             pinnedMarker={null}
             timeSlot={sessionCompactUpdatedLabel}
+            session={resolvedSession}
             directoryIndicator={null}
             prBadge={primaryRef ? (
               <span
@@ -997,6 +1012,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             goal={sessionGoalGlyph}
             badges={null}
             hideMetaOnHoverClass=""
+            elements={rowElements}
           />
         </div>
       );
@@ -1479,6 +1495,21 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           </Sub>
         );
       })() : null}
+      {!isSubtaskSession && !isVSCode && sessionDirectory ? (
+        <SessionMenuItemHint hint={isStreaming
+          ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+          : t('sessions.changeLocation.hint')}>
+          <Item
+            disabled={isStreaming || isMovingToWorktree}
+            onClick={() => setChangeLocationDialogOpen(true)}
+            className="[&>svg]:me-1"
+            data-session-change-location={session.id}
+          >
+            <Icon name="folder" className="me-1 h-4 w-4" />
+            {t('sessions.changeLocation.menu')}
+          </Item>
+        </SessionMenuItemHint>
+      ) : null}
       {multiRunKey ? (
         <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.openRunOverview')}>
         <Item onClick={() => useUIStore.getState().setRunOverviewKey(multiRunKey)} className="[&>svg]:me-1">
@@ -1695,7 +1726,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         >
           <Icon name={primaryRef.icon} className="h-3 w-3" />
           {/* One-line rows keep the coloured mark only; its tooltip lists every link. */}
-          {isOneLineTimelineRow ? null : <>
+          {isOneLineTimelineRow && !twoLineTreeRow ? null : <>
             <span className="leading-none tabular-nums">{primaryRef.label}</span>
             {moreRefCount > 0 ? <span data-ref-more className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
           </>}
@@ -1711,7 +1742,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // one-line form, with the session's live state and time on the right.
   const rowBody = (
     <SessionTimelineRowBody
-      compact={!isMultiLineTimelineContext(renderContext)}
+      session={resolvedSession}
+      compact={!isMultiLineTimelineContext(renderContext) && !twoLineTreeRow}
       project={timelineProject}
       chat={showsChatMark}
       projectLabel={tooltipProjectLabel}
@@ -1730,8 +1762,12 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       statusDot={stateInSlot ? null : liveStateMark}
       pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker ? pinnedMarkerContent : null}
       timeSlot={showActivityDuration
-        ? <SessionActivityDuration sessionId={session.id} running={isStreaming} className="typography-micro" />
-        : sessionCompactUpdatedLabel}
+        ? (isStreaming && countFromInput
+          ? <SessionRunDuration sessionId={session.id} running fallback={<SessionActivityDuration sessionId={session.id} running className="typography-micro" />} />
+          : <SessionActivityDuration sessionId={session.id} running={isStreaming} className="typography-micro" />)
+        : lastRunWhenIdle && !isStreaming
+          ? <SessionRunDuration sessionId={session.id} running={false} fallback={sessionCompactUpdatedLabel} />
+          : sessionCompactUpdatedLabel}
       // Project rows leave the action indicator to their worktree header.
       directoryIndicator={!archivedBucket && sessionDirectory && renderContext !== 'project' ? <DirectoryActionIndicator directory={sessionDirectory} /> : null}
       prBadge={timelinePrBadge}
@@ -1739,7 +1775,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       goal={sessionGoalGlyph}
       badges={rowBadges}
       doneHint={doneHintBadge()}
-      providerId={isTimelineRow ? resolvedSession.model?.providerID ?? null : null}
+      providerId={isTimelineRow || twoLineTreeRow ? resolvedSession.model?.providerID ?? null : null}
       // Grouped rows reserve room for permanent actions on their button.
       metaPaddingClass={isTimelineRow && alwaysShowActions
         ? (showQuickArchiveAction ? 'pe-13' : 'pe-7')
@@ -1747,6 +1783,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       hideMetaOnHoverClass={alwaysShowActions && !isVSCode ? '' : coveredMetaFadeClass}
       actionsReserveClass={actionsReserveClass}
       actionsMaskClass={actionsMaskClass}
+      elements={rowElements}
     />
   );
 
@@ -1922,6 +1959,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                       </div>
                     ) : null}
                     {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={trackerDirectory} /> : null}
+                    <SessionTimestamps session={resolvedSession} placement="hover" />
                     {currentRecap ? (
                       <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}
@@ -2087,6 +2125,27 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {changeLocationDialogOpen ? (
+        <ChangeSessionLocationDialog
+          open={changeLocationDialogOpen}
+          onOpenChange={setChangeLocationDialogOpen}
+          currentDirectory={sessionDirectory ?? null}
+          onPick={(directory) => {
+            if (!sessionDirectory) return;
+            requestSessionTreeMove({
+              kind: 'directory',
+              root: resolvedSession,
+              descendants: collectSessionMoveDescendants(resolvedSession, collectNodeDescendantSessions(node)),
+              sourceDirectory: sessionDirectory,
+              directory,
+              messages: buildSessionTreeMoveMessages(t, {
+                success: 'sessions.changeLocation.success',
+                failure: 'sessions.changeLocation.failed',
+              }),
+            });
+          }}
+        />
+      ) : null}
     </React.Fragment>
   );
 }

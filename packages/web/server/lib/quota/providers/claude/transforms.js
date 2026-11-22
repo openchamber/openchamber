@@ -23,6 +23,8 @@ const WEEKLY_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
+const clampPercent = (value) => (value === null ? null : Math.min(100, Math.max(0, value)));
+
 /** Money in Anthropic's minor-unit form, e.g. `{ amount_minor: 10000, exponent: 2 }`. */
 const toAmount = (value) => {
   const money = asObject(value);
@@ -49,7 +51,7 @@ const applyLimitsArray = (limits, windows, models) => {
   for (const entry of limits) {
     const limit = asObject(entry);
     if (!limit) continue;
-    const percent = toNumber(limit.percent);
+    const percent = clampPercent(toNumber(limit.percent));
     const resetAt = toTimestamp(limit.resets_at);
     const modelName = asNonEmptyString(asObject(asObject(limit.scope)?.model)?.display_name);
 
@@ -74,14 +76,14 @@ const applyLegacyFields = (payload, windows) => {
   const sevenDay = asObject(payload.seven_day);
   if (fiveHour) {
     addWindow(windows, SESSION_WINDOW, {
-      percent: toNumber(fiveHour.utilization),
+      percent: clampPercent(toNumber(fiveHour.utilization)),
       resetAt: toTimestamp(fiveHour.resets_at),
       windowSeconds: SESSION_WINDOW_SECONDS
     });
   }
   if (sevenDay) {
     addWindow(windows, WEEKLY_WINDOW, {
-      percent: toNumber(sevenDay.utilization),
+      percent: clampPercent(toNumber(sevenDay.utilization)),
       resetAt: toTimestamp(sevenDay.resets_at),
       windowSeconds: WEEKLY_WINDOW_SECONDS
     });
@@ -99,7 +101,7 @@ const applyExtraUsage = (payload, windows) => {
   const used = toAmount(spend.used);
   const limit = toAmount(spend.limit);
   addWindow(windows, EXTRA_USAGE_WINDOW, {
-    percent: toNumber(spend.percent),
+    percent: clampPercent(toNumber(spend.percent)),
     resetAt: null,
     valueLabel: formatSpendLabel(used, limit, asNonEmptyString(asObject(spend.used)?.currency))
   });

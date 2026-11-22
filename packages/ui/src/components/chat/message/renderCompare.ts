@@ -53,6 +53,7 @@ export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolea
     if (leftPart.type !== rightPart.type) {
       return false;
     }
+    if (leftPart.displayTime?.start !== rightPart.displayTime?.start || leftPart.displayTime?.end !== rightPart.displayTime?.end) return false;
 
     const leftId = readPartId(leftPart);
     const rightId = readPartId(rightPart);

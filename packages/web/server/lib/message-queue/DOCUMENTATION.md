@@ -51,15 +51,20 @@ send never re-resolves mutable UI state:
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
   sendConfig: { providerID, modelID, agent?, variant? },  // required
-  goal?: { objective?, tokenBudget }  // queued with "run as goal" armed
+  goal?: { objective?, tokenBudget, settled?, briefAgent?, ignoreLimit? }  // queued with "run as goal" armed
 }
 ```
 
 `goal` is the composer's armed goal, taken off the composer when the message
 is queued so it belongs to this message and no other. `objective` is present
 only when the arming flow supplied its own (the plan flow); otherwise the
-delivered `text` is the objective. A goal needs message text. Snapshots keep
-`goal`, so the queue row can show it.
+delivered `text` is the objective. `settled`, `briefAgent` and `ignoreLimit`
+are the composer's goal flags, kept only when true (anything but a boolean is
+refused): a settled objective is not rewritten by "Rewrite every goal", a
+`briefAgent` goal briefs the agent with `objective` in the intro's
+`<goal-spec>`, and `ignoreLimit` keeps the objective whole and marks the goal.
+Without `briefAgent` the intro carries the spec the writer produced, if any.
+A goal needs message text. Snapshots keep `goal`, so the queue row can show it.
 
 The server is a courier for `context`: it validates the shape (a kind it
 knows, a `metadata` object on `context` entries) and delivers each entry as a
@@ -106,12 +111,14 @@ persistence, retries, directory query and delivery gates remain unchanged.
 
 `<data-dir>/message-queue.json` (`OPENCHAMBER_DATA_DIR` or
 `~/.config/openchamber`): `{ version, revision, sessions: { [sessionId]:
-{ directory, items } } }`, written atomically (temp file + rename) through a
-serialized write chain. A missing file is an empty queue. A malformed file is
-a failure, not an empty queue: it is moved aside as
-`message-queue.json.corrupt-<timestamp>` before the runtime starts empty, so
-the next write cannot overwrite the user's data. A failed read leaves writes
-disabled until a later load succeeds. `revision` is a global monotonic counter
+{ directory, items } } }`, written atomically through a serialized write
+chain. Persistence rides the shared durable-store primitive
+(`../shared/durable-json-store.js`, #978): a missing or empty file is an
+empty queue; a malformed file (unparseable bytes, or a value that is not a
+JSON object) is preserved aside as
+`message-queue.json.corrupt-<timestamp>-<pid>-<random>` before any write
+can replace it, and a failed preservation refuses the write; a failed read
+leaves writes disabled until a later load succeeds. `revision` is a global monotonic counter
 bumped on every mutation; clients use it to reject stale snapshots.
 
 In-memory only, deliberately: the in-flight item (`sendingId`), retry
@@ -219,7 +226,11 @@ session is deleted or evicted).
 
 Limits: 20 items per session, 50 sessions (oldest evicted, never one with an
 item in flight), 200k characters of content; attachment payloads are bounded
-by the route family's 50 MB JSON limit.
+by the route family's 50 MB JSON limit. An enqueue into a session that
+already holds 20 items is rejected with HTTP 409 — ordinary and scheduled
+items alike — and leaves the existing queue untouched: a queued item is
+never silently evicted to make room, so a scheduled item at the head is
+never reported cancelled by an overflow.
 
 ## UI ownership
 

@@ -1,19 +1,48 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-vi.mock('../../opencode/auth.js', () => ({
-  readOpenCodeCredentials: async () => ({ openai: { access: 'test-token' } }),
-}));
+// The instance fallback reads the merged config layers. Point the global
+// config directory at a path that does not exist so the machine's own
+// opencode config can never leak into these assertions; the custom layer
+// is resolved from OPENCODE_CONFIG at call time.
+vi.hoisted(() => {
+  process.env.OPENCODE_CONFIG_DIR = 'codex-test-without-config-dir';
+});
+
+const readAuth = async () => ({ openai: { access: 'test-token' } });
 
 import { fetchQuota } from './codex.js';
 
+const createdConfigPaths = [];
+
+const setMergedConfig = (config) => {
+  const filePath = path.join(os.tmpdir(), `codex-config-${process.pid}-${Math.random().toString(16).slice(2)}`);
+  fs.writeFileSync(filePath, JSON.stringify(config));
+  vi.stubEnv('OPENCODE_CONFIG', filePath);
+  createdConfigPaths.push(filePath);
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  for (const filePath of createdConfigPaths.splice(0)) {
+    fs.rmSync(filePath, { force: true });
+  }
 });
 
 const mockUsage = (rateLimit) => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({ rate_limit: rateLimit }),
+  }));
+};
+
+const mockPayload = (payload) => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => payload,
   }));
 };
 
@@ -31,7 +60,7 @@ describe('Codex quota windows', () => {
   ])('displays credit balance $balance with unlimited=$unlimited as $expected', async ({ balance, unlimited, expected }) => {
     vi.stubGlobal('fetch', async () => Response.json({ credits: { balance, unlimited } }));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits_balance.valueLabel).toBe(expected);
@@ -41,7 +70,7 @@ describe('Codex quota windows', () => {
   it('omits the balance window when credits are absent', async () => {
     mockUsage(null);
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits_balance).toBeUndefined();
@@ -57,7 +86,7 @@ describe('Codex quota windows', () => {
       secondary_window: null,
     });
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.usage.windows.weekly.usedPercent).toBe(3);
     expect(result.usage.windows['5h']).toBeUndefined();
@@ -69,10 +98,38 @@ describe('Codex quota windows', () => {
       secondary_window: { used_percent: 20, limit_window_seconds: 604800 },
     });
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.usage.windows['5h'].usedPercent).toBe(10);
     expect(result.usage.windows.weekly.usedPercent).toBe(20);
+  });
+
+  it.each([
+    { usedPercent: 150, expected: 100 },
+    { usedPercent: -20, expected: 0 },
+    { usedPercent: 200, expected: 100 },
+    { usedPercent: 42, expected: 42 },
+    { usedPercent: undefined, expected: null },
+  ])('clamps all Codex usage windows for used_percent=$usedPercent', async ({ usedPercent, expected }) => {
+    mockPayload({
+      rate_limit: {
+        primary_window: { used_percent: usedPercent, limit_window_seconds: 18000 },
+        secondary_window: { used_percent: usedPercent, limit_window_seconds: 604800 },
+      },
+      spend_control: {
+        individual_limit: {
+          limit: '7500',
+          used: '2674',
+          used_percent: usedPercent,
+        },
+      },
+    });
+
+    const result = await fetchQuota({ readAuth });
+
+    expect(result.usage.windows['5h'].usedPercent).toBe(expected);
+    expect(result.usage.windows.weekly.usedPercent).toBe(expected);
+    expect(result.usage.windows.credits.usedPercent).toBe(expected);
   });
 
   it('surfaces spend_control individual limit for business accounts', async () => {
@@ -95,7 +152,7 @@ describe('Codex quota windows', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(true);
     expect(result.usage.windows.credits.usedPercent).toBe(36);
@@ -110,7 +167,7 @@ describe('Codex quota windows', () => {
       json: async () => ({ error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule', message: 'Unauthorized' } }),
     }));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     // The credential is still valid; the endpoint refused usage access. Saying
@@ -126,9 +183,81 @@ describe('Codex quota windows', () => {
       json: async () => ({}),
     }));
 
-    const result = await fetchQuota();
+    const result = await fetchQuota({ readAuth });
 
     expect(result.ok).toBe(false);
     expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
+  });
+});
+
+describe('Codex request deadline', () => {
+  it('recognizes the timeout exception from AbortSignal.timeout', async () => {
+    const fetchMock = vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota({ readAuth });
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBeNull();
+    expect(result.error).toBe('Request timed out');
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe('Codex quota instance fallback', () => {
+  const instanceConfig = {
+    provider: {
+      'openai.main': { instanceOf: 'openai', name: 'OpenAI Main (drewrypope)' },
+      'openai.alternate': { instanceOf: 'openai', name: 'OpenAI Alternate (Student - popesdrew)' },
+    },
+  };
+
+  const mockWhamByToken = () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, init = {}) => ({
+      ok: true,
+      json: async () => ({
+        email: (init.headers?.Authorization ?? '').endsWith('main-token') ? 'drewrypope@gmail.com' : 'popesdrew@gmail.com',
+        rate_limit: {
+          primary_window: { used_percent: 8, limit_window_seconds: 604800, reset_at: 1793513510 },
+          secondary_window: null,
+        },
+      }),
+    })));
+  };
+
+  it('fetches with the first usable instance credential when the bare integration is empty', async () => {
+    setMergedConfig(instanceConfig);
+    mockWhamByToken();
+    const result = await fetchQuota({
+      readAuth: async () => ({
+        'openai.main': { access: 'main-token', accountId: 'acc_main' },
+        'openai.alternate': { access: 'alt-token', accountId: 'acc_alt' },
+      }),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.accountLabel).toBe('drewrypope@gmail.com');
+    expect(result.usage.windows.weekly.usedPercent).toBe(8);
+  });
+
+  it('prefers the bare integration entry over instance credentials', async () => {
+    setMergedConfig(instanceConfig);
+    mockWhamByToken();
+    const result = await fetchQuota({
+      readAuth: async () => ({
+        openai: { access: 'alt-token', accountId: 'acc_alt' },
+        'openai.main': { access: 'main-token', accountId: 'acc_main' },
+      }),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.accountLabel).toBe('popesdrew@gmail.com');
+  });
+
+  it('still answers Not configured when no instance holds a credential', async () => {
+    setMergedConfig(instanceConfig);
+    const result = await fetchQuota({ readAuth: async () => ({}) });
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(false);
+    expect(result.error).toBe('Not configured');
   });
 });

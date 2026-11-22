@@ -558,6 +558,119 @@ describe('canonical GitHub mutations', () => {
     if (status === 200) expect(response.body.target.number).toBe(7);
   });
 
+  describe('reconciliation collection completeness (#1595)', () => {
+    const runningCreateStore = (account, target, actor) => makeStore([{
+      key: 'request-one',
+      inputDigest: digestMutationInput({ kind: 'create', actor, credential: credentialFor(account), target, title: 'Title', headRemote: 'origin' }),
+      kind: 'change-request-create', actor, target, state: 'running',
+    }]);
+    const createTarget = {
+      repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+      project: { id: 'acme/app', owner: 'acme', name: 'app' }, head: 'feature', base: 'main',
+    };
+    const fillerPr = (base, i) => ({
+      ...base,
+      number: 1000 + i,
+      html_url: `https://github.com/acme/app/pull/${1000 + i}`,
+      head: { ...base.head, ref: 'other-branch' },
+    });
+
+    it('reconciles restart create from a match that only appears on page 2', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+      const store = runningCreateStore(account, createTarget, actor);
+      const base = pullRequest();
+      const pages = [];
+      vi.stubGlobal('fetch', vi.fn(async (url) => {
+        const page = new URL(String(url)).searchParams.get('page') ?? '1';
+        pages.push(page);
+        return jsonResponse(page === '2' ? [base] : Array.from({ length: 100 }, (_, i) => fillerPr(base, i)));
+      }));
+      const { app } = makeApp({ store });
+
+      const response = await request(app).post('/api/source-control/github/pr/create')
+        .send({ ...context(account.accountId), title: 'Title' }).expect(200);
+      expect(response.body.status).toBe('succeeded');
+      expect(response.body.target.number).toBe(7);
+      expect(pages).toContain('2');
+    });
+
+    it('fails restart create closed when the candidate list runs past the cap', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+      const store = runningCreateStore(account, createTarget, actor);
+      const base = pullRequest();
+      vi.stubGlobal('fetch', vi.fn(async (url) => {
+        const page = Number(new URL(String(url)).searchParams.get('page') ?? '1');
+        return jsonResponse(page > 20 ? [fillerPr(base, 0)] : Array.from({ length: 100 }, (_, i) => fillerPr(base, i)));
+      }));
+      const { app } = makeApp({ store });
+
+      const response = await request(app).post('/api/source-control/github/pr/create')
+        .send({ ...context(account.accountId), title: 'Title' }).expect(409);
+      expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN');
+      expect(store.records.get('request-one').state).toBe('outcome-unknown');
+    });
+
+    it('does not affirm a labels reconcile from a page-1 prefix', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const target = {
+        repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+        project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 7, head: 'feature', base: 'main', headSha: 'abc123',
+      };
+      const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+      const labels = Array.from({ length: 100 }, (_, i) => `l${String(i).padStart(3, '0')}`);
+      const input = { kind: 'labels', actor, credential: credentialFor(account), target, labels };
+      const store = makeStore([{ key: 'request-one', inputDigest: digestMutationInput(input), kind: 'change-request-labels', actor, target, state: 'running' }]);
+      vi.stubGlobal('fetch', vi.fn(async (url) => {
+        const parsed = new URL(String(url));
+        if (!parsed.pathname.endsWith('/labels')) return jsonResponse(pullRequest());
+        const page = parsed.searchParams.get('page') ?? '1';
+        return jsonResponse(page === '2' ? [{ name: 'zz-extra' }] : labels.map((name) => ({ name })));
+      }));
+      const { app } = makeApp({ store });
+
+      const response = await request(app).post('/api/source-control/github/pr/labels')
+        .send({ ...context(account.accountId, { target: { project: { owner: 'acme', name: 'app' }, number: 7 } }), labels })
+        .expect(409);
+      expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN');
+      expect(store.records.get('request-one').state).toBe('outcome-unknown');
+    });
+
+    it('removes a requested reviewer that only appears on page 2 of the current set', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = [];
+      vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+        const parsed = new URL(String(url));
+        const entry = {
+          method: options.method,
+          path: parsed.pathname,
+          page: parsed.searchParams.get('page'),
+          body: options.body ? JSON.parse(options.body) : null,
+        };
+        requests.push(entry);
+        if (entry.path.endsWith('/requested_reviewers') && entry.method === 'GET') {
+          const users = entry.page === '2'
+            ? [{ login: 'zz-last' }]
+            : Array.from({ length: 100 }, (_, i) => ({ login: `u${String(i).padStart(3, '0')}` }));
+          return jsonResponse({ users, teams: [] });
+        }
+        return jsonResponse(pullRequest());
+      }));
+      const { app } = makeApp();
+
+      const response = await request(app).post('/api/source-control/github/pr/reviewers')
+        .send({ ...context(account.accountId, { target: { project: { owner: 'acme', name: 'app' }, number: 7 } }), reviewers: ['u000'] })
+        .expect(200);
+      expect(response.body.result).toEqual({});
+      expect(requests.some((entry) => entry.method === 'GET' && entry.page === '2')).toBe(true);
+      const removals = requests.filter((entry) => entry.method === 'DELETE');
+      expect(removals).toHaveLength(1);
+      expect(removals[0].body.reviewers).toHaveLength(100);
+      expect(removals[0].body.reviewers).toContain('zz-last');
+    });
+  });
+
   describe('comments and reviews', () => {
     const pullTarget = { project: { owner: 'acme', name: 'app' }, number: 7 };
     const recordRequests = (respond) => {

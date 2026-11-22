@@ -23,7 +23,7 @@ export const toGuestAuthResponse = async (integration, stored) => {
   const auth = getLinearAuth();
   return {
     ...published,
-    connected: Boolean(auth?.accessToken),
+    connected: Boolean(auth?.accessToken || auth?.tokenReference),
     account: linearAccountLabel(auth),
     hasClient: true,
   };
@@ -60,14 +60,15 @@ export const disconnectHostGuest = async (integration) => {
   return true;
 };
 
-export const resolveHostAccessToken = async (integration) => {
+export const resolveHostAuthorization = async (integration) => {
   if (!isHostLinear(integration)) {
     return null;
   }
   try {
-    const { getValidLinearAccessToken } = await import('../linear/index.js');
-    return await getValidLinearAccessToken();
+    const { getValidLinearAuthorization } = await import('../linear/index.js');
+    return await getValidLinearAuthorization();
   } catch {
     return null;
   }
 };
+

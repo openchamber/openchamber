@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { learnedChoices } from './route-learning.js';
 import { cooldownHistory, estimateWait, ORDINARY_COOLDOWN_MS } from './route-wait.js';
@@ -91,6 +91,73 @@ describe('route settings', () => {
       waitPercentile: 5,
       waitMinSamples: 1,
     });
+  });
+
+  it('preserves a corrupt settings file instead of silently resetting to defaults', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-settings-'));
+      const file = path.join(dir, 'route-settings.json');
+      const corrupt = '{"learnAfter":7,"stages":{"keywords":fal';
+      fs.writeFileSync(file, corrupt);
+      const store = createSettingsStore({ file });
+      expect(store.read()).toEqual(DEFAULT_SETTINGS);
+      const preserved = fs.readdirSync(dir).filter((name) => name.startsWith('route-settings.json.corrupt-'));
+      expect(preserved).toHaveLength(1);
+      expect(fs.readFileSync(path.join(dir, preserved[0]), 'utf8')).toBe(corrupt);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(preserved[0]));
+      const warned = warn.mock.calls.flat().map(String).join(' ');
+      expect(warned).not.toContain('learnAfter');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('preserves a corrupt settings file before a write overwrites it, and leaves no temp file', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-settings-'));
+      const file = path.join(dir, 'route-settings.json');
+      fs.writeFileSync(file, '{"learnAfter":7,"stages":{"keywords":fal');
+      const store = createSettingsStore({ file });
+      const saved = store.write({ learnAfter: 5 });
+      expect(store.read()).toEqual(saved);
+      const names = fs.readdirSync(dir);
+      expect(names.filter((name) => name.startsWith('route-settings.json.corrupt-'))).toHaveLength(1);
+      expect(names.filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('preserves a settings file that parses but cannot be normalized before a write overwrites it', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-settings-'));
+      const file = path.join(dir, 'route-settings.json');
+      fs.writeFileSync(file, 'null');
+      const store = createSettingsStore({ file });
+      const saved = store.write({ learnAfter: 5 });
+      expect(store.read()).toEqual(saved);
+      const preserved = fs.readdirSync(dir).filter((name) => name.startsWith('route-settings.json.corrupt-'));
+      expect(preserved).toHaveLength(1);
+      expect(fs.readFileSync(path.join(dir, preserved[0]), 'utf8')).toBe('null');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('refuses to overwrite an existing settings file it cannot read', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'route-settings-'));
+    const file = path.join(dir, 'route-settings.json');
+    // A directory at the settings path makes the guard's read fail with
+    // EISDIR: an existing file whose bytes can be neither parsed nor
+    // preserved, so the write must refuse rather than rename over it.
+    fs.mkdirSync(file);
+    const store = createSettingsStore({ file });
+    expect(() => store.write({ learnAfter: 5 })).toThrow(/Refusing to overwrite the unreadable route settings file/);
+    expect(fs.statSync(file).isDirectory()).toBe(true);
+    expect(fs.readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
   it('defaults a missing or unreadable file and round-trips a saved one', () => {

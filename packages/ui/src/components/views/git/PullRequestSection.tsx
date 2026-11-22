@@ -48,6 +48,7 @@ import {
 } from './sourceControlMutationOutcome';
 import { BranchPullRequestPreview } from './BranchPullRequestPreview';
 import { useBranchPush } from './useBranchPush';
+import { getPullRequestChecksText } from '../../checksSummaryPresentation';
 
 const statusColor = (state: string | undefined | null): string => {
   switch (state) {
@@ -895,9 +896,7 @@ export const PullRequestSection: React.FC<{
       ].filter(Boolean).join(' · ')
     : '';
   const checksText = checks
-    ? checks.total > 0
-      ? `${checks.success}/${checks.total} ${t('gitView.pr.checks.label')}`
-      : `${checks.state} ${t('gitView.pr.checks.label')}`
+    ? getPullRequestChecksText(checks, t('gitView.pr.checks.label'))
     : '';
   const headerClassName = 'px-0 py-3 border-b border-border/40 flex flex-col gap-1';
   const bodyClassName = 'flex flex-col gap-3 py-3';

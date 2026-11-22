@@ -18,6 +18,7 @@ import { runOpenCodeCliUpgrade } from '../../web/server/lib/opencode/cli-upgrade
 import { spawnManagedOpenCodeProcess } from './managed-opencode-process';
 import { readEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { isExecutable, isKnownOpenCodeDesktopAppPath, isMacOpenCodeAppBundlePath, resolveDetectedOpencodeCliPath } from './opencodeCliDiscovery';
+import { readCappedFileSync } from './opencodeConfig';
 
 const t = vscode.l10n.t;
 
@@ -109,10 +110,26 @@ function isValidOpenCodePassword(password: string): boolean {
   return typeof password === 'string' && password.trim().length > 0;
 }
 
+// The shared settings file only needs to yield `opencodeBinary` here; cap
+// the read so a grown or non-regular settings.json cannot buffer whole (or
+// wedge the extension host on a FIFO) on every CLI resolution. Over-cap and
+// non-regular failures throw into the bare catch below and degrade to {}
+// exactly as a read failure does today. The cap is 8 MiB: settings.json is
+// one shared file with one cap, matching the web readers of the same file
+// (SETTINGS_FILE_MAX_BYTES in packages/web/server/lib/github/auth.js and
+// packages/web/server/lib/linear/auth.js). The 4 MiB this carried from
+// #1650 matched this package's own config reader instead, so a 4-8 MiB
+// settings.json read normally on web but silently degraded to {} here
+// (#1746).
+export const MAX_OPENCHAMBER_SETTINGS_BYTES = 8 * 1024 * 1024;
+
 function readOpenChamberSettings(): Record<string, unknown> {
   const settingsPath = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
   try {
-    const raw = fs.readFileSync(settingsPath, 'utf8');
+    const raw = readCappedFileSync(settingsPath, MAX_OPENCHAMBER_SETTINGS_BYTES, {
+      tooLarge: (target) => new Error(`OpenChamber settings at ${target} exceeds the ${MAX_OPENCHAMBER_SETTINGS_BYTES}-byte limit`),
+      notRegular: (target) => new Error(`OpenChamber settings at ${target} is not a regular file`),
+    });
     const parsed = JSON.parse(raw) as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;

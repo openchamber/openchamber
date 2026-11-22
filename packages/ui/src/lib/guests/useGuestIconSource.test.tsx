@@ -40,7 +40,7 @@ describe('guest icon loading', () => {
     revoked = [];
     reply = async () => svg();
     window = new Window({ url: 'http://localhost/' });
-    for (const [key, value] of Object.entries({ window, document: window.document, navigator: window.navigator, IS_REACT_ACT_ENVIRONMENT: true })) {
+    for (const [key, value] of Object.entries({ window, document: window.document, navigator: window.navigator, Event: window.Event, CustomEvent: window.CustomEvent, MutationObserver: window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })) {
       globals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
       Object.defineProperty(globalThis, key, { configurable: true, value });
     }

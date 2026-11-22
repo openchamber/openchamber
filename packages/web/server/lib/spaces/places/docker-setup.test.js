@@ -105,6 +105,15 @@ describe('docker setup: the action', () => {
     expect(await settle(setup)).toMatchObject({ action: 'install_all', running: false, failure: { code: 'docker_setup_failed', output: 'Error: No such file or directory' } });
   });
 
+  it('keeps a failed install output tail on a character boundary (#2041)', async () => {
+    // stdout + the joining newline is 4,002 chars, so tailOf's 4,000-char
+    // cut lands between the halves of the astral character.
+    const printed = `x\u{1F600}${'y'.repeat(3_998)}`;
+    const { setup } = makeSetup({ programs: ['brew'], checks: [MISSING], answer: () => ({ code: 1, stdout: printed, stderr: '' }) });
+    await setup.start('install_all');
+    expect(await settle(setup)).toMatchObject({ failure: { code: 'docker_setup_failed', output: 'y'.repeat(3_998) } });
+  });
+
   it('starts a new Colima machine with 6 GB when the user has none', async () => {
     const { setup, commands } = makeSetup({ programs: ['brew', 'colima'], checks: [DOWN] });
     await setup.start('start_colima');

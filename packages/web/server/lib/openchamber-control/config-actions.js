@@ -42,6 +42,7 @@ const settingsRegistry = createRequire(import.meta.url)('../opencode/settings-re
 
 export const CONFIG_ACTION_DEFINITIONS = Object.freeze([
   { action: 'settings.keys', title: 'List OpenChamber settings', description: 'List every OpenChamber setting key with its scope, whether it is kept per surface kind (perSurface), and whether settings.set may change it (and why not); no parameters' },
+  { action: 'settings.devices', title: 'Read device-only settings', description: 'Read the settings each open OpenChamber window keeps for its own device, which settings.get does not show: theme choice, sidebar and panel widths and layout, message limit, scrollbars, dock badge, window controls, mobile keyboard. One entry per open window (tab) that reported since the server started, most recent first, with its surface kind and when it reported. Read only: the user changes these in that window' },
   { action: 'settings.get', title: 'Read OpenChamber settings', description: 'Read OpenChamber settings: all of them, or one settingKey. Some keys (perSurface in settings.keys, such as sidebarLayout, themeId or fontSize) hold a separate value for each surface kind: with surface, the values that surface uses are returned; without it, the base values plus a surfaces breakdown of each kind\'s own values. Secrets (passwords, tokens) are never returned, only whether they are set' },
   { action: 'settings.set', title: 'Change OpenChamber settings', description: 'Change OpenChamber settings: settingKey with settingValue (any JSON), or a settings object of several. A perSurface key changed with surface (web, desktop, vscode or mobile) changes only that surface kind; without surface it changes the base value, which a surface with its own value ignores. Every key is checked before anything is saved: unknown, device-only, computed, desktop-owned, secret and security-sensitive keys (permissions, tunnels, LAN access, the OpenCode binary, projects) are refused, as is a value OpenChamber would not accept. Turning off agentControlToolEnabled removes this tool and needs confirm. Open OpenChamber windows may need a reload to show the change' },
   { action: 'opencode.config.get', title: 'Read OpenCode config', description: 'Read OpenCode configuration and the files it comes from. configScope merged (default), user, project or custom; configPath is a dot path into it, such as mcp.servers.github or providers.openai.models["gpt-4.1"]. Values that look like keys, tokens or passwords are masked' },
@@ -200,17 +201,39 @@ const readAtPath = (root, segments) => {
   return { found: true, value: current };
 };
 
-const SECRET_KEY_PATTERN = /(api[-_]?key|apikey|token|secret|password|passwd|authorization|credential|cookie)/i;
+const SECRET_KEY_PATTERN = /(api[-_]?key|apikey|token|secret|password|passwd|passphrase|authorization|credential|cookie)/i;
+// The secret words above are shared with integration-service-actions.js's
+// SECRET_KEY. Token, secret, password, passwd, passphrase, api-key, cookie
+// and authorization are secrets on both sides, so a widening here must be
+// mirrored there and the other way round. One intentional divergence: this
+// pattern also masks `credential`. The integration guard leaves
+// credential-named binding fields readable because they name a stored
+// account, a reference to it, and hold no secret value themselves.
+// The bare-key rule, shared with integration-service-actions.js: a name that
+// ends in `key` or `keys` (privateKey, accessKeys, a key literally named
+// `key`) holds a secret. Suffix-only, so keybinds and other names that merely
+// start with or contain `key` stay readable. A name like `monkey` also ends
+// in `key` and stays masked. That is the deliberate fail-closed reading, and
+// a test pins it.
+const SECRET_KEY_SUFFIX = /keys?$/i;
+const isSecretKeyName = (key) => SECRET_KEY_PATTERN.test(key) || SECRET_KEY_SUFFIX.test(key);
 // `{env:NAME}` and `{file:path}` are references, not the secret itself.
 const isConfigReference = (value) => /^\{(env|file):[^}]+\}$/.test(value.trim());
 
-/** Copy of a config value with secret-looking string values masked. */
-export const maskConfigSecrets = (value, key = '') => {
-  if (Array.isArray(value)) return value.map((entry) => maskConfigSecrets(entry, key));
+/**
+ * Copy of a config value with secret-looking string values masked. A
+ * secret-named key masks every string leaf under it, through nested plain
+ * objects and arrays of objects, so structured key material (a JWK object,
+ * a `{value: ...}` wrapper) stays hidden. Reference leaves keep their
+ * readable form at any depth.
+ */
+export const maskConfigSecrets = (value, key = '', secretAncestor = false) => {
+  const secret = secretAncestor || isSecretKeyName(key);
+  if (Array.isArray(value)) return value.map((entry) => maskConfigSecrets(entry, key, secret));
   if (isPlainObject(value)) {
-    return Object.fromEntries(Object.entries(value).map(([entryKey, entry]) => [entryKey, maskConfigSecrets(entry, entryKey)]));
+    return Object.fromEntries(Object.entries(value).map(([entryKey, entry]) => [entryKey, maskConfigSecrets(entry, entryKey, secret)]));
   }
-  if (isString(value) && value && SECRET_KEY_PATTERN.test(key) && !isConfigReference(value)) return '********';
+  if (isString(value) && value && secret && !isConfigReference(value)) return '********';
   return value;
 };
 
@@ -232,6 +255,8 @@ export const createConfigActions = (deps) => {
     persistSettings,
     refreshOpenCodeAfterConfigChange = null,
     getRequestHandoff = () => null,
+    // The device settings windows reported (../device-settings/store.js).
+    listDeviceSettings = null,
     env = process.env,
     platform = process.platform,
     versions = process.versions,
@@ -265,6 +290,17 @@ export const createConfigActions = (deps) => {
       }
     }
     return result;
+  };
+
+  const settingsDevices = () => {
+    if (!listDeviceSettings) throw new OpenChamberControlError('Device settings are not available on this server', 503);
+    const devices = listDeviceSettings();
+    return {
+      devices,
+      note: devices.length === 0
+        ? 'No window has reported since the server started; open OpenChamber in a browser, the desktop app or the phone app'
+        : 'Each open window reports its own; a device whose windows are closed keeps its last report until the server restarts',
+    };
   };
 
   const settingsGet = async (input) => {
@@ -529,6 +565,7 @@ export const createConfigActions = (deps) => {
     try {
       switch (action) {
         case 'settings.keys': return settingsKeys();
+        case 'settings.devices': return settingsDevices();
         case 'settings.get': return await settingsGet(input);
         case 'settings.set': return await settingsSet(input);
         case 'opencode.config.get': return configGet(input, ctx);

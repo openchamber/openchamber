@@ -76,7 +76,68 @@ export const INTEGRATION_SERVICE_PARAMETERS = {
   },
   sessionComments: { type: 'boolean', description: 'linear.preferences: post session status comments on Linear issues' },
   bindingOperation: { type: 'string', enum: ['provider', 'transport', 'transport-remove', 'auxiliary', 'reset'], description: 'binding.set: which change bindingIntent describes' },
-  bindingIntent: { type: 'object', description: 'binding.set: the change, with the expected repository, binding and config revisions from binding.get. Account and SSH key references only; raw tokens, passwords and URLs are refused' },
+  bindingIntent: {
+    type: 'object',
+    description: 'binding.set: the change, with the expected repository, binding and config revisions from binding.get. Only the fields of the chosen bindingOperation belong here; the operations refuse any other key. Account and SSH key references only; raw tokens, passwords and URLs are refused',
+    required: ['expectedRepositoryId', 'expectedRevision'],
+    properties: {
+      directory: { type: 'string', description: 'Repository directory; defaults to the call directory when omitted' },
+      expectedRepositoryId: { type: 'string', description: 'Repository id from binding.get; every operation' },
+      expectedRevision: { type: 'integer', description: 'Binding revision from binding.get; every operation' },
+      expectedConfigRevision: { type: 'string', description: 'Config revision from binding.get; transport, transport-remove, auxiliary and reset (provider does not take it)' },
+      operation: { type: 'string', enum: ['add', 'replace', 'remove', 'configure'], description: 'provider: add, replace or remove; auxiliary: configure or remove' },
+      target: {
+        type: 'object',
+        description: 'provider replace and remove: the existing association to change',
+        required: ['provider', 'instance', 'accountId', 'primaryRemote'],
+        properties: {
+          provider: { type: 'string', enum: ['github', 'gitlab'] },
+          instance: { type: 'string', description: 'Provider instance origin' },
+          accountId: { type: 'string' },
+          primaryRemote: { type: 'string', description: 'Remote name the association is for' },
+        },
+      },
+      provider: {
+        type: 'object',
+        description: 'provider add and replace: the association to store',
+        required: ['provider', 'instance', 'accountId', 'primaryRemote'],
+        properties: {
+          provider: { type: 'string', enum: ['github', 'gitlab'] },
+          instance: { type: 'string', description: 'Provider instance origin' },
+          accountId: { type: 'string' },
+          primaryRemote: { type: 'string', description: 'Remote name the association is for' },
+          repository: {
+            type: 'object',
+            description: 'Repository on the provider, when known',
+            required: ['owner', 'name'],
+            properties: { owner: { type: 'string' }, name: { type: 'string' } },
+          },
+        },
+      },
+      remote: { type: 'string', description: 'transport and transport-remove: remote name from binding.get' },
+      transport: { type: 'string', enum: ['system', 'https', 'ssh', 'anonymous'], description: 'transport, and auxiliary configure: how the remote authenticates' },
+      expectedFetchFingerprint: { type: 'string', description: 'transport and transport-remove: the remote fetch endpoint fingerprint from binding.get' },
+      expectedPushFingerprint: { type: 'string', description: 'transport and transport-remove: the remote push endpoint fingerprint from binding.get' },
+      unverifiedConfirmed: { type: 'boolean', description: 'transport system, and auxiliary configure with system: true confirms using System Git unverified' },
+      credentialAccount: {
+        type: 'object',
+        description: 'transport https, and auxiliary configure with https: the stored account to authenticate with',
+        required: ['provider', 'instance', 'accountId'],
+        properties: {
+          provider: { type: 'string', enum: ['github', 'gitlab'] },
+          instance: { type: 'string', description: 'Provider instance origin' },
+          accountId: { type: 'string' },
+        },
+      },
+      sshCredentialId: { type: 'string', description: 'transport ssh, and auxiliary configure with ssh: managed SSH credential reference from binding.get' },
+      parentRemote: { type: 'string', description: 'auxiliary: parent repository remote name from binding.get' },
+      expectedParentFingerprint: { type: 'string', description: 'auxiliary: the parent remote fetch endpoint fingerprint from binding.get' },
+      kind: { type: 'string', enum: ['submodule', 'lfs'], description: 'auxiliary: which endpoint kind changes' },
+      path: { type: 'string', description: 'auxiliary: checkout-relative path of the submodule or LFS endpoint' },
+      expectedEndpointFingerprint: { type: 'string', description: 'auxiliary: the endpoint fingerprint from binding.get' },
+      confirmed: { type: 'boolean', description: 'reset: true confirms removing the whole binding' },
+    },
+  },
   extensionId: { type: 'string', description: 'Extension id from extensions.list' },
   extensionSettings: { type: 'object', description: 'extensions.settings: setting id to text value' },
 };
@@ -87,10 +148,15 @@ const GITLAB_DEFAULT_INSTANCE = 'https://gitlab.com';
 
 /**
  * accessToken, refreshToken, clientSecret, password, apiKey, cookie and the
- * like. Anchored at the end so tokenType, scope and the binding's credential
- * references (which name a stored account, not a secret) stay.
+ * like, in singular and plural forms (tokens, apiKeys, passwords). The bare
+ * `key` alternative is the rule config-actions.js applies to config masking
+ * too: a name that ends in `key` or `keys` (privateKey, privateKeys,
+ * access_key, a key literally named `key`) holds a secret. Anchored at the
+ * end so tokenType, scope and the binding's credential references (which
+ * name a stored account, not a secret) stay. A name like `monkey` also ends
+ * in `key` and is treated as a secret on both sides, fail-closed.
  */
-const SECRET_KEY = /(?:token|secret|password|passwd|passphrase|api[-_]?key|cookie|authorization)$/i;
+const SECRET_KEY = /(?:tokens?|secrets?|passwords?|passwd|passphrases?|api[-_]?keys?|keys?|cookies?|authorizations?)$/i;
 
 const badRequest = (message) => new OpenChamberControlError(message, 400);
 
@@ -427,7 +493,7 @@ export const createIntegrationServiceActions = (deps) => {
   };
 
   const execute = async (action, input = {}, ctx = {}) => {
-    const handler = handlers[action];
+    const handler = Object.hasOwn(handlers, action) ? handlers[action] : null;
     if (!handler) throw badRequest(`Unsupported integration action: ${action || 'missing'}`);
     try {
       return withoutSecrets(await handler(input ?? {}, ctx));

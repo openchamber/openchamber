@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
+import type { WebFilesAPIOptions } from './files';
 
 const runtimeFetchMock = vi.fn();
 const searchFilesMock = vi.fn();
@@ -10,9 +11,10 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-vi.mock('@openchamber/ui/lib/runtime-fetch', () => ({
-  runtimeFetch: runtimeFetchMock,
-}));
+const createWebFilesAPI = async (options: WebFilesAPIOptions) => {
+  const { createWebFilesAPI: create } = await import('./files');
+  return create({ runtimeFetch: runtimeFetchMock, ...options });
+};
 
 const toUrl = (path: string, query?: RuntimeUrlQuery): string => {
   const params = query instanceof URLSearchParams ? query : new URLSearchParams();
@@ -33,9 +35,8 @@ const urls: RuntimeUrlResolver = {
 
 describe('createWebFilesAPI', () => {
   it('sends a request for a path inside a space to that space, whichever folder is open', async () => {
-    const { createWebFilesAPI } = await import('./files');
     let open = '/repo';
-    const api = createWebFilesAPI({ urls, getDirectory: () => open });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => open });
     const directoryOfCall = (index: number) => runtimeFetchMock.mock.calls[index]?.[1]?.headers?.['x-opencode-directory'];
     runtimeFetchMock.mockReset();
     runtimeFetchMock.mockImplementation(async () => Response.json({ path: '/x', entries: [] }));
@@ -55,8 +56,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('preserves the directory permission failure contract', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     runtimeFetchMock.mockResolvedValueOnce(Response.json(
       { error: 'Access to directory denied', reason: 'os-permission' },
       { status: 403 },
@@ -73,8 +73,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('rejects malformed successful directory listings', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/workspace' }));
 
     await expect(api.listDirectory('/workspace')).rejects.toMatchObject({
@@ -83,8 +82,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('forwards respectGitignore only when the caller asks for it', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
 
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/workspace', entries: [] }));
     await api.listDirectory('/workspace', { respectGitignore: true });
@@ -100,8 +98,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('uses per-call workspace directory for stat and read requests', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/stale-workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/stale-workspace' });
 
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/worktree-b/file.txt', isFile: true, size: 12 }));
     await api.statFile?.('/worktree-b/file.txt', { directory: '/worktree-a' });
@@ -134,8 +131,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('sends the workspace directory header for downloads', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
 
     runtimeFetchMock.mockResolvedValueOnce(new Response('', { status: 500 }));
     await expect(api.downloadFile?.('/current-workspace/file.txt')).rejects.toThrow('Download failed');
@@ -147,8 +143,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('forwards allowOutsideWorkspace for a download of an outside file', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
 
     // The request is sent before the response is inspected, so a failed status
     // still proves the query the client built.
@@ -163,8 +158,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('reads an outside file directly without a grant', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     const content = Array.from({ length: 100 }, (_, line) => `Line ${line + 1}`).join('\n');
     runtimeFetchMock.mockResolvedValueOnce(new Response(content));
 
@@ -179,8 +173,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('rejects a stalled file read when its deadline expires', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     const controller = new AbortController();
     const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
     runtimeFetchMock.mockImplementationOnce((_path: string, options: RequestInit) => new Promise((_resolve, reject) => {
@@ -198,8 +191,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('uploads binary file contents to the active workspace', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     const file = new Blob([new Uint8Array([0, 1, 255])]);
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ success: true, path: '/workspace/image.bin' }));
 
@@ -217,8 +209,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('preserves upload conflict details for explicit overwrite handling', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     runtimeFetchMock.mockResolvedValueOnce(Response.json(
       { error: 'File already exists', reason: 'already-exists' },
       { status: 409 },
@@ -231,8 +222,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('reports a rename onto an existing name as a conflict', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     runtimeFetchMock.mockResolvedValueOnce(Response.json(
       { error: 'Destination already exists', reason: 'already-exists' },
       { status: 409 },
@@ -245,8 +235,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('opens the native share sheet for downloads in the Capacitor app', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     const share = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('window', globalThis);
     vi.stubGlobal('navigator', {});
@@ -261,8 +250,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('hands downloads to the native FileShare plugin on Android, where WebView has no Web Share API', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
     const share = vi.fn().mockResolvedValue(undefined);
     const registerPlugin = vi.fn(() => ({ share }));
     vi.stubGlobal('window', globalThis);
@@ -280,8 +268,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('delegates file search to file.find and maps hits', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace', searchFiles: searchFilesMock });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace', searchFiles: searchFilesMock });
     searchFilesMock.mockResolvedValueOnce([
       { name: 'package.json', path: '/workspace/package.json', relativePath: 'package.json' },
     ]);
@@ -297,8 +284,7 @@ describe('createWebFilesAPI', () => {
   });
 
   it('propagates search failures instead of returning empty', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace', searchFiles: searchFilesMock });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/workspace', searchFiles: searchFilesMock });
     searchFilesMock.mockRejectedValueOnce(new Error('gone'));
 
     await expect(api.search({ directory: '/workspace', query: 'package' })).rejects.toThrow('gone');
@@ -317,8 +303,7 @@ describe('createWebFilesAPI.searchContents', () => {
   };
 
   it('sends the search as the server expects and parses the matches', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/elsewhere' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/elsewhere' });
     runtimeFetchMock.mockResolvedValueOnce(Response.json({
       matches: [{ path: 'C:\\repo\\src\\a.ts', relativePath: 'src/a.ts', line: 3, column: 7, text: 'const needle', ranges: [[6, 12]], cutStart: false }],
       stopped: 'limit',
@@ -342,8 +327,7 @@ describe('createWebFilesAPI.searchContents', () => {
   });
 
   it('leaves default options out of the query', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/repo' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/repo' });
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ matches: [], stopped: null }));
 
     await api.searchContents!({ directory: '/repo', query: 'needle', regex: false });
@@ -352,8 +336,7 @@ describe('createWebFilesAPI.searchContents', () => {
   });
 
   it('turns the server’s unavailable and invalid-pattern answers into outcomes', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/repo' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/repo' });
 
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'no ripgrep', reason: 'search-unavailable' }, { status: 501 }));
     expect(await api.searchContents!({ directory: '/repo', query: 'x', regex: false })).toEqual({ status: 'unavailable' });
@@ -363,8 +346,7 @@ describe('createWebFilesAPI.searchContents', () => {
   });
 
   it('rejects other failures and malformed successes instead of answering no matches', async () => {
-    const { createWebFilesAPI } = await import('./files');
-    const api = createWebFilesAPI({ urls, getDirectory: () => '/repo' });
+    const api = await createWebFilesAPI({ urls, getDirectory: () => '/repo' });
 
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'ripgrep exited with code 2', reason: 'search-failed' }, { status: 500 }));
     await expect(api.searchContents!({ directory: '/repo', query: 'x', regex: false })).rejects.toMatchObject({ message: 'ripgrep exited with code 2', status: 500 });

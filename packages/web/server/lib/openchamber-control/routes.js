@@ -19,15 +19,16 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
       return res.json(data);
     } catch (error) {
       const controlError = asControlError(error, 'OpenChamber control action failed');
-      return res.status(controlError.statusCode).json({
+      const response = {
         error: controlError.message,
-        ...(controlError.partial === true ? {
-          partial: true,
-          partialAction: controlError.partialAction,
-          sessionId: controlError.sessionId,
-          directory: controlError.directory,
-        } : {}),
-      });
+      };
+      if (controlError.partial === true) {
+        response.partial = true;
+        response.partialAction = controlError.partialAction;
+        response.sessionId = controlError.sessionId;
+        response.directory = controlError.directory;
+      }
+      return res.status(controlError.statusCode).json(response);
     } finally {
       req.off('aborted', abortOnDisconnect);
       res.off('close', abortOnDisconnect);

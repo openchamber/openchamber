@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createSseCursor, isResyncBlock, parseSseBlock } from './sse-cursor.js';
+import { createSseCursor, decodeOpenChamberCursor, encodeOpenChamberCursor, isOpenChamberCursor, isOpenCodeEventId, isResyncBlock, parseSseBlock, SSE_CURSOR_MAX_PENDING_CHARS } from './sse-cursor.js';
 
 describe('SSE cursor', () => {
   it('tracks the id of the last complete block and reports every block in order', () => {
@@ -70,8 +70,106 @@ describe('SSE cursor', () => {
     expect(cursor.lastEventId()).toBe('');
   });
 
+  it('discards an oversized block through its separator without corrupting the cursor', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('data: {"forged":"')).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    // The remainder of the same oversized block: the `id:` line inside it belongs to the
+    // discarded block, so it must not move the cursor, and its terminating separator is
+    // consumed by the discard rather than closing a block.
+    expect(cursor.observe('aaaa"\nid: forged\n\n')).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    const blocks = cursor.observe('id: ws:9\ndata: {"n":9}\n\n');
+    expect(blocks.map((block) => [block.id, block.data])).toEqual([['ws:9', '{"n":9}']]);
+    expect(cursor.lastEventId()).toBe('ws:9');
+  });
+
+  it('discards through a separator that is split across chunks', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('x'.repeat(20))).toEqual([]);
+    expect(cursor.observe('y\n')).toEqual([]);
+    expect(cursor.observe('\n')).toEqual([]);
+    expect(cursor.lastEventId()).toBe('ws:0');
+
+    const blocks = cursor.observe('id: ws:5\ndata: {"n":5}\n\n');
+    expect(blocks).toHaveLength(1);
+    expect(cursor.lastEventId()).toBe('ws:5');
+  });
+
+  it('recovers through a CRLF separator split as CRLF + CR across chunks while discarding', () => {
+    const cursor = createSseCursor('ws:0', { maxPendingChars: 16 });
+
+    expect(cursor.observe('x'.repeat(20))).toEqual([]);
+    // The oversized block's terminating separator arrives as \r\n\r, completed by the
+    // leading \n of the next chunk. Retaining only the final \r would lose the preceding
+    // \n, miss the separator, and discard the valid block that follows it.
+    expect(cursor.observe('\r\n\r')).toEqual([]);
+    const blocks = cursor.observe('\nid: ws:1\r\ndata: {}\r\n\r\n');
+    expect(blocks.map((block) => [block.id, block.data])).toEqual([['ws:1', '{}']]);
+    expect(cursor.lastEventId()).toBe('ws:1');
+  });
+
+  it('bounds pending at the default cap on a separator-less flood', () => {
+    const cursor = createSseCursor();
+
+    expect(cursor.observe('x'.repeat(SSE_CURSOR_MAX_PENDING_CHARS + 1))).toEqual([]);
+    // Terminate the discarded flood block, then a genuine block parses normally.
+    expect(cursor.observe('\n\n')).toEqual([]);
+
+    const blocks = cursor.observe('id: ws:1\ndata: {"n":1}\n\n');
+    expect(blocks).toHaveLength(1);
+    expect(cursor.lastEventId()).toBe('ws:1');
+  });
+
   it('starts from the id the browser already holds', () => {
     expect(createSseCursor('ws:7').lastEventId()).toBe('ws:7');
+  });
+});
+
+describe('OpenChamber cursor', () => {
+  const INSTANCE = '6b1f3c2e-8d4a-4f7b-9c3e-2a5d7e9f1b40';
+
+  it('round-trips a stream position and its upstream OpenCode id', () => {
+    const cursor = encodeOpenChamberCursor({ stream: 'global', position: 42, upstream: `${INSTANCE}:7` });
+    expect(cursor).toBe(`occ1.global.42.${INSTANCE}:7`);
+    expect(decodeOpenChamberCursor(cursor)).toEqual({
+      version: 1,
+      stream: 'global',
+      position: 42,
+      upstream: `${INSTANCE}:7`,
+    });
+  });
+
+  it('round-trips a position with no upstream id yet', () => {
+    expect(decodeOpenChamberCursor(encodeOpenChamberCursor({ stream: 'global', position: 0 })))
+      .toEqual({ version: 1, stream: 'global', position: 0, upstream: '' });
+  });
+
+  it('cannot be mistaken for an OpenCode event id', () => {
+    const cursor = encodeOpenChamberCursor({ stream: 'global', position: 3, upstream: `${INSTANCE}:9` });
+    expect(isOpenCodeEventId(cursor)).toBe(false);
+    expect(isOpenChamberCursor(cursor)).toBe(true);
+    expect(isOpenChamberCursor(`${INSTANCE}:9`)).toBe(false);
+  });
+
+  it('rejects a wrong version, stream token, position or upstream form', () => {
+    expect(decodeOpenChamberCursor(`occ2.global.1.${INSTANCE}:1`)).toBeNull();
+    expect(decodeOpenChamberCursor('occ1.GLOBAL.1.')).toBeNull();
+    expect(decodeOpenChamberCursor('occ1.global.-1.')).toBeNull();
+    expect(decodeOpenChamberCursor('occ1.global.1.2')).toBeNull();
+    expect(decodeOpenChamberCursor('occ1.global.1.not-an-id')).toBeNull();
+    expect(decodeOpenChamberCursor('')).toBeNull();
+    expect(decodeOpenChamberCursor(undefined)).toBeNull();
+  });
+
+  it('refuses to encode a cursor the decoder would reject', () => {
+    expect(() => encodeOpenChamberCursor({ stream: 'global', position: -1 })).toThrow(TypeError);
+    expect(() => encodeOpenChamberCursor({ stream: 'Global', position: 1 })).toThrow(TypeError);
+    expect(() => encodeOpenChamberCursor({ stream: 'global', position: 1, upstream: 'nope' })).toThrow(TypeError);
   });
 });
 

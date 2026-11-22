@@ -42,6 +42,8 @@ const referenceFields = {
   updatedAt: z.string().nullable(),
   author: z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable(),
   labels: z.array(z.object({ name: z.string(), color: z.string().optional() })),
+  // How many labels the item has in total; `labels` holds at most six (#1427).
+  labelTotal: z.number().optional(),
   commentCount: z.number(),
   sourceRepo: z.object({ owner: z.string(), repo: z.string(), source: z.string() }),
 };
@@ -110,8 +112,13 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
         }).optional(),
       })),
       commentTotal: z.number(),
+      labels: z.array(z.object({ name: z.string(), color: z.string().optional() })).optional(),
+      // How many labels the item has in total; `labels` holds at most six (#1427).
+      labelTotal: z.number().optional(),
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
+        // How many review requests the PR has in total; `reviewers` holds at most 30 (#1427).
+        reviewRequestTotal: z.number().optional(),
         reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
         checks: checksSummarySchema.nullable().optional(),
         additions: z.number(),

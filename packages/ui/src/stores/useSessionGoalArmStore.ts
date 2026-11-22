@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { GoalSubmitChoice } from '@/lib/goalWriter';
 
 // Narrow store for the "next message starts a goal" flag. Armed by the
 // composer target button (works for existing sessions AND session drafts)
@@ -52,3 +53,38 @@ export const useSessionGoalArmStore = create<SessionGoalArmStore>((set, get) => 
     return { armed, objectiveOverride, settled, briefAgent, ignoreLimit };
   },
 }));
+
+/**
+ * Arms the composer again with a goal that left with a queued message: when the
+ * message comes back to the composer to be edited, or when queueing it failed.
+ * The flags come back with it, so a retry neither rewrites a settled spec nor
+ * drops the briefing or the length choice.
+ */
+export const rearmQueuedGoal = (goal: {
+  objective?: string | null;
+  settled?: boolean;
+  briefAgent?: boolean;
+  ignoreLimit?: boolean;
+}): void => {
+  useSessionGoalArmStore.getState().setArmed(true, goal.objective ?? null, {
+    settled: goal.settled === true,
+    briefAgent: goal.briefAgent === true,
+    ignoreLimit: goal.ignoreLimit === true,
+  });
+};
+
+/**
+ * The goal writer's choice for a send, as the composer arm. ChatInput applies
+ * it right before the message leaves, sent or queued, so an early return that
+ * sends nothing never leaves a stale arm behind. A spec choice is settled: the
+ * writer produced the objective, so nothing rewrites it. It briefs the agent
+ * only when the original message goes with it; sent as the message itself, the
+ * spec needs no briefing.
+ */
+export const applyGoalChoice = (choice: GoalSubmitChoice | undefined): void => {
+  if (!choice) return;
+  const goalArm = useSessionGoalArmStore.getState();
+  if (choice.kind === 'none') goalArm.setArmed(false);
+  else if (choice.kind === 'unchanged') goalArm.setArmed(true, null, { settled: true });
+  else goalArm.setArmed(true, choice.spec, { settled: true, briefAgent: choice.sendMode === 'with-message', ignoreLimit: choice.ignoreLimit });
+};

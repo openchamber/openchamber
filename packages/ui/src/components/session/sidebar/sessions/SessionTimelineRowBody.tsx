@@ -1,9 +1,12 @@
 import React from 'react';
+import type { Session } from '@/lib/opencode/model';
+import { SessionTimestamps } from './SessionTimestamps';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { Icon } from '@/components/icon/Icon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { cn } from '@/lib/utils';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
+import { DEFAULT_SESSION_ROW_ELEMENTS, type SessionRowElements } from '@/stores/useSessionDisplayStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 
 type TimelineRowProject = {
@@ -15,6 +18,7 @@ type TimelineRowProject = {
 };
 
 type Props = {
+  session?: Session;
   /** One-line rows (tree rows, Chats, the Tree view's Pinned and In work):
       title and meta on one line, no branch line. */
   compact?: boolean;
@@ -58,6 +62,11 @@ type Props = {
   providerId?: string | null;
   /** Reserves room for permanently shown action buttons on the title line. */
   metaPaddingClass?: string;
+  /** Optional row elements, shown where the row already has a slot for them.
+      Everything shows by default, exactly like today. Live status and the
+      permission/question badges are not here: a row always says when it
+      needs the user. */
+  elements?: SessionRowElements;
   hideMetaOnHoverClass: string;
   /** Sets how far hover-revealed actions reach into the title line
       (`--oc-actions-reserve`). */
@@ -106,6 +115,7 @@ const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string
 // The List view's list by time has no project headers and room for the name,
 // so its rows add a project line above the title.
 export const SessionTimelineRowBody: React.FC<Props> = ({
+  session,
   compact = false,
   project,
   chat = false,
@@ -127,6 +137,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   doneHint = null,
   providerId,
   metaPaddingClass,
+  elements = DEFAULT_SESSION_ROW_ELEMENTS,
   hideMetaOnHoverClass,
   actionsReserveClass,
   actionsMaskClass,
@@ -135,27 +146,27 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   // cluster: the hover actions overlay that cluster, and anything placed
   // after it would sit underneath them.
   const meta = <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1 transition-opacity', metaPaddingClass, hideMetaOnHoverClass)}>
-    {compact ? goal : null}
-    {compact ? zombieIndicator ?? prBadge : null}
+    {compact && elements.showGoal ? goal : null}
+    {compact ? zombieIndicator ?? (elements.showPrBadge ? prBadge : null) : null}
     {compact ? badges : null}
-    {directoryIndicator}
-    {pinnedMarker}
-    {doneHint}
+    {elements.showDirectoryIndicator ? directoryIndicator : null}
+    {elements.showPinnedMarker ? pinnedMarker : null}
+    {elements.showDoneHint ? doneHint : null}
     {statusDot}
-    <span className="typography-micro leading-none text-muted-foreground/50 tabular-nums">{timeSlot}</span>
+    {elements.showTime ? <span className="typography-micro leading-none text-muted-foreground/50 tabular-nums">{timeSlot}</span> : null}
   </span>;
   const titleLine = (
     <div dir="auto" className={cn('oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
   );
-  const originMark = project
+  const originMark = !elements.showProjectIcon ? null : project
     ? <TimelineProjectIcon project={project} label={projectLabel} />
     : chat ? <Icon name="chat-4" className="h-3 w-3 flex-shrink-0 text-muted-foreground/75" /> : null;
   if (compact) {
-    return <div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
+    return <div className="flex w-full min-w-0 flex-col gap-1"><div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
       {originMark}
       {titleLine}
       {meta}
-    </div>;
+    </div>{session ? <SessionTimestamps session={session} placement="row" /> : null}</div>;
   }
   return <div className="flex w-full min-w-0 flex-col gap-px">
     {/* Fixed 20px first line: the hover actions are positioned against the
@@ -163,7 +174,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         a project line the actions cover the project's name, never the title. */}
     {projectLine ? <>
       <div className={cn('@container relative flex h-5 w-full min-w-0 items-center gap-1', actionsReserveClass)}>
-        {project ? <TimelineProjectIcon project={project} label={null} /> : null}
+        {elements.showProjectIcon && project ? <TimelineProjectIcon project={project} label={null} /> : null}
         {/* Starts past the 12px project icon and the 4px gap. */}
         <span className={cn('min-w-0 flex-1 truncate typography-micro text-muted-foreground/85', project && '[--oc-actions-inset:16px]', actionsMaskClass)}>{projectLabel}</span>
         {meta}
@@ -180,10 +191,11 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     {/* Fixed 16px branch line, always rendered: a row without a branch,
         a model or badges keeps the height of its neighbours, so the list
         does not shift when a branch or a badge arrives and the virtualizer's
-        per-kind size estimate stays exact. */}
+        per-kind size estimate stays exact. Hidden elements leave the line, so
+        rows keep their height whatever the row display shows. */}
     <div className="flex h-4 w-full min-w-0 items-center gap-1">
       {projectLine ? null : originMark}
-      {metaLineLead ?? (branchLabel ? (
+      {metaLineLead ?? (elements.showBranch && branchLabel ? (
         <>
           {spaceMark
             // `Icon` hides itself from assistive tech; the space's mark is the row's only word for "space", so it speaks.
@@ -193,13 +205,14 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         </>
       ) : null)}
       <span className="ms-auto flex flex-shrink-0 items-center gap-1">
-        {goal}
-        {zombieIndicator ?? prBadge}
+        {elements.showGoal ? goal : null}
+        {zombieIndicator ?? (elements.showPrBadge ? prBadge : null)}
         {badges}
         {/* PR-icon size: a 16px box leaves the logo's own inner margin
             wide enough to pull it visibly in from the time above. */}
-        {providerId ? <ProviderLogo providerId={providerId} className="h-3 w-3 flex-shrink-0 opacity-45" /> : null}
+        {elements.showProviderLogo && providerId ? <ProviderLogo providerId={providerId} className="h-3 w-3 flex-shrink-0 opacity-45" /> : null}
       </span>
     </div>
+    {session ? <SessionTimestamps session={session} placement="row" /> : null}
   </div>;
 };

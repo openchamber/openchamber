@@ -752,6 +752,7 @@ const validateGitHubCheckRun = (run: GitHubCheckRun): void => {
     || (run.completedAt !== undefined && !isNonEmptyString(run.completedAt))
     || (run.status !== undefined && !isNonEmptyString(run.status))
     || (run.conclusion !== undefined && run.conclusion !== null && !isStringValue(run.conclusion))
+    || (run.annotationsTruncated !== undefined && !isBooleanValue(run.annotationsTruncated))
     || (run.detailsUrl !== undefined && !isHttpUrl(run.detailsUrl))) {
     throw new Error('Source control response contained invalid GitHub check-run fields');
   }
@@ -804,6 +805,7 @@ const mapCheckRun = (run: GitHubCheckRun, index: number): CIRun => {
     };
   }
   if (run.output) result.output = { title: run.output.title, summary: run.output.summary, text: run.output.text };
+  if (run.annotationsTruncated) result.annotationsTruncated = true;
   if (run.annotations) {
     result.annotations = run.annotations.map((annotation) => ({
       message: annotation.message,
@@ -959,6 +961,7 @@ const parseSourceCI = (ci: CI | null | undefined, identity: SourceControlIdentit
       if ((run.startedAt !== undefined && !isNonEmptyString(run.startedAt))
         || (run.completedAt !== undefined && !isNonEmptyString(run.completedAt))
         || (run.status !== undefined && !isNonEmptyString(run.status))
+        || (run.annotationsTruncated !== undefined && !isBooleanValue(run.annotationsTruncated))
         || (run.conclusion !== undefined && run.conclusion !== null && !isStringValue(run.conclusion))) {
         throw new Error('Source control response contained invalid CI run fields');
       }
@@ -1027,6 +1030,7 @@ const parseSourceCI = (ci: CI | null | undefined, identity: SourceControlIdentit
       job: run.job,
       output: run.output,
       annotations: run.annotations,
+      annotationsTruncated: run.annotationsTruncated,
     })),
   };
 };

@@ -27,6 +27,18 @@ Wähle ein Projekt in der Seitenleiste aus, um es aktiv zu machen. Alles — Ses
 
 > In VS Code verwendet OpenChamber immer den Ordner, den du geöffnet hast, als einziges Projekt. Es gibt dort also nichts hinzuzufügen oder umzuschalten. Die Seite mit den Projekteinstellungen ist dort ausgeblendet.
 
+## Sitzungen in Ordnern gruppieren
+
+Klicke in der Ansicht **Tree** der Seitenleiste mit der rechten Maustaste auf eine Session und wähle **Move to folder**, um sie in einen Ordner zu legen, oder **New folder...**, um einen zu erstellen. Ein Ordner gehört zur Projektwurzel oder zu einem Worktree, und die Ordnerzeile hat Schaltflächen zum Umbenennen oder Löschen. Das Löschen eines Ordners behält seine Sessions; sie gehen zurück ins Projekt.
+
+Ordner werden auf dem OpenChamber-Server gespeichert, sodass alles, was mit demselben Server verbunden ist, dieselben zeigt: ein anderer angemeldeter Computer, die Web-App und das Handy. Eine Änderung auf einem Gerät erscheint innerhalb einer Sekunde auf den anderen, ohne Neuladen. Jeder Server hat seine eigenen Ordner. Welche Ordner eingeklappt sind, bleibt auf jedem Gerät.
+
+Das Handy zeigt die Ordner in seiner Tree-Ansicht, kann sie aber nicht ändern. Verschiebe Sessions auf dem Desktop oder in der Web-App.
+
+Wenn sich ein Gerät nach einem Update von einer Version, die Ordner auf jedem Gerät behielt, erstmals verbindet, werden seine Ordner zu denen des Servers hinzugefügt. Ein Ordner mit demselben Namen am selben Ort wie einer, den der Server bereits hat, schließt sich ihm an, und seine Sessions gehen mit; nichts geht verloren. Eine Session, die der Server bereits abgelegt hat, bleibt im Ordner des Servers.
+
+Das Löschen einer Session nimmt sie aus ihrem Ordner, und das Schließen eines Projekts entfernt seine Ordner. In VS Code bleiben Ordner in der Erweiterung und werden nicht geteilt.
+
 ## Projektumgebung
 
 Wenn die Werkzeuge eines Projekts aus direnv, devenv oder einer Nix-Shell kommen, finden Git-Hooks, das Terminal und [Projektaktionen](/de/project-actions/) sie nicht von selbst. Öffne **Einstellungen → Projekte** und wähle das Projekt aus. Unter **Umgebung** kannst du:

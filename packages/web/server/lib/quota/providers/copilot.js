@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -6,7 +7,8 @@ import {
   toUsageWindow,
   toNumber,
   toTimestamp,
-  formatCredits
+  formatCredits,
+  asNonEmptyString
 } from '../utils/index.js';
 
 const buildCopilotWindows = (payload) => {
@@ -80,7 +82,7 @@ const buildCopilotWindows = (payload) => {
 
 export const providerId = 'github-copilot';
 export const providerName = 'GitHub Copilot';
-const aliases = ['github-copilot', 'copilot'];
+export const aliases = ['github-copilot', 'copilot'];
 
 const INVALID_COPILOT_ENTERPRISE_URL = 'Invalid GitHub Copilot Enterprise URL';
 
@@ -104,15 +106,17 @@ const copilotUserUrl = (enterpriseUrl) => {
   return `https://api.${url.hostname}/copilot_internal/user`;
 };
 
+const getAccessToken = (entry) => asNonEmptyString(entry?.access) ?? asNonEmptyString(entry?.token);
+
 export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.access || entry?.token);
+  return Boolean(getAccessToken(entry));
 };
 
-export const fetchQuota = async () => {
-  const auth = await readOpenCodeCredentials();
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials } = {}) => {
+  const auth = await readAuth();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const accessToken = entry?.access ?? entry?.token;
+  const accessToken = getAccessToken(entry);
 
   if (!accessToken) {
     return buildResult({
@@ -124,6 +128,8 @@ export const fetchQuota = async () => {
     });
   }
 
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
   try {
     const response = await fetch(copilotUserUrl(entry?.enterpriseUrl), {
       method: 'GET',
@@ -132,7 +138,8 @@ export const fetchQuota = async () => {
         Accept: 'application/json',
         'Editor-Version': 'vscode/1.96.2',
         'X-Github-Api-Version': '2025-04-01'
-      }
+      },
+      signal: timeoutSignal
     });
 
     if (!response.ok) {
@@ -145,7 +152,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     return buildResult({
       providerId,
       providerName,
@@ -154,70 +161,17 @@ export const fetchQuota = async () => {
       usage: { windows: buildCopilotWindows(payload) }
     });
   } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
     return buildResult({
       providerId,
       providerName,
       ok: false,
       configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
-    });
-  }
-};
-
-export const providerIdAddon = 'github-copilot-addon';
-export const providerNameAddon = 'GitHub Copilot Add-on';
-
-export const fetchQuotaAddon = async () => {
-  const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const accessToken = entry?.access ?? entry?.token;
-
-  if (!accessToken) {
-    return buildResult({
-      providerId: providerIdAddon,
-      providerName: providerNameAddon,
-      ok: false,
-      configured: false,
-      error: 'Not configured'
-    });
-  }
-
-  try {
-    const response = await fetch(copilotUserUrl(entry?.enterpriseUrl), {
-      method: 'GET',
-      headers: {
-        Authorization: `token ${accessToken}`,
-        Accept: 'application/json',
-        'Editor-Version': 'vscode/1.96.2',
-        'X-Github-Api-Version': '2025-04-01'
-      }
-    });
-
-    if (!response.ok) {
-      return buildResult({
-        providerId: providerIdAddon,
-        providerName: providerNameAddon,
-        ok: false,
-        configured: true,
-        error: `API error: ${response.status}`
-      });
-    }
-
-    const payload = await response.json();
-    return buildResult({
-      providerId: providerIdAddon,
-      providerName: providerNameAddon,
-      ok: true,
-      configured: true,
-      usage: { windows: buildCopilotWindows(payload) }
-    });
-  } catch (error) {
-    return buildResult({
-      providerId: providerIdAddon,
-      providerName: providerNameAddon,
-      ok: false,
-      configured: true,
-      error: error instanceof Error ? error.message : 'Request failed'
+      error: isTimeout
+        ? 'Request timed out'
+        : (error instanceof Error ? error.message : 'Request failed')
     });
   }
 };

@@ -37,12 +37,13 @@ import {
   type PluginDraft,
   type PluginEntry,
   type PluginFile,
+  type PluginOptions,
   type PluginScope,
 } from '@/stores/usePluginsStore';
 
 interface OptionsParseResult {
   ok: boolean;
-  value?: Record<string, unknown>;
+  value?: PluginOptions;
 }
 
 function parseOptionsJson(raw: string): OptionsParseResult {
@@ -55,7 +56,7 @@ function parseOptionsJson(raw: string): OptionsParseResult {
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { ok: false };
     }
-    return { ok: true, value: parsed as Record<string, unknown> };
+    return { ok: true, value: parsed as PluginOptions };
   } catch {
     return { ok: false };
   }

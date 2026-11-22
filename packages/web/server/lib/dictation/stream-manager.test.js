@@ -72,11 +72,12 @@ function speechWithGapBase64({ before, gap, after, gapAmplitude = 0 }) {
   return Buffer.from(arr.buffer).toString('base64');
 }
 
-function createManager(session) {
+function createManager(session, managerOptions = {}) {
   const messages = [];
   const manager = new DictationStreamManager({
     emit: (msg) => messages.push(msg),
     createSttSession: async () => ({ session }),
+    ...managerOptions,
   });
   return { manager, messages };
 }
@@ -131,6 +132,44 @@ describe('DictationStreamManager', () => {
     expect(session.appended.length).toBe(2);
     manager.handleFinish('d1', 1);
 
+    await waitFor(() => messages.some((m) => m.type === 'final'));
+  });
+
+  it('fails and cleans up when buffered chunks behind a gap exceed the reorder byte cap', async () => {
+    const session = new FakeSttSession();
+    // 32,000-byte chunks; a 40,000-byte cap admits one buffered chunk, not two.
+    const { manager, messages } = createManager(session, { maxReorderBufferBytes: 40000 });
+
+    await manager.handleStart('d1', FORMAT, {});
+    manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64(16000) });
+    expect(manager.streams.has('d1')).toBe(true);
+    expect(session.appended.length).toBe(0);
+
+    manager.handleChunk({ dictationId: 'd1', seq: 2, audioBase64: loudChunkBase64(16000) });
+
+    const error = messages.find((m) => m.type === 'error');
+    expect(error).toBeDefined();
+    expect(error.payload.retryable).toBe(true);
+    expect(error.payload.error).toContain('reorder buffer');
+    expect(manager.streams.has('d1')).toBe(false);
+    expect(session.closed).toBe(true);
+    expect(session.appended.length).toBe(0);
+  });
+
+  it('reorders and forwards normally when a gap closes before the reorder byte cap', async () => {
+    const session = new FakeSttSession();
+    const { manager, messages } = createManager(session, { maxReorderBufferBytes: 40000 });
+
+    await manager.handleStart('d1', FORMAT, {});
+    manager.handleChunk({ dictationId: 'd1', seq: 2, audioBase64: loudChunkBase64(8000) });
+    manager.handleChunk({ dictationId: 'd1', seq: 1, audioBase64: loudChunkBase64(8000) });
+    expect(session.appended.length).toBe(0);
+    manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64(8000) });
+    expect(session.appended.length).toBe(3);
+    expect(messages.some((m) => m.type === 'error')).toBe(false);
+    expect(manager.streams.get('d1').reorderBufferedBytes).toBe(0);
+
+    manager.handleFinish('d1', 2);
     await waitFor(() => messages.some((m) => m.type === 'final'));
   });
 

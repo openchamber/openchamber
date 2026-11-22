@@ -93,6 +93,17 @@ describe('Antigravity transforms', () => {
     expect(fiveHourBucket.window.usedPercent).toBe(0);
   });
 
+  it('clamps usedPercent to 100 when remainingFraction is negative', () => {
+    const bucket = parseBucket({
+      bucketId: 'gemini-5h',
+      window: '5h',
+      resetTime: '2026-10-04T07:31:51Z',
+      remainingFraction: -0.5
+    });
+
+    expect(bucket.window.usedPercent).toBe(100);
+  });
+
   it('parses summary groups into Gemini and 3P model-group windows', () => {
     const { modelGroupWindows } = transformSummary(MOCK_SUMMARY_PAYLOAD);
 

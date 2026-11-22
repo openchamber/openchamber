@@ -4,8 +4,11 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
+
+const asBuffer = (chunk) => (Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
 
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
@@ -47,6 +50,16 @@ const MONITOR_STABILIZE_TICKS = 5;
 const SSH_STATUS_EVENT = 'openchamber:ssh-instance-status';
 const MAX_PROCESS_ERROR_CHARS = 2000;
 const MAX_PROCESS_ERROR_CAPTURE_CHARS = MAX_PROCESS_ERROR_CHARS * 2;
+// Captured stdout from an SSH command is bounded and timed. The remote host
+// controls both how much a command prints and whether it exits, so an
+// unbounded, timeless read lets a verbose or wedged remote grow or hang the
+// desktop app. The 4 MiB cap matches the web run-command cap; stderr in
+// this file was already tail-capped.
+export const MAX_SSH_OUTPUT_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_SSH_OUTPUT_TIMEOUT_MS = 120 * 1000;
+// A remote install (bun add / npm install -g) legitimately runs for
+// minutes, so its call site passes this generous deadline explicitly.
+const REMOTE_INSTALL_TIMEOUT_MS = 600 * 1000;
 const childProcessDiagnostics = new WeakMap();
 
 const nowMillis = () => Date.now();
@@ -403,11 +416,68 @@ const parseVersionToken = (raw) => {
   return null;
 };
 
+// The probe script only ever prints a curl `%{http_code}` (three digits, 000
+// when the connection failed) or the literal 0/200 fallbacks, so the value is
+// judged whole and in its canonical shape: parseInt alone would accept
+// '200junk' or '200.9' as 200, and a digit string of any other length is a
+// leading-zero spelling ('0200', '000200') the script never emits. Padding
+// counts too: the script prints no spaces or tabs around the value, so a
+// padded spelling (' 200', '200 ') is judged as written, with no trim. A
+// login-shell banner line carrying such a value must not fake a healthy
+// server or an accepted password.
 const parseProbeStatusLine = (line, prefix) => {
   if (!line || !line.startsWith(prefix)) return null;
-  const value = Number.parseInt(line.slice(prefix.length).trim(), 10);
-  return Number.isFinite(value) ? value : null;
+  const raw = line.slice(prefix.length);
+  if (raw !== '0' && !/^\d{3}$/.test(raw)) return null;
+  const value = Number.parseInt(raw, 10);
+  return value === 0 || (value >= 100 && value <= 599) ? value : null;
 };
+
+// `serve --quiet` reports its bound port as a line containing only the port
+// (plus a trailing `pass:<generated>` when it generated a UI password). The
+// remote command runs through a login shell, whose banner/profile output can
+// precede that line and contain arbitrary numbers, so the port must be read
+// from an anchored whole-line match — never the first number in the output —
+// and range-checked like any other port. The match also requires the
+// canonical spelling: serve prints the port with no leading zeros, so a
+// leading-zero line ('080', '04096') can only be banner output, the same
+// canonical-shape rule parseProbeStatusLine applies to probe statuses.
+const parseServedPortLine = (output) => {
+  for (const line of String(output ?? '').split('\n')) {
+    const match = line.trim().match(/^([1-9]\d{0,4})(?:\s+pass:\S+)?$/);
+    if (!match) continue;
+    const value = Number.parseInt(match[1], 10);
+    if (value >= 1 && value <= 65535) return value;
+  }
+  return null;
+};
+
+// Every remote command runs through a login shell (`sh -lc`), whose
+// banner/profile output can precede the script's own output, so no parser may
+// treat the whole stdout as the script's answer. `uname -s` prints exactly one
+// line; read it as a whole-line match, the way the served port is read.
+const parseRemoteOs = (output) => {
+  for (const line of String(output ?? '').split(/\r?\n/)) {
+    const value = line.trim().toLowerCase();
+    if (value === 'linux' || value === 'darwin') return value;
+  }
+  return null;
+};
+
+// The resolved-tool and candidate scripts print remote paths the login shell
+// expanded from the probed candidates. A genuine path is absolute; a banner
+// line is not, so an absolute first field is what separates a script answer
+// from login-shell output. (Remote paths may contain spaces, so whitespace
+// alone proves nothing.) For the resolved tool that shape is not enough on
+// its own: a banner sentence can start with '/' and read as a path with
+// spaces, so resolveRemoteTool adds position and ending checks there.
+const isRemotePathLine = (value) => value.startsWith('/');
+
+// A stored port is only a port when it is an integer in 1-65535: a finite
+// number alone lets 99999, -1 or 8080.9 through the sanitizers and into an
+// ssh -L/-R spec or a remote `serve --port`, where it fails opaquely. The
+// same range check guards discovered servers in listRemoteServers.
+const validPort = (value) => (Number.isInteger(value) && value >= 1 && value <= 65535 ? value : null);
 
 const isAuthHttpStatus = (status) => status === 401 || status === 403;
 const isLivenessHttpStatus = (status) => (status >= 200 && status <= 299) || isAuthHttpStatus(status);
@@ -462,13 +532,17 @@ export class ElectronSshManager {
     childProcessDiagnostics.set(child, diagnostics);
     const auth = this.sshAuth.get(parsed);
     auth?.children.add(child);
+    // stderr is diagnostic text, but a multi-byte character split across
+    // pipe chunks would still garble it; decode incrementally like stdout.
+    const stderrDecoder = new StringDecoder('utf8');
     child.stderr?.on('data', (chunk) => {
-      diagnostics.stderr = `${diagnostics.stderr}${chunk.toString()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
+      diagnostics.stderr = `${diagnostics.stderr}${stderrDecoder.write(asBuffer(chunk))}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
     });
     child.on('error', (error) => {
       diagnostics.error = error;
     });
     child.on('close', () => {
+      diagnostics.stderr = `${diagnostics.stderr}${stderrDecoder.end()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
       auth?.children.delete(child);
     });
     return child;
@@ -493,7 +567,7 @@ export class ElectronSshManager {
     return this.trackSshProcess(child, parsed);
   }
 
-  async runSshOutput(parsed, preDestinationArgs, remoteCommand = null) {
+  async runSshOutput(parsed, preDestinationArgs, remoteCommand = null, { timeoutMs = DEFAULT_SSH_OUTPUT_TIMEOUT_MS, maxStdoutBytes = MAX_SSH_OUTPUT_BYTES } = {}) {
     return await new Promise((resolve, reject) => {
       const child = this.trackSshProcess(this.spawnProcess('ssh', buildSshArgs(parsed, preDestinationArgs, remoteCommand), {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -503,18 +577,54 @@ export class ElectronSshManager {
 
       let stdout = '';
       let stderr = '';
+      // Decode incrementally: a multi-byte character split across pipe
+      // chunks must round-trip exactly, because callers parse this output
+      // as data (ssh -G config, status --json, probe bodies) (#1577).
+      const stdoutDecoder = new StringDecoder('utf8');
+      const stderrDecoder = new StringDecoder('utf8');
+      let stdoutBytes = 0;
+      let settled = false;
+      const settle = (action, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        action(value);
+      };
+      const killChild = () => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // The process already exited.
+        }
+      };
+      const timer = timeoutMs > 0
+        ? setTimeout(() => {
+          killChild();
+          settle(reject, new Error(`SSH command timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+        : null;
       child.stdout?.on('data', (chunk) => {
-        stdout += chunk.toString();
+        if (settled) return;
+        const buffer = asBuffer(chunk);
+        stdoutBytes += buffer.length;
+        if (stdoutBytes > maxStdoutBytes) {
+          killChild();
+          settle(reject, new Error(`SSH command output exceeded the ${maxStdoutBytes} byte limit (output-too-large)`));
+          return;
+        }
+        stdout += stdoutDecoder.write(buffer);
       });
       child.stderr?.on('data', (chunk) => {
-        stderr = `${stderr}${chunk.toString()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
+        stderr = `${stderr}${stderrDecoder.write(asBuffer(chunk))}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
       });
       child.on('error', () => {
-        reject(new Error(this.processErrorDetail(child, 'Failed to start SSH process')));
+        settle(reject, new Error(this.processErrorDetail(child, 'Failed to start SSH process')));
       });
       child.on('close', (code) => {
+        stdout += stdoutDecoder.end();
+        stderr = `${stderr}${stderrDecoder.end()}`.slice(-MAX_PROCESS_ERROR_CAPTURE_CHARS);
         const auth = this.sshAuth.get(parsed);
-        resolve({
+        settle(resolve, {
           code: typeof code === 'number' ? code : -1,
           stdout,
           stderr: sanitizeProcessDiagnostic(stderr, auth?.sshPassword),
@@ -523,15 +633,18 @@ export class ElectronSshManager {
     });
   }
 
-  async runRemoteCommand(parsed, controlPath, script, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC) {
+  async runRemoteCommand(parsed, controlPath, script, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC, { executionTimeoutMs = DEFAULT_SSH_OUTPUT_TIMEOUT_MS, maxStdoutBytes = MAX_SSH_OUTPUT_BYTES } = {}) {
     const connectionArgs = this.usesControlMaster()
       ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`]
       : this.independentConnectionArgs();
+    // ConnectTimeout bounds connection establishment only. The execution
+    // deadline bounds the remote command itself and is enforced locally by
+    // runSshOutput, which kills the ssh child when it passes.
     const { code, stdout, stderr } = await this.runSshOutput(parsed, [
       ...connectionArgs,
       '-o', `ConnectTimeout=${timeoutSec}`,
       '-T',
-    ], `sh -lc ${shellQuote(script)}`);
+    ], `sh -lc ${shellQuote(script)}`, { timeoutMs: executionTimeoutMs, maxStdoutBytes });
     if (code !== 0) {
       const auth = this.sshAuth.get(parsed);
       throw new Error(sanitizeProcessDiagnostic(stderr || stdout, auth?.sshPassword) || 'Remote command failed');
@@ -825,9 +938,9 @@ export class ElectronSshManager {
       enabled: forward?.enabled !== false,
       type,
       ...(forward?.localHost ? { localHost: sanitizeBindHost(forward.localHost) } : {}),
-      ...(Number.isFinite(forward?.localPort) ? { localPort: Number(forward.localPort) } : {}),
+      ...(validPort(forward?.localPort) !== null ? { localPort: Number(forward.localPort) } : {}),
       ...(forward?.remoteHost ? { remoteHost: String(forward.remoteHost).trim() || '127.0.0.1' } : {}),
-      ...(Number.isFinite(forward?.remotePort) ? { remotePort: Number(forward.remotePort) } : {}),
+      ...(validPort(forward?.remotePort) !== null ? { remotePort: Number(forward.remotePort) } : {}),
     };
 
     if (type === 'local' || type === 'remote') {
@@ -870,7 +983,7 @@ export class ElectronSshManager {
       remoteOpenchamber: {
         mode: instance?.remoteOpenchamber?.mode === 'external' ? 'external' : 'managed',
         keepRunning: instance?.remoteOpenchamber?.keepRunning !== false,
-        ...(Number.isFinite(instance?.remoteOpenchamber?.preferredPort) ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
+        ...(validPort(instance?.remoteOpenchamber?.preferredPort) !== null ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
         installMethod: ['auto', 'npm', 'bun'].includes(instance?.remoteOpenchamber?.installMethod)
           ? instance.remoteOpenchamber.installMethod
           : 'auto',
@@ -879,7 +992,7 @@ export class ElectronSshManager {
       },
       localForward: {
         bindHost: sanitizeBindHost(instance?.localForward?.bindHost),
-        ...(Number.isFinite(instance?.localForward?.preferredLocalPort) ? { preferredLocalPort: Number(instance.localForward.preferredLocalPort) } : {}),
+        ...(validPort(instance?.localForward?.preferredLocalPort) !== null ? { preferredLocalPort: Number(instance.localForward.preferredLocalPort) } : {}),
       },
       auth: {
         ...(this.sanitizeStoredSecret(instance?.auth?.sshPassword) ? { sshPassword: this.sanitizeStoredSecret(instance.auth.sshPassword) } : {}),
@@ -1065,7 +1178,19 @@ export class ElectronSshManager {
 
     try {
       const output = await this.runRemoteCommand(parsed, controlPath, script);
-      return output.trim() || null;
+      // The script prints its one answer last, with no trailing newline, and
+      // login-shell banner output can only precede it. Banner lines are
+      // newline-terminated, so banner-only output is empty or ends with a
+      // newline and its final segment is empty. Take the final segment
+      // as-is: the answer is that segment, and only when it is an absolute
+      // path to the named tool. The script only ever prints one of the
+      // probed candidates, and every candidate is a path ending in the
+      // tool's name. Skipping empty segments instead would promote the
+      // last banner line, which can itself start with '/' and read as a
+      // path with spaces.
+      const lines = output.split(/\r?\n/);
+      const last = (lines[lines.length - 1] || '').trim();
+      return isRemotePathLine(last) && last.endsWith(`/${commandName}`) ? last : null;
     } catch {
       return null;
     }
@@ -1093,11 +1218,15 @@ export class ElectronSshManager {
     const candidates = [];
     const seen = new Set();
     for (const line of output.split(/\r?\n/)) {
-      const [binPath, versionRaw] = line.split('\t');
-      const trimmed = (binPath || '').trim();
-      if (!trimmed || seen.has(trimmed)) continue;
+      // The script prints one `path<TAB>version` line per candidate; a line
+      // without the tab — login-shell banner output above all — is not a
+      // candidate, and neither is a first field that is not a remote path.
+      const tabIndex = line.indexOf('\t');
+      if (tabIndex < 0) continue;
+      const trimmed = line.slice(0, tabIndex).trim();
+      if (!isRemotePathLine(trimmed) || seen.has(trimmed)) continue;
       seen.add(trimmed);
-      candidates.push({ binPath: trimmed, version: parseVersionToken(versionRaw || '') });
+      candidates.push({ binPath: trimmed, version: parseVersionToken(line.slice(tabIndex + 1)) });
     }
     return candidates;
   }
@@ -1133,7 +1262,7 @@ export class ElectronSshManager {
     let lastError = null;
     for (const command of commands) {
       try {
-        await this.runRemoteCommand(parsed, controlPath, command);
+        await this.runRemoteCommand(parsed, controlPath, command, DEFAULT_CONNECTION_TIMEOUT_SEC, { executionTimeoutMs: REMOTE_INSTALL_TIMEOUT_MS });
         return;
       } catch (error) {
         lastError = error;
@@ -1154,10 +1283,17 @@ export class ElectronSshManager {
     const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
     const output = await this.runRemoteCommand(parsed, controlPath, script);
     const lines = output.split(/\r?\n/);
-    const infoStatus = parseProbeStatusLine(lines[0], 'INFO_STATUS=') || 0;
-    const authStatus = parseProbeStatusLine(lines[1], 'AUTH_STATUS=') || 0;
-    const healthStatus = parseProbeStatusLine(lines[2], 'HEALTH_STATUS=') || 0;
-    const body = lines.slice(3).join('\n');
+    // The probe runs through a login shell, whose banner/profile output can
+    // precede the status lines, so each status is found by its prefix — never
+    // by position — and the body starts after the last status line.
+    const statusLineIndex = (prefix) => lines.findIndex((line) => line.startsWith(prefix));
+    const infoIndex = statusLineIndex('INFO_STATUS=');
+    const authIndex = statusLineIndex('AUTH_STATUS=');
+    const healthIndex = statusLineIndex('HEALTH_STATUS=');
+    const infoStatus = (infoIndex >= 0 ? parseProbeStatusLine(lines[infoIndex], 'INFO_STATUS=') : null) || 0;
+    const authStatus = (authIndex >= 0 ? parseProbeStatusLine(lines[authIndex], 'AUTH_STATUS=') : null) || 0;
+    const healthStatus = (healthIndex >= 0 ? parseProbeStatusLine(lines[healthIndex], 'HEALTH_STATUS=') : null) || 0;
+    const body = lines.slice(Math.max(infoIndex, authIndex, healthIndex) + 1).join('\n');
     const passwordAccepted = authStatus === 200;
 
     if (isLivenessHttpStatus(infoStatus)) {
@@ -1208,9 +1344,10 @@ export class ElectronSshManager {
     if (secret) {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }
-    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} ${shellQuote(binPath)} serve --hostname ${remoteBindHost} --port ${desiredPort}`);
-    const port = output.split(/\s+/).map((token) => Number.parseInt(token, 10)).find((value) => Number.isFinite(value));
-    return port || desiredPort;
+    // --quiet makes serve print exactly one machine-readable line (the bound
+    // port), instead of the human summary the port used to be scraped from.
+    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} ${shellQuote(binPath)} serve --quiet --hostname ${remoteBindHost} --port ${desiredPort}`);
+    return parseServedPortLine(output) || desiredPort;
   }
 
   // `openchamber stop` owns the daemon lifecycle. The HTTP shutdown route sits
@@ -1277,9 +1414,26 @@ export class ElectronSshManager {
   // The remote CLI registry is the authority on which servers run there.
   async listRemoteServers(parsed, controlPath, binPath) {
     const output = await this.runRemoteCommand(parsed, controlPath, `${shellQuote(binPath)} status --json`);
-    const payload = JSON.parse(output.slice(output.indexOf('{')));
+    // Login-shell output can precede the registry JSON and can itself contain
+    // a `{`, so try each brace as the start of the payload and keep the first
+    // one that parses to a registry; if none does, the first parse error is
+    // the failure the caller should see.
+    let payload = null;
+    let firstError = null;
+    for (let start = output.indexOf('{'); start !== -1; start = output.indexOf('{', start + 1)) {
+      try {
+        const parsedPayload = JSON.parse(output.slice(start));
+        if (parsedPayload && Array.isArray(parsedPayload.instances)) {
+          payload = parsedPayload;
+          break;
+        }
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+    if (!payload) throw firstError ?? new Error('Remote OpenChamber status output held no server registry');
     return payload.instances
-      .filter((entry) => entry.runtime === 'cli' && Number.isInteger(entry.port))
+      .filter((entry) => entry.runtime === 'cli' && validPort(entry.port) !== null)
       .map((entry) => ({
         port: entry.port,
         launchMode: entry.launchMode,
@@ -1452,6 +1606,19 @@ export class ElectronSshManager {
     }
   }
 
+  // The first remote parse in a connect. `uname -s` runs through the login
+  // shell, so banner output can precede its one-line answer: accept only a
+  // whole line naming a supported OS, and name the raw output when none does
+  // so a genuinely unsupported host still fails here.
+  async probeRemoteOs(parsed, controlPath, timeoutSec = DEFAULT_CONNECTION_TIMEOUT_SEC) {
+    const output = await this.runRemoteCommand(parsed, controlPath, 'uname -s', timeoutSec);
+    const remoteOs = parseRemoteOs(output);
+    if (!remoteOs) {
+      throw new Error(`Unsupported remote OS: ${String(output ?? '').trim().toLowerCase()}`);
+    }
+    return remoteOs;
+  }
+
   async connectBlocking(instance) {
     const id = instance.id;
     this.setStatus(id, 'config_resolved', 'Resolving SSH command');
@@ -1489,10 +1656,7 @@ export class ElectronSshManager {
     }
 
     this.setStatus(id, 'remote_probe', 'Probing remote platform');
-    const remoteOs = (await this.runRemoteCommand(parsed, controlPath, 'uname -s', instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC)).trim().toLowerCase();
-    if (!['linux', 'darwin'].includes(remoteOs)) {
-      throw new Error(`Unsupported remote OS: ${remoteOs}`);
-    }
+    await this.probeRemoteOs(parsed, controlPath, instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC);
 
     const { remotePort, startedByUs, ownsRemoteServer, remoteBinPath } = await this.ensureRemoteServer(instance, parsed, controlPath);
     session.remotePort = remotePort;

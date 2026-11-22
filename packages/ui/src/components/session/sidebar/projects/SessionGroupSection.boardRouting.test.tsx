@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -12,6 +12,14 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceBoardStore } from '@/stores/useSourceBoardStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { SessionGroupSectionProps } from './SessionGroupSection';
+import { restoreModuleMock } from '../test-utils/moduleMocks';
+import * as buttonModule from '@/components/ui/button';
+import * as syncContextModule from '@/sync/sync-context';
+import * as sessionFolderItemModule from '../../SessionFolderItem';
+import * as sessionFolderDndModule from '../folders/sessionFolderDnd';
+import * as collapsedActivityIndicatorModule from '../sessions/collapsedActivityIndicator';
+import * as collapsedActivityStateModule from '../sessions/collapsedActivityState';
+import * as sessionTreeItemModule from '../sessions/SessionTreeItem';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -24,6 +32,14 @@ Object.assign(globalThis, {
 
 // The system browser is where a misrouted chip would end up.
 const childStores = new ChildStoreManager();
+
+const realButton = { ...buttonModule };
+const realSyncContext = { ...syncContextModule };
+const realSessionFolderItem = { ...sessionFolderItemModule };
+const realSessionFolderDnd = { ...sessionFolderDndModule };
+const realCollapsedActivityIndicator = { ...collapsedActivityIndicatorModule };
+const realCollapsedActivityState = { ...collapsedActivityStateModule };
+const realSessionTreeItem = { ...sessionTreeItemModule };
 
 mock.module('@/components/ui/button', () => ({
   Button: ({ children }: { children?: React.ReactNode }) => <button>{children}</button>,
@@ -63,6 +79,16 @@ mock.module('../sessions/SessionTreeItem', () => ({
 }));
 
 const { SessionGroupSection } = await import('./SessionGroupSection');
+
+afterAll(async () => {
+  await restoreModuleMock('@/components/ui/button', realButton, () => import('@/components/ui/button'));
+  await restoreModuleMock('@/sync/sync-context', realSyncContext, () => import('@/sync/sync-context'));
+  await restoreModuleMock('@/components/session/SessionFolderItem', realSessionFolderItem, () => import('../../SessionFolderItem'));
+  await restoreModuleMock('@/components/session/sidebar/folders/sessionFolderDnd', realSessionFolderDnd, () => import('../folders/sessionFolderDnd'));
+  await restoreModuleMock('@/components/session/sidebar/sessions/collapsedActivityIndicator', realCollapsedActivityIndicator, () => import('../sessions/collapsedActivityIndicator'));
+  await restoreModuleMock('@/components/session/sidebar/sessions/collapsedActivityState', realCollapsedActivityState, () => import('../sessions/collapsedActivityState'));
+  await restoreModuleMock('@/components/session/sidebar/sessions/SessionTreeItem', realSessionTreeItem, () => import('../sessions/SessionTreeItem'));
+});
 
 const ISSUE_URL = 'https://github.com/openchamber/openchamber/issues/5028';
 const PROJECT: ProjectEntry = { id: 'proj-1', path: '/repo' };

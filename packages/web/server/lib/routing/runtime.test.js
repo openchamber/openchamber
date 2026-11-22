@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { attachmentHint, createRoutingRuntime, readOpenCodeKeys, requestTextOf, routingRequestTextOf } from './runtime.js';
 import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
-import { createJevClient, decidePermission, decideRouting } from './jev.js';
+import { buildRoutingRequest, createJevClient, decidePermission, decideRouting, JEV_MAX_RESPONSE_BYTES } from './jev.js';
 import { classifierEndpoint, parseCustomEndpointUrl, resolveClassifier } from './classifier.js';
 
 const AUTO = { providerID: 'openchamber', id: 'auto' };
@@ -25,7 +25,7 @@ const readyConfig = () => {
 const makeRuntime = ({
   config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true,
   enterprise = false, pinned = null, catalog = [], answers, askError, lastAnswer = null, configEntries = [], nowMs = 1_000_000_000,
-  warmSessions = [],
+  warmSessions = [], readModelPools = () => ({}),
 } = {}) => {
   const events = [];
   const store = {
@@ -66,6 +66,7 @@ const makeRuntime = ({
     readConfigEntries,
     isSessionWarm: (sessionId) => warmSessions.includes(sessionId),
     now: () => nowMs,
+    readModelPools,
   });
   return { runtime, store, jev, events, readConfigEntries };
 };
@@ -156,6 +157,29 @@ describe('decisions', () => {
   });
 });
 
+describe('buildRoutingRequest pool text', () => {
+  const criteriaFor = (pool) => buildRoutingRequest({
+    categories: [{ id: 'hard', description: 'Hard work.', model: { providerID: 'opencode-route', modelID: 'strong' } }],
+    history: [],
+    request: 'x',
+    pools: { strong: { targets: ['p/a'], ...pool } },
+  }).questions.category.criteria.hard;
+  const withNotes = (notes) => `Hard work.\n\nRuns on the model pool "strong": ${notes}`;
+
+  it('drops hand-edited text the save would refuse and keeps the valid field', () => {
+    expect(criteriaFor({ description: 'one\ntwo', details: 'Spans packages.' })).toBe(withNotes('Spans packages.'));
+    expect(criteriaFor({ description: 'one\rtwo' })).toBe('Hard work.');
+    expect(criteriaFor({ description: 'a'.repeat(201), details: 'Spans packages.' })).toBe(withNotes('Spans packages.'));
+    expect(criteriaFor({ description: 'Long refactors.', details: 'b'.repeat(2001) })).toBe(withNotes('Long refactors.'));
+    expect(criteriaFor({ description: 4, details: 'Spans packages.' })).toBe(withNotes('Spans packages.'));
+  });
+
+  it('keeps text exactly at the limits', () => {
+    expect(criteriaFor({ description: 'a'.repeat(200), details: 'b'.repeat(2000) }))
+      .toBe(withNotes(`${'a'.repeat(200)}\n${'b'.repeat(2000)}`));
+  });
+});
+
 describe('resolveAutoSelection', () => {
   const send = (extra = {}) => ({ sessionId: 's1', model: AUTO, requestText: 'find the root cause', ...extra });
 
@@ -182,6 +206,39 @@ describe('resolveAutoSelection', () => {
     expect(routing.questions.category.instructions).toEqual(expect.any(String));
     expect(routing.questions.category.instructions).toContain('The thing to classify is `request`');
     expect(probe.questions.probe.instructions).toEqual(expect.any(String));
+  });
+
+  it('adds the description and details of the pool a category runs on to that category\'s criteria', async () => {
+    const config = readyConfig();
+    config.categories = config.categories.map((c) => (c.id === 'hard'
+      ? { ...c, model: { providerID: 'opencode-route', modelID: 'strong' }, variant: null, agent: null }
+      : c));
+    const readModelPools = vi.fn(() => ({
+      strong: { targets: ['openai/gpt-6-astra'], description: 'Long refactors; slow; costs the most.', details: ' Spans packages. ' },
+      cheap: { targets: ['openai/gpt-6-luna'], description: 'Not used by any category.' },
+    }));
+    const { runtime, jev } = makeRuntime({ config, readModelPools, answers: { category: { choice: 'hard', confidence: 0.97 } } });
+    await runtime.resolveAutoSelection(send({ directory: '/repo' }));
+    expect(readModelPools).toHaveBeenCalledWith('/repo');
+    const { criteria } = jev.ask.mock.calls[0][0].questions.category;
+    const hard = config.categories.find((c) => c.id === 'hard');
+    expect(criteria.hard).toBe(`${hard.description}\n\nRuns on the model pool "strong": Long refactors; slow; costs the most.\nSpans packages.`);
+    for (const category of config.categories.filter((c) => c.enabled && c.id !== 'hard')) {
+      expect(criteria[category.id]).toBe(category.description);
+    }
+  });
+
+  it('routes on the category descriptions alone when the pools cannot be read', async () => {
+    const config = readyConfig();
+    config.categories = config.categories.map((c) => (c.id === 'hard' ? { ...c, model: { providerID: 'opencode-route', modelID: 'strong' } } : c));
+    const readModelPools = () => { throw new Error('bad JSONC'); };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { runtime, jev } = makeRuntime({ config, readModelPools, answers: { category: { choice: 'hard', confidence: 0.97 } } });
+    const resolved = await runtime.resolveAutoSelection(send());
+    warn.mockRestore();
+    expect(resolved.decision.reason).toBe('routed');
+    const hard = config.categories.find((c) => c.id === 'hard');
+    expect(jev.ask.mock.calls[0][0].questions.category.criteria.hard).toBe(hard.description);
   });
 
   it('uses the fallback pair and keeps the composer agent when the category has no model', async () => {
@@ -367,7 +424,7 @@ describe('jev endpoint', () => {
     let call = null;
     const fetchImpl = async (url, init) => {
       call = { url, init };
-      return { ok: true, status: 200, text: async () => JSON.stringify({ answers: {} }) };
+      return new Response(JSON.stringify({ answers: {} }), { status: 200 });
     };
     await createJevClient({ fetchImpl }).ask({ state: 'x', questions: {} }, classifierEndpoint(source, keys));
     return { url: call.url, headers: call.init.headers, body: JSON.parse(call.init.body) };
@@ -427,16 +484,62 @@ describe('jev endpoint', () => {
       },
       success: true,
     };
-    const fetchImpl = async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(cfPayload),
-    });
+    const fetchImpl = async () => new Response(JSON.stringify(cfPayload), { status: 200 });
     const result = await createJevClient({ fetchImpl }).ask(
       { state: 'x', questions: {} },
       { url: 'https://example.com/v1/systemone', model: 'clef-flash' },
     );
     expect(result.answers).toEqual({ category: { choice: 'implement', confidence: 0.95 } });
+  });
+
+  it('refuses a response whose declared length crosses the size cap, without reading the body', async () => {
+    const cancel = vi.fn(async () => {});
+    const fetchImpl = async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-length': String(JEV_MAX_RESPONSE_BYTES + 1) }),
+      body: { cancel },
+    });
+    await expect(createJevClient({ fetchImpl }).ask(
+      { state: 'x', questions: {} },
+      { url: 'https://example.com/v1/systemone', model: 'jev-latest' },
+    )).rejects.toMatchObject({ code: 'response_too_large' });
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('stops pulling a streamed response shortly past the size cap', async () => {
+    const chunk = new Uint8Array(64 * 1024).fill(97);
+    let pulled = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        if (pulled >= 64) {
+          controller.close();
+          return;
+        }
+        pulled += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const fetchImpl = async () => new Response(stream, { status: 200 });
+    await expect(createJevClient({ fetchImpl }).ask(
+      { state: 'x', questions: {} },
+      { url: 'https://example.com/v1/systemone', model: 'jev-latest' },
+    )).rejects.toMatchObject({ code: 'response_too_large' });
+    // The full stream is 4 MiB; the client must stop near the 1 MiB cap.
+    expect(pulled * chunk.byteLength).toBeLessThan(2 * JEV_MAX_RESPONSE_BYTES);
+  });
+
+  it('accepts a small answer prefixed with a UTF-8 BOM', async () => {
+    const json = new TextEncoder().encode(JSON.stringify({ answers: {} }));
+    const body = new Uint8Array(3 + json.byteLength);
+    body.set([0xef, 0xbb, 0xbf]);
+    body.set(json, 3);
+    const fetchImpl = async () => new Response(body, { status: 200 });
+    const result = await createJevClient({ fetchImpl }).ask(
+      { state: 'x', questions: {} },
+      { url: 'https://example.com/v1/systemone', model: 'jev-latest' },
+    );
+    expect(result.answers).toEqual({});
   });
 });
 

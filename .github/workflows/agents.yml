@@ -1,0 +1,63 @@
+# Thin caller for this repo's dispatch-scheduled agents: this file is
+# the single home for this repo's scheduled agents, replacing the
+# retired Jules scheduled tasks and the Suggestions task.
+#
+# This file is only a caller: the task list, slot table, and prompts
+# live centrally in developing-today/code — in the reusable workflow
+# .github/workflows/pm-scheduled.yml and the pm-dispatch-task prompt
+# library.
+#
+# Schedule times are America/Chicago local times converted from CDT:
+# the tasks run at 21:00 CDT (02:00 UTC) and suggestions at 09:00 CDT
+# (14:00 UTC). GitHub cron is always UTC, so during CST the local fire
+# time shifts one hour earlier (tasks 20:00, suggestions 08:00).
+name: agents
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: Which scheduled agent task to dispatch
+        type: choice
+        options:
+          - all
+          - bolt
+          - palette
+          - suggestions
+        default: all
+        required: true
+
+# Concurrency (#933): one static group serializes every run of this
+# workflow. The dispatch path dedupes only ci-fix (pm-dispatch-task in
+# developing-today/code gates its dedupe step on task == ci-fix), so
+# without this group an overlapping scheduled/manual run launches
+# duplicate bolt/palette/suggestions sessions (wait: "true", a new
+# session per run). A single group for all task selections, not
+# per-task groups: task: all would still overlap task: bolt.
+# cancel-in-progress is the literal false: cancelling the caller does
+# not reliably stop an already-launched session, and a running
+# dispatch must never be cancelled mid-session. queue: max so no
+# scheduled slot is silently dropped when runs queue up.
+concurrency:
+  group: agents
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  scheduled:
+    uses: developing-today/code/.github/workflows/pm-scheduled.yml@main
+    # No timeout-minutes here: GitHub rejects it on reusable-workflow caller
+    # jobs and the whole workflow dies at startup with zero jobs (#1399).
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      schedule: ${{ github.event.schedule }}
+      tasks: ${{ github.event_name == 'workflow_dispatch' && inputs.task != 'all' && inputs.task || '' }}

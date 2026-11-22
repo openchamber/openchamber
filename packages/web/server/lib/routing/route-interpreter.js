@@ -22,7 +22,7 @@ export const DEFAULT_TOGGLES = { keywords: true, local: true, external: true };
 
 const AVOID =
   /\b(don'?t use|do not use|dont use|stop using|avoid|skip|exclude|no more|never use|is down|are down|not working|isn'?t working|is broken|keep off|turn off|without)\b/;
-const PREFER = /\b(prefer|favou?r|use only|only use|switch to|stick to|use|go with)\b/;
+const PREFER = /\b(prefer|favou?r|use only|only use|switch to|back to|stick to|use|go with)\b/;
 const BUDGET = /\b(credits?|budget|spend|burn|unlimited|ignore (?:the )?(?:budget|limit)s?|no limit)\b/;
 const POOLS = /\b(include|add)\b.*\bpools?\b/;
 const LIGHTER = /\b(less|lighter|fewer|rarely|go easy on|lower priority|deprioritize|deprioritise)\b/;
@@ -87,9 +87,53 @@ const latestOf = (family, models) => {
   return [...best.entries()].map(([providerID, value]) => ({ providerID, id: value.id }));
 };
 
-const providersMentioned = (text, providers) => {
-  const ids = new Set([...providers, ...Object.keys(ALIASES)]);
-  return [...ids].filter((id) => (ALIASES[id] ?? [id]).some((word) => has(text, word)));
+// Only configured providers count: "gemini" with no google provider names the
+// gemini models other providers serve (github-copilot/gemini-*), found below.
+const providersMentioned = (text, providers) =>
+  providers.filter((id) => (ALIASES[id] ?? [id]).some((word) => has(text, word)));
+
+/** Models the sentence names exactly, as `provider/model` or a bare model id; a `#variant` is ignored. */
+const namedModels = (text, models) => {
+  const found = new Map();
+  for (const raw of text.split(/[\s,;!?()"']+/)) {
+    const token = raw.replace(/[.:]+$/, '').split('#')[0];
+    if (!token) continue;
+    for (const model of models) {
+      const id = model.id.toLowerCase();
+      if (token === id || token === `${model.providerID.toLowerCase()}/${id}`) {
+        found.set(`${model.providerID}/${model.id}`, model);
+      }
+    }
+  }
+  return [...found.values()];
+};
+
+// A missing exact reference must not fall through to a whole-provider or
+// family preference. Historical models can disappear from the catalog.
+const unavailableReference = (text, models) => text.split(/[\s,;!?()"']+/)
+  .map((token) => token.replace(/[.:]+$/, '').split('#')[0])
+  .find((token) => token.includes('/') && !models.some((model) =>
+    token === `${model.providerID}/${model.id}`.toLowerCase()));
+
+const nameWordsOf = (id) => id.toLowerCase().split(/[^a-z0-9]+/).filter((word) => /^[a-z]{3,}$/.test(word));
+
+/**
+ * A kind of model is a word the sentence shares with model names: "gemini"
+ * names gemini-4-carbon and gemini-2.5-pro, "flash" every flash model. Words
+ * of a named provider id do not count, so "github-copilot" alone stays a
+ * provider. Matches only models that are available now.
+ */
+const modelsOfKind = (text, models, providers) => {
+  const providerWords = new Set(providers.flatMap((id) => [...nameWordsOf(id), ...(ALIASES[id] ?? [])]));
+  const words = new Set((text.match(/[a-z]{3,}/g) ?? []).filter((word) => !providerWords.has(word)));
+  const scoped = providers.length ? models.filter((model) => providers.includes(model.providerID)) : models;
+  return scoped.filter((model) => nameWordsOf(model.id).some((word) => words.has(word)));
+};
+
+const scopesByProvider = (models) => {
+  const groups = new Map();
+  for (const model of models) groups.set(model.providerID, [...(groups.get(model.providerID) ?? []), model.id]);
+  return [...groups].map(([providerID, ids]) => ({ providers: [providerID], models: ids }));
 };
 
 const actionOf = (text) => {
@@ -155,6 +199,17 @@ export const keywords = (input, context, learned = {}) => {
   const fixed = !NOT_FIXED.test(text);
   const factor = priorityOf(text, lighter);
   const drafts = (scope) => actions.map((item) => draftFor({ action: item, ...scope, factor, fixed, until, text: input }));
+  const modelDrafts = (models) => scopesByProvider(models).flatMap(drafts);
+
+  const missingReference = unavailableReference(text, context.models);
+  if (missingReference) return unknown(stage, `The model ${missingReference} is not in the available catalog.`);
+  const named = namedModels(text, context.models);
+  if (named.length > 0) return decided(stage, assumed ? 'tentative' : 'certain', modelDrafts(named), until, assumed);
+
+  if (families.length === 0 && !claude) {
+    const kind = modelsOfKind(text, context.models, providers);
+    if (kind.length > 0) return decided(stage, 'tentative', modelDrafts(kind), until, assumed);
+  }
 
   if (families.length === 0 && providers.length === 0 && !claude) {
     return unknown(stage, 'No provider or model was named.');
@@ -310,6 +365,8 @@ export const groundChoices = (answers, text, context) => {
  * the user should answer. Local, then external: the first one that decides wins.
  */
 export const interpret = async ({ text, context, learned = {}, toggles = DEFAULT_TOGGLES, stages = {} }) => {
+  const missingReference = unavailableReference(normalize(text), context.models);
+  if (missingReference) return unknown('keywords', `The model ${missingReference} is not in the available catalog.`);
   let fallback;
   if (toggles.keywords) {
     const result = keywords(text, context, learned);

@@ -15,6 +15,9 @@ import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import type { GlobalSessionStructure } from '@/stores/globalSessionStructure';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
 import type { SessionNode } from '../types';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { isSessionPinned } from '@/lib/sessionPins';
+import { sortSessionScopesByTimestamp, useSessionActivityTimestampsStore } from '@/sync/session-activity-timestamps';
 
 type ProjectSidebarActiveSessionsArgs = {
   globalActiveSessions: Session[];
@@ -302,9 +305,27 @@ export const useSessionProjectCollection = ({
     knownDirectories,
     isVSCode,
   }), [globalActiveSessions, globalStructure, isVSCode, knownDirectories, liveGapSessions]);
+  const timestampSort = useSessionDisplayStore((state) => state.sessionTimestampSort);
+  const timestampRecords = useSessionActivityTimestampsStore(React.useCallback(
+    (state) => isVisible && timestampSort.field !== 'lifecycle' && timestampSort.field !== 'created' ? state.sortById : null,
+    [isVisible, timestampSort.field],
+  ));
   const ordering = React.useMemo(
-    () => orderSidebarSessionStructure(structure, pinnedSessionIds, sessionOrderRanks),
-    [pinnedSessionIds, sessionOrderRanks, structure],
+    () => {
+      const lifecycle = orderSidebarSessionStructure(structure, pinnedSessionIds, sessionOrderRanks);
+      if (timestampSort.field === 'lifecycle') return lifecycle;
+      const orderedSessions = sortSessionScopesByTimestamp(lifecycle.orderedSessions, timestampSort.field, timestampSort.direction,
+        timestampRecords ?? new Map(), (session) => isSessionPinned(pinnedSessionIds, session.directory, session.id));
+      const childrenMap = new Map<string, Session[]>();
+      for (const session of orderedSessions) {
+        if (!session.parentID) continue;
+        const siblings = childrenMap.get(session.parentID) ?? [];
+        siblings.push(session);
+        childrenMap.set(session.parentID, siblings);
+      }
+      return { orderedSessions, childrenMap, chatSessions: orderedSessions.filter((session) => structure.chatSessionIds.has(session.id)) };
+    },
+    [pinnedSessionIds, sessionOrderRanks, structure, timestampSort, timestampRecords],
   );
   const { chatSessions, orderedSessions } = ordering;
   const sessions = structure.projectSessions;

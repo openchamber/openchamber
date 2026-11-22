@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import {
   GUEST_REQUEST_RESPONSE_MAX,
@@ -380,18 +381,45 @@ const recordServiceProcess = (registryDir, child, service) => {
 const collectProcessOutput = (child, maxChars = 2_000) => {
   let stdout = '';
   let stderr = '';
+  // One StringDecoder per stream (#1696): a multi-byte UTF-8 character
+  // split across pipe chunks must decode as itself, not as replacement
+  // characters. Decoding each chunk on its own (chunk.toString('utf8'),
+  // the old shape) corrupted exactly those split characters in the tail
+  // that becomes the SERVICE_FAILED diagnostic.
+  const decoders = {
+    stdout: new StringDecoder('utf8'),
+    stderr: new StringDecoder('utf8'),
+  };
+  let flushed = false;
+  // Keep the tail bound without leaving a lone surrogate at its head:
+  // a plain slice at maxChars can land between the halves of a pair.
+  const tail = (/** @type {string} */ text) => {
+    if (text.length <= maxChars) return text;
+    const sliced = text.slice(-maxChars);
+    const first = sliced.charCodeAt(0);
+    return first >= 0xdc00 && first <= 0xdfff ? sliced.slice(1) : sliced;
+  };
   const append = (/** @type {'stdout' | 'stderr'} */ stream, chunk) => {
-    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    const text = typeof chunk === 'string' ? chunk : decoders[stream].write(chunk);
     if (stream === 'stdout') {
-      stdout = `${stdout}${text}`.slice(-maxChars);
+      stdout = tail(`${stdout}${text}`);
       return;
     }
-    stderr = `${stderr}${text}`.slice(-maxChars);
+    stderr = tail(`${stderr}${text}`);
   };
   child.stdout?.on('data', (chunk) => append('stdout', chunk));
   child.stderr?.on('data', (chunk) => append('stderr', chunk));
   return {
     snapshot: () => {
+      // Flush the decoder remainders before the tail is read: bytes
+      // still held are a character whose remaining bytes never came
+      // (it surfaces as U+FFFD, as it should), and a character split
+      // across the final chunks is completed by its last write above.
+      if (!flushed) {
+        flushed = true;
+        stdout = tail(`${stdout}${decoders.stdout.end()}`);
+        stderr = tail(`${stderr}${decoders.stderr.end()}`);
+      }
       const out = stdout.trim();
       const err = stderr.trim();
       if (err && out) return `${err}\n${out}`;

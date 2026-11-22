@@ -27,6 +27,18 @@ Abre **Settings → Projects** para darle a un proyecto un nombre, color o icono
 
 > En VS Code, OpenChamber siempre usa la carpeta que tienes abierta como único proyecto, así que no hay nada que añadir ni cambiar. La página de ajustes de proyectos está oculta allí.
 
+## Agrupar sesiones en carpetas
+
+En la vista **Tree** de la barra lateral, haz clic derecho en una sesión y elige **Move to folder** para ponerla en una carpeta, o **New folder...** para crear una. Una carpeta pertenece a la raíz del proyecto o a un worktree, y la fila de la carpeta tiene botones para renombrarla o eliminarla. Al eliminar una carpeta se conservan sus sesiones; vuelven al proyecto.
+
+Las carpetas se guardan en el servidor de OpenChamber, así que todo lo conectado al mismo servidor muestra las mismas: otro ordenador con la sesión iniciada en él, la aplicación web y el teléfono. Un cambio en uno aparece en los demás en un segundo, sin recargar. Cada servidor tiene sus propias carpetas. Qué carpetas están plegadas se queda en cada dispositivo.
+
+El teléfono muestra las carpetas en su vista Tree pero no puede cambiarlas. Mueve las sesiones en el escritorio o en la aplicación web.
+
+Cuando un dispositivo se conecta por primera vez tras actualizarse desde una versión que guardaba las carpetas en cada dispositivo, sus carpetas se añaden a las del servidor. Una carpeta con el mismo nombre en el mismo lugar que otra que el servidor ya tiene se une a ella, y sus sesiones van con ella; no se pierde nada. Una sesión que el servidor ya clasificó se queda en la carpeta del servidor.
+
+Eliminar una sesión la saca de su carpeta, y cerrar un proyecto elimina sus carpetas. En VS Code las carpetas se quedan en la extensión y no se comparten.
+
 ## Entorno del proyecto
 
 Cuando las herramientas de un proyecto vienen de direnv, devenv o un shell de Nix, los hooks de Git, la terminal y las [acciones de proyecto](/es/project-actions/) no las encuentran por sí solos. Abre **Configuración → Proyectos**, elige el proyecto y, en **Entorno**:

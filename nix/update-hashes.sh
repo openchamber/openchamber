@@ -1,27 +1,35 @@
 #!/usr/bin/env bash
-# Re-bake the fixed-output dependency hashes after bun.lock or the pinned
-# OpenCode tag changes.
+# Re-bake the fixed-output node_modules hash in nix/hashes.json after
+# bun.lock changes.
 #
-# IMPORTANT: run this from a COMMITTED tree. Nix's evaluation cache can serve
-# stale flake sources for dirty git trees, which makes the script fight its
-# own edits (the sentinel swap may not be visible to the build). Commit
-# first, run, then commit the baked hash it writes.
+# hashes.json is keyed per system ("nodeModules": { "<system>": "sha256-…" })
+# because bun installs only the optional native packages matching the
+# target cpu/os, so each system produces a different tree. A hash can only
+# be measured on a builder for that system: this script bakes the CURRENT
+# system only. Run it once per system (on a Mac for aarch64-darwin, on an
+# aarch64 builder for aarch64-linux) and combine the results.
+#
+# IMPORTANT: run this from a COMMITTED tree. Nix's evaluation cache can
+# serve stale flake sources for dirty git trees, which makes the script
+# fight its own edits (the sentinel swap may not be visible to the build).
+# Commit first, run, then commit the baked hash it writes.
 #
 # Usage:
-#   nix run .#update-hashes
-#       Re-bake both hashes at the currently locked state (bun.lock, and the
-#       opencode input revision recorded in flake.lock).
-#   nix run .#update-hashes -- --opencode-tag <tag>
-#       Additionally move the opencode flake input to <tag>, re-lock, and
-#       bake its node_modules hash. Keep the tag in sync with
-#       packages/electron/package.json (opencodeCli.version), which the
-#       build-time assertion enforces.
+#   nix run .#update-hashes      (or: bash nix/update-hashes.sh)
 #
-# Mechanism: a build-produced fixed-output derivation can only be hashed by
-# building it. Each hash is swapped for a sentinel (fakeSha256), the build
-# fails reporting the real hash ("got: sha256-…"), which is then baked back
-# and verified with a clean build. This is the same two-pass flow upstream's
-# own flake documents; here it is scripted.
+# Mechanism: a fixed-output derivation's hash can only be learned by
+# building it. The current system's hash is swapped for a sentinel
+# (fakeSha256), the build fails reporting the real hash ("got: sha256-…"),
+# which is baked back and verified with a --rebuild (a plain build could
+# silently succeed on a store hit and verify nothing).
+#
+# History: the previous version of this script targeted a different
+# flake shape (it grepped for "bunDeps"/"opencodeNodeModules" keys and
+# built .#openchamber.bunDeps / .#opencode-cli.node_modules, none of
+# which exist in this repo — the OpenCode CLI's own hashes live in the
+# opencode repo). It could not have worked here; this rewrite matches
+# the flake as it stands: the FOD is the openchamber package's
+# node_modules passthru.
 set -euo pipefail
 
 [[ -f flake.nix ]] || {
@@ -29,110 +37,63 @@ set -euo pipefail
   exit 1
 }
 
-# NOTE: no NIX variable indirection here. Earlier versions routed nix through
-# a variable/array and the nested nix calls failed with parser errors that
-# were impossible to reproduce from the shell. Direct calls with the ambient
-# flake configuration (enabled system-wide on NixOS) are the reliable form.
-
-# Both baked hashes live in nix/hashes.json — the single file the bake
-# PR touches. flake.lock changes alongside it only when the OpenCode tag
-# moves.
+# NOTE: no NIX variable indirection here. Earlier versions routed nix
+# through a variable/array and the nested nix calls failed with parser
+# errors that were impossible to reproduce from the shell. Direct calls
+# are the reliable form.
 
 log() { printf '[update-hashes] %s\n' "$*"; }
 
-# opencode-hash <file>: the x86_64 node_modules hash baked for the opencode
-# input.
-opencode_hash() { grep -oP '"opencodeNodeModules": "\Ksha256-[A-Za-z0-9+/=]+(?=")' "$1" | head -1; }
+FAKE_SENTINEL="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+HASH_FILE="nix/hashes.json"
 
-# got-hash <logfile> <drv-name-pattern>: the hash the named failing
-# fixed-output derivation reported. A build's closure can hold several FODs
-# (bun deps, the opencode CLI's node_modules, the models-dev SDK's), so
-# anchor on the derivation name — the first "got:" in the log may belong to
-# a different one when more than one pin moved before a run.
-got_hash() {
-  awk -v re="$2" '
-    /hash mismatch in fixed-output derivation/ && $0 ~ re { inblock = 1 }
-    inblock && /got:/ { sub(/^.*got:[[:space:]]*/, ""); print; exit }
-  ' "$1"
+system="$(nix eval --impure --raw --expr builtins.currentSystem)"
+current="$(grep -oP "\"$system\": \"\\Ksha256-[A-Za-z0-9+/=]+(?=\")" "$HASH_FILE" | head -1)"
+[[ -n "$current" ]] || {
+  echo "error: no nodeModules hash for $system in $HASH_FILE" >&2
+  exit 1
 }
+log "$system: current hash $current"
 
-# rehash <file> <current-hash> <build-target> <label> <drv-name-pattern>
-#   Swap current -> sentinel, build, bake the reported hash, verify.
-rehash() {
-  local file="$1" current="$2" target="$3" label="$4" drv_re="$5"
-  local err got
+if [[ "$current" == "$FAKE_SENTINEL" ]]; then
+  log "$system: already at the sentinel — building to capture the real hash"
+else
+  # Anchor the swap on this system's line only; the file is one key per line.
+  sed -i "/\"$system\":/s|$current|$FAKE_SENTINEL|" "$HASH_FILE"
+  log "$system: sentinel set, building to discover the hash"
+fi
 
+err=$(mktemp)
+if nix build --no-link ".#openchamber.node_modules" -L >"$err" 2>&1; then
+  rm -f "$err"
   if [[ "$current" == "$FAKE_SENTINEL" ]]; then
-    log "$label: already at the sentinel — building to capture the real hash"
-  else
-    sed -i "s|$current|$FAKE_SENTINEL|" "$file"
-    log "$label: sentinel set, building to discover the hash"
-  fi
-
-  err=$(mktemp)
-  if nix build --no-link "$target" -L >"$err" 2>&1; then
-    rm -f "$err"
-    if [[ "$current" == "$FAKE_SENTINEL" ]]; then
-      log "$label: build SUCCEEDED with the sentinel — the derivation is not in this build's closure"
-      exit 1
-    fi
-    log "$label: already up to date ($current)"
-    return 0
-  fi
-  got=$(got_hash "$err" "$drv_re" || true)
-  if [[ -z "$got" ]]; then
-    log "$label: no hash reported — a different error occurred:"
-    head -8 "$err"
-    rm -f "$err"
+    log "$system: build SUCCEEDED with the sentinel — the derivation is not in this build's closure"
     exit 1
   fi
+  log "$system: already up to date ($current)"
+  exit 0
+fi
+# The hash-mismatch error names the failing derivation; anchor on it so a
+# stray "got:" from another fixed-output derivation cannot be picked up.
+got=$(awk '
+  /hash mismatch in fixed-output derivation/ && /openchamber-node_modules/ { inblock = 1 }
+  inblock && /got:/ { sub(/^.*got:[[:space:]]*/, ""); print; exit }
+' "$err")
+if [[ -z "$got" ]]; then
+  log "$system: no hash reported — a different error occurred:"
+  head -8 "$err"
   rm -f "$err"
-
-  sed -i "s|$FAKE_SENTINEL|$got|" "$file"
-  log "$label: baked $got — verifying"
-  nix build --no-link "$target" -L >/dev/null
-  log "$label: verified"
-}
-
-FAKE_SENTINEL="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-
-# ─── 1. bun dependencies (openchamber bun.lock) ───────────────
-
-bun_file="nix/hashes.json"
-bun_current=$(grep -oP '"bunDeps": "\Ksha256-[A-Za-z0-9+/=]+(?=")' "$bun_file" | head -1)
-log "bun-deps: current hash $bun_current"
-# Build the FOD itself (via its passthru), not the packages that consume it:
-# the hash check happens in the derivation, so the sdk/web builds and the
-# server assembly add nothing to the bake.
-rehash "$bun_file" "$bun_current" ".#openchamber.bunDeps" "bun-deps" "openchamber-bun-deps"
-
-# ─── 2. opencode CLI node_modules (upstream flake at the pin) ──
-
-# The version source of truth is packages/electron's opencodeCli pin:
-# this script follows it, it does not bump it. Bumping the pin (together
-# with @opencode/client) is an OpenChamber-side compatibility decision.
-cli_version=$(grep -A1 '"opencodeCli"' packages/electron/package.json | grep -oP '"version":\s*"\K[^"]+' | head -1)
-[[ -n "$cli_version" ]] || { echo "error: cannot read opencodeCli.version from packages/electron/package.json" >&2; exit 1; }
-
-if [[ "${1:-}" == "--opencode-tag" ]]; then
-  tag="${2:?--opencode-tag needs a value}"
-  log "opencode: explicit tag override $tag (packages/electron pins $cli_version)"
-else
-  # Upstream tags are v-prefixed; the pin in packages/electron is not.
-  tag="v$cli_version"
+  exit 1
 fi
+rm -f "$err"
 
-current_tag=$(grep -oP 'github:anomalyco/opencode/\K[v0-9.]+' flake.nix | head -1)
-if [[ "$current_tag" != "$tag" ]]; then
-  sed -i "s|github:anomalyco/opencode/[^\"]*|github:anomalyco/opencode/$tag|" flake.nix
-  nix flake update opencode >/dev/null
-  log "opencode: input moved to $tag (packages/electron pins $cli_version)"
-else
-  log "opencode: input already at $tag"
+sed -i "s|$FAKE_SENTINEL|$got|" "$HASH_FILE"
+log "$system: baked $got — verifying with a rebuild"
+nix build --no-link --rebuild ".#openchamber.node_modules" >/dev/null
+log "$system: verified"
+
+others=$(grep -oP '^\s+"\K[a-z0-9_]+-[a-z0-9]+(?=":)' "$HASH_FILE" | grep -v "^$system$" || true)
+if [[ -n "$others" ]]; then
+  log "note: hashes for $(echo $others | tr '\n' ' ')were NOT re-measured — no builder for them here"
 fi
-
-cli_hash=$(opencode_hash "$bun_file")
-log "opencode-cli: current hash $cli_hash"
-rehash "$bun_file" "$cli_hash" ".#opencode-cli.node_modules" "opencode-cli" "opencode-node_modules"
-
-log "done — commit nix/hashes.json (and flake.lock when the tag moved)"
+log "done — commit $HASH_FILE"

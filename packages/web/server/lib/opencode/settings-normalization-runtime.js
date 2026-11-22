@@ -269,6 +269,14 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         project.sidebarCollapsed = candidate.sidebarCollapsed;
       }
 
+      if (candidate.hiddenFromWork === true) {
+        project.hiddenFromWork = true;
+      }
+
+      if (candidate.hiddenFromAllSessions === true) {
+        project.hiddenFromAllSessions = true;
+      }
+
       result.push(project);
     }
 
@@ -349,6 +357,16 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       return tunnelSessionTtlDefaultMs;
     }
     return clampNumber(Math.round(value), tunnelSessionTtlMinMs, tunnelSessionTtlMaxMs);
+  };
+
+  // Server-wide scheduled-task run limit (#765): a positive millisecond
+  // count, clamped to the largest delay a timer can hold. Anything else
+  // means "not set"; the settings sanitizer then drops the key.
+  const normalizeScheduledTasksMaxRunDurationMs = (value) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return undefined;
+    }
+    return clampNumber(Math.round(value), 1_000, 2_147_483_647);
   };
 
   const normalizeManagedRemoteTunnelHostname = (value) => {
@@ -521,6 +539,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     normalizeSettingsPaths,
     normalizeTunnelBootstrapTtlMs,
     normalizeTunnelSessionTtlMs,
+    normalizeScheduledTasksMaxRunDurationMs,
     normalizeManagedRemoteTunnelHostname,
     normalizeManagedRemoteTunnelPresets,
     normalizeManagedRemoteTunnelPresetTokens,

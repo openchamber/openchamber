@@ -1,5 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { constants as nodeFsConstants } from 'node:fs';
 import { z } from 'zod';
+
+const themeFileOpenFlags =
+  process.platform === 'win32' || nodeFsConstants.O_NONBLOCK === undefined
+    ? 'r'
+    : nodeFsConstants.O_RDONLY | nodeFsConstants.O_NONBLOCK;
 
 const color = z.string().regex(/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
 const role = z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*$/).max(64);
@@ -110,6 +116,31 @@ export const createThemeRuntime = (dependencies) => {
     };
   };
 
+  // Reads a theme file judging maxThemeJsonBytes on the opened handle and on
+  // the bytes in flight, never on a pre-read path stat alone: a file grown or
+  // swapped after a path stat is treated exactly like an already-over-cap
+  // file, and at most cap + 1 bytes are ever buffered. Returns { text }, or
+  // { tooLarge: true, size } / { notFile: true }.
+  const readThemeFileBounded = async (filePath) => {
+    const handle = await fsPromises.open(filePath, themeFileOpenFlags);
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) return { notFile: true };
+      if (stat.size > maxThemeJsonBytes) return { tooLarge: true, size: stat.size };
+      const buffer = Buffer.alloc(maxThemeJsonBytes + 1);
+      let bytesRead = 0;
+      while (bytesRead < buffer.length) {
+        const { bytesRead: chunkBytes } = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+        if (chunkBytes === 0) break;
+        bytesRead += chunkBytes;
+      }
+      if (bytesRead > maxThemeJsonBytes) return { tooLarge: true, size: bytesRead };
+      return { text: buffer.toString('utf8', 0, bytesRead) };
+    } finally {
+      await handle.close();
+    }
+  };
+
   const readCustomThemesFromDisk = async () => {
     try {
       const entries = await fsPromises.readdir(themesDir, { withFileTypes: true });
@@ -122,14 +153,14 @@ export const createThemeRuntime = (dependencies) => {
 
         const filePath = path.join(themesDir, entry.name);
         try {
-          const stat = await fsPromises.stat(filePath);
-          if (!stat.isFile()) continue;
-          if (stat.size > maxThemeJsonBytes) {
-            logger.warn(`[themes] Skip ${entry.name}: too large (${stat.size} bytes)`);
+          const bounded = await readThemeFileBounded(filePath);
+          if (bounded.notFile) continue;
+          if (bounded.tooLarge) {
+            logger.warn(`[themes] Skip ${entry.name}: too large (${bounded.size} bytes)`);
             continue;
           }
 
-          const rawText = await fsPromises.readFile(filePath, 'utf8');
+          const rawText = bounded.text;
           const parsed = JSON.parse(rawText);
           const normalized = normalizeThemeJson(parsed);
           if (!normalized) {
@@ -184,7 +215,10 @@ export const createThemeRuntime = (dependencies) => {
       } catch (error) {
         const parsedError = fileErrorSchema.safeParse(error);
         if (!parsedError.success || parsedError.data.code !== 'EEXIST') throw error;
-        if (await fsPromises.readFile(target, 'utf8') !== contents) throw new ThemeImportStorageError('conflict', 409);
+        // Bounded compare: an over-cap existing file cannot equal the
+        // cap-bounded import contents, so cap + 1 bytes decide it.
+        const existing = await readThemeFileBounded(target);
+        if (existing.tooLarge || existing.notFile || existing.text !== contents) throw new ThemeImportStorageError('conflict', 409);
       }
       return theme;
     } finally {
@@ -216,7 +250,9 @@ export const createThemeRuntime = (dependencies) => {
         try {
           const stat = await fsPromises.lstat(target);
           if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxThemeJsonBytes) continue;
-          text = await fsPromises.readFile(target, 'utf8');
+          const bounded = await readThemeFileBounded(target);
+          if (bounded.notFile || bounded.tooLarge) continue;
+          text = bounded.text;
         } catch (error) {
           if (fileErrorSchema.safeParse(error).data?.code !== 'ENOENT') readFailure = error;
           continue;

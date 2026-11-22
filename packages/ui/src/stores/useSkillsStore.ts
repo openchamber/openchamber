@@ -71,6 +71,7 @@ interface SkillSources {
     scope?: SkillScope | null;
     source?: SkillSource | null;
     supportingFiles: SupportingFile[];
+    supportingFilesTruncated?: boolean;
     // Actual content values
     name?: string;
     description?: string;

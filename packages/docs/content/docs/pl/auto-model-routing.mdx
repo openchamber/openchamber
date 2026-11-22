@@ -18,13 +18,14 @@ Gdy wszystko jest gotowe, strona pokaże **Gotowe**. Wybierz **Auto** na górze 
 
 ## Kategorie
 
-Każdy prompt trafia do jednej kategorii. Wbudowane są cztery:
+Każdy prompt trafia do jednej kategorii. Wbudowanych jest pięć:
 
 | Kategoria | Do czego |
 | --- | --- |
 | Trivial | praca mechaniczna: zmiany nazw, literówki, formatowanie, komentarze, proste polecenia |
 | Research | czytanie i objaśnianie kodu bez zmieniania go |
 | Implement | jasna zmiana: funkcja o znanym zakresie, testy, poprawka o znanej przyczynie |
+| Review | sprawdzenie zmian pod kątem poprawności, regresji, problemów bezpieczeństwa i brakujących testów; zgłoszenie ustaleń bez edytowania |
 | Hard | błędy o nieznanej przyczynie, projektowanie i planowanie, bezpieczeństwo, uwierzytelnianie, współbieżność, migracje, pieniądze |
 
 Dla każdej kategorii możesz ustawić:
@@ -33,7 +34,41 @@ Dla każdej kategorii możesz ustawić:
 - **Myślenie:** poziom myślenia dla tego modelu
 - **Agent:** agent, który wykonuje te zadania; puste pole zostawia agenta, którego użyłoby pole wiadomości
 
+## Auto trzyma się jednego modelu przy podobnych promptach
+
+Jev klasyfikuje każdy prompt osobno, więc dwa podobne dalsze pytania mogą trafić do sąsiednich kategorii. Żeby sesja nie przeskakiwała między modelami (i nie traciła za każdym razem pamięci podręcznej promptów dostawcy), Auto trzyma model sesji, dopóki dowody na zmianę nie są spójne:
+
+- Opuszczenie modelu, od którego sesja zaczęła, wymaga dwóch promptów z rzędu wskazujących ten sam inny model albo jednego promptu, co do którego Jev jest pewny.
+- Po przeskoku na silniejszy model sesja zostaje na nim, dopóki trzy prompty z rzędu nie wskażą gdzie indziej. Pewna odpowiedź skraca to, ale nigdy poniżej dwóch.
+- Prompt, którego Jev nie potrafi umiejscowić (niska pewność, nieznana kategoria, Jev nieosiągalny), zachowuje bieżący model. Model zapasowy obsługuje tylko sesję, która nie ma jeszcze historii.
+
+Decyzja routingu pokazuje `held`, gdy Auto zachował model wbrew najnowszej odpowiedzi Jev. Ta historia żyje w procesie serwera, więc restart zaczyna sesje od nowa. To, czy sesja jest na Auto, jest zapisywane, więc restart trzyma ją na Auto, dopóki nie wybierzesz prawdziwego modelu.
+
+W **Ustawienia → Routing** wyłącz **Zostań przy obecnym modelu**, żeby podążać za każdym promptem, albo zmień **Prompty do przełączenia** i **Prompty do powrotu**. Pewność, która liczy się jako „pewna”, to `stickiness.strongConfidence` w `routing.json` (domyślnie 0,9).
+
+## Pule dostawców dla modeli kategorii
+
+OpenChamber wybiera kategorię, poziom myślenia i agenta. OpenCode odpowiada za przełączanie awaryjne między dostawcami. Zdefiniuj uporządkowane pule w `experimental.model_routes` OpenCode, a potem wybierz model trasy dla kategorii. Na przykład ustaw **Trivial** na `opencode-route/cheap-fast`, **Implement** na `opencode-route/smart-slow`, a **Hard** i **Review** na `opencode-route/frontier-heavy`. Jev nadal podejmuje decyzję o zadaniu; wybrana trasa próbuje potem swoich dostawców po kolei.
+
+OpenCode przechodzi do innego celu przy powtarzalnych błędach dostawcy, błędach limitu lub uwierzytelniania oraz przy przekroczonym terminie pierwszej odpowiedzi. Ukończone żądania mogą też oznaczyć cel jako pogorszony na podstawie skonfigurowanych progów opóźnienia lub przepustowości. Okresy wyciszenia są współdzielone przez sesje w procesie OpenCode i przywracane po restarcie, a OpenCode zapisuje w swojej bazie danych każdą decyzję routingu, próbę (dokładny kod i komunikat błędu, czasy, liczby tokenów) i okres wyciszenia do późniejszej analizy. Tura nigdy nie jest odtwarzana po rozpoczęciu odpowiedzi lub wyjścia narzędzia.
+
+OpenCode czyta też nagłówki limitów szybkości każdej odpowiedzi i przenosi ruch z celu, którego dostawca mówi, że jego okno się wyczerpało, zanim dostawca zacznie go odrzucać.
+
+Pula może też wykonać kilka żądań do celu, zanim przejdzie dalej (`attempts`, domyślnie dwa łącznie), uruchomić następny cel, gdy pierwszy milczy (`hedgeAfterMs`), ograniczyć żądania i tokeny celu (`budgets`, które liczą każde żądanie, jakie OpenCode kieruje do celu, w tym żądania w tle, takie jak tytuły), oraz być dostrajana przez agenta na podstawie jego zapisanej historii. To opcje tras OpenCode; zobacz jego dokumentację konfiguracji.
+
+Harmonogramy zmieniają wagi celów w wybrane dni lub godziny, na przykład żeby wysyłać mniej ruchu do dostawcy w jego godzinach szczytu. Harmonogramy danej puli są w jej opcjach zaawansowanych w **Ustawienia → Routing → Pule modeli**, a **Harmonogramy dla wszystkich pul** pod listą pul zmieniają pasujące cele w każdej puli albo tylko w pulach, które podasz. Każdy harmonogram przyjmuje dni tygodnia, dni miesiąca, godzinę początku i końca, strefę czasową oraz albo mnożnik wagi, albo wagę, która ją zastępuje. Poza oknem obowiązują skonfigurowane wagi. OpenCode stosuje też harmonogramy z innych swoich plików konfiguracyjnych, na przykład z `opencode.json` projektu. Ustawienia pokazują je tylko do odczytu, pod nazwą pliku, w którym można je edytować.
+
+Każda pula może też powiedzieć, do czego służy. W **Ustawienia → Routing → Pule modeli** otwórz pulę i wypełnij **Opis**, jedną linię, na przykład „długie refaktoryzacje w wielu plikach; wolne; kosztuje najwięcej”, oraz **Szczegóły**, akapit o tym, kiedy używać puli, a kiedy nie. Gdy modelem kategorii jest pula, Jev czyta oba razem z opisem tej kategorii. OpenChamber zapisuje je jako `description` i `details` na trasie w `opencode.json`. OpenCode ignoruje oba klucze, więc edytor, który sprawdza plik względem schematu JSON OpenCode, może je oznaczyć.
+
 Jev sortuje prompty, czytając nazwy i opisy kategorii, więc opisy działają jak instrukcje. Napisz, co należy do kategorii, a co nie. Kategorie możesz edytować, wyłączać, usuwać i dodawać, a wbudowaną przywrócić, jeśli zmienisz zdanie. Auto potrzebuje co najmniej dwóch włączonych kategorii.
+
+### Sprawdź, które sesje współdzielą cel
+
+Gdy plan celu się wyczerpie, wszystkie sesje na tym celu jednocześnie przełączają się dalej i każda zaczyna od nowa z zimną pamięcią podręczną promptów. **Ustawienia → Routing → Pule modeli → Stan puli** pokazuje dla każdego celu w każdej puli, ile sesji korzystało z niego w ostatnich 15 minutach, i ostrzega, gdy współdzielą go co najmniej dwie.
+
+Powiąż tam cel z jednym ze swoich planów, żeby zobaczyć prognozę: jego niedawne użycie razem z użyciem wszystkich innych celów powiązanych z tym samym planem, przeskalowane do okna limitu planu. Okna liczone w żądaniach, wiadomościach lub tokenach dostają prognozę, a okna w dolarach i procentach nie. Ta liczba to szacunek z ostatnich 24 godzin ruchu OpenCode i nie obejmuje użycia poza OpenCode. W puli ważonej lub rotacyjnej cel, który zużył 70% swojego okna lub więcej, dostaje przycisk **Zmniejsz wagę**. Zmniejsza on wagę celu o połowę, więc nowe sesje częściej trafiają do innych celów.
+
+Pod listą celów jest opcja **Przenoś sesje z celu, zanim wyczerpie się jego plan**, domyślnie wyłączona. Gdy jest włączona, a plan celu według prognozy osiąga 70% lub więcej i korzystają z niego co najmniej dwie sesje, OpenChamber przełącza jedną z tych sesji na inny cel tej samej puli, który ma zapas i w tej chwili nie zawodzi. Przenosi jedną sesję na pulę co 5 minut, a ten odstęp można zmienić, najpierw działających subagentów, potem sesję, która najdłużej jest bezczynna. Ostatnia sesja na celu zostaje. Dzięki temu ich pamięci podręczne startują od nowa po kolei, a nie wszystkie naraz. Przeniesiona sesja działa bezpośrednio na tym modelu, poza pulą, więc nie przełącza się już awaryjnie. Żeby ją przywrócić, wybierz pulę ponownie. Sesje w trybie **Auto** nigdy nie są przenoszone. Ostatnie przeniesienia są wypisane pod przełącznikiem. Gdy OpenCode działa na innym komputerze, rotacja niczego nie przenosi. Cel, do którego trafia sesja, nigdy nie jest powiązany z tym samym planem co cel, który opuszcza. Cel bez powiązanego planu lub bez prognozy też może zostać wybrany, choć jego zapas jest nieznany.
 
 ## Co się dzieje po wysłaniu
 
@@ -50,6 +85,17 @@ Model zapasowy odpowiada, gdy:
 - kategoria nie ma własnego modelu
 
 Wybranie w wyborze konkretnego modelu wyprowadza sesję z Auto. Żeby wrócić, wybierz znowu **Auto**. Auto możesz też ustawić jako domyślny model nowych sesji w **Ustawienia → Sesje**.
+
+## Plany, użycie i przeglądy
+
+**Ustawienia → Routing → Plany i wykorzystanie** przechowuje to, czego przegląd nie może zmierzyć: Twoje subskrypcje i ich okna limitów (nazwa, jednostka, limit, długość okna, sposób resetowania), opłaty i daty wygaśnięcia, datę ostatniego sprawdzenia każdego planu i skąd sprawdzano, poziom kosztu dla każdego modelu (`plan`, `common`, `medium`, `high` wraz z planami, które go obejmują), do czego służy każda pula oraz notatki o tym, jak odczuwało się użycie. Notatki są przechowywane tak, jak je napisałeś, i nigdy nie są przepisywane. Używaj ich do rzeczy takich jak „Claude skończył się za szybko” albo „na koniec miesiąca zawsze zostaje mi GPT”; przegląd waży je względem historii użycia.
+
+Dwa przyciski rozpoczynają nowy czat z poleceniem gotowym do wysłania:
+
+- **Przejrzyj routing** uruchamia `/routing-review`. Czyta historię tras (żądania, tokeny, koszt, sesje oraz które pule użyły lub pominęły którego dostawcę i model), zapisy planów i notatki, i proponuje zmiany. Niczego nie zmienia, dopóki nie zatwierdzisz konkretnej zmiany.
+- **Zaktualizuj plany** uruchamia `/plan-update`. Znajduje plany, którym brakuje szczegółów lub które sprawdzano ostatnio ponad miesiąc temu, pyta o te kilka potrzebnych pól i zapisuje Twoje odpowiedzi.
+
+Zapisy mieszkają w katalogu danych OpenCode jako `plans.json` i `plan-notes.jsonl`, i nic w nich nie wygasa. Historia też jest przechowywana; `route_usage` może odczytać każde jej okno.
 
 ## Gdzie to działa
 

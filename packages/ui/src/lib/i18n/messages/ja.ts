@@ -4,15 +4,19 @@ import { messagingI18n } from './messaging.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { sessionErrorRecoveryI18n } from './session-error-recovery.i18n';
 import { sidebarLayoutI18n } from './sidebar-layout.i18n';
+import { activityTimesI18n } from './activity-times.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { poolSettingsI18n } from './pool-settings.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { sessionLocationI18n } from './session-location.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -28,7 +32,9 @@ import { mcpxSecretsI18n } from './mcpx-secrets.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
+import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { questionAnswersI18n } from './question-answers.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "OpenCode は OpenChamber に同梱されています。OpenCode v2 を利用するには OpenChamber を更新してください。",
@@ -142,15 +148,19 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ja,
   ...referencePickerI18n.ja,
   ...sessionMenuHintsI18n.ja,
+  ...sessionErrorRecoveryI18n.ja,
   ...sidebarLayoutI18n.ja,
+  ...activityTimesI18n.ja,
   ...projectKnowledgeI18n.ja,
   ...linearPanelI18n.ja,
   ...routingI18n.ja,
+  ...poolSettingsI18n.ja,
   ...pluginPanelI18n.ja,
   ...surfacePanelI18n.ja,
   ...fileArtifactsI18n.ja,
   ...fileContentSearchI18n.ja,
   ...htmlRenderI18n.ja,
+  ...sessionLocationI18n.ja,
   ...sessionNoticesI18n.ja,
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
@@ -166,7 +176,9 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ja,
   ...integrationsCatalogI18n['ja'],
   ...sessionGoalWriterI18n['ja'],
+  ...subsessionModelsI18n['ja'],
   ...diffFindI18n['ja'],
+  ...questionAnswersI18n['ja'],
   'terminalView.actions.attachSelection': '選択した出力を添付',
   'terminalView.actions.copySelection': '選択した出力をコピー',
   'terminalView.toast.selectionCopied': '出力をコピーしました',
@@ -476,6 +488,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.status.sent': '送信済み',
   'sessions.scheduledTasks.dialog.status.skipped': 'スキップ',
   'sessions.scheduledTasks.dialog.status.cancelled': 'キャンセル',
+  'sessions.scheduledTasks.dialog.status.timeout': 'タイムアウト',
   'sessions.scheduledTasks.dialog.nextRun.label': '次回',
   'sessions.scheduledTasks.dialog.lastRun.label': '最終実行',
   'sessions.scheduledTasks.dialog.lastRun.runningNow': '実行中',
@@ -593,6 +606,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showWork': '作業中セクションを表示',
   'sessions.sidebar.header.displayMode.showPinned': 'ピン留めセクションを表示',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細な行',
+  'sessions.sidebar.header.displayMode.sidebarRows': 'サイドバーの行…',
   'sessions.sidebar.activity.pinnedTitle': 'ピン留め',
   'sessions.sidebar.header.displayMode.showArchived': 'アーカイブ済みセッションを表示',
   'sessions.sidebar.header.displayMode.collapseAll': 'すべて折りたたむ',
@@ -621,6 +635,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.viewMode.label': '表示',
   'sessions.sidebar.header.viewMode.projects': 'ツリー',
   'sessions.sidebar.header.viewMode.timeline': 'リスト',
+  'sessions.sidebar.header.viewMode.headerless': 'セクション見出しを隠す',
   'sessions.sidebar.activity.chatsEmpty': 'まだチャットはありません。',
   'chat.chatInput.chooseProject': 'プロジェクトを選択',
   'sessions.archivePage.allDirectories': 'すべてのディレクトリ',
@@ -1132,11 +1147,11 @@ export const dict: Record<I18nKey, string> = {
   'gitView.integrate.commitsMovedDescriptionSingle': '{count}コミットを{branch}に移動しました。',
   'gitView.integrate.commitsMovedToast': 'コミットを移動しました',
   'gitView.integrate.commitsToMove': '移動するコミット',
-  'gitView.integrate.conflictsInFiles': 'ファイルの競合',
+  'gitView.integrate.conflictsInFiles': '{count} ファイルの競合',
   'gitView.integrate.currentCommit': '現在のコミット',
   'gitView.integrate.currentSession': '現在のセッション',
   'gitView.integrate.failedToMoveToast': 'コミットの移動に失敗しました',
-  'gitView.integrate.moreFiles': 'その他のファイル',
+  'gitView.integrate.moreFiles': 'その他のファイル {count} 件',
   'gitView.integrate.move': '移動',
   'gitView.integrate.moveCommits': 'コミットを移動',
   'gitView.integrate.moving': '移動中…',
@@ -1148,10 +1163,10 @@ export const dict: Record<I18nKey, string> = {
   'gitView.integrate.previewUnavailable': 'プレビューは利用できません',
   'gitView.integrate.showAll': 'すべて表示',
   'gitView.integrate.showLess': '表示を減らす',
-  'gitView.integrate.showingFirstCommits': '最初のコミットを表示中',
+  'gitView.integrate.showingFirstCommits': '最初の {count} コミットを表示中',
   'gitView.integrate.target': 'ターゲット',
   'gitView.integrate.title': 'コミットの再統合',
-  'gitView.integrate.toMoveCount': '移動数',
+  'gitView.integrate.toMoveCount': '移動数 {count}',
   'gitView.operation.abort': '中止',
   'gitView.operation.continue': '続行',
   'gitView.operation.inProgressTitle': '{operation}進行中',
@@ -1273,6 +1288,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.checks.openRun': '開く',
   'gitView.pr.checks.failedAnnotations': '失敗したアノテーション',
   'gitView.pr.checks.failedAnnotationsShown': '失敗したアノテーション（{total} 件中 {shown} 件を表示）',
+  'gitView.pr.checks.annotationsTruncated': '注釈が不完全です — この実行には読み込めた数より多くの注釈があります。',
   'gitView.pr.field.baseBranch': 'ベースブランチ',
   'gitView.pr.field.description': '説明',
   'gitView.pr.field.title': 'タイトル',
@@ -1885,6 +1901,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.nestedRepository.noChanges': 'このリポジトリに変更はありません',
   'diffView.unavailable.untrackedDirectoryTitle': '新規ファイルのフォルダー',
   'diffView.unavailable.untrackedDirectoryDescription': 'このフォルダーには新規ファイルが多すぎるため、個別に一覧表示できません。ステージするか、リポジトリに不要であれば .gitignore に追加してください。',
+  'diffView.unavailable.tooLargeTitle': 'ファイルが大きすぎて差分を表示できません',
+  'diffView.unavailable.tooLargeDescription': 'ファイル差分の上限である 20 MiB を超えています。',
   'diffView.submodule.title': 'サブモジュール',
   'diffView.submodule.commitChanged': 'コミット {from} → {to}',
   'diffView.submodule.commitUnchanged': 'コミット {commit} のまま',
@@ -2585,6 +2603,19 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.modelAttribution.failoverLabel': 'フェイルオーバー元',
   'chat.messageBody.modelChanged.notice': 'モデルが変更されました: {from} → {to}',
   'chat.messageBody.modelChanged.noticeWithReason': 'モデルが変更されました: {from} → {to}（{reason}）',
+  'chat.messageBody.modelChanged.preferPrevious': '前のモデルを優先',
+  'chat.messageBody.modelChanged.preferPreviousTitle': 'モデルプールで1日間 {model} を優先する',
+  'chat.currentModel.label': '現在のモデル: {model}',
+  'chat.currentModel.labelWithPool': '現在のモデル: {model}（プール {pool}）',
+  'chat.currentModel.menu.openHint': 'クリックしてモデルを選択',
+  'chat.currentModel.menu.timing': '切り替え',
+  'chat.currentModel.menu.directPickHelp': '直接選択すると、プールに戻るまでプールのフェイルオーバーが停止します。',
+  'chat.currentModel.timing.immediately': '今すぐ（実行中の応答をやり直します）',
+  'chat.currentModel.timing.nextStep': '次のステップで',
+  'chat.currentModel.timing.nextInput': '次のメッセージで',
+  'chat.currentModel.menu.members': 'プール {pool} のモデル',
+  'chat.currentModel.menu.returnToPool': 'プール {pool} に戻る',
+  'chat.currentModel.toast.failed': 'モデルを切り替えられませんでした',
   'chat.generatedResult.actions.copy': 'コピー',
   'chat.generatedResult.actions.copied': 'コピーしました',
   'chat.generatedResult.commit.title': '生成されたコミットメッセージ',
@@ -3076,6 +3107,7 @@ export const dict: Record<I18nKey, string> = {
   'mcpDropdown.status.needsAuth': '認証が必要です',
   'mcpDropdown.status.needsRegistration': '登録が必要: {error}',
   'mcpDropdown.empty.configureInConfig': '設定でMCPサーバーを構成してください。',
+  "mcpDropdown.cacheNote": "Code Mode がオフのサーバーを切り替えると、実行中のセッションの次のターンはプロンプトキャッシュを使いません。",
   'sessionAuth.error.rateLimitTitle': '試行回数が多すぎます',
   'sessionAuth.error.networkTitle': 'サーバーに到達できません',
   'sessionAuth.error.rateLimitDescriptionSingle': '再試行まで{minutes}分お待ちください。',
@@ -3834,8 +3866,8 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.card.keep': 'これを残す',
   'multirun.overview.addModel.action': 'モデルを追加',
   'multirun.overview.addModel.hint': 'この実行で同じプロンプトをもう1つのモデルに送ります',
-  'chat.parallel.settings.whereShared': 'プロジェクトディレクトリ',
-  'chat.parallel.settings.whereSharedHint': 'すべての実行があなたの作業コピーで動きます。質問や調査に最適です。',
+  'chat.parallel.settings.whereShared': '共有ディレクトリ',
+  'chat.parallel.settings.whereSharedHint': 'すべての実行がこの下書きで選んだディレクトリで動きます。質問や調査に最適です。',
   'chat.parallel.settings.whereWorktrees': '個別のワークツリー',
   'chat.parallel.settings.whereWorktreesHint': '実行ごとに専用のブランチを使うので、コードの変更が衝突しません。一番良いものを残せます。',
   'chat.parallel.settings.baseBranchTitle': 'ベースブランチ',

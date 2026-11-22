@@ -4,11 +4,13 @@ import { Lexer } from 'marked';
  * marked runs each block rule on the rest of the message at every block, and
  * each inline rule on the rest of the paragraph at every token. Its rules
  * start with `^`, and V8 gives up on them at the first character that does
- * not match. JavaScriptCore (Safari, the iOS app's WebView, Bun) retries a
- * failed `^` match at every later position, so each call reads the whole
- * remainder and a long message costs the square of its length: 16,000 short
- * paragraphs took about 70 s in Bun and the hr rule alone 7.9 s in the system
- * JavaScriptCore, against milliseconds in Node.
+ * not match. Older JavaScriptCore (Bun 1.3.11; Safari and the iOS app's
+ * WebView before the WebKit in macOS 27.0.1) retries a failed `^` match at
+ * every later position, so each call reads the whole remainder and a long
+ * message costs the square of its length: 16,000 short paragraphs took about
+ * 70 s in Bun 1.3.11 and the hr rule alone 7.9 s in that system
+ * JavaScriptCore, against milliseconds in Node. Bun 1.4.3 and the newer
+ * JavaScriptCore are fast either way; the pin keeps older Safari and iOS fast.
  *
  * The sticky flag (`y`) limits a match to one position in every engine. marked
  * never resets `lastIndex`, and a sticky match moves it, so `exec` starts every

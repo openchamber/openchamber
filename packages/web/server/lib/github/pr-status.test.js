@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { findBranchPrCandidates, invalidateRepoPullsCache, isHistoricalPrOfCheckout, resolveGitHubPrStatus } from './pr-status.js';
+import { findBranchPrCandidates, getPrStatusCacheSizes, invalidateRepoPullsCache, isHistoricalPrOfCheckout, PR_STATUS_CACHE_MAX_ENTRIES, pruneExpiredPrStatusCaches, resolveGitHubPrStatus } from './pr-status.js';
 import { createOctokit, getOctokitCacheIdentity } from './octokit.js';
 
 const listMock = mock(async () => ({ data: [] }));
@@ -88,6 +88,50 @@ describe('findBranchPrCandidates', () => {
 
     expect(open?.number).toBe(15);
     expect(historical).toBeNull();
+  });
+
+  test('finds an open PR past the first per-head page (#1596)', async () => {
+    // More than one page of PRs was opened from this head: the matching open
+    // PR sits on page 2, behind a full page of closed ones. The per-head
+    // read must paginate instead of treating page 1 as the whole set.
+    const fillerPage = new Array(100).fill(null).map((_, index) => ({ ...mergedPr, number: 1000 + index }));
+    listMock.mockImplementation(async ({ head, page }) => {
+      if (!head) return { data: [] };
+      return page === 2 ? { data: [openPr] } : { data: fillerPage };
+    });
+
+    const { open, historical } = await call();
+
+    expect(open?.number).toBe(15);
+    expect(historical).toBeNull();
+    expect(listMock.mock.calls.some((entry) => entry[0]?.head && entry[0]?.page === 2)).toBe(true);
+  });
+
+  test('finds the newest historical PR past the first per-head page (#1596)', async () => {
+    const fillerPage = new Array(100).fill(null).map((_, index) => ({ ...mergedPr, number: 100 + index }));
+    const newestMergedPr = { ...mergedPr, number: 4242 };
+    listMock.mockImplementation(async ({ head, page }) => {
+      if (!head) return { data: [] };
+      return page === 2 ? { data: [newestMergedPr] } : { data: fillerPage };
+    });
+
+    const { open, historical } = await call();
+
+    expect(open).toBeNull();
+    expect(historical?.number).toBe(4242);
+  });
+
+  test('errors instead of answering from a prefix past the per-head cap (#1596)', async () => {
+    // Every page is full and the probe past the cap is non-empty: the set
+    // may be incomplete, so the verdict disposition is an explicit error,
+    // never a "no PR" answer read off a prefix.
+    listMock.mockImplementation(async ({ head }) => (
+      head
+        ? { data: new Array(100).fill(null).map((_, index) => ({ ...mergedPr, number: 2000 + index })) }
+        : { data: [] }
+    ));
+
+    await expect(call()).rejects.toThrow('may be incomplete');
   });
 
   test('returns the branch history when no open PR exists', async () => {
@@ -619,5 +663,366 @@ describe('resolveGitHubPrStatus fork history', () => {
     } finally {
       await fs.rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('pr-status cache bounds (#972)', () => {
+  beforeEach(() => {
+    listMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const callRepo = (owner, repo) => findBranchPrCandidates({
+    octokit: octokitFor('bounds-token', 'bounds-account'),
+    target: { repo: { owner, repo }, remoteName: 'origin' },
+    branch: 'feature',
+    sourceCandidates: [{ repo: { owner, repo } }],
+    force: false,
+    includeHistory: false,
+  });
+
+  test('sweeps expired repoPulls entries when a different repo is written', async () => {
+    listMock.mockResolvedValue({ data: [] });
+    const startedAt = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+
+    await callRepo('sweep-a', 'app');
+    const sizeAfterFirst = getPrStatusCacheSizes().repoPulls;
+    expect(sizeAfterFirst).toBeGreaterThan(0);
+
+    // Past the 45s repoPulls TTL: writing sweep-b must evict sweep-a's
+    // never-revisited entry instead of accumulating alongside it.
+    nowSpy.mockReturnValue(startedAt + 46_000);
+    await callRepo('sweep-b', 'app');
+    expect(getPrStatusCacheSizes().repoPulls).toBeLessThanOrEqual(sizeAfterFirst);
+    expect(pruneExpiredPrStatusCaches().repoPulls).toBeLessThanOrEqual(sizeAfterFirst);
+
+    // The fresh entry still hits; the evicted one is re-fetched.
+    const callsBefore = listMock.mock.calls.length;
+    await callRepo('sweep-b', 'app');
+    expect(listMock.mock.calls.length).toBe(callsBefore);
+    await callRepo('sweep-a', 'app');
+    expect(listMock.mock.calls.length).toBe(callsBefore + 1);
+    nowSpy.mockRestore();
+  });
+
+  test('cap eviction preserves in-flight repoPulls entries', async () => {
+    let releaseHeld;
+    let markHeldStarted;
+    const held = new Promise((resolve) => { releaseHeld = resolve; });
+    const heldStarted = new Promise((resolve) => { markHeldStarted = resolve; });
+    listMock.mockImplementation(async ({ owner }) => {
+      if (owner === 'held-repo') {
+        markHeldStarted();
+        await held;
+      }
+      return { data: [] };
+    });
+
+    const pending = callRepo('held-repo', 'app');
+    await heldStarted;
+
+    // Fill the cache well past the cap while held-repo's request is in
+    // flight: settled entries are capped, the in-flight entry is not evicted.
+    for (let i = 0; i < PR_STATUS_CACHE_MAX_ENTRIES + 5; i += 1) {
+      await callRepo(`flood-${i}`, 'app');
+    }
+    expect(getPrStatusCacheSizes().repoPulls).toBe(PR_STATUS_CACHE_MAX_ENTRIES);
+
+    // A second lookup for held-repo shares the in-flight promise instead of
+    // starting a duplicate GitHub request.
+    const shared = callRepo('held-repo', 'app');
+    releaseHeld();
+    await pending;
+    await shared;
+    expect(listMock.mock.calls.filter((entry) => entry[0]?.owner === 'held-repo')).toHaveLength(1);
+  });
+
+  test('caps repoPulls at PR_STATUS_CACHE_MAX_ENTRIES with oldest-first eviction', async () => {
+    listMock.mockResolvedValue({ data: [] });
+    const total = PR_STATUS_CACHE_MAX_ENTRIES + 5;
+    for (let i = 0; i < total; i += 1) {
+      await callRepo(`cap-${i}`, 'app');
+    }
+
+    expect(getPrStatusCacheSizes().repoPulls).toBe(PR_STATUS_CACHE_MAX_ENTRIES);
+
+    const callsBefore = listMock.mock.calls.length;
+    await callRepo(`cap-${total - 1}`, 'app');
+    expect(listMock.mock.calls.length).toBe(callsBefore);
+    await callRepo('cap-0', 'app');
+    expect(listMock.mock.calls.length).toBe(callsBefore + 1);
+  });
+});
+
+describe('pr-status repo metadata cache bounds (#972)', () => {
+  let directory;
+  let secondDirectory;
+
+  const makeDirectory = async (remoteUrl) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pr-status-bounds-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+    git('init', '-q', '-b', 'feature');
+    git('remote', 'add', 'origin', remoteUrl);
+    return dir;
+  };
+
+  beforeEach(async () => {
+    directory = await makeDirectory('https://github.com/bounds-a/app.git');
+    secondDirectory = await makeDirectory('https://github.com/bounds-b/app2.git');
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(secondDirectory, { recursive: true, force: true });
+  });
+
+  test('sweeps expired metadata entries when another repo is written; live entries still hit', async () => {
+    const getMock = mock(async () => ({ data: { default_branch: 'main' } }));
+    const client = {
+      openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit('bounds-meta-token', 'bounds-meta-account')),
+      rest: {
+        repos: { get: getMock },
+        pulls: { list: async () => ({ data: [] }) },
+        search: { issuesAndPullRequests: async () => ({ data: { items: [] } }) },
+      },
+    };
+    const startedAt = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    const sizesAfterFirst = getPrStatusCacheSizes();
+    expect(sizesAfterFirst.repoMetadata).toBeGreaterThan(0);
+    const callsAfterFirst = getMock.mock.calls.length;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+
+    // A fresh resolve for the same repo is served from the caches.
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(getMock.mock.calls.length).toBe(callsAfterFirst);
+
+    // Past the 5-minute metadata TTL, resolving a different repo sweeps the
+    // first repo's expired entries instead of letting them accumulate.
+    nowSpy.mockReturnValue(startedAt + 6 * 60_000);
+    await resolveGitHubPrStatus({ octokit: client, directory: secondDirectory, branch: 'feature', remoteName: 'origin', force: false });
+    const sizesAfterSecond = getPrStatusCacheSizes();
+    expect(sizesAfterSecond.repoMetadata).toBeLessThanOrEqual(sizesAfterFirst.repoMetadata);
+    expect(sizesAfterSecond.defaultBranch).toBeLessThanOrEqual(sizesAfterFirst.defaultBranch);
+
+    // The evicted first repo is fetched again on its next resolve.
+    const callsBeforeRefetch = getMock.mock.calls.length;
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(getMock.mock.calls.length).toBeGreaterThan(callsBeforeRefetch);
+    nowSpy.mockRestore();
+  });
+
+  test('sweeps expired search-disabled entries after the retry window', async () => {
+    const searchMock = mock(async () => {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    });
+    const client = {
+      openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit('bounds-search-token', 'bounds-search-account')),
+      rest: {
+        repos: { get: async () => ({ data: { default_branch: 'main' } }) },
+        pulls: {
+          list: async ({ head }) => (head
+            ? { data: [] }
+            : { data: Array.from({ length: 100 }, (_, index) => ({ number: index, state: 'open', head: { ref: 'other' } })) }),
+        },
+        search: { issuesAndPullRequests: searchMock },
+      },
+    };
+    const startedAt = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const disabledBefore = getPrStatusCacheSizes().searchApiDisabled;
+
+    // An incomplete open list forces the search fallback, whose 403 records
+    // the repo set in _searchApiDisabledRepos.
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(getPrStatusCacheSizes().searchApiDisabled).toBe(disabledBefore + 1);
+    expect(searchMock.mock.calls.length).toBe(1);
+
+    // Within the retry window the disabled repo set is not searched again.
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: true });
+    expect(searchMock.mock.calls.length).toBe(1);
+
+    // Past the 5-minute retry window, another repo's 403 sweeps the expired
+    // entry instead of accumulating, and the first repo is searched again.
+    nowSpy.mockReturnValue(startedAt + 6 * 60_000);
+    await resolveGitHubPrStatus({ octokit: client, directory: secondDirectory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(getPrStatusCacheSizes().searchApiDisabled).toBe(disabledBefore + 1);
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(searchMock.mock.calls.length).toBe(3);
+    nowSpy.mockRestore();
+  });
+});
+
+describe('pr-status search fallback scoping (#1496)', () => {
+  let directory;
+
+  beforeEach(async () => {
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pr-status-fallback-'));
+    const git = (...args) => execFileSync('git', args, { cwd: directory, stdio: 'ignore' });
+    git('init', '-q', '-b', 'feature');
+    git('remote', 'add', 'origin', 'https://github.com/acme/app.git');
+  });
+
+  afterEach(async () => {
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+
+  const fallbackClient = (token, searchItems, prsByKey) => {
+    const searchMock = mock(async () => ({ data: { items: searchItems } }));
+    const getMock = mock(async ({ owner, repo, pull_number }) => {
+      const pr = prsByKey[`${owner}/${repo}#${pull_number}`];
+      if (!pr) {
+        throw Object.assign(new Error('Not Found'), { status: 404 });
+      }
+      return { data: pr };
+    });
+    const client = {
+      openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit(token, `${token}-account`)),
+      rest: {
+        repos: { get: async () => ({ data: { default_branch: 'main' } }) },
+        pulls: {
+          // A full page of unrelated open PRs makes the per-repo list
+          // incomplete, so resolveGitHubPrStatus spends the search fallback.
+          list: async ({ head }) => (head
+            ? { data: [] }
+            : { data: Array.from({ length: 100 }, (_, index) => ({ number: index, state: 'open', head: { ref: 'other' } })) }),
+          get: getMock,
+        },
+        search: { issuesAndPullRequests: searchMock },
+      },
+    };
+    return { client, searchMock, getMock };
+  };
+
+  const searchItem = (owner, number) => ({
+    number,
+    repository_url: `https://api.github.com/repos/${owner}/app`,
+  });
+
+  const branchPr = (number) => ({
+    number,
+    state: 'open',
+    head: { ref: 'feature' },
+  });
+
+  test('never returns a same-named PR from a different owner', async () => {
+    const { client, searchMock, getMock } = fallbackClient('fallback-owner-token', [searchItem('stranger', 77)], {
+      'stranger/app#77': branchPr(77),
+    });
+
+    const result = await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+
+    expect(result.pr).toBeNull();
+    // The other owner's item is rejected before any pulls.get is spent on it.
+    expect(getMock.mock.calls.length).toBe(0);
+    // The search itself is scoped to the resolved target repo.
+    expect(searchMock.mock.calls.length).toBeGreaterThan(0);
+    expect(searchMock.mock.calls[0][0].q).toContain('repo:acme/app');
+  });
+
+  test('invalidating the repo clears its remembered search miss', async () => {
+    const { client, searchMock } = fallbackClient('fallback-invalidate-token', [], {});
+
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(searchMock.mock.calls.length).toBe(1);
+
+    // The miss is remembered: a later resolve does not spend search again.
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(searchMock.mock.calls.length).toBe(1);
+
+    // A mutation on the repo invalidates the owner-qualified miss key, so
+    // the next resolve searches again instead of trusting the stale miss.
+    invalidateRepoPullsCache('acme', 'app', client);
+    await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+    expect(searchMock.mock.calls.length).toBe(2);
+  });
+
+  test('finds the real PR behind same-named results from other owners', async () => {
+    const { client, getMock } = fallbackClient('fallback-order-token', [searchItem('stranger', 100), searchItem('acme', 42)], {
+      'stranger/app#100': branchPr(100),
+      'acme/app#42': branchPr(42),
+    });
+
+    const result = await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: false });
+
+    expect(result.pr?.number).toBe(42);
+    expect(result.repo?.owner).toBe('acme');
+    expect(getMock.mock.calls.every((entry) => entry[0]?.owner === 'acme')).toBe(true);
+  });
+});
+
+describe('resolveGitHubPrStatus fallback search with an inaccessible network repo', () => {
+  let directory;
+
+  beforeEach(async () => {
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pr-status-422-'));
+    const gitLocal = (...args) => execFileSync('git', args, { cwd: directory, stdio: 'ignore' });
+    gitLocal('init', '-q', '-b', 'feature');
+    gitLocal('remote', 'add', 'origin', 'https://github.com/contrib/app.git');
+    invalidateRepoPullsCache('contrib', 'app');
+    invalidateRepoPullsCache('acme', 'app');
+  });
+
+  afterEach(async () => {
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+
+  const httpError = (status, message) => Object.assign(new Error(message), {
+    status,
+    response: { status, data: { message } },
+  });
+
+  test('a 422 from one network repo keeps the PR found in an accessible repo', async () => {
+    const foundPr = {
+      number: 7,
+      state: 'open',
+      head: { ref: 'feature', label: 'contrib:feature', user: { login: 'contrib' }, repo: { owner: { login: 'contrib' }, name: 'app' } },
+    };
+    const client = {
+      openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit('search-422-token', 'search-422-account')),
+      rest: {
+        repos: {
+          get: async ({ owner }) => ({
+            data: owner === 'contrib'
+              ? { default_branch: 'main', parent: { owner: { login: 'acme' }, name: 'app', html_url: 'https://github.com/acme/app' } }
+              : { default_branch: 'main' },
+          }),
+        },
+        pulls: {
+          // A full page of unrelated open PRs makes the per-repo list
+          // incomplete, so resolveGitHubPrStatus spends the search fallback.
+          list: async ({ head }) => (head
+            ? { data: [] }
+            : { data: Array.from({ length: 100 }, (_, index) => ({ number: index, state: 'open', head: { ref: 'other' } })) }),
+          get: async ({ owner, pull_number }) => {
+            if (owner === 'contrib' && pull_number === 7) return { data: foundPr };
+            throw httpError(404, 'Not Found');
+          },
+        },
+        search: {
+          issuesAndPullRequests: async ({ q }) => {
+            const qualifiers = q.split(' ').filter((part) => part.startsWith('repo:'));
+            // The combined query and the inaccessible parent's own query
+            // both answer 422; only the accessible repo's query succeeds.
+            if (qualifiers.length !== 1 || qualifiers[0] !== 'repo:contrib/app') {
+              throw httpError(422, 'Validation Failed: repo:acme/app is not accessible');
+            }
+            return { data: { items: [{ number: 7, repository_url: 'https://api.github.com/repos/contrib/app' }] } };
+          },
+        },
+      },
+    };
+
+    const status = await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: true });
+
+    expect(status.pr?.number).toBe(7);
+    expect(status.repo).toMatchObject({ owner: 'contrib', repo: 'app' });
   });
 });

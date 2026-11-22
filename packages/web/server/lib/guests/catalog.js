@@ -1,3 +1,4 @@
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -8,6 +9,7 @@ import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './ht
 import { effectiveGrants, guestGrantScope } from './grant-scope.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import { ensureGuestStorageIds, onExtensionStoreWrite, readExtensionStore } from './persist.js';
 import { buildPublicSocketBindings } from './sockets.js';
 import { isReservedBuiltInId, readBuiltInRegistry } from './builtins.js';
@@ -27,6 +29,54 @@ export const registerBuiltInGuests = async ({ persistPath, root }) => {
 };
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Byte cap for one guest asset on the serve path and for the manifest and
+ * entry HTML reads during package inspection, judged from stat before reading.
+ * Sized to the in-feature precedent: files.js refuses file content over
+ * GUEST_FILE_CONTENT_MAX (2,000,000) before reading it.
+ */
+export const GUEST_ASSET_MAX_BYTES = 2_000_000;
+
+const fileSizeOrNull = async (filePath) => {
+  try {
+    return (await fs.stat(filePath)).size;
+  } catch {
+    return null;
+  }
+};
+
+const readGuestManifest = async (manifestPath) => {
+  let handle;
+  try {
+    const nonBlockingFlag = process.platform === 'win32' ? 0 : (fsConstants.O_NONBLOCK ?? 0);
+    handle = await fs.open(manifestPath, fsConstants.O_RDONLY | nonBlockingFlag);
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > GUEST_ASSET_MAX_BYTES) {
+      return null;
+    }
+
+    const buffer = Buffer.alloc(GUEST_ASSET_MAX_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const result = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (result.bytesRead === 0) {
+        break;
+      }
+      bytesRead += result.bytesRead;
+    }
+    if (bytesRead > GUEST_ASSET_MAX_BYTES) {
+      return null;
+    }
+    return buffer.toString('utf8', 0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    if (handle) {
+      await handle.close().catch(() => {});
+    }
+  }
+};
 
 const MIME_BY_EXT = {
   '.html': 'text/html; charset=utf-8',
@@ -93,7 +143,7 @@ export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRun
     return null;
   }
   if (filePath && contentType) {
-    return { filePath, contentType };
+    return { filePath, contentType, size: await fileSizeOrNull(filePath) };
   }
   if (!hasRuntime || !relativePath.endsWith('.js')) {
     return null;
@@ -102,9 +152,11 @@ export const resolveGuestServedFile = async (packageRoot, relativePath, { hasRun
   if (!tsPath) {
     return null;
   }
+  const compiledPath = `${tsPath.slice(0, -3)}.js`;
   return {
-    filePath: `${tsPath.slice(0, -3)}.js`,
+    filePath: compiledPath,
     contentType: MIME_BY_EXT['.js'],
+    size: await fileSizeOrNull(compiledPath),
   };
 };
 
@@ -134,7 +186,15 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
   if (!entryPath) {
     return false;
   }
-  const html = await fs.readFile(entryPath, 'utf8');
+  // The shared bounded read (design #1254) enforces the cap during the
+  // read, where the previous stat-then-read left a grow-between gap. Any
+  // non-ok outcome (missing, non-regular, over-cap) means the entry page
+  // is not a built page this package can serve, as the stat gate meant.
+  const entryRead = await readBoundedFile(entryPath, GUEST_ASSET_MAX_BYTES);
+  if (!entryRead.ok) {
+    return false;
+  }
+  const html = entryRead.buffer.toString('utf8');
   for (const href of listRelativeGuestScriptHrefs(html)) {
     const relativePath = resolveGuestHtmlRelativePath(entry, href);
     if (!relativePath || !relativePath.endsWith('.js')) {
@@ -149,10 +209,9 @@ const guestBuiltScriptsReady = async (packageRoot, entry) => {
 };
 
 export const inspectGuestPackage = async (packageRoot, { openchamberVersion, skipEngineCheck } = {}) => {
-  let raw;
-  try {
-    raw = await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8');
-  } catch {
+  const manifestPath = path.join(packageRoot, 'package.json');
+  const raw = await readGuestManifest(manifestPath);
+  if (raw === null) {
     return { ok: false, code: 'invalid-manifest' };
   }
   const parsed = parseManifestJson(raw);

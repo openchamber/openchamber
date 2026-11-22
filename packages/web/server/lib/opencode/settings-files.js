@@ -9,10 +9,24 @@
 // (`packages/vscode/src/settings-files.ts`); keep the format changes in sync.
 import { createRequire } from 'node:module';
 
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
+
 const registry = createRequire(import.meta.url)('./settings-registry.json');
 
 const PREFERENCES_FILE_NAME = 'preferences.json';
 const PREFERENCES_DOCUMENT_VERSION = 1;
+
+// Byte caps for the merged hot-path read (readMergedSettingsSync). Both
+// files are small documents; anything past the cap is a defect or an
+// attack on a synchronous hot path, not content to parse whole.
+// settings.json takes the established 8 MiB precedent for this same file
+// (SETTINGS_FILE_MAX_BYTES in linear/auth.js and github/auth.js): it
+// holds instance facts plus whatever legacy keys older builds left in
+// it. preferences.json holds only registry profile fields — 268 fields
+// of small scalar values with stamps — so 4 MiB is still orders of
+// magnitude past a legitimate profile.
+export const MERGED_SETTINGS_MAX_BYTES = 8 * 1024 * 1024;
+export const MERGED_PREFERENCES_MAX_BYTES = 4 * 1024 * 1024;
 
 /** The registry scope for a key, or `null` when the registry does not know it. */
 const getSettingsScope = (key) => registry.fields[key]?.scope ?? null;
@@ -195,20 +209,63 @@ export const seedPreferencesFrom = (document, now) => buildPreferencesFields({},
  * or unreadable preferences file contributes nothing, and the caller's own
  * default applies — the same "missing is not default" rule the clients use.
  */
-export const readMergedSettingsSync = ({ fs, path, settingsFilePath }) => {
-  let settings = {};
+/**
+ * One bounded read for the merged hot-path read: the file's text, or
+ * `null` when the file contributes nothing. Missing is the ordinary
+ * first-run case and stays silent, exactly as the previous bare-catch
+ * read behaved; unexpected I/O errors keep that lenient behaviour too.
+ * Too-large and not-regular also contribute nothing, but they are
+ * defects on a hot path (a 32 MiB settings file parsed whole; a FIFO
+ * that blocked the read forever), so they warn — never silently
+ * conflated with missing.
+ *
+ * The bounded reader opens the file itself with node:fs, so the
+ * injected `fs` of the caller is not used for these two reads; every
+ * production caller passes the real node:fs, and the exported
+ * signature is unchanged.
+ */
+const readSettingsFileBoundedSync = (filePath, maxBytes) => {
+  let result;
   try {
-    const parsed = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
-    if (isPlainObject(parsed)) settings = parsed;
+    result = readBoundedFileSync(filePath, maxBytes);
   } catch {
-    settings = {};
+    return null;
+  }
+  if (result.ok) return result.buffer.toString('utf8');
+  if (result.reason === 'too-large') {
+    console.warn(
+      `[settings] Ignoring ${filePath}: ${result.size} bytes exceeds the ${result.limit}-byte cap for the merged settings read.`,
+    );
+  } else if (result.reason === 'not-regular') {
+    console.warn(`[settings] Ignoring ${filePath}: not a regular file.`);
+  }
+  return null;
+};
+
+export const readMergedSettingsSync = ({ fs, path, settingsFilePath }) => {
+  void fs;
+  let settings = {};
+  const settingsText = readSettingsFileBoundedSync(settingsFilePath, MERGED_SETTINGS_MAX_BYTES);
+  if (settingsText !== null) {
+    try {
+      const parsed = JSON.parse(settingsText);
+      if (isPlainObject(parsed)) settings = parsed;
+    } catch {
+      settings = {};
+    }
   }
   let preferences = {};
-  try {
-    const parsed = parsePreferencesDocument(fs.readFileSync(preferencesFilePathFor(settingsFilePath, path), 'utf8'));
-    if (parsed.ok) preferences = flattenPreferences(parsed.fields);
-  } catch {
-    preferences = {};
+  const preferencesText = readSettingsFileBoundedSync(
+    preferencesFilePathFor(settingsFilePath, path),
+    MERGED_PREFERENCES_MAX_BYTES,
+  );
+  if (preferencesText !== null) {
+    try {
+      const parsed = parsePreferencesDocument(preferencesText);
+      if (parsed.ok) preferences = flattenPreferences(parsed.fields);
+    } catch {
+      preferences = {};
+    }
   }
   return { ...settings, ...preferences };
 };

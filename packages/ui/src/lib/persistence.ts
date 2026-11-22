@@ -214,7 +214,11 @@ const dispatchSettingsSynced = (settings: DesktopSettings, bootstrap: boolean, a
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<SettingsSyncedDetail>('openchamber:settings-synced', {
+  // Events are constructed from the dispatch target's own realm: the global
+  // constructors can belong to a different window than the current one (a
+  // webview, or a test file that replaced the globals), and a window rejects
+  // an event created by another realm's constructor.
+  window.dispatchEvent(new (window.CustomEvent ?? CustomEvent)<SettingsSyncedDetail>('openchamber:settings-synced', {
     detail: { settings, bootstrap, adoptTheme },
   }));
 };
@@ -262,7 +266,7 @@ const dispatchSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void =>
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<'saving' | 'saved' | 'error'>('openchamber:settings-save-state', { detail: state }));
+  window.dispatchEvent(new (window.CustomEvent ?? CustomEvent)<'saving' | 'saved' | 'error'>('openchamber:settings-save-state', { detail: state }));
 };
 
 type PersistApi = {
@@ -498,6 +502,10 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     _settingsCache = null;
     _settingsInflight = null;
     _serverKnownSettings = {};
+    // Server-owned and per instance: a server from before this flag omits it, and an
+    // omitted key leaves the store alone, so the previous instance's `true` would
+    // otherwise keep the Tools page's cache note on. The next settings read sets it.
+    useUIStore.getState().setManagedToolsApplyLive(false);
     dispatchSettingsSaveState('saved');
   });
 
@@ -705,10 +713,10 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
     if (webSettings && isSettingsRuntimeContextCurrent(context)) {
       await applySettings(webSettings);
     } else if (isSettingsRuntimeContextCurrent(context)) {
-      window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
+      window.dispatchEvent(new (window.Event ?? Event)('openchamber:settings-sync-failed'));
     }
   } catch (error) {
-    if (isSettingsRuntimeContextCurrent(context)) window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
+    if (isSettingsRuntimeContextCurrent(context)) window.dispatchEvent(new (window.Event ?? Event)('openchamber:settings-sync-failed'));
     console.warn('Failed to synchronise settings:', error);
   } finally {
     _settingsMutationTracker.finish(operation);

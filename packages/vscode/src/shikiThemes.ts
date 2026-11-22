@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 
+export const SHIKI_THEME_MAX_BYTES = 16 * 1024 * 1024;
+
 type VSCodeThemeContribution = {
   label?: string;
   uiTheme?: string;
@@ -183,7 +185,12 @@ const readThemeJsonByLabel = async (label: string): Promise<Record<string, unkno
 
   try {
     const uri = vscode.Uri.joinPath(resolved.extension.extensionUri, resolved.theme.path as string);
+    const stat = await vscode.workspace.fs.stat(uri);
+    if (stat.size > SHIKI_THEME_MAX_BYTES) return null;
+
     const bytes = await vscode.workspace.fs.readFile(uri);
+    if (bytes.byteLength > SHIKI_THEME_MAX_BYTES) return null;
+
     const text = new TextDecoder('utf-8').decode(bytes);
     return parseJsoncLoose(text);
   } catch {

@@ -9,6 +9,7 @@ export interface ThemeContextValue {
   customThemeIds: string[];
   setTheme: (themeId: string) => void;
   customThemesLoading: boolean;
+  customThemesLoadError?: boolean;
   reloadCustomThemes: () => Promise<void>;
   importTheme: (definition: ThemeDefinition, options?: { activate?: boolean }) => Promise<Theme>;
   deleteImportedTheme: (themeId: string) => Promise<void>;

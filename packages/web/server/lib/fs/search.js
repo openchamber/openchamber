@@ -1,5 +1,11 @@
+import { StringDecoder } from 'node:string_decoder';
+
+import { parseBoundedIntWithDefault } from '../shared/parse-int.js';
+import { createTraversalBudget } from '../shared/traversal-budget.js';
+
 const FILE_SEARCH_MAX_CONCURRENCY = 5;
 const FILE_SEARCH_MAX_VISITED_FILES = 10_000;
+const FILE_SEARCH_MAX_VISITED_DIRS = 50_000;
 const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'node_modules',
   '.git',
@@ -97,9 +103,15 @@ const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
 };
 
 export const createGitCheckIgnoreTimeoutMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
-  return 2500;
+  // The strict plain-decimal judgement lives in shared/parse-int.js (design
+  // #802 phase 2, #804): a bare Number(...) would silently honour '' and ' '
+  // as 0 (disarming the check-ignore kill timeout), '1e3' as 1000, '0x10' as
+  // 16, and '5.9' as a fractional timeout. An explicit '0' still disables
+  // the timeout.
+  // The upper bound is Node's timer maximum (2^31 - 1 ms): a larger delay
+  // fires after ~1 ms instead, which would kill every check-ignore child
+  // immediately rather than giving it the configured time.
+  return parseBoundedIntWithDefault(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS, 2500, 0, 2_147_483_647);
 };
 
 export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn }) => {
@@ -112,16 +124,30 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
     const matchAll = normalizedQuery.length === 0;
     const queue = [rootPath];
     const visited = new Set([rootPath]);
+    // The shared traversal budget (design #1391, #1393) owns this walk's
+    // counting: directories admitted and files inspected. The root is the
+    // first directory the walk enters, so it is consulted first, matching
+    // the visited set it seeds.
+    const budget = createTraversalBudget({
+      maxDirs: FILE_SEARCH_MAX_VISITED_DIRS,
+      maxEntries: FILE_SEARCH_MAX_VISITED_FILES,
+    });
+    budget.visitDir();
     const shouldRespectGitignore = respectGitignore !== false;
     // An empty query stops at `limit` candidates: any file serves. A query
     // must keep walking until the tree or the inspected-file ceiling is
     // reached: weak shallow matches otherwise exhaust a candidate budget
     // before exact deeper matches are ever visited.
     const candidates = [];
-    let inspectedFiles = 0;
     const reachedSearchStop = () => (matchAll
       ? candidates.length >= limit
-      : inspectedFiles >= FILE_SEARCH_MAX_VISITED_FILES);
+      : budget.visitedEntries >= FILE_SEARCH_MAX_VISITED_FILES);
+    // The budget holds every directory that will ever be read, so
+    // refusing enqueues at its directory ceiling bounds the whole walk: a
+    // directory-heavy tree cannot grow the queue or the visited set past
+    // it, while directories already queued are still read, so results
+    // collected up to the ceiling stay complete for the directories that
+    // were visited. The visited set itself only dedupes now.
 
     while (queue.length > 0 && !reachedSearchStop()) {
       const batch = queue.splice(0, FILE_SEARCH_MAX_CONCURRENCY);
@@ -148,6 +174,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
               });
 
               let stdout = '';
+              const stdoutDecoder = new StringDecoder('utf8');
               let settled = false;
               let timeout = null;
               const finish = (value) => {
@@ -167,8 +194,8 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
                 }, gitCheckIgnoreTimeoutMs);
               }
 
-              child.stdout.on('data', (data) => { stdout += data.toString(); });
-              child.on('close', () => finish(stdout));
+              child.stdout.on('data', (data) => { stdout += stdoutDecoder.write(data); });
+              child.on('close', () => finish(stdout + stdoutDecoder.end()));
               child.on('error', () => finish(''));
             });
 
@@ -203,7 +230,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
             if (shouldSkipSearchDirectory(entryName, includeHiddenEntries)) {
               continue;
             }
-            if (!visited.has(entryPath)) {
+            if (!visited.has(entryPath) && budget.visitDir()) {
               visited.add(entryPath);
               queue.push(entryPath);
             }
@@ -216,7 +243,10 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
 
           const relativePath = normalizeRelativeSearchPath(rootPath, entryPath, path);
           const extension = entryName.includes('.') ? entryName.split('.').pop()?.toLowerCase() : undefined;
-          inspectedFiles += 1;
+          // Count the inspected file against the budget's entries
+          // dimension; reachedSearchStop reads that counter, so the
+          // consultation is the count, not a second gate.
+          budget.visitEntry();
 
           if (matchAll) {
             candidates.push({

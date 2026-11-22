@@ -1,3 +1,5 @@
+import { constants as fsConstants } from 'node:fs';
+
 /**
  * Where this server keeps the files its managed OpenCode child reads: the
  * generated agent-tool plugin and the managed config layer.
@@ -75,11 +77,38 @@ export const prepareInstanceDir = async ({
 
 const OWNER_FILE = 'owner';
 
+// The server writes the owner as one pid line (`${pid}\n`), so anything
+// past a few dozen bytes is not an owner file this code wrote. The cap is
+// enforced on the opened handle during the read, and the open is
+// non-blocking on POSIX: this read runs for every instance folder on the
+// startup path, before the listener exists, so a FIFO or a grown file at
+// an owner path must refuse promptly into the fallback instead of
+// wedging or buffering whole (#1793).
+const OWNER_FILE_MAX_BYTES = 64;
+const OWNER_OPEN_FLAGS = fsConstants.O_RDONLY | (process.platform === 'win32' ? 0 : fsConstants.O_NONBLOCK);
+
 // The pid in `owner` when a server claimed the folder, otherwise the pid it is named after.
+// Every refusal — missing, unreadable, non-regular, over-cap — takes the fallback.
 const readOwner = async (fsPromises, ownerPath, fallback) => {
-  const text = await fsPromises.readFile(ownerPath, 'utf8').catch(() => '');
-  const owner = Number.parseInt(text.trim(), 10);
-  return Number.isInteger(owner) && owner > 0 ? owner : fallback;
+  let handle;
+  try {
+    handle = await fsPromises.open(ownerPath, OWNER_OPEN_FLAGS);
+  } catch {
+    return fallback;
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > OWNER_FILE_MAX_BYTES) return fallback;
+    const buffer = Buffer.alloc(OWNER_FILE_MAX_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > OWNER_FILE_MAX_BYTES) return fallback;
+    const owner = Number.parseInt(buffer.toString('utf8', 0, bytesRead).trim(), 10);
+    return Number.isInteger(owner) && owner > 0 ? owner : fallback;
+  } catch {
+    return fallback;
+  } finally {
+    await handle.close().catch(() => {});
+  }
 };
 
 const isProcessAlive = (pid) => {

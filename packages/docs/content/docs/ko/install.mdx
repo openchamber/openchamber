@@ -36,3 +36,16 @@ CLI가 출력한 URL(보통 `http://localhost:3000`)을 여세요. OpenChamber �
 ## 모바일
 
 TestFlight로 iPhone 앱을, 최신 릴리스에서 Android 앱을 설치한 뒤 컴퓨터와 페어링하세요. [모바일 앱 & PWA](/ko/mobile/)에서 두 단계를 모두 안내합니다.
+
+## Nix
+
+NixOS나 Nix가 있는 모든 Linux에서는 OpenChamber 저장소의 flake가 동일한 앱을 빌드합니다:
+
+```bash
+nix run github:openchamber/openchamber        # http://localhost:3000 웹 서버
+nix run github:openchamber/openchamber#gui    # 데스크톱 앱
+```
+
+flake는 `packages.openchamber`와 `packages.openchamber-desktop`, 그리고 `host`, `port`, `openFirewall`, `uiPasswordFile`를 갖춘 `nixosModules.openchamber` systemd 모듈도 제공합니다. 비밀번호 파일은 systemd의 `LoadCredential`를 통해 읽히므로, root 소유 0400 비밀 파일이 기본 동적 사용자로 동작합니다.
+
+업데이트는 flake를 통해 이루어집니다. 패키지에 포함된 OpenCode CLI는 인앱 업데이터가 꺼져 있습니다. Nix 스토어 경로는 스스로 업데이트할 수 없기 때문입니다. 업데이트하려면 flake를 가져와 다시 빌드하세요.

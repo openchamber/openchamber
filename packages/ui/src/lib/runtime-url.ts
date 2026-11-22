@@ -17,7 +17,7 @@ export interface RuntimeUrlResolver {
   assetWithUrlToken(path: string, token: string, query?: RuntimeUrlQuery): string;
   auth(path: string, query?: RuntimeUrlQuery): string;
   health(query?: RuntimeUrlQuery): string;
-  rawFile(path: string, options?: { download?: boolean; allowOutsideWorkspace?: boolean; outsideFileGrant?: string }): string;
+  rawFile(path: string, options?: { download?: boolean; allowOutsideWorkspace?: boolean }): string;
   sse(path: string, query?: RuntimeUrlQuery): string;
   websocket(path: string, query?: RuntimeUrlQuery): string;
 }
@@ -164,7 +164,6 @@ export const createRuntimeUrlResolver = (config: RuntimeUrlConfig = {}): Runtime
       path,
       download: options?.download === true ? true : undefined,
       allowOutsideWorkspace: options?.allowOutsideWorkspace === true ? true : undefined,
-      outsideFileGrant: options?.outsideFileGrant,
     }),
     sse: (path, query) => {
       const target = withUrlAuth(realtime(path, query));

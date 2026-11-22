@@ -55,6 +55,36 @@ describe('scheduled-task service list', () => {
     expect(projectConfigRuntime.listScheduledTasks).not.toHaveBeenCalled();
   });
 
+  it('collects the targets of enabled tasks and only those', async () => {
+    const { service, scheduledTasksRuntime } = createService({
+      projectConfigRuntime: {
+        listScheduledTasks: vi.fn(async () => [
+          { id: 'task-a', enabled: true, targetSessionId: 'ses_target_a' },
+          { id: 'task-b', targetSessionId: 'ses_target_b' },
+          { id: 'task-c', enabled: false, targetSessionId: 'ses_disabled' },
+          { id: 'task-d', enabled: true },
+        ]),
+      },
+    });
+
+    await expect(service.existingSessionTargetIds()).resolves.toEqual(new Set(['ses_target_a', 'ses_target_b']));
+    // The read must not sync the project: syncing re-arms timers and can
+    // cancel a run that is due within the due-slack window.
+    expect(scheduledTasksRuntime.syncProject).not.toHaveBeenCalled();
+  });
+
+  it('does not report a partial target set when a scope cannot be read', async () => {
+    const { service } = createService({
+      projectConfigRuntime: {
+        listScheduledTasks: vi.fn(async () => {
+          throw new Error('stored tasks unreadable');
+        }),
+      },
+    });
+
+    await expect(service.existingSessionTargetIds()).rejects.toThrow('stored tasks unreadable');
+  });
+
   it('surfaces reconciliation failure instead of returning a stale list', async () => {
     const syncError = new Error('loop reconciliation failed');
     const { service, projectConfigRuntime } = createService({

@@ -210,6 +210,19 @@ describe('dispatch results runtime', () => {
     expect(openCode.state.synthetic).toHaveLength(1);
   });
 
+  it('does not let a prototype-named session read as running (#2311)', async () => {
+    const { runtime, openCode } = await createRuntime();
+    openCode.state.sessions['constructor'] = { id: 'constructor', title: 'Proto-named session' };
+    openCode.state.records['constructor'] = [user(11), assistant('Already done', 20), idle('succeeded', 30)];
+    openCode.state.children['constructor'] = [];
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'constructor', dispatchedAt: 10 });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([
+      expect.objectContaining({ sessionID: 'ses_parent', text: expect.stringContaining('Already done') }),
+    ]);
+    expect(runtime.pending()).toEqual([]);
+  });
+
   it('waits for the dispatched session\'s subagents before calling the turn over', async () => {
     const { runtime, openCode } = await createRuntime();
     openCode.state.records.ses_child.push(user(11), assistant('Waiting on a subagent', 12), idle('succeeded', 13));
@@ -352,8 +365,183 @@ describe('dispatch results runtime', () => {
     expect(runtime.pending()).toEqual([]);
   });
 
+  it('keeps a file of the wrong shape aside instead of overwriting it', async () => {
+    const dataDir = await makeDataDir();
+    await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), JSON.stringify({ version: 1 }));
+    const { runtime } = await createRuntime({ dataDir });
+    await runtime.load();
+    const files = await fs.readdir(dataDir);
+    expect(files.some((name) => name.startsWith('dispatch-results.json.corrupt-'))).toBe(true);
+    expect(runtime.pending()).toEqual([]);
+  });
+
+  it('reads an empty file as nothing pending and persists over it', async () => {
+    const dataDir = await makeDataDir();
+    await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), '');
+    const { runtime } = await createRuntime({ dataDir });
+    await runtime.load();
+    expect(runtime.pending()).toEqual([]);
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    const files = await fs.readdir(dataDir);
+    expect(files.some((name) => name.startsWith('dispatch-results.json.corrupt-'))).toBe(false);
+    const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'dispatch-results.json'), 'utf8'));
+    expect(stored.entries).toHaveLength(1);
+  });
+
+  it('refuses to treat the file as empty when preserving it fails', async () => {
+    const dataDir = await makeDataDir();
+    await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), '{ not json');
+    const fsPromises = {
+      ...fs,
+      rename: async () => {
+        throw new Error('rename blocked');
+      },
+    };
+    const { runtime } = await createRuntime({ dataDir, fsPromises });
+    await expect(runtime.load()).rejects.toThrow('refusing to treat it as empty');
+    // The bytes are still live at the store path: nothing overwrote them.
+    expect(await fs.readFile(path.join(dataDir, 'dispatch-results.json'), 'utf8')).toBe('{ not json');
+  });
+
+  it('refuses to treat the file as empty when a valid replacement lands on every read attempt', async () => {
+    const dataDir = await makeDataDir();
+    await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), '{ not json');
+    const replacement = JSON.stringify({ version: 1, entries: [] });
+    let reads = 0;
+    const fsPromises = {
+      ...fs,
+      readFile: async (filePath, encoding) => {
+        if (!String(filePath).endsWith('dispatch-results.json')) return fs.readFile(filePath, encoding);
+        reads += 1;
+        // The store's own read judges the bytes malformed; by the time
+        // preservation re-reads them, a valid replacement has landed, so
+        // every attempt answers 'replaced' and the loop runs out.
+        return reads % 2 === 1 ? '{ not json' : replacement;
+      },
+    };
+    const { runtime } = await createRuntime({ dataDir, fsPromises });
+    await expect(runtime.load()).rejects.toThrow('refusing to treat it as empty');
+    // Writes stay off: a registration re-runs the load and refuses too,
+    // rather than persisting over the unread replacement.
+    await expect(runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 })).rejects.toThrow(
+      'refusing to treat it as empty',
+    );
+    expect(runtime.pending()).toEqual([]);
+  });
+
+  it('does not resurrect a rolled-back registration through a queued snapshot', async () => {
+    const dataDir = await makeDataDir();
+    let writes = 0;
+    const fsPromises = {
+      ...fs,
+      writeFile: async (...args) => {
+        writes += 1;
+        if (writes === 1) throw new Error('no space left on device');
+        return fs.writeFile(...args);
+      },
+    };
+    const { runtime, openCode } = await createRuntime({ dataDir, fsPromises });
+    openCode.state.sessions.ses_first = { id: 'ses_first', title: 'First' };
+    openCode.state.sessions.ses_second = { id: 'ses_second', title: 'Second' };
+    // Two registrations overlap: the first write fails transiently while
+    // the second registration is already queued behind it. The first
+    // caller is refused and its entry rolled back; the queued write must
+    // not carry the rejected entry back onto disk (#1503).
+    const refused = runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_first', dispatchedAt: 10 });
+    const accepted = runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_second', dispatchedAt: 11 });
+    await expect(refused).rejects.toThrow('no space left on device');
+    await accepted;
+    await runtime.flush();
+    expect(runtime.pending().map((entry) => entry.sessionId)).toEqual(['ses_second']);
+    const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'dispatch-results.json'), 'utf8'));
+    expect(stored.entries.map((entry) => entry.sessionId)).toEqual(['ses_second']);
+  });
+
+  it('does not commit a registration whose own write fails after an earlier write succeeded', async () => {
+    const dataDir = await makeDataDir();
+    let writes = 0;
+    const fsPromises = {
+      ...fs,
+      writeFile: async (...args) => {
+        writes += 1;
+        if (writes === 2) throw new Error('no space left on device');
+        return fs.writeFile(...args);
+      },
+    };
+    const { runtime, openCode } = await createRuntime({ dataDir, fsPromises });
+    openCode.state.sessions.ses_first = { id: 'ses_first', title: 'First' };
+    openCode.state.sessions.ses_second = { id: 'ses_second', title: 'Second' };
+    // The mirror image of the queued-snapshot case: two registrations
+    // overlap and only the second write fails. The first registration is
+    // durable; the second is refused, and no earlier write may already
+    // have committed its entry to disk (#1503).
+    const accepted = runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_first', dispatchedAt: 10 });
+    const refused = runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_second', dispatchedAt: 11 });
+    await accepted;
+    await expect(refused).rejects.toThrow('no space left on device');
+    await runtime.flush();
+    expect(runtime.pending().map((entry) => entry.sessionId)).toEqual(['ses_first']);
+    const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'dispatch-results.json'), 'utf8'));
+    expect(stored.entries.map((entry) => entry.sessionId)).toEqual(['ses_first']);
+  });
+
+  it('refuses to register an entry whose write is refused', async () => {
+    const dataDir = await makeDataDir();
+    let failWrites = true;
+    const fsPromises = {
+      ...fs,
+      writeFile: async (...args) => {
+        if (failWrites) throw new Error('no space left on device');
+        return fs.writeFile(...args);
+      },
+    };
+    const { runtime } = await createRuntime({ dataDir, fsPromises });
+    await expect(runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 })).rejects.toThrow(
+      'no space left on device',
+    );
+    // The refused entry is not held as pending: it existed only in memory,
+    // so a restart would have dropped it while the caller waited (#1503).
+    expect(runtime.pending()).toEqual([]);
+    // The shared write chain is not poisoned by the refusal: once writes
+    // land again, a registration succeeds and persists.
+    failWrites = false;
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    expect(runtime.pending()).toHaveLength(1);
+    const stored = JSON.parse(await fs.readFile(path.join(dataDir, 'dispatch-results.json'), 'utf8'));
+    expect(stored.entries).toHaveLength(1);
+  });
+
   it('refuses an entry that would report a session to itself', async () => {
     const { runtime } = await createRuntime();
     await expect(runtime.register({ parentSessionId: 'ses_same', sessionId: 'ses_same', dispatchedAt: 1 })).rejects.toThrow('itself');
+  });
+});
+
+describe('buildDispatchResultMessage surrogate-pair cut (#1908)', () => {
+  const EMOJI = '\u{1F600}';
+  const build = (text) => buildDispatchResultMessage({
+    sessionId: 'ses_cut',
+    title: '',
+    outcome: { state: 'completed', text, errorMessage: '' },
+  }).text;
+
+  it('never ends the 50,000-character cut on a lone high surrogate', () => {
+    const message = build(`${'a'.repeat(49_999)}${EMOJI}${'b'.repeat(100)}`);
+    expect(message).toContain('a'.repeat(49_999));
+    expect(message).not.toContain(EMOJI);
+    expect(message).toContain('[Cut at 50000 characters; read the rest with session.messages for ses_cut.]');
+    expect(Buffer.from(message, 'utf8').toString('utf8')).toBe(message);
+  });
+
+  it('keeps a pair that fits whole inside the limit', () => {
+    const message = build(`${'a'.repeat(49_998)}${EMOJI}${'b'.repeat(100)}`);
+    expect(message).toContain(`${'a'.repeat(49_998)}${EMOJI}`);
+    expect(Buffer.from(message, 'utf8').toString('utf8')).toBe(message);
+  });
+
+  it('cuts plain text at exactly the limit', () => {
+    const message = build('a'.repeat(50_100));
+    expect(message).toContain('a'.repeat(50_000));
+    expect(message).not.toContain('a'.repeat(50_001));
   });
 });

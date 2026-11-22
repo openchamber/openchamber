@@ -20,13 +20,29 @@ import { requestedDirectories } from './dispatcher.js';
 
 import { SpaceError } from './errors.js';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { archivedChatOf, chatIdSchema } from './space-opencode.js';
 
 // The maintainer's call of 2026-09-30: at most this many chats of one space go to the archive.
 export const ARCHIVE_MAX_CHATS = 1000;
+// One archive entry on disk, read at server startup. Its shape is small by
+// construction: at most ARCHIVE_MAX_CHATS chat ids, each at most 68 ASCII
+// characters (about 70 KiB of JSON for the full list), a name of at most 200
+// characters, and a project directory path. A 1 MiB cap leaves substantial
+// headroom for all of that while keeping a single overgrown or non-regular
+// entry from being buffered whole — or, for a FIFO, from blocking startup.
+export const ARCHIVE_ENTRY_MAX_BYTES = 1024 * 1024;
 // All the chats of one space are taken out within this, however slowly the space answers; the
 // rest counts as not saved, so a space cannot hold its own delete.
 const SAVE_TIMEOUT_MS = 30 * 60_000;
+// The total staging budget for one save (#2321). The per-chat cap
+// (CHAT_EXPORT_MAX_BYTES, 256 MiB in space-opencode.js) times the chat cap
+// (ARCHIVE_MAX_CHATS, 1000) would otherwise let one space delete stage
+// ~256 GiB in .incoming-<spaceId> before the all-or-nothing refusal is even
+// reached. Four per-chat caps' worth of archive is generous for real chats
+// and bounds the staged bytes absolutely; a chat that would cross the
+// budget counts as not saved, like one that runs past the deadline.
+export const ARCHIVE_MAX_TOTAL_BYTES = 4 * 256 * 1024 * 1024;
 // A title from a space is shown as text; this much of it is enough to name the chat.
 const TITLE_SHOWN_CHARACTERS = 200;
 
@@ -38,7 +54,7 @@ const archiveEntrySchema = z.object({
   name: z.string().max(200),
   projectDirectory: z.string().nullable(),
   archivedAt: z.number().int().nonnegative(),
-  chats: z.array(chatIdSchema),
+  chats: z.array(chatIdSchema).max(ARCHIVE_MAX_CHATS),
 });
 
 // A request that would run or change a chat, by the session id in its path. Reads pass, and so
@@ -67,7 +83,7 @@ const titleShown = (title) => {
  * `hostOpenCode.importChat(chat)` imports one chat into the host's OpenCode and
  * `hostOpenCode.removeChat(id)` deletes one again, for a save that is taken back.
  */
-export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, now = () => Date.now() }) {
+export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, now = () => Date.now(), maxStagedBytes = ARCHIVE_MAX_TOTAL_BYTES }) {
   const root = path.join(dataDir, 'spaces', 'archive');
   const directoryOf = (spaceId) => path.join(root, spaceId);
   const entryFileOf = (spaceId) => path.join(root, `${spaceId}.json`);
@@ -85,7 +101,16 @@ export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, no
     for (const name of names) {
       if (!name.endsWith('.json')) continue;
       try {
-        const entry = archiveEntrySchema.parse(JSON.parse(fs.readFileSync(path.join(root, name), 'utf8')));
+        // Judged from the opened handle through the shared bounded reader:
+        // an over-cap or non-regular entry takes the same warn-and-skip
+        // path as a malformed one, and a FIFO never blocks startup.
+        const read = readBoundedFileSync(path.join(root, name), ARCHIVE_ENTRY_MAX_BYTES);
+        if (!read.ok) {
+          const refused = new Error(read.reason);
+          refused.code = read.code;
+          throw refused;
+        }
+        const entry = archiveEntrySchema.parse(JSON.parse(read.buffer.toString('utf8')));
         entries.set(entry.spaceId, entry);
       } catch (error) {
         logger.warn?.(`[spaces] an archive entry could not be read: ${name}: ${error?.code ?? 'malformed'}`);
@@ -216,6 +241,7 @@ export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, no
     fs.mkdirSync(incoming, { recursive: true, mode: 0o700 });
     try {
       const taken = new Map();
+      let stagedBytes = 0;
       for (const chat of chosen) {
         if (now() > deadline) {
           failed += 1;
@@ -223,7 +249,22 @@ export function createSpaceArchive({ dataDir, hostOpenCode, logger = console, no
         }
         try {
           const exported = await source.exportChat(chat.id);
-          fs.writeFileSync(path.join(incoming, `${chat.id}.json`), JSON.stringify(exported), { mode: 0o600 });
+          const serialized = JSON.stringify(exported);
+          const bytes = Buffer.byteLength(serialized);
+          if (stagedBytes + bytes > maxStagedBytes) {
+            failed += 1;
+            // A strict save is refused as soon as any chat fails, so taking
+            // out the remaining chats would only waste the exports: stop.
+            // A lenient save keeps going - a later, smaller chat may fit.
+            if (!allowUnsaved) {
+              logger.warn?.(`[spaces] chat ${chat.id} of space ${spaceId} was not taken out: the archive staging budget of ${maxStagedBytes} bytes is exhausted (${stagedBytes} already staged)`);
+              break;
+            }
+            logger.warn?.(`[spaces] chat ${chat.id} of space ${spaceId} was not taken out: the archive staging budget of ${maxStagedBytes} bytes is exhausted (${stagedBytes} already staged)`);
+            continue;
+          }
+          fs.writeFileSync(path.join(incoming, `${chat.id}.json`), serialized, { mode: 0o600 });
+          stagedBytes += bytes;
           taken.set(chat.id, exported.info.parentID ?? null);
         } catch (error) {
           if (error?.code === 'chat_too_large') tooLarge.push(titleShown(chat.title) ?? chat.id);

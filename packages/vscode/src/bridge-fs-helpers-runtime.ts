@@ -6,9 +6,25 @@ import { execGit } from './bridge-git-process-runtime';
 
 const MAX_FILE_ATTACH_SIZE_BYTES = 20 * 1024 * 1024;
 
-const createGitCheckIgnoreTimeoutMs = () => {
-  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
-  if (Number.isFinite(raw) && raw >= 0) return raw;
+// An env value is judged by its whole text, not by what `Number(...)` can
+// reinterpret: '' or ' ' must not read as 0, and '1e3', '0x10' or '5.9' must
+// not become a number the user never wrote. The web copies of these readers
+// judge the same variables this way (`packages/web/server/lib/fs/routes.js`).
+const parsePlainDecimalInt = (raw: string | undefined): number | null => {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+};
+
+export const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = parsePlainDecimalInt(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  // A delay above Node's timer maximum (2^31 - 1 ms) fires after ~1 ms
+  // instead, so a larger configured timeout falls back to the default
+  // rather than killing every check-ignore child immediately.
+  if (raw !== null && raw >= 0 && raw <= 2_147_483_647) return raw;
   return 2500;
 };
 
@@ -103,12 +119,18 @@ export const readUriAsAttachment = async (
     }
 
     const bytes = await vscode.workspace.fs.readFile(uri);
+    // The file can grow between the stat and the read; never hand back more
+    // than the cap even when the stat said it fit (the gitService.ts diff
+    // path guards the same race). Report the size actually read below.
+    if (bytes.byteLength > MAX_FILE_ATTACH_SIZE_BYTES) {
+      return { skipped: { name, reason: 'File exceeds 20MB limit' } };
+    }
     const ext = path.extname(name).toLowerCase();
     const mimeType = guessMimeTypeFromExtension(ext);
     const base64 = Buffer.from(bytes).toString('base64');
     const dataUrl = `data:${mimeType};base64,${base64}`;
 
-    return { file: { name, mimeType, size, dataUrl } };
+    return { file: { name, mimeType, size: bytes.byteLength, dataUrl } };
   } catch (error) {
     return { skipped: { name, reason: error instanceof Error ? error.message : 'Failed to read file' } };
   }
@@ -213,6 +235,7 @@ const FILE_SEARCH_EXCLUDED_DIRS = new Set([
 ]);
 
 const FILE_SEARCH_MAX_VISITED_FILES = 10_000;
+const FILE_SEARCH_MAX_VISITED_DIRS = 50_000;
 
 const shouldSkipSearchDirectory = (name: string, includeHidden: boolean) => {
   if (!name) {
@@ -311,6 +334,12 @@ const searchFilesystemFiles = async (
   const reachedSearchStop = () => (matchAll
     ? candidates.length >= limit
     : inspectedFiles >= FILE_SEARCH_MAX_VISITED_FILES);
+  // Mirrors the web server's directory ceiling in `search.js`: the visited
+  // set holds every directory that will ever be read, so refusing enqueues
+  // at the ceiling bounds the whole walk (including the empty-query path,
+  // which passes no time budget), while directories already queued are
+  // still read to completion.
+  const directoryVisitCapReached = () => visited.size >= FILE_SEARCH_MAX_VISITED_DIRS;
   const MAX_CONCURRENCY = 10;
 
   while (queue.length > 0 && !reachedSearchStop()) {
@@ -349,7 +378,7 @@ const searchFilesystemFiles = async (
           if (shouldSkipSearchDirectory(entryName, includeHidden)) {
             continue;
           }
-          if (!visited.has(absolute)) {
+          if (!visited.has(absolute) && !directoryVisitCapReached()) {
             visited.add(absolute);
             queue.push(entryUri);
           }
@@ -507,6 +536,46 @@ export const searchDirectory = async (
   return searchFilesystemFiles(rootPath, sanitizedQuery, limit, includeHidden, respectGitignore, 1500);
 };
 
+// The models.dev catalog is several megabytes; the cap is generous on purpose
+// (16 MiB), matching the web copy's MODELS_DEV_CATALOG_MAX_BYTES
+// (`packages/web/server/lib/opencode/models-metadata.js`): the 8 s deadline
+// bounds time, the cap bounds memory, and an over-cap body throws like a fetch
+// failure so the api:models/metadata error shape applies.
+export const MODELS_DEV_CATALOG_MAX_BYTES = 16 * 1024 * 1024;
+
+// The bounded read the web copy gets from readBoundedResponseText
+// (`packages/web/server/lib/shared/response-body.js`), mirrored here: a
+// declared length past the cap is rejected up front, and the stream is
+// cancelled as soon as it crosses the limit, so a body with no declared
+// length is never buffered whole in the extension host.
+const readBoundedResponseText = async (
+  response: Response,
+  maxBytes: number,
+): Promise<{ tooLarge: false; text: string } | { tooLarge: true }> => {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    return { tooLarge: true };
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return { tooLarge: false, text: '' };
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return { tooLarge: true };
+    }
+    chunks.push(value);
+  }
+  return { tooLarge: false, text: Buffer.concat(chunks, size).toString('utf8') };
+};
+
 export const fetchModelsMetadata = async () => {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
   const timeout = controller ? setTimeout(() => controller.abort(), 8000) : undefined;
@@ -518,7 +587,11 @@ export const fetchModelsMetadata = async () => {
     if (!response.ok) {
       throw new Error(`models.dev responded with ${response.status}`);
     }
-    return await response.json();
+    const bounded = await readBoundedResponseText(response, MODELS_DEV_CATALOG_MAX_BYTES);
+    if (bounded.tooLarge) {
+      throw new Error('models.dev response exceeded size limit');
+    }
+    return JSON.parse(bounded.text);
   } finally {
     if (timeout) {
       clearTimeout(timeout);

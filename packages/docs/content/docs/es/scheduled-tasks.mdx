@@ -22,6 +22,48 @@ Puedes ejecutar cualquier tarea de inmediato con **run now** para comprobar que 
 
 Marca **Ejecutar como objetivo** para que la ejecución persiga su prompt hasta completarlo en lugar de detenerse tras una respuesta — consulta [Objetivos de sesión](/session-goals/).
 
+## Bucles: tareas programadas como archivos markdown
+
+Un **bucle** es una tarea programada definida como un archivo markdown portable que puedes guardar en tu repositorio. Deja un archivo en `.agents/loops/` y abre la lista de tareas programadas para sincronizarlo, sin reiniciar el servidor:
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Dónde viven los archivos
+
+- **Ámbito del proyecto** — `.agents/loops/*.md` en el directorio del proyecto o en cualquier directorio antecesor hasta la raíz del worktree de git.
+- **Ámbito del usuario** — `~/.agents/loops/*.md` se aplica a cada proyecto que abras.
+
+Si un bucle de proyecto y un bucle de usuario comparten nombre, gana el bucle de proyecto.
+
+### Campos
+
+| Campo | Significado |
+|---|---|
+| `name` | Nombre de la tarea (obligatorio, máx. 80 caracteres). |
+| `schedule` | Expresión cron (obligatoria): los archivos de bucle son solo cron. |
+| `enabled` | Ponlo en `true` para ejecutar. Los bucles están **desactivados por defecto**, así que guardar un archivo nunca empieza a ejecutar una tarea por sí solo. Un bucle que vino con un repositorio también espera hasta que lo actives en Tareas programadas en tu equipo, y de nuevo tras un cambio en su horario, modelo o prompt. Los bucles en `~/.agents/loops` se ejecutan solo con `true`. |
+| `model` | `provider/model` (obligatorio), p. ej. `anthropic/claude-sonnet-4-5`. |
+| `agent` | Agente a usar (opcional). |
+| `timezone` | Zona horaria IANA (opcional, por defecto la zona del servidor). |
+| cuerpo | El prompt de ejecución (obligatorio). Puede ser un comando slash, como `/review src/`. |
+
+### Cómo se comportan los bucles
+
+- El **archivo es la autoridad** mientras exista. **Editar** lo abre en el editor de archivos integrado, el interruptor de activación actualiza su frontmatter, y eliminar la tarea elimina el archivo markdown tras confirmación. **Ejecutar ahora** sigue disponible.
+- El estado en tiempo de ejecución (última ejecución, próxima ejecución, estado) vive en la configuración del proyecto y nunca se escribe de vuelta en el archivo markdown.
+- Renombrar el campo `name` renombra la tarea en el sitio. Si un archivo de bucle falla temporalmente al analizarse (a mitad de una edición, un conflicto de fusión), su tarea se mantiene con la última definición válida hasta que el archivo se arregle.
+- Los horarios `daily`/`weekly`/`once` y los ajustes de objetivos siguen siendo solo de la interfaz; los archivos de bucle son siempre cron.
+
 ## Cómo se ve el éxito
 
 Después de una ejecución, la tarea muestra cuándo se ejecutó por última vez, si tuvo éxito y un enlace a la sesión que creó. Si una ejecución falla, el error también se muestra ahí.

@@ -4,9 +4,13 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 1_000;
+// 1,000 records (DEFAULT_MAX_RECORDS) of audit state, each with its plan,
+// steps and result — 8 MiB is the named cap for the whole state file.
+const AUDIT_STATE_MAX_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TERMINAL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const UNSTARTED_GIT_PLAN_TTL_MS = 60 * 60 * 1000;
 const EXECUTORS = new Set(['openchamber-server-git', 'provider-api']);
@@ -206,13 +210,23 @@ export function createSourceControlAuditStore({
     writes = next.then(() => undefined, () => undefined);
     return next;
   };
+// Bounded state read (#1663): the shared bounded reader judges the file
+// from its opened handle under a named cap, so an over-cap file is refused
+// before parsing and a FIFO is refused promptly instead of wedging this
+// store's serialized chain. The cap is sized from the store's own record
+// bound below. Missing still answers the empty state; over-cap and
+// non-regular fail closed as the store's typed invalid-state error (never
+// the empty state, which would silently discard the records this store is
+// the safety layer for). The bounded reader goes through fsImpl like the
+// write and lock paths (the reader's `fs` option, #2015), so a store
+// built on an injected filesystem reads from that filesystem too.
   const readState = async () => {
-    try {
-      return parseState(JSON.parse(await fsImpl.readFile(filePath, 'utf8')));
-    } catch (error) {
-      if (error?.code === 'ENOENT') return emptyState();
-      throw error;
+    const result = await readBoundedFile(filePath, AUDIT_STATE_MAX_BYTES, { fs: fsImpl });
+    if (!result.ok) {
+      if (result.reason === 'missing') return emptyState();
+      throw invalidStore();
     }
+    return parseState(JSON.parse(result.buffer.toString('utf8')));
   };
   const writeState = async (state) => {
     await fsImpl.mkdir(path.dirname(filePath), { recursive: true });

@@ -253,6 +253,48 @@ describe('createSessionMetadataStore', () => {
       expect(fs.readdirSync(dataDir).some((name) => name.startsWith('sessions-metadata.json.corrupt-'))).toBe(true);
     });
 
+    it('treats an empty file as missing: nothing to migrate, no preservation copy', async () => {
+      const openCode = createFakeOpenCode({ ses_1: { a: 1 } });
+      const dataDir = makeDataDir();
+      writeLegacy(dataDir, '');
+      const { store } = makeStore(openCode, dataDir);
+
+      await expect(store.get('ses_1')).resolves.toEqual({ a: 1 });
+      await expect(store.listUnmigrated()).resolves.toEqual({});
+      expect(fs.readdirSync(dataDir)).toEqual(['sessions-metadata.json']);
+    });
+
+    it('moves a non-object JSON file aside like malformed bytes', async () => {
+      const openCode = createFakeOpenCode({ ses_1: { a: 1 } });
+      const dataDir = makeDataDir();
+      writeLegacy(dataDir, '[1, 2]');
+      const { store } = makeStore(openCode, dataDir);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await expect(store.get('ses_1')).resolves.toEqual({ a: 1 });
+      expect(fs.readdirSync(dataDir).some((name) => name.startsWith('sessions-metadata.json.corrupt-'))).toBe(true);
+    });
+
+    it('refuses to proceed when a malformed file cannot be preserved', async () => {
+      const openCode = createFakeOpenCode({ ses_1: { a: 1 } });
+      const dataDir = makeDataDir();
+      writeLegacy(dataDir, '{ not json');
+      const fsPromises = {
+        ...fs.promises,
+        readFile: async (target, encoding) => {
+          if (target === legacyFile(dataDir)) return '{ not json';
+          return fs.promises.readFile(target, encoding);
+        },
+        rename: async () => { throw new Error('rename blocked'); },
+      };
+      const store = createSessionMetadataStore({ dataDir, openCode, fsPromises });
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await expect(store.get('ses_1')).rejects.toThrow('could not be preserved');
+      expect(openCode.read).not.toHaveBeenCalled();
+      expect(fs.readFileSync(legacyFile(dataDir), 'utf8')).toBe('{ not json');
+    });
+
     it('refuses to write while the file cannot be read, then recovers', async () => {
       const openCode = createFakeOpenCode({ ses_1: {} });
       const dataDir = makeDataDir();

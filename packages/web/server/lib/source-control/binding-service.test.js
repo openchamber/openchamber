@@ -19,7 +19,22 @@ const createMemoryBindingFs = () => {
     rm: async (file) => { files.delete(file); },
     writeFile: async (file, text) => { files.set(file, text); },
     rename: async (from, to) => { files.set(to, files.get(from)); files.delete(from); },
-    open: async (file) => {
+    open: async (file, flags) => {
+      if (flags !== 'wx') {
+        // Read-shaped open, for the bounded reader the stores now read
+        // through: a handle over the stored content, or ENOENT.
+        if (!files.has(file)) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        const buffer = Buffer.from(files.get(file), 'utf8');
+        return {
+          stat: async () => ({ isFile: () => true, size: buffer.length }),
+          read: async (target, offset, length, position) => {
+            const chunk = buffer.subarray(position, position + length);
+            chunk.copy(target, offset);
+            return { bytesRead: chunk.length };
+          },
+          close: async () => {},
+        };
+      }
       if (files.has(file)) throw Object.assign(new Error('exists'), { code: 'EEXIST' });
       files.set(file, '');
       const stat = { dev: 1n, ino: nextInode++ };

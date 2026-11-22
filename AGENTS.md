@@ -79,6 +79,13 @@ implementation skills unless a specialized subsystem has to be interpreted.
 - Before every commit of source changes, `bun run check:changed` passes. It runs type-check, lint, and dead code (Knip, kept at zero findings), then an anti-slop ratchet: the vendored `anti-slop` oxlint plugin (low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, module mocking) may report no more findings per rule across the changed files than at the base. Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
 - Report exactly what was and was not validated. Static checks alone do not prove runtime, relay, performance, or platform correctness.
 
+## Testing doctrine
+
+- **PBT (property-based testing):** state invariants that must always hold, then let a generator hammer the code with thousands of random inputs to find counterexamples. Where code has meaningful invariants — parsers, serializers, protocol envelopes, sync and state machines — state the invariants and cover them with property tests (fast-check is the standard generator for this stack).
+- **MBT (model-based testing):** where behavior has a spec or design model, generate tests — and their expected results — from the model instead of hand-writing cases only.
+- **Oracles:** the decision procedure that tells you whether actual output matches expected — the hard part of automated testing. Every automated test names its oracle: a reference implementation, the model, an invariant check, or a golden corpus. A test with no decidable oracle is a smell to fix, not ship.
+- Example-based tests remain fine for smoke and acceptance coverage; they do not replace PBT/MBT where those fit.
+
 ## Pull Request Handoff
 
 Before creating or updating a pull request, read `CONTRIBUTING.md` and

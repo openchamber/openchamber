@@ -249,6 +249,11 @@ const RENDER_PARAMETER_PROPERTIES = {
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
+  tiers: { type: 'array', description: 'For render.tierChooser and render.quotaFallback: one { tier, model } object per tier; the model is the candidate for that tier, as provider/model or a bare model id', items: { type: 'object', properties: { tier: { type: 'string' }, model: { type: 'string' } } } },
+  currentTier: { type: 'string', description: 'For render.quotaFallback: the tier whose quota ran out; must be one of the tiers candidates' },
+  currentProvider: { type: 'string', description: 'For render.quotaFallback: the provider whose quota ran out; defaults to the current tier model provider' },
+  resetAt: { type: 'string', description: 'For render.quotaFallback: when the quota resets, as reported by the error, when known' },
+  message: { type: 'string', description: 'For render.quotaFallback: the quota context shown on the card (which provider/quota was hit)' },
 };
 
 // When to act (link an issue, save a memory, draw a page) is stated once, in
@@ -260,8 +265,8 @@ const RENDER_PARAMETER_PROPERTIES = {
 // calls for a worktree depends on how the user works, and users ask for a pull
 // request or for work kept apart rather than for a worktree.
 const CONTROL_TOOL_DESCRIPTION = "OpenChamber projects, sessions and worktrees. One action per call; projectId or directory scope it, default this session's directory. "
-  + "A session you create, send to or fork belongs to the user, who follows and talks to it. Dispatch one when the user asks, even for work related to yours, with any agent, optionally in a new worktree; to delegate part of your own task, use the subagent tool. A dispatch returns at once; returnResult brings its final answer back here as a message. session.send always starts a new prompt. "
-  + "session.moveToWorktree moves this session into a new worktree on a new branch from the default branch, taking the changed files you name in carry. It can help when the checkout looks busy: someone's pull request branch, uncommitted changes, another session here, a branch changed between your messages. Whether that fits depends on how the user works: ask, unless the request already calls for separate work, such as a pull request of its own. Unlike git worktree add, the session moves along and the branch starts from the default branch. "
+  + "A session you create, send to or fork belongs to the user, who follows and talks to it. Dispatch one when the user asks, even for work related to yours, with any agent; session.create puts a new session of a Git project in a new worktree unless newWorktree is false (a pullRequest session always gets its own worktree), and a fork stays in its source's directory; to delegate part of your own task, use the subagent tool. A dispatch returns at once; returnResult brings its final answer back here as a message. session.send always starts a new prompt. "
+  + "session.moveToWorktree moves this session into a new worktree on a new branch from the default branch (or where the user's Settings start agents' worktrees), taking the changed files you name in carry. It can help when the checkout looks busy: someone's pull request branch, uncommitted changes, another session here, a branch changed between your messages. Whether that fits depends on how the user works: ask, unless the request already calls for separate work, such as a pull request of its own. Unlike git worktree add, the session moves along. "
   + "This tool cannot delete sessions or worktrees.";
 
 const SCHEDULE_TOOL_DESCRIPTION = "Scheduled tasks: prompts OpenChamber runs on a schedule, in a new session each run or in targetSessionId. A task is the user's; create or change one when the user asks. One action per call; projectId or directory scope it, default this session's directory.";
@@ -458,9 +463,40 @@ const singleActionSchema = (definition) => ({
  * answer with an empty completion instead of an error, and the `oneOf` branches
  * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false }) => {
+const defaultedActionSchema = (definitions, defaultAction) => {
+  const fullNames = definitions.map((definition) => definition.action);
+  const bareNames = fullNames.map((action) => action.slice(action.indexOf('.') + 1));
+  return {
+    property: {
+      type: 'string',
+      description: definitions.map((definition) => `${definition.action}: ${definition.description}`).join('; '),
+    },
+    required: [],
+    normalize: String.raw`        if (typeof args.action === "string" && args.action.trim().startsWith("{")) {
+          try {
+            const revived = JSON.parse(args.action)
+            if (revived !== null && typeof revived === "object" && !Array.isArray(revived)) {
+              const { action: revivedAction, parameters: revivedParameters, ...revivedFields } = revived
+              const nested = revivedParameters !== null && typeof revivedParameters === "object" && !Array.isArray(revivedParameters) ? revivedParameters : {}
+              for (const [field, value] of Object.entries({ ...revivedFields, ...nested })) {
+                if (!Object.hasOwn(args, field)) args[field] = value
+              }
+              if (typeof revivedAction === "string") args.action = revivedAction
+            }
+          } catch {}
+        }
+        if (!${JSON.stringify(fullNames)}.includes(args.action) && !${JSON.stringify(bareNames)}.includes(args.action)) args.action = ${JSON.stringify(defaultAction)}
+`,
+  };
+};
+
+const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false, defaultAction = null }) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);
-  const actionSchema = definitions.length === 1 ? singleActionSchema(definitions[0]) : multiActionSchema(definitions);
+  const actionSchema = defaultAction
+    ? defaultedActionSchema(definitions, defaultAction)
+    : definitions.length === 1
+      ? singleActionSchema(definitions[0])
+      : multiActionSchema(definitions);
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
@@ -536,9 +572,51 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
             body: JSON.stringify({ input: args, sessionID: context.sessionID, callID: context.id, tool: ${JSON.stringify(name)} }),
             signal: ${answers ? 'waitSignal' : 'context.signal'},${answers ? ANSWER_FETCH_TIMEOUT : ''}
           })
-          const content = await response.text()
+          // The callback response is read through a bounded stream, not
+          // response.text(): a loopback body with no end would otherwise be
+          // buffered whole into the OpenCode process. The generated source
+          // is a template string with no imports, so the shared bounded-read
+          // primitive cannot be reused and the cap is spelled out here: one
+          // named constant, sized like the codebase's other 16 MiB catalog
+          // caps and generously above any legitimate action result. A body
+          // over the cap is refused while it streams in (the stream is
+          // cancelled as soon as it crosses, and a declared Content-Length
+          // over the cap is refused up front), and the read then returns
+          // null, which falls through to the same invalid-response failure
+          // envelope below - no throw escapes, no partial content returned.
+          // Ordinary actions deliberately get no fetch deadline of their
+          // own: the session signal above aborts them when the session is
+          // stopped, and Bun's fetch idle timeout (about six minutes with
+          // no response) is the intended outer bound for a stalled body; a
+          // shorter deadline would cut legitimate long actions short. The
+          // awaitAnswer wait is separate and keeps its timeout: false.
+          const AGENT_TOOL_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
+          const readBoundedContent = async () => {
+            const declared = Number(response.headers?.get("content-length"))
+            if (Number.isFinite(declared) && declared > AGENT_TOOL_RESPONSE_MAX_BYTES) {
+              await response.body?.cancel().catch(() => {})
+              return null
+            }
+            const reader = response.body?.getReader()
+            if (!reader) return ""
+            const decoder = new TextDecoder()
+            let text = ""
+            let size = 0
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              size += value.byteLength
+              if (size > AGENT_TOOL_RESPONSE_MAX_BYTES) {
+                await reader.cancel().catch(() => {})
+                return null
+              }
+              text += decoder.decode(value, { stream: true })
+            }
+            return text + decoder.decode()
+          }
+          const content = await readBoundedContent()
           let result = null
-          try { result = JSON.parse(content) } catch {}
+          try { if (content !== null) result = JSON.parse(content) } catch {}
           const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
           await progress({ ok: valid && result.ok === true })
           if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
@@ -635,6 +713,11 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       // never showed and an answer had no call to reach.
       codeMode: false,
       answers: true,
+      // render.page stays the default call: it predates the second
+      // action, and page calls that omit the action (or pack it into
+      // a JSON string, the failure the single-action schema's revival
+      // exists for) must keep reaching it.
+      defaultAction: 'render.page',
     }));
   }
 

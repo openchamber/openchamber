@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isPasswordlessSocketOriginAllowed } from './request-security.js';
+import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isLocalDevClientOrigin, isPasswordlessSocketOriginAllowed } from './request-security.js';
 
 const createRuntime = () => createRequestSecurityRuntime({
   readSettingsFromDiskMigrated: async () => ({}),
@@ -81,6 +81,75 @@ describe('request security runtime', () => {
     })).toBe(false);
   });
 
+  test('allows loopback aliases when the server is reached via [::1] with a port', async () => {
+    const runtime = createRuntime();
+    const viaIpv6 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '[::1]:3000' },
+      socket: {},
+    });
+
+    expect(await viaIpv6('http://[::1]:3000')).toBe(true);
+    expect(await viaIpv6('http://localhost:3000')).toBe(true);
+    expect(await viaIpv6('https://evil.example.com')).toBe(false);
+  });
+
+  test('allows loopback aliases when the server is reached via [::1] without a port', async () => {
+    const runtime = createRuntime();
+    const viaIpv6 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '[::1]' },
+      socket: {},
+    });
+
+    expect(await viaIpv6('http://[::1]')).toBe(true);
+    expect(await viaIpv6('http://localhost')).toBe(true);
+    expect(await viaIpv6('https://evil.example.com')).toBe(false);
+  });
+
+  test('allows cross-IP loopback aliases when the server is reached with a port', async () => {
+    const runtime = createRuntime();
+    const viaIpv4 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '127.0.0.1:3000' },
+      socket: {},
+    });
+    const viaIpv6 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '[::1]:3000' },
+      socket: {},
+    });
+
+    expect(await viaIpv4('http://[::1]:3000')).toBe(true);
+    expect(await viaIpv6('http://127.0.0.1:3000')).toBe(true);
+    expect(await viaIpv4('https://evil.example.com')).toBe(false);
+    expect(await viaIpv6('https://evil.example.com')).toBe(false);
+  });
+
+  test('allows cross-IP loopback aliases when the server is reached without a port', async () => {
+    const runtime = createRuntime();
+    const viaIpv4 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '127.0.0.1' },
+      socket: {},
+    });
+    const viaIpv6 = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: '[::1]' },
+      socket: {},
+    });
+
+    expect(await viaIpv4('http://[::1]')).toBe(true);
+    expect(await viaIpv6('http://127.0.0.1')).toBe(true);
+    expect(await viaIpv4('https://evil.example.com')).toBe(false);
+    expect(await viaIpv6('https://evil.example.com')).toBe(false);
+  });
+
+  test('allows the [::1] alias when the server is reached via localhost', async () => {
+    const runtime = createRuntime();
+    const viaLocalhost = (origin) => runtime.isRequestOriginAllowed({
+      headers: { origin, host: 'localhost:3000' },
+      socket: {},
+    });
+
+    expect(await viaLocalhost('http://[::1]:3000')).toBe(true);
+    expect(await viaLocalhost('https://evil.example.com')).toBe(false);
+  });
+
   test('reads the slot for the request port when a browser shares jars across LAN ports', () => {
     const runtime = createRuntime();
     // Two instances on one LAN IP: the browser sends BOTH session cookies to
@@ -124,6 +193,11 @@ describe('request security runtime', () => {
     const devRuntime = createRequestSecurityRuntime({ readSettingsFromDiskMigrated: async () => ({}), allowLocalDevOrigins: true });
     expect(await devRuntime.isRequestOriginAllowed(devPage)).toBe(true);
 
+    expect(isLocalDevClientOrigin('http://[::1]:5173')).toBe(true);
+    expect(isLocalDevClientOrigin('https://[::1]:5173')).toBe(true);
+    expect(isLocalDevClientOrigin('http://[::1]')).toBe(false);
+    expect(isLocalDevClientOrigin('https://evil.example.com:5173')).toBe(false);
+
     expect(allowsLocalDevOrigins({})).toBe(false);
     expect(allowsLocalDevOrigins({ OPENCHAMBER_ALLOW_DEV_ORIGINS: '1' })).toBe(true);
     expect(allowsLocalDevOrigins({ OPENCHAMBER_ELECTRON_DEV: '1' })).toBe(true);
@@ -147,6 +221,8 @@ describe('request security runtime', () => {
   test('lets only the app, its shells and named embedders frame it', () => {
     expect(buildFrameAncestorsPolicy()).toBe("frame-ancestors 'self' openchamber-ui://app capacitor://localhost https://localhost");
     expect(buildFrameAncestorsPolicy({ allowLocalDevOrigins: true })).toContain('http://127.0.0.1:*');
+    expect(buildFrameAncestorsPolicy({ allowLocalDevOrigins: true })).toContain('http://[::1]:*');
+    expect(buildFrameAncestorsPolicy()).not.toContain('[::1]');
     expect(buildFrameAncestorsPolicy({ extra: 'https://dash.example.com, *' })).toMatch(/ https:\/\/dash\.example\.com \*$/);
     // Anything that is not a plain origin stays out of the policy.
     expect(buildFrameAncestorsPolicy({ extra: "https://a.test; script-src 'unsafe-inline'" })).not.toContain('script-src');

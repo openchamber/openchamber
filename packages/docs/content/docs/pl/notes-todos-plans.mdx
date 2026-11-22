@@ -31,6 +31,17 @@ Miejsce na przechowywanie dłuższych planów jako zapisanych plików. Możesz:
 
 Powinieneś wrócić do zakładki Context z zapisaną notatką, odhaczonym zadaniem lub wylistowanym planem — tak poznasz, że się udało.
 
+## Usuwanie i cofanie
+
+Usunięcie notatki, planu lub zapisanej pamięci pokazuje na kilka sekund powiadomienie z przyciskiem **Cofnij**. Wpis znika na dobre dopiero, gdy ten czas upłynie.
+
+## Agenci
+
+Agenci odczytują i aktualizują te same notatki, zadania i plany przez narzędzie wiedzy o projekcie. Poproś agenta, aby zanotował decyzję, dodał zadanie, odhaczył jedno z nich albo utrzymywał plan na bieżąco, a zmiana pojawi się w panelu w momencie, gdy nastąpi. Notatki utworzone przez agenta są oznaczone jako pochodzące od agenta. Gdy agent pisze dla ciebie plan, może otworzyć go przed tobą — tam czytasz go, komentujesz linie i wysyłasz do sesji. Plany to zwykłe pliki Markdown, więc agenci czytają i edytują je jak każdy inny plik. Zaczynają plan od krótkiej listy kontrolnej kroków i odhaczają każdy z nich w trakcie realizacji, a otwarty plan przejmuje zmiany w ciągu kilku sekund, więc jego podgląd pokazuje, jak daleko zaszły prace.
+
+Agent pracuje nad projektem, do którego należy jego sesja, łącznie z worktree. Jeśli agent zmieni notatkę lub plan, gdy w niej piszesz, to, co piszesz, nadpisuje zmianę agenta. Agentom poleca się dołączać przeczytany tekst do notatki lub planu, który zastępują w całości; jeśli zmienił się on od tego czasu, zapis jest odrzucany i agent odczytuje go ponownie.
+
+Narzędzie jest domyślnie włączone. Wyłączysz je w **Settings → General → OpenChamber Tools** opcją **Project knowledge tool**. Jak inne narzędzia OpenChamber, jest dostępne tylko, gdy OpenChamber uruchamia własny serwer OpenCode, a więc nie z serwerem zewnętrznym ani w rozszerzeniu VS Code.
 ## Powiązane
 
 - [Sesje worktree](/pl/worktrees/) — uruchom zadanie w jego własnej gałęzi

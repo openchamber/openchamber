@@ -1,11 +1,14 @@
 import express from 'express';
 import { constants as fsConstants } from 'node:fs';
-import { mintOutsideFileGrant } from '../fs/routes.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { renderPageImageSources } from '../openchamber-control/render-page.js';
 import { isString } from '../shared/guards.js';
+import { readBoundedResponseJson } from '../shared/response-body.js';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS = 10_000;
+// 16 MiB matches the session-list proxy cap and permits large tool messages.
+const OPEN_CODE_MESSAGE_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 // A clip streams by byte ranges on every seek, so it is never read whole.
 const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 const VIDEO_EXTENSION_RE = /\.(?:mp4|m4v|mov|webm)$/i;
@@ -149,24 +152,175 @@ const messageContent = (message) => {
   return [];
 };
 
+// Raw HTML blocks (CommonMark types 1, 3, 4, 5 and the block-tag type 6;
+// comments are type 2 and are handled by the comment state in the
+// collector). The chat renderer escapes a raw HTML block instead of
+// parsing its contents as Markdown, so image syntax inside one is visible
+// text, never a rendered image (#2158). Type 7 (a lone non-block tag) is
+// deliberately not a block here: inside a paragraph it is inline HTML and
+// the surrounding Markdown still renders.
+const HTML_BLOCK_PRE_LIKE = /^\s{0,3}<(pre|script|style|textarea)(?=[\s>]|$)/i;
+const HTML_BLOCK_TAG = /^\s{0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$)/i;
+
+const htmlBlockStart = (line) => {
+  const preLike = HTML_BLOCK_PRE_LIKE.exec(line);
+  if (preLike) return { endTag: preLike[1].toLowerCase() };
+  if (/^\s{0,3}<\?/.test(line)) return { endMark: '?>' };
+  if (/^\s{0,3}<!\[CDATA\[/.test(line)) return { endMark: ']]>' };
+  if (/^\s{0,3}<![A-Z]/.test(line)) return { endMark: '>' };
+  if (HTML_BLOCK_TAG.test(line)) return { endMark: '' };
+  return null;
+};
+
+const htmlBlockEndsOn = (block, line) => {
+  if (block.endTag) return line.toLowerCase().includes(`</${block.endTag}>`);
+  if (block.endMark === '') return line.trim() === '';
+  return line.includes(block.endMark);
+};
+
 const collectMarkdownLinesOutsideCode = (message) => {
   const lines = [];
+  let fence = null;
+  // Length of the backtick run that opened the current inline code span,
+  // or 0 outside one. A CommonMark code span may cross line breaks (and
+  // text parts, like the fence state above), so the state is carried
+  // across lines instead of removing spans per line: a per-line removal
+  // cannot see a span that opens on one line and closes on another, and
+  // the image lines inside it would survive extraction (#2141). An
+  // unclosed span runs to the end of the message, exactly like an
+  // unclosed fence: this collector is a grant gate, so ambiguous code
+  // extent fails closed.
+  let inlineRun = 0;
+  const stripInlineCode = (line) => {
+    let out = '';
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] !== '`') {
+        if (!inlineRun) out += line[i];
+        i += 1;
+        continue;
+      }
+      let j = i;
+      while (j < line.length && line[j] === '`') j += 1;
+      const run = j - i;
+      if (inlineRun) {
+        if (run === inlineRun) inlineRun = 0;
+        i = j;
+        continue;
+      }
+      // Opening run: find its closing run of exactly the same length
+      // later in this line; if there is none, the span opens here and
+      // the rest of the line is code.
+      let closedEnd = -1;
+      for (let k = j; k < line.length;) {
+        if (line[k] !== '`') { k += 1; continue; }
+        let m = k;
+        while (m < line.length && line[m] === '`') m += 1;
+        if (m - k === run) { closedEnd = m; break; }
+        k = m;
+      }
+      if (closedEnd >= 0) {
+        i = closedEnd;
+      } else {
+        inlineRun = run;
+        i = line.length;
+      }
+    }
+    return out;
+  };
+  let inComment = false;
+  let indentedCode = false;
+  let previousBlank = true;
+  let htmlBlock = null;
   for (const part of messageContent(message)) {
     if (part?.type !== 'text' || typeof part.text !== 'string') continue;
-    let fence = null;
     for (const line of part.text.split('\n')) {
-      const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+      const fenceMatch = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
       if (fenceMatch) {
         const marker = fenceMatch[1];
         if (!fence) {
           fence = { char: marker[0], size: marker.length };
-        } else if (marker[0] === fence.char && marker.length >= fence.size) {
+        } else if (
+          marker[0] === fence.char &&
+          marker.length >= fence.size &&
+          // A closing fence is the marker run and nothing else on the
+          // line: CommonMark allows only spaces/tabs after it. A run
+          // followed by other text is fence content, not a closer --
+          // treating it as one would expose image syntax the block
+          // still hides (#2150).
+          /^[ \t]*$/.test(fenceMatch[2])
+        ) {
           fence = null;
         }
+        indentedCode = false;
+        previousBlank = true;
         continue;
       }
       if (fence) continue;
-      lines.push(line.replace(/`+[^`]*`+/g, ''));
+      // Raw HTML block lines never reach the scanner (#2158): the
+      // renderer escapes the block instead of parsing it as Markdown.
+      // The state spans lines and text parts, like the fence state
+      // above; previousBlank still tracks every consumed line so the
+      // indented-code state below resumes correctly when a block ends.
+      if (htmlBlock) {
+        previousBlank = line.trim() === '';
+        if (htmlBlockEndsOn(htmlBlock, line)) htmlBlock = null;
+        continue;
+      }
+      // Indented code blocks (#2151): a line indented by four spaces
+      // (or a tab) opens one when the previous line is blank or the
+      // text just started — an indented line cannot interrupt a
+      // paragraph, so an indented continuation line stays scannable.
+      // The block runs until the first non-blank, less-indented line;
+      // its lines are code, so image syntax in them grants nothing.
+      const blank = line.trim() === '';
+      const indented = /^(?: {4}| {0,3}\t)/.test(line);
+      if (indentedCode) {
+        if (blank || indented) continue;
+        indentedCode = false;
+      } else if (indented && previousBlank && !inlineRun) {
+        indentedCode = true;
+        continue;
+      }
+      previousBlank = blank;
+      // A raw HTML block start inside an HTML comment is comment text,
+      // so starts are recognized only outside comments (#2158).
+      if (!inComment) {
+        const started = htmlBlockStart(line);
+        if (started) {
+          if (!htmlBlockEndsOn(started, line)) htmlBlock = started;
+          continue;
+        }
+      }
+      // HTML comments are not rendered (#2142): image syntax inside one
+      // must not authorize a grant. Comment state spans lines and text
+      // parts, like the fence state above; text outside the comment on
+      // the same line stays visible and is then stripped of inline code
+      // like any other line.
+      let visible = '';
+      let rest = line;
+      while (rest.length > 0) {
+        if (inComment) {
+          const end = rest.indexOf('-->');
+          if (end < 0) {
+            rest = '';
+            break;
+          }
+          inComment = false;
+          rest = rest.slice(end + 3);
+        } else {
+          const start = rest.indexOf('<!--');
+          if (start < 0) {
+            visible += rest;
+            rest = '';
+            break;
+          }
+          visible += rest.slice(0, start);
+          inComment = true;
+          rest = rest.slice(start + 4);
+        }
+      }
+      lines.push(stripInlineCode(visible));
     }
   }
   return lines;
@@ -244,11 +398,11 @@ const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl,
       'x-opencode-directory': encodeURIComponent(directory),
       ...getOpenCodeAuthHeaders(),
     },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(OPEN_CODE_MESSAGE_FETCH_TIMEOUT_MS),
   });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`OpenCode returned ${response.status}`);
-  const message = unwrapOpenCodeResponse(await response.json().catch(() => null));
+  const message = unwrapOpenCodeResponse(await readBoundedResponseJson(response, OPEN_CODE_MESSAGE_RESPONSE_MAX_BYTES));
   return message && typeof message === 'object' && typeof message.id === 'string' ? message : null;
 };
 
@@ -270,7 +424,15 @@ const inspectImage = async ({ source, directory, fsPromises, path }) => {
       fsPromises.realpath(sourcePath),
     ]);
     if (!outsideWorkspace && !isWithin(canonicalPath, canonicalRoot, path)) return { status: 'error' };
-    const handle = await fsPromises.open(canonicalPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    // O_NONBLOCK (POSIX) keeps the open itself from blocking on a FIFO at
+    // the referenced path: the isFile judgement below can only refuse a
+    // non-regular file after the open settles (#1785; the house pattern in
+    // shared/bounded-file-read.js). NOFOLLOW stays: a symlinked source is
+    // judged by its canonical path above, never followed twice.
+    const handle = await fsPromises.open(
+      canonicalPath,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (process.platform === 'win32' ? 0 : fsConstants.O_NONBLOCK),
+    );
     try {
       // The chat draws a clip or a picture by the name the message gave; a
       // link under one name to a file of the other kind gets neither limit.
@@ -303,7 +465,6 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
   const {
     fsPromises,
     path,
-    crypto,
     validateDirectoryPath,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
@@ -357,21 +518,13 @@ export const registerMarkdownImageGrantRoutes = (app, dependencies) => {
               results.push({ source, status: inspected.status });
               continue;
             }
-            // Reuse the existing path-bound raw-file grant instead of creating another asset lifecycle.
-            const grant = inspected.outsideWorkspace
-              ? await mintOutsideFileGrant(inspected.path, {
-                scopes: ['raw'],
-                fsPromises,
-                path,
-                crypto,
-              })
-              : null;
+            // Outside-workspace reads are allowed under normal server
+            // authentication and OS permissions (a91777602); the referenced
+            // check above is the gate, so the result carries path/status only.
             results.push({
               source,
               status: 'ready',
               path: inspected.path,
-              outsideFileGrant: grant?.outsideFileGrant,
-              expiresAt: grant?.expiresAt,
             });
           } catch {
             results.push({ source, status: 'error' });

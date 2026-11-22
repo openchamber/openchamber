@@ -44,3 +44,11 @@ test('a port that is not a port is left out rather than written into the rules',
   assert.equal(config.proxyBypassRules, '<-loopback>;openchamber-preview.localhost:4321');
   assert.throws(() => spacePreviewProxyConfig({ deadProxyPort: 0, localPorts: [] }), /dead proxy port/);
 });
+
+test('a malformed port is rejected or left out, never coerced to another port', () => {
+  assert.throws(() => spacePreviewProxyConfig({ deadProxyPort: '8080junk', localPorts: [] }), /dead proxy port/);
+  assert.throws(() => spacePreviewProxyConfig({ deadProxyPort: '80.9', localPorts: [] }), /dead proxy port/);
+  assert.throws(() => spacePreviewProxyConfig({ deadProxyPort: 8080.5, localPorts: [] }), /dead proxy port/);
+  const config = spacePreviewProxyConfig({ deadProxyPort: 51000, localPorts: ['51234junk', '80.9', 4321] });
+  assert.equal(config.proxyBypassRules, '<-loopback>;openchamber-preview.localhost:4321');
+});

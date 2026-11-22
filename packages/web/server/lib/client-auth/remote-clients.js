@@ -1,14 +1,31 @@
+import {
+  preserveMalformedJsonFile,
+  readDurableJsonFile,
+  writeDurableJsonFile,
+} from '../shared/durable-json-store.js';
+
 const STORE_VERSION = 1;
 const TOKEN_PREFIX = 'oc_client_';
 const TOKEN_BYTES = 32;
 const MAX_LABEL_LENGTH = 80;
 const LAST_USED_WRITE_INTERVAL_MS = 60_000;
 
+// A plain slice at the cap can land between the halves of a surrogate pair,
+// leaving a lone high surrogate that encodes as U+FFFD. On disk that becomes a
+// literal \ud83d escape and the operator sees a corrupted device name on every
+// surface that reads the store; move the cut back to the pair boundary.
+const clipPairSafe = (text, limit) => {
+  if (text.length <= limit) return text;
+  const clipped = text.slice(0, limit);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped;
+};
+
 const normalizeLabel = (value) => {
   if (typeof value !== 'string') return 'Remote client';
   const trimmed = value.trim();
   if (!trimmed) return 'Remote client';
-  return trimmed.length > MAX_LABEL_LENGTH ? trimmed.slice(0, MAX_LABEL_LENGTH) : trimmed;
+  return clipPairSafe(trimmed, MAX_LABEL_LENGTH);
 };
 
 const normalizeTimestamp = (value) => {
@@ -33,14 +50,6 @@ const normalizeMetadata = (client) => ({
   deviceModel: normalizeOptionalString(client.deviceModel),
   appVersion: normalizeOptionalString(client.appVersion),
 });
-
-const safeJsonParse = (raw) => {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-};
 
 const constantTimeEqual = (left, right, crypto) => {
   if (typeof left !== 'string' || typeof right !== 'string') return false;
@@ -94,19 +103,60 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       : [],
   });
 
-  const readStore = async () => {
-    try {
-      const raw = await fsPromises.readFile(storePath, 'utf8');
-      return normalizeStore(safeJsonParse(raw));
-    } catch (error) {
-      if (error?.code === 'ENOENT') return normalizeStore(null);
-      throw error;
+  // This store rides the shared durable-store primitive (design #976):
+  // the strict reader judges the file, the preserve helper moves a
+  // malformed file aside under the collision-proof preserve name, and
+  // the writer is mode-explicit. A torn or otherwise unparseable file is
+  // paired-device auth state, not an empty store: its bytes are
+  // preserved before any later write can overwrite them, and the loss
+  // stays recoverable. The value judgement stays the one this store
+  // always made - any parsed JSON reaches normalizeStore, which
+  // tolerates every shape - so only unparseable bytes are malformed
+  // here. The preserve helper re-reads and re-judges the on-disk bytes
+  // before renaming anything, so a valid replacement that landed in
+  // the meantime is never moved aside (Codex, PR #890); a 'replaced'
+  // outcome re-reads that valid file instead (bounded - repeated
+  // replacement is a race no read should chase). A mutation must never
+  // overwrite bytes whose preservation failed: they are the only copy
+  // of the paired clients, so the read fails closed instead.
+  const readStore = async (replacements = 0) => {
+    const result = await readDurableJsonFile(storePath, { fs: fsPromises });
+    if (result.state === 'valid') return normalizeStore(result.value);
+    // The primitive collapses an absent file and an EXISTING empty or
+    // whitespace-only file into the same 'missing' answer. Only the
+    // absent file is the first-run case: empty bytes are unparseable,
+    // and the pre-migration reader revalidated them before treating
+    // the store as empty - another process sharing this file can
+    // replace the empty bytes with valid state while this read is in
+    // flight, and returning an empty store here would let a mutation
+    // overwrite that replacement and drop its clients (Codex, PR
+    // #1019). So a 'missing' verdict goes through the preserve helper
+    // too: it re-reads and re-judges the on-disk bytes, answers
+    // 'replaced' for a valid replacement (re-read below), 'missing'
+    // for a truly absent file (the first-run return) or for
+    // still-empty bytes (which hold no clients, so there is nothing
+    // to preserve), and 'preserved' if the re-read bytes are malformed.
+    const preservation = await preserveMalformedJsonFile(storePath, { fs: fsPromises });
+    if (preservation.preserved) {
+      console.warn(`Failed to read remote clients store: preserved the unreadable file at ${preservation.preservedPath}`);
+      return normalizeStore(null);
     }
+    if (preservation.outcome === 'missing') return normalizeStore(null);
+    if (preservation.outcome === 'replaced' && replacements < 3) {
+      return readStore(replacements + 1);
+    }
+    throw new Error('Failed to preserve the unreadable remote clients store; refusing to overwrite it');
   };
 
   const writeStore = async (store) => {
+    // The directory mode stays stated here: the primitive's writer
+    // creates the directory without a mode, and this store has always
+    // made its directory 0o700. The file itself is written by the
+    // primitive with its mode stated (0o600 - the store holds token
+    // hashes), and the chmod keeps the mode true even when the rename
+    // landed over an existing file with wider permissions.
     await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
-    await fsPromises.writeFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
+    await writeDurableJsonFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { fs: fsPromises, mode: 0o600 });
     if (typeof fsPromises.chmod === 'function') {
       await fsPromises.chmod(storePath, 0o600).catch(() => {});
     }

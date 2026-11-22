@@ -23,9 +23,9 @@ Narzędzie sterowania wyświetla projekty i preferencje modeli, przeszukuje kata
 ## Pamiętaj
 
 - Prompty do nowych sesji domyślnie wracają od razu. Śledź sesję w OpenChamber albo poproś agenta, żeby sprawdził ją później.
-- Osobny worktree powstaje tylko na Twoją prośbę. Niezacommitowane zmiany z bieżącego worktree nie są do niego kopiowane.
+- Nowa sesja w projekcie Git pracuje w nowym worktree, chyba że poprosisz, żeby pracowała bezpośrednio w folderze; folder, który nie jest repozytorium Git, jest używany taki, jaki jest, a sesja rozgałęziona zostaje w folderze sesji, z której pochodzi. Niezacommitowane zmiany z bieżącego worktree nie są kopiowane do nowego worktree. Sesja dla pull requesta zawsze dostaje własny worktree.
 - Gdy checkout wygląda na zajęty, na przykład inna sesja pracuje na tym samym branchu, agent może zaproponować przeniesienie swojej sesji do nowego worktree. Przenosi ją po Twojej zgodzie i zabiera tylko pliki, które sam zmienił.
-- Narzędzia nie mogą usuwać sesji ani worktree, rejestrować ścieżek projektów, uruchamiać dowolnych poleceń shella ani wywoływać dowolnych adresów URL.
+- Narzędzia nie mogą usuwać sesji ani worktree, uruchamiać dowolnych poleceń shella ani wywoływać dowolnych adresów URL. Mogą dodać folder jako projekt i usunąć projekt z listy; jego pliki zostają na miejscu.
 
 ## Włączanie i wyłączanie narzędzi
 

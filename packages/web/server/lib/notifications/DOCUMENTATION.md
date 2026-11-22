@@ -51,6 +51,7 @@ This module provides notification message preparation utilities for the web serv
   - completion/error/question/permission trigger routing (a page an agent shows that waits for the user's answer, `openchamber:page-waiting` from this server, notifies exactly like a form, with the page title as the ask); permission suppression consults the authoritative permission-auto-accept runtime
   - where a permission or question notification opens: the highest session above the session that asked that still runs in the same directory, whose composer docks every request below it. In a tree that stays in one directory that is the top-level session. A subagent moved to another directory takes its requests to that directory, where no ancestor's dock reads them, so the walk stops before an ancestor in another directory. The walk reads each record's `parentID` and `location.directory` fresh from `GET /api/session/:id`, since a move changes a session's directory, and stops at the first record it cannot read. Native notifications, the UI broadcast, web push (`data.url`, `data.sessionId`) and APNs (`data.sessionId`) all carry that session, with the event's `directory`, which it shares. The text, the tag and `sessionName` still describe the session that asked. A waiting page opens its own session, the only one that draws it
   - session parent cache for subtask suppression
+  - bounded per-process retention in the trigger runtime: notified permission requests and the ready/error per-session cooldowns are each capped at 500 entries with oldest-first eviction, so the process-lifetime runtime cannot grow them without limit; a permission key only has to outlive a plausible re-delivery of the same request
   - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
   - an MCP elicitation form (session id `global`, owned by no session) notifies without a session: no session title lookup, and the deep link opens the app
   - template resolution and fallback behavior
@@ -70,6 +71,7 @@ This module provides notification message preparation utilities for the web serv
   - `updateUiVisibility(token, visible)`
   - `isAnyUiVisible()`
   - `isUiVisible(token)`
+- The push subscription store rides the shared durable-store primitive (`../shared/durable-json-store.js`, #976/#978): a file that is not a JSON object at version 1 is malformed and is preserved aside under the primitive's collision-proof name before any write replaces it; a serialized write whose preservation fails is refused. An absent or empty file is the empty store.
 
 ### APNs runtime API (apns-runtime.js)
 - `createApnsRuntime(dependencies)`: creates runtime for native iOS APNs push and device-token state. Dependencies: `fsPromises`, `path`, `crypto`, `http2`, `APNS_TOKENS_FILE_PATH`, `readSettingsFromDiskMigrated`, `writeSettingsToDisk` (persists the auto-generated relay signing keypair).
@@ -79,6 +81,7 @@ This module provides notification message preparation utilities for the web serv
   - `removeApnsTokenFromAllSessions(deviceToken)`
   - `sendApnsToAllUiSessions(payload)` — `payload.sealed` (`{ title, body }`, optional) is what a phone with a push key opens; it is never sent in the clear. Signs + sends to all registered tokens (no UI-visibility gate; iOS suppresses the foreground banner). No-ops with a single warning when APNs is unconfigured. Drops tokens on `410` / `BadDeviceToken` / `Unregistered`.
   - `resolveApnsConfig()`
+- The device-token store rides the shared durable-store primitive (`../shared/durable-json-store.js`, #976/#978): a file that is not a JSON object at version 1 is malformed and is preserved aside under the primitive's collision-proof name before any write replaces it; a serialized write whose preservation fails is refused. An absent or empty file is the empty store.
 - Configuration (env first, then `settings.apnsConfig`): `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8` (PEM contents; literal `\n` accepted) or `OPENCHAMBER_APNS_P8_PATH`, `OPENCHAMBER_APNS_BUNDLE_ID` (default `today.developing.openchamber`), `OPENCHAMBER_APNS_ENVIRONMENT` (optional override forcing every send to `sandbox` or `production`; when unset, each token is delivered to the environment it registered with, defaulting to `production` for tokens without one).
 
 ### Emitter runtime API (emitter-runtime.js)
@@ -123,6 +126,14 @@ This module provides notification message preparation utilities for the web serv
 The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastMessageLength` (number), the maximum length for the final notification text (default: 250). Legacy summarization settings may still exist in persisted settings but are ignored.
 
 ## Response contracts
+
+### `GET /api/sessions/status`
+
+The response keeps its `sessions`, `pending`, and `serverTime` fields and adds
+`openCodeDraining`, a boolean from the managed lifecycle. When true, a replaced
+OpenCode still runs sessions the current server's active list cannot report.
+Clients must preserve them while reconciling. Older hosts and the VS Code shim
+omit this additive field; they keep their existing behavior.
 
 ### `truncateNotificationText`
 - Returns empty string for non-string input.

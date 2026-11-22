@@ -5,6 +5,7 @@ import { runAsUserAction } from '../environment/refresh-scope.js';
 import { redactRemoteUrl } from '../source-control/url-redaction.js';
 import { parsePublicGitIdentityProfile, toPublicGitIdentityProfile } from './identity-storage.js';
 import { WorktreeCreationError, createWorktreeCreation, hasClientContributorAuthority } from './worktree-creation.js';
+import { MAX_GIT_LOG_COUNT } from './log-limits.js';
 
 const NETWORK_OPERATION_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const toGitIdentitySummary = (identity) => identity ? {
@@ -20,6 +21,41 @@ const toGitRemoteSummary = (remote) => ({
 // A removal should not hang on an unresponsive OpenCode server: disposal is
 // best-effort and `removeWorktree` swallows its failure.
 const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
+
+// Every git endpoint judges its numeric parameters the same strict way
+// (#463/#464/#465): the value's whole text must be digits, the judgement
+// POST /api/git/diffs already applied to `context` and the Web CLI applies
+// to its numeric options. Bare parseInt reinterpreted '10junk' as 10 and
+// let '-5' through, and Number + isFinite let '2.9' reach git as -U2.9,
+// which git rejects.
+// Diff context: a non-negative integer, else the 3-line default. Digits
+// alone are not enough (#1079): a 309-digit string parses to Infinity and a
+// merely huge one asks git for an absurd -U value, so the parsed number
+// must be a safe integer, clamped to a generous ceiling — 100k lines of
+// context covers a whole-file view of any file these endpoints
+// realistically serve. Oversized finite requests clamp instead of falling
+// back to 3: the UI's full-context callers ask for 1,000,000 lines
+// (FULL_CONTEXT_DIFF_LINES) and must still get a whole-file patch.
+const MAX_DIFF_CONTEXT_LINES = 100_000;
+const parseDiffContextLines = (value) => {
+  const text = String(value ?? '');
+  if (!/^\d+$/.test(text)) return 3;
+  const contextLines = Number(text);
+  return Number.isSafeInteger(contextLines) ? Math.min(contextLines, MAX_DIFF_CONTEXT_LINES) : 3;
+};
+
+// Digits alone are not enough for log maxCount (#1120): a huge decimal string
+// can exceed JavaScript's safe integer range or ask git to return the entire
+// history. Unsafe or invalid values use the service default; safe values clamp
+// to the shared ceiling so the route and direct service callers stay bounded.
+const parseLogMaxCount = (value) => {
+  const text = String(value ?? '');
+  if (!/^\d+$/.test(text)) return undefined;
+  const maxCount = Number(text);
+  return Number.isSafeInteger(maxCount) && maxCount > 0
+    ? Math.min(maxCount, MAX_GIT_LOG_COUNT)
+    : undefined;
+};
 
 /**
  * Builds the best-effort disposal hook handed to `removeWorktree`. The URL and
@@ -73,15 +109,17 @@ export function registerGitRoutes(app, {
   networkOperations, managedSshInventory, getSourceControlBinding, contributorProvenance, resolveChangeRequestSource,
   backfillIdentities,
   createHttpsCredentialReference, resolveSourceControlAccount, errorRedactionSecrets = [], worktreeBootstrapStore,
-  emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders,
+  emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders, gitLibraryService: injectedGitLibraryService,
 } = {}) {
-  let gitLibraries = null;
+  let gitLibraries = injectedGitLibraryService ?? null;
+  let worktreeChangesSubscribed = false;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
       gitLibraries = await import('./index.js');
-      if (emitWorktreeChanged) {
-        gitLibraries.subscribeWorktreeTopologyChanges(emitWorktreeChanged);
-      }
+    }
+    if (emitWorktreeChanged && !worktreeChangesSubscribed) {
+      gitLibraries.subscribeWorktreeTopologyChanges(emitWorktreeChanged);
+      worktreeChangesSubscribed = true;
     }
     return gitLibraries;
   };
@@ -90,7 +128,7 @@ export function registerGitRoutes(app, {
   // row or a nested repository, not a server fault.
   // The client splits a larger changeset into requests of this size.
   const GIT_DIFFS_MAX_PATHS = 1000;
-  const GIT_PATH_ERROR_STATUS = new Map([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422]]);
+  const GIT_PATH_ERROR_STATUS = new Map([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422], ['file_too_large', 413], ['diff_too_large', 413]]);
   const sendGitPathError = (res, error) => {
     const status = GIT_PATH_ERROR_STATUS.get(error?.code);
     if (!status) return false;
@@ -99,7 +137,13 @@ export function registerGitRoutes(app, {
   };
 
   const resolveDirectoryQuery = (value, preserveWhitespace = false) => {
-    const raw = Array.isArray(value) ? value[0] : value;
+    // A repeated query parameter arrives as an array and is ambiguous:
+    // never silently select its first value (issue #2121). Returning null
+    // routes it through each consumer's invalid-parameter response.
+    if (Array.isArray(value)) {
+      return null;
+    }
+    const raw = value;
     if (typeof raw !== 'string') {
       return null;
     }
@@ -278,6 +322,11 @@ export function registerGitRoutes(app, {
   });
 
   app.get('/api/git/contributor-destinations', async (req, res) => {
+    // A duplicated directory parameter is invalid input (issue #2121), not
+    // a capability gap: reject it before the unavailable-runtime response.
+    if (Array.isArray(req.query?.directory)) {
+      return res.status(400).json({ error: 'directory parameter must appear at most once', code: 'INVALID_REQUEST' });
+    }
     const directory = resolveDirectoryQuery(req.query?.directory);
     if (!directory || !(getSourceControlBinding instanceof Function)
       || !(contributorProvenance?.read instanceof Function)) {
@@ -530,7 +579,11 @@ export function registerGitRoutes(app, {
     const directories = [];
     const seen = new Set();
     for (const value of body.directories) {
-      const directory = resolveDirectoryQuery(value);
+      // Batch entries are JSON body data, not query parameters: keep the
+      // legacy one-level normalization of a nested entry here, while query
+      // parameters reject duplicates outright (issue #2121).
+      const candidate = Array.isArray(value) ? value[0] : value;
+      const directory = resolveDirectoryQuery(candidate);
       if (!directory || seen.has(directory)) continue;
       seen.add(directory);
       directories.push(directory);
@@ -661,11 +714,15 @@ export function registerGitRoutes(app, {
   app.get('/api/git/remote-url', async (req, res) => {
     const { getRemoteUrl } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const remote = req.query.remote || 'origin';
+      const remoteParam = req.query.remote;
+      if (remoteParam !== undefined && (typeof remoteParam !== 'string' || !remoteParam.trim())) {
+        return res.status(400).json({ error: 'remote parameter must be a single non-empty string' });
+      }
+      const remote = remoteParam?.trim() || 'origin';
 
       const url = await getRemoteUrl(directory, remote);
       const displayUrl = url ? redactRemoteUrl(url) : '';
@@ -679,7 +736,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/current-identity', async (req, res) => {
     const { getCurrentIdentity } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -695,7 +752,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/has-local-identity', async (req, res) => {
     const { hasLocalIdentity } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -711,7 +768,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/set-identity', async (req, res) => {
     const { getProfile, setLocalIdentity, clearLocalIdentity, getGlobalIdentity } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -795,7 +852,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/primary-root', async (req, res) => {
     const { resolvePrimaryWorktreeRoot } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -810,7 +867,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/toplevel', async (req, res) => {
     const { resolveWorktreeTopLevel } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -825,7 +882,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/commit-summaries', async (req, res) => {
     const { getCommitSummaries } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -883,7 +940,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/diff', async (req, res) => {
     const { getPathDiff } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -894,12 +951,11 @@ export function registerGitRoutes(app, {
       }
 
       const staged = req.query.staged === 'true';
-      const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
 
       const { diff, submodule } = await getPathDiff(directory, {
         path,
         staged,
-        contextLines: Number.isFinite(context) ? context : 3,
+        contextLines: parseDiffContextLines(req.query.context),
       });
 
       res.json({ diff, submodule });
@@ -916,7 +972,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/diffs', async (req, res) => {
     const { getPathDiffs } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!isString(directory) || !directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -927,12 +983,11 @@ export function registerGitRoutes(app, {
       }
 
       const staged = req.body?.staged === true;
-      const context = Number(req.body?.context);
 
       const diffs = await getPathDiffs(directory, {
         paths,
         staged,
-        contextLines: Number.isInteger(context) && context >= 0 ? context : 3,
+        contextLines: parseDiffContextLines(req.body?.context),
       });
 
       res.json({ diffs });
@@ -945,7 +1000,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/file-diff', async (req, res) => {
     const { getFileDiff } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -979,7 +1034,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/range-diff', async (req, res) => {
     const { getRangeDiff } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -990,19 +1045,22 @@ export function registerGitRoutes(app, {
         return res.status(400).json({ error: 'base and head parameters are required' });
       }
 
+      if (Array.isArray(req.query.path)) {
+        return res.status(400).json({ error: 'path parameter must appear at most once' });
+      }
       const pathParam = typeof req.query.path === 'string' && req.query.path ? req.query.path : undefined;
-      const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
 
       const diff = await getRangeDiff(directory, {
         base,
         head,
         includeWorkingTree: req.query.includeWorkingTree === 'true',
         path: pathParam,
-        contextLines: Number.isFinite(context) ? context : 3,
+        contextLines: parseDiffContextLines(req.query.context),
       });
 
       res.json({ diff });
     } catch (error) {
+      if (sendGitPathError(res, error)) return;
       console.error('Failed to get git range diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git range diff' });
     }
@@ -1054,7 +1112,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/revert', async (req, res) => {
     const { revertFile } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1075,7 +1133,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/stage', async (req, res) => {
     const { stageFiles } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1097,7 +1155,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/unstage', async (req, res) => {
     const { unstageFiles } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1119,7 +1177,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/apply-hunk', async (req, res) => {
     const { applyHunk } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1144,13 +1202,13 @@ export function registerGitRoutes(app, {
   });
 
   app.post('/api/git/pull', async (req, res) => {
-    const directory = req.query.directory;
+    const directory = resolveDirectoryQuery(req.query.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
     await rejectLegacyNetworkOperation(directory, res);
   });
 
   app.post('/api/git/push', async (req, res) => {
-    const directory = req.query.directory;
+    const directory = resolveDirectoryQuery(req.query.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
     await rejectLegacyNetworkOperation(directory, res);
   });
@@ -1158,7 +1216,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/stashes', async (req, res) => {
     const { listStashes } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       res.json({ stashes: await listStashes(directory) });
     } catch (error) {
@@ -1170,7 +1228,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/stashes/file-counts', async (req, res) => {
     const { countStashFiles } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       res.json({ counts: await countStashFiles(directory, req.body?.refs) });
     } catch (error) {
@@ -1182,7 +1240,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/stash', async (req, res) => {
     const { stashPush } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       res.json(await stashPush(directory, req.body));
     } catch (error) {
@@ -1194,7 +1252,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/stash/apply', async (req, res) => {
     const { stashApply } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       res.json(await stashApply(directory, req.body));
     } catch (error) {
@@ -1206,7 +1264,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/stash/pop', async (req, res) => {
     const { stashPop } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       res.json(await stashPop(directory, req.body));
     } catch (error) {
@@ -1218,7 +1276,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/stash/drop', async (req, res) => {
     const { stashDrop } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       res.json(await stashDrop(directory, req.body));
     } catch (error) {
@@ -1228,7 +1286,7 @@ export function registerGitRoutes(app, {
   });
 
   app.post('/api/git/fetch', async (req, res) => {
-    const directory = req.query.directory;
+    const directory = resolveDirectoryQuery(req.query.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
     await rejectLegacyNetworkOperation(directory, res);
   });
@@ -1236,7 +1294,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/remotes', async (req, res) => {
     const { getRemotes } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1252,12 +1310,12 @@ export function registerGitRoutes(app, {
   app.delete('/api/git/remotes', async (req, res) => {
     const { removeRemote } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const remote = String(req.body?.remote || '').trim();
+      const remote = typeof req.body?.remote === 'string' ? req.body.remote.trim() : '';
       if (!remote) {
         return res.status(400).json({ error: 'remote is required' });
       }
@@ -1273,7 +1331,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/rebase', userAction(async (req, res) => {
     const { rebase } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1289,7 +1347,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/rebase/abort', async (req, res) => {
     const { abortRebase } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1305,7 +1363,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/merge', userAction(async (req, res) => {
     const { merge } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1321,7 +1379,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/merge/abort', async (req, res) => {
     const { abortMerge } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1337,7 +1395,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/rebase/continue', userAction(async (req, res) => {
     const { continueRebase } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1353,7 +1411,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/merge/continue', userAction(async (req, res) => {
     const { continueMerge } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1369,7 +1427,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/conflict-details', async (req, res) => {
     const { getConflictDetails } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1385,7 +1443,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/commit', userAction(async (req, res) => {
     const { commit } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1410,7 +1468,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/branches', async (req, res) => {
     const { getBranches } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1427,7 +1485,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/branch-push-status', async (req, res) => {
     const { getUnpushedBranchCounts } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       const branches = req.body?.branches;
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       if (!Array.isArray(branches) || branches.some((branch) => typeof branch !== 'string')) {
@@ -1443,7 +1501,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/branches', userAction(async (req, res) => {
     const { createBranch } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1464,7 +1522,7 @@ export function registerGitRoutes(app, {
   app.delete('/api/git/branches', async (req, res) => {
     const { deleteBranch } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1485,7 +1543,7 @@ export function registerGitRoutes(app, {
   app.put('/api/git/branches/rename', async (req, res) => {
     const { renameBranch } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1509,7 +1567,7 @@ export function registerGitRoutes(app, {
     }
   });
   app.delete('/api/git/remote-branches', async (req, res) => {
-    const directory = req.query.directory;
+    const directory = resolveDirectoryQuery(req.query.directory);
     if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
     await rejectLegacyNetworkOperation(directory, res);
   });
@@ -1517,7 +1575,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/checkout', userAction(async (req, res) => {
     const { checkoutBranch } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1538,7 +1596,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/checkout-commit', userAction(async (req, res) => {
     const { checkoutCommit } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1557,7 +1615,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/cherry-pick', userAction(async (req, res) => {
     const { cherryPick } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1576,7 +1634,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/revert-commit', userAction(async (req, res) => {
     const { revertCommit } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1595,7 +1653,7 @@ export function registerGitRoutes(app, {
   app.post('/api/git/reset-to-commit', async (req, res) => {
     const { resetToCommit } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1617,7 +1675,7 @@ export function registerGitRoutes(app, {
   app.get('/api/git/worktrees', async (req, res) => {
     const { getWorktrees, observeWorktreeTopology } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1649,7 +1707,7 @@ export function registerGitRoutes(app, {
     }
 
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1671,7 +1729,7 @@ export function registerGitRoutes(app, {
 
   app.post('/api/git/worktrees', userAction(async (req, res) => {
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1698,7 +1756,7 @@ export function registerGitRoutes(app, {
     }
 
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1734,7 +1792,7 @@ export function registerGitRoutes(app, {
     }
 
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1758,7 +1816,7 @@ export function registerGitRoutes(app, {
     }
 
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1858,15 +1916,18 @@ export function registerGitRoutes(app, {
   app.get('/api/git/log', async (req, res) => {
     const { getLog } = await getGitLibraries();
     try {
-      const directory = req.query.directory;
+      const directory = resolveDirectoryQuery(req.query.directory);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
       const { maxCount, from, to, file } = req.query;
+      if ([maxCount, from, to, file].some((value) => value !== undefined && typeof value !== 'string')) {
+        return res.status(400).json({ error: 'log parameters must be single string values' });
+      }
       const all = req.query.all === 'true';
       const log = await getLog(directory, {
-        maxCount: maxCount ? parseInt(maxCount) : undefined,
+        maxCount: parseLogMaxCount(maxCount),
         from,
         to,
         file,
@@ -1882,7 +1943,8 @@ export function registerGitRoutes(app, {
   app.get('/api/git/commit-files', async (req, res) => {
     const { getCommitFiles } = await getGitLibraries();
     try {
-      const { directory, hash } = req.query;
+      const directory = resolveDirectoryQuery(req.query.directory);
+      const hash = resolveDirectoryQuery(req.query.hash);
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
@@ -1904,15 +1966,20 @@ export function registerGitRoutes(app, {
       const directory = resolveDirectoryQuery(req.query.directory);
       const hash = resolveDirectoryQuery(req.query.hash);
       if (!directory || !hash) return res.status(400).json({ error: 'directory and hash are required' });
-      const context = Number(req.query.context ?? 3);
+      // path/previousPath are optional, so a repeated value would otherwise
+      // degrade silently to an unscoped diff (issue #2121).
+      if (Array.isArray(req.query.path) || Array.isArray(req.query.previousPath)) {
+        return res.status(400).json({ error: 'path parameters must appear at most once' });
+      }
       const diff = await getCommitDiff(directory, {
         hash,
         path: resolveDirectoryQuery(req.query.path, true) ?? undefined,
         previousPath: resolveDirectoryQuery(req.query.previousPath, true) ?? undefined,
-        contextLines: Number.isFinite(context) ? context : 3,
+        contextLines: parseDiffContextLines(req.query.context),
       });
       res.json({ diff });
     } catch (error) {
+      if (sendGitPathError(res, error)) return;
       res.status(500).json({ error: error.message || 'Failed to get commit diff' });
     }
   });

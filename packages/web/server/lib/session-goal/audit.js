@@ -47,9 +47,25 @@ const THRESHOLD = 0.5;
 const ANSWER_HEAD_CHARS = 2_000;
 const ANSWER_TAIL_CHARS = 8_000;
 
+const isHighSurrogate = (code) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code) => code >= 0xdc00 && code <= 0xdfff;
+
+// A plain slice can land between the halves of a surrogate pair, leaving a lone
+// surrogate that encodes to U+FFFD in the judge's input. These move a cut to the
+// pair boundary by at most one unit, so the excerpt never starts or ends on half
+// a character (the same guard guests/service.js and notifications/apns-runtime.js use).
+const sliceHead = (text, end) => {
+  if (isHighSurrogate(text.charCodeAt(end - 1)) && isLowSurrogate(text.charCodeAt(end))) return text.slice(0, end - 1);
+  return text.slice(0, end);
+};
+const sliceTail = (text, start) => {
+  if (isLowSurrogate(text.charCodeAt(start)) && isHighSurrogate(text.charCodeAt(start - 1))) return text.slice(start + 1);
+  return text.slice(start);
+};
+
 const excerptAnswer = (text) => (text.length <= ANSWER_HEAD_CHARS + ANSWER_TAIL_CHARS
   ? text
-  : `${text.slice(0, ANSWER_HEAD_CHARS).trimEnd()}\n[…]\n${text.slice(-ANSWER_TAIL_CHARS).trimStart()}`);
+  : `${sliceHead(text, ANSWER_HEAD_CHARS).trimEnd()}\n[…]\n${sliceTail(text, text.length - ANSWER_TAIL_CHARS).trimStart()}`);
 
 /**
  * At most `limit` characters of the objective: a goal within it is passed
@@ -63,7 +79,7 @@ export const excerptObjective = (text, limit) => {
   const marker = '\n[… middle of the objective left out for this check …]\n';
   const head = Math.floor((limit - marker.length) * 0.4);
   const tail = limit - marker.length - head;
-  return `${text.slice(0, head).trimEnd()}${marker}${text.slice(-tail).trimStart()}`;
+  return `${sliceHead(text, head).trimEnd()}${marker}${sliceTail(text, text.length - tail).trimStart()}`;
 };
 
 /** The Jev request for one check. */

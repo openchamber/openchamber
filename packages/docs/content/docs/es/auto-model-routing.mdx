@@ -18,13 +18,14 @@ Cuando todo está listo, la página muestra **Listo**. Elige **Auto** arriba del
 
 ## Categorías
 
-Cada prompt cae en una categoría. Vienen cuatro integradas:
+Cada prompt cae en una categoría. Vienen cinco integradas:
 
 | Categoría | Para |
 | --- | --- |
 | Trivial | trabajo mecánico: renombrar, erratas, formato, comentarios, comandos sencillos |
 | Research | leer y explicar código sin cambiarlo |
 | Implement | un cambio claro: una función de alcance conocido, tests, un arreglo con causa conocida |
+| Review | inspeccionar cambios en busca de errores de corrección, regresiones, problemas de seguridad y tests que faltan; informar de los hallazgos sin editar |
 | Hard | bugs de causa desconocida, diseño y planificación, seguridad, autenticación, concurrencia, migraciones, dinero |
 
 Para cada categoría puedes definir:
@@ -33,7 +34,41 @@ Para cada categoría puedes definir:
 - **Razonamiento:** el nivel de razonamiento de ese modelo
 - **Agente:** el agente que ejecuta estas tareas; vacío mantiene el agente que usaría el campo de mensaje
 
+## Auto se mantiene en un modelo ante prompts parecidos
+
+Jev clasifica cada prompt por su cuenta, así que dos seguimientos parecidos pueden caer en categorías vecinas. Para que una sesión no salte de un modelo a otro (y pierda cada vez la caché de prompts del proveedor), Auto mantiene el modelo de la sesión salvo que la evidencia a favor de un cambio sea coherente:
+
+- Dejar el modelo con el que empezó una sesión requiere dos prompts seguidos que apunten al mismo otro modelo, o un prompt del que Jev esté seguro.
+- Tras un salto a un modelo más potente, la sesión se queda ahí hasta que tres prompts seguidos apunten a otro sitio. Una respuesta segura acorta eso, pero nunca por debajo de dos.
+- Un prompt que Jev no puede ubicar (confianza baja, categoría desconocida, Jev inalcanzable) mantiene el modelo actual. El modelo de respaldo solo atiende a una sesión que aún no tiene historial.
+
+La decisión de enrutamiento muestra `held` cuando Auto mantuvo el modelo frente a la última respuesta de Jev. Ese historial vive en el proceso del servidor, así que un reinicio empieza las sesiones desde cero. Si una sesión está en Auto se guarda, así que un reinicio la mantiene en Auto hasta que elijas un modelo concreto.
+
+En **Configuración → Enrutamiento**, desactiva **Mantener el modelo actual** para seguir cada prompt, o cambia **Prompts para cambiar** y **Prompts para volver**. La confianza que cuenta como «seguro» es `stickiness.strongConfidence` en `routing.json` (0,9 por defecto).
+
+## Usar pools de proveedores para los modelos de categoría
+
+OpenChamber elige la categoría, el nivel de razonamiento y el agente. OpenCode se encarga de la conmutación entre proveedores. Define pools ordenados en el `experimental.model_routes` de OpenCode y luego elige el modelo de ruta de una categoría. Por ejemplo, pon **Trivial** en `opencode-route/cheap-fast`, **Implement** en `opencode-route/smart-slow`, y **Hard** y **Review** en `opencode-route/frontier-heavy`. Jev sigue tomando la decisión de la tarea; la ruta elegida prueba después sus proveedores en orden.
+
+OpenCode pasa a otro destino ante fallos de proveedor reintentables, errores de cuota o de autenticación y un plazo de primera salida incumplido. Las peticiones completadas también pueden marcar un destino como degradado usando los umbrales de latencia o de rendimiento configurados. Los enfriamientos se comparten entre las sesiones del proceso de OpenCode y se restauran tras un reinicio, y OpenCode registra cada decisión de enrutamiento, intento (código y mensaje de error exactos, tiempos, conteos de tokens) y enfriamiento en su base de datos para analizarlos después. Un turno nunca se repite una vez que ha empezado una respuesta o una salida de herramienta.
+
+OpenCode también lee las cabeceras de límite de velocidad de cada respuesta y aparta el tráfico de un destino cuyo proveedor dice que su ventana está agotada, antes de que el proveedor empiece a rechazarlo.
+
+Un pool también puede hacer varias peticiones a un destino antes de pasar al siguiente (`attempts`, dos en total por defecto), arrancar el destino siguiente cuando el primero guarda silencio (`hedgeAfterMs`), limitar las peticiones y los tokens de un destino (`budgets`, que cuentan cada petición que OpenCode hace al destino, incluidas las de fondo como los títulos) y ser ajustado por el agente a partir de su historial registrado. Son opciones de ruta de OpenCode; consulta su referencia de configuración.
+
+Los horarios cambian los pesos de los destinos en días u horas concretos, por ejemplo para mandar menos tráfico a un proveedor en sus horas punta. Los horarios propios de un pool están en sus opciones avanzadas, en **Configuración → Enrutamiento → Pools de modelos**, y **Horarios para todos los pools**, debajo de la lista de pools, cambia los destinos que coincidan en cada pool o solo en los pools que indiques. Cada horario admite días de la semana, días del mes, una hora de inicio y de fin, una zona horaria y, o bien un factor que multiplica el peso, o bien un peso que lo sustituye. Fuera de su franja se aplican los pesos configurados. OpenCode también aplica los horarios de sus otros archivos de configuración, como el `opencode.json` de un proyecto. La configuración los muestra en solo lectura, bajo el nombre del archivo donde se editan.
+
+Cada pool también puede decir para qué sirve. En **Configuración → Enrutamiento → Pools de modelos**, abre un pool y rellena **Descripción**, una línea como «refactorizaciones largas en muchos archivos; lento; es lo que más cuesta», y **Detalles**, un párrafo sobre cuándo usar el pool y cuándo no. Cuando el modelo de una categoría es un pool, Jev lee ambos junto con la descripción de esa categoría. OpenChamber los guarda como `description` y `details` en la ruta, en `opencode.json`. OpenCode ignora las dos claves, así que un editor que compruebe el archivo contra el esquema JSON de OpenCode puede marcarlas.
+
 Jev clasifica los prompts leyendo los nombres y las descripciones de las categorías, así que las descripciones funcionan como instrucciones. Escribe qué entra en la categoría y qué no. Puedes editar, desactivar, quitar o añadir categorías, y restaurar una integrada si cambias de idea. Auto necesita al menos dos categorías activadas.
+
+### Ver qué sesiones comparten un destino
+
+Cuando se agota el plan de un destino, todas las sesiones en ese destino pasan al siguiente a la vez, y cada una vuelve a empezar con la caché de prompts fría. **Configuración → Enrutamiento → Pools de modelos → Estado de los pools** muestra, para cada destino de cada pool, cuántas sesiones lo usaron en los últimos 15 minutos, y avisa cuando lo comparten dos o más.
+
+Vincula ahí un destino a uno de tus planes para ver una proyección: su uso reciente, junto con el de todos los demás destinos vinculados al mismo plan, escalado a la ventana de cuota del plan. Las ventanas que cuentan peticiones, mensajes o tokens tienen proyección; las de dólares y porcentaje no. La cifra es una estimación a partir de las últimas 24 horas de tráfico de OpenCode y no ve el uso fuera de OpenCode. En un pool ponderado o por turnos, un destino al 70 % o más de su ventana muestra el botón **Reducir peso**, que reduce su peso a la mitad para que las sesiones nuevas se inclinen hacia los demás destinos.
+
+Debajo de los destinos, **Mover sesiones de un destino antes de que se agote su plan** está desactivado por defecto. Cuando está activado y el plan de un destino se proyecta al 70 % o más con dos o más sesiones en él, OpenChamber pasa una de esas sesiones a otro destino del mismo pool que tenga margen y no esté fallando en ese momento. Mueve una sesión por pool cada 5 minutos, un intervalo que se puede ajustar, primero los subagentes en ejecución y después la sesión que lleva más tiempo inactiva. La última sesión de un destino se queda. Así sus cachés se reinician de una en una y no todas a la vez. Una sesión movida usa ese modelo directamente, fuera del pool, así que ya no conmuta a otro destino si falla; vuelve a elegir el pool para recuperarla. Las sesiones en **Auto** nunca se mueven. Los movimientos recientes aparecen debajo del interruptor. Si OpenCode se ejecuta en otra máquina, la rotación no mueve ninguna sesión. El destino de un movimiento nunca está vinculado al mismo plan que el destino que la sesión deja. También puede elegirse un destino sin plan vinculado o sin proyección, aunque no se sepa cuánto margen tiene.
 
 ## Qué pasa al enviar
 
@@ -50,6 +85,17 @@ El modelo de respaldo responde cuando:
 - la categoría no tiene modelo propio
 
 Elegir cualquier modelo concreto en el selector saca la sesión de Auto. Vuelve a elegir **Auto** para regresar. También puedes hacer que Auto sea el modelo predeterminado de las sesiones nuevas en **Configuración → Sesiones**.
+
+## Planes, uso y revisiones
+
+**Configuración → Enrutamiento → Planes y uso** guarda lo que la revisión no puede medir: tus suscripciones y sus ventanas de cuota (nombre, unidad, límite, cuánto dura la ventana, cómo se reinicia), tarifas y fechas de caducidad, la fecha en que se comprobó cada plan por última vez y desde dónde, un nivel de coste para cada modelo (`plan`, `common`, `medium`, `high`, con los planes que lo cubren), para qué sirve cada pool y notas sobre cómo se ha sentido el uso. Las notas se guardan tal como las escribiste y nunca se reescriben. Úsalas para cosas como «Claude se me acabó demasiado rápido» o «siempre me sobra GPT a fin de mes»; la revisión las sopesa frente al historial de uso.
+
+Dos botones inician un chat nuevo con un comando listo para enviar:
+
+- **Revisar el enrutamiento** ejecuta `/routing-review`. Lee el historial de rutas (peticiones, tokens, coste, sesiones y qué pools usaron o saltaron cada proveedor y modelo), los registros de los planes y las notas, y propone cambios. No cambia nada hasta que apruebes un cambio concreto.
+- **Actualizar planes** ejecuta `/plan-update`. Encuentra planes a los que les faltan detalles o que se comprobaron por última vez hace más de un mes, pide los pocos campos que necesita y registra tus respuestas.
+
+Los registros viven en el directorio de datos de OpenCode como `plans.json` y `plan-notes.jsonl`, y nada de lo que contienen caduca. El historial también se guarda; `route_usage` puede leer cualquier ventana de él.
 
 ## Dónde funciona
 

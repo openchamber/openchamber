@@ -29,5 +29,12 @@ export const openCodeCredentialSource = (manager: {
   return {
     list: async () => connected().list(),
     listEnvironmentKeys: async () => connected().listEnvironmentKeys?.() ?? {},
+    usesLocalStore: () => {
+      try {
+        return connected().usesLocalStore?.() ?? false;
+      } catch {
+        return false;
+      }
+    },
   };
 };

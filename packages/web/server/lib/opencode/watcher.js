@@ -7,6 +7,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     onPayload,
+    onConnectionState = null,
     fetchImpl = fetch,
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs = 1000,
@@ -17,6 +18,20 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   let reader = null;
   let unsubscribeEvent = null;
   let unsubscribeStatus = null;
+  // The upstream reader reconnects on its own (after a stall, for one), and each reconnect is a
+  // `connect`. Only the first connection and the first after a reported disconnect are logged, so a
+  // healthy stream does not fill the log (dezren39/nix#668).
+  let connectLogged = false;
+  const logConnected = () => {
+    if (connectLogged) return;
+    connectLogged = true;
+    console.log('[PushWatcher] connected');
+  };
+  // `diagnostics/local-files.js` classifies these lines by their text; keep it unchanged.
+  const logDisconnected = (detail) => {
+    connectLogged = false;
+    console.warn('[PushWatcher] disconnected', detail);
+  };
 
   // `onPayload` consumers speak the server's own event vocabulary, so the v2
   // wire payload is translated here rather than in each consumer. An event of
@@ -47,6 +62,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
 
     abortController = new AbortController();
     const signal = abortController.signal;
+    connectLogged = false;
 
     if (globalEventHub) {
       // The events of isolated spaces feed this watcher too, so live status, unread marks and
@@ -63,11 +79,13 @@ export const createOpenCodeWatcherRuntime = (deps) => {
           return;
         }
         if (status.type === 'connect') {
-          console.log('[PushWatcher] connected');
+          onConnectionState?.(true);
+          logConnected();
           return;
         }
         if (status.type === 'error' || status.type === 'initial-error') {
-          console.warn('[PushWatcher] disconnected', status.error?.error?.message ?? status.error?.message ?? status.error);
+          onConnectionState?.(false);
+          logDisconnected(status.error?.error?.message ?? status.error?.message ?? status.error);
         }
       });
       globalEventHub.start();
@@ -82,7 +100,8 @@ export const createOpenCodeWatcherRuntime = (deps) => {
       stallTimeoutMs: upstreamStallTimeoutMs,
       reconnectDelayMs: upstreamReconnectDelayMs,
       onConnect() {
-        console.log('[PushWatcher] connected');
+        onConnectionState?.(true);
+        logConnected();
       },
       onEvent(event) {
         const payload = unwrapGlobalEventPayload(event.payload);
@@ -95,7 +114,8 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (signal.aborted) {
           return;
         }
-        console.warn('[PushWatcher] disconnected', error?.error?.message ?? error?.message ?? error);
+        onConnectionState?.(false);
+        logDisconnected(error?.error?.message ?? error?.message ?? error);
       },
     });
 
@@ -117,6 +137,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     unsubscribeEvent = null;
     unsubscribeStatus = null;
     abortController = null;
+    onConnectionState?.(false);
   };
 
   return {

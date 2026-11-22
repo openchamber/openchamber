@@ -61,4 +61,27 @@ describe('xAI quota provider', () => {
     expect(result.configured).toBe(false);
     expect(requests).toBe(0);
   });
+
+  it('marks a credential-store read failure as a shared credential-path failure', async () => {
+    const result = await fetchQuota({
+      readAuth: () => { throw new Error('Authentication required'); },
+      fetchImpl: async () => { throw new Error('must not be called'); },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    // The generic wrapper text stays (the original message is not passed
+    // through); the marker is what the dispatcher classifies (#1131).
+    expect(result.error).toBe('Failed to read xAI OAuth credentials');
+    expect(result.credentialReadFailure).toBe(true);
+  });
+
+  it('leaves an xAI provider-API error unmarked', async () => {
+    const result = await fetchQuota({
+      readAuth: authWith({ access: 'valid-access', refresh: 'rotating-1', expires: Date.now() + 3_600_000 }),
+      fetchImpl: async () => { throw new Error('Authentication required'); },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('Authentication required');
+    expect(result.credentialReadFailure).toBeUndefined();
+  });
 });

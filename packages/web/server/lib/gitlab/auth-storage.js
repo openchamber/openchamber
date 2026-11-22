@@ -6,6 +6,7 @@ import { isPlainObject, isString } from './validation.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { isVaultReference } from '../environment/vault.js';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 
 const AUTH_VERSION = 2;
 const emptyState = () => ({ version: AUTH_VERSION, providers: { gitlab: { instances: {} } } });
@@ -189,14 +190,15 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     }
   };
   const readState = async () => {
-    let encoded;
-    try { encoded = await fsImpl.readFile(filePath, 'utf8'); }
-    catch (error) {
-      if (error?.code === 'ENOENT') return emptyState();
-      throw error;
+    const result = await readBoundedFile(filePath, 1_048_576 /* 1 MiB */);
+    if (!result.ok) {
+      if (result.reason === 'missing') return emptyState();
+      if (result.reason === 'not-regular') throw invalidState(new Error('Auth file is not a regular file', { cause: result }));
+      if (result.reason === 'too-large') throw invalidState(new Error('Auth file exceeds size limit', { cause: result }));
+      throw invalidState(new Error('Failed to read auth file', { cause: result }));
     }
     let value;
-    try { value = JSON.parse(encoded); }
+    try { value = JSON.parse(result.buffer.toString('utf8')); }
     catch (error) { throw invalidState(error); }
     if (value?.version !== AUTH_VERSION) throw invalidState();
     return parseVersionTwo(value);

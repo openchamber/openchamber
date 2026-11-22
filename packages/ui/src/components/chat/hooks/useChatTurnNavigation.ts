@@ -183,14 +183,18 @@ export const useChatTurnNavigation = ({
             return;
         }
 
-        const applyHash = (hashChanged: boolean) => {
+        const applyHash = () => {
             const hash = window.location.hash;
             const target = parseChatHashTarget(hash);
             if (!target) {
                 return;
             }
 
-            if (!hashChanged && reachedHashRef.current === hash) {
+            // A hashchange for the hash already reached is not a new
+            // navigation: the hook's own replaceState writes can surface as
+            // one in some DOM implementations, and replaying the scroll
+            // would jump back to a prompt the user has moved past.
+            if (reachedHashRef.current === hash) {
                 return;
             }
 
@@ -203,9 +207,9 @@ export const useChatTurnNavigation = ({
                 }
             });
         };
-        const handleHashChange = () => applyHash(true);
+        const handleHashChange = () => applyHash();
 
-        applyHash(false);
+        applyHash();
         window.addEventListener('hashchange', handleHashChange);
         return () => {
             window.removeEventListener('hashchange', handleHashChange);

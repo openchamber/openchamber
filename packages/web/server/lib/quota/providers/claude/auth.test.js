@@ -4,20 +4,13 @@ const execFileSync = vi.fn();
 const files = new Map();
 const openCodeAuth = vi.fn(() => ({}));
 
-vi.mock('child_process', () => ({ execFileSync: (...args) => execFileSync(...args) }));
-
-vi.mock('fs', () => {
-  const fs = {
-    existsSync: (filePath) => files.has(filePath),
-    readFileSync: (filePath) => {
-      if (!files.has(filePath)) throw new Error('ENOENT');
-      return files.get(filePath);
-    },
-  };
-  return { ...fs, default: fs };
-});
-
-vi.mock('../../../opencode/auth.js', () => ({ readOpenCodeCredentials: async () => openCodeAuth() }));
+// Dependency seams: the keychain exec, the credentials-file JSON read, and
+// the OpenCode credential read are injected per call instead of mocked.
+const deps = {
+  execFileSyncImpl: (...args) => execFileSync(...args),
+  readJsonFileImpl: (filePath) => (files.has(filePath) ? JSON.parse(files.get(filePath)) : null),
+  readAuth: async () => openCodeAuth(),
+};
 
 import { findClaudeCredential, loadClaudeCredential } from './auth.js';
 
@@ -55,7 +48,7 @@ afterEach(() => {
   delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 });
 
-const findLocal = () => findClaudeCredential(openCodeAuth());
+const findLocal = () => findClaudeCredential(openCodeAuth(), deps);
 
 describe('Claude credential discovery', () => {
   it('prefers the macOS Keychain over a stale credentials file', () => {
@@ -121,10 +114,10 @@ describe('Claude credential discovery', () => {
     openCodeAuth.mockClear();
     openCodeAuth.mockReturnValue({ anthropic: { access: 'opencode-token', refresh: 'opencode-refresh', expires: 1 } });
     files.set(`${process.env.HOME}/.claude/.credentials.json`, claudeCodeBlob('file-token'));
-    expect((await withPlatform('linux', loadClaudeCredential)).source).toBe('credentials-file');
+    expect((await withPlatform('linux', () => loadClaudeCredential(deps))).source).toBe('credentials-file');
     expect(openCodeAuth).not.toHaveBeenCalled();
 
     files.clear();
-    expect((await withPlatform('linux', loadClaudeCredential)).source).toBe('opencode-auth');
+    expect((await withPlatform('linux', () => loadClaudeCredential(deps))).source).toBe('opencode-auth');
   });
 });

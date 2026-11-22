@@ -1,13 +1,17 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionNodeItemProps } from './SessionNodeItem';
 import type { SessionTreeItemProps } from './SessionTreeItem';
 import { installHookTestDom } from '../test-utils/testDom';
+import { restoreModuleMock } from '../test-utils/moduleMocks';
 import { I18nProvider } from '@/lib/i18n';
+import * as sessionNodeItemModule from './SessionNodeItem';
 
 const renderedRows: SessionNodeItemProps[] = [];
+
+const realSessionNodeItem = { ...sessionNodeItemModule };
 
 mock.module('./SessionNodeItem', () => ({
   SessionNodeItem: (props: SessionNodeItemProps) => {
@@ -16,25 +20,11 @@ mock.module('./SessionNodeItem', () => ({
   },
 }));
 
-mock.module('./hooks/useSessionActions', () => ({
-  useSessionActions: (args: {
-    setEditingId: (id: string | null) => void;
-    setEditTitle: (title: string) => void;
-  }) => ({
-    handleSaveEdit: () => undefined,
-    handleCancelEdit: () => undefined,
-    handleSessionSelect: () => undefined,
-    handleSessionDoubleClick: (id: string, title: string) => {
-      args.setEditingId(id);
-      args.setEditTitle(title);
-    },
-    handleCopySessionId: () => undefined,
-    handleDeleteSession: () => undefined,
-    handleRestoreSession: () => undefined,
-  }),
-}));
-
 const { SessionTreeItem } = await import('./SessionTreeItem');
+
+afterAll(async () => {
+  await restoreModuleMock('@/components/session/sidebar/sessions/SessionNodeItem', realSessionNodeItem, () => import('./SessionNodeItem'));
+});
 
 const noopStartSessionWorktreeMenuLoad: SessionTreeItemProps['startSessionWorktreeMenuLoad'] = () => ({
   cachedTargets: [],

@@ -21,7 +21,7 @@ export const parseBucket = (bucket) => {
   const remainingPercent = remainingFraction !== null
     ? Math.round(remainingFraction * 100)
     : null;
-  const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+  const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
   const resetAt = toTimestamp(bucket?.resetTime);
   const windowStr = (bucket?.window || bucket?.bucketId || '').toLowerCase();
 
@@ -135,7 +135,7 @@ export const transformModels = (modelsPayload, modelGroupWindows = []) => {
       const remainingPercent = remainingFraction !== null
         ? Math.round(remainingFraction * 100)
         : null;
-      const usedPercent = remainingPercent !== null ? Math.max(0, 100 - remainingPercent) : null;
+      const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
       const resetAt = toTimestamp(modelData?.quotaInfo?.resetTime);
 
       const remainingSeconds = resetAt !== null

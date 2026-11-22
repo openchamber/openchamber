@@ -23,19 +23,6 @@ const CORPUS = [
 const lexAll = () => [new Marked({ gfm: true }), new Marked({ gfm: true, breaks: true }), new Marked({ pedantic: true })]
   .map((marked) => JSON.stringify(marked.lexer(CORPUS)));
 
-const paragraphs = (count: number) => Array.from({ length: count }, (_, i) => `Paragraph ${i} is short.`).join('\n\n');
-
-const fastestLexMs = (source: string) => {
-  const marked = new Marked({ gfm: true });
-  let best = Infinity;
-  for (let run = 0; run < 3; run += 1) {
-    const start = performance.now();
-    marked.lexer(source);
-    best = Math.min(best, performance.now() - start);
-  }
-  return best;
-};
-
 describe('pinMarkedAnchoredRules', () => {
   // Runs before the pin, so `before` comes from marked's own rules.
   const before = lexAll();
@@ -60,14 +47,10 @@ describe('pinMarkedAnchoredRules', () => {
     expect(hr.exec('text\n---\n')).toBeNull();
   });
 
-  // The cost of a message must grow with its length, not its square. Four
-  // times the paragraphs takes about four times as long when linear and about
-  // sixteen times when quadratic; the bound sits between, so machine speed
-  // does not matter.
-  test('lexing time grows linearly with the number of paragraphs', () => {
-    fastestLexMs(paragraphs(250));
-    const small = fastestLexMs(paragraphs(1_000));
-    const large = fastestLexMs(paragraphs(4_000));
-    expect(large / Math.max(small, 1)).toBeLessThan(8);
-  }, 60_000);
+  // No timing test: the engines CI and current Safari run (Bun 1.4.3, the
+  // JavaScriptCore in macOS 27.0.1) no longer retry a failed ^ match at every
+  // position, so a growth test passes with or without the pin and can only
+  // fail on noise. Older JavaScriptCore (Bun 1.3.11, Safari and iOS WebKit
+  // before that release) took 14 s for the hr rule over 16,000 paragraphs and
+  // still benefits; 'replaces the anchored rules' above is the guard.
 });

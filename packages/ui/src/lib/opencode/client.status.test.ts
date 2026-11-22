@@ -247,3 +247,76 @@ describe("v2 status and cancellation HTTP boundary", () => {
     }
   })
 })
+
+describe("session-activity v1 envelope boundary (#709)", () => {
+  const envelope = {
+    version: 1,
+    serverTime: 1_700_000_000_000,
+    watcherReady: true,
+    sessions: {
+      s1: {
+        type: "busy",
+        lastActivityAt: 1_700_000_000_500,
+        status: "running",
+        model: { modelID: "gpt-test", providerID: "openai" },
+        toolInFlight: null,
+      },
+      s2: {
+        type: "idle",
+        lastActivityAt: 1_700_000_000_100,
+        status: null,
+        model: null,
+        toolInFlight: null,
+      },
+    },
+  }
+
+  test("unwraps the v1 envelope and returns only the per-session entries", async () => {
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async () => Response.json(envelope))
+    try {
+      const activity = await opencodeClient.getWebServerSessionActivity()
+      expect(Object.keys(activity ?? {}).sort()).toEqual(["s1", "s2"])
+      expect(activity?.s1).toEqual(envelope.sessions.s1)
+      expect(activity?.s2?.type).toBe("idle")
+      // Envelope fields are never surfaced as session entries.
+      expect(activity).not.toHaveProperty("version")
+      expect(activity).not.toHaveProperty("serverTime")
+      expect(activity).not.toHaveProperty("watcherReady")
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("a pre-v1 bare session map is malformed and reads as null", async () => {
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ s1: { type: "busy" } }),
+    )
+    try {
+      expect(await opencodeClient.getWebServerSessionActivity()).toBeNull()
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("an envelope with a malformed entry reads as null, not a partial map", async () => {
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ ...envelope, sessions: { s1: { type: "busy" } } }),
+    )
+    try {
+      expect(await opencodeClient.getWebServerSessionActivity()).toBeNull()
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("a failed fetch reads as null", async () => {
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response("nope", { status: 500 }),
+    )
+    try {
+      expect(await opencodeClient.getWebServerSessionActivity()).toBeNull()
+    } finally {
+      fetch.mockRestore()
+    }
+  })
+})

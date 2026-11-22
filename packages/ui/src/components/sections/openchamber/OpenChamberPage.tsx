@@ -1,5 +1,6 @@
 import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
+import { getAppearanceVisibleSettings } from './appearanceVisibleSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { MergedWorktreeCleanupSettings } from './MergedWorktreeCleanupSettings';
 import { AutoCreateWorktreeSettings } from './AutoCreateWorktreeSettings';
@@ -146,23 +147,7 @@ const GeneralSectionContent: React.FC = () => {
 
 // Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
-    const isVSCode = isVSCodeRuntime();
-    return <OpenChamberVisualSettings visibleSettings={[
-        'theme',
-        'windowControlsPosition',
-        'pwaInstallName',
-        'pwaOrientation',
-        'mobileKeyboardMode',
-        'timeFormat',
-        ...(!isVSCode ? ['weekStart' as const] : []),
-        'fontSize',
-        'terminalFontSize',
-        'editorFontSize',
-        'spacing',
-        'scrollbars',
-        'inputBarOffset',
-        'animatedActivityIndicators',
-    ]} />;
+    return <OpenChamberVisualSettings visibleSettings={getAppearanceVisibleSettings(isVSCodeRuntime())} />;
 };
 
 const ChatSectionContent: React.FC = () => <ChatSettings />;

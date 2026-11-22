@@ -34,8 +34,11 @@ type TerminalBuffer = {
   lastSequence: number;
 };
 
+const EMPTY_TERMINAL_CHUNKS: TerminalChunk[] = [];
+Object.freeze(EMPTY_TERMINAL_CHUNKS);
+
 const EMPTY_TERMINAL_BUFFER: TerminalBuffer = Object.freeze({
-  chunks: Object.freeze([]) as unknown as TerminalChunk[],
+  chunks: EMPTY_TERMINAL_CHUNKS,
   byteLength: 0,
   lastSequence: -1,
 });
@@ -123,7 +126,9 @@ const TERMINAL_BUFFER_LIMIT = 512 * 1024;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 /** One encode per chunk: the trimmed text and its UTF-8 size are needed together. */
-const trimToBufferLimit = (value: string): { text: string; byteLength: number } => {
+type TerminalBufferTrim = { text: string; byteLength: number };
+
+const trimToBufferLimit = (value: string): TerminalBufferTrim => {
   const bytes = textEncoder.encode(value);
   if (bytes.byteLength <= TERMINAL_BUFFER_LIMIT) return { text: value, byteLength: bytes.byteLength };
   let start = bytes.byteLength - TERMINAL_BUFFER_LIMIT;
@@ -177,8 +182,7 @@ type PersistedTerminalStoreState = {
   nextTabId: number;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
+const persistedRecordSchema = z.record(z.string(), z.unknown());
 
 const isProjectActionPurpose = (purpose: TerminalTabPurpose): purpose is Extract<TerminalTabPurpose, { type: 'project-action' }> =>
   purpose.type === 'project-action';
@@ -1187,12 +1191,14 @@ export const useTerminalStore = create<TerminalStore>()(
         storage: createDedupedTerminalStorage(),
         partialize: partializeTerminalStore,
         merge: (persistedState, currentState) => {
-          if (!isRecord(persistedState)) {
+          const parsedPersistedState = persistedRecordSchema.safeParse(persistedState);
+          if (!parsedPersistedState.success) {
             return currentState;
           }
+          const persistedRecord = parsedPersistedState.data;
 
-          const rawSessions = Array.isArray(persistedState.sessions)
-            ? (persistedState.sessions as PersistedTerminalStoreState['sessions'])
+          const rawSessions = Array.isArray(persistedRecord.sessions)
+            ? (persistedRecord.sessions as PersistedTerminalStoreState['sessions'])
             : [];
 
           const sessions = new Map<string, DirectoryTerminalState>();
@@ -1204,20 +1210,24 @@ export const useTerminalStore = create<TerminalStore>()(
             }
 
             const [directory, rawState] = entry as [unknown, unknown];
-            if (typeof directory !== 'string' || !isRecord(rawState)) {
+            const parsedRawState = persistedRecordSchema.safeParse(rawState);
+            if (typeof directory !== 'string' || !parsedRawState.success) {
               continue;
             }
+            const rawStateRecord = parsedRawState.data;
 
-            const rawTabs = Array.isArray(rawState.tabs) ? (rawState.tabs as unknown[]) : [];
+            const rawTabs = Array.isArray(rawStateRecord.tabs) ? (rawStateRecord.tabs as unknown[]) : [];
             const tabs: TerminalTab[] = [];
             const migratedTabIds = new Map<string, string>();
 
             for (const rawTab of rawTabs) {
-              if (!isRecord(rawTab)) {
+              const parsedRawTab = persistedRecordSchema.safeParse(rawTab);
+              if (!parsedRawTab.success) {
                 continue;
               }
+              const rawTabRecord = parsedRawTab.data;
 
-              const persistedId = typeof rawTab.id === 'string' ? rawTab.id : null;
+              const persistedId = typeof rawTabRecord.id === 'string' ? rawTabRecord.id : null;
               if (!persistedId) {
                 continue;
               }
@@ -1228,19 +1238,19 @@ export const useTerminalStore = create<TerminalStore>()(
               }
               const id = num === null ? persistedId : createTerminalTabId();
               migratedTabIds.set(persistedId, id);
-              const persistedPurpose = persistedProjectActionPurposeSchema.safeParse(rawTab.purpose).data;
+              const persistedPurpose = persistedProjectActionPurposeSchema.safeParse(rawTabRecord.purpose).data;
               const purpose: TerminalTabPurpose = persistedPurpose
                 ? { type: 'project-action', actionId: persistedPurpose.actionId, executionId: null }
                 : { type: 'terminal' };
 
               tabs.push({
                 id,
-                label: typeof rawTab.label === 'string' ? rawTab.label : 'Terminal',
-                iconKey: typeof rawTab.iconKey === 'string' ? rawTab.iconKey : null,
+                label: typeof rawTabRecord.label === 'string' ? rawTabRecord.label : 'Terminal',
+                iconKey: typeof rawTabRecord.iconKey === 'string' ? rawTabRecord.iconKey : null,
                 terminalSessionId: null,
                 lifecycle: 'idle',
                 purpose,
-                createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
+                createdAt: typeof rawTabRecord.createdAt === 'number' ? rawTabRecord.createdAt : Date.now(),
                 isConnecting: false,
                 previewUrl: null,
                 previewAutoOpened: false,
@@ -1253,7 +1263,7 @@ export const useTerminalStore = create<TerminalStore>()(
             }
 
             const activeTabId =
-              typeof rawState.activeTabId === 'string' ? (rawState.activeTabId as string) : null;
+              typeof rawStateRecord.activeTabId === 'string' ? (rawStateRecord.activeTabId as string) : null;
             const migratedActiveTabId = activeTabId ? (migratedTabIds.get(activeTabId) ?? activeTabId) : null;
             const activeExists = migratedActiveTabId ? tabs.some((t) => t.id === migratedActiveTabId) : false;
 
@@ -1264,8 +1274,8 @@ export const useTerminalStore = create<TerminalStore>()(
           }
 
           const persistedNextTabId =
-            typeof persistedState.nextTabId === 'number' && Number.isFinite(persistedState.nextTabId)
-              ? (persistedState.nextTabId as number)
+            typeof persistedRecord.nextTabId === 'number' && Number.isFinite(persistedRecord.nextTabId)
+              ? (persistedRecord.nextTabId as number)
               : 1;
 
           const nextTabId = Math.max(currentState.nextTabId, persistedNextTabId, maxTabNum + 1);
@@ -1289,14 +1299,7 @@ export const useTerminalStore = create<TerminalStore>()(
 // Ensure hydration completes even when no persisted state exists.
 if (typeof window !== 'undefined' && !hydrationListenerAttached) {
   hydrationListenerAttached = true;
-  const persistApi = (
-    useTerminalStore as unknown as {
-      persist?: {
-        hasHydrated?: () => boolean;
-        onFinishHydration?: (cb: () => void) => (() => void) | void;
-      };
-    }
-  ).persist;
+  const persistApi = useTerminalStore.persist;
 
   const markHydrated = () => {
     if (!useTerminalStore.getState().hasHydrated) {

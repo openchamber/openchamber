@@ -1,0 +1,313 @@
+name: main-broken watcher
+
+# CI policy: .github/ci-policy.md (fleet design developing-today/code#1779
+# sec.5; Phase 3, developing-today/code#1782). `pr checks` (oc-review.yml)
+# is this repo's designated main-gate: watching only that one workflow
+# avoids the workflow_run fan-out noise (the code#304 lesson -- watching
+# "*" produced a skipped no-op run for every workflow completion).
+#
+# On a main-gate failure on main, this watcher computes the Breakage-ID,
+# then either appends the run to the open `main-broken` issue that
+# already carries that ID or files a new one with the pattern labels and
+# an agent-note:v1 holder trail. Exactly one holder owns a breakage at
+# any moment: breakages are handed to the fleet queue via pm-dispatch
+# at filing (label `queue/queued`), and the claiming lane records the
+# next holder transition in the agent-note trail.
+
+on:
+  workflow_run:
+    workflows: ["pr checks"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Past main-gate run id to process (validation)"
+        required: true
+        type: string
+      dry_run:
+        description: "Compute + search only; file and comment nothing"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+# Concurrency audit (#84): triggers are workflow_run / workflow_dispatch
+# only -- no issues and no pull_request_target event -- and
+# cancel-in-progress is the literal `false`, so queue: max can never pair
+# with a true-evaluating cancel expression here. The group is a single
+# global group on purpose: filing is a non-atomic search-then-file keyed
+# on the Breakage-ID, and the Breakage-ID is only computed inside the
+# job, so it cannot key the group. Serializing every watcher run is what
+# makes lookup-and-create atomic in effect -- two simultaneous failures
+# carrying the same Breakage-ID can no longer both miss the search and
+# file duplicate breakage issues. queue: max with the literal `false`
+# cancel means runs wait their turn instead of displacing each other.
+concurrency:
+  group: main-broken-watcher
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  watch:
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      id-token: write
+    if: >-
+      github.repository == 'developing-today-forks/openchamber' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'failure' &&
+      (github.event.workflow_run.event == 'push' ||
+      github.event.workflow_run.event == 'schedule' ||
+      github.event.workflow_run.event == 'workflow_dispatch') &&
+      github.event.workflow_run.head_branch == 'main'))
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute the breakage and prepare the dispatch
+        id: file-breakage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          WATCHED_RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          run_id="$WATCHED_RUN_ID"
+          if [ -z "$run_id" ]; then
+            echo "::error::no watched run id available"
+            exit 1
+          fi
+
+          run_json="$(gh api "repos/${GH_REPO}/actions/runs/${run_id}")"
+          workflow_name="$(printf '%s' "$run_json" | jq -r '.name')"
+          run_url="$(printf '%s' "$run_json" | jq -r '.html_url')"
+          head_sha="$(printf '%s' "$run_json" | jq -r '.head_sha')"
+          head_branch="$(printf '%s' "$run_json" | jq -r '.head_branch')"
+          run_event="$(printf '%s' "$run_json" | jq -r '.event')"
+          conclusion="$(printf '%s' "$run_json" | jq -r '.conclusion')"
+          short_sha="${head_sha:0:7}"
+
+          if [ "$conclusion" != "failure" ]; then
+            echo "::notice::run ${run_id} concluded '${conclusion}', not failure; nothing to file."
+            exit 0
+          fi
+          if [ "$head_branch" != "main" ]; then
+            echo "::notice::run ${run_id} is on branch '${head_branch}', not main; nothing to file."
+            exit 0
+          fi
+          case "$run_event" in
+            push|schedule|workflow_dispatch) ;;
+            *)
+              echo "::notice::run ${run_id} is a '${run_event}' run, not a main push/schedule/dispatch run; nothing to file."
+              exit 0
+              ;;
+          esac
+
+          failing_json="$(gh api "repos/${GH_REPO}/actions/runs/${run_id}/jobs?per_page=100" --paginate \
+            | jq -s '[.[].jobs[] | select(.conclusion == "failure") | .name] | sort | unique')"
+          failing_csv="$(printf '%s' "$failing_json" | jq -r 'join(",")')"
+          first_failing="$(printf '%s' "$failing_json" | jq -r '.[0] // "unknown"')"
+
+          # Breakage-ID (design sec.5.2): first 12 hex of
+          # sha256("<repo>|<workflow>|<sorted failing job names, comma-joined>").
+          breakage_id="$(printf '%s' "${GH_REPO}|${workflow_name}|${failing_csv}" | sha256sum | cut -c1-12)"
+          ts="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "workflow=${workflow_name} run=${run_url} failing=[${failing_csv}] Breakage-ID=${breakage_id} dry_run=${DRY_RUN}"
+
+          existing="$(gh issue list --state open --label main-broken \
+            --search "${breakage_id} in:body" --json number --jq '.[0].number // empty')"
+
+          if [ -n "$existing" ]; then
+            append_body="$(printf 'Another failure of the same breakage.\n\n- Run: %s\n- Head commit: %s\n- Failing jobs: %s\n\nagent-note:v1 holder: chain (watcher append) at %s; holder unchanged -- see the filing note on this issue. No duplicate issue, no duplicate dispatch.\n' \
+              "$run_url" "$head_sha" "$failing_csv" "$ts")"
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "DRY RUN: would queue a follow-up task on existing issue #${existing}:"
+              printf '%s\n' "$append_body"
+            else
+              {
+                echo "mode=append"
+                echo "existing_number=${existing}"
+                echo "title=main-broken: ${GH_REPO} ${workflow_name} @${short_sha} — ${first_failing}"
+                echo "prompt<<PM_DISPATCH_PROMPT_EOF"
+                printf '%s\n' "$append_body"
+                echo "PM_DISPATCH_PROMPT_EOF"
+              } >> "$GITHUB_OUTPUT"
+              echo "Prepared a pm-dispatch follow-up task for existing breakage issue #${existing}."
+            fi
+            exit 0
+          fi
+
+          error_excerpt="$(gh run view "$run_id" --log-failed 2>/dev/null | head -n 40 || true)"
+          if [ -z "$error_excerpt" ]; then
+            error_excerpt="(failed-job log excerpt unavailable; see the run URL)"
+          fi
+
+          body_file="$RUNNER_TEMP/breakage-body.md"
+          {
+            echo "Main tier (the \`pr checks\` main-gate) failed on \`main\`."
+            echo
+            echo "- Run: ${run_url}"
+            echo "- Workflow: ${workflow_name}"
+            echo "- Head commit: ${head_sha}"
+            echo "- Failing jobs: ${failing_csv}"
+            echo "- First failing job: ${first_failing}"
+            echo
+            echo "Breakage-ID: ${breakage_id}"
+            echo
+            echo "First error excerpt (failed-job log, truncated):"
+            echo
+            echo '```text'
+            printf '%s\n' "$error_excerpt"
+            echo '```'
+            echo
+            echo "<!-- agent-note:v1 -->"
+            echo "agent-note:v1"
+            echo "holder: chain (filing)"
+            echo "since: ${ts}"
+            echo "holder: released by chain at ${ts}; handed to the fleet queue via pm-dispatch at filing (label \`queue/queued\`). The dispatch records its task id on this issue; the claiming lane records the next holder transition here."
+            echo
+            echo "Anything that breaks main is top priority. Close this issue only when the main-gate passes on a SHA containing the fix; the \`main-broken\` label comes off only at close."
+          } > "$body_file"
+
+          title="main-broken: ${GH_REPO} ${workflow_name} @${short_sha} — ${first_failing}"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "DRY RUN: would file a new breakage issue:"
+            echo "title: ${title}"
+            echo "labels: kind/ci, priority/critical, main-broken, queue/queued, status/needs-triage"
+            cat "$body_file"
+            exit 0
+          fi
+
+          # Coin the pattern labels if any is missing, so filing never
+          # fails on an absent label.
+          for spec in 'kind/ci fbca04' 'priority/critical b60205' 'main-broken B60205' 'queue/queued 7057ff' 'status/needs-triage fbca04'; do
+            label_name="${spec% *}"
+            label_color="${spec#* }"
+            encoded="$(jq -rn --arg v "$label_name" '$v | @uri')"
+            if ! gh api "repos/${GH_REPO}/labels/${encoded}" >/dev/null 2>&1; then
+              gh label create "$label_name" --color "$label_color" \
+                --description "Coined by the main-broken watcher (fleet CI Phase 3)" || true
+            fi
+          done
+
+          {
+            echo "mode=file"
+            echo "title=${title}"
+            echo "prompt<<PM_DISPATCH_PROMPT_EOF"
+            cat "$body_file"
+            echo "PM_DISPATCH_PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Prepared a pm-dispatch filing for: ${title}"
+
+      # pm-dispatch inline (no external action download): the watcher used to
+      # call pm-dispatch-queue from developing-today/code at main, which failed
+      # the whole job in "Set up job" whenever the runner could not fetch
+      # that repo's archive (runs 41477860103, 41472207624, 41459167391 all
+      # failed downloading 750bc13 within minutes of that push). The steps
+      # below POST the same payload with the same OIDC grant, so filing no
+      # longer depends on an external checkout at setup time.
+      - name: Queue a follow-up task on the existing breakage issue via pm-dispatch
+        if: steps.file-breakage.outputs.mode == 'append'
+        env:
+          INPUT_TITLE: ${{ steps.file-breakage.outputs.title }}
+          INPUT_PROMPT: ${{ steps.file-breakage.outputs.prompt }}
+          INPUT_ISSUE_NUMBER: ${{ steps.file-breakage.outputs.existing_number }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::pm-dispatch: OIDC token request env is not set; the job must grant 'permissions: id-token: write'." >&2
+            exit 1
+          fi
+          oidc_token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pm-dispatch" | jq -r '.value // empty')"
+          if [ -z "$oidc_token" ]; then
+            echo "::error::pm-dispatch: failed to mint a GitHub Actions OIDC token (audience pm-dispatch)." >&2
+            exit 1
+          fi
+          payload="$(jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg title "$INPUT_TITLE" \
+            --arg prompt "$INPUT_PROMPT" \
+            --argjson issue true \
+            --argjson issue_number "$INPUT_ISSUE_NUMBER" \
+            '{repo: $repo, title: $title, prompt: $prompt, issue: $issue, issue_number: $issue_number}')"
+          response="$(curl -sS -w $'\n%{http_code}' -X POST "https://dispatch.security.cab/v1/tasks" \
+            -H "Authorization: Bearer $oidc_token" \
+            -H "Content-Type: application/json" \
+            -d "$payload")"
+          http_code="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::error::pm-dispatch POST /v1/tasks failed (HTTP $http_code):" >&2
+            echo "$body" >&2
+            exit 1
+          fi
+          echo "$body"
+
+      - name: File the breakage issue via pm-dispatch
+        id: dispatch
+        if: steps.file-breakage.outputs.mode == 'file'
+        env:
+          INPUT_TITLE: ${{ steps.file-breakage.outputs.title }}
+          INPUT_PROMPT: ${{ steps.file-breakage.outputs.prompt }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::pm-dispatch: OIDC token request env is not set; the job must grant 'permissions: id-token: write'." >&2
+            exit 1
+          fi
+          oidc_token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pm-dispatch" | jq -r '.value // empty')"
+          if [ -z "$oidc_token" ]; then
+            echo "::error::pm-dispatch: failed to mint a GitHub Actions OIDC token (audience pm-dispatch)." >&2
+            exit 1
+          fi
+          payload="$(jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg title "$INPUT_TITLE" \
+            --arg prompt "$INPUT_PROMPT" \
+            --argjson issue true \
+            '{repo: $repo, title: $title, prompt: $prompt, issue: $issue}')"
+          response="$(curl -sS -w $'\n%{http_code}' -X POST "https://dispatch.security.cab/v1/tasks" \
+            -H "Authorization: Bearer $oidc_token" \
+            -H "Content-Type: application/json" \
+            -d "$payload")"
+          http_code="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "::error::pm-dispatch POST /v1/tasks failed (HTTP $http_code):" >&2
+            echo "$body" >&2
+            exit 1
+          fi
+          echo "$body"
+          task_id="$(printf '%s' "$body" | jq -r '.task_id // empty')"
+          issue_number="$(printf '%s' "$body" | jq -r '.issue_number // empty')"
+          issue_url="$(printf '%s' "$body" | jq -r '.issue_url // empty')"
+          if [ -z "$issue_url" ] && [ -n "$issue_number" ]; then
+            issue_url="https://github.com/${{ github.repository }}/issues/${issue_number}"
+          fi
+          {
+            echo "task_id=$task_id"
+            echo "issue_number=$issue_number"
+            echo "issue_url=$issue_url"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Apply the breakage labels to the filed issue
+        if: steps.file-breakage.outputs.mode == 'file' && steps.dispatch.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh issue edit "${{ steps.dispatch.outputs.issue_number }}" \
+            --add-label 'kind/ci' --add-label 'priority/critical' --add-label 'main-broken' \
+            --add-label 'queue/queued' --add-label 'status/needs-triage'
+          echo "Applied the breakage label set to issue #${{ steps.dispatch.outputs.issue_number }} (${{ steps.dispatch.outputs.issue_url }})."

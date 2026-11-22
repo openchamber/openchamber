@@ -281,6 +281,7 @@ export const ImageArtifact: React.FC<{
               variant="ghost"
               size="xs"
               className="min-w-11 tabular-nums"
+              aria-label={t('filesView.artifact.image.actualTitle')}
               title={t('filesView.artifact.image.actualTitle')}
               disabled={!natural}
               onClick={() => zoomAtCenter(1)}

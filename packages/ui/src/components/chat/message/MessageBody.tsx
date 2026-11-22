@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
+import { EntryTimes } from './EntryTimes';
 import { readSessionNoticePart } from '@/lib/opencode/session-notices';
 import { Button } from '@/components/ui/button';
 import { ErrorResponseDetails } from '@/components/chat/ErrorResponseDetails';
@@ -23,6 +24,7 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { LongErrorText } from '../LongErrorText';
+import { MessageRecoveryActions } from '../MessageRecoveryActions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChatSessionSelection } from '../chatColumnSession';
 import { useUIStore } from '@/stores/useUIStore';
@@ -1756,6 +1758,7 @@ const AssistantMessageBody = React.memo(({
                 if (notice) {
                     rendered.push(
                         <FadeInOnReveal key={`notice-${toolPart.id}`}>
+                            <EntryTimes part={toolPart} />
                             <SessionNoticeBlock notice={notice} blockId={toolPart.id} />
                         </FadeInOnReveal>
                     );
@@ -2198,6 +2201,7 @@ const AssistantMessageBody = React.memo(({
                                     </div>
                                 </div>
                                 {errorResponseBody ? <ErrorResponseDetails body={errorResponseBody} className="mt-1 ps-7" /> : null}
+                                {sessionId ? <MessageRecoveryActions sessionId={sessionId} directory={effectiveDirectory} anchorMessageId={messageId} /> : null}
                             </div>
                         </FadeInOnReveal>
                     )}

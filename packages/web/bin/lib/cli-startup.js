@@ -293,11 +293,23 @@ WantedBy=default.target
 `;
 }
 
+// Every startup-management call goes through this wrapper, and the system
+// tools it runs (systemctl --user, launchctl, schtasks) can hang for the
+// life of the child when the user's session manager is wedged: spawnSync
+// without a timeout would hang the CLI command with them, forever, with no
+// error. The queries below answer in well under a second and the
+// enable/bootstrap operations in a few seconds, so 30 s is generous for a
+// healthy manager and still turns a wedged one into the existing error
+// shapes (a thrown result.error, or the failure status callers already
+// handle) instead of a silent permanent hang.
+const STARTUP_COMMAND_TIMEOUT_MS = 30_000;
+
 function runStartupCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     stdio: options.stdio || 'pipe',
     windowsHide: true,
+    timeout: options.timeout ?? STARTUP_COMMAND_TIMEOUT_MS,
   });
   if (result.error) {
     throw result.error;
@@ -464,4 +476,5 @@ export {
   enableStartupService,
   disableStartupService,
   buildWindowsStartupTaskCommand,
+  runStartupCommand,
 };

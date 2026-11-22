@@ -629,6 +629,11 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
 
       let payload = frame.payload;
       if (frame.frameType === TunnelFrameType.WsText || frame.frameType === TunnelFrameType.WsBinary) {
+        // Reject before assembly (#1024): fragments for a stream with no
+        // registered handler (never opened, or already dropped) must not be
+        // retained by the assembler. The handler lookup below already
+        // tolerates such late frames; this only moves the check earlier.
+        if (!channelObj.streams.get(frame.streamId)) return;
         let complete: Uint8Array | null;
         try {
           complete = channelObj.assembler.push(frame);

@@ -16,7 +16,7 @@ import { Icon } from '@/components/icon/Icon';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { usePluginsStore, type PluginScope } from '@/stores/usePluginsStore';
+import { usePluginsStore, type PluginOptions, type PluginScope } from '@/stores/usePluginsStore';
 
 type TabKey = 'npm' | 'path' | 'file';
 
@@ -28,7 +28,7 @@ interface AddPluginDialogProps {
 
 const FILENAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
 
-function parseOptions(raw: string): { ok: true; value?: Record<string, unknown> } | { ok: false } {
+function parseOptions(raw: string): { ok: true; value?: PluginOptions } | { ok: false } {
   const trimmed = raw.trim();
   if (trimmed === '') return { ok: true, value: undefined };
   try {
@@ -36,7 +36,7 @@ function parseOptions(raw: string): { ok: true; value?: Record<string, unknown> 
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { ok: false };
     }
-    return { ok: true, value: parsed as Record<string, unknown> };
+    return { ok: true, value: parsed as PluginOptions };
   } catch {
     return { ok: false };
   }

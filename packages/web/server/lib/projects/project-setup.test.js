@@ -12,6 +12,7 @@ import {
   normalizePlansDir,
   serializeSharedProjectConfig,
   parseSharedProjectConfig,
+  SHARED_PROJECT_CONFIG_MAX_BYTES,
   sharedTrustHashOf,
   projectSetupPatchToStored,
   projectSetupViewOf,
@@ -425,6 +426,44 @@ describe('project setup runtime', () => {
     }
   });
 
+  it('refuses a shared file over the size cap and reads one at the cap', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const repo = path.join(tempRoot, 'repo');
+      await mkdir(path.join(repo, '.openchamber'), { recursive: true });
+      const sharedPath = path.join(repo, '.openchamber', 'project.json');
+      const projectId = createProjectIdFromPath(repo);
+      const emptyDoc = JSON.stringify({ version: 1, pad: '' });
+      const atCap = JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES - emptyDoc.length) });
+      expect(atCap.length).toBe(SHARED_PROJECT_CONFIG_MAX_BYTES);
+      await writeFile(sharedPath, atCap);
+      expect((await runtime.readProjectSetup(projectId)).shared.status).toBe('ok');
+      await writeFile(sharedPath, JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES) }));
+      const overCap = await runtime.readProjectSetup(projectId);
+      expect(overCap.shared.status).toBe('invalid');
+      expect(overCap.shared.reason).toMatch(/too large/);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('refuses to patch over a shared file the size gate refused to read', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const repo = path.join(tempRoot, 'repo');
+      await mkdir(path.join(repo, '.openchamber'), { recursive: true });
+      const sharedPath = path.join(repo, '.openchamber', 'project.json');
+      const projectId = createProjectIdFromPath(repo);
+      const oversized = JSON.stringify({ version: 1, pad: 'x'.repeat(SHARED_PROJECT_CONFIG_MAX_BYTES) });
+      await writeFile(sharedPath, oversized);
+      await expect(runtime.updateSharedProjectSetup(projectId, { plansDir: 'docs/plans' })).rejects.toThrow('too large');
+      await expect(runtime.updateSharedProjectSetup(projectId, {})).rejects.toThrow('too large');
+      expect(await readFile(sharedPath, 'utf8')).toBe(oversized);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('reads the shared file from the checkout the id names and merges it', async () => {
     const { runtime, tempRoot, cleanup } = await createRuntime();
     try {
@@ -507,6 +546,24 @@ describe('project setup runtime', () => {
     }
   });
 
+  it('refuses to persist a shared file over the size cap instead of writing an unreadable one', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const repo = path.join(tempRoot, 'repo');
+      await mkdir(repo, { recursive: true });
+      const projectId = createProjectIdFromPath(repo);
+      const projectActions = Array.from({ length: 260 }, (_, index) => ({
+        id: `action-${index}`,
+        name: `Action ${index}`,
+        command: 'x'.repeat(4000),
+      }));
+      await expect(runtime.updateSharedProjectSetup(projectId, { projectActions })).rejects.toThrow('too large');
+      await expect(readFile(path.join(repo, '.openchamber', 'project.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('refuses to write the shared file for a checkout that does not exist and on a bad patch', async () => {
     const { runtime, tempRoot, cleanup } = await createRuntime();
     try {
@@ -553,5 +610,26 @@ describe('project setup runtime', () => {
     } finally {
       await cleanup();
     }
+  });
+});
+
+describe('project-setup clamp surrogate-pair boundary (#1990)', () => {
+  const EMOJI = '\u{1F600}';
+
+  it('an action name straddling the 80-char cut is dropped whole', () => {
+    const [action] = sanitizeProjectActions([{ id: 'a', name: `${'a'.repeat(79)}${EMOJI}x`, command: 'run' }]);
+    expect(action.name).toBe('a'.repeat(79));
+    expect(Buffer.from(action.name, 'utf8').toString('utf8')).toBe(action.name);
+  });
+
+  it('an action name pair ending exactly at the limit is kept whole', () => {
+    const name = `${'a'.repeat(78)}${EMOJI}`;
+    const [action] = sanitizeProjectActions([{ id: 'a', name, command: 'run' }]);
+    expect(action.name).toBe(name);
+  });
+
+  it('a setup command straddling the 4,000-char cut is dropped whole', () => {
+    const [command] = sanitizeSetupCommands([`${'a'.repeat(3999)}${EMOJI}x`]);
+    expect(command).toBe('a'.repeat(3999));
   });
 });

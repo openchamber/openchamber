@@ -3,15 +3,8 @@ import https from 'node:https';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createProxyMiddlewareMock } = vi.hoisted(() => ({
-  createProxyMiddlewareMock: vi.fn(),
-}));
-
-vi.mock('http-proxy-middleware', () => ({
-  createProxyMiddleware: createProxyMiddlewareMock,
-}));
-
 const { registerOpenCodeProxy } = await import('./proxy.js');
+const createProxyMiddlewareMock = vi.fn();
 
 const createStubApp = () => {
   const settings = new Map();
@@ -52,6 +45,7 @@ const createStubDeps = (state) => ({
     return `${state.baseUrl}${pathname}`;
   },
   ensureOpenCodeApiPrefix: (pathname) => pathname,
+  createProxyMiddleware: createProxyMiddlewareMock,
 });
 
 const managedState = () => ({ port: 49303, baseUrl: 'http://127.0.0.1:49303' });

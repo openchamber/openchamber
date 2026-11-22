@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { startRelayHost } from './host-client.js';
+import { resolveBatchWindowMs, startRelayHost } from './host-client.js';
 import {
   bytesToBase64Url,
   createFrameDecryptor,
@@ -594,5 +594,30 @@ describe('relay host-client error redaction', () => {
     } finally {
       host.stop();
     }
+  });
+});
+
+describe('relay batch window env parsing (#689)', () => {
+  it('honours plain decimal spellings, including zero', () => {
+    expect(resolveBatchWindowMs(undefined, '150')).toBe(150);
+    expect(resolveBatchWindowMs(undefined, '0')).toBe(0);
+    expect(resolveBatchWindowMs(undefined, ' 250 ')).toBe(250);
+  });
+
+  it('falls back to the 150 ms default for non-plain-decimal spellings', () => {
+    for (const invalid of [undefined, '', 'abc', '150junk', '2.9', '1e3', '0x10', '-5']) {
+      expect(resolveBatchWindowMs(undefined, invalid)).toBe(150);
+    }
+  });
+
+  it('falls back to the 150 ms default above the timer maximum', () => {
+    expect(resolveBatchWindowMs(undefined, '2147483647')).toBe(2_147_483_647);
+    expect(resolveBatchWindowMs(undefined, '3000000000')).toBe(150);
+    expect(resolveBatchWindowMs(undefined, '9007199254740993')).toBe(150);
+  });
+
+  it('keeps an explicit option ahead of the environment', () => {
+    expect(resolveBatchWindowMs(0, '250')).toBe(0);
+    expect(resolveBatchWindowMs(42, '150junk')).toBe(42);
   });
 });

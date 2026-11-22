@@ -18,13 +18,14 @@ Her şey hazır olduğunda sayfa **Hazır** gösterir. Herhangi bir oturumda mod
 
 ## Kategoriler
 
-Her istem bir kategoriye düşer. Dördü yerleşik gelir:
+Her istem bir kategoriye düşer. Beşi yerleşik gelir:
 
 | Kategori | Ne için |
 | --- | --- |
 | Trivial | mekanik işler: yeniden adlandırma, yazım hataları, biçimlendirme, yorumlar, basit komutlar |
 | Research | kodu değiştirmeden okuma ve açıklama |
 | Implement | net bir değişiklik: kapsamı belli bir özellik, testler, nedeni bilinen bir düzeltme |
+| Review | değişiklikleri doğruluk, gerileme, güvenlik sorunları ve eksik testler açısından inceleme; düzenleme yapmadan bulguları bildirme |
 | Hard | nedeni bilinmeyen hatalar, tasarım ve planlama, güvenlik, kimlik doğrulama, eşzamanlılık, geçişler, para |
 
 Her kategori için şunları ayarlayabilirsiniz:
@@ -33,7 +34,41 @@ Her kategori için şunları ayarlayabilirsiniz:
 - **Düşünme:** bu modelin düşünme düzeyi
 - **Ajan:** bu görevleri yürüten ajan; boş bırakılırsa mesaj alanının kullanacağı ajan kalır
 
+## Auto benzer istemlerde aynı modelde kalır
+
+Jev her istemi kendi başına sınıflandırır, yani birbirine benzeyen iki devam istemi komşu kategorilere düşebilir. Bir oturumun modeller arasında gidip gelmesini (ve her seferinde sağlayıcının istem önbelleğini kaybetmesini) önlemek için Auto, değişim kanıtı tutarlı olmadıkça oturumun modelini korur:
+
+- Bir oturumun başladığı modeli bırakmak, aynı başka modeli gösteren art arda iki istem ya da Jev'in emin olduğu tek bir istem gerektirir.
+- Daha güçlü bir modele sıçradıktan sonra oturum, art arda üç istem başka yeri gösterene kadar orada kalır. Emin bir yanıt bunu kısaltır ama asla ikinin altına indirmez.
+- Jev'in yerleştiremediği bir istem (düşük güven, bilinmeyen kategori, Jev'e ulaşılamıyor) geçerli modeli korur. Yedek model yalnızca henüz geçmişi olmayan bir oturuma hizmet eder.
+
+Auto, Jev'in en son yanıtına rağmen modeli koruduğunda yönlendirme kararı `held` gösterir. Bu geçmiş sunucu sürecinde yaşar, yani yeniden başlatma oturumları taze başlatır. Bir oturumun Auto'da olup olmadığı kaydedilir, yani yeniden başlatma, siz gerçek bir model seçene kadar oturumu Auto'da tutar.
+
+**Ayarlar → Yönlendirme** içinde, her istemi izlemek için **Mevcut modelde kal** seçeneğini kapatın ya da **Geçiş için istem sayısı** ve **Geri dönüş için istem sayısı** değerlerini değiştirin. ‘Emin’ sayılan güven, `routing.json` içindeki `stickiness.strongConfidence` değeridir (varsayılan 0,9).
+
+## Kategori modelleri için sağlayıcı havuzları kullanma
+
+Kategoriyi, düşünme düzeyini ve ajanı OpenChamber seçer. Sağlayıcı yedeklemesini OpenCode üstlenir. OpenCode'un `experimental.model_routes` alanında sıralı havuzlar tanımlayın, sonra bir kategori için rota modelini seçin. Örneğin **Trivial** kategorisini `opencode-route/cheap-fast`, **Implement** kategorisini `opencode-route/smart-slow`, **Hard** ve **Review** kategorilerini `opencode-route/frontier-heavy` olarak ayarlayın. Görev kararını yine Jev verir; seçilen rota daha sonra sağlayıcılarını sırayla dener.
+
+OpenCode; yeniden denenebilir sağlayıcı hatalarında, kota veya kimlik doğrulama hatalarında ve kaçırılan ilk çıktı son tarihinde başka bir hedefe geçer. Tamamlanan istekler de yapılandırılmış gecikme veya verim eşiklerini kullanarak bir hedefi bozulmuş olarak işaretleyebilir. Bekleme süreleri OpenCode sürecindeki oturumlar arasında paylaşılır ve yeniden başlatmadan sonra geri yüklenir; OpenCode her yönlendirme kararını, denemeyi (tam hata kodu ve iletisi, süreler, token sayıları) ve bekleme süresini daha sonra incelenmek üzere veritabanına kaydeder. Bir tur, herhangi bir yanıt veya araç çıktısı başladıktan sonra asla yeniden oynatılmaz.
+
+OpenCode ayrıca her yanıtın hız sınırı başlıklarını okur ve sağlayıcısı penceresi dolduğunu söyleyen bir hedeften, sağlayıcı reddetmeye başlamadan önce trafiği çeker.
+
+Bir havuz ayrıca sıradakine geçmeden önce bir hedefe birden çok istek yapabilir (`attempts`, varsayılan olarak toplam iki), ilki sessiz kaldığında sonraki hedefi başlatabilir (`hedgeAfterMs`), bir hedefin isteklerine ve tokenlerine üst sınır koyabilir (`budgets`, OpenCode'un o hedefe yaptığı, başlıklar gibi arka plan istekleri dahil her isteği sayar) ve kayıtlı geçmişine dayanarak ajan tarafından ayarlanabilir. Bunlar OpenCode rota seçenekleridir; yapılandırma başvurusuna bakın.
+
+Zamanlamalar, hedeflerin ağırlıklarını belirli günlerde veya saatlerde değiştirir; örneğin bir sağlayıcıya yoğun saatlerinde daha az trafik göndermek için. Bir havuzun kendi zamanlamaları, **Ayarlar → Yönlendirme → Model havuzları** içinde o havuzun gelişmiş seçeneklerindedir. Havuz listesinin altındaki **Tüm havuzlar için zamanlamalar** ise eşleşen hedefleri her havuzda veya yalnızca belirttiğiniz havuzlarda değiştirir. Her zamanlama haftanın günlerini, ayın günlerini, bir başlangıç ve bitiş saatini, bir saat dilimini ve ağırlığı çarpan bir katsayı ya da ağırlığın yerine geçen bir değer alır. Zaman aralığının dışında yapılandırılmış ağırlıklar geçerlidir. OpenCode, bir projenin `opencode.json` dosyası gibi diğer yapılandırma dosyalarındaki zamanlamaları da uygular. Ayarlar bunları salt okunur olarak, düzenleneceği dosyanın adı altında listeler.
+
+Her havuz ne işe yaradığını da söyleyebilir. **Ayarlar → Yönlendirme → Model havuzları** içinde bir havuz açın ve **Açıklama** alanına «birçok dosyaya yayılan uzun yeniden düzenlemeler; yavaş; en pahalı» gibi tek satır, **Ayrıntılar** alanına da havuzun ne zaman kullanılacağını ve ne zaman kullanılmayacağını anlatan bir paragraf yazın. Bir kategorinin modeli bir havuz olduğunda Jev ikisini o kategorinin açıklamasıyla birlikte okur. OpenChamber bunları `opencode.json` içindeki rotaya `description` ve `details` olarak kaydeder. OpenCode bu iki anahtarı yok sayar, yani dosyayı OpenCode'un JSON şemasına göre denetleyen bir düzenleyici bunları işaretleyebilir.
+
 Jev istemleri kategori adlarını ve açıklamalarını okuyarak sınıflandırır, yani açıklamalar talimat gibi çalışır. Kategoriye neyin girdiğini ve neyin girmediğini yazın. Kategorileri düzenleyebilir, kapatabilir, kaldırabilir veya ekleyebilirsiniz; fikrinizi değiştirirseniz yerleşik bir kategoriyi geri getirebilirsiniz. Auto'nun en az iki açık kategoriye ihtiyacı vardır.
+
+### Bir hedefi hangi oturumların paylaştığını görün
+
+Bir hedefin planı tükendiğinde o hedefteki tüm oturumlar aynı anda sıradaki hedefe geçer ve her biri soğuk bir istem önbelleğiyle baştan başlar. **Ayarlar → Yönlendirme → Model havuzları → Havuz durumu**, her havuzdaki her hedef için son 15 dakikada onu kaç oturumun kullandığını gösterir ve iki ya da daha fazla oturum aynı hedefi paylaştığında uyarır.
+
+Bir tahmin görmek için orada bir hedefi planlarınızdan birine bağlayın. Tahmin, hedefin son kullanımını aynı plana bağlı diğer tüm hedeflerinkiyle birlikte planın kota penceresine ölçekler. İstek, mesaj veya token sayan pencereler tahmin alır; dolar ve yüzde pencereleri almaz. Bu sayı, son 24 saatlik OpenCode trafiğinden yapılan bir tahmindir ve OpenCode dışındaki kullanımı göremez. Ağırlıklı ya da sırayla dönüşümlü bir havuzda, penceresinin yüzde 70'ine veya fazlasına ulaşan bir hedefte **Ağırlığı azalt** düğmesi çıkar. Bu düğme hedefin ağırlığını yarıya indirir, böylece yeni oturumlar diğer hedeflere kayar.
+
+Hedeflerin altındaki **Planı bitmeden oturumları hedeften taşı** varsayılan olarak kapalıdır. Açıkken bir hedefin planı yüzde 70 veya üzerine çıkacak gibi görünüyorsa ve üzerinde iki ya da daha fazla oturum varsa, OpenChamber bu oturumlardan birini aynı havuzda payı olan ve şu anda hata vermeyen başka bir hedefe geçirir. Her havuzda 5 dakikada bir oturum taşınır ve bu süre ayarlanabilir; önce çalışan alt ajanlar, sonra en uzun süredir boşta duran oturum taşınır. Bir hedefteki son oturum yerinde kalır. Böylece önbellekleri hepsi birden değil, birer birer sıfırlanır. Taşınan oturum o modeli havuzun dışında doğrudan kullanır, bu yüzden artık yedeğe geçmez; geri getirmek için havuzu yeniden seçin. **Otomatik** oturumlar asla taşınmaz. Son taşımalar anahtarın altında listelenir. OpenCode başka bir makinede çalışıyorsa rotasyon hiçbir oturumu taşımaz. Oturumun taşındığı hedef, hiçbir zaman ayrıldığı hedefle aynı plana bağlı değildir. Bağlı planı veya tahmini olmayan bir hedef de, payı bilinmese bile seçilebilir.
 
 ## Gönderdiğinizde ne olur
 
@@ -50,6 +85,17 @@ Yedek model şu durumlarda yanıt verir:
 - kategorinin kendi modeli yoksa
 
 Seçicide belirli bir model seçmek oturumu Auto'dan çıkarır. Geri dönmek için yeniden **Otomatik**'i seçin. Auto'yu **Ayarlar → Session'lar** bölümünden yeni oturumların varsayılanı da yapabilirsiniz.
+
+## Planlar, kullanım ve incelemeler
+
+**Ayarlar → Yönlendirme → Planlar ve kullanım**, incelemenin ölçemediği şeyleri tutar: abonelikleriniz ve kota pencereleri (ad, birim, sınır, pencerenin uzunluğu, nasıl sıfırlandığı), ücretler ve son kullanma tarihleri, her planın en son ne zaman ve nereden denetlendiği, her model için bir maliyet katmanı (`plan`, `common`, `medium`, `high` ve onu kapsayan planlarla birlikte), her havuzun ne işe yaradığı ve kullanımın nasıl hissettirdiğine dair notlar. Notlar yazdığınız gibi saklanır ve asla yeniden yazılmaz. Bunları «Claude çok hızlı bitti» veya «Ay sonunda her zaman GPT artıyor» gibi şeyler için kullanın; inceleme bunları kullanım geçmişiyle tartar.
+
+İki düğme, göndermeye hazır bir komutla yeni bir sohbet başlatır:
+
+- **Yönlendirmeyi incele**, `/routing-review` komutunu çalıştırır. Rota geçmişini (istekler, tokenlar, maliyet, oturumlar ve hangi havuzların hangi sağlayıcıyı ve modeli kullandığı veya atladığı), plan kayıtlarını ve notları okur ve değişiklikler önerir. Siz belirli bir değişikliği onaylamadan hiçbir şeyi değiştirmez.
+- **Planları güncelle**, `/plan-update` komutunu çalıştırır. Ayrıntıları eksik olan veya son denetimi bir aydan eski olan planları bulur, ihtiyacı olan birkaç alanı sorar ve yanıtlarınızı kaydeder.
+
+Kayıtlar OpenCode'un veri dizininde `plans.json` ve `plan-notes.jsonl` olarak durur ve içlerindeki hiçbir şeyin süresi dolmaz. Geçmiş de tutulur; `route_usage` onun herhangi bir penceresini okuyabilir.
 
 ## Nerede çalışır
 

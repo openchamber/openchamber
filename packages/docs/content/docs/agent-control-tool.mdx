@@ -23,9 +23,9 @@ The control tool can list projects and model preferences, search the model catal
 ## Keep in mind
 
 - New session prompts return immediately by default. Follow the session in OpenChamber, or ask the agent to check it later.
-- A separate worktree is only created when you ask for one. Uncommitted changes from your current worktree are not copied into it.
+- A new session in a Git project runs in a new worktree unless you ask for it to work in the folder itself; a folder that isn't a Git repository is used as it is, and a forked session stays in the folder of the session it came from. Uncommitted changes from your current worktree are not copied into a new worktree. A session for a pull request always gets a worktree of its own.
 - When the checkout looks busy, for example another session works on the same branch, the agent may offer to move its own session into a new worktree. It moves after you agree, and takes along only the files it changed.
-- The tools cannot delete sessions or worktrees, register project paths, run arbitrary shell commands, or call arbitrary URLs. Archiving is the agent's way to clear a session away; permanent deletion stays with you, through the CLI (`openchamber session delete`).
+- The tools cannot delete sessions or worktrees, run arbitrary shell commands, or call arbitrary URLs. They can add a folder as a project and remove a project from the list, which leaves its files alone. Archiving is the agent's way to clear a session away; permanent deletion stays with you, through the CLI (`openchamber session delete`).
 
 ## Turn the tools on or off
 

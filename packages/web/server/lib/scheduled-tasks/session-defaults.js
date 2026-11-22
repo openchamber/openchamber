@@ -17,7 +17,14 @@ export const resolveSessionDefaults = ({ settings, project }) => {
   const projectModel = splitModel(project?.defaultModel);
   const globalModel = splitModel(settings?.defaultModel);
   const model = projectModel ?? globalModel;
-  const variant = projectModel ? text(project?.defaultVariant) : globalModel ? text(settings?.defaultVariant) : null;
+  const configured = projectModel ? text(project?.defaultVariant) : globalModel ? text(settings?.defaultVariant) : null;
+  // The model's own default effort applies only when none is configured next
+  // to the default model; no entry means no effort, the provider's default.
+  const modelDefaults = settings?.modelDefaultVariants;
+  const key = model ? `${model.providerID}/${model.modelID}` : '';
+  const variant = configured ?? (model && modelDefaults && Object.hasOwn(modelDefaults, key)
+    ? text(modelDefaults[key])
+    : null);
   return {
     providerID: model?.providerID ?? null,
     modelID: model?.modelID ?? null,

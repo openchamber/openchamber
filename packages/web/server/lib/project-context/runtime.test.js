@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import fsPromises from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
-import { createProjectContextRuntime, parsePlanMarkdown } from './runtime.js';
+import { CONTEXT_FILE_READ_MAX_BYTES, PROJECT_TODO_ID_MAX_LENGTH, createProjectContextRuntime, parsePlanMarkdown } from './runtime.js';
+import { PLAN_FILE_READ_MAX_BYTES } from './plan-progress.js';
 
 const PROJECT_ID = 'path_dGVzdA';
 
@@ -157,6 +159,32 @@ describe('atomic todo mutations', () => {
     await expect(guarded.createTodo(PROJECT_ID, { text: 'new' })).rejects.toThrow('malformed');
     expect(changes).toEqual([]);
   });
+
+  test('rejects an oversized todo id and writes nothing (#2113)', async () => {
+    const oversizedId = 'x'.repeat(PROJECT_TODO_ID_MAX_LENGTH + 1);
+    await expect(runtime.createTodo(PROJECT_ID, { text: 'new', id: oversizedId })).rejects.toMatchObject({ status: 400 });
+    expect((await runtime.readContext(PROJECT_ID)).todos).toEqual([]);
+    const atBound = await runtime.createTodo(PROJECT_ID, { text: 'new', id: 'x'.repeat(PROJECT_TODO_ID_MAX_LENGTH) });
+    expect(atBound.todo.id).toHaveLength(PROJECT_TODO_ID_MAX_LENGTH);
+  });
+
+  test('repeated oversized-id creates cannot brick the stored context (#2113)', async () => {
+    const { todo } = await runtime.createTodo(PROJECT_ID, { text: 'keep' });
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await expect(runtime.createTodo(PROJECT_ID, { text: 'x', id: 'y'.repeat(900_000) })).rejects.toMatchObject({ status: 400 });
+    }
+    const context = await runtime.readContext(PROJECT_ID);
+    expect(context.todos.map((entry) => entry.id)).toEqual([todo.id]);
+  });
+
+  test('bulk save drops stored todos whose id exceeds the bound (#2113)', async () => {
+    const saved = await runtime.saveTodos(PROJECT_ID, [
+      { id: 'ok', text: 'keep', createdAt: 1 },
+      { id: 'x'.repeat(PROJECT_TODO_ID_MAX_LENGTH + 1), text: 'drop', createdAt: 1 },
+    ]);
+    expect(saved.todos.map((entry) => entry.id)).toEqual(['ok']);
+    expect((await runtime.readContext(PROJECT_ID)).todos.map((entry) => entry.id)).toEqual(['ok']);
+  });
 });
 
 describe('conditional plan updates', () => {
@@ -233,6 +261,35 @@ describe('readContext', () => {
   test('malformed stored context fails instead of reading as empty', async () => {
     await fsPromises.mkdir(path.dirname(contextPath()), { recursive: true });
     await fsPromises.writeFile(contextPath(), '{ not json', 'utf8');
+    await expect(runtime.readContext(PROJECT_ID)).rejects.toThrow('malformed');
+  });
+
+  test('oversized stored context fails as malformed instead of being buffered whole', async () => {
+    await fsPromises.mkdir(path.dirname(contextPath()), { recursive: true });
+    // Valid JSON padded past the read cap: the bounded read refuses it
+    // before any parse, so it lands on the malformed path, not on empty.
+    await fsPromises.writeFile(
+      contextPath(),
+      `{"version":2,"notes":[],"todos":[],"plans":[],"pad":"${'x'.repeat(CONTEXT_FILE_READ_MAX_BYTES)}"}`,
+      'utf8',
+    );
+    await expect(runtime.readContext(PROJECT_ID)).rejects.toThrow('malformed');
+  });
+
+  test('a context file under the read cap reads unchanged', async () => {
+    await writeJson(contextPath(), {
+      version: 2,
+      notes: [{ id: 'n1', body: 'kept', createdAt: 1, updatedAt: 1, source: 'manual' }],
+      todos: [],
+      plans: [],
+      pad: 'x'.repeat(1024 * 1024),
+    });
+    expect((await runtime.readContext(PROJECT_ID)).notes.map((n) => n.body)).toEqual(['kept']);
+  });
+
+  test.skipIf(process.platform === 'win32')('a FIFO at the context path fails as malformed without blocking', async () => {
+    await fsPromises.mkdir(path.dirname(contextPath()), { recursive: true });
+    execFileSync('mkfifo', [contextPath()]);
     await expect(runtime.readContext(PROJECT_ID)).rejects.toThrow('malformed');
   });
 
@@ -340,6 +397,23 @@ describe('legacy migration', () => {
     const context = await runtime.readContext(PROJECT_ID);
     expect(context.notes.map((note) => note.body)).toEqual(['kept']);
     expect(context.plans).toEqual([]);
+  });
+
+  test('skips an over-cap legacy plan instead of buffering it, and still migrates the rest', async () => {
+    await fsPromises.mkdir(plansDir(), { recursive: true });
+    await fsPromises.writeFile(path.join(plansDir(), '10-big.md'), `# Big\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`, 'utf8');
+    await fsPromises.writeFile(path.join(plansDir(), '11-old.md'), '# Old plan\n\nbody here', 'utf8');
+    await writeJson(legacyConfigPath(), {
+      projectNotes: 'legacy notes',
+      projectPlanFiles: [
+        { id: 'p1', path: path.join(plansDir(), '10-big.md'), createdAt: 10 },
+        { id: 'p2', path: path.join(plansDir(), '11-old.md'), createdAt: 11 },
+      ],
+    });
+
+    const context = await runtime.readContext(PROJECT_ID);
+    expect(context.notes.map((note) => note.body)).toEqual(['legacy notes']);
+    expect(context.plans).toEqual([{ id: 'p2', file: '11-old.md', title: 'Old plan', createdAt: 11, pinned: false, source: 'personal' }]);
   });
 
   test('does not run when the legacy config holds no context keys', async () => {
@@ -727,6 +801,14 @@ describe('plans', () => {
     expect(await runtime.readPlan(PROJECT_ID, 'nope')).toBeNull();
   });
 
+  test.skipIf(process.platform === 'win32')('reading a plan whose file is a FIFO fails promptly instead of hanging', async () => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Piped', body: 'x' });
+    const file = path.join(plansDir(), plan.file);
+    await fsPromises.rm(file);
+    execFileSync('mkfifo', [file]);
+    await expect(runtime.readPlan(PROJECT_ID, plan.id)).rejects.toThrow('not a regular file');
+  });
+
   test('reading a plan whose markdown was deleted returns null', async () => {
     const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Doomed', body: 'x' });
     await fsPromises.rm(path.join(plansDir(), plan.file));
@@ -878,6 +960,96 @@ describe('shared plans', () => {
     expect(read.path).toBe(path.join(sharedDir, 'roadmap.md'));
     expect(await sharedRuntime.readPlan(PROJECT_ID, 'shared:missing.md')).toBeNull();
     expect(await sharedRuntime.readPlan(PROJECT_ID, 'shared:../escape.md')).toBeNull();
+  });
+
+  test('an over-cap shared plan is listed as tooLarge, never read whole, and readPlan refuses it', async () => {
+    await fsPromises.mkdir(sharedDir, { recursive: true });
+    await fsPromises.writeFile(path.join(sharedDir, 'big.md'), `# Big\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+    await fsPromises.writeFile(path.join(sharedDir, 'small.md'), '# Small\n\n## Steps\n- [x] one\n');
+    let bigReads = 0;
+    const counting = createProjectContextRuntime({
+      fsPromises: {
+        ...fsPromises,
+        readFile: (...args) => {
+          if (String(args[0]).endsWith('big.md')) bigReads += 1;
+          return fsPromises.readFile(...args);
+        },
+      },
+      path,
+      projectsDirPath,
+      createId: () => `plan-${++idCounter}`,
+      resolveSharedPlansDir: async () => sharedDir,
+    });
+
+    const context = await counting.readContext(PROJECT_ID);
+    const big = context.plans.find((plan) => plan.id === 'shared:big.md');
+    expect(big.tooLarge).toBe(true);
+    expect(big.progress).toBeUndefined();
+    expect(context.plans.find((plan) => plan.id === 'shared:small.md').progress).toEqual({ done: 1, total: 1 });
+
+    await expect(counting.readPlan(PROJECT_ID, 'shared:big.md')).rejects.toThrow('too large');
+    expect(bigReads).toBe(0);
+    expect(await counting.readPlan(PROJECT_ID, 'shared:missing.md')).toBeNull();
+    expect((await counting.readPlan(PROJECT_ID, 'shared:small.md')).raw).toBe('# Small\n\n## Steps\n- [x] one\n');
+  });
+
+  test('an over-cap shared plan is refused by unsharePlan and by an expectedRaw update, without a whole-file read', async () => {
+    await fsPromises.mkdir(sharedDir, { recursive: true });
+    await fsPromises.writeFile(path.join(sharedDir, 'big.md'), `# Big\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+    let bigReads = 0;
+    const counting = createProjectContextRuntime({
+      fsPromises: {
+        ...fsPromises,
+        readFile: (...args) => {
+          if (String(args[0]).endsWith('big.md')) bigReads += 1;
+          return fsPromises.readFile(...args);
+        },
+      },
+      path,
+      projectsDirPath,
+      createId: () => `plan-${++idCounter}`,
+      resolveSharedPlansDir: async () => sharedDir,
+    });
+
+    await expect(counting.unsharePlan(PROJECT_ID, 'shared:big.md')).rejects.toThrow('too large');
+    await expect(counting.updatePlan(PROJECT_ID, 'shared:big.md', { raw: '# Big\n' }, { expectedRaw: '# Big\n' })).rejects.toThrow('too large');
+    expect(bigReads).toBe(0);
+    // The refused unshare leaves the file in the shared folder.
+    expect(await fsPromises.readFile(path.join(sharedDir, 'big.md'), 'utf8')).toContain('# Big');
+  });
+
+  test('an over-cap personal plan is listed as tooLarge in the context', async () => {
+    const mine = await runtime.createPlan(PROJECT_ID, { title: 'Mine', body: 'x' });
+    await fsPromises.writeFile(path.join(plansDir(), mine.plan.file), `# Mine\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+    const context = await runtime.readContext(PROJECT_ID);
+    const listed = context.plans.find((plan) => plan.id === mine.plan.id);
+    expect(listed.tooLarge).toBe(true);
+    expect(listed.progress).toBeUndefined();
+  });
+
+  test('a shared plan that grows past the cap after its stat is refused by readPlan', async () => {
+    await fsPromises.mkdir(sharedDir, { recursive: true });
+    await fsPromises.writeFile(path.join(sharedDir, 'big.md'), `# Big\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+    const lyingStat = createProjectContextRuntime({
+      fsPromises: {
+        ...fsPromises,
+        stat: async (...args) => {
+          const stat = await fsPromises.stat(...args);
+          return String(args[0]).endsWith('big.md') ? { ...stat, size: 10 } : stat;
+        },
+      },
+      path,
+      projectsDirPath,
+      createId: () => `plan-${++idCounter}`,
+      resolveSharedPlansDir: async () => sharedDir,
+    });
+    await expect(lyingStat.readPlan(PROJECT_ID, 'shared:big.md')).rejects.toThrow('too large');
+  });
+
+  test('an over-cap personal plan is refused by readPlan without a whole-file read', async () => {
+    const mine = await runtime.createPlan(PROJECT_ID, { title: 'Mine', body: 'x' });
+    await fsPromises.writeFile(path.join(plansDir(), mine.plan.file), `# Mine\n${'x'.repeat(PLAN_FILE_READ_MAX_BYTES)}`);
+    await expect(runtime.readPlan(PROJECT_ID, mine.plan.id)).rejects.toThrow('too large');
   });
 
   test('a missing shared folder lists nothing; no folder configured lists nothing', async () => {
@@ -1079,5 +1251,106 @@ describe('atomic write rename retry', () => {
 
     await expect(failing.createTodo(PROJECT_ID, { text: 'doomed' })).rejects.toMatchObject({ code: 'EPERM' });
     expect(await fsPromises.readdir(path.join(projectsDirPath, PROJECT_ID))).toEqual([]);
+  });
+});
+
+describe('plan metrics (#16 stage 1)', () => {
+  const METRICS = {
+    costUsd: 4.25,
+    costSource: 'opencode',
+    tokens: { input: 10, output: 20, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 30 },
+  };
+
+  const runtimeWithMetrics = (readPlanMetrics) => createProjectContextRuntime({
+    fsPromises,
+    path,
+    projectsDirPath,
+    createId: () => `plan-${++idCounter}`,
+    readPlanMetrics,
+  });
+
+  test('a linked plan carries the metrics its reader reports', async () => {
+    const seen = [];
+    const withMetrics = runtimeWithMetrics(async (sessionId) => { seen.push(sessionId); return METRICS; });
+    const { plan } = await withMetrics.createPlan(PROJECT_ID, { title: 'Metered', body: 'x' });
+    await withMetrics.setPlanSession(PROJECT_ID, plan.id, { sessionId: 'ses_42' });
+
+    const context = await withMetrics.readContext(PROJECT_ID);
+    expect(context.plans.find((entry) => entry.id === plan.id)?.metrics).toEqual(METRICS);
+    // setPlanSession reads the plan back through readContext, so the reader
+    // is asked more than once; every ask is for the linked session.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set(['ses_42']));
+  });
+
+  test('no reader, no session, an unreadable session, and a failing reader all show no metrics', async () => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Plain', body: 'x' });
+    await runtime.setPlanSession(PROJECT_ID, plan.id, { sessionId: 'ses_42' });
+    expect((await runtime.readContext(PROJECT_ID)).plans[0].metrics).toBeUndefined();
+
+    const nullReader = runtimeWithMetrics(async () => null);
+    expect((await nullReader.readContext(PROJECT_ID)).plans[0].metrics).toBeUndefined();
+
+    const failingReader = runtimeWithMetrics(async () => { throw new Error('opencode down'); });
+    const context = await failingReader.readContext(PROJECT_ID);
+    expect(context.plans[0].session?.sessionId).toBe('ses_42');
+    expect(context.plans[0].metrics).toBeUndefined();
+  });
+});
+
+describe('clampLength surrogate-pair boundary (#2010)', () => {
+  const EMOJI = '\u{1F600}';
+
+  test('a pair straddling the 3,000-char note body cap is dropped whole, in storage and on disk', async () => {
+    const { note } = await runtime.createNote(PROJECT_ID, { body: `${'a'.repeat(2999)}${EMOJI}${'b'.repeat(10)}` });
+    expect(note.body).toBe('a'.repeat(2999));
+    expect((await runtime.readContext(PROJECT_ID)).notes[0].body).toBe('a'.repeat(2999));
+    const onDisk = await fsPromises.readFile(contextPath(), 'utf8');
+    expect(onDisk).not.toContain('\\ud83d');
+    expect(onDisk).not.toContain('\uFFFD');
+  });
+
+  test('a pair ending exactly at the note body cap is kept whole', async () => {
+    const body = `${'a'.repeat(2998)}${EMOJI}`;
+    const { note } = await runtime.createNote(PROJECT_ID, { body });
+    expect(note.body).toBe(body);
+    expect(note.body.length).toBe(3000);
+  });
+
+  test('a pair straddling the 1,000-char todo cap is dropped whole via saveTodos', async () => {
+    const saved = await runtime.saveTodos(PROJECT_ID, [
+      { id: 't1', text: `${'a'.repeat(999)}${EMOJI}tail`, completed: false, createdAt: 1 },
+    ]);
+    expect(saved.todos[0].text).toBe('a'.repeat(999));
+    const onDisk = await fsPromises.readFile(contextPath(), 'utf8');
+    expect(onDisk).not.toContain('\\ud83d');
+    expect(onDisk).not.toContain('\uFFFD');
+  });
+
+  test('a pair straddling the 160-char plan title cap is dropped whole, in the manifest and the plan file', async () => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: `${'t'.repeat(159)}${EMOJI}tail`, body: 'x' });
+    expect(plan.title).toBe('t'.repeat(159));
+    const read = await runtime.readPlan(PROJECT_ID, plan.id);
+    expect(read.title).toBe('t'.repeat(159));
+    expect(read.raw).not.toContain('\uFFFD');
+    const onDisk = await fsPromises.readFile(path.join(plansDir(), plan.file), 'utf8');
+    expect(onDisk).not.toContain('\uFFFD');
+    expect(onDisk.startsWith(`# ${'t'.repeat(159)}`)).toBe(true);
+  });
+
+  test('a pair straddling the 200,000-char plan body cap is dropped whole and no U+FFFD is baked into the plan file', async () => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Big', body: `${'c'.repeat(199_999)}${EMOJI}tail` });
+    const read = await runtime.readPlan(PROJECT_ID, plan.id);
+    expect(read.body).toBe('c'.repeat(199_999));
+    expect(read.raw).not.toContain('\uFFFD');
+    const bytes = await fsPromises.readFile(path.join(plansDir(), plan.file));
+    expect(bytes.includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(false);
+  });
+
+  test('ASCII and under-limit content is unchanged by the pair guard', async () => {
+    const ascii = await runtime.createNote(PROJECT_ID, { body: 'a'.repeat(3010) });
+    expect(ascii.note.body).toBe('a'.repeat(3000));
+    const emoji = await runtime.createNote(PROJECT_ID, { body: `short ${EMOJI} note` });
+    expect(emoji.note.body).toBe(`short ${EMOJI} note`);
   });
 });

@@ -16,6 +16,7 @@ import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
 import { useUIStore, type SessionGoalAutoCreate, type SessionGoalWriterSendMode } from '@/stores/useUIStore';
+import { GoalWriterChoiceSuggestion } from './ModelChoiceSettings';
 
 /**
  * The goal writer's settings in Settings → Chat → Goal: the composer switch,
@@ -175,7 +176,13 @@ const SessionGoalWriterModelField: React.FC<{ disabled: boolean }> = ({ disabled
     }
   }, []);
 
+  const handleSuggestionApproved = React.useCallback((settings: { sessionGoalWriterModel: string; sessionGoalWriterVariant: string }) => {
+    setModel(settings.sessionGoalWriterModel || undefined);
+    setVariant(settings.sessionGoalWriterVariant || undefined);
+  }, []);
+
   return (
+    <>
     <SettingsFieldRow
       settingsItem="chat.session-goal-writer-model"
       label={t('settings.openchamber.visual.goal.writer.modelLabel')}
@@ -213,5 +220,8 @@ const SessionGoalWriterModelField: React.FC<{ disabled: boolean }> = ({ disabled
       ) : null}
       </div>
     </SettingsFieldRow>
+    {/* Shown only where the goal section is: never in VS Code. */}
+    <GoalWriterChoiceSuggestion disabled={disabled} onApproved={handleSuggestionApproved} />
+    </>
   );
 };

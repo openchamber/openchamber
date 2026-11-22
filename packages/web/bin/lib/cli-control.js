@@ -17,25 +17,34 @@ const WAIT_HTTP_TIMEOUT_BUFFER_MS = 30_000;
 // timeout here reported a failure for a worktree that was in fact created.
 const WORKTREE_PROVISION_TIMEOUT_MS = 120_000;
 
+// session.create makes a worktree even when the caller names none: the server
+// creates one for any session started in a git checkout. The CLI never sends a
+// worktree name for a plain create, so without this the create was held to the
+// 4 second default while the server was still provisioning it.
+const provisionsWorktree = (input, action) => {
+  if (asNonEmptyString(input?.worktree) !== null) return true;
+  return action === 'session.create';
+};
+
 // The control service blocks server-side while wait is set, so the client
 // HTTP timeout must outlive the requested wait window instead of the short
 // default used for instant control calls.
-export const resolveControlTimeoutMs = (input, options) => {
+export const resolveControlTimeoutMs = (input, options, action) => {
   if (Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0) return options.timeoutMs;
-  const provisionsWorktree = asNonEmptyString(input?.worktree) !== null;
+  const provisions = provisionsWorktree(input, action);
   if (input?.wait !== true) {
-    return provisionsWorktree ? WORKTREE_PROVISION_TIMEOUT_MS : undefined;
+    return provisions ? WORKTREE_PROVISION_TIMEOUT_MS : undefined;
   }
   const waitSeconds = Number(input?.timeout) > 0 ? Number(input.timeout) : DEFAULT_WAIT_TIMEOUT_SECONDS;
   const waitTimeoutMs = (waitSeconds * 1000) + WAIT_HTTP_TIMEOUT_BUFFER_MS;
   // The server provisions the worktree inside session creation, before it
   // starts waiting for the session to go idle, so the two windows run in
   // sequence rather than overlapping. The client window has to cover both.
-  return provisionsWorktree ? waitTimeoutMs + WORKTREE_PROVISION_TIMEOUT_MS : waitTimeoutMs;
+  return provisions ? waitTimeoutMs + WORKTREE_PROVISION_TIMEOUT_MS : waitTimeoutMs;
 };
 
 export const requestControlAction = async (port, action, input, options = {}) => {
-  const timeoutMs = resolveControlTimeoutMs(input, options);
+  const timeoutMs = resolveControlTimeoutMs(input, options, action);
   const { response, body } = await requestJson(port, '/api/openchamber/control', {
     ...options,
     ...(timeoutMs ? { timeoutMs } : {}),

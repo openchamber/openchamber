@@ -1,3 +1,4 @@
+import { readQuotaJson } from '../utils/response-body.js';
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
@@ -15,19 +16,21 @@ import {
 
 const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
 
+export const REQUEST_TIMEOUT_MS = 15_000;
+
 // A pay-as-you-go Moonshot platform key (prepaid vouchers, no Kimi Code
 // subscription) is refused by the Kimi Code usage address. Its balance is read
 // from the platform instead: USD, what remains, with no spent figure.
 // Resolves to the credits_balance windows, or null when they cannot be read.
-const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl) => {
+const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl, timeoutMs = REQUEST_TIMEOUT_MS) => {
   try {
     const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(15_000)
+      signal: AbortSignal.timeout(timeoutMs)
     });
     if (!response.ok) return null;
-    const balance = asObject(asObject(await response.json())?.data)?.available_balance;
+    const balance = asObject(asObject(await readQuotaJson(response))?.data)?.available_balance;
     if (!Number.isFinite(balance)) return null;
     return {
       credits_balance: toUsageWindow({
@@ -49,7 +52,7 @@ export const providerName = 'Kimi for Coding';
 // works at the api.kimi.com usage address, and a pre-split `kimi-for-coding`
 // key left behind with a dead credential must not shadow it. The global plan
 // stays last, as before, since its key is not known to work at that address.
-const aliases = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
+export const aliases = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
 
 // The ratio-based `usages` block, in the order Kimi's own CLI renders it.
 // `limit_month_code` is not read: it is the code-typed share of
@@ -135,7 +138,7 @@ const getApiKey = (auth) => {
 
 export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
-export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch, timeoutMs = REQUEST_TIMEOUT_MS } = {}) => {
   const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
@@ -154,12 +157,13 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
-      }
+      },
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl);
+        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl, timeoutMs);
         if (balanceWindows) {
           return buildResult({
             providerId,
@@ -179,7 +183,7 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
       });
     }
 
-    const payload = await response.json();
+    const payload = await readQuotaJson(response);
     // Kimi replaced the counted payload with a ratio-based `usages` map. Its own
     // client reads only `usages`, so when that block is present the `limits[]`
     // entry for the same 5-hour window is a coarser duplicate and is not read.

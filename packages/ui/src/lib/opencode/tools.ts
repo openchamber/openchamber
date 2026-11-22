@@ -343,10 +343,20 @@ const elementText = (html: string, pattern: RegExp): string => (pattern.exec(htm
   .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, entity: keyof typeof TITLE_ENTITIES) => TITLE_ENTITIES[entity])
   .replace(/\s+/g, " ")
   .trim()
-const pageTitleFromHtml = (html: string): string => (
-  elementText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
-  || elementText(html, /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)
-).slice(0, RENDER_PAGE_MAX_TITLE_LENGTH).trim()
+// Same pair-safe cap as the server's renderPageTitleFromHtml: a plain slice
+// at 120 can land between the halves of a surrogate pair and name the page
+// with a lone high surrogate (U+FFFD once encoded).
+const clipTitlePairSafe = (text: string): string => {
+  const clipped = text.slice(0, RENDER_PAGE_MAX_TITLE_LENGTH)
+  const last = clipped.charCodeAt(clipped.length - 1)
+  return last >= 0xd800 && last <= 0xdbff ? clipped.slice(0, -1) : clipped
+}
+
+const pageTitleFromHtml = (html: string): string => {
+  const title = elementText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
+    || elementText(html, /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)
+  return clipTitlePairSafe(title).trim()
+}
 
 /**
  * The page an `openchamber_render` call showed: present once OpenChamber

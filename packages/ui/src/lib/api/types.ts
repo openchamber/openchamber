@@ -1317,7 +1317,6 @@ interface ListDirectoryOptions {
 
 interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
-  outsideFileGrant?: string;
   optional?: boolean;
   directory?: string;
   fresh?: boolean;
@@ -1364,6 +1363,10 @@ export interface ProjectEntry {
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;
+  /** Keeps this project's sessions out of the In work zone. Absent means shown. */
+  hiddenFromWork?: boolean;
+  /** Keeps this project out of the List view's All sessions. Absent means shown. */
+  hiddenFromAllSessions?: boolean;
 }
 
 /**
@@ -1552,6 +1555,7 @@ export type GitHubCheckRun = {
       completedAt?: string;
     }>;
   };
+  annotationsTruncated?: boolean;
   annotations?: Array<{
     path?: string;
     startLine?: number;
@@ -1794,6 +1798,8 @@ export type GitHubReferenceThread = {
   /** Whether this account can resolve the thread, or open it again. */
   canResolve: boolean;
   canReply: boolean;
+  /** How many comments the thread has in all; GitHub only, absent for GitLab. */
+  commentTotal?: number;
   /** Oldest first. */
   replies: GitHubReferenceComment[];
 };
@@ -1812,6 +1818,10 @@ export type GitHubReferenceDetail = {
   comments: GitHubReferenceComment[];
   /** How many conversation comments the item has in all. */
   commentTotal: number;
+  /** The item's labels (at most six); GitHub PR detail only, absent elsewhere. */
+  labels?: { name: string; color?: string }[];
+  /** How many labels the item has in all; `labels` holds at most six (#1427). */
+  labelTotal?: number;
   /** Null for an issue. */
   pull: {
     reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
@@ -1829,6 +1839,10 @@ export type GitHubReferenceDetail = {
     commits: GitHubReferenceCommit[];
     /** How many commits the PR has in all; null when the host does not say. */
     commitTotal: number | null;
+    /** How many reviews the PR has in all; GitHub only, absent for GitLab. */
+    reviewTotal?: number;
+    /** How many review threads the PR has in all; GitHub only, absent for GitLab. */
+    threadTotal?: number;
   } | null;
 };
 
@@ -2163,6 +2177,7 @@ export type LinearWorkspaceSummary = {
   current: boolean;
   user?: LinearUserSummary | null;
   authorizedAt?: number | null;
+  source?: 'oauth' | 'vault';
 };
 
 export type LinearAuthStatus = {
@@ -2170,6 +2185,7 @@ export type LinearAuthStatus = {
   user?: LinearUserSummary | null;
   organization?: LinearOrganizationSummary | null;
   scope?: string;
+  source?: 'oauth' | 'vault';
   workspaces?: LinearWorkspaceSummary[];
 };
 
@@ -2225,6 +2241,8 @@ export type LinearIssueSummary = {
   priority?: LinearIssuePriority | null;
   /** Absent on a related issue (a parent, a sub-issue): Linear is not asked for them there. */
   labels?: LinearIssueLabel[];
+  /** The first page only; `labelsMore` says there are others. */
+  labelsMore?: boolean;
   updatedAt?: string | null;
   /** The issue this one is a sub-issue of. */
   parent?: LinearIssueSummary | null;
@@ -2249,6 +2267,8 @@ export type LinearIssueComment = {
 export type LinearIssue = LinearIssueSummary & {
   description?: string | null;
   comments?: LinearIssueComment[];
+  /** In Linear's order; the first page only, `commentsMore` says there are others. */
+  commentsMore?: boolean;
   /** In Linear's order; the first page only, `subIssuesMore` says there are others. */
   subIssues?: LinearIssueSummary[];
   subIssuesMore?: boolean;
@@ -2295,6 +2315,8 @@ export type LinearIssueLiveSummary = {
 export type LinearIssueStatesResult = {
   connected: boolean;
   states?: LinearWorkflowState[];
+  /** True when the team holds more workflow states than the one page fetched. */
+  statesMore?: boolean;
 };
 
 export type LinearIssueUpdateInput = {
@@ -2318,6 +2340,8 @@ export type LinearMappingResult = {
   connected: boolean;
   defaultProjectPath?: string | null;
   teams?: LinearTeamMapping[];
+  /** True when the workspace holds more teams than the pages fetched. */
+  teamsMore?: boolean;
 };
 
 export type LinearMappingWrite = {
@@ -2351,6 +2375,7 @@ export type LinearPreferences = {
 export interface LinearAPI {
   authStatus(): Promise<LinearAuthStatus>;
   authStart(origin?: LinearAuthOrigin): Promise<LinearAuthStart>;
+  authVault?(tokenReference: string): Promise<LinearAuthStatus>;
   authDisconnect(): Promise<{ removed: boolean }>;
   authActivate(organizationId: string): Promise<LinearAuthStatus>;
   issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;

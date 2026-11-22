@@ -2,6 +2,23 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { getRunDir } from './cli-paths.js';
+import { readBoundedFileSync } from '../../server/lib/shared/bounded-file-read.js';
+
+// A pid file is a handful of digits (the token-file precedent in
+// cli-tunnel-profiles.js caps at 8 KiB); an instance file is a small JSON
+// document. Both read through the shared bounded reader (#1706): a FIFO at
+// either path is refused promptly instead of hanging the CLI, and an
+// over-cap file yields the caller's null default, never a whole-file parse.
+const MAX_PID_FILE_BYTES = 8 * 1024;
+const MAX_INSTANCE_OPTIONS_BYTES = 1024 * 1024;
+
+function readBoundedTextSync(filePath, maxBytes) {
+  const result = readBoundedFileSync(filePath, maxBytes);
+  if (!result.ok) {
+    return undefined;
+  }
+  return result.buffer.toString('utf8');
+}
 
 async function getPidFilePath(port) {
   return path.join(getRunDir(), `openchamber-${port}.pid`);
@@ -13,7 +30,7 @@ async function getInstanceFilePath(port) {
 
 function readPidFile(pidFilePath) {
   try {
-    const content = fs.readFileSync(pidFilePath, 'utf8').trim();
+    const content = readBoundedTextSync(pidFilePath, MAX_PID_FILE_BYTES).trim();
     const pid = parseInt(content, 10);
     return Number.isFinite(pid) ? pid : null;
   } catch {
@@ -45,7 +62,8 @@ function removePidFile(pidFilePath) {
 
 function readInstanceOptions(instanceFilePath) {
   try {
-    return JSON.parse(fs.readFileSync(instanceFilePath, 'utf8'));
+    const raw = readBoundedTextSync(instanceFilePath, MAX_INSTANCE_OPTIONS_BYTES);
+    return raw === undefined ? null : JSON.parse(raw);
   } catch {
     return null;
   }

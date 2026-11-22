@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { renameWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFile } from '../shared/bounded-file-read.js';
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_KEYS_MAX, GUEST_STORAGE_TOTAL_BYTES, GUEST_STORAGE_VALUE_BYTES } from '@openchamber/sdk';
 
 const stores = new Map();
@@ -34,14 +35,28 @@ export const runGuestStorage = (persistPath, id, request, authorize) => {
   return withStorageLock(file, async () => {
     await authorize();
     let entries = new Map();
-    try {
-      const stat = await fs.stat(file);
-      if (stat.size > GUEST_STORAGE_TOTAL_BYTES) throw new Error('Storage exceeds its size limit');
-      const parsed = documentSchema.parse(JSON.parse(await fs.readFile(file, 'utf8')));
+    // Handle-judged bounded read (#1784): the createReadStream this
+    // replaces opened without O_NONBLOCK, so a FIFO at the storage
+    // path blocked the open forever — inside withStorageLock, wedging
+    // every queued operation for the file — and judged nothing about
+    // the file before streaming. The shared reader opens once with
+    // O_NONBLOCK on POSIX, refuses non-regular files from the handle
+    // stat, and enforces the cap in flight (at most cap + 1 bytes
+    // read, so a file grown after the stat is refused, not buffered).
+    const stored = await readBoundedFile(file, GUEST_STORAGE_TOTAL_BYTES);
+    if (stored.ok) {
+      const parsed = documentSchema.parse(JSON.parse(stored.buffer.toString('utf8')));
       entries = new Map(Object.entries(parsed));
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
+    } else if (stored.reason === 'too-large') {
+      throw new Error('Storage exceeds its size limit');
+    } else if (stored.reason === 'not-regular') {
+      const error = new Error('Storage file is not a regular file');
+      error.code = stored.code;
+      throw error;
     }
+    // reason 'missing': entries stay empty, exactly as the old
+    // ENOENT catch behaved. Malformed JSON and schema-invalid
+    // documents still throw out of the lock, unchanged.
     if (request.op === 'get') {
       return entries.has(request.key)
         ? { storage: true, op: 'get', found: true, value: entries.get(request.key) }

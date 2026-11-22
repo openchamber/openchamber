@@ -11,6 +11,7 @@ import { responseBodyOf, summarizeOpenCodeError } from '@/sync/session-error-log
 import { useDirectoryStore, useSessionStatus, useSessionStatusSnapshotReady } from '@/sync/sync-context';
 import { refetchSessionMessages } from '@/sync/session-actions';
 import { LongErrorText } from './LongErrorText';
+import { MessageRecoveryActions } from './MessageRecoveryActions';
 import { findRecordedTurnError, readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
@@ -249,6 +250,7 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
           </div>
         ) : null}
         {responseBody ? <ErrorResponseDetails body={responseBody} className="ps-[1.375rem]" /> : null}
+        <MessageRecoveryActions sessionId={sessionId} directory={directory} />
       </div>
     </div>
   );

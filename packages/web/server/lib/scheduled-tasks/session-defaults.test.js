@@ -16,4 +16,16 @@ describe('resolveSessionDefaults', () => {
       .toEqual({ providerID: null, modelID: null, variant: null, agent: null });
     expect(resolveSessionDefaults({ settings: { defaultModel: 'no-slash' }, project: null }).modelID).toBeNull();
   });
+
+  // Oracle: the precedence stated in Settings: the effort configured next to the
+  // default model, then the model's own default effort, else none at all.
+  it('falls back to the model default effort, below the effort configured next to the default model', () => {
+    const modelDefaultVariants = { 'openai/gpt-6': 'low', 'anthropic/claude-sonnet-5': 'max' };
+    expect(resolveSessionDefaults({ settings: { defaultModel: 'openai/gpt-6', modelDefaultVariants }, project: null }).variant).toBe('low');
+    expect(resolveSessionDefaults({ settings: { defaultModel: 'openai/gpt-6', defaultVariant: 'high', modelDefaultVariants }, project: null }).variant).toBe('high');
+    expect(resolveSessionDefaults({ settings: { defaultModel: 'openai/gpt-6' }, project: null }).variant).toBeNull();
+    expect(resolveSessionDefaults({ settings: { defaultModel: 'google/gemini', modelDefaultVariants }, project: null }).variant).toBeNull();
+    // An inherited name never counts as an entry.
+    expect(resolveSessionDefaults({ settings: { defaultModel: 'openai/toString', modelDefaultVariants }, project: null }).variant).toBeNull();
+  });
 });

@@ -23,7 +23,12 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
 - `store.js`: `<dataDir>/environment.json`, mode 0600, written atomically and
   by one writer at a time in this process. A file that exists but cannot be
   read or parsed throws `EnvironmentStoreError`; it never reads as empty,
-  because a write on top would erase every stored value. Patches: a string
+  because a write on top would erase every stored value. Reads go through the
+  shared bounded reader under a 64 MiB cap (`MAX_ENVIRONMENT_FILE_BYTES`):
+  the write side clamps each entry to roughly 6.5 MB at worst and the project
+  count is unbounded, so the cap sits at about ten worst-case entries. An
+  over-cap file or a non-regular file at the path throws the same
+  `EnvironmentStoreError`, and a FIFO cannot block the synchronous read. Patches: a string
   sets, `null` removes, an absent name stays.
 - `runtime.js`: `createEnvironmentRuntime` decides what each spawn gets.
   `forDirectory(dir)` finds the project (a configured project containing the
@@ -33,23 +38,37 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
   answers `opencode service set env` variables under the user variables.
   `applyToDirectory(dir, env)` is the overlay consumers call. `forDirectory`
   reads vault references on a user action and otherwise uses the last value
-  read. `forOpenCodeResolved()` is `forOpenCode()` with references read, for
+  read. The environment command itself is spawned with the user variables
+  after the same vault resolution, under the caller's `refresh` flag, so it
+  receives the secret or no variable and never the literal `op://…` text.
+  `forOpenCodeResolved()` is `forOpenCode()` with references read, for
   the launch itself; the launch fingerprint keeps the unresolved
   `forOpenCode()`, so no secret is hashed or stored and a changed reference
   still restarts OpenCode. `vaultStatus()` answers each reference's last read.
 - `vault.js`: vault references. A value matching `op://<vault>/<item>/<field>`
   (optionally with a section) is read with `op read --no-newline` when a
   process needs it (`createVaultResolver().resolve(variables, { refresh })`).
-  The secret stays in memory only. `refresh: true` reads a reference with no
-  value yet or one older than five minutes; `refresh: false` uses only what
-  an earlier read left, so Git status polling never starts `op`. A failed
+  The secret stays in memory only. `refresh: true` re-reads every reference
+  on every call, even one read moments ago, so a relaunch after a rotation
+  gets the rotated value instead of the fresh cached one; `refresh: false`
+  uses only what an earlier read left, fresh or stale, so Git status polling
+  never starts `op`. `readSecret` keeps the five-minute TTL instead: it
+  serves a fresh cached value and re-reads only once the entry is older
+  than five minutes. A failed
   read leaves the variable out (a stale good value is kept instead when
   there is one) and records `{ state: 'failed', reason }` per variable:
   `op-not-installed`, `timeout` (30 s), `op-read-failed`, `empty`. It warns
-  once per variable and reason, naming the variable only.
+  once per variable and reason, naming the variable only. A recorded
+  outcome belongs to the reference it was recorded under: serving a
+  variable from the cache records `resolved` for its current reference,
+  and `status(variables)` answers only outcomes whose reference matches
+  the one the variable currently holds, so a replaced reference never
+  inherits the previous one's outcome.
 - `opencode-service-env.js`: reads `env` from `service.json` in OpenCode's
   global config directory (the stable channel's file only). Not a published
-  OpenCode contract; anything unexpected reads as no variables.
+  OpenCode contract. The shared bounded reader caps the file at 1 MiB and
+  rejects non-regular files without blocking. Missing, unreadable, over-cap,
+  non-regular or invalid files yield no variables; this file is read-only.
 - `routes.js`: `/api/environment` (user) and `/api/environment/projects/:id`
   (+ `/reload`). On the JSON-body allowlist in `opencode/core-routes.js`.
   Every answer carries `references` (the variables whose value is a vault
@@ -95,7 +114,10 @@ token, PATH entries it needs) are applied after the user's variables and win.
   The first user action in a checkout waits for the run; a result older than
   five minutes is used by the next user action while a fresh run happens in
   the background. Editing the project's settings drops what was kept, and a
-  run that started before the edit is not kept.
+  run that started before the edit is not kept. A reload after the edit
+  starts a fresh run; it never joins a run still in flight from before the
+  edit, so the command that runs is the one just saved and the reload
+  answers that run's outcome.
 - `refresh-scope.js`: the AsyncLocalStorage flag behind `runAsUserAction` /
   `isUserAction`, so the Git service needs no extra argument between route
   and spawn.

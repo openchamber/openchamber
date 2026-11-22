@@ -34,4 +34,16 @@ describe('resolveControlTimeoutMs', () => {
     expect(resolveControlTimeoutMs({ wait: true, timeout: 30, worktree: 'feature' }, {})).toBe(180_000);
     expect(resolveControlTimeoutMs({ wait: true, worktree: 'feature' }, {})).toBe(750_000);
   });
+
+  it('gives a plain session create the provisioning budget the server may need', () => {
+    // Regression: a create with no worktree name was held to the 4 second
+    // default while the server created an auto worktree and then the session.
+    expect(resolveControlTimeoutMs({ directory: '/repo/worktree' }, {}, 'session.create')).toBe(120_000);
+    expect(resolveControlTimeoutMs({ directory: '/repo/worktree', wait: true, timeout: 30 }, {}, 'session.create')).toBe(180_000);
+  });
+
+  it('keeps the short default for session calls that never provision a worktree', () => {
+    expect(resolveControlTimeoutMs({ sessionId: 'ses_1', directory: '/repo' }, {}, 'session.send')).toBeUndefined();
+    expect(resolveControlTimeoutMs({ sessionId: 'ses_1', directory: '/repo' }, {}, 'session.status')).toBeUndefined();
+  });
 });

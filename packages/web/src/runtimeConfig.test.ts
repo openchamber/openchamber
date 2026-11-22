@@ -1,28 +1,27 @@
 import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
-vi.mock('@openchamber/ui/lib/runtime-auth', () => ({
-  getRuntimeBearerTokenSync: vi.fn(() => ''),
-  getRuntimeExtraHeadersSync: vi.fn(() => ({})),
-  refreshLocalRuntimeUrlAuthToken: vi.fn(() => Promise.resolve()),
-  refreshRuntimeUrlAuthToken: vi.fn(() => Promise.resolve()),
-  setRuntimeBearerToken: vi.fn(),
-  setRuntimeExtraHeaders: vi.fn(),
-}));
-vi.mock('@openchamber/ui/lib/runtime-fetch', () => ({ installRuntimeFetchBridge: vi.fn() }));
-vi.mock('@openchamber/ui/lib/runtime-switch', () => ({
-  getRuntimeApiBaseUrl: vi.fn(() => ''),
-  getRuntimeKey: vi.fn(() => 'local'),
-  initializeRuntimeEndpoint: vi.fn(),
-  switchRuntimeEndpoint: vi.fn(),
-}));
-vi.mock('@openchamber/ui/lib/desktopRelayRestore', () => ({ restoreDesktopRelayRuntime: vi.fn(() => Promise.resolve()) }));
-vi.mock('@openchamber/ui/lib/runtime-url', () => ({ configureRuntimeUrlResolver: vi.fn(() => ({})) }));
-vi.mock('@openchamber/ui/lib/opencode/client', () => ({ opencodeClient: { reconnectToRuntimeBaseUrl: vi.fn() } }));
-vi.mock('./api', () => ({ createWebAPIs: vi.fn() }));
-
-import { initializeRuntimeEndpoint } from '@openchamber/ui/lib/runtime-switch';
-import { restoreDesktopRelayRuntime } from '@openchamber/ui/lib/desktopRelayRestore';
 import { createConfiguredWebAPIs, readRuntimeBootstrapConfig } from './runtimeConfig';
+import type { RuntimeConfigDeps } from './runtimeConfig';
+
+// Dependency seams: the side-effecting runtime collaborators are injected
+// into createConfiguredWebAPIs instead of mocked at the module boundary.
+// The URL resolver, boot-outcome reader, and Web API factory stay real.
+const initializeRuntimeEndpoint = vi.fn();
+const restoreDesktopRelayRuntime = vi.fn(() => Promise.resolve());
+
+const testDeps: Partial<RuntimeConfigDeps> = {
+  getRuntimeExtraHeadersSync: () => ({}),
+  refreshLocalRuntimeUrlAuthToken: () => Promise.resolve(''),
+  refreshRuntimeUrlAuthToken: () => Promise.resolve(''),
+  setRuntimeBearerToken: () => {},
+  setRuntimeExtraHeaders: () => {},
+  installRuntimeFetchBridge: () => {},
+  initializeRuntimeEndpoint,
+  warmDesktopHostStatuses: () => Promise.resolve(),
+  restoreDesktopRelayRuntime,
+  reconnectToRuntimeBaseUrl: () => {},
+};
+
 
 const originalWindow = globalThis.window;
 
@@ -107,7 +106,7 @@ describe('createConfiguredWebAPIs', () => {
     current.__OPENCHAMBER_LOCAL_ORIGIN__ = 'http://127.0.0.1:3901';
     installWindow(current);
 
-    createConfiguredWebAPIs();
+    createConfiguredWebAPIs(testDeps);
 
     expect(initializeRuntimeEndpoint).toHaveBeenCalledWith({
       apiBaseUrl: 'http://127.0.0.1:62545',
@@ -122,7 +121,7 @@ describe('createConfiguredWebAPIs', () => {
     current.__OPENCHAMBER_EXPLICIT_RUNTIME__ = true;
     installWindow(current);
 
-    createConfiguredWebAPIs();
+    createConfiguredWebAPIs(testDeps);
 
     expect(restoreDesktopRelayRuntime).not.toHaveBeenCalled();
   });
@@ -135,7 +134,7 @@ describe('createConfiguredWebAPIs', () => {
     current.__OPENCHAMBER_EXPLICIT_RUNTIME__ = true;
     installWindow(current);
 
-    createConfiguredWebAPIs();
+    createConfiguredWebAPIs(testDeps);
 
     expect(restoreDesktopRelayRuntime).toHaveBeenCalledWith('relay-host', { reconnectActive: true });
   });
@@ -146,7 +145,7 @@ describe('createConfiguredWebAPIs', () => {
     current.__OPENCHAMBER_LOCAL_ORIGIN__ = 'http://127.0.0.1:3901';
     installWindow(current);
 
-    createConfiguredWebAPIs();
+    createConfiguredWebAPIs(testDeps);
 
     expect(restoreDesktopRelayRuntime).toHaveBeenCalledWith();
   });

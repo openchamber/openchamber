@@ -96,12 +96,13 @@ describe('Markdown image asset preparation', () => {
     const url = getPreparedMarkdownImageUrl({
       status: 'ready',
       path: '/tmp/opencode/image.png',
-      outsideFileGrant: 'grant-1',
+      outsideWorkspace: true,
     }, '/repo');
 
     expect(url).toContain('/api/fs/raw?');
     expect(url).toContain('path=%2Ftmp%2Fopencode%2Fimage.png');
-    expect(url).toContain('outsideFileGrant=grant-1');
+    expect(url).toContain('allowOutsideWorkspace=true');
+    expect(url).not.toContain('outsideFileGrant');
   });
 
   test('loads a workspace image through the local filesystem bridge', async () => {

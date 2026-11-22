@@ -135,6 +135,25 @@ describe('OpenChamber control service', () => {
     expect(generateWorktreeName).not.toHaveBeenCalled();
   });
 
+  it('honors an explicit directory as the session location when newWorktree is false', async () => {
+    const isGitRepository = vi.fn(async () => true);
+    const { service, sessionService } = createService({
+      isGitRepository,
+      generateWorktreeName: vi.fn(),
+      randomWorktreeName: vi.fn(),
+    });
+
+    await service.execute('session.create', {
+      directory: '/prepared-worktree',
+      newWorktree: false,
+    });
+
+    expect(sessionService.create).toHaveBeenCalledWith(expect.objectContaining({ directory: '/prepared-worktree' }));
+    expect(sessionService.create.mock.calls[0][0]).not.toHaveProperty('worktree');
+    expect(sessionService.create.mock.calls[0][0].directory).toBe('/prepared-worktree');
+    expect(isGitRepository).not.toHaveBeenCalled();
+  });
+
   it('session.create names a new branch from a pull request from the prompt, and leaves a checkout to its branch', async () => {
     const generateWorktreeName = vi.fn(async () => 'csv-export');
     const { service, sessionService } = createService({ generateWorktreeName });
@@ -449,6 +468,35 @@ describe('OpenChamber control service', () => {
     }));
   });
 
+  it('rejects malformed weekly weekdays instead of coercing them', async () => {
+    for (const weekly of ['1.9', '0x1', '1abc,2', '+3', '3e0', '7', '-1', '1,,2']) {
+      const { service, scheduledTaskService } = createService();
+      await expect(service.execute('schedule.create', {
+        directory: '/repo',
+        name: 'Weekly',
+        prompt: 'Run checks',
+        model: 'provider/model',
+        weekly,
+        time: '09:00',
+      }, '/repo')).rejects.toMatchObject({ statusCode: 400 });
+      expect(scheduledTaskService.upsert).not.toHaveBeenCalled();
+    }
+  });
+
+  it('accepts well-formed weekly weekdays, deduped and sorted', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
+    await service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Weekly',
+      prompt: 'Run checks',
+      model: 'provider/model',
+      weekly: '6, 0,6',
+      time: '09:00',
+    }, '/repo');
+    expect(scheduledTaskService.upsert.mock.calls[0][1].schedule).toEqual({ kind: 'weekly', weekdays: [0, 6], times: ['09:00'] });
+  });
+
   it('updates a scheduled task in place, changing only the named fields', async () => {
     const { service, scheduledTaskService } = createService();
     const existing = {
@@ -541,6 +589,29 @@ describe('OpenChamber control service', () => {
     const { service, sessionService } = createService();
     await service.execute('session.create', { title: 'From tool' }, '/repo');
     expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'From tool' });
+  });
+
+  it('forwards subagentPolicy unchanged on session.create and leaves it off send and fork', async () => {
+    const { service, sessionService } = createService();
+    const subagentPolicy = {
+      models: ['anthropic/claude-haiku-5-5', 'opencode-go/*'],
+      excludedModels: ['openai/gpt-5'],
+      agentOverrides: { build: { models: ['anthropic/claude-haiku-5-5'] } },
+    };
+    await service.execute('session.create', { title: 'Governed', subagentPolicy, newWorktree: false }, '/repo');
+    expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'Governed', subagentPolicy });
+    sessionService.send.mockResolvedValue({ sessionId: 'ses_1', directory: '/repo' });
+    await service.execute('session.send', { sessionId: 'ses_1', prompt: 'Go', subagentPolicy }, '/repo');
+    expect(sessionService.send).toHaveBeenCalledWith('ses_1', { directory: '/repo', prompt: 'Go' });
+  });
+
+  it('refuses a subagentPolicy that is not an object on session.create', async () => {
+    const { service, sessionService } = createService();
+    for (const subagentPolicy of ['anthropic/claude', ['anthropic/claude'], 42]) {
+      await expect(service.execute('session.create', { title: 'Governed', subagentPolicy, newWorktree: false }, '/repo'))
+        .rejects.toThrow('subagentPolicy must be an object');
+    }
+    expect(sessionService.create).not.toHaveBeenCalled();
   });
 
   it('hands a pull request number to session creation with the folder and branch names it may carry', async () => {
@@ -810,6 +881,21 @@ describe('OpenChamber control service', () => {
       .resolves.toEqual({ sessionId: 'ses_unknown', directory: '/current-session', sessionStatus: { type: 'idle' } });
   });
 
+  it('does not report a prototype-named session as busy (#2311)', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({ data: [{ id: 'constructor', location: { directory: '/repo' }, time: {} }] });
+    client.session.active.mockResolvedValue({ ses_active: { type: 'running' } });
+
+    await expect(service.execute('session.status', { sessionId: 'constructor' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'constructor', directory: '/repo', sessionStatus: { type: 'idle' } });
+    await expect(service.execute('session.status', { sessionId: 'ses_active' }, '/current-session'))
+      .resolves.toEqual({ sessionId: 'ses_active', directory: '/current-session', sessionStatus: { type: 'busy' } });
+    await expect(service.execute('session.list', { limit: 10, withStatus: true }))
+      .resolves.toEqual(expect.objectContaining({
+        sessions: [expect.objectContaining({ id: 'constructor', status: { type: 'idle' } })],
+      }));
+  });
+
   it('rejects an unknown project instead of reading another directory', async () => {
     const { service, client } = createService();
     await expect(service.execute('session.list', { projectId: 'missing' }, '/current-session'))
@@ -974,6 +1060,48 @@ describe('OpenChamber control service', () => {
     expect(drained.messages.map((message) => message.id)).toEqual(['msg_user']);
   });
 
+  it('caps the message walk when the cursor is always new', async () => {
+    const { service, client } = createService();
+    let page = 0;
+    client.message.list.mockImplementation(async () => {
+      page += 1;
+      return {
+        data: [{ id: `msg_${page}`, type: 'user', time: { created: page }, text: `Question ${page}` }],
+        cursor: { next: `cursor-${page}` },
+      };
+    });
+
+    const result = await service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', all: true });
+    // MAX_PAGES_PER_WALK in service.js: the walk stops at the cap and
+    // returns the partial history instead of looping on fresh cursors,
+    // flagged truncated so the partial history is not read as complete.
+    expect(client.message.list).toHaveBeenCalledTimes(20);
+    expect(result.truncated).toBe(true);
+    expect(result.messages).toHaveLength(20);
+    expect(result.messages[0].id).toBe('msg_1');
+    expect(result.messages[19].id).toBe('msg_20');
+  });
+
+  it('caps session directory resolution when the cursor is always new, and stops on an empty page', async () => {
+    const { service, client } = createService();
+    let page = 0;
+    client.session.list.mockImplementation(async () => {
+      page += 1;
+      return {
+        data: [{ id: 'ses_other', location: { directory: '/repo' } }],
+        cursor: { next: `cursor-${page}` },
+      };
+    });
+
+    await expect(service.resolveSessionDirectory('ses_target')).resolves.toBeNull();
+    expect(client.session.list).toHaveBeenCalledTimes(20);
+
+    client.session.list.mockReset();
+    client.session.list.mockImplementation(async () => ({ data: [], cursor: { next: 'cursor-empty' } }));
+    await expect(service.resolveSessionDirectory('ses_target')).resolves.toBeNull();
+    expect(client.session.list).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects actions outside the fixed contract', async () => {
     const { service } = createService();
     await expect(service.execute('session.explode')).rejects.toThrow('Unsupported OpenChamber action');
@@ -1103,6 +1231,19 @@ describe('render.page', () => {
     expect(await named('<title></title><div><h2>Release <b>2.4</b></h2></div>')).toBe('Release 2.4');
     expect(await named(`<h1>${'x'.repeat(200)}</h1>`)).toBe('x'.repeat(120));
     expect(await named(page)).toBe('Page');
+  });
+
+  it('never splits a surrogate pair at the title cap (oracle: astral char straddling offset 120)', async () => {
+    const { service } = createService();
+    const named = (html) => service.execute('render.page', { html }, '/repo').then((result) => result.title);
+
+    const title = await named(`<title>${'a'.repeat(119)}😀tail</title>`);
+    expect(title).toBe('a'.repeat(119));
+    expect(title.length).toBe(119);
+    // A lone surrogate would encode as U+FFFD and not round-trip.
+    expect(new TextDecoder().decode(new TextEncoder().encode(title))).toBe(title);
+    // An over-cap ASCII title still cuts at exactly 120 code units.
+    expect(await named(`<h1>${'a'.repeat(200)}</h1>`)).toBe('a'.repeat(120));
   });
 
   it('asks for html and title in one call when html is missing', async () => {

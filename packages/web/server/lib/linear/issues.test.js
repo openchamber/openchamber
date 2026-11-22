@@ -55,6 +55,7 @@ describe('Linear issue list/get', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     clearLinearAuth();
     if (previousDataDir === undefined) {
       delete process.env.OPENCHAMBER_DATA_DIR;
@@ -126,6 +127,106 @@ describe('Linear issue list/get', () => {
     expect(graphql).not.toHaveBeenCalled();
   });
 
+  it('abandons a GraphQL request that never answers at the deadline', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms) => realTimeout(Math.min(ms, 10)));
+    const stalled = vi.fn((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    }));
+    vi.stubGlobal('fetch', stalled);
+
+    await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
+      name: 'LinearApiError',
+      message: 'Linear GraphQL request timed out',
+      status: 504,
+      userError: false,
+    });
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    expect(stalled).toHaveBeenCalledTimes(1);
+    expect(stalled.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('abandons a GraphQL body read that never finishes at the deadline', async () => {
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => realTimeout(Math.min(ms, 10)));
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => new Response(new ReadableStream({
+      start(controller) {
+        options.signal.addEventListener('abort', () => controller.error(options.signal.reason), { once: true });
+      },
+    }), { status: 200 })));
+
+    await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
+      name: 'LinearApiError',
+      message: 'Linear GraphQL request timed out',
+      status: 504,
+    });
+  });
+
+  it('rejects a streamed GraphQL response after it exceeds the body cap', async () => {
+    const cancel = vi.fn();
+    const chunk = new Uint8Array(1024 * 1024);
+    const stream = new ReadableStream({
+      start(controller) {
+        for (let index = 0; index < 17; index += 1) {
+          controller.enqueue(chunk);
+        }
+      },
+      cancel,
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(stream, { status: 200 })));
+
+    await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
+      name: 'LinearApiError',
+      message: 'Linear GraphQL response exceeded the size limit',
+      status: 502,
+      userError: false,
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps GraphQL 401 handling ahead of an oversized-body error', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream({ cancel });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, {
+      status: 401,
+      headers: { 'Content-Length': String(16 * 1024 * 1024 + 1) },
+    })));
+
+    await expect(listLinearIssues()).resolves.toEqual({ connected: false });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps non-OK HTTP status handling ahead of an oversized-body error', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream({ cancel });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, {
+      status: 503,
+      headers: { 'Content-Length': String(16 * 1024 * 1024 + 1) },
+    })));
+
+    await expect(getLinearIssue('ENG-12')).rejects.toMatchObject({
+      name: 'LinearApiError',
+      message: 'Linear GraphQL request failed (503)',
+      status: 503,
+      userError: false,
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('parses BOM-prefixed GraphQL JSON responses', async () => {
+    const payload = { data: { issue: issueNode } };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(`\uFEFF${JSON.stringify(payload)}`, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+
+    await expect(getLinearIssue('ENG-12')).resolves.toMatchObject({
+      connected: true,
+      issue: { identifier: 'ENG-12' },
+    });
+  });
+
   it('lists incomplete issues and never returns the token', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
       const body = JSON.parse(options.body);
@@ -156,6 +257,7 @@ describe('Linear issue list/get', () => {
         team: { id: 'team-eng', key: 'ENG', name: 'Engineering' },
         priority: 1,
         labels: [{ id: 'label-bug', name: 'Bug', color: '#eb5757' }],
+        labelsMore: false,
         updatedAt: '2026-09-30T10:00:00.000Z',
         parent: null,
         subIssueProgress: null,
@@ -179,6 +281,7 @@ describe('Linear issue list/get', () => {
                 { id: 'label-bad-color', name: 'Nope', color: 'red' },
                 { id: '', name: 'Missing id' },
               ],
+              pageInfo: { hasNextPage: false },
             },
           }],
           pageInfo: { hasNextPage: false, endCursor: null },
@@ -192,6 +295,7 @@ describe('Linear issue list/get', () => {
       { id: 'label-ok', name: 'Bug', color: '#eb5757' },
       { id: 'label-bad-color', name: 'Nope', color: null },
     ]);
+    expect(result.issues?.[0]?.labelsMore).toBe(false);
   });
 
   it('searches by text and looks up an identifier directly', async () => {
@@ -386,6 +490,59 @@ describe('Linear issue list/get', () => {
       createdAt: '2026-08-24T10:00:00.000Z',
       user: { name: 'Ada', displayName: null, avatarUrl: 'https://linear.app/avatar/ada.png' },
     }]);
+    expect(result.issue?.commentsMore).toBe(false);
+  });
+
+  it('asks for comments pageInfo and reports commentsMore past one page', async () => {
+    const seen = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      seen.push(body.query);
+      return jsonResponse({
+        data: {
+          issue: {
+            ...issueNode,
+            description: 'Users cannot sign in.',
+            comments: {
+              nodes: [{ id: 'comment-50', body: 'Oldest shown', createdAt: null, user: null }],
+              pageInfo: { hasNextPage: true },
+            },
+          },
+        },
+      });
+    }));
+
+    const result = await getLinearIssue('ENG-12');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain('query GetLinearIssue');
+    expect(seen[0]).toContain('comments(first: 50)');
+    expect(seen[0]).toContain('pageInfo { hasNextPage }');
+    expect(result.issue?.comments).toHaveLength(1);
+    expect(result.issue?.commentsMore).toBe(true);
+  });
+
+  it('asks for one labels page and reports labelsMore past that page', async () => {
+    const seen = [];
+    const labels = [{ id: 'label-1', name: 'Bug', color: 'EB5757' }];
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      seen.push(body.query);
+      return jsonResponse({
+        data: {
+          issue: {
+            ...issueNode,
+            labels: { nodes: labels, pageInfo: { hasNextPage: true } },
+          },
+        },
+      });
+    }));
+
+    const result = await getLinearIssue('ENG-12');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain('labels(first: 50)');
+    expect(seen[0]).toContain('pageInfo { hasNextPage }');
+    expect(result.issue?.labels).toEqual([{ id: 'label-1', name: 'Bug', color: '#eb5757' }]);
+    expect(result.issue?.labelsMore).toBe(true);
   });
 
   it('reads the parent and how many sub-issues a listed issue has finished', async () => {
@@ -522,6 +679,29 @@ describe('Linear issue list/get', () => {
       'Canceled',
       'Duplicate',
     ]);
+    expect(result.statesMore).toBe(false);
+  });
+
+  it('reports statesMore when the workflow states run past one page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.query).toContain('query TeamWorkflowStates');
+      expect(body.query).toContain('pageInfo { hasNextPage }');
+      return jsonResponse({
+        data: {
+          team: {
+            states: {
+              nodes: [{ id: 'state-todo', name: 'Todo', type: 'unstarted', position: 0 }],
+              pageInfo: { hasNextPage: true },
+            },
+          },
+        },
+      });
+    }));
+
+    const result = await listLinearIssueStates('team-eng');
+    expect(result.states).toHaveLength(1);
+    expect(result.statesMore).toBe(true);
   });
 
   it('rejects workflow states without a team id', async () => {
@@ -535,6 +715,8 @@ describe('Linear issue list/get', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
       const body = JSON.parse(options.body);
       expect(body.query).toContain('mutation IssueUpdate');
+      expect(body.query).toContain('comments(first: 50)');
+      expect(body.query).toContain('pageInfo { hasNextPage }');
       expect(body.variables).toEqual({
         id: 'issue-uuid-1',
         input: { stateId: 'state-done' },
@@ -558,6 +740,7 @@ describe('Linear issue list/get', () => {
     const result = await updateLinearIssue({ id: 'issue-uuid-1', stateId: 'state-done' });
     expect(result.connected).toBe(true);
     expect(result.issue?.state).toEqual({ id: 'state-done', name: 'Done', type: 'completed' });
+    expect(result.issue?.commentsMore).toBe(false);
     expect(JSON.stringify(result)).not.toContain('access-1');
   });
 

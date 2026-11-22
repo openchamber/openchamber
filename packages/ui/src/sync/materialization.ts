@@ -182,8 +182,23 @@ function getPartStateTime(part: Part): { start?: number; end?: number } | undefi
   return { start, end }
 }
 
+/**
+ * A page read from history knows only the owning message's span for text (and
+ * for reasoning OpenCode stored without times). The live stream saw the part's
+ * own start and end, so those stay when the page arrives afterwards.
+ */
+function withObservedPartTime(existing: Part, next: Part): Part {
+  if (existing.displayTime) next = { ...next, displayTime: { ...existing.displayTime, ...next.displayTime } }
+  if (next.type !== "text" && next.type !== "reasoning") return next
+  if (existing.type !== next.type || next.timeSource !== "message") return next
+  if (existing.timeSource === "message" || !existing.time) return next
+  const { timeSource: _approximate, ...rest } = next
+  return { ...rest, time: existing.time }
+}
+
 function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
   if (!existing) return next
+  next = withObservedPartTime(existing, next)
 
   if (existing.type === "tool" && next.type === "tool") {
     // A page carries finished results as shells. The whole call this client

@@ -1,4 +1,6 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
+import { createWindowGeometryState } from './window-geometry-state.mjs';
+import { OPEN_IN_APP_SPAWN_TIMEOUT_MS, WHERE_SPAWN_TIMEOUT_MS, WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS } from './spawn-sync-timeouts.mjs';
 import { compareSemver } from './semver-compare.mjs';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
@@ -23,6 +25,7 @@ import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveAttachedLocalServerUrl, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
+import { getInstalledAppsCacheResponse, refreshInstalledAppsCache } from './installed-apps-cache.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
 import {
   BACKGROUND_START_ARG,
@@ -69,6 +72,7 @@ import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, create
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
+import { fetchFaviconDataUrl } from './favicon-fetch.mjs';
 import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, readPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
@@ -115,7 +119,6 @@ import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { parsePairingDeepLink } from './pairing-deep-link.mjs';
 import { attachRendererRecovery, takeSafeStart } from './renderer-recovery.mjs';
 import { createLoadFailureWarningFilter } from './load-failure-warnings.mjs';
-import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
 import { fetchUpdateNotes } from '@openchamber/web/server/lib/changelog/update-notes.js';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
@@ -314,8 +317,6 @@ const state = {
   quakeNormalBounds: null,
   quakeNormalMaximized: false,
   focusedWindowIds: new Set(),
-  windowGeometryRevisions: new Map(),
-  windowGeometryTimers: new Map(),
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
@@ -919,33 +920,9 @@ const writeWindowState = async (browserWindow) => {
   });
 };
 
+const windowGeometryState = createWindowGeometryState({ persist: writeWindowState });
 const debounceWindowStatePersist = (browserWindow, immediate = false) => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  const key = String(browserWindow.id);
-  const revision = (state.windowGeometryRevisions.get(key) || 0) + 1;
-  state.windowGeometryRevisions.set(key, revision);
-
-  const existingTimer = state.windowGeometryTimers.get(key);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-    state.windowGeometryTimers.delete(key);
-  }
-
-  const persist = async () => {
-    if (state.windowGeometryRevisions.get(key) !== revision) return;
-    state.windowGeometryTimers.delete(key);
-    await writeWindowState(browserWindow);
-  };
-
-  if (immediate) {
-    void persist();
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    void persist();
-  }, 300);
-  state.windowGeometryTimers.set(key, timer);
+  windowGeometryState.schedule(browserWindow, immediate);
 };
 
 const buildHealthUrl = (url) => {
@@ -1415,7 +1392,8 @@ const clearSessionNotifications = (sessionId) => {
   const ids = deliveredNotificationIdsBySession.get(sessionId);
   if (!ids) return;
   deliveredNotificationIdsBySession.delete(sessionId);
-  Notification.remove(ids);
+  // Notification.remove is Electron 44+; see setZoomMode in createBrowserWindow.
+  if (typeof Notification.remove === 'function') Notification.remove(ids);
 };
 
 const getNativeNotificationClaimKey = (payload) => {
@@ -2742,6 +2720,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     debounceWindowStatePersist(browserWindow, true);
   });
   browserWindow.on('closed', () => {
+    windowGeometryState.cancel(browserWindow);
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       state.mainWindow = null;
@@ -2865,7 +2844,15 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
 
   // The app scales itself (View > Zoom changes the interface scale), so
   // Chromium's page zoom from pinch or Ctrl+wheel stays off.
-  browserWindow.webContents.setZoomMode('disabled');
+  // setZoomMode is Electron 44+. On an older runtime (a packager that
+  // supplies its own Electron) the call threw before the window was shown,
+  // leaving a black app, so fall back to resetting the zoom factor.
+  if (typeof browserWindow.webContents.setZoomMode === 'function') {
+    browserWindow.webContents.setZoomMode('disabled');
+  } else {
+    browserWindow.webContents.setZoomFactor(1);
+    browserWindow.webContents.on('zoom-changed', () => browserWindow.webContents.setZoomFactor(1));
+  }
   attachRendererRecovery(browserWindow, { log, label: 'window' });
   attachDevWindowTape(app, browserWindow);
 
@@ -4005,7 +3992,7 @@ const WINDOWS_APP_ID_BY_NAME = new Map([
 const getWindowsAppIdForName = (appName) => WINDOWS_APP_ID_BY_NAME.get(String(appName || '').trim().toLowerCase()) || '';
 
 const runWhere = (program) => {
-  const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true });
+  const result = spawnSync('where.exe', [program], { encoding: 'utf8', windowsHide: true, timeout: WHERE_SPAWN_TIMEOUT_MS });
   if (result.error || result.status !== 0) return null;
   const first = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
   return first || null;
@@ -4052,6 +4039,7 @@ const resolveWindowsTerminalPackagePath = () => {
     const result = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', command], {
       encoding: 'utf8',
       windowsHide: true,
+      timeout: WINDOWS_TERMINAL_PACKAGE_SPAWN_TIMEOUT_MS,
     });
     if (!result.error && result.status === 0) {
       const packagePath = String(result.stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
@@ -4115,6 +4103,11 @@ const resolveWindowsTerminalExecutable = () => {
 const imageFileToDataUrl = (filePath) => {
   if (!filePath) return null;
   try {
+    // Stat-gated at the favicon cap: an icon is a display thumbnail, and
+    // the path is package-controlled, so its size is not bounded by
+    // construction. Mirrors MAX_INSTALLED_APP_ICON_BYTES in
+    // linux-app-discovery.mjs — keep the 512 KiB values in sync.
+    if (fs.statSync(filePath).size > MAX_FAVICON_BYTES) return null;
     return `data:image/png;base64,${fs.readFileSync(filePath).toString('base64')}`;
   } catch {
     return null;
@@ -4355,7 +4348,7 @@ const runSpecChain = (specs, appName) => {
 
   const failures = [];
   for (const spec of specs) {
-    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore', windowsHide: true });
+    const result = spawnSync(spec.program, spec.args, { stdio: 'ignore', windowsHide: true, timeout: OPEN_IN_APP_SPAWN_TIMEOUT_MS });
     if (result.error) {
       failures.push(`${spec.program}: ${result.error.message}`);
       continue;
@@ -4759,21 +4752,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         throw new Error('Unsupported favicon URL');
       }
 
-      const response = await electronNet.fetch(parsed.toString(), {
+      // The icon URL is page-controlled, so the fetch itself is bounded in
+      // favicon-fetch.mjs: one deadline over headers and body, and a body
+      // read that stops at the cap instead of buffering the whole response.
+      return fetchFaviconDataUrl({
+        fetchImpl: (url, options) => electronNet.fetch(url, options),
+        url: parsed.toString(),
         session: session.fromPartition(BROWSER_PANEL_PARTITION),
+        maxBytes: MAX_FAVICON_BYTES,
+        mimeTypes: FAVICON_MIME_TYPES,
       });
-      if (!response.ok) throw new Error(`Favicon request failed (${response.status})`);
-
-      const mime = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      if (!FAVICON_MIME_TYPES.has(mime)) throw new Error('Favicon is not an image');
-
-      const buffer = Buffer.from(await response.arrayBuffer());
-      // A tab icon is a few kilobytes; anything of a different order is not one,
-      // and is not worth holding in memory for every tab.
-      if (buffer.length === 0 || buffer.length > MAX_FAVICON_BYTES) {
-        throw new Error('Favicon is not a usable size');
-      }
-      return { dataUrl: `data:${mime};base64,${buffer.toString('base64')}` };
     }
 
     // Scoped to the browser panel's own partition, so clearing it can never
@@ -5132,24 +5120,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         cache = JSON.parse(await fsp.readFile(cachePath, 'utf8'));
       } catch {
       }
-      const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
-      const hasCache = Boolean(cache);
-      const isCacheStale = !cache
-        || cache.version !== INSTALLED_APPS_CACHE_VERSION
-        || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
-      const refresh = async () => {
-        const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
-        await fsp.mkdir(path.dirname(cachePath), { recursive: true });
-        await fsp.writeFile(cachePath, JSON.stringify({ version: INSTALLED_APPS_CACHE_VERSION, updatedAt: now, apps }, null, 2));
-        emitToAllWindows('openchamber:installed-apps-updated', apps);
-      };
-      if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
-        return { apps: [], hasCache: false, isCacheStale: false, supported: false };
-      }
-      if (!hasCache || isCacheStale || args.force === true) {
-        void refresh();
-      }
-      return { apps: cachedApps, hasCache, isCacheStale };
+      return getInstalledAppsCacheResponse({
+        cache,
+        now,
+        version: INSTALLED_APPS_CACHE_VERSION,
+        ttlSecs: INSTALLED_APPS_CACHE_TTL_SECS,
+        force: args.force === true,
+        supported: process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux',
+        refresh: () => refreshInstalledAppsCache({
+          cachePath,
+          now,
+          version: INSTALLED_APPS_CACHE_VERSION,
+          apps: Array.isArray(args.apps) ? args.apps : [],
+          buildApps: buildPlatformInstalledApps,
+          mkdir: () => fsp.mkdir(path.dirname(cachePath), { recursive: true }),
+          writeFile: fsp.writeFile.bind(fsp),
+          emit: emitToAllWindows,
+        }),
+        log,
+      });
     }
 
     case 'desktop_hosts_get': {
@@ -6101,10 +6090,12 @@ ipcMain.handle('openchamber:dialog:open', async (event, options) => {
   const grantFilePath = async (filePath) => {
     if (options?.directory) return { path: filePath };
     try {
-      const grant = await mintOutsideFileGrant(filePath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
-      return { path: grant.path, outsideFileGrant: grant.outsideFileGrant, expiresAt: grant.expiresAt };
+      const canonicalPath = await fsp.realpath(filePath);
+      const stats = await fsp.stat(canonicalPath);
+      if (!stats.isFile()) throw new Error('Outside file access requires a file path');
+      return { path: canonicalPath };
     } catch (error) {
-      log.warn(`[ipc] failed to mint outside file grant: ${error?.message || error}`);
+      log.warn(`[ipc] failed to resolve outside file: ${error?.message || error}`);
       return { path: filePath };
     }
   };
@@ -6129,11 +6120,13 @@ ipcMain.handle('openchamber:file:grant-existing', async (event, filePath) => {
     throw new Error('Path is required');
   }
 
-  const grant = await mintOutsideFileGrant(targetPath, { scopes: ['stat', 'read', 'raw'], fsPromises: fsp, path });
+  const canonicalPath = await fsp.realpath(targetPath);
+  const stats = await fsp.stat(canonicalPath);
+  if (!stats.isFile()) {
+    throw new Error('Outside file access requires a file path');
+  }
   return {
-    path: grant.path,
-    outsideFileGrant: grant.outsideFileGrant,
-    expiresAt: grant.expiresAt,
+    path: canonicalPath,
   };
 });
 
@@ -6498,11 +6491,14 @@ app.whenReady().then(async () => {
     try {
       const enabled = await readLinuxAutostartEnabled();
       if (enabled) {
-        await setLinuxAutostartEnabled({
+        const result = await setLinuxAutostartEnabled({
           enabled: true,
           appName: app.getName(),
           backgroundArg: BACKGROUND_START_ARG,
         });
+        if (!result.supported) {
+          log.info('[electron] Linux autostart entry is owned by another application', result);
+        }
       }
     } catch (error) {
       log.warn('[electron] failed to reconcile Linux autostart entry', error);

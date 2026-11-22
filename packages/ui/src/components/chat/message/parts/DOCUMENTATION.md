@@ -89,6 +89,26 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
+### Question rows after the call ended
+
+`QuestionToolDetails` shows an agent's `question` call with every question
+and option however the call ended. Once it has ended, Answer (Answer again,
+or Answer anyway for a timed-out call) opens the questions as a form whose
+answers reach the agent as a new message. Every such answer is late, so the
+form also asks how the agent should use it (`LateAnswerMode` in
+`lib/questionTimeout.ts`: do exactly this, FYI what I would have done, or
+consider them if not done yet; the last is the default) and takes an
+optional note; both go into the message after the answers
+(`formatQuestionAnswers`). A call that `sync/question-timeouts.ts` closed on
+its timeout is drawn greyed out with "Timed out" in its row header and its
+expanded body; one left to answer later says the agent went on, not greyed.
+Either replaces the result text, which is the message OpenChamber closed it
+with. A dismissed call keeps "Not answered" with OpenCode's reason, and any
+call without returned answers offers Answer anyway. Copy questions and
+answers puts every question, its options and the answer shown (or the picks
+kept from the dock) on the clipboard as Markdown
+(`formatQuestionsAsMarkdown`).
+
 ### Bidirectional prose
 
 Shared chat CSS applies `unicode-bidi: plaintext` to prose blocks, including
@@ -253,12 +273,14 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   file's token gets its span and link a moment after the message shows.
 - A long message lexes in time proportional to its length in every engine.
   marked runs its `^`-anchored block rules on the rest of the message at each
-  block; JavaScriptCore (Safari, the iOS app's WebView, Bun tests) retried a
-  failed `^` match at every later position, so 16,000 short paragraphs cost
-  about a minute there and milliseconds in V8. `markedAnchoredRules.ts` makes
-  those rules sticky once at module load, with `exec` resetting `lastIndex`, so
-  matches are unchanged; `markedAnchoredRules.test.ts` checks the tokens and
-  that four times the paragraphs takes under eight times as long.
+  block; older JavaScriptCore (Bun 1.3.11, and Safari and iOS WebKit before
+  the release in macOS 27.0.1) retried a failed `^` match at every later
+  position, so 16,000 short paragraphs cost about a minute there and
+  milliseconds in V8. `markedAnchoredRules.ts` makes those rules sticky once at
+  module load, with `exec` resetting `lastIndex`, so matches are unchanged;
+  `markedAnchoredRules.test.ts` checks the tokens and that the rules are
+  pinned. There is no timing test: the engines CI and current Safari run are
+  fast either way, so one could only fail on noise.
 - Assistant images appear where the text puts them. The Markdown renderer
   draws assistant image syntax as a label, the shared image icon and the file
   name, and never loads an image itself (`label` mode in `markdownCore.ts`);
@@ -282,13 +304,14 @@ finished with `stop`, so no tool patch is parsed while the turn streams.
   In server-backed runtimes, the first label of a part to near the viewport
   prepares all of that part's local images (at most 12) in one request to the
   grant route, then loads them through the authenticated `/api/fs/raw` asset
-  route; the preview prepares again, so an expired grant is renewed. Embedded
+  route; the preview prepares again rather than reusing the cached result. Embedded
   images are validated in the browser and limited to 10 MiB. VS Code loads
   workspace-contained images through its local filesystem bridge and never
   calls the grant route; images outside the workspace stay labels there.
-  Workspace-external images, wherever they are on the machine, receive the
-  existing path-bound `outsideFileGrant` only when the server verifies the
-  exact source in the owning assistant message and the file's signature.
+  Workspace-external images, wherever they are on the machine, are read under
+  normal server authentication and OS permissions (a91777602) once the server
+  verifies the exact source in the owning assistant message and the file's
+  signature.
 - `read` and `skill` are **static navigation tools** and render via `StaticToolRow`.
 - Every other tool, including search/fetch, OpenCode built-ins, custom tools, plugins, and MCP tools, is **expandable** and renders through `ToolPart`.
 - The managed `openchamber` plugin tool uses the expandable path and hides its broad protocol input. The plugin supplies the selected action's human description as the native tool title; the UI renders that metadata without owning an action map. The full versioned result envelope renders through the same neutral JSON summary/tree/raw views as other tools, without a tool-specific output card.

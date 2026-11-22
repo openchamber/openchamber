@@ -23,9 +23,9 @@ L’outil de contrôle liste les projets et les préférences de modèles, cherc
 ## À garder en tête
 
 - Par défaut, les prompts envoyés à de nouvelles sessions reviennent tout de suite. Suivez la session dans OpenChamber ou demandez à l’agent de la vérifier plus tard.
-- Un worktree séparé n’est créé que si vous le demandez. Les changements non commités de votre worktree actuel n’y sont pas copiés.
+- Une nouvelle session d’un projet Git travaille dans un nouveau worktree, sauf si vous demandez qu’elle travaille dans le dossier lui-même ; un dossier qui n’est pas un dépôt Git est utilisé tel quel, et une session dérivée reste dans le dossier de la session d’origine. Les changements non commités de votre worktree actuel ne sont pas copiés dans un nouveau worktree. Une session pour une pull request a toujours son propre worktree.
 - Quand le checkout semble occupé, par exemple parce qu’une autre session travaille sur la même branche, l’agent peut proposer de déplacer sa propre session dans un nouveau worktree. Il la déplace une fois que vous êtes d’accord et n’emporte que les fichiers qu’il a modifiés.
-- Les outils ne peuvent pas supprimer de sessions ni de worktrees, enregistrer des chemins de projet, lancer des commandes shell arbitraires ni appeler des URL arbitraires.
+- Les outils ne peuvent pas supprimer de sessions ni de worktrees, lancer des commandes shell arbitraires ni appeler des URL arbitraires. Ils peuvent ajouter un dossier comme projet et retirer un projet de la liste, sans toucher à ses fichiers.
 
 ## Activer ou désactiver les outils
 

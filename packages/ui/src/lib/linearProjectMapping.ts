@@ -22,3 +22,17 @@ export function resolveLinearMappedProjectPath(
   }
   return mapping.defaultProjectPath?.trim() || null;
 }
+
+/** True when the mapping's team list is truncated: Linear held more teams than the pages fetched. */
+export function linearMappingTeamsTruncated(
+  mapping: LinearMappingResult | null | undefined,
+): boolean {
+  return mapping?.teamsMore === true;
+}
+
+/** True when the empty-teams note applies: the fetched list is empty and complete. A truncated empty list says nothing about whether the workspace has teams, so the truncated note stands alone for it. */
+export function linearMappingShowsEmptyTeamsNote(
+  mapping: LinearMappingResult | null | undefined,
+): boolean {
+  return (mapping?.teams ?? []).length === 0 && !linearMappingTeamsTruncated(mapping);
+}

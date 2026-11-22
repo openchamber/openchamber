@@ -27,6 +27,18 @@ Etkin yapmak için kenar çubuğundan bir proje seçin. Oturumlar, git, notlar g
 
 > VS Code içinde OpenChamber her zaman açık olan klasörü tek proje olarak kullanır. Bu yüzden ekleyecek ya da geçiş yapacak bir şey yoktur. Projects ayar sayfası orada gizlidir.
 
+## Oturumları klasörlerde gruplama
+
+Kenar çubuğunun **Tree** görünümünde bir oturuma sağ tıklayın ve bir klasöre koymak için **Move to folder** öğesini, yeni bir klasör oluşturmak için **New folder...** öğesini seçin. Bir klasör, proje köküne ya da bir worktree'ye aittir ve klasör satırında yeniden adlandırma ve silme düğmeleri vardır. Bir klasörü silmek oturumlarını korur; oturumlar projeye geri döner.
+
+Klasörler OpenChamber sunucusunda saklanır, bu yüzden aynı sunucuya bağlı her şey aynı klasörleri gösterir: o sunucuda oturum açmış başka bir bilgisayar, web uygulaması ve telefon. Birindeki değişiklik, yeniden yüklemeye gerek kalmadan bir saniye içinde diğerlerinde görünür. Her sunucunun kendi klasörleri vardır. Hangi klasörlerin daraltılmış olduğu her cihazda kalır.
+
+Telefon, klasörleri Tree görünümünde gösterir ama değiştiremez. Oturumları masaüstünde ya da web uygulamasında taşıyın.
+
+Bir cihaz, klasörleri her cihazda tutan bir sürümden güncelleme yaptıktan sonra ilk kez bağlandığında, klasörleri sunucunun klasörlerine eklenir. Sunucunun zaten sahip olduğu bir klasörle aynı ada ve aynı konuma sahip bir klasör ona katılır ve oturumları da beraberinde gider; hiçbir şey atılmaz. Sunucunun zaten yerleştirdiği bir oturum, sunucunun klasöründe kalır.
+
+Bir oturumu silmek onu klasöründen çıkarır, bir projeyi kapatmak da klasörlerini kaldırır. VS Code'da klasörler uzantıda kalır ve paylaşılmaz.
+
 ## Proje ortamı
 
 Bir projenin araçları direnv, devenv ya da bir Nix shell'den geliyorsa Git hook'ları, terminal ve [proje eylemleri](/tr/project-actions/) onları kendi başına bulamaz. **Ayarlar → Projeler** bölümünü açın, projeyi seçin ve **Ortam** altında:

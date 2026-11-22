@@ -13,7 +13,9 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { projectSettingsTabForSearchTarget, useProjectSettingsTabStore } from '@/components/sections/projects/projectSettingsTabs';
+import { routingTabForSearchTarget, useRoutingPageViewStore } from '@/components/sections/routing/routingTabs';
 import { chatSettingsTabForSearchTarget, useChatSettingsTabStore } from '@/components/sections/openchamber/chatSettingsTabs';
+import { tunnelSearchRevealModeForResult } from '@/components/sections/openchamber/tunnelSearchReveal';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
@@ -486,8 +488,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       useUIStore.getState().setSettingsProvidersConnectRequested(true);
     }
 
-    if (result.id === 'providers.classification') {
+    // providers.custom's anchored field lives only inside
+    // CustomProviderForm, which the Providers page renders only in
+    // custom-create mode (#1765): ask the page to enter that mode with
+    // the custom candidate preselected, not just the connect picker.
+    if (result.id === 'providers.custom') {
+      useUIStore.getState().setSettingsProvidersCustomRequested(true);
+    }
+
+    // routing.token's field lives on the Classification sub-page too
+    // (#1762): its search entry points at Providers, and the sub-page
+    // renders only when this request flag is set.
+    if (result.id === 'providers.classification' || result.id === 'routing.token') {
       useUIStore.getState().setSettingsProvidersClassificationRequested(true);
+    }
+
+    // The managed tunnel sections render only for the saved tunnel mode;
+    // ask the Tunnel page to reveal the searched mode view-only (#1764).
+    // The reveal never persists a mode change.
+    const tunnelRevealMode = tunnelSearchRevealModeForResult(result.id);
+    if (tunnelRevealMode) {
+      useUIStore.getState().setSettingsTunnelModeRequested(tunnelRevealMode);
     }
 
     if (result.id === 'plugins.create') {
@@ -502,6 +523,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     const projectTab = projectSettingsTabForSearchTarget(result.id);
     if (projectTab) {
       useProjectSettingsTabStore.getState().setTab(projectTab);
+    }
+
+    const routingTab = routingTabForSearchTarget(result.id);
+    if (routingTab) {
+      useRoutingPageViewStore.getState().setTab(routingTab);
     }
 
     openChatSettingsTabFor(result.id);

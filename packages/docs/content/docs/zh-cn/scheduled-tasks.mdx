@@ -22,6 +22,48 @@ description: 按计划自动运行提示词。
 
 勾选**作为目标运行**，运行就会把提示词推进到完成，而不是在一次回复后停下 — 参见[会话目标](/session-goals/)。
 
+## 循环：以 Markdown 文件形式定义计划任务
+
+**循环**是一个以可移植 Markdown 文件形式定义的计划任务，你可以将其提交到仓库中。把文件放入 `.agents/loops/`，然后打开计划任务列表即可同步——无需重启服务器：
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### 文件所在位置
+
+- **项目范围** — 项目目录中，或直到 git worktree 根目录的任何祖先目录中的 `.agents/loops/*.md`。
+- **用户范围** — `~/.agents/loops/*.md` 适用于你打开的每个项目。
+
+如果项目循环和用户循环同名，项目循环优先。
+
+### 字段
+
+| 字段 | 含义 |
+|---|---|
+| `name` | 任务名称（必填，最多 80 个字符）。 |
+| `schedule` | Cron 表达式（必填）——循环文件仅支持 cron。 |
+| `enabled` | 设为 `true` 才会运行。循环**默认关闭**，因此提交文件永远不会自行开始运行任务。随仓库附带的循环还会等到你在自己机器的计划任务中开启它，并且在其计划、模型或提示变更后再次等待。`~/.agents/loops` 中的循环仅凭 `true` 即可运行。 |
+| `model` | `provider/model`（必填），例如 `anthropic/claude-sonnet-4-5`。 |
+| `agent` | 要使用的智能体（可选）。 |
+| `timezone` | IANA 时区（可选，默认为服务器时区）。 |
+| 正文 | 执行提示（必填）。可以是斜杠命令，如 `/review src/`。 |
+
+### 循环的运作方式
+
+- 只要文件存在，**文件即为准**。**编辑**会在内置文件编辑器中打开它，启用开关会更新其 frontmatter，删除任务会在确认后删除该 Markdown 文件。**立即运行**仍然可用。
+- 运行时状态（上次运行、下次运行、状态）存放在项目配置中，永远不会写回 Markdown 文件。
+- 重命名 `name` 字段会就地重命名任务。如果循环文件暂时无法解析（编辑中、合并冲突），其任务会保留最后一次良好的定义，直到文件修复。
+- `daily`/`weekly`/`once` 调度和目标设置仍然仅限 UI；循环文件始终是 cron。
+
 ## 成功的样子
 
 运行之后，任务会显示它上次运行的时间、是否成功，以及指向它所创建会话的链接。如果某次运行失败，错误也会显示在那里。

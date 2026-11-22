@@ -1,5 +1,6 @@
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
 import { isUserAction } from './refresh-scope.js';
@@ -39,7 +40,11 @@ import { createVaultResolver } from './vault.js';
  * A value that is a vault reference (`op://…`, see `vault.js`) is read when a
  * process needs it: the managed OpenCode reads it at every launch, and a
  * directory's processes read it on a user action and otherwise use the last
- * value read. A reference that cannot be read leaves its variable out.
+ * value read. A reference that cannot be read leaves its variable out. The
+ * project's environment command is a process too: it receives the user's
+ * variables with references read under the same `refresh` flag as the caller
+ * that runs it, so it never receives the literal reference text and a
+ * background run never starts `op` for it.
  */
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
@@ -60,6 +65,8 @@ const isInside = (directory, root) => directory === root || directory.startsWith
 
 const runCommand = ({ spawn, command, cwd, env, timeoutMs }) => new Promise((resolve) => {
   let stdout = '';
+  let stdoutBytes = 0;
+  const decoder = new StringDecoder('utf8');
   let settled = false;
   let timer = null;
   const finish = (outcome) => {
@@ -83,14 +90,18 @@ const runCommand = ({ spawn, command, cwd, env, timeoutMs }) => new Promise((res
   }, timeoutMs);
 
   child.stdout?.on('data', (chunk) => {
-    stdout += chunk.toString();
-    if (stdout.length > MAX_COMMAND_OUTPUT_BYTES) {
+    if (settled) return;
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    stdoutBytes += buffer.length;
+    if (stdoutBytes > MAX_COMMAND_OUTPUT_BYTES) {
       try { child.kill('SIGKILL'); } catch { /* already gone */ }
       finish({ ok: false, reason: 'output-too-large' });
+      return;
     }
+    stdout += decoder.write(buffer);
   });
   child.on('error', () => finish({ ok: false, reason: 'spawn' }));
-  child.on('close', (code) => finish(code === 0 ? { ok: true, stdout } : { ok: false, reason: 'exit', exitCode: code }));
+  child.on('close', (code) => finish(code === 0 ? { ok: true, stdout: stdout + decoder.end() } : { ok: false, reason: 'exit', exitCode: code }));
 });
 
 export const createEnvironmentRuntime = ({
@@ -205,14 +216,20 @@ export const createEnvironmentRuntime = ({
 
   const generationOf = (projectId) => generations.get(projectId) ?? 0;
 
-  const runProjectCommand = (projectId, root, command) => {
+  const runProjectCommand = (projectId, root, command, refresh) => {
     const key = `${projectId}\0${root}`;
-    const pending = commandRuns.get(key);
+    // A run is only shared with callers from the same generation: an
+    // invalidation (a settings edit, a reload) must not be answered by a
+    // run that started before it, whose result the generation guard below
+    // would discard anyway.
+    const generation = generationOf(projectId);
+    const runKey = `${key}\0${generation}`;
+    const pending = commandRuns.get(runKey);
     if (pending) return pending;
 
-    const generation = generationOf(projectId);
     const run = (async () => {
-      const env = overlayEnvironment(commandBaseEnv(), readUserVariables());
+      const userVariables = await vault.resolve(readUserVariables(), { refresh });
+      const env = overlayEnvironment(commandBaseEnv(), userVariables);
       const outcome = await runCommand({ spawn, command, cwd: root, env, timeoutMs: commandTimeoutMs });
       const variables = outcome.ok ? parseEnvironmentOutput(outcome.stdout, env) : null;
       const status = outcome.ok
@@ -229,17 +246,17 @@ export const createEnvironmentRuntime = ({
       }
       return variables ?? {};
     })().finally(() => {
-      if (commandRuns.get(key) === run) commandRuns.delete(key);
+      if (commandRuns.get(runKey) === run) commandRuns.delete(runKey);
     });
-    commandRuns.set(key, run);
+    commandRuns.set(runKey, run);
     return run;
   };
 
   const commandVariables = async (projectId, root, command, refresh) => {
     const cached = commandCache.get(`${projectId}\0${root}`);
     if (!refresh) return cached?.variables ?? {};
-    if (!cached) return runProjectCommand(projectId, root, command);
-    if (now() - cached.at >= commandTtlMs) void runProjectCommand(projectId, root, command);
+    if (!cached) return runProjectCommand(projectId, root, command, refresh);
+    if (now() - cached.at >= commandTtlMs) void runProjectCommand(projectId, root, command, refresh);
     return cached.variables;
   };
 
@@ -308,7 +325,7 @@ export const createEnvironmentRuntime = ({
     invalidateProject(projectId);
     const entry = store.projectEntry(projectId);
     if (!entry.command) return null;
-    await runProjectCommand(projectId, path.resolve(projectPath), entry.command);
+    await runProjectCommand(projectId, path.resolve(projectPath), entry.command, true);
     return projectStatus(projectId);
   };
 

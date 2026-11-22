@@ -543,7 +543,10 @@ describe('source-control mutation executor', () => {
     const originalMutation = await fs.readFile(mutationPath, 'utf8');
     const originalAudit = await fs.readFile(auditPath, 'utf8');
     const restarted = recreate('server_restarted', {
-      auditFs: { ...fs, readFile: async () => { throw new Error('audit unreadable'); } },
+      auditFs: { ...fs, open: async (file, ...rest) => {
+        if (file === auditPath) throw new Error('audit unreadable');
+        return fs.open(file, ...rest);
+      } },
     });
     const reconcile = vi.fn();
     await expect(restarted.executor.execute({ record: mutation(), perform, reconcile })).rejects.toThrow('audit unreadable');

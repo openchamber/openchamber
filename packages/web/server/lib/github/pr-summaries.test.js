@@ -32,6 +32,7 @@ const prNode = (number, overrides = {}) => ({
       commit: {
         statusCheckRollup: {
           contexts: {
+            totalCount: 2,
             nodes: [
               checkRun('build', 'COMPLETED', 'SUCCESS', '2026-09-30T10:00:00Z'),
               checkRun('tests', 'COMPLETED', 'SUCCESS', '2026-09-30T10:00:00Z'),
@@ -126,6 +127,29 @@ describe('summarizeCheckContexts', () => {
   test('a commit without any checks is unknown', () => {
     expect(summarizeCheckContexts([])).toEqual({ state: 'unknown', total: 0, success: 0, failure: 0, pending: 0, inProgress: 0, queued: 0 });
   });
+
+  test('a truncated contexts connection reads unknown, never success (#1418)', () => {
+    expect(summarizeCheckContexts([
+      checkRun('build', 'COMPLETED', 'SUCCESS', '2026-09-30T10:00:00Z'),
+    ], 101)).toEqual({
+      state: 'unknown', total: 1, success: 1, failure: 0, pending: 0, inProgress: 0, queued: 0, incomplete: true, contextsTotal: 101,
+    });
+  });
+
+  test('a truncated contexts connection does not read as definitive failure either (#1418)', () => {
+    const summary = summarizeCheckContexts([
+      checkRun('build', 'COMPLETED', 'FAILURE', '2026-09-30T10:00:00Z'),
+    ], 150);
+    expect(summary.state).toBe('unknown');
+    expect(summary.incomplete).toBe(true);
+    expect(summary.contextsTotal).toBe(150);
+  });
+
+  test('a complete contexts connection summarizes exactly as before (#1418)', () => {
+    expect(summarizeCheckContexts([
+      checkRun('build', 'COMPLETED', 'SUCCESS', '2026-09-30T10:00:00Z'),
+    ], 1)).toEqual({ state: 'success', total: 1, success: 1, failure: 0, pending: 0, inProgress: 0, queued: 0 });
+  });
 });
 
 describe('fetchPrSummaries', () => {
@@ -156,6 +180,16 @@ describe('fetchPrSummaries', () => {
       mergeableState: 'unknown',
       checks: null,
     });
+  });
+
+  test('a PR whose contexts are truncated does not report success (#1418)', async () => {
+    const node = prNode(9);
+    node.commits.nodes[0].commit.statusCheckRollup.contexts.totalCount = 101;
+    const octokit = fakeOctokit(new Map([[9, node]]));
+
+    const { summaries: [summary] } = await fetchPrSummaries({ octokit, refs: [{ owner: 'acme', repo: 'app', number: 9 }] });
+
+    expect(summary.checks).toEqual(expect.objectContaining({ state: 'unknown', incomplete: true, contextsTotal: 101 }));
   });
 
   test('keeps partial data when some PRs cannot be resolved', async () => {

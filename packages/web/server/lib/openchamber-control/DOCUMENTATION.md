@@ -63,6 +63,15 @@ other.
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP, at most 12). The
   image grant route (`../markdown-image-grants/`) allows exactly those, and the
   chat reads them with the same rule.
+- `tier-chooser-card.js` builds the standardized `render.page` cards for the
+  model tier chooser (`Select Execution Tier`, one tile per tier submitting
+  `{ tier, model }`) and the quota fallback (`Quota Limit Reached`, tiles for
+  switch-provider, downgrade-tier and wait-for-reset submitting
+  `{ action: 'fallback', provider, tier }`). Pure helper: plain data in
+  (tiers, models.dev pricing, quota context), an HTML document string out;
+  pricing lookup stays with the caller. Every interpolated value is
+  HTML-escaped, and styling uses the `font-sans` class with `--bg-base`,
+  `--text-primary`, `--border-base` and `--accent-primary`.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -76,6 +85,13 @@ other.
 
 - Session status and messages come from official directory-scoped OpenCode
   APIs. Message output includes only ordered `text` parts.
+- Cursor walks always end: the message walk and the session-directory walk
+  stop on an empty page, a missing or repeated cursor, or the
+  `MAX_PAGES_PER_WALK` page cap, so a server that keeps handing out fresh
+  cursors cannot loop them forever. Past the cap the message walk returns
+  the partial history collected so far with `truncated: true` on the
+  `session.messages` result, and directory resolution returns
+  null (unresolved), never a fabricated complete result.
 - Wait (CLI only; the agent tool refuses it) never treats an initial idle
   response as completion after dispatch. It requires observed activity or a
   newly completed assistant message.
@@ -223,7 +239,8 @@ other.
   same suffix from the session service's branch read.
 - Action modules (`session-actions.js`, `config-actions.js`,
   `integration-actions.js`, `integration-service-actions.js`,
-  `provider-actions.js`, `environment-actions.js`, `project-setup-actions.js`)
+  `provider-actions.js`, `environment-actions.js`, `project-setup-actions.js`,
+  `model-choice-actions.js`)
   are passed in as `actionModules` and dispatched by action name before the
   built-in actions; their definitions are part of
   `OPENCHAMBER_CONTROL_ACTION_DEFINITIONS`.
@@ -240,8 +257,9 @@ other.
   `getIntegrationOperations` once the routes are registered (before that the
   actions answer 503). A refusal keeps the route's status and message.
   Secrets: no action signs in or takes a token, password or client secret;
-  an input object with a key ending in token, secret, password or passphrase
-  is refused with 400 before any operation runs; every answer has such keys
+  an input object with a key ending in token, secret, password, passphrase or
+  key, in singular or plural form, is refused with 400 before any operation
+  runs; every answer has such keys
   removed at any depth (`withoutSecrets`). `github.remove`, `gitlab.remove`,
   `linear.disconnect`, `extensions.disconnect` and every `binding.set` except
   `bindingOperation: provider` need `confirm: true`. GitLab actions accept
@@ -260,6 +278,11 @@ other.
   secret, so the whole call is refused and nothing is saved. A project change
   calls `invalidateProject`; the managed OpenCode reads a change when it
   restarts.
+- `models.choices` (`model-choice-actions.js`) returns the notes built from
+  the model and effort choices the user made by hand, the most recent choices
+  (`limit`, default 50) and whether recording is on
+  (`../model-choices/DOCUMENTATION.md`). Read only: turning recording off and
+  clearing the history stay with the user in Settings.
 - `projects.setup` returns a configured project's setup through
   `projectConfigRuntime.readProjectSetup`, the same read as
   `GET /api/projects/:projectId/config`; an unknown id is a 404. It is read
@@ -298,6 +321,12 @@ other.
   for the registry's `perSurface` keys, because the sidebar layout, themes and
   font sizes the user changes in the app are stored per surface and the base
   read alone shows them as absent.
+- `settings.devices` (`config-actions.js`) lists the device settings each open
+  window reported (`../device-settings/store.js`, `PUT /api/config/device-settings`):
+  the registry's device-scoped keys, which `settings.get` cannot show because
+  they live in the window's own storage. One entry per window, memory only, at most 20, keys
+  outside the registry's device scope dropped. Read only. 503 when the server
+  did not wire the store.
 - `opencode.config.set` (`config-actions.js`) writes the user file (default),
   the project file, or with `configScope: custom` the file the user's own
   `OPENCODE_CONFIG` names, the file Settings writes when it is set. Without
@@ -317,6 +346,13 @@ other.
   store refuses to archive is a 500, never a claimed success. Archiving is
   reversible, so the agent tool may use it — that is how throwaway sessions
   an agent created are removed through the same API.
+- `subagentPolicy` (`{ models, excludedModels, agentOverrides }`, model
+  selectors such as `provider/model` or `provider/*`) travels unchanged on
+  `session.create`, through the session service to OpenCode's session create
+  body, and `session.subagentPolicy` replaces it on an existing session
+  through `session.update`. OpenCode owns the shape and its checks, so this
+  layer forwards the value and never narrows or rewrites it. A change
+  applies to subsessions started after it.
 - `session.delete` permanently removes a session through the
   directory-scoped client's `session.remove`. It is CLI-only
   (`agentExposed: false`, like `schedule.status`): permanent deletion stays

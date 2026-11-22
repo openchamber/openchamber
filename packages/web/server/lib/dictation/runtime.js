@@ -28,6 +28,13 @@ import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../sec
 
 const DICTATION_WS_PATH = '/api/dictation/ws';
 
+/**
+ * Largest single WebSocket frame the dictation socket accepts. Under Node
+ * the ws layer refuses an oversized frame (close 1009) before assembly;
+ * under Bun the bundled ws does not enforce maxPayload, so the message
+ * handler below ALSO checks the assembled size and closes with 1009 before
+ * the frame is parsed.
+ */
 const DICTATION_WS_MAX_PAYLOAD_BYTES = 512 * 1024;
 const DICTATION_WS_HEARTBEAT_INTERVAL_MS = 30000;
 
@@ -157,6 +164,15 @@ export function createDictationRuntime({
     }, DICTATION_WS_HEARTBEAT_INTERVAL_MS);
 
     socket.on('message', (raw, isBinary) => {
+      // Per-frame bound: maxPayload alone is not enforced by the bundled ws
+      // under every runtime (Bun delivers the oversized message whole), so
+      // refuse it here — before it is parsed — with the same 1009 the ws
+      // layer would have used.
+      const frameBytes = typeof raw === 'string' ? Buffer.byteLength(raw) : (raw?.byteLength ?? 0);
+      if (frameBytes > DICTATION_WS_MAX_PAYLOAD_BYTES) {
+        try { socket.close(1009, 'Dictation frame too large'); } catch { /* already closing */ }
+        return;
+      }
       if (isBinary) {
         return;
       }
@@ -287,5 +303,5 @@ export function createDictationRuntime({
     service.shutdown();
   };
 
-  return { stop };
+  return { stop, wsServer };
 }

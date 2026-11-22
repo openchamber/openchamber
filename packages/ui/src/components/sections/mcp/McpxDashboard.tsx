@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +27,12 @@ interface McpxStatus {
   namespaces?: McpxNamespace[];
 }
 
+// The daemon is local, but a wedged daemon or a stalled socket must not
+// wedge this panel: every fetch gets the deadline the rest of the UI
+// uses, so a load that never settles reaches the error state and the
+// Refresh button (disabled while loading) becomes usable again.
+const MCPX_FETCH_TIMEOUT_MS = 15_000;
+
 export const McpxDashboard: React.FC = () => {
   const [status, setStatus] = useState<McpxStatus | null>(null);
   const [namespaces, setNamespaces] = useState<McpxNamespace[]>([]);
@@ -35,16 +41,18 @@ export const McpxDashboard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const typesRequestRef = useRef(0);
+
   const fetchStatus = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/mcpx/status');
+      const res = await fetch('/api/mcpx/status', { signal: AbortSignal.timeout(MCPX_FETCH_TIMEOUT_MS) });
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
       }
-      const nsRes = await fetch('/api/mcpx/namespaces');
+      const nsRes = await fetch('/api/mcpx/namespaces', { signal: AbortSignal.timeout(MCPX_FETCH_TIMEOUT_MS) });
       if (nsRes.ok) {
         const nsData = await nsRes.json();
         setNamespaces(Array.isArray(nsData) ? nsData : nsData.namespaces || []);
@@ -57,15 +65,25 @@ export const McpxDashboard: React.FC = () => {
   };
 
   const fetchTypes = async (ns: string) => {
+    // Only the latest selection may apply its response: a late answer
+    // for a namespace the user has already left must not overwrite the
+    // types of the one they are looking at.
+    const requestId = ++typesRequestRef.current;
     setSelectedNs(ns);
     try {
-      const res = await fetch(`/api/mcpx/types?namespace=${encodeURIComponent(ns)}`);
+      const res = await fetch(`/api/mcpx/types?namespace=${encodeURIComponent(ns)}`, {
+        signal: AbortSignal.timeout(MCPX_FETCH_TIMEOUT_MS),
+      });
+      if (requestId !== typesRequestRef.current) return;
       if (res.ok) {
         const data = await res.json();
+        if (requestId !== typesRequestRef.current) return;
         setTypes(typeof data.types === 'string' ? data.types : JSON.stringify(data.types, null, 2));
       }
     } catch {
-      setTypes('Failed to load types');
+      if (requestId === typesRequestRef.current) {
+        setTypes('Failed to load types');
+      }
     }
   };
 

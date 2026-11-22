@@ -54,6 +54,16 @@ describe('lsof listener parsing', () => {
   test('rejects out-of-range ports', () => {
     expect(parseLsofListeners(['p1', 'cnode', 'n*:70000', 'n*:0'].join('\n'))).toEqual([]);
   });
+
+  test('rejects a port with trailing junk instead of truncating it', () => {
+    expect(parseLsofListeners(['p1', 'cnode', 'n127.0.0.1:5173junk'].join('\n'))).toEqual([]);
+    expect(parseLsofListeners(['p1', 'cnode', 'n127.0.0.1:5173.9'].join('\n'))).toEqual([]);
+  });
+
+  test('records a null pid when the pid field has trailing junk', () => {
+    expect(parseLsofListeners(['p123junk', 'cnode', 'n127.0.0.1:5173'].join('\n')))
+      .toEqual([{ port: 5173, pid: null, command: 'node' }]);
+  });
 });
 
 describe('netstat listener parsing', () => {
@@ -81,6 +91,11 @@ describe('netstat listener parsing', () => {
 
   test('tolerates empty output', () => {
     expect(parseNetstatListeners('')).toEqual([]);
+  });
+
+  test('rejects a port with trailing junk instead of truncating it', () => {
+    const line = '  TCP    127.0.0.1:8080junk    0.0.0.0:0    LISTENING    4321';
+    expect(parseNetstatListeners(line)).toEqual([]);
   });
 });
 
@@ -170,5 +185,13 @@ describe('proc net tcp parsing', () => {
     expect(parseProcNetTcpListeners('')).toEqual([]);
     expect(parseProcNetTcpListeners(header)).toEqual([]);
     expect(parseProcNetTcpListeners('garbage')).toEqual([]);
+  });
+
+  test('rejects a hex port with trailing junk instead of parsing its prefix', () => {
+    const output = [
+      header,
+      '   0: 0100007F:1F9Z 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 12345 1 0000 100 0',
+    ].join('\n');
+    expect(parseProcNetTcpListeners(output)).toEqual([]);
   });
 });

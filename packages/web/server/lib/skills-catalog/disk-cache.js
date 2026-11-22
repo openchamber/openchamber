@@ -2,15 +2,28 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { renameSyncWithRetry } from '../shared/atomic-rename.js';
+import { readBoundedFileSync } from '../shared/bounded-file-read.js';
+
+// Generous cap for the bounded read below (#1627): a persisted scan cache
+// holds at most MAX_CACHED_SCANS scan values (~57 KB each, cache.js) and
+// the github-meta cache is smaller still, so legitimate cache files fit
+// in a fraction of this.
+export const DISK_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 
 const resolveDataDir = () => (process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
   : path.join(os.homedir(), '.config', 'openchamber'));
 
 const readJsonFile = (filePath) => {
+  // Bounded read (#1627): missing, malformed, over-cap and non-regular
+  // files all answer null, exactly as an unreadable file did before —
+  // but an oversized file is refused after at most cap + 1 bytes, and a
+  // FIFO is refused from the opened handle instead of freezing this
+  // synchronous read (and the server event loop with it).
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
+    const result = readBoundedFileSync(filePath, DISK_CACHE_MAX_BYTES);
+    if (!result.ok) return null;
+    const parsed = JSON.parse(result.buffer.toString('utf8'));
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;

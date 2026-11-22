@@ -9,7 +9,10 @@ import http from 'node:http';
 
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '::1'];
 
-const readVariable = (env, name) => String(env[name] ?? env[name.toLowerCase()] ?? '').trim();
+// An empty or whitespace-only value counts as unset, so a variable set to ''
+// in one case does not shadow a real value in the other.
+const readVariable = (env, name) =>
+  String(env[name] ?? '').trim() || String(env[name.toLowerCase()] ?? '').trim();
 
 /**
  * The proxy settings the environment asks for, with loopback added to the

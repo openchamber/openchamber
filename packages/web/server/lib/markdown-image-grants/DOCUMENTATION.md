@@ -16,7 +16,7 @@ the UI is on a different machine.
   message once and verifies every exact image source before reading files.
 - Authorization recognizes the same common inline and reference-style image
   destinations collected by the UI, including balanced parentheses, while
-  excluding fenced and inline code.
+  excluding fenced and inline code, HTML comments, and raw HTML blocks.
 - The local images an `openchamber_render` page in the same message names are
   referenced too (`renderPageImageSources` in
   `../openchamber-control/render-page.js`): the page's HTML is the call's
@@ -37,10 +37,12 @@ the UI is on a different machine.
   its filesystem bridge reads files whole.
 - Prepare requests inspect only file metadata and signatures. Workspace images
   reuse the existing authenticated `/api/fs/raw` asset route directly. Images
-  outside the workspace receive the existing path-bound `raw`
-  `outsideFileGrant`; this module does not add another asset lifetime, copy, or
-  storage layer. Missing files return per-source results, so only those images
-  keep their label.
+  outside the workspace are read the same way, with `allowOutsideWorkspace=true`:
+  outside-workspace reads are allowed under normal server authentication and OS
+  permissions (a91777602), and the exact reference in the assistant message is
+  the gate. Prepare results carry path and status only; this module does not
+  add another asset lifetime, copy, or storage layer. Missing files return
+  per-source results, so only those images keep their label.
 
 The routes are OpenChamber-owned and must be registered before the generic
 OpenCode proxy. Web, Electron, hosted mobile, and Capacitor use the shared
