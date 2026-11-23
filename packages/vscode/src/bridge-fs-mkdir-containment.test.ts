@@ -78,9 +78,9 @@ afterEach(async () => {
   }
 });
 
-const mkdir = async (target: string) => {
+const mkdir = async (target: string, extraPayload: Record<string, unknown> = {}) => {
   const result = await handleFsBridgeMessage(
-    { id: 'mkdir-1', type: 'api:fs:mkdir', payload: { path: target } },
+    { id: 'mkdir-1', type: 'api:fs:mkdir', payload: { path: target, ...extraPayload } },
     deps,
   );
   return result as { success: boolean; error?: string; data?: { path: string } };
@@ -167,6 +167,24 @@ describe('api:fs:mkdir workspace containment', () => {
     const target = path.join(home, 'evil');
     const result = await mkdir(target);
     expect(result.success).toBe(false);
+    expect(await exists(target)).toBe(false);
+  });
+
+  test('refuses a truthy allowOutsideWorkspace flag and creates nothing', async () => {
+    const { workspace } = await setupTree();
+    const target = path.join(workspace, 'grant-ask');
+    const result = await mkdir(target, { allowOutsideWorkspace: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Outside workspace directory creation requires a grant');
+    expect(await exists(target)).toBe(false);
+  });
+
+  test('refuses a truthy allowOutsideWorkspace flag for an outside target too', async () => {
+    const { outside } = await setupTree();
+    const target = path.join(outside, 'grant-ask');
+    const result = await mkdir(target, { allowOutsideWorkspace: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Outside workspace directory creation requires a grant');
     expect(await exists(target)).toBe(false);
   });
 });

@@ -246,9 +246,16 @@ export async function handleFsBridgeMessage(
     }
 
     case 'api:fs:mkdir': {
-      const target = (payload as { path: string })?.path;
+      const { path: target, allowOutsideWorkspace } = (payload || {}) as { path?: string; allowOutsideWorkspace?: unknown };
       if (!target) {
         return { id, type, success: false, error: 'Path is required' };
+      }
+      // The bridge holds no trusted directory grant, so a caller asking to
+      // create outside the workspace is refused outright — the same
+      // no-grant behaviour as the web route (POST /api/fs/mkdir in
+      // packages/web/server/lib/fs/routes.ts).
+      if (allowOutsideWorkspace) {
+        return { id, type, success: false, error: 'Outside workspace directory creation requires a grant' };
       }
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
       const chatsRoot = path.join(os.homedir(), '.config', 'openchamber', 'chats');
