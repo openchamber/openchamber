@@ -39,11 +39,11 @@
     "mcpx-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1795362558,
-        "narHash": "sha256-MYQ4wBOBY7RCXhpk09xdzEAiLNkdRzvRcxyo7EQ5v8c=",
+        "lastModified": 1795394049,
+        "narHash": "sha256-t+8+qNAfMwjA8l/wcmcaJdzEbljLrcNxhJen2oa2biI=",
         "owner": "developing-today",
         "repo": "code",
-        "rev": "16ffdfdf12084e8e948155f4daa0190202fd9a1d",
+        "rev": "6f4696b7c265902b5ad51f2f5a11b5a63cb1c179",
         "type": "github"
       },
       "original": {
@@ -93,11 +93,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1795386686,
-        "narHash": "sha256-kvLaiT6dHCDhM4j6c6zDhGe0PYQ8FZu1NMOTuIgnhnI=",
+        "lastModified": 1795395041,
+        "narHash": "sha256-rnRLWtnX+mZbADLFo6CmtO2lQ5+NVo+806N7T7JA5AY=",
         "owner": "developing-today-forks",
         "repo": "opencode",
-        "rev": "9d5445710bb35b1ac55c423f9ef78760b5bfd360",
+        "rev": "ce615977a2092b3b0f107ba19fd7f5e6130bbc09",
         "type": "github"
       },
       "original": {
