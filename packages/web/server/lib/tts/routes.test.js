@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createServer } from 'node:http';
@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { buildSayArgs, isSafeSayVoice, parseSayRate, registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
+import { buildSayArgs, isSafeSayVoice, parseSayRate, registerTtsRoutes, speechVoiceHeaderValue, synthesizeSayAudio } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { updateVoiceKeys } from './voice-keys.js';
 
@@ -496,5 +496,61 @@ describe('normalizeCustomOpenAIBaseURL', () => {
     const result = normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1');
     expect(result.error).toMatch(/Remote custom server URLs are disabled/);
     expect(result.value).toBeUndefined();
+  });
+});
+
+describe('say temp directory', () => {
+  const outPathOf = (args) => args[args.indexOf('-o') + 1];
+
+  it('gives two speak calls in the same millisecond their own directory and returns both audios', async () => {
+    // Fake timers pin Date.now(): the old name, say-${Date.now()}.m4a, would
+    // be identical for both calls. mkdtemp names must still differ.
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+    try {
+      const seen = [];
+      const execFileAsync = async (_file, args) => {
+        const out = outPathOf(args);
+        seen.push(out);
+        await fs.promises.writeFile(out, Buffer.from(`audio:${args[args.length - 1]}`));
+        return { stdout: '', stderr: '' };
+      };
+
+      const [first, second] = await Promise.all([
+        synthesizeSayAudio({ voice: 'Samantha', rate: 200, text: 'one', execFileAsync }),
+        synthesizeSayAudio({ voice: 'Samantha', rate: 200, text: 'two', execFileAsync }),
+      ]);
+
+      expect(first.toString()).toBe('audio:one');
+      expect(second.toString()).toBe('audio:two');
+      expect(seen).toHaveLength(2);
+      expect(seen[0]).not.toBe(seen[1]);
+      for (const out of seen) {
+        // The output path is inside a directory mkdtemp created under the
+        // shared temp dir, never a bare child of os.tmpdir() itself.
+        const dir = path.dirname(out);
+        expect(path.dirname(dir)).toBe(os.tmpdir());
+        expect(path.basename(dir)).toMatch(/^openchamber-say-/);
+        // Success path: the directory is removed once the audio is read.
+        expect(fs.existsSync(dir)).toBe(false);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('removes the temp directory when say fails', async () => {
+    let out;
+    const execFileAsync = async (_file, args) => {
+      out = outPathOf(args);
+      // Partial output, as a real failed `say` can leave behind.
+      await fs.promises.writeFile(out, Buffer.from('partial'));
+      throw new Error('say exploded');
+    };
+
+    await expect(
+      synthesizeSayAudio({ voice: 'Samantha', rate: 200, text: 'boom', execFileAsync })
+    ).rejects.toThrow('say exploded');
+    expect(fs.existsSync(path.dirname(out))).toBe(false);
   });
 });
