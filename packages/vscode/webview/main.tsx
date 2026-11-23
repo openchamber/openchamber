@@ -684,7 +684,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
 
   if (pathname.startsWith('/api/fs/mkdir')) {
     const body = await extractJsonBody(input, init, method);
-    const data = await sendBridgeMessage('api:fs:mkdir', { path: body.path });
+    const data = await sendBridgeMessage('api:fs:mkdir', { path: body.path, allowOutsideWorkspace: body.allowOutsideWorkspace });
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
