@@ -41,7 +41,7 @@ export type ProjectIconSavedSettings = {
 };
 
 export interface ProjectIconDependencies {
-  fsPromises: Pick<typeof fs, 'readFile' | 'writeFile' | 'unlink' | 'mkdir' | 'readdir' | 'lstat' | 'realpath' | 'open'>;
+  fsPromises: Pick<typeof fs, 'readFile' | 'writeFile' | 'rename' | 'unlink' | 'mkdir' | 'readdir' | 'lstat' | 'realpath' | 'open'>;
   path: typeof nodePath;
   crypto: Pick<typeof nodeCrypto, 'createHash'>;
   openchamberDataDir: string;
@@ -298,6 +298,39 @@ export const registerProjectIconRoutes = (app: Application, dependencies: Projec
     }));
   };
 
+  let stagedProjectIconCounter = 0;
+
+  // Replacement icons are staged beside the canonical path and only
+  // published after the new metadata is durably persisted (#2512):
+  // until then the previous icon file and metadata stay authoritative,
+  // so a persistence failure can never leave metadata pointing at a
+  // file that was already removed. The staging name never matches a
+  // served candidate path, and a leftover staging file is never read.
+  const stageProjectIconFile = async (iconPath: string, bytes: Buffer) => {
+    stagedProjectIconCounter += 1;
+    const stagedPath = `${iconPath}.tmp-${process.pid}-${Date.now()}-${stagedProjectIconCounter}`;
+    await fsPromises.writeFile(stagedPath, bytes);
+    return stagedPath;
+  };
+
+  const discardStagedProjectIconFile = async (stagedPath: string) => {
+    try {
+      await fsPromises.unlink(stagedPath);
+    } catch {
+      // Best effort only: a leftover staging file is never served.
+    }
+  };
+
+  const commitStagedProjectIconFile = async (projectId: string, stagedPath: string, iconPath: string) => {
+    try {
+      await fsPromises.rename(stagedPath, iconPath);
+    } catch (error) {
+      await discardStagedProjectIconFile(stagedPath);
+      throw error;
+    }
+    await removeProjectIconFiles(projectId, iconPath);
+  };
+
   const parseProjectIconDataUrl = (value: string | undefined): ParsedProjectIcon => {
     if (value === undefined) {
       return { ok: false, error: 'dataUrl is required' };
@@ -508,8 +541,7 @@ export const registerProjectIconRoutes = (app: Application, dependencies: Projec
       }
 
       await fsPromises.mkdir(projectIconsDirPath, { recursive: true });
-      await fsPromises.writeFile(iconPath, parsed.bytes);
-      await removeProjectIconFiles(projectId, iconPath);
+      const stagedPath = await stageProjectIconFile(iconPath, parsed.bytes);
 
       const updatedAt = Date.now();
       const nextProjects = projects.map<ProjectIconProject>((entry) => (
@@ -517,7 +549,14 @@ export const registerProjectIconRoutes = (app: Application, dependencies: Projec
           ? { ...entry, iconImage: { mime: parsed.mime, updatedAt, source: 'custom' } }
           : entry
       ));
-      const updatedSettings = await persistSettings({ projects: nextProjects });
+      let updatedSettings: ProjectIconSavedSettings;
+      try {
+        updatedSettings = await persistSettings({ projects: nextProjects });
+      } catch (error) {
+        await discardStagedProjectIconFile(stagedPath);
+        throw error;
+      }
+      await commitStagedProjectIconFile(projectId, stagedPath, iconPath);
       const updatedProject = (updatedSettings.projects || []).find((entry) => entry.id === projectId) || null;
 
       return res.json({ project: updatedProject, settings: updatedSettings });
@@ -646,22 +685,35 @@ export const registerProjectIconRoutes = (app: Application, dependencies: Projec
       }
 
       await fsPromises.mkdir(projectIconsDirPath, { recursive: true });
-      await fsPromises.writeFile(iconPath, bytes);
-      await removeProjectIconFiles(projectId, iconPath);
+      const stagedPath = await stageProjectIconFile(iconPath, bytes);
 
       const updatedAt = Date.now();
-      const updatedSettings = await persistResolvedSettings((current) => {
-        const { projects, project: currentProject } = findProjectById(current, projectId);
-        if (!currentProject) return {};
-        return {
-          projects: projects.map((entry) => (
-            entry.id === projectId
-              ? { ...entry, iconImage: { mime, updatedAt, source: 'auto' } }
-              : entry
-          )),
-        };
-      });
+      let updatedSettings: ProjectIconSavedSettings;
+      try {
+        updatedSettings = await persistResolvedSettings((current) => {
+          const { projects, project: currentProject } = findProjectById(current, projectId);
+          if (!currentProject) return {};
+          return {
+            projects: projects.map((entry) => (
+              entry.id === projectId
+                ? { ...entry, iconImage: { mime, updatedAt, source: 'auto' } }
+                : entry
+            )),
+          };
+        });
+      } catch (error) {
+        await discardStagedProjectIconFile(stagedPath);
+        throw error;
+      }
       const updatedProject = (updatedSettings.projects || []).find((entry) => entry.id === projectId) || null;
+      if (updatedProject?.iconImage && updatedProject.iconImage.mime === mime && updatedProject.iconImage.updatedAt === updatedAt) {
+        await commitStagedProjectIconFile(projectId, stagedPath, iconPath);
+      } else {
+        // The persisted settings did not take the discovered icon (the
+        // project changed or vanished while discovery ran): drop the
+        // staged file and leave the previous icon files as they were.
+        await discardStagedProjectIconFile(stagedPath);
+      }
 
       return res.json({
         project: updatedProject,
