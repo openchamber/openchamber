@@ -1,9 +1,11 @@
-# One-off measurement workflow for #275: the aarch64-linux node_modules
-# hash in nix/hashes.json can only be measured on an aarch64-linux
-# builder, and the fleet has none. Dispatch-only on purpose — run it on
-# a branch (or main) and read the measured hash from the job summary /
-# log. Kept after #275 as the standing arm-measurement route for this
-# fork, whose nix-hashes.yml re-bake job only runs upstream.
+# Measurement workflow first written for #275: the Linux node_modules
+# hashes in nix/hashes.json can only be measured on a Linux builder of
+# each architecture, and the fleet has none. Dispatch-only on purpose:
+# run it on a branch (or main) and read the measured hashes from the job
+# summaries / logs or the uploaded hashes.json artifacts. It is this
+# fork's standing measurement route, since nix-hashes.yml re-bakes only
+# upstream. The x86_64-linux leg was added when the 2026-11-22 upstream
+# merge changed bun.lock and nothing in the fork could measure that hash.
 name: measure-aarch64-hash
 
 on:
@@ -17,7 +19,15 @@ concurrency:
 
 jobs:
   measure:
-    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+          - runner: ubuntu-latest
+            system: x86_64-linux
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,22 +41,22 @@ jobs:
       # update-hashes.sh measures the CURRENT system only: it swaps in a
       # sentinel, captures the real hash from the fixed-output mismatch,
       # bakes it into nix/hashes.json, and verifies with a --rebuild.
-      - name: Measure and verify the aarch64-linux node_modules hash
+      - name: Measure and verify the ${{ matrix.system }} node_modules hash
         id: measure
         run: |
           set -o pipefail
           bash nix/update-hashes.sh 2>&1 | tee /tmp/update-hashes.log
           {
-            echo '## aarch64-linux node_modules hash (#275)'
+            echo '## ${{ matrix.system }} node_modules hash'
             echo
             echo '```diff'
             git diff -- nix/hashes.json
             echo '```'
             echo
-            echo "Measured line: $(grep 'aarch64-linux' nix/hashes.json)"
+            echo "Measured line: $(grep '${{ matrix.system }}' nix/hashes.json)"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload the measured hashes.json
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: hashes-json-aarch64-linux
+          name: hashes-json-${{ matrix.system }}
           path: nix/hashes.json
