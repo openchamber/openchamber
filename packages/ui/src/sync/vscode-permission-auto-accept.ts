@@ -1,5 +1,5 @@
 import type { PermissionRequest, Session } from "@/lib/opencode/model"
-import { opencodeClient } from "@/lib/opencode/client"
+import { isOpencodeNotFound, opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { getAllSyncSessionMap, getDirectoryState } from "./sync-refs"
 import * as sessionActions from "./session-actions"
@@ -59,30 +59,30 @@ export function createVSCodePermissionAutoAcceptRuntime(dependencies: Dependenci
     const existing = inFlight.get(permission.id)
     if (existing) return existing
 
-    const task = (async () => {
+    const task = (async (): Promise<"accepted" | "settled-elsewhere" | false> => {
       if (!(await isEnabled(permission.sessionID, directory))) return false
 
       if (options?.verifyPending !== false) {
         const permissionState = await dependencies.getPermissionState(permission.sessionID, permission.id, directory)
-        if (permissionState === "resolved") return true
+        if (permissionState === "resolved") return "accepted"
       }
 
       for (const delay of RETRY_DELAYS_MS) {
         if (delay > 0) await dependencies.wait(delay)
         try {
           await dependencies.reply(permission.sessionID, permission.id, directory)
-          return true
-        } catch {
-          // A failed reply stays visible after the bounded retries.
+          return "accepted"
+        } catch (error) {
+          if (isOpencodeNotFound(error)) return "settled-elsewhere"
         }
       }
       return false
-    })().then((accepted) => {
-      if (accepted) {
+    })().then((outcome) => {
+      if (outcome === "accepted") {
         recentOutcomes.set(permission.id, true)
         setTimeout(() => recentOutcomes.delete(permission.id), 5000)
       }
-      return accepted
+      return outcome !== false
     }).finally(() => inFlight.delete(permission.id))
 
     inFlight.set(permission.id, task)
