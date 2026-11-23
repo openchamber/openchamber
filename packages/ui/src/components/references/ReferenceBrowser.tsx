@@ -128,6 +128,7 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
             summary={summary}
             groups={groups}
             labelSection={labelSection}
+            collapsibleLabels
             appearance="full"
             mobile={browser.isMobile}
             ariaLabel={appliedNames ? `${filterLabel}: ${appliedNames}` : filterLabel}

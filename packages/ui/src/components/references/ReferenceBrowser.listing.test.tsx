@@ -234,14 +234,21 @@ describe("the phone's filter", () => {
     await click(filterTrigger());
     const sheet = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Filter"]');
     expect(sheet).not.toBeNull();
-    // Status, people and the labels with their search, together in the sheet.
+    // Status, people and the labels row, together in the sheet.
     const groups = [...(sheet?.querySelectorAll<HTMLElement>('[role="group"]') ?? [])].map((group) => group.getAttribute('aria-label'));
     expect(groups).toEqual(['Status', 'People', 'Labels']);
-    expect(sheet?.querySelector('input')).not.toBeNull();
+    // The label search waits behind the row, so opening the sheet shows no field.
+    expect(sheet?.querySelector('input')).toBeNull();
     expect(document.activeElement?.tagName).not.toBe('INPUT');
 
     const labelRow = (name: string) => [...(sheet?.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Labels"] button') ?? [])]
       .find((button) => button.textContent?.trim() === name);
+    // The label choices wait behind their row, which names itself like a group header.
+    expect(labelRow('Labels')?.getAttribute('aria-expanded')).toBe('false');
+    expect(labelRow('bug')).toBeUndefined();
+    await click(labelRow('Labels'));
+    expect(labelRow('bug')).toBeDefined();
+    expect(sheet?.querySelector('input')).not.toBeNull();
     reads = [];
     await click(labelRow('bug'));
     expect(reads.at(-1)?.labels).toEqual(['bug']);

@@ -84,14 +84,14 @@ const useShownLabels = (listed: readonly Label[], applied: readonly string[], qu
     return React.useMemo(() => (query ? rankByQuery(all, query, (label) => [label.name]) : all), [all, query]);
 };
 
-function useLabelChoices(directory: string | null, applied: readonly string[], query: string) {
+function useLabelChoices(directory: string | null, applied: readonly string[], query: string, enabled: boolean) {
     const [choices, setChoices] = React.useState<LabelChoices>({ status: 'loading' });
-    const { ready, supported, read } = useRepositoryLabelReader(true, directory);
+    const { ready, supported, read } = useRepositoryLabelReader(enabled, directory);
 
     const readRef = React.useRef(read);
     React.useEffect(() => { readRef.current = read; }, [read]);
     React.useEffect(() => {
-        if (!ready || !supported) return;
+        if (!enabled || !ready || !supported) return;
         let current = true;
         setChoices({ status: 'loading' });
         void readRef.current().then(
@@ -102,7 +102,7 @@ function useLabelChoices(directory: string | null, applied: readonly string[], q
             },
         );
         return () => { current = false; };
-    }, [directory, ready, supported]);
+    }, [directory, enabled, ready, supported]);
 
     const listed = choices.status === 'ready' ? choices.items : NO_LABELS;
     const shown = useShownLabels(listed, applied, query);
@@ -305,7 +305,7 @@ type LabelSectionProps = {
 
 const ProviderLabelSection: React.FC<LabelSectionProps & { section: Extract<ReferenceFilterLabelSection, { kind: 'provider' }> }> = ({ section, mobile, collapsible, expanded, onToggle }) => {
     const [query, setQuery] = React.useState('');
-    const { hidden, choices, shown, appliedChips } = useLabelChoices(section.directory, section.applied, query);
+    const { hidden, choices, shown, appliedChips } = useLabelChoices(section.directory, section.applied, query, expanded || !collapsible);
     if (hidden) return null;
     const body = {
         choices,

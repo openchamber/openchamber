@@ -206,6 +206,13 @@ const openMenu = () => click(filterTrigger());
 const closeMenu = async () => {
   if (menu()) await click(filterTrigger());
 };
+/** The label section's row: closed until asked for, with the applied labels on it. */
+const labelRow = () => [...(menu()?.querySelectorAll<HTMLElement>('[aria-expanded]') ?? [])]
+  .find((element) => element.textContent?.trim().startsWith('Labels'));
+/** Opens the label row so the host's choices appear. */
+const expandLabels = async () => {
+  if (labelRow()?.getAttribute('aria-expanded') !== 'true') await click(labelRow());
+};
 /** The browser the harness last rendered, for typing the way its field does. */
 let latestBrowser: { setQuery: (value: string) => void } | null = null;
 
@@ -223,6 +230,7 @@ const groupLabel = (name: string) => [...(menu()?.querySelectorAll<HTMLElement>(
 /** Opens the panel, emptying labels an earlier test left: the selection is remembered for the app run. */
 const openFiltered = async (shown: Shown) => {
   await openMenu();
+  await expandLabels();
   if (!filterTrigger()?.getAttribute('aria-label')?.includes(':')) return;
   await click(labelChoice('Clear'));
   shown.patches.length = 0;
@@ -232,11 +240,17 @@ const openFiltered = async (shown: Shown) => {
 const issueReads = (shown: Shown) => shown.reads.filter((query) => query.kind === 'issue');
 
 describe('the labels filter in the filter menu', () => {
-  test('labels are read when the panel opens, and not before', async () => {
+  test('labels are read when the row is opened, and not before', async () => {
     const shown = await show();
     await flush();
     expect(shown.labelReads).toEqual([]);
     await openMenu();
+    // The row starts closed: opening the panel alone asks the host nothing.
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
+    expect(labelChoice('bug')).toBeUndefined();
+    expect(shown.labelReads).toEqual([]);
+    await expandLabels();
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('true');
     expect(shown.labelReads.length).toBe(1);
     expect(shown.labelReads[0]?.project).toEqual({ owner: 'acme', repo: 'app' });
     expect(shown.labelReads[0]?.context?.directory).toBe('/work/app');
@@ -255,6 +269,11 @@ describe('the labels filter in the filter menu', () => {
     // The panel stays open for the next pick.
     expect(menu()).not.toBeNull();
     expect(checked('bug')).toBe(true);
+    // The chosen label rides the closed row, without its list in the panel.
+    await click(labelRow());
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
+    expect(labelChoice('bug')).toBeUndefined();
+    expect(labelRow()?.textContent).toContain('bug');
     await closeMenu();
   });
 
@@ -318,6 +337,8 @@ describe('the labels filter in the filter menu', () => {
     await closeMenu();
     shown.setHostLabels([{ name: 'docs' }]);
     await openMenu();
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
+    await expandLabels();
     expect(checked('bug')).toBe(true);
     expect(checked('docs')).toBe(false);
     await click(labelChoice('bug'));
@@ -332,6 +353,7 @@ describe('the labels filter in the filter menu', () => {
     await closeMenu();
     shown.setLabelsMode('fail');
     await openMenu();
+    await expandLabels();
     expect(menu()?.textContent).toContain('Could not load labels');
     expect(menu()?.textContent).toContain('This project is not readable');
     // The chosen label stays chosen, and can still be unpicked.
@@ -346,6 +368,9 @@ describe('the labels filter in the filter menu', () => {
     shown.setLabelsMode('unsupported');
     await openMenu();
     expect(menu()?.textContent).toContain('Status');
+    // The row shows until the host's answer says it has no label list.
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
+    await expandLabels();
     expect(menu()?.textContent).not.toContain('Labels');
     expect(menu()?.textContent).not.toContain('Could not load labels');
     await closeMenu();
@@ -360,7 +385,9 @@ describe('the labels filter in the filter menu', () => {
     // The registry settles while the panel is open: the read must still happen.
     await setProvider();
     await flush();
-    expect(menu()?.textContent).toContain('Labels');
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
+    expect(shown.labelReads).toEqual([]);
+    await expandLabels();
     expect(shown.labelReads).toHaveLength(1);
     await closeMenu();
   });

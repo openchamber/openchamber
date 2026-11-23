@@ -154,6 +154,13 @@ const openMenu = () => click(filterTrigger());
 const closeMenu = async () => {
   if (menu()) await click(filterTrigger());
 };
+/** The label section's row: closed until asked for, with the applied labels on it. */
+const labelRow = () => [...(menu()?.querySelectorAll<HTMLElement>('[aria-expanded]') ?? [])]
+  .find((element) => element.textContent?.trim().startsWith('Labels'));
+/** Opens the label row so the host's choices appear. */
+const expandLabels = async () => {
+  if (labelRow()?.getAttribute('aria-expanded') !== 'true') await click(labelRow());
+};
 
 /** A filter the app remembers for this folder and tab, as an earlier run left it. */
 const remember = (filter: RepositoryReferenceFilter) => {
@@ -174,6 +181,7 @@ describe('the labels a list read carries', () => {
   test('a second tick sends both labels, which the host ands', async () => {
     await show();
     await openMenu();
+    await expandLabels();
     // The selection is remembered for the app run: start from none.
     if (filterTrigger()?.getAttribute('aria-label')?.includes(':')) await click(labelChoice('Clear'));
     reads = [];
