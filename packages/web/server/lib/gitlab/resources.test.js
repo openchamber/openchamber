@@ -119,7 +119,7 @@ describe('GitLab resource service', () => {
     expect(issuesAll.mock.calls.at(-1)?.[0]).toMatchObject({ state: 'closed', scope: 'assigned_to_me' });
   });
 
-  it('adds commits and review verdicts only when the timeline asks', async () => {
+  it('adds commits only when the timeline asks, keeping verdicts and reviewers in the plain context', async () => {
     const commits = [
       { id: 'bbb', title: 'second', author_name: 'Sam', committed_date: '2026-10-02T10:00:00Z', web_url: `${origin}/team/repo/-/commit/bbb` },
       { id: 'aaa', title: 'first', author_name: 'Sam', committed_date: '2026-10-01T10:00:00Z', web_url: `${origin}/team/repo/-/commit/aaa` },
@@ -139,16 +139,18 @@ describe('GitLab resource service', () => {
     const plain = await service.changeRequestContext('/repo', 5, {});
     expect(plain).not.toHaveProperty('commits');
     expect(allCommits).not.toHaveBeenCalled();
+    expect(plain.verdicts).toMatchObject([{ state: 'approved', createdAt: '2026-10-02T11:00:00Z', author: { username: 'sam' } }]);
+    expect(plain.reviewers).toEqual([expect.objectContaining({ id: '7', username: 'ann' })]);
 
     const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
     expect(result.commits.map((commit) => commit.headline)).toEqual(['first', 'second']);
     expect(result.commitsComplete).toBe(true);
-    expect(result.verdicts).toMatchObject([{ state: 'approved', createdAt: '2026-10-02T11:00:00Z', author: { username: 'sam' } }]);
+    expect(result.verdicts).toEqual(plain.verdicts);
     expect(result.issueComments.map((comment) => comment.body)).toEqual(['Looks good']);
-    expect(result.reviewers).toEqual([expect.objectContaining({ id: '7', username: 'ann' })]);
+    expect(result.reviewers).toEqual(plain.reviewers);
   });
 
-  it('reads one state per reviewer only with the timeline', async () => {
+  it('reads one state per reviewer with or without the timeline', async () => {
     const showReviewers = vi.fn(async () => [
       { user: { id: 7, username: 'ann' }, state: 'approved' },
       { user: { id: 8, username: 'bo' }, state: 'requested_changes' },
@@ -163,13 +165,13 @@ describe('GitLab resource service', () => {
     });
 
     const plain = await service.changeRequestContext('/repo', 5, {});
-    expect(plain).not.toHaveProperty('reviewerStates');
-    expect(showReviewers).not.toHaveBeenCalled();
-
-    const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
-    expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
+    expect(plain.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
       ['ann', 'approved'], ['bo', 'changes_requested'], ['cy', 'pending'], ['di', 'commented'], ['ed', 'pending'], ['flo', 'pending'],
     ]);
+    expect(showReviewers).toHaveBeenCalledTimes(1);
+
+    const result = await service.changeRequestContext('/repo', 5, { includeTimeline: true });
+    expect(result.reviewerStates).toEqual(plain.reviewerStates);
   });
 
   it('keeps the states it understands and leaves the rest to the plain roster', async () => {

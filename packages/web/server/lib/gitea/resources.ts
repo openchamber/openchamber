@@ -5,10 +5,10 @@ import { changeRequestNetworkTarget } from '../source-control/repository-network
 import {
   asDraftTitle, asReadyTitle, branchRepoId, liveChangeRequestSummary, liveIssueSummary,
   mapGiteaChangedFile, mapGiteaCI, mapGiteaComment, mapGiteaIssue, mapGiteaPull, mapGiteaRepo,
-  mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaReviewerStates, mapGiteaUser, mapGiteaVerdict, splitUnifiedDiff, SUBMITTED_REVIEW_STATES,
+  mapGiteaReviewBody, mapGiteaReviewComment, mapGiteaUser, splitUnifiedDiff, SUBMITTED_REVIEW_STATES,
 } from './mappers.js';
 import { resolveGiteaReposFromDirectory } from './repo.js';
-import { giteaReviewMethods, readReviewSummaries } from './review-summaries.js';
+import { giteaReviewMethods, readReviewContext } from './review-summaries.js';
 import { readTimelineCommits, readTimelineReferences, withIssueReferences, withReferences } from './references.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { ProviderMutationContext, ProviderReadContext } from '../source-control/provider-contract.js';
@@ -467,7 +467,7 @@ export function createGiteaResourceService({
         changeRequest: request,
         issueComments,
         reviewComments,
-        reviews: readReviewSummaries(reviews, identity),
+        ...readReviewContext(reviews, raw.requested_reviewers, identity, request.url),
         files,
         diff: diffText,
         ci,
@@ -477,15 +477,6 @@ export function createGiteaResourceService({
         ...withReferences(context, references),
         commits: commits.items,
         commitsComplete: commits.complete,
-        reviewers: (array(raw.requested_reviewers) ? raw.requested_reviewers : []).flatMap((user) => {
-          const mapped = mapGiteaUser(user, identity);
-          return mapped ? [mapped] : [];
-        }),
-        reviewerStates: mapGiteaReviewerStates(reviews, raw.requested_reviewers, identity),
-        verdicts: reviews.flatMap((review) => {
-          const mapped = mapGiteaVerdict(review, identity, request.url);
-          return mapped ? [mapped] : [];
-        }),
       };
     },
 

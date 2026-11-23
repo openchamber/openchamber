@@ -9,7 +9,6 @@ export const FAKE_FORGE_STRANGER = { owner: 'mona', name: 'kettle' };
 
 type ForgeComment = { id: number; body: string; created_at: string };
 type ForgePerson = { id: number; login: string; full_name?: string; email?: string; avatar_url?: string };
-type ForgeReview = { user: ForgePerson; state: string; stale?: boolean; dismissed?: boolean };
 type ForgeItem = {
   number: number;
   title: string;
@@ -50,7 +49,7 @@ type ForgeReview = {
   id: number;
   state: 'PENDING' | 'COMMENT' | 'APPROVED' | 'REQUEST_CHANGES' | 'REQUEST_REVIEW' | 'DISMISSED';
   body: string;
-  user: { id: number; login: string };
+  user: ForgePerson;
   commit_id: string;
   comments: ForgeReviewComment[];
   dismissed?: boolean;
@@ -119,21 +118,25 @@ export const startFakeForge = async (): Promise<FakeForge> => {
         head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false,
         requestedReviewers: [{ id: 11, login: 'cid' }],
         reviews: [
-          { user: { id: 9, login: 'ann' }, state: 'APPROVED' },
-          { user: { id: 10, login: 'bob' }, state: 'REQUEST_CHANGES', stale: true },
-          { user: { id: 12, login: 'dee' }, state: 'APPROVED' },
-          ...Array.from({ length: 50 }, () => ({ user: { id: 11, login: 'cid' }, state: 'REQUEST_REVIEW' })),
-          { user: { id: 12, login: 'dee' }, state: 'APPROVED', dismissed: true },
-          { user: { id: 9, login: 'ann' }, state: 'PENDING' },
+          { id: 401, body: '', commit_id: SHA_B, comments: [], user: { id: 9, login: 'ann' }, state: 'APPROVED' },
+          { id: 402, body: '', commit_id: SHA_B, comments: [], user: { id: 10, login: 'bob' }, state: 'REQUEST_CHANGES', stale: true },
+          { id: 403, body: '', commit_id: SHA_B, comments: [], user: { id: 12, login: 'dee' }, state: 'APPROVED' },
+          ...Array.from({ length: 50 }, (_, index) => ({ id: 500 + index, body: '', commit_id: SHA_B, comments: [], user: { id: 11, login: 'cid' }, state: 'REQUEST_REVIEW' as const })),
+          { id: 404, body: '', commit_id: SHA_B, comments: [], user: { id: 12, login: 'dee' }, state: 'APPROVED', dismissed: true },
+          { id: 405, body: '', commit_id: SHA_B, comments: [], user: { id: 9, login: 'ann' }, state: 'PENDING' },
         ],
       },
     },
   ];
+  const reviewSummariesPull: ForgeItem = {
+    number: 4, title: 'Review summaries land here', body: 'One reviewer, three reviews.', state: 'open', comments: [],
+    pull: { head: 'feature', headRepo: 1, base: 'main', sha: SHA_B, merged: false },
+  };
   let commentId = 100;
   let reviewSeq = 300;
   let reviewCommentId = 500;
   const failingReviews = new Set<number>();
-  const reviews = new Map<number, ForgeReview[]>([[2, [{
+  const reviews = new Map<number, ForgeReview[]>([[4, [{
     id: 300, state: 'COMMENT', body: 'Looks good', user: { id: 8, login: 'octo' }, commit_id: SHA_B, comments: [], dismissed: false,
     submitted_at: '2026-10-02T10:00:00Z',
   }, {
@@ -234,7 +237,8 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       requested_reviewers: pull.requestedReviewers ?? [],
     };
   };
-  const byNumber = (value: string | undefined) => items.find((item) => item.number === Number(value));
+  const byNumber = (value: string | undefined) => items.find((item) => item.number === Number(value))
+    ?? (Number(value) === reviewSummariesPull.number ? reviewSummariesPull : undefined);
   const page = <T,>(list: T[], url: URL, response: http.ServerResponse) => {
     const limit = Math.max(1, Math.min(50, Number(url.searchParams.get('limit')) || 20));
     const index = Math.max(1, Number(url.searchParams.get('page')) || 1);
@@ -314,7 +318,10 @@ export const startFakeForge = async (): Promise<FakeForge> => {
       }
       const item = byNumber(number);
       if (!item?.pull) return notFound;
-      if (method === 'GET' && action === 'reviews' && rest.length === 3) return { status: 200, body: page(item.pull.reviews ?? [], url, response) };
+      if (method === 'GET' && action === 'reviews' && rest.length === 3) {
+        if (failingReviews.delete(item.number)) return { status: 500, body: { message: 'reviews are unavailable' } };
+        return { status: 200, body: page(item.pull.reviews ?? reviews.get(item.number) ?? [], url, response) };
+      }
       if (method === 'GET' && rest.length === 2) return { status: 200, body: pullJson(item) };
       if (method === 'GET' && action === 'files' && rest.length === 3) {
         const base = treeAt(MERGE_BASE);

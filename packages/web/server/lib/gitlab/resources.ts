@@ -1304,7 +1304,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           : Promise.resolve(null),
         options.includeDiff ? readDiffStats(client, target.project, number) : Promise.resolve(null),
         options.includeTimeline ? readThreadPermissions(target.project, number) : Promise.resolve(null),
-        options.includeTimeline ? readReviewerStates(client, target.project.id, number, raw, identity) : Promise.resolve(undefined),
+        readReviewerStates(client, target.project.id, number, raw, identity),
         readChain(reply, isString(target.raw?.default_branch) ? target.raw.default_branch : null).catch(() => undefined),
       ]);
       const notes = options.includeTimeline ? notesOfDiscussions(noteSource, threadPermissions) : noteSource;
@@ -1352,20 +1352,6 @@ export function createGitLabResourceService({ origin, client, download, resolveP
         diff: files.map((file) => file.patch).filter(Boolean).join('\n'),
         ci,
         reviews,
-      };
-      const withStack = chain === undefined ? context : { ...context, stack: chain };
-      if (!options.includeTimeline) return withStack;
-      const withRefs = options.includeReferences
-        ? withReferences(withStack, systemReferences(notes, String(obj(raw)?.web_url ?? ''), projectPath(target.project.owner, target.project.name)))
-        : withStack;
-      if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
-      const timeline = {
-        ...withRefs,
-        commits: asArray(commitPage?.items).flatMap((commit) => {
-          const mapped = mapGitLabCommit(obj(commit));
-          return mapped ? [mapped] : [];
-        }).reverse(),
-        commitsComplete: !commitPage?.hasMore,
         reviewers: asArray(record(raw).reviewers).flatMap((user) => {
           const mapped = mapGitLabUser(obj(user), identity);
           return mapped ? [mapped] : [];
@@ -1375,7 +1361,21 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           return mapped ? [mapped] : [];
         }),
       };
-      return reviewerStates === undefined ? timeline : { ...timeline, reviewerStates };
+      const withStates = reviewerStates === undefined ? context : { ...context, reviewerStates };
+      const withStack = chain === undefined ? withStates : { ...withStates, stack: chain };
+      if (!options.includeTimeline) return withStack;
+      const withRefs = options.includeReferences
+        ? withReferences(withStack, systemReferences(notes, String(obj(raw)?.web_url ?? ''), projectPath(target.project.owner, target.project.name)))
+        : withStack;
+      if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
+      return {
+        ...withRefs,
+        commits: asArray(commitPage?.items).flatMap((commit) => {
+          const mapped = mapGitLabCommit(obj(commit));
+          return mapped ? [mapped] : [];
+        }).reverse(),
+        commitsComplete: !commitPage?.hasMore,
+      };
     },
 
     async listIssues(directory: string, options: ListOptions = {}) {

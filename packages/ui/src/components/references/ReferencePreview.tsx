@@ -314,8 +314,9 @@ const PullDetailRows: React.FC<{
     links?: React.ReactNode;
     onOpenChecks?: () => void;
     revisionChoice?: RevisionChoice;
+    reviewersControl?: React.ReactNode;
     onChanged?: () => void;
-}> = ({ detail, reference, checks, links, onOpenChecks, revisionChoice, onChanged }) => {
+}> = ({ detail, reference, checks, links, onOpenChecks, revisionChoice, reviewersControl, onChanged }) => {
     const { t } = useI18n();
     const pull = detail.status === 'ready' ? detail.value.pull : null;
     return (
@@ -365,7 +366,7 @@ const PullDetailRows: React.FC<{
                     {checks.status === 'error' ? <LoadError error={checks.error} /> : <Pending />}
                 </MetaRow>
             )}
-            {pull ? <ReferenceReviews pull={pull} reference={reference} onChanged={onChanged} /> : null}
+            {pull || reviewersControl ? <ReferenceReviews pull={pull} reference={reference} reviewersControl={reviewersControl} onChanged={onChanged} /> : null}
         </>
     );
 };
@@ -746,12 +747,10 @@ const RepositoryPreview: React.FC<{
                                 links={pullLinks}
                                 onOpenChecks={onOpenChecks}
                                 onChanged={refresh ?? undefined}
+                                reviewersControl={reviewersControl}
                                 revisionChoice={descriptor.features.revisions ? revisionChoice : undefined}
                             />
                         </>
-                    ) : null}
-                    {reviewersControl && reference.kind === 'pull' ? (
-                        <MetaRow label={t('references.picker.preview.reviewers')}>{reviewersControl}</MetaRow>
                     ) : null}
                     {labelsControl ? (
                         <MetaRow label={t('references.picker.preview.labels')}>{labelsControl}</MetaRow>

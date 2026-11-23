@@ -2,7 +2,7 @@ import { isPlainObject, isString } from '../shared/guards.js';
 import { dismissReview, reconcileReviewDismiss } from './review-dismiss.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { GiteaIdentity } from './mappers.js';
-import { mapGiteaUser } from './mappers.js';
+import { mapGiteaReviewerStates, mapGiteaUser, mapGiteaVerdict } from './mappers.js';
 import type { createGiteaClient } from './client.js';
 import type { SourceControlReviewState, SourceControlReviewSummary } from '@openchamber/sdk';
 
@@ -40,6 +40,19 @@ export const readReviewSummaries = (reviews: JsonValue[], identity: GiteaIdentit
   const summary = reviewSummaryOf(review, identity);
   return summary ? [summary] : [];
 }).sort((left, right) => String(right.submittedAt ?? '').localeCompare(String(left.submittedAt ?? '')));
+
+export const readReviewContext = (reviews: JsonValue[], requested: JsonValue | undefined, identity: GiteaIdentity, fallbackUrl: string) => ({
+  reviews: readReviewSummaries(reviews, identity),
+  reviewers: (Array.isArray(requested) ? requested : []).flatMap((user) => {
+    const mapped = mapGiteaUser(user, identity);
+    return mapped ? [mapped] : [];
+  }),
+  reviewerStates: mapGiteaReviewerStates(reviews, requested, identity),
+  verdicts: reviews.flatMap((review) => {
+    const mapped = mapGiteaVerdict(review, identity, fallbackUrl);
+    return mapped ? [mapped] : [];
+  }),
+});
 
 type Client = ReturnType<typeof createGiteaClient>;
 

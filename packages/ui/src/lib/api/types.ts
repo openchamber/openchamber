@@ -3,8 +3,8 @@ import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { GitPathUnavailableReason } from './git-path-diff';
 import type { PushAPI } from './push';
-import type { RepositoryReferenceCommit, RepositoryReferenceReviewer, RepositoryReferenceReviewerState } from './repositoryReferenceTypes';
-export type { RepositoryReferenceReviewer } from './repositoryReferenceTypes';
+import type { RepositoryReferenceDetailResult, RepositoryReferenceReviewer } from './repositoryReferenceTypes';
+export type { RepositoryReferenceComment, RepositoryReferenceDetail, RepositoryReferenceDetailResult, RepositoryReferenceReviewer, ReviewCommentExcerpt } from './repositoryReferenceTypes';
 import type {
   ChangeRequest,
   ChangeRequestContext,
@@ -66,10 +66,6 @@ import type {
   UpdateChangeRequestInput,
   UpdateIssueInput,
   UpdateDiscussionInput,
-  ChangeRequestRevision,
-  ChangeRequestSubmitRequirement,
-  ChangeRequestVoteLabel,
-  PullRequestStack,
 } from '../source-control/types';
 import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
 import type { TrackerAPI } from '../trackers/types';
@@ -1547,65 +1543,6 @@ export type RepositoryChangeRequestReference = RepositoryReferenceCommon & {
   topic?: string;
   revisionNumber?: number;
 };
-
-import type { RepositoryReferenceReview } from '../source-control/reviewSummary';
-
-export type ReviewCommentExcerpt = { startLine: number; lines: string[] };
-
-export type RepositoryReferenceComment = {
-  author: { login: string; avatarUrl?: string } | null;
-  body: string;
-  createdAt: string | null;
-  url: string;
-  id?: string;
-  canUpdate?: boolean;
-  canDelete?: boolean;
-  path: string | null;
-  line: number | null;
-  review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
-  excerpt?: ReviewCommentExcerpt;
-  thread?: RepositoryReferenceThread;
-  answer?: { chosen: boolean; canChange: boolean };
-};
-
-export type RepositoryReferenceThread = {
-  id: string;
-  resolved: boolean;
-  canResolve: boolean;
-  canReply: boolean;
-  outdated?: boolean;
-  replies: RepositoryReferenceComment[];
-};
-
-export type RepositoryReferenceDetail = {
-  number: number;
-  body?: string;
-  viewerCanUpdate?: boolean;
-  comments: RepositoryReferenceComment[];
-  commentTotal: number;
-  pull: {
-    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
-    reviewers: RepositoryReferenceReviewer[];
-    reviewerStates?: RepositoryReferenceReviewerState[];
-    reviews?: RepositoryReferenceReview[];
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    checks?: CISummary | null;
-    commits: RepositoryReferenceCommit[];
-    commitTotal: number | null;
-    stack?: PullRequestStack | null;
-    voteLabels?: ChangeRequestVoteLabel[];
-    submitRequirements?: ChangeRequestSubmitRequirement[];
-    revisions?: ChangeRequestRevision[];
-  } | null;
-  references?: ChangeRequestContext['references'];
-  discussion?: { canComment: boolean; canClose: boolean; canReopen: boolean };
-};
-
-export type RepositoryReferenceDetailResult =
-  | { connected: false }
-  | { connected: true; detail: RepositoryReferenceDetail | null };
 
 export type RepositoryReference = RepositoryIssueReference | RepositoryChangeRequestReference | RepositoryDiscussionReference;
 

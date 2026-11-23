@@ -270,22 +270,6 @@ const referencesCarrierSchema = jsonObject.refine(
   { message: 'answer is larger than the response cap' },
 ).transform(withValidReferences);
 
-const changeRequestContextSchema = z.object({
-  reviewerStates: z.unknown().optional(),
-}).passthrough().refine(
-  (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
-  { message: 'answer is larger than the response cap' },
-).transform(({ reviewerStates, ...rest }) => {
-  const states = Array.isArray(reviewerStates)
-    ? reviewerStates.flatMap((entry) => {
-      const parsed = reviewerStateSchema.safeParse(entry);
-      return parsed.success ? [parsed.data] : [];
-    })
-    : [];
-  const context = withValidReferences(rest);
-  return states.length > 0 ? { ...context, reviewerStates: states } : context;
-});
-
 const STACK_LAYERS_MAX = 50;
 
 const changeRequestStackSchema = z.object({
@@ -349,7 +333,19 @@ const changeRequestReviewSchema = z.object({
 }).passthrough();
 
 const changeRequestContextSchema = z.union([
-  z.object({ reviews: z.array(changeRequestReviewSchema).max(1_000).optional() }).passthrough(),
+  z.object({
+    reviewerStates: z.unknown().optional(),
+    reviews: z.array(changeRequestReviewSchema).max(1_000).optional(),
+  }).passthrough().transform(({ reviewerStates, ...rest }) => {
+    const states = Array.isArray(reviewerStates)
+      ? reviewerStates.flatMap((entry) => {
+        const parsed = reviewerStateSchema.safeParse(entry);
+        return parsed.success ? [parsed.data] : [];
+      })
+      : [];
+    const context = withValidReferences(rest);
+    return states.length > 0 ? { ...context, reviewerStates: states } : context;
+  }),
   z.array(z.json()),
 ]).refine(
   (value) => JSON.stringify(value).length <= SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,

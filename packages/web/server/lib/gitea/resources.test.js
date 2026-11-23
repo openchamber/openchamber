@@ -176,6 +176,24 @@ describe('Gitea change request context', () => {
     ]);
   });
 
+  it('carries the reviewers, their states and the verdicts without the timeline', async () => {
+    const { service } = setup(contextRoutes());
+
+    const plain = await service.changeRequestContext('/repo', 1, { remote: 'origin' });
+
+    expect(plain).not.toHaveProperty('commits');
+    expect(plain.reviewers.map((user) => user.username)).toEqual(['alice', 'carol']);
+    expect(plain.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([['alice', 'approved'], ['carol', 'commented']]);
+    expect(plain.verdicts).toEqual([expect.objectContaining({ state: 'approved', author: expect.objectContaining({ username: 'alice' }) })]);
+
+    const timeline = await service.changeRequestContext('/repo', 1, { includeTimeline: true, remote: 'origin' });
+
+    expect(timeline.reviewers).toEqual(plain.reviewers);
+    expect(timeline.reviewerStates).toEqual(plain.reviewerStates);
+    expect(timeline.verdicts).toEqual(plain.verdicts);
+    expect(timeline.commits).toHaveLength(2);
+  });
+
   it('keeps commits made within one second in the order Gitea lists them', async () => {
     const sameSecond = fixtures.commits.map((commit) => ({
       ...commit, commit: { ...commit.commit, committer: { ...commit.commit.committer, date: '2026-10-22T17:40:14+03:00' } },

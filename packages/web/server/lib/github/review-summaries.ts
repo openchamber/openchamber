@@ -1,3 +1,4 @@
+import { contextReviewFields, type ContextReviewFields } from './context-reviewers.js';
 import { fieldAt } from './contracts.js';
 import { isProviderString, requireProviderArray } from './mappers.js';
 import type { GitHubEnvelope, Octokit } from './contracts.js';
@@ -52,6 +53,8 @@ const reviewSummaryOf = (review: GitHubEnvelope['data']): SourceControlReviewSum
   return { id: String(id), state, author, submittedAt: isProviderString(submittedAt) ? submittedAt : null };
 };
 
+export type { ContextReviewFields } from './context-reviewers.js';
+
 export async function readReviewSummaries(
   octokit: Octokit, route: { owner: string; repo: string }, number: number,
 ): Promise<SourceControlReviewSummary[]> {
@@ -64,3 +67,9 @@ export async function readReviewSummaries(
     return summary ? [summary] : [];
   }).sort(newestFirst);
 }
+
+export const readReviewContext = async (
+  octokit: Octokit, route: { owner: string; repo: string }, number: number,
+  requested: readonly { login?: string | undefined; avatar_url?: string | undefined }[] | undefined,
+  identity: { provider: string; instance: string },
+): Promise<ContextReviewFields> => contextReviewFields(await readReviewSummaries(octokit, route, number), requested, identity);

@@ -5,7 +5,9 @@ import type { Root } from 'react-dom/client';
 
 import type {
   RepositoryChangeRequestReference,
+  RepositoryReferenceDetail,
   RepositoryReferenceReview,
+  RepositoryReferenceReviewer,
   ReviewDismissInput,
   RuntimeAPIs,
   SourceControlReadContext,
@@ -24,7 +26,8 @@ Object.assign(globalThis, {
 globalThis.fetch = Object.assign(() => new Promise<Response>(() => {}), globalThis.fetch);
 
 const { createRoot } = await import('react-dom/client');
-const { ReviewRows } = await import('./ReferenceReviews');
+const { ReviewerRows } = await import('./ReferenceReviews');
+const { mergeReviewerEntries } = await import('./reviewerEntries');
 
 let root: Root;
 let host: HTMLDivElement;
@@ -52,11 +55,17 @@ const reference: RepositoryChangeRequestReference = {
   state: 'open', draft: false, head: 'feature', base: 'main', headSha: 'f'.repeat(40), headRepo: null,
 };
 
-const reviews: RepositoryReferenceReview[] = [
-  { id: 'R1', state: 'approved', author: { login: 'mona' }, submittedAt: null },
-  { id: 'R2', state: 'commented', author: { login: 'mona' }, submittedAt: null },
-  { id: 'R3', state: 'changes_requested', author: { login: 'hubot' }, submittedAt: null },
-];
+type Pull = NonNullable<RepositoryReferenceDetail['pull']>;
+
+const pullOf = (overrides: Partial<Pull> = {}): Pull => ({
+  reviewDecision: null, reviewers: [], additions: 0, deletions: 0, changedFiles: 0, commits: [], commitTotal: null,
+  ...overrides,
+});
+
+const person = (login: string): RepositoryReferenceReviewer => ({ id: `id-${login}`, login });
+const review = (id: string, state: RepositoryReferenceReview['state'], login: string): RepositoryReferenceReview => ({
+  id, state, author: { login }, submittedAt: null,
+});
 
 const receipt = (input: ReviewDismissInput) => ({
   status: 'succeeded' as const,
@@ -93,16 +102,17 @@ const setUp = async () => {
 
 const renderRows = async (
   runtime: RuntimeAPIs,
-  options: { mode: 'others' | 'own' | null; canUndismiss?: boolean; viewerLogin: string | null; list?: RepositoryReferenceReview[]; onChanged: () => void },
+  options: { pull: Pull; mode: 'others' | 'own' | null; canUndismiss?: boolean; viewerLogin: string | null; onChanged: () => void },
 ) => {
   const { I18nProvider } = await import('@/lib/i18n');
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const entries = mergeReviewerEntries(options.pull);
   await act(async () => {
     root.render(
       <I18nProvider>
         <RuntimeAPIContext.Provider value={runtime}>
-          <ReviewRows
-            reviews={options.list ?? reviews}
+          <ReviewerRows
+            entries={entries}
             mode={options.mode}
             canUndismiss={options.canUndismiss ?? false}
             viewerLogin={options.viewerLogin}
@@ -116,8 +126,17 @@ const renderRows = async (
   });
 };
 
+const stateRows = () => [...host.querySelectorAll<HTMLElement>('[data-reviewer-state]')].map((row) => {
+  const label = row.querySelector('.sr-only')?.textContent ?? '';
+  return {
+    state: row.getAttribute('data-reviewer-state'),
+    login: row.textContent?.replace(label, '').trim(),
+    label,
+    title: row.getAttribute('title'),
+    icon: row.querySelector('use')?.getAttribute('href'),
+  };
+});
 const actionTriggers = () => [...host.querySelectorAll<HTMLButtonElement>('button[aria-label="Review actions"]')];
-const buttonNamed = (name: string) => [...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === name);
 const menuItems = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => item.textContent?.trim() ?? '');
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
 const dialogButton = (name: string) => [...(dialog()?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) => button.textContent?.trim() === name);
@@ -136,19 +155,104 @@ const typeInto = async (element: HTMLTextAreaElement, value: string) => {
   });
 };
 
-describe('dismissing someone else\'s review', () => {
-  test('offers the action only on a review that counts and is not the viewer\'s', async () => {
+describe('the merged reviews row', () => {
+  test('one entry per person, ordered changes requested, approved, commented, awaiting', async () => {
     const { apis, onChanged } = await setUp();
-    await renderRows(apis(), { mode: 'others', viewerLogin: 'hubot', onChanged });
+    const pull = pullOf({
+      reviewers: [person('grace')],
+      reviewerStates: [
+        { ...person('margaret'), state: 'pending' },
+        { ...person('ada'), state: 'approved' },
+        { ...person('grace'), state: 'changes_requested' },
+        { ...person('linus'), state: 'commented' },
+      ],
+    });
+    await renderRows(apis(), { pull, mode: 'others', viewerLogin: 'hubot', onChanged });
+
+    const rows = stateRows();
+    expect(rows.map((row) => [row.login, row.state])).toEqual([
+      ['grace', 'changes_requested'], ['ada', 'approved'], ['linus', 'commented'], ['margaret', 'pending'],
+    ]);
+    expect(rows.map((row) => row.icon)).toEqual([
+      '#oc-error-warning', '#oc-checkbox-circle', '#oc-chat-3', '#oc-time',
+    ]);
+    expect(rows.map((row) => row.title)).toEqual([
+      'Changes requested', 'Approved', 'Commented', 'Awaiting review',
+    ]);
+  });
+
+  test('a person with several review records still reads as one entry', async () => {
+    const pull = pullOf({
+      reviews: [review('R1', 'approved', 'mona'), review('R2', 'commented', 'mona')],
+    });
+    const entries = mergeReviewerEntries(pull);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.reviews).toHaveLength(2);
+    expect(entries[0]?.state).toBe('approved');
+
+    const { apis, onChanged } = await setUp();
+    await renderRows(apis(), { pull, mode: 'others', viewerLogin: 'hubot', onChanged });
+    expect(stateRows().map((row) => row.login)).toEqual(['mona']);
+  });
+
+  test('a review record outranks the pending state of a request', async () => {
+    const pull = pullOf({
+      reviewerStates: [{ ...person('mona'), state: 'pending' }],
+      reviews: [review('R1', 'approved', 'mona')],
+    });
+    expect(mergeReviewerEntries(pull)[0]?.state).toBe('approved');
+
+    const { apis, onChanged } = await setUp();
+    await renderRows(apis(), { pull, mode: 'others', viewerLogin: 'hubot', onChanged });
+    expect(stateRows()[0]).toMatchObject({ state: 'approved', login: 'mona', icon: '#oc-checkbox-circle' });
+  });
+
+  test('a requested reviewer with no review record awaits review and carries no menu', async () => {
+    const { apis, onChanged } = await setUp();
+    await renderRows(apis(), {
+      pull: pullOf({ reviewers: [person('ada'), person('grace')], reviewerStates: [{ ...person('ada'), state: 'approved' }] }),
+      mode: 'others', viewerLogin: 'hubot', onChanged,
+    });
+
+    expect(stateRows().map((row) => [row.login, row.state])).toEqual([['ada', 'approved'], ['grace', 'pending']]);
+    expect(stateRows()[1]?.icon).toBe('#oc-time');
+    expect(actionTriggers()).toHaveLength(0);
+  });
+
+  test('a host with no review surface keeps the plain requested reviewers', async () => {
+    const { apis, onChanged } = await setUp();
+    await renderRows(apis(), {
+      pull: pullOf({ reviewers: [person('ada'), person('grace')] }),
+      mode: 'others', viewerLogin: 'hubot', onChanged,
+    });
+
+    expect(host.textContent).toContain('ada');
+    expect(host.textContent).toContain('grace');
+    expect(stateRows()).toEqual([]);
+    expect(host.querySelector('.sr-only')).toBeNull();
+    expect(actionTriggers()).toHaveLength(0);
+  });
+});
+
+describe('dismissing someone else\'s review', () => {
+  const reviewed = () => pullOf({
+    reviewerStates: [{ ...person('mona'), state: 'approved' }],
+    reviews: [review('R1', 'approved', 'mona')],
+  });
+
+  test('the review record puts its action in the person\'s menu', async () => {
+    const { apis, onChanged } = await setUp();
+    await renderRows(apis(), { pull: reviewed(), mode: 'others', viewerLogin: 'hubot', onChanged });
+    expect(stateRows().map((row) => row.login)).toEqual(['mona']);
     expect(actionTriggers()).toHaveLength(1);
-    expect(buttonNamed('Withdraw approval')).toBeUndefined();
+    await click(actionTriggers()[0]);
+    expect(menuItems()).toEqual(['Dismiss review']);
   });
 
   test('takes a reason before it sends, then asks for a refresh', async () => {
     const { apis, sent, changed, onChanged } = await setUp();
-    await renderRows(apis(), { mode: 'others', viewerLogin: 'hubot', onChanged });
+    await renderRows(apis(), { pull: reviewed(), mode: 'others', viewerLogin: 'hubot', onChanged });
     await click(actionTriggers()[0]);
-    expect(menuItems()).toEqual(['Dismiss review']);
     await click([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')][0]);
     expect(dialogButton('Dismiss review')?.hasAttribute('disabled')).toBe(true);
     await typeInto(dialogField()!, 'Superseded by the rewrite');
@@ -161,62 +265,29 @@ describe('dismissing someone else\'s review', () => {
 
   test('without a viewer to compare against, no review is offered', async () => {
     const { apis, onChanged } = await setUp();
-    const { I18nProvider } = await import('@/lib/i18n');
-    const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
-    await act(async () => {
-      root.render(
-        <I18nProvider>
-          <RuntimeAPIContext.Provider value={apis()}>
-            <ReviewRows
-              reviews={reviews}
-              mode="others"
-              canUndismiss={false}
-              viewerLogin={null}
-              context={context}
-              reference={reference}
-              onChanged={onChanged}
-            />
-          </RuntimeAPIContext.Provider>
-        </I18nProvider>,
-      );
-    });
+    await renderRows(apis(), { pull: reviewed(), mode: 'others', viewerLogin: null, onChanged });
     expect(actionTriggers()).toHaveLength(0);
   });
 
   test('a host that names no dismissal mode offers nothing', async () => {
     const { apis, onChanged } = await setUp();
-    const { I18nProvider } = await import('@/lib/i18n');
-    const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
-    await act(async () => {
-      root.render(
-        <I18nProvider>
-          <RuntimeAPIContext.Provider value={apis()}>
-            <ReviewRows
-              reviews={reviews}
-              mode={null}
-              canUndismiss={false}
-              viewerLogin="hubot"
-              context={context}
-              reference={reference}
-              onChanged={onChanged}
-            />
-          </RuntimeAPIContext.Provider>
-        </I18nProvider>,
-      );
-    });
+    await renderRows(apis(), { pull: reviewed(), mode: null, viewerLogin: 'hubot', onChanged });
     expect(actionTriggers()).toHaveLength(0);
-    expect(buttonNamed('Withdraw approval')).toBeUndefined();
   });
 });
 
 describe('restoring a dismissed review', () => {
-  const dismissed: RepositoryReferenceReview[] = [
-    { id: 'R7', state: 'dismissed', author: { login: 'mona' }, submittedAt: null },
-  ];
+  const dismissed = () => pullOf({
+    reviewerStates: [{ ...person('mona'), state: 'pending' }],
+    reviews: [review('R7', 'dismissed', 'mona')],
+  });
 
-  test('a host that can restore offers it on a dismissed review, and sends no reason', async () => {
+  test('a dismissed record reads as dismissed and a host that can restore offers it', async () => {
     const { apis, sent, changed, onChanged } = await setUp();
-    await renderRows(apis(), { mode: 'others', canUndismiss: true, viewerLogin: 'hubot', list: dismissed, onChanged });
+    await renderRows(apis(), { pull: dismissed(), mode: 'others', canUndismiss: true, viewerLogin: 'hubot', onChanged });
+
+    const row = stateRows()[0];
+    expect(row).toMatchObject({ state: 'dismissed', login: 'mona', title: 'Dismissed', icon: '#oc-eye-off' });
     expect(actionTriggers()).toHaveLength(1);
     await click(actionTriggers()[0]);
     expect(menuItems()).toEqual(['Restore review']);
@@ -229,8 +300,50 @@ describe('restoring a dismissed review', () => {
 
   test('a host that cannot restore leaves a dismissed review without an action', async () => {
     const { apis, onChanged } = await setUp();
-    await renderRows(apis(), { mode: 'others', viewerLogin: 'hubot', list: dismissed, onChanged });
+    await renderRows(apis(), { pull: dismissed(), mode: 'others', viewerLogin: 'hubot', onChanged });
     expect(actionTriggers()).toHaveLength(0);
+  });
+
+  test('an earlier approval next to a dismissal offers only the restore', async () => {
+    const { apis, onChanged } = await setUp();
+    const pull = pullOf({
+      reviewerStates: [{ ...person('mona'), state: 'pending' }],
+      reviews: [review('R7', 'dismissed', 'mona'), review('R1', 'approved', 'mona')],
+    });
+    await renderRows(apis(), { pull, mode: 'others', canUndismiss: true, viewerLogin: 'hubot', onChanged });
+    await click(actionTriggers()[0]);
+    expect(menuItems()).toEqual(['Restore review']);
+  });
+
+  test('a newer approval next to a dismissed record offers only the dismiss', async () => {
+    const { apis, onChanged } = await setUp();
+    const pull = pullOf({
+      reviewerStates: [{ ...person('mona'), state: 'pending' }],
+      reviews: [review('R2', 'approved', 'mona'), review('R7', 'dismissed', 'mona')],
+    });
+    await renderRows(apis(), { pull, mode: 'others', canUndismiss: true, viewerLogin: 'hubot', onChanged });
+    await click(actionTriggers()[0]);
+    expect(menuItems()).toEqual(['Dismiss review']);
+  });
+});
+
+describe('withdrawing the viewer\'s own approval', () => {
+  test('offers the action in the viewer\'s menu and sends no reason', async () => {
+    const { apis, sent, changed, onChanged } = await setUp();
+    const pull = pullOf({
+      reviews: [review('R9', 'approved', 'hubot'), review('R1', 'approved', 'mona')],
+    });
+    await renderRows(apis(), { pull, mode: 'own', viewerLogin: 'hubot', onChanged });
+
+    expect(stateRows().map((row) => row.login)).toEqual(['hubot', 'mona']);
+    expect(actionTriggers()).toHaveLength(1);
+    await click(actionTriggers()[0]);
+    expect(menuItems()).toEqual(['Withdraw approval']);
+    await click([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')][0]);
+    expect(sent).toHaveLength(1);
+    expect('reviewId' in sent[0]).toBe(false);
+    expect('message' in sent[0]).toBe(false);
+    expect(changed()).toBe(1);
   });
 });
 
@@ -262,42 +375,19 @@ const listBackedPull = async (reviews?: RepositoryReferenceReview[]) => {
 };
 
 describe('the reviews a list-backed preview carries', () => {
-  test('two reviews in the context render two rows with their own actions', async () => {
-    const { apis, onChanged } = await setUp();
+  test('the reviews it read become entries with their states', async () => {
     const carried = await listBackedPull([
-      { id: 'R1', state: 'approved', author: { login: 'mona' }, submittedAt: null },
-      { id: 'R2', state: 'changes_requested', author: { login: 'hubot' }, submittedAt: null },
+      review('R1', 'approved', 'mona'),
+      review('R2', 'changes_requested', 'hubot'),
     ]);
     expect(carried).toHaveLength(2);
-    await renderRows(apis(), { mode: 'others', viewerLogin: 'ada', list: carried, onChanged });
-    expect(host.querySelectorAll('li')).toHaveLength(2);
-    expect(actionTriggers()).toHaveLength(2);
+    expect(mergeReviewerEntries(pullOf({ reviews: carried })).map((entry) => [entry.person.login, entry.state]))
+      .toEqual([['hubot', 'changes_requested'], ['mona', 'approved']]);
   });
 
-  test('a context without reviews carries none, so no row renders', async () => {
+  test('a context without reviews carries none, so the row stays empty', async () => {
     const carried = await listBackedPull();
     expect(carried).toBeUndefined();
-    const { apis, onChanged } = await setUp();
-    await renderRows(apis(), { mode: 'others', viewerLogin: 'ada', list: carried ?? [], onChanged });
-    expect(host.querySelectorAll('li')).toHaveLength(0);
-    expect(actionTriggers()).toHaveLength(0);
-  });
-});
-
-describe('withdrawing the viewer\'s own approval', () => {
-  test('offers the action on the viewer\'s approved review and sends no reason', async () => {
-    const { apis, sent, changed, onChanged } = await setUp();
-    const ownReviews: RepositoryReferenceReview[] = [
-      { id: 'R9', state: 'approved', author: { login: 'hubot' }, submittedAt: null },
-      { id: 'R1', state: 'approved', author: { login: 'mona' }, submittedAt: null },
-    ];
-    await renderRows(apis(), { mode: 'own', viewerLogin: 'hubot', list: ownReviews, onChanged });
-    expect(actionTriggers()).toHaveLength(0);
-    expect(buttonNamed('Withdraw approval')).toBeDefined();
-    await click(buttonNamed('Withdraw approval'));
-    expect(sent).toHaveLength(1);
-    expect('reviewId' in sent[0]).toBe(false);
-    expect('message' in sent[0]).toBe(false);
-    expect(changed()).toBe(1);
+    expect(mergeReviewerEntries(pullOf())).toEqual([]);
   });
 });

@@ -138,6 +138,15 @@ describe('Gerrit change context', () => {
     expect(result).not.toHaveProperty('verdicts');
   });
 
+  it('carries reviewer states without the timeline', async () => {
+    const { service } = setup();
+
+    const result = await service.changeRequestContext('/repo', 42, { remote: 'origin' });
+
+    expect(result).not.toHaveProperty('commits');
+    expect(result.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([['carol', 'pending'], ['bob', 'commented']]);
+  });
+
   it('reads the files of an older patchset when one is named, and refuses one the change does not have', async () => {
     const { service, calls } = setup({
       [`GET ${CHANGE}/revisions/${PS2}/files/`]: { 'src/login.js': { lines_inserted: 1 } },

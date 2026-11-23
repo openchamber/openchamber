@@ -41,12 +41,11 @@ import { fetchPullStack } from './pull-stack.js';
 import { referencesField } from './references.js';
 import { parseReferenceLink } from './reference-links.js';
 import { fetchReviewState } from './review-draft.js';
-import { readReviewSummaries } from './review-summaries.js';
+import { readReviewContext, type ContextReviewFields } from './review-summaries.js';
 import type { Octokit, RestEndpointMethodTypes } from '@octokit/rest';
 import type { ProviderImplementation, ProviderSession } from '../source-control/provider-contract.js';
 import type { ContributorProvenanceRead } from '../git/contributor-provenance-storage.js';
 import type { AcrossContext, AcrossGroup, DiscoveryRepository, GitHubEnvelope } from './contracts.js';
-import type { SourceControlReviewSummary } from '@openchamber/sdk';
 import type { CI } from './mappers.js';
 import { retainedEntry } from './contracts.js';
 type ResourceMethods = ProviderImplementation['resources'];
@@ -87,7 +86,7 @@ export interface ContextScope {
   primaryRemote: string;
   number: number | undefined;
 }
-export interface PullContext {
+export interface PullContext extends ContextReviewFields {
   identity: Identity;
   fetchedAt: number;
   project: ReturnType<typeof mapProject>;
@@ -96,7 +95,6 @@ export interface PullContext {
   reviewComments: ReturnType<typeof mapReviewComment>[];
   files: ReturnType<typeof mapFile>[];
   ci: CI | null;
-  reviews?: SourceControlReviewSummary[];
   diff?: string;
   stack?: Awaited<ReturnType<typeof fetchPullStack>>;
 }
@@ -491,7 +489,7 @@ export function createGitHubResources({
         (await octokit.rest.pulls.listReviewComments({ ...route, pull_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid review comment list',
       ).map((comment) => mapReviewComment(requireGitHubReviewComment(comment), identity));
-      const reviews = await readReviewSummaries(octokit, route, number);
+      const reviewContext = await readReviewContext(octokit, route, number, prData.requested_reviewers, identity);
       const files = requireProviderArray<Rest['pulls']['listFiles']['response']['data'][number]>(
         (await octokit.rest.pulls.listFiles({ ...route, pull_number: number, per_page: 100 }))?.data,
         'GitHub returned an invalid pull request file list',
@@ -525,7 +523,7 @@ export function createGitHubResources({
         changeRequest: mapChangeRequest(prData, projectDTO, identity),
         issueComments,
         reviewComments,
-        reviews,
+        ...reviewContext,
         files,
         ci,
       };

@@ -478,16 +478,16 @@ describe('source-control provider review drafts', () => {
 
   test('dismisses and undismisses another reviewer with a message', async () => {
     const reviewsOf = async (): Promise<Array<{ id: number; state: string; dismissed?: boolean }>> => (
-      await fetch(`${forge.origin}/api/v1/repos/mona/teapot/pulls/2/reviews`, { headers: { authorization: 'token good' } })
+      await fetch(`${forge.origin}/api/v1/repos/mona/teapot/pulls/4/reviews`, { headers: { authorization: 'token good' } })
     ).json();
     expect((await reviewsOf()).find((review) => review.id === 300)).toMatchObject({ state: 'COMMENT' });
 
-    const dismiss = await stepFor(2, 'change-request-review-dismiss', { reviewId: '300', message: 'Superseded' }, '/pr/review/dismiss');
+    const dismiss = await stepFor(4, 'change-request-review-dismiss', { reviewId: '300', message: 'Superseded' }, '/pr/review/dismiss');
     expect(await data('mutation.perform', dismiss)).toEqual({});
     expect(await data('mutation.reconcile', dismiss)).toEqual({ state: 'succeeded', result: {} });
     expect((await reviewsOf()).find((review) => review.id === 300)).toMatchObject({ state: 'DISMISSED', dismissed: true });
 
-    const undismiss = await stepFor(2, 'change-request-review-dismiss', { reviewId: '300', dismissed: false }, '/pr/review/dismiss');
+    const undismiss = await stepFor(4, 'change-request-review-dismiss', { reviewId: '300', dismissed: false }, '/pr/review/dismiss');
     expect(await data('mutation.perform', undismiss)).toEqual({});
     expect(await data('mutation.reconcile', undismiss)).toEqual({ state: 'succeeded', result: {} });
     expect((await reviewsOf()).find((review) => review.id === 300)).toMatchObject({ state: 'COMMENT', dismissed: false });
@@ -501,15 +501,15 @@ describe('source-control provider review summaries', () => {
   });
 
   test('a change request context lists the forge reviews and skips a stale request for changes', async () => {
-    expect(field(await contextOf(2), 'reviews')).toEqual([
+    expect(field(await contextOf(4), 'reviews')).toEqual([
       { id: '301', state: 'approved', author: { login: 'octo' }, submittedAt: '2026-10-03T10:00:00Z' },
       { id: '300', state: 'commented', author: { login: 'octo' }, submittedAt: '2026-10-02T10:00:00Z' },
     ]);
   });
 
   test('a context leaves reviews out when the forge cannot answer them', async () => {
-    forge.failNextReviews(2);
-    const context = await contextOf(2);
+    forge.failNextReviews(4);
+    const context = await contextOf(4);
     expect(Object.keys(Object(context))).not.toContain('reviews');
   });
 });

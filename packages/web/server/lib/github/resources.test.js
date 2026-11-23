@@ -334,7 +334,7 @@ describe('listChangeRequests filters', () => {
 
 
 describe('change request context reviews', () => {
-  const resourcesWith = (reviews) => createGitHubResources({
+  const resourcesWith = (reviews, requestedReviewers) => createGitHubResources({
     load: async () => ({
       rateLimit: { isGitHubRateLimited: () => false, noteIfGitHubRateLimit: () => false, isGitHubRateLimitError },
     }),
@@ -343,7 +343,7 @@ describe('change request context reviews', () => {
       octokit: {
         rest: {
           pulls: {
-            get: async () => ({ data: { ...openPull, user: { id: 1, login: 'contributor' } } }),
+            get: async () => ({ data: { ...openPull, user: { id: 1, login: 'contributor' }, requested_reviewers: requestedReviewers ?? [] } }),
             listReviewComments: async () => ({ data: [] }),
             listFiles: async () => ({ data: [] }),
             listReviews: async () => ({ data: reviews }),
@@ -376,6 +376,36 @@ describe('change request context reviews', () => {
       { id: '1', state: 'approved', author: { login: 'bob', avatarUrl: undefined }, submittedAt: '2026-10-01T10:00:00Z' },
       { id: '3', state: 'pending', author: { login: 'cid', avatarUrl: undefined }, submittedAt: null },
     ]);
+  });
+
+  test('carries requested reviewers and one state per person without the timeline', async () => {
+    const resources = resourcesWith([
+      { id: 1, state: 'APPROVED', user: { login: 'bob' }, submitted_at: '2026-10-01T10:00:00Z' },
+      { id: 2, state: 'DISMISSED', user: { login: 'ann', avatar_url: 'https://a/ann.png' }, submitted_at: '2026-10-01T12:00:00Z' },
+      { id: 3, state: 'PENDING', user: { login: 'cid' }, submitted_at: null },
+    ], [
+      { login: 'bob', avatar_url: 'https://a/bob.png' },
+      { login: 'eve' },
+      { login: 'ann' },
+    ]);
+    const read = (includeTimeline) => resources.changeRequestContext({
+      session, context: {}, directory: '/repo', number: 42, includeDiff: false, includeCIDetails: false, includeTimeline,
+    });
+
+    const plain = await read(false);
+    expect(plain.reviewers).toEqual([
+      { provider: 'github', instance: 'github.com', id: 'bob', username: 'bob', avatarUrl: 'https://a/bob.png' },
+      { provider: 'github', instance: 'github.com', id: 'eve', username: 'eve' },
+      { provider: 'github', instance: 'github.com', id: 'ann', username: 'ann' },
+    ]);
+    // The dismissed review leaves its author pending; the unpublished draft says nothing.
+    expect(plain.reviewerStates.map(({ user, state }) => [user.username, state])).toEqual([
+      ['bob', 'approved'], ['ann', 'pending'], ['eve', 'pending'],
+    ]);
+
+    const timeline = await read(true);
+    expect(timeline.reviewers).toEqual(plain.reviewers);
+    expect(timeline.reviewerStates).toEqual(plain.reviewerStates);
   });
 });
 
