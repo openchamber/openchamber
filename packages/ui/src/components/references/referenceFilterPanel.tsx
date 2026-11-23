@@ -1,5 +1,7 @@
 import * as React from 'react';
 
+import { useRevealOnExpand } from '@/hooks/useRevealOnExpand';
+
 import { Icon } from '@/components/icon/Icon';
 import { PRESSED_CLASS } from '@/components/ui/action-toolbar';
 import { Command, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -178,7 +180,7 @@ const DesktopLabelChoices: React.FC<LabelChoicesBodyProps> = ({ choices, applied
                     });
                 }}
             />
-            <CommandList aria-label={t('references.picker.filter.group.labels')} className="max-h-[13rem]">
+            <CommandList aria-label={t('references.picker.filter.group.labels')} className="max-h-[13rem] pointer-coarse:max-h-[19.25rem]">
                 <LabelChoicesState choices={choices} empty={shown.length === 0} />
                 {shown.map((label) => {
                     const checked = applied.includes(label.name);
@@ -444,6 +446,7 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
 }) => {
     const { t } = useI18n();
     const [labelsExpanded, setLabelsExpanded] = React.useState(false);
+    const menuRef = useRevealOnExpand<HTMLDivElement>(labelsExpanded);
     const pressed = summary !== '';
     const accessibleLabel = ariaLabel ?? (pressed ? `${title}: ${summary}` : title);
     const tooltip = triggerTitle ?? (pressed ? `${title} · ${summary}` : title);
@@ -507,6 +510,7 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
         <DropdownMenu onOpenChange={(nextOpen) => { if (!nextOpen) setLabelsExpanded(false); }}>
             <DropdownMenuTrigger asChild>{trigger()}</DropdownMenuTrigger>
             <DropdownMenuContent
+                ref={menuRef}
                 align="end"
                 positionerClassName="z-[70]"
                 className={cn(
