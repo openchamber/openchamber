@@ -1675,3 +1675,94 @@ printf '4321\\n'`);
     });
   });
 });
+
+describe('ElectronSshManager settings write paths (#2410)', () => {
+  const malformedBytes = '{ "theme": "dark", "desktopSshInstances": [{ "id": "a", "destination": "u@h" }], }';
+
+  const createManager = (initialBytes) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-manager-2410-'));
+    tempDirs.push(tempDir);
+    const settingsFilePath = path.join(tempDir, 'settings.json');
+    if (initialBytes !== undefined) fs.writeFileSync(settingsFilePath, initialBytes);
+    const manager = new ElectronSshManager({
+      settingsFilePath,
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+    });
+    return { manager, settingsFilePath };
+  };
+
+  test('persistLocalPort refuses to rewrite a malformed settings.json', async () => {
+    const { manager, settingsFilePath } = createManager(malformedBytes);
+    await expect(manager.persistLocalPort('a', 2222)).rejects.toThrow('not a valid JSON object');
+    expect(fs.readFileSync(settingsFilePath, 'utf8')).toBe(malformedBytes);
+  });
+
+  test('updateHostRuntime refuses to rewrite a malformed settings.json', async () => {
+    const { manager, settingsFilePath } = createManager(malformedBytes);
+    await expect(manager.updateHostRuntime('a', 'Host', 'http://127.0.0.1:2222')).rejects.toThrow('not a valid JSON object');
+    expect(fs.readFileSync(settingsFilePath, 'utf8')).toBe(malformedBytes);
+  });
+
+  test('setInstances refuses to rewrite a malformed settings.json', async () => {
+    const { manager, settingsFilePath } = createManager(malformedBytes);
+    await expect(manager.setInstances({ instances: [{ id: 'a', sshCommand: 'ssh u@h' }] })).rejects.toThrow('not a valid JSON object');
+    expect(fs.readFileSync(settingsFilePath, 'utf8')).toBe(malformedBytes);
+  });
+
+  test('readInstances stays lenient for a malformed settings.json', () => {
+    const { manager } = createManager(malformedBytes);
+    expect(manager.readInstances()).toEqual({ instances: [] });
+  });
+
+  const validBytes = JSON.stringify(
+    {
+      theme: 'dark',
+      desktopDefaultHostId: 'a',
+      desktopHosts: [{ id: 'a', label: 'Host', url: 'http://127.0.0.1/' }],
+      desktopSshInstances: [{ id: 'a', sshCommand: 'ssh u@h', localForward: {} }],
+    },
+    null,
+    2,
+  );
+
+  test('persistLocalPort preserves unrelated settings in a valid settings.json', async () => {
+    const { manager, settingsFilePath } = createManager(validBytes);
+    await manager.persistLocalPort('a', 2222);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.theme).toBe('dark');
+    expect(settings.desktopDefaultHostId).toBe('a');
+    expect(settings.desktopHosts).toEqual([{ id: 'a', label: 'Host', url: 'http://127.0.0.1/' }]);
+    expect(settings.desktopSshInstances).toHaveLength(1);
+    expect(settings.desktopSshInstances[0].localForward.preferredLocalPort).toBe(2222);
+  });
+
+  test('updateHostRuntime preserves unrelated settings in a valid settings.json', async () => {
+    const { manager, settingsFilePath } = createManager(validBytes);
+    await manager.updateHostRuntime('a', 'Host', 'http://127.0.0.1:2222');
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.theme).toBe('dark');
+    expect(settings.desktopDefaultHostId).toBe('a');
+    expect(settings.desktopSshInstances).toEqual([{ id: 'a', sshCommand: 'ssh u@h', localForward: {} }]);
+    expect(settings.desktopHosts).toEqual([
+      { id: 'a', label: 'Host', url: 'http://127.0.0.1:2222', apiUrl: 'http://127.0.0.1:2222' },
+    ]);
+  });
+
+  test('setInstances preserves unrelated settings in a valid settings.json', async () => {
+    const { manager, settingsFilePath } = createManager(validBytes);
+    await manager.setInstances({ instances: [{ id: 'a', sshCommand: 'ssh u@h' }] });
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.theme).toBe('dark');
+    expect(settings.desktopDefaultHostId).toBe('a');
+    expect(settings.desktopSshInstances).toHaveLength(1);
+    expect(settings.desktopSshInstances[0].id).toBe('a');
+  });
+
+  test('write paths still work when settings.json does not exist yet', async () => {
+    const { manager, settingsFilePath } = createManager(undefined);
+    await manager.persistLocalPort('a', 2222);
+    const settings = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(settings.desktopSshInstances).toEqual([]);
+  });
+});
