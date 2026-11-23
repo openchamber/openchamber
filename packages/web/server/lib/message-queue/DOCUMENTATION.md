@@ -110,13 +110,42 @@ JSON bodies enabled in `server-frame/core-routes.js`; stopped by
 
 ## Auto routing
 
-`resolveAutoSelection` (the routing runtime) runs right before the send when
-the queued send config names `openchamber/auto`, and answers with the real
-model and agent. OpenCode 2.x holds both on the session, so the queue applies
-them with the `POST /api/session/:id/model` and `/agent` calls it already
-makes. The queue captures the sentinel like any other send config. The request
-text it routes on carries the same image attachment fact as a direct send
-(`attachmentHint`).
+An ordinary item never carries a model to the session. The item's captured
+`sendConfig.providerID`, `modelID` and `variant` are what the composer showed
+when it was queued, and the session may have been switched since: by another
+client, by an explicit pick in the same client, or by a failover. Delivery
+therefore sends no `POST /api/session/:id/model` for it, and an old stored item
+with a model gets no more authority than a new one. Only the agent is still
+switched.
+
+Auto is the one exception, and only while the session is marked: delivery calls
+`resolveAutoSelection` (the routing runtime) with the Auto sentinel and
+`liveOnly`, and the routing runtime answers only when the session carries its
+Auto mark in memory (`noteModelSelection`, set by an explicit Auto pick or by an Auto composer at the
+creating gesture of a new session). A captured sentinel on its own routes nothing, so
+a user who picked a concrete model after queueing is not routed back onto Auto.
+The answer is a real model and agent; OpenCode 2.x holds both on the session, so
+the queue applies them with the `POST /api/session/:id/model` and `/agent`
+calls it already makes. The request text it routes on carries the same image
+attachment fact as a direct send (`attachmentHint`). The mark lives in server
+memory (`../routing/DOCUMENTATION.md`): after a restart a session whose
+composer still shows Auto runs on its last real model until the user picks Auto
+again.
+
+Classification takes time, so the routing runtime checks the mark again once it
+has its answer, as its last step before it returns it (`liveOnly` only), and the
+queue sends the model POST right after. If an explicit pick cleared the mark in
+the meantime, the answer is null and the item goes out as an ordinary one: no
+model POST, on the model the pick chose. One gap remains and is accepted:
+OpenCode's `POST /api/session/:id/model` takes no condition, so a pick that clears
+the mark between that last check and the queue's own POST can still be
+overwritten by the routed model, and a pick whose POST is still in flight when
+the check runs can land after the prompt. Closing it needs a conditional switch
+in OpenCode, which this module does not change.
+
+A scheduled item is different: its model is the task's configured one, and it
+keeps applying (`resolveAutoSelection` with the configured model, which routes
+only an Auto task, then the model switch).
 
 ## Item
 
@@ -250,11 +279,11 @@ persisted "sending" flag would strand a message forever.
    Background work does not hold the head: a parent idle while its
    background subagents or commands run gets the next queued message, the
    same as a message the user sends from the composer then.
-5. The head is marked in flight (broadcast), then sent. The captured model and
-   agent are switched onto the session first (`POST /session/:id/model`,
-   `/agent`), because v2 holds both on the session rather than in the body; a
-   captured `openchamber/auto` is resolved into a real pair by the routing
-   runtime beforehand. The session's project knowledge is written into its
+5. The head is marked in flight (broadcast), then sent. The captured agent is
+   switched onto the session first (`POST /session/:id/agent`) because v2 holds
+   it on the session rather than in the body; the model is not (ordinary items
+   run on the session's own model, a live Auto mark routes it, a scheduled item
+   applies its configured model: see "Auto routing" above). The session's project knowledge is written into its
    instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
    send); the response style is left out, because the queued message is the
    user's own and the entry the session already holds stays as it is

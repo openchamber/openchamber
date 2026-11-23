@@ -225,6 +225,27 @@ describe("request fidelity", () => {
     expect(model).toEqual({ id: "gpt-5.6-luna", providerID: "openai" })
   })
 
+  test("a session created on a chosen thinking level carries it in the create body", async () => {
+    responses.push(json({ data: sessionInfo }))
+    await opencodeClient.createSession({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } }, "/repo/app")
+    expect(requests).toHaveLength(1)
+    expect(requests[0].body).toMatchObject({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } })
+  })
+
+  test("a session created on Auto is created without a model, then marked Auto once at the creating gesture", async () => {
+    responses.push(json({ data: sessionInfo }), noContent())
+    const created = await opencodeClient.createSession({ model: { id: "auto", providerID: "openchamber" } }, "/repo/app")
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["POST /api/session", `POST /api/session/${created.id}/model`])
+    expect(requests[0].body).not.toHaveProperty("model")
+    expect(requests[1].body).toEqual({ model: { id: "auto", providerID: "openchamber" } })
+  })
+
+  test("a session created with no model is created and left alone", async () => {
+    responses.push(json({ data: sessionInfo }))
+    await opencodeClient.createSession({}, "/repo/app")
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["POST /api/session"])
+  })
+
   test("releasing a location names its directory, never OpenCode's own", async () => {
     opencodeClient.setDirectory("/repo/current")
     responses.push(noContent())
@@ -421,12 +442,11 @@ describe("error normalisation", () => {
 })
 
 describe("sendMessage", () => {
-  test("switches model and agent, admits context as synthetic messages, then prompts", async () => {
-    responses.push(agentList("build", "plan"), noContent(), noContent(), json({ id: "syn_1" }), json({ id: "msg_1" }))
+  test("switches the agent but never the model, admits context as synthetic messages, then prompts", async () => {
+    responses.push(agentList("build", "plan"), noContent(), json({ id: "syn_1" }), json({ id: "msg_1" }))
     const id = await opencodeClient.sendMessage({
       id: "ses_1",
       providerID: "openai",
-      model: { id: "gpt-5.6-luna", providerID: "openai" },
       agent: "build",
       text: "hello",
       messageId: "msg_1",
@@ -437,14 +457,12 @@ describe("sendMessage", () => {
     expect(id).toBe("msg_1")
     expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
       "GET /api/agent",
-      "POST /api/session/ses_1/model",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/synthetic",
       "POST /api/session/ses_1/prompt",
     ])
-    expect(requests[1].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
-    expect(requests[3].body).toMatchObject({ text: "selected code", resume: false, metadata: { openchamberContext: { kind: "file-quote" } } })
-    expect(requests[4].body).toEqual({
+    expect(requests[2].body).toMatchObject({ text: "selected code", resume: false, metadata: { openchamberContext: { kind: "file-quote" } } })
+    expect(requests[3].body).toEqual({
       id: "msg_1",
       text: "hello",
       agents: [{ name: "explore", mention: { start: 0, end: 8, text: "@explore" } }],
@@ -593,7 +611,7 @@ describe("sendMessage", () => {
       const first = Promise.allSettled([opencodeClient.sendMessage({ runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "first" })])
       await settle()
       const second = Promise.allSettled([opencodeClient.sendMessage({
-        runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "second", model: { id: "gpt-5.6-luna", providerID: "openai" },
+        runtimeKey: "test-runtime", id: "ses_1", providerID: "openai", text: "second",
       })])
       await settle()
       runtimeGeneration += 2
@@ -607,36 +625,38 @@ describe("sendMessage", () => {
     }
   })
 
-  test("a later send to the same session changes the model and adds context only after the earlier prompt went out", async () => {
+  test("a later send to the same session changes the agent and adds context only after the earlier prompt went out", async () => {
     jest.useFakeTimers()
     try {
-      responses.push(noContent(), unreachable())
+      responses.push(agentList("build", "plan"), noContent(), unreachable())
       const first = opencodeClient.sendMessage({
-        id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a", model: { id: "gpt-5.6-luna", providerID: "openai" },
+        id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a", agent: "build",
       })
       await settle()
-      responses.push(json({ id: "msg_a" }), noContent(), json({ id: "syn_b" }), json({ id: "msg_b" }))
+      responses.push(json({ id: "msg_a" }), agentList("build", "plan"), noContent(), json({ id: "syn_b" }), json({ id: "msg_b" }))
       const second = opencodeClient.sendMessage({
         id: "ses_1", providerID: "anthropic", text: "second", messageId: "msg_b",
-        model: { id: "claude-sonnet", providerID: "anthropic" }, context: [{ text: "selected code" }],
+        agent: "plan", context: [{ text: "selected code" }],
       })
       await settle()
       jest.advanceTimersByTime(500)
       await Promise.all([first, second])
       expect(requests.map((r) => r.url.pathname)).toEqual([
-        "/api/session/ses_1/model",
+        "/api/agent",
+        "/api/session/ses_1/agent",
         "/api/session/ses_1/prompt",
         "/api/session/ses_1/prompt",
-        "/api/session/ses_1/model",
+        "/api/agent",
+        "/api/session/ses_1/agent",
         "/api/session/ses_1/synthetic",
         "/api/session/ses_1/prompt",
       ])
-      expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
-      expect(requests[1].body).toEqual({ id: "msg_a", text: "first" })
+      expect(requests[1].body).toEqual({ agent: "build" })
       expect(requests[2].body).toEqual({ id: "msg_a", text: "first" })
-      expect(requests[3].body).toEqual({ model: { id: "claude-sonnet", providerID: "anthropic" } })
-      expect(requests[4].body).toMatchObject({ text: "selected code" })
-      expect(requests[5].body).toEqual({ id: "msg_b", text: "second" })
+      expect(requests[3].body).toEqual({ id: "msg_a", text: "first" })
+      expect(requests[5].body).toEqual({ agent: "plan" })
+      expect(requests[6].body).toMatchObject({ text: "selected code" })
+      expect(requests[7].body).toEqual({ id: "msg_b", text: "second" })
     } finally {
       jest.useRealTimers()
     }
@@ -707,17 +727,17 @@ describe("sendMessage", () => {
     jest.useFakeTimers()
     try {
       const seen: string[] = []
-      responses.push(noContent(), unreachable())
+      responses.push(agentList("build", "plan"), noContent(), unreachable())
       const first = opencodeClient.sendMessage({
-        id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a", model: { id: "model-b", providerID: "openai" },
+        id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a", agent: "build",
       })
       await settle()
-      responses.push(() => { seen.push("first admitted"); return json({ id: "msg_a" }) }, noContent(), json({ id: "msg_b" }))
+      responses.push(() => { seen.push("first admitted"); return json({ id: "msg_a" }) }, agentList("build", "plan"), noContent(), json({ id: "msg_b" }))
       const second = opencodeClient.sendMessage({
         id: "ses_1", providerID: "openai", text: "second", messageId: "msg_b",
         resolveSelection: async () => {
           seen.push("second resolves its selection")
-          return { model: { id: "model-a", providerID: "openai" } }
+          return { agent: "plan" }
         },
       })
       await settle()
@@ -726,13 +746,15 @@ describe("sendMessage", () => {
       await Promise.all([first, second])
       expect(seen).toEqual(["first admitted", "second resolves its selection"])
       expect(requests.map((r) => r.url.pathname)).toEqual([
-        "/api/session/ses_1/model",
+        "/api/agent",
+        "/api/session/ses_1/agent",
         "/api/session/ses_1/prompt",
         "/api/session/ses_1/prompt",
-        "/api/session/ses_1/model",
+        "/api/agent",
+        "/api/session/ses_1/agent",
         "/api/session/ses_1/prompt",
       ])
-      expect(requests[3].body).toEqual({ model: { id: "model-a", providerID: "openai" } })
+      expect(requests[5].body).toEqual({ agent: "plan" })
     } finally {
       jest.useRealTimers()
     }
@@ -744,9 +766,9 @@ describe("sendMessage", () => {
       responses.push(unreachable())
       const first = opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "first", messageId: "msg_a" })
       await settle()
-      responses.push(json({ id: "msg_a" }), noContent(), json({ id: "syn_c" }), noContent())
+      responses.push(json({ id: "msg_a" }), json({ id: "syn_c" }), noContent())
       const command = opencodeClient.sendCommand({
-        id: "ses_1", model: { id: "claude-sonnet", providerID: "anthropic" }, command: "review", context: [{ text: "selected code" }],
+        id: "ses_1", command: "review", context: [{ text: "selected code" }],
       })
       await settle()
       expect(requests).toHaveLength(1)
@@ -755,43 +777,12 @@ describe("sendMessage", () => {
       expect(requests.map((r) => r.url.pathname)).toEqual([
         "/api/session/ses_1/prompt",
         "/api/session/ses_1/prompt",
-        "/api/session/ses_1/model",
         "/api/session/ses_1/synthetic",
         "/api/session/ses_1/command",
       ])
     } finally {
       jest.useRealTimers()
     }
-  })
-
-  // OpenCode's `ModelRef.variant` is an optional string: a `null` is a 400
-  // ("Expected string at [model][variant]") and the prompt never goes out.
-  test("an explicit Default thinking level switches the model without a variant, never as null", async () => {
-    responses.push(noContent(), json({ id: "msg_3" }))
-    await opencodeClient.sendMessage({
-      id: "ses_1",
-      providerID: "openai",
-      model: { id: "gpt-5.6-luna", providerID: "openai", variant: null },
-      text: "hello",
-      messageId: "msg_3",
-    })
-    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
-      "POST /api/session/ses_1/model",
-      "POST /api/session/ses_1/prompt",
-    ])
-    expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
-  })
-
-  test("a chosen thinking level travels with the model switch", async () => {
-    responses.push(noContent(), json({ id: "msg_4" }))
-    await opencodeClient.sendMessage({
-      id: "ses_1",
-      providerID: "openai",
-      model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" },
-      text: "hello",
-      messageId: "msg_4",
-    })
-    expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } })
   })
 
   test("refuses to send when the runtime changed underneath the caller", async () => {
@@ -801,9 +792,27 @@ describe("sendMessage", () => {
     expect(requests).toHaveLength(0)
   })
 
-  // A runtime switch while the model switch is in flight: the agent switch,
+  // A runtime switch while the agent list is read: the agent switch,
   // context and prompt must not go to the new server.
-  test("stops between the model and agent switch when the runtime changes mid-send", async () => {
+  test("stops before the agent switch when the runtime changes during the agent check", async () => {
+    responses.push(() => {
+      runtimeKey = "other"
+      return agentList("build")
+    })
+    await expect(
+      opencodeClient.sendMessage({
+        runtimeKey: "test-runtime",
+        id: "ses_1",
+        providerID: "openai",
+        agent: "build",
+        text: "hello",
+        context: [{ text: "ctx" }],
+      }),
+    ).rejects.toThrow("runtime changed")
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent"])
+  })
+
+  test("stops before the prompt when the runtime changes after the agent switch", async () => {
     responses.push(agentList("build"), () => {
       runtimeKey = "other"
       return noContent()
@@ -813,31 +822,11 @@ describe("sendMessage", () => {
         runtimeKey: "test-runtime",
         id: "ses_1",
         providerID: "openai",
-        model: { id: "m", providerID: "openai" },
-        agent: "build",
-        text: "hello",
-        context: [{ text: "ctx" }],
-      }),
-    ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/model"])
-  })
-
-  test("stops before the prompt when the runtime changes after the agent switch", async () => {
-    responses.push(agentList("build"), noContent(), () => {
-      runtimeKey = "other"
-      return noContent()
-    })
-    await expect(
-      opencodeClient.sendMessage({
-        runtimeKey: "test-runtime",
-        id: "ses_1",
-        providerID: "openai",
-        model: { id: "m", providerID: "openai" },
         agent: "build",
         text: "hello",
       }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/model", "/api/session/ses_1/agent"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/agent"])
   })
 
   test("refuses an agent the session's folder does not have before switching anything (#5522)", async () => {
@@ -845,7 +834,6 @@ describe("sendMessage", () => {
     const sending = opencodeClient.sendMessage({
       id: "ses_1",
       providerID: "xai",
-      model: { id: "grok-4.7", providerID: "xai" },
       agent: "stock",
       text: "hello",
       directory: "/repo/app",
@@ -1018,48 +1006,29 @@ describe("sendMessage with inline skills", () => {
 })
 
 describe("sendCommand", () => {
-  test("switches model and agent, then runs the command", async () => {
-    responses.push(agentList("build"), noContent(), noContent(), noContent())
+  test("switches the agent but never the model, then runs the command", async () => {
+    responses.push(agentList("build"), noContent(), noContent())
     await opencodeClient.sendCommand({
       runtimeKey: "test-runtime",
       id: "ses_1",
-      model: { id: "m", providerID: "openai" },
       agent: "build",
       command: "review",
       arguments: "src",
     })
     expect(requests.map((r) => r.url.pathname)).toEqual([
       "/api/agent",
-      "/api/session/ses_1/model",
       "/api/session/ses_1/agent",
       "/api/session/ses_1/command",
     ])
-    expect(requests[3].body).toMatchObject({ name: "review", text: "src" })
+    expect(requests[2].body).toMatchObject({ name: "review", text: "src" })
   })
 
   test("refuses a command for an agent the session's folder does not have", async () => {
     responses.push(agentList("build"))
     await expect(
-      opencodeClient.sendCommand({ id: "ses_1", model: { id: "m", providerID: "openai" }, agent: "stock", command: "review" }),
+      opencodeClient.sendCommand({ id: "ses_1", agent: "stock", command: "review" }),
     ).rejects.toBeInstanceOf(AgentUnavailableError)
     expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent"])
-  })
-
-  test("stops after the model switch when the runtime changes mid-command", async () => {
-    responses.push(agentList("build"), () => {
-      runtimeKey = "other"
-      return noContent()
-    })
-    await expect(
-      opencodeClient.sendCommand({
-        runtimeKey: "test-runtime",
-        id: "ses_1",
-        model: { id: "m", providerID: "openai" },
-        agent: "build",
-        command: "review",
-      }),
-    ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/model"])
   })
 
   test("stops before the command when the runtime changes after the agent switch", async () => {
@@ -1464,13 +1433,11 @@ describe("read timeouts (#2470)", () => {
 describe("sendCommand context", () => {
   test("delivers attached context as non-resuming synthetic messages before the command", async () => {
     responses.push(agentList("build")) // agent check
-    responses.push(new Response(null, { status: 204 })) // model switch
     responses.push(new Response(null, { status: 204 })) // agent switch
     responses.push(json({ data: { id: "msg_ctx" } })) // synthetic
     responses.push(new Response(null, { status: 204 })) // command
     await opencodeClient.sendCommand({
       id: "ses_1",
-      model: { providerID: "p", modelID: "m" },
       agent: "build",
       command: "review",
       arguments: "src",

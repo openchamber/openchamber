@@ -7,7 +7,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
+import { commitComposerPick } from '@/sync/model-gesture';
 import { useKeybinds } from './useKeybind';
 import { hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, typesOutsidePrefixField } from './keyboard-shortcut-dom';
 import { useComposerAbortEscape } from './useComposerAbortEscape';
@@ -58,7 +58,7 @@ export const useMiniChatKeyboardShortcuts = () => {
     setProvider(next.providerID);
     setModel(next.modelID);
     const sessionId = useSessionUIStore.getState().currentSessionId;
-    if (sessionId) useSelectionStore.getState().pickSessionModel(sessionId, next.providerID, next.modelID);
+    commitComposerPick(sessionId);
     addRecentModel(next.providerID, next.modelID);
     setLastSelectedModel(next.providerID, next.modelID);
   };

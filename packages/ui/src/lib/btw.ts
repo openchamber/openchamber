@@ -167,6 +167,8 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
     try {
       if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
       registerSessionDirectory(forked.id, sessionDirectory);
+      await opencodeClient.switchSessionModel(forked.id, { providerID: input.providerID, id: input.modelID, variant: input.variant }, sessionDirectory);
+      if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
       const selections = useSelectionStore.getState();
       selections.saveSessionModelSelection(forked.id, input.providerID, input.modelID);
       if (input.agent) {

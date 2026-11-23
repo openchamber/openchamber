@@ -1,6 +1,7 @@
-import { afterAll, beforeEach, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
+import { opencodeClient } from '@/lib/opencode/client';
 import type { TodoSendExecution } from '../todoSendExecution';
 
 const dom = new Window();
@@ -25,6 +26,7 @@ const resolvedDirectories: string[] = [];
 const sends: Array<{ providerID: string; modelID: string; agent?: string; variant?: string | null }> = [];
 const savedSelections: string[] = [];
 const createdSessions: string[] = [];
+const switchedModels: Array<{ sessionId: string; model: unknown; directory: unknown }> = [];
 
 const sessionState = {
   currentSessionId: 'session-elsewhere',
@@ -52,7 +54,8 @@ const selectFrom = <T,>(state: T) => Object.assign(
   { getState: () => state },
 );
 
-mock.module('@/components/ui', () => ({ toast: { success: () => undefined, error: () => undefined } }));
+const toastErrors: string[] = [];
+mock.module('@/components/ui', () => ({ toast: { success: () => undefined, error: (message: string) => { toastErrors.push(message); } } }));
 mock.module('@/lib/git/branchNameGenerator', () => ({ generateBranchName: () => 'quiet-otter' }));
 mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 mock.module('@/lib/magicPrompts', () => ({
@@ -122,12 +125,17 @@ const capturedElsewhere = (picked: TodoSendExecution['picked']): TodoSendExecuti
 });
 
 beforeEach(() => {
+  spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (sessionId, model, directory) => { switchedModels.push({ sessionId, model, directory }); });
   directoryDefaults = {};
   resolvedDirectories.length = 0;
   sends.length = 0;
   savedSelections.length = 0;
   createdSessions.length = 0;
+  switchedModels.length = 0;
+  toastErrors.length = 0;
 });
+
+afterEach(() => mock.restore());
 
 afterAll(() => {
   act(() => root.unmount());
@@ -149,6 +157,18 @@ test('a new worktree session starts on the defaults of the directory it lands in
     'session-worktree agent plan',
     'session-worktree variant plan anthropic/claude high',
   ]);
+  // The worktree session is created before its execution is known: the model this send chose is written once, right after create.
+  expect(switchedModels).toEqual([{ sessionId: 'session-worktree', model: { providerID: 'anthropic', id: 'claude', variant: 'high' }, directory: worktreeDirectory }]);
+});
+
+test('a failed model switch in a new worktree session tells the user and sends no prompt', async () => {
+  spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async () => { throw new Error('offline'); });
+
+  await send('worktree', capturedElsewhere({ model: true, variant: true, agent: true }));
+
+  expect(toastErrors).toEqual(['Could not switch the model']);
+  expect(sends).toEqual([]);
+  expect(savedSelections).toEqual([]);
 });
 
 test('a pick made in the dialog wins over the directory defaults', async () => {
@@ -175,4 +195,6 @@ test('a session in the project itself sends what the dialog shows', async () => 
   expect(resolvedDirectories).toEqual([]);
   expect(createdSessions).toEqual(['/repo']);
   expect(sends).toEqual([{ providerID: 'other', modelID: 'stale-model', agent: 'build', variant: 'low' }]);
+  // A session in the project itself gets its model through the create call, so nothing is written after it.
+  expect(switchedModels).toEqual([]);
 });

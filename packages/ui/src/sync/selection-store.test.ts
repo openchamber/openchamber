@@ -195,3 +195,15 @@ test('a session model switch counts only against a model already reconciled', ()
   store.clearSessionSelections('one');
   expect(store.isSessionModelSwitched('one', 'p/b#')).toBe(false);
 });
+
+test('a pick without a known base stays live until settled or cleared (the base comparison runs in session-selection.test.ts)', () => {
+  const store = useSelectionStore.getState();
+  const onOpus = { providerID: 'p', id: 'opus', variant: 'high' };
+  store.pickSessionModel('one', 'p', 'fable');
+  expect(store.liveSessionModelPick('one', onOpus)).toEqual({ providerId: 'p', modelId: 'fable' });
+  // Nothing in the sync stores holds this session, so the pick was made on an unknown model and stays live.
+  expect(store.liveSessionModelPick('one', undefined)).toEqual({ providerId: 'p', modelId: 'fable' });
+  expect(store.getSessionModelPick('one')).toEqual({ providerId: 'p', modelId: 'fable' });
+  store.clearSessionSelections('one');
+  expect(store.liveSessionModelPick('one', onOpus)).toBeNull();
+});

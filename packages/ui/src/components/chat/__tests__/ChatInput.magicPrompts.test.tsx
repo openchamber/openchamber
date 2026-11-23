@@ -124,6 +124,7 @@ const { updateDesktopSettings } = await import('@/lib/persistence');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useSelectionStore } = await import('@/sync/selection-store');
+const { whenModelPickWritten } = await import('@/sync/model-gesture');
 const { useInputStore } = await import('@/sync/input-store');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { shortcutRegistry } = await import('@/lib/shortcuts');
@@ -420,7 +421,8 @@ const setupBtwCompaction = () => {
   }] });
 };
 
-test('the BTW favorite-model shortcut leaves the pick a form reply applies', async () => {
+test('the BTW favorite-model shortcut writes its pick to the BTW session, and only that', async () => {
+  const switchSpy = spyOn(opencodeClient, 'switchSessionModel').mockResolvedValue(undefined);
   const favorites = [{ providerID: 'btw-provider', modelID: 'btw-model' }, { providerID: 'btw-provider', modelID: 'next-model' }];
   const previousFavorites = useUIStore.getState().favoriteModels;
   const providers = [{
@@ -441,22 +443,25 @@ test('the BTW favorite-model shortcut leaves the pick a form reply applies', asy
       shortcutRegistry.get('cycle_favorite_model_forward')?.(new window.KeyboardEvent('keydown'));
     });
 
+    await whenModelPickWritten('ses_btw');
     expect(useSelectionStore.getState().getSessionModelPick('ses_btw')).toEqual({ providerId: 'btw-provider', modelId: 'next-model' });
+    expect(switchSpy.mock.calls.map(([id, model]) => [id, model])).toEqual([['ses_btw', { providerID: 'btw-provider', id: 'next-model', variant: undefined }]]);
   } finally {
+    switchSpy.mockRestore();
     useUIStore.setState({ favoriteModels: previousFavorites });
     useConfigStore.setState({ providers: [] });
   }
 });
 
-for (const switchFails of [false, true]) {
-  test(`BTW /compact keeps the main selection${switchFails ? ' and restores a failed command' : ''}`, async () => {
+for (const compactFails of [false, true]) {
+  test(`BTW /compact keeps the main selection and never writes a model${compactFails ? ' and restores a failed command' : ''}`, async () => {
     const calls: { method: string; id: string; model?: ModelSelection; directory?: string | null }[] = [];
     const switchSpy = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (id, model, directory) => {
       calls.push({ method: 'switch', id, model, directory });
-      if (switchFails) throw new Error('switch refused');
     });
     const compactSpy = spyOn(opencodeClient, 'compactSession').mockImplementation(async (id, directory) => {
       calls.push({ method: 'compact', id, directory });
+      if (compactFails) throw new Error('compact refused');
     });
     const file = new File(['context'], 'context.txt', { type: 'text/plain' });
     const attachment = { id: 'compact-context', file, filename: file.name, size: file.size,
@@ -466,11 +471,8 @@ for (const switchFails of [false, true]) {
         expect(useInputStore.getState().composerAddress?.attachments?.sessionId).toBe('ses_btw');
         useInputStore.getState().setAttachedFiles([attachment]);
       });
-      expect(calls).toEqual([
-        { method: 'switch', id: 'ses_feature', model: { providerID: 'provider', id: 'model', variant: 'high' }, directory: WORKTREE },
-        ...(switchFails ? [] : [{ method: 'compact', id: 'ses_feature', directory: WORKTREE }]),
-      ]);
-      expect(remaining).toBe(switchFails ? '/compact' : '');
+      expect(calls).toEqual([{ method: 'compact', id: 'ses_feature', directory: WORKTREE }]);
+      expect(remaining).toBe(compactFails ? '/compact' : '');
       expect(useInputStore.getState().attachedFiles).toEqual([attachment]);
       expect(sent).toEqual([]);
     } finally {

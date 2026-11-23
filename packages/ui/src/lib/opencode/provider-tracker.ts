@@ -57,12 +57,12 @@ function getOrCreateProvider(providerID: string): ProviderState {
   return state
 }
 
-export function recordProviderSuccess(providerID: string): void {
+export function recordProviderSuccess(providerID: string | undefined): void {
   if (!providerID) return
   providers.delete(providerKey(providerID))
 }
 
-export function recordProviderError(providerID: string, status?: number): void {
+export function recordProviderError(providerID: string | undefined, status?: number): void {
   if (!providerID) return
   const state = getOrCreateProvider(providerID)
   state.consecutiveErrors += 1
@@ -102,7 +102,7 @@ function isCircuitOpen(providerID: string): boolean {
   return true
 }
 
-export function assertProviderCircuitClosed(providerID: string): void {
+export function assertProviderCircuitClosed(providerID: string | undefined): void {
   if (!providerID || !isCircuitOpen(providerID)) return
   throw new Error(`Provider ${providerID} is temporarily unavailable after repeated errors. Please retry shortly.`)
 }

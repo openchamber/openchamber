@@ -12,6 +12,7 @@ import type { RoutingModelRef } from '../routing/contracts.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
+import { AUTO_MODEL_REF } from '../routing/defaults.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { parseAttachment, toPublicAttachment, type PublicQueuedAttachment, type QueuedAttachment } from './attachments.js';
@@ -570,11 +571,10 @@ export function createMessageQueueRuntime({
       ...(item.goal ? [{ text: buildGoalIntroText(item.goal.tokenBudget), resume: false }] : []),
     ];
 
-    const routed = hasSelectedModel(model) ? await resolveAutoSelection?.({
-      sessionId,
-      directory,
-      model,
-      agent,
+    const scheduled = Boolean(item.scheduledTask);
+    const routable = scheduled ? (hasSelectedModel(model) ? model : null) : AUTO_MODEL_REF;
+    const routed = routable ? await resolveAutoSelection?.({
+      sessionId, directory, agent, liveOnly: !scheduled, model: routable,
       requestText: `${item.text}${attachmentHint({ files: promptFiles })}`.trim(),
     }) : null;
     if (routed) {
@@ -582,7 +582,7 @@ export function createMessageQueueRuntime({
       agent = routed.agent ?? agent;
     }
 
-    if (!item.scheduledTask || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
+    if (routed || (scheduled && providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
       directory,
       method: 'POST',
       body: { model },

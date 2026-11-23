@@ -157,11 +157,11 @@ time. Keeping the client alone can send a rollback to the newly selected
 server, or omit the old server's credentials. Only rollback captures transport;
 ordinary feature requests continue to resolve the active runtime at call time.
 
-### Why compaction checks runtime ownership after switching the model
+### Why compaction checks runtime ownership after waiting for a pick
 
-Manual compaction captures the runtime instance before reconciling the composer's
-model pick. If that instance changes while the model switch is pending, the action
-rejects before compacting. The shared client resolves the active server at call
+Manual compaction captures the runtime instance, waits for this client's own pick
+still being written, and compacts; it writes no model. If that instance changes
+during the wait, the action rejects before compacting. The shared client resolves the active server at call
 time, so continuing could compact an unrelated session with the same ID. Returning
 to the original runtime does not resume the cancelled operation.
 
@@ -279,9 +279,64 @@ Providers accept PNG, JPEG, GIF and WebP image parts. A raw HEIC image part make
 
 ### Why sends read the server's selection
 
-`resolveSendSelection` reads the session through the runtime-aware SDK before comparing the requested model and agent, on every send it resolves. A directory sync record can miss a switch and already match the picker while the server still runs another model or agent, and the composer then shows the cached model while the turn runs on the server's (#6035, #6501). The server read makes that send recover and skips switch records when the server already matches. The model must also match the current sync record after the read, so a switch event received during it remains visible; a directory store without the record falls through to every store, so an unchanged model held elsewhere adds no switch record. A runtime instance change discards the response, including a switch away and back.
+`resolveSendSelection` reads the session through the runtime-aware SDK before comparing the requested agent, on every send it resolves. A directory sync record can miss an agent switch and already match the picker while the server still runs another agent (#6035), so the read makes that send recover and skips the switch when the server already matches. It compares no model: a send never writes one. A runtime instance change discards the response, including a switch away and back.
 
-The read is a check, never a gate for a model-only selection. When it fails for a send without an agent, such as `/compact` or a form reply with only a model pick, the action still goes out with the picked model stated explicitly: at worst OpenCode records one switch to the model it already runs. With an agent the agent cannot be compared, so a failed read is a definite pre-send failure and rolls the send back without prompt-confirmation reads, as before.
+### Why only a pick, or a new session, writes a model
+
+An existing session's model, provider and effort are the server's. A send, a
+form answer, a compaction, a queued delivery and a reconnect never write a model
+for it, whatever the composer shows, whether the session has a recorded
+`outcome`, and whether this client has its record cached: the composer can hold a
+selection remembered from an earlier visit, and replaying it over a choice made
+meanwhile by another client started a cold prompt cache each time. The only
+writes are:
+
+- an explicit pick (the model picker, the effort menu, the effort and
+  favorite-model shortcuts, the BTW and mini-chat pickers), which
+  `commitModelPick` / `commitComposerPick` (`model-gesture.ts`) write at once,
+  exactly as chosen, even when the local record already shows that model;
+- the creating gesture of a session this client makes. The model and effort the
+  gesture chose go in the create body (`session.create`: the draft's first send,
+  guests, memory tidy, plan and todo sends into the project, the assistant-plan
+  fork, review and multi-run sessions). Where the model is known only after the
+  session exists, the same gesture writes it once right after creating, and a
+  failure ends the gesture: a `/btw` fork (`lib/btw.ts`) and a plan or todo
+  worktree session (`resolveWorktreeExecution`). Auto is the server's in-memory
+  mark, so `createSession` in `lib/opencode/client.ts` sets it with one switch
+  right after the create. Nothing is remembered for a later send: a transcript
+  fork opened for later input keeps the parent's model, and the first send of any
+  session writes none. A created session that is never sent to keeps what it was
+  created with;
+- choosing an agent that pins a model (`commitAgentPinnedModel`), which writes
+  that model once as a pick, only when the composer now shows the agent's pinned
+  model.
+
+A pick is the write; the pending-pick map in `selection-store.ts` only keeps the
+composer from snapping back to the old record while the write is in flight.
+Picks of one session are serialized and the latest wins; `resolveSendSelection`,
+a form answer and a compaction wait for an in-flight pick (a form answer on every
+path, with or without an agent pick), so an action right after a pick runs on the
+pick. Two clients picking at once end on the one the
+server acknowledged last, and nothing a client sends afterwards writes its own
+older view back. A pick on something that is not a session (a pending BTW
+composer) writes nothing. Auto follows the same rule: the Auto pick writes the
+sentinel, which marks the session on the server (`../../../web/server/lib/routing/DOCUMENTATION.md`),
+and the server routes each later send itself. The mark lives in server memory,
+so after a restart the composer may show Auto while the session runs on its last
+real model until Auto is picked again.
+
+`resolveSendSelection` reports the provider the send runs on, because the provider
+circuit breaker must judge the provider that will take the message, not the one an
+older composer shows: the server's current one. It reports none, and the circuit is
+not consulted, when the composer shows Auto (the server routes the prompt, so the
+last real model's circuit says nothing about it) and when the session read failed
+(a cached or composer provider is no evidence of the session's current one).
+
+The read is a check, never a gate for a model-only selection. When it fails for a
+send without an agent, such as `/compact`, the action goes out and writes no model.
+With an agent the agent cannot be compared, so a failed read is a
+definite pre-send failure and rolls the send back without prompt-confirmation
+reads, as before.
 
 ## Catalog changes apply live
 
@@ -701,14 +756,17 @@ check the runtime, draft identity, target revision, and manual-selection state
 before applying defaults again.
 
 The runtime/session-keyed `sessionPickedModels` map in `selection-store.ts`
-tracks explicit model picks until a matching successful send, accepted queue
-item, or manual compaction carries them. Each operation captures settlement
-before waiting, including review-flow sends. Success settles the captured
-runtime/session pick even after a runtime switch; a newer pick, including a
-repeat of the same model, survives the older operation. Failure retains the pick.
-History restores never create that intent. This map is
-memory-only; session deletion clears it, and runtime keys isolate server picks.
-Agent selection uses it before old per-agent choices or pinned models.
+tracks explicit model picks for display only: it keeps the composer on the pick
+until the session record catches up, and it grants no write. A matching
+successful send, accepted queue item, or manual compaction settles it. Each
+operation captures settlement before waiting, including review-flow sends.
+Success settles the captured runtime/session pick even after a runtime switch; a
+newer pick, including a repeat of the same model, survives the older operation.
+Failure retains the pick. History restores never create one. A pick keeps the
+session's model at pick time (`base`); `liveSessionModelPick` drops it once the
+session runs on another model. This map is memory-only; session deletion clears
+it, and runtime keys isolate server picks. Agent selection uses it before old
+per-agent choices or pinned models.
 
 `selection-store.ts` persists runtime/session-keyed effort overrides alongside model and
 agent choices. Both a named effort and explicit `Default` survive reload, with
@@ -718,9 +776,9 @@ Session deletion clears these entries. A send saves the effort it carried for
 its session; only a send from the main chat reads the main composer's live
 selection, to tell an explicit Default from no choice, so a `/btw` fork or a
 pinned chat on the main chat's agent and model keeps its own effort. A saved effort choice precedes older
-message history so a reload cannot undo a saved picker change. While a live model
-pick is pending, it and its effort win over external switches. Otherwise the
-session record can switch to another model and effort. The store also
+message history so a reload cannot undo a saved picker change. While a model
+pick is pending, it and its effort win over external switches on screen (an effort-only change counts as a pick). Otherwise the
+session record switches the composer to its model; a selection remembered from an earlier visit is not a pick. The store also
 persists, per session, the session-record agent and model the composer last
 followed; a different record value is a newer switch and replaces the saved selection
 (Auto excepted), while an unchanged one keeps an unsent pick
@@ -741,8 +799,10 @@ since the send left. Agent and model revisions advance independently on changed
 followed values, so even an external switch away and back supersedes a pending
 send. This still detects a later switch back to the original
 value without reopening the chat. Failed sends leave that sent baseline unchanged.
-Picker changes make no session API writes. Explicit Default
-effort remains `null` when sent so the saved choice is not erased. An extension
+Picker changes write the chosen model and effort to an existing session at
+once (see "Why only a pick, or a new session, writes a model"); a send writes
+none. Explicit Default effort remains `null` in the saved choice so it is not
+erased. An extension
 starting a new session still captures the app defaults before creating it.
 
 A picker change records the chosen level for that model in the profile
@@ -1610,7 +1670,7 @@ Examples of global-store updates performed in `session-actions.ts`:
 
 ### Blocking-request (form/permission) reply routing
 
-A form reply resumes the turn, so `replyToForm` first puts the session on its composer's selection through `applySendSelection`, the guarded entry the sends use (#6053). The form's record is read from the reply's directory store first, then from every initialized store and the global cache, so a record held elsewhere is still classified (#6555). A root session open in the main chat uses the app-wide composer, and an open review session does too: the codebase treats review sessions as independent conversations even when an older record still carries `parentID` (`chatPromptReadOnly`). Any other session uses only what is held for it: its own unsent model and agent picks and its saved effort still apply, so a pinned chat or a `/btw` fork keeps its own selection, and a child session keeps what a workflow bound it to whichever chat shows it, because the app-wide config can still hold the previous chat's selection when the child was just opened. Only a record marking a non-review child diverts from the composer; an extension's prompt to an open session (`captureGuestPromptSelection` in `lib/guests/start-session.ts`) classifies the same way. When no store holds the record, the reply reads it from the server first (`session.get`) and classifies it exactly like a store record, so a subagent whose record has not loaded yet still keeps its own agent and model, and that record's server-confirmed `directory` addresses the answer. A failed read, or a runtime change during it, sends nothing, switches nothing, and leaves the form pending for a retry (#6555). A location-scoped form has no session to switch. A failed switch or an unavailable agent leaves the answer unsent and the form pending. Auto reaches the session as the sentinel, and the server routes the reply itself (`packages/web/server/lib/routing/DOCUMENTATION.md`). The reply captures the runtime instance before its first wait and rechecks it after the switches, so a switch away, even with a return, stops the answer; a late result from an old runtime touches no local form.
+A form reply resumes the turn, so `replyToForm` first waits for this client's own model pick still being written (whether or not an agent is picked), then puts the session on its composer's agent through `applySendSelection`, the guarded entry the sends use (#6053), and never on its composer's model: a model the composer shows is not a choice (see "Why only a pick, or a new session, writes a model"). The form's record is read from the reply's directory store first, then from every initialized store and the global cache, so a record held elsewhere is still classified (#6555). A root session open in the main chat uses the app-wide composer's agent, and an open review session does too: the codebase treats review sessions as independent conversations even when an older record still carries `parentID` (`chatPromptReadOnly`). Any other session uses only what is held for it: its own unsent agent pick, so a pinned chat or a `/btw` fork keeps its own selection, and a child session keeps what a workflow bound it to whichever chat shows it, because the app-wide config can still hold the previous chat's agent when the child was just opened. Only a record marking a non-review child diverts from the composer; an extension's prompt to an open session (`captureGuestPromptSelection` in `lib/guests/start-session.ts`) classifies the same way. When no store holds the record, the reply reads it from the server first (`session.get`) and classifies it exactly like a store record, and that record's server-confirmed `directory` addresses the answer. A failed read, or a runtime change during it, sends nothing, switches nothing, and leaves the form pending for a retry (#6555). A location-scoped form has no session to switch. A failed agent switch or an unavailable agent leaves the answer unsent and the form pending. Auto marks nothing here: the session's own mark on the server routes the reply (`packages/web/server/lib/routing/DOCUMENTATION.md`). The reply captures the runtime instance before its first wait and rechecks it after the switches, so a switch away, even with a return, stops the answer; a late result from an old runtime touches no local form.
 
 `replyToForm`, `cancelForm`, `respondToPermission`, and `dismissPermission` route the reply through `resolveBlockingRequestTarget`. The directory chosen decides which OpenCode instance resolves the pending request, so it must be the **session record's own server-confirmed directory** (ownership), never the containing child-store key (containment): a project store legitimately holds its worktree sessions, and a reply addressed to the parent instance makes the server answer `FormNotFoundError` while the form stays pending in the worktree instance — the session is then stuck on the running form tool with no recovery. The containment guess from `resolveDirectoryForBlockingRequest` only finds the record. When no store and no global cache holds it, the record is read from the server before anything is sent, and a failed read, or a runtime change during it, sends nothing and keeps the request pending for a retry: a guessed parent's not-found must never dismiss a valid worktree request (#6555). A location-scoped form has no record and keeps its directory; a permission reply with an explicit directory from the raising event uses it as is. When a form reply/cancel comes back not-found, the stale request is removed locally and a `settled-running-tool` tail materialization is enqueued so the trailing tool part converges to the server's actual state instead of leaving the UI on "asking question" forever. A permission reply/reject that comes back not-found only removes the request locally.
 

@@ -241,7 +241,6 @@ export async function startRunFusion(input: {
     runtimeKey,
     id: fusionSession.id,
     providerID: judge.providerID,
-    model: { providerID: judge.providerID, id: judge.modelID, variant: judge.variant },
     agent: judge.agent,
     text: visiblePrompt,
     context,

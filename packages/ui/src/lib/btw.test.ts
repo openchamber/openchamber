@@ -11,6 +11,7 @@ const forkBeforeNotFound = new Error('session.fork failed (404): message not fou
 let forkSessionImpl: (sessionId: string, options?: ForkOptions) => Promise<Session>;
 let getSessionMessagesImpl: (id: string, options?: { limit?: number }, directory?: string | null) => Promise<MessagePage>;
 let sendMessageImpl: (...args: unknown[]) => Promise<unknown>;
+let switchSessionModelImpl: (id: string, model: unknown, directory?: string | null) => Promise<void>;
 let deleteSessionImpl: (sessionId: string) => Promise<boolean>;
 let updateSessionTitleImpl: (sessionId: string, title: string) => Promise<void>;
 let patchSessionMetadataImpl: (
@@ -18,6 +19,7 @@ let patchSessionMetadataImpl: (
   directory: string | null | undefined,
   updater: (metadata: Record<string, unknown>) => Record<string, unknown>,
 ) => Promise<Session>;
+const switchedModels: Array<{ id: string; model: unknown; directory?: string | null }> = [];
 const registeredDirectories: string[] = [];
 const upsertedSessions: unknown[] = [];
 const childStoreSessions: Session[] = [];
@@ -29,6 +31,10 @@ mock.module('@/lib/opencode/client', () => ({
   isOpencodeNotFound: (error: Error) => error === forkBeforeNotFound,
   opencodeClient: {
     forkSession: (sessionId: string, options?: ForkOptions) => forkSessionImpl(sessionId, options),
+    switchSessionModel: (id: string, model: unknown, directory?: string | null) => {
+      switchedModels.push({ id, model, directory });
+      return switchSessionModelImpl(id, model, directory);
+    },
     getSessionMessages: (id: string, options?: { limit?: number }, directory?: string | null) => {
       sessionMessageReads.push(id);
       return getSessionMessagesImpl(id, options, directory);
@@ -114,6 +120,8 @@ const startInput = {
 };
 
 beforeEach(() => {
+  switchedModels.length = 0;
+  switchSessionModelImpl = () => Promise.resolve();
   registeredDirectories.length = 0;
   upsertedSessions.length = 0;
   childStoreSessions.length = 0;
@@ -225,6 +233,8 @@ describe('startBtwSession', () => {
     const session = await startBtwSession({ ...startInput, variant: null });
 
     expect(session.id).toBe('fork-1');
+    // The question's own model and effort are written once, right after the fork, before the question goes out.
+    expect(switchedModels).toEqual([{ id: 'fork-1', model: { providerID: 'provider', id: 'model', variant: null }, directory: '/project' }]);
     expect(useSelectionStore.getState().getAgentModelVariantForSession('fork-1', 'build', 'provider', 'model')).toBeNull();
     expect(registeredDirectories).toEqual(['fork-1:/project']);
     expect(childStoreSessions.map((s) => s.id)).toEqual(['fork-1']);
@@ -240,6 +250,20 @@ describe('startBtwSession', () => {
     ]);
     // Transient creating flag is cleared once the flow settles.
     expect(useBtwStore.getState().byParent).toEqual({ 'parent-1': { creating: false } });
+  });
+
+  test('a failed write of the question\'s model ends the fork before the question is sent', async () => {
+    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project'));
+    switchSessionModelImpl = () => Promise.reject(new Error('switch failed'));
+    const deleted: string[] = [];
+    deleteSessionImpl = (sessionId) => { deleted.push(sessionId); return Promise.resolve(true); };
+    let sent = 0;
+    sendMessageImpl = () => { sent += 1; return Promise.resolve(); };
+
+    await expect(startBtwSession(startInput)).rejects.toThrow('switch failed');
+
+    expect(sent).toBe(0);
+    expect(deleted).toEqual(['fork-1']);
   });
 
   test('a fork in a space starts in the Settings default, which no server writes for it', async () => {

@@ -169,18 +169,17 @@ const sendPlainMessage = async (
     onOptimisticInsert: () => requestChatForceScrollBottom(sessionID),
     send: async (messageID, context, commitRevert) => {
       const selection = await resolveSendSelection(sessionID, directory, resolved);
-      return opencodeClient.sendMessage({
+      await opencodeClient.sendMessage({
         runtimeKey,
         id: sessionID,
         directory,
-        providerID: resolved.providerID,
-        model: selection.model,
+        providerID: selection.providerID,
         agent: selection.agent,
         text,
         context,
         messageId: messageID,
         commitRevert,
-      }).then(() => undefined);
+      });
     },
   });
   settleModelPick();

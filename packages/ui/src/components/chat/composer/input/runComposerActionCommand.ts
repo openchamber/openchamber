@@ -93,13 +93,7 @@ export async function runComposerActionCommand({
             } else if (actionName === 'compact') {
                 await sessionActions.waitForConnectionOrThrow();
                 const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                await sessionActions.compactSession(
-                    currentSessionId,
-                    currentProviderId && currentModelId
-                        ? { providerID: currentProviderId, modelID: currentModelId, variant: currentVariant }
-                        : null,
-                    compactDirectory,
-                );
+                await sessionActions.compactSession(currentSessionId, compactDirectory);
             }
         } catch (error) {
             restoreComposerText();

@@ -65,8 +65,9 @@ import {
     areModelChoicesEqual,
     extractSessionRecordModelChoice,
     findLatestUserModelChoice,
-    shouldPreserveManualModelOverride,
 } from '@/lib/messages/userModelChoice';
+import { livePickOverRecord } from './livePickOverRecord';
+import { commitAgentPinnedModel, commitComposerPick, commitModelPick } from '@/sync/model-gesture';
 import type { BtwSelection } from '@/stores/useBtwStore';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 import { effortMemoryKey, rememberEffort, resolveEffortChoice, resolveEffortForModelSelection } from '@/lib/modelEfforts';
@@ -965,6 +966,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         };
 
         const savedSessionModel = getSessionModelSelection(currentSessionId);
+        const pickedSessionModel = livePickOverRecord(currentSessionId, sessionRecordChoice, latestLoadedUserChoice, useConfigStore.getState().selectionSource);
         const savedAuto = Boolean(savedSessionModel) && isAutoModel(savedSessionModel!.providerId, savedSessionModel!.modelId);
         if (savedAuto && isStaleAutoSelection(savedSessionModel!.providerId, savedSessionModel!.modelId)) {
             useConfigStore.getState().dropStaleAutoSelection();
@@ -974,19 +976,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             markRecordModelFollowed();
             latestLoadedUserChoiceRestoreRef.current = restoreKey;
             return;
-        } else if (!recordModelSwitched && shouldPreserveManualModelOverride({
-            selectionSource: useConfigStore.getState().selectionSource,
-            savedSessionModel,
-            candidate: latestLoadedUserChoice,
-        })) {
-            if (savedSessionModel) {
-                applyModelSelectionWithVariant(
-                    savedSessionModel.providerId,
-                    savedSessionModel.modelId,
-                    resolveModelVariantSelection(savedSessionModel.providerId, savedSessionModel.modelId, { includeInherited: false }),
-                    restoreAgentName,
-                );
-            }
+        } else if (pickedSessionModel && !recordModelSwitched) {
+            applyModelSelectionWithVariant(
+                pickedSessionModel.providerId,
+                pickedSessionModel.modelId,
+                resolveModelVariantSelection(pickedSessionModel.providerId, pickedSessionModel.modelId, { includeInherited: false }),
+                restoreAgentName,
+            );
             markRecordModelFollowed();
             latestLoadedUserChoiceRestoreRef.current = restoreKey;
             return;
@@ -1348,8 +1344,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (currentProviderId && currentModelId) {
             commitVariantSelectionForModel(currentProviderId, currentModelId, variant ?? null);
             rememberVariantForModel(currentProviderId, currentModelId, variant ?? null);
+            if (selection) commitModelPick(controlledSessionId, { providerID: currentProviderId, modelID: currentModelId, variant: variant ?? null }, currentSessionDirectory);
+            else commitComposerPick(currentSessionId, currentSessionDirectory);
         }
-    }, [commitVariantSelectionForModel, currentModelId, currentProviderId, rememberVariantForModel]);
+    }, [commitVariantSelectionForModel, controlledSessionId, currentModelId, currentProviderId, currentSessionDirectory, currentSessionId, rememberVariantForModel, selection]);
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         if (selection) {
@@ -1375,6 +1373,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 pickSessionAgent(currentSessionId, agentName);
             }
             setAgent(agentName);
+            commitAgentPinnedModel(currentSessionId, agentName, currentSessionDirectory);
             addRecentAgent(agentName);
             if (options?.closeModelSelector ?? true) {
                 setAgentMenuOpen(false);
@@ -1391,6 +1390,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         controlledSessionId,
         currentModelId,
         currentProviderId,
+        currentSessionDirectory,
         currentSessionId,
         getAgentModelVariantForSession,
         isCompact,
@@ -1450,8 +1450,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             if (options?.applyVariant) {
                 rememberVariantForModel(providerId, modelId, options.variant ?? null);
             }
-            const pickedSessionId = selection ? controlledSessionId : currentSessionId;
-            if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, providerId, modelId);
+            if (selection) commitModelPick(controlledSessionId, { providerID: providerId, modelID: modelId, variant: options?.applyVariant ? options.variant ?? null : resolveModelVariantSelection(providerId, modelId) ?? null }, currentSessionDirectory);
+            else commitComposerPick(currentSessionId, currentSessionDirectory);
             if (!selection && !options?.applyVariant && !isAutoModel(providerId, modelId)) {
                 addRecentModel(providerId, modelId);
             }
@@ -1774,8 +1774,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
             return;
         }
-        const pickedSessionId = selection ? controlledSessionId : currentSessionId;
-        if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, providerId, modelId);
+        if (selection) commitModelPick(controlledSessionId, { providerID: providerId, modelID: modelId, variant: resolveModelVariantSelection(providerId, modelId) ?? null }, currentSessionDirectory);
+        else commitComposerPick(currentSessionId, currentSessionDirectory);
         if (!selection) setLastSelectedModel(providerId, modelId);
         setMobileDetailsEntry(null);
         closeMobilePanel();

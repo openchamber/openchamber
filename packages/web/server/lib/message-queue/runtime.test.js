@@ -3,6 +3,8 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMessageQueueRuntime, parseQueuedItemInput } from './runtime.js';
+import { createRoutingRuntime } from '../routing/runtime.js';
+import { resolveEffectiveConfig } from '../routing/store.js';
 
 const SESSION = 'ses_queue_test_1';
 const DIRECTORY = '/repo';
@@ -55,6 +57,9 @@ const createOpenCode = () => {
     commandsAfterActivation: null,
     // Sees each POST body before the fake answers, so a test can stage the next failure.
     onPost: null,
+    // The model the session runs on, as another client left it; a prompt records the one it was accepted on.
+    model: null,
+    acceptedOn: [],
   };
   // v2 wraps `/api/*` payloads in `{ location, data }`; a message page is
   // `{ data, cursor }` and lists newest first.
@@ -101,6 +106,7 @@ const createOpenCode = () => {
     if (method === 'POST' && (pathname.endsWith('/model') || pathname.endsWith('/agent'))) {
       // Kept apart from `sent`: switching the session is not a message.
       state.switched.push({ path: pathname, body: JSON.parse(init.body) });
+      if (pathname.endsWith('/model')) state.model = JSON.parse(init.body).model;
       return new Response(null, { status: 204 });
     }
     if (method === 'POST' && (pathname.endsWith('/prompt') || pathname.endsWith('/command') || pathname.endsWith('/synthetic'))) {
@@ -111,6 +117,7 @@ const createOpenCode = () => {
       if (pathname.endsWith('/synthetic') && state.admitted.has(body.id)) return wrapped({ id: body.id });
       if (pathname.endsWith('/synthetic')) state.admitted.add(body.id);
       state.sent.push({ path: pathname, body });
+      state.acceptedOn.push({ path: pathname, model: state.model });
       return wrapped({ id: `msg_${state.sent.length}` });
     }
     return new Response('not found', { status: 404 });
@@ -400,6 +407,121 @@ describe('auto routing', () => {
     openCode.state.statuses = {};
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await vi.waitFor(() => expect(resolveAutoSelection.mock.calls[0][0].requestText).toBe("what's wrong?\n\n[The user attached an image: shot.png]"));
+  });
+});
+
+describe('an ordinary item never carries a model', () => {
+  const OPUS = { providerID: 'anthropic', id: 'opus', variant: 'high' };
+  const FABLE = { providerID: 'anthropic', id: 'fable', variant: 'medium' };
+  const queueWhileBusy = async (resolveAutoSelection, sendConfig) => {
+    const made = createRuntime({ resolveAutoSelection });
+    made.runtime.start();
+    // `/api/session/active` lists a running session; the item must stay queued while it runs.
+    made.openCode.state.active = { [SESSION]: { type: 'running' } };
+    made.openCode.state.model = FABLE;
+    await made.runtime.enqueue(SESSION, DIRECTORY, item({ sendConfig }));
+    await settle();
+    expect(made.runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    expect(made.openCode.state.sent).toEqual([]);
+    made.openCode.state.model = OPUS;
+    made.openCode.state.active = {};
+    made.emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await vi.waitFor(() => expect(made.openCode.state.sent).toHaveLength(1));
+    return made;
+  };
+  const modelPosts = (openCode) => openCode.state.switched.filter((entry) => entry.path.endsWith('/model'));
+
+  it('delivers on the model another client chose after it was queued, without a model POST', async () => {
+    const resolveAutoSelection = vi.fn(async () => null);
+    const { openCode, replayAfterSend } = await queueWhileBusy(resolveAutoSelection, { providerID: FABLE.providerID, modelID: FABLE.id, variant: FABLE.variant, agent: 'build' });
+    await replayAfterSend();
+    expect(modelPosts(openCode)).toEqual([]);
+    expect(openCode.state.acceptedOn).toEqual([{ path: `/api/session/${SESSION}/prompt`, model: OPUS }]);
+  });
+
+  it('does not route on an Auto sentinel the user has since left, whatever the stored item says', async () => {
+    const resolveAutoSelection = vi.fn(async ({ liveOnly }) => (liveOnly ? null : { model: { providerID: 'openai', id: 'gpt-6-astra' }, agent: 'plan', decision: {} }));
+    const { openCode, replayAfterSend } = await queueWhileBusy(resolveAutoSelection, { providerID: 'openchamber', modelID: 'auto', agent: 'build' });
+    await replayAfterSend();
+    expect(resolveAutoSelection).toHaveBeenCalledWith(expect.objectContaining({ sessionId: SESSION, liveOnly: true, model: { providerID: 'openchamber', id: 'auto' } }));
+    expect(modelPosts(openCode)).toEqual([]);
+    expect(openCode.state.acceptedOn.map((entry) => entry.model)).toEqual([OPUS]);
+  });
+
+  it('routes while the session carries the live Auto mark', async () => {
+    const routed = { providerID: 'openai', id: 'gpt-6-astra' };
+    const resolveAutoSelection = vi.fn(async ({ liveOnly }) => (liveOnly ? { model: routed, agent: 'plan', decision: {} } : null));
+    const { openCode, replayAfterSend } = await queueWhileBusy(resolveAutoSelection, { providerID: FABLE.providerID, modelID: FABLE.id, agent: 'build' });
+    await replayAfterSend();
+    expect(modelPosts(openCode).map((entry) => entry.body.model)).toEqual([routed]);
+    expect(openCode.state.acceptedOn.map((entry) => entry.model)).toEqual([routed]);
+  });
+
+  describe('an explicit pick that clears the live Auto mark while the classifier runs', () => {
+    const routedByAuto = { providerID: 'openai', id: 'routed', variant: 'high' };
+    const makeRouting = (ask) => {
+      const config = resolveEffectiveConfig(null);
+      config.enabled = true;
+      config.fallback = { model: { providerID: 'anthropic', modelID: 'fallback' }, variant: null };
+      config.categories = config.categories.map((entry) => entry.id === 'hard'
+        ? { ...entry, model: { providerID: 'openai', modelID: 'routed' }, variant: 'high', agent: null }
+        : entry);
+      return createRoutingRuntime({
+        dataDir: '/unused', buildOpenCodeUrl: () => 'http://opencode.test/', getOpenCodeAuthHeaders: () => ({}),
+        store: {
+          readConfig: async () => config, readToken: async () => 'fake', readClassifierSource: async () => null,
+          readCustomEndpoint: async () => null, readGeminiKey: async () => null,
+        },
+        jev: { ask },
+        readProviderKeys: () => ({ zenKey: null, openrouterKey: null, vercelKey: null, geminiKey: null }),
+        zenPromotionActive: true, enterpriseMode: () => false, readPinnedEndpoint: () => null,
+        listCatalogModels: async () => [], readSessionHistory: async () => ({ history: [], lastAnswer: null }),
+        readSessionAgent: async () => 'build',
+      });
+    };
+
+    it('delivers on the manual model without a model POST of its own', async () => {
+      let release = () => {};
+      let started = () => {};
+      const held = new Promise((resolve) => { release = resolve; });
+      const classifying = new Promise((resolve) => { started = resolve; });
+      const routing = makeRouting(async () => { started(); await held; return { answers: { category: { choice: 'hard', confidence: 0.99 } }, ms: 1 }; });
+      routing.noteModelSelection(SESSION, { providerID: 'openchamber', id: 'auto' }, DIRECTORY);
+      const { runtime, openCode, emit, replayAfterSend } = createRuntime({ resolveAutoSelection: routing.resolveAutoSelection });
+      openCode.state.active = { [SESSION]: { type: 'running' } };
+      runtime.start();
+      await runtime.enqueue(SESSION, DIRECTORY, item({ sendConfig: { providerID: 'openchamber', modelID: 'auto' } }));
+      openCode.state.active = {};
+      emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+      await classifying;
+
+      // The same note-then-forward order as the model-switch middleware: the mark clears, the pick is acknowledged.
+      expect(routing.noteModelSelection(SESSION, OPUS, DIRECTORY)).toBe(false);
+      const picked = await openCode.fetchImpl(`http://opencode.test/api/session/${SESSION}/model`, { method: 'POST', body: JSON.stringify({ model: OPUS }) });
+      expect(picked.status).toBe(204);
+      release();
+      await replayAfterSend();
+
+      expect(openCode.state.acceptedOn).toEqual([{ path: `/api/session/${SESSION}/prompt`, model: OPUS }]);
+      expect(openCode.state.model).toEqual(OPUS);
+      expect(modelPosts(openCode).map((entry) => entry.body.model)).toEqual([OPUS]);
+      runtime.stop();
+      await runtime.flush();
+    });
+
+    it('still routes when the mark is there at the recheck', async () => {
+      const routing = makeRouting(async () => ({ answers: { category: { choice: 'hard', confidence: 0.99 } }, ms: 1 }));
+      routing.noteModelSelection(SESSION, { providerID: 'openchamber', id: 'auto' }, DIRECTORY);
+      const { runtime, openCode, replayAfterSend } = createRuntime({ resolveAutoSelection: routing.resolveAutoSelection });
+      runtime.start();
+      await runtime.enqueue(SESSION, DIRECTORY, item({ sendConfig: { providerID: 'openchamber', modelID: 'auto' } }));
+      await replayAfterSend();
+
+      expect(modelPosts(openCode).map((entry) => entry.body.model)).toEqual([{ providerID: routedByAuto.providerID, id: routedByAuto.id, variant: routedByAuto.variant }]);
+      expect(openCode.state.acceptedOn.map((entry) => entry.model)).toEqual([{ providerID: routedByAuto.providerID, id: routedByAuto.id, variant: routedByAuto.variant }]);
+      runtime.stop();
+      await runtime.flush();
+    });
   });
 });
 

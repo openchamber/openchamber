@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { OpenCode } from '@opencode/client';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
@@ -6,6 +6,12 @@ import { createRoot } from 'react-dom/client';
 
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import { opencodeClient } from '@/lib/opencode/client';
+import { useComposerSelection } from '@/components/chat/composer/input/useComposerSelection';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { whenModelPickWritten } from '@/sync/model-gesture';
+import { getSyncSessionDirectory } from '@/sync/sync-refs';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { SyncProvider } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
@@ -90,6 +96,9 @@ test('web terminal zoom handles configured shortcuts only while focused', async 
 async function withShortcutsMounted(
   run: (requests: string[], waitForRequest: (pathFragment: string) => Promise<void>) => Promise<void>,
   settingsOnly = false,
+  alongside: React.ReactNode = null,
+  onPrompt?: (sessionId: string) => void,
+  onModel?: (sessionId: string, model: unknown, directory: string | null) => boolean,
 ) {
   const dom = new Window({ url: 'http://shortcut.test' });
   const requests: string[] = [];
@@ -97,7 +106,7 @@ async function withShortcutsMounted(
   const waitForRequest = (pathFragment: string) => new Promise<void>((resolve) => {
     requestListeners.set(pathFragment, resolve);
   });
-  const fetchResponse = async (request: Request | URL | string) => {
+  const fetchResponse = async (request: Request | URL | string, init?: RequestInit) => {
     const path = new URL(request instanceof Request ? request.url : request.toString()).pathname;
     requests.push(path);
     for (const [fragment, resolve] of requestListeners) {
@@ -108,6 +117,18 @@ async function withShortcutsMounted(
     }
     if (path.endsWith('/event')) {
       return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+    }
+    if (path.endsWith('/prompt')) {
+      const id = path.split('/').at(-2)!;
+      onPrompt?.(id);
+      return Response.json({ data: { id: 'msg_test', sessionID: id, time: { created: 1 }, type: 'user', payload: { text: 'Next' }, delivery: 'queue' } });
+    }
+    if (path.endsWith('/model') && onModel) {
+      const headers = new Headers(init?.headers ?? (request instanceof Request ? request.headers : undefined));
+      const rawDir = headers.get('x-opencode-directory');
+      const body = String(init?.body ?? (request instanceof Request ? await request.clone().text() : '{}'));
+      const ok = onModel(path.split('/').at(-2)!, JSON.parse(body).model, rawDir ? decodeURIComponent(rawDir) : null);
+      return ok ? new Response(null, { status: 204 }) : Response.json({ _tag: 'NotFoundError', message: 'no session in this directory' }, { status: 404 });
     }
     const data = path.endsWith('/location')
       ? { directory, project: { id: 'project', directory, canonical: directory } }
@@ -152,7 +173,7 @@ async function withShortcutsMounted(
     await act(async () => root.render(
       <ThemeSystemProvider>
         {settingsOnly ? <SettingsShortcutOwner /> : (
-          <SyncProvider sdk={sdk} directory={directory}><ShortcutOwner /></SyncProvider>
+          <SyncProvider sdk={sdk} directory={directory}><ShortcutOwner />{alongside}</SyncProvider>
         )}
       </ThemeSystemProvider>,
     ));
@@ -287,6 +308,265 @@ test('Ctrl+L adds a selection outside chat and yields to a sequence without one'
       useInputStore.getState().setPendingInputText(null);
     }
   });
+});
+
+// The composer of a pinned column, as ChatInput mounts it for that column's session.
+function PinnedComposerKeys({ formRef }: { formRef: React.RefObject<HTMLFormElement | null> }) {
+  useComposerSelection({
+    column: { columnPinned: true },
+    editorState: { composerFormRef: formRef },
+    sessionScope: {
+      currentSessionId: 'ses_pinned', currentDirectory: directory, isBtwActive: false, btwComposerSessionId: null,
+      sessionAgentPick: null, btwAgentSelection: null, btwModelSelection: null,
+    },
+  });
+  return null;
+}
+
+test('the favorite-model and effort keys change the session of the composer they were pressed in, a pinned column included', async () => {
+  const oldConfig = useConfigStore.getState();
+  const oldUI = useUIStore.getState();
+  const oldSession = useSessionUIStore.getState();
+  const selections = useSelectionStore.getState();
+  const written: Array<{ id: string; model: unknown }> = [];
+  const switchModel = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (id, model) => { written.push({ id, model }); });
+  const model = (id: string) => ({ id, providerID: 'provider', modelID: id, name: id, enabled: true, status: 'active' as const,
+    capabilities: { tools: true, input: ['text'], output: ['text'] }, variants: [{ id: 'low', settings: {} }, { id: 'high', settings: {} }], time: { released: 0 }, cost: [], limit: { context: 1, output: 1 } });
+  const formRef = React.createRef<HTMLFormElement>();
+  try {
+    await withShortcutsMounted(async () => {
+      await act(async () => {
+        useConfigStore.setState({
+          providers: [{ id: 'provider', name: 'provider', activation: 'enabled', package: 'provider', models: [model('a'), model('b'), model('c')] }],
+          activeDirectoryKey: directory,
+          currentProviderId: 'provider', currentModelId: 'a', currentAgentName: 'build', currentVariant: 'low', currentVariantSelection: { override: 'low', inherited: 'low' },
+        });
+        useSessionUIStore.setState({ currentSessionId: 'ses_main', currentSessionDirectory: null });
+        useUIStore.setState({
+          favoriteModels: [{ providerID: 'provider', modelID: 'a' }, { providerID: 'provider', modelID: 'b' }, { providerID: 'provider', modelID: 'c' }],
+          hiddenModels: [], shortcutOverrides: {}, isSettingsDialogOpen: false, isCommandPaletteOpen: false, isHelpDialogOpen: false, isSessionSwitcherOpen: false, isAboutDialogOpen: false,
+        });
+        // The pinned column's session runs on b at low effort (and remembers low on c); the main chat on a.
+        selections.saveSessionAgentSelection('ses_pinned', 'build');
+        selections.saveSessionModelSelection('ses_pinned', 'provider', 'b');
+        selections.saveAgentModelVariantForSession('ses_pinned', 'build', 'provider', 'b', 'low');
+        selections.saveAgentModelVariantForSession('ses_pinned', 'build', 'provider', 'c', 'low');
+      });
+      const column = document.createElement('form');
+      column.dataset.chatColumn = 'pinned';
+      column.dataset.chatSessionId = 'ses_pinned';
+      document.body.append(column);
+      const pinnedComposer = createComposer(column);
+      formRef.current = column;
+      const mainComposer = createComposer(document.body);
+      const press = async (target: HTMLElement, init: KeyboardEventInit) => {
+        const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+        await act(async () => { target.dispatchEvent(event); });
+        await whenModelPickWritten('ses_pinned');
+        await whenModelPickWritten('ses_main');
+        return event;
+      };
+      const favorite = { key: ']', code: 'BracketRight', ctrlKey: true, altKey: true };
+      const effort = { key: 'T', code: 'KeyT', ctrlKey: true, shiftKey: true };
+
+      expect((await press(pinnedComposer, favorite)).defaultPrevented).toBe(true);
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'low' } }]);
+      written.length = 0;
+
+      expect((await press(pinnedComposer, effort)).defaultPrevented).toBe(true);
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'high' } }]);
+      written.length = 0;
+
+      // The same keys in the main chat's composer still change the main session, and only it.
+      expect((await press(mainComposer, favorite)).defaultPrevented).toBe(true);
+      expect((await press(mainComposer, effort)).defaultPrevented).toBe(true);
+      expect(written.map((entry) => entry.id)).toEqual(['ses_main', 'ses_main']);
+      expect(written[0]?.model).toMatchObject({ providerID: 'provider', id: 'b' });
+    }, false, <PinnedComposerKeys formRef={formRef} />);
+  } finally {
+    switchModel.mockRestore();
+    selections.clearSessionSelections('ses_pinned');
+    useConfigStore.setState(oldConfig, true);
+    useUIStore.setState(oldUI, true);
+    useSessionUIStore.setState(oldSession, true);
+  }
+});
+
+test('a pinned column shortcut passes its known directory even before the session is in sync', async () => {
+  const oldConfig = useConfigStore.getState();
+  const oldUI = useUIStore.getState();
+  const oldSession = useSessionUIStore.getState();
+  const selections = useSelectionStore.getState();
+  const written: Array<{ id: string; model: unknown }> = [];
+  const models = new Map<string, unknown>([
+    ['ses_main', { providerID: 'provider', id: 'a', variant: 'low' }],
+    ['ses_pinned', { providerID: 'provider', id: 'b', variant: 'low' }],
+  ]);
+  const accepted: Array<{ id: string; model: unknown }> = [];
+  const seenDirectories: Array<string | null> = [];
+  const oldDirectory = opencodeClient.getDirectory();
+  const switchReal = opencodeClient.switchSessionModel.bind(opencodeClient);
+  const switchModel = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (id, model, dir) => { written.push({ id, model }); await switchReal(id, model, dir); });
+  const model = (id: string) => ({ id, providerID: 'provider', modelID: id, name: id, enabled: true, status: 'active' as const,
+    capabilities: { tools: true, input: ['text'], output: ['text'] }, variants: [{ id: 'low', settings: {} }, { id: 'high', settings: {} }], time: { released: 0 }, cost: [], limit: { context: 1, output: 1 } });
+  const formRef = React.createRef<HTMLFormElement>();
+  try {
+    await withShortcutsMounted(async () => {
+      await act(async () => {
+        useConfigStore.setState({
+          providers: [{ id: 'provider', name: 'provider', activation: 'enabled', package: 'provider', models: [model('a'), model('b'), model('c')] }],
+          activeDirectoryKey: directory,
+          currentProviderId: 'provider', currentModelId: 'a', currentAgentName: 'build', currentVariant: 'low', currentVariantSelection: { override: 'low', inherited: 'low' },
+        });
+        useSessionUIStore.setState({ currentSessionId: 'ses_main', currentSessionDirectory: null });
+        useUIStore.setState({
+          favoriteModels: [{ providerID: 'provider', modelID: 'a' }, { providerID: 'provider', modelID: 'b' }, { providerID: 'provider', modelID: 'c' }],
+          hiddenModels: [], shortcutOverrides: {}, isSettingsDialogOpen: false, isCommandPaletteOpen: false, isHelpDialogOpen: false, isSessionSwitcherOpen: false, isAboutDialogOpen: false,
+        });
+        // The pinned column's session runs on b at low effort (and remembers low on c); the main chat on a.
+        selections.saveSessionAgentSelection('ses_pinned', 'build');
+        selections.saveSessionModelSelection('ses_pinned', 'provider', 'b');
+        selections.saveAgentModelVariantForSession('ses_pinned', 'build', 'provider', 'b', 'low');
+        selections.saveAgentModelVariantForSession('ses_pinned', 'build', 'provider', 'c', 'low');
+      });
+      const column = document.createElement('form');
+      column.dataset.chatColumn = 'pinned';
+      column.dataset.chatSessionId = 'ses_pinned';
+      document.body.append(column);
+      const pinnedComposer = createComposer(column);
+      formRef.current = column;
+      const mainComposer = createComposer(document.body);
+      const press = async (target: HTMLElement, init: KeyboardEventInit) => {
+        const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+        await act(async () => { target.dispatchEvent(event); });
+        await whenModelPickWritten('ses_pinned');
+        await whenModelPickWritten('ses_main');
+        return event;
+      };
+      const favorite = { key: ']', code: 'BracketRight', ctrlKey: true, altKey: true };
+      const effort = { key: 'T', code: 'KeyT', ctrlKey: true, shiftKey: true };
+
+      opencodeClient.setDirectory('/workspace/other-project');
+      expect(getSyncSessionDirectory('ses_pinned')).toBeNull();
+      expect((await press(pinnedComposer, favorite)).defaultPrevented).toBe(true);
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'low' } }]);
+      await opencodeClient.sendMessage({ id: 'ses_pinned', text: 'Next', directory });
+      expect(accepted.at(-1)).toEqual({ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'low' } });
+      expect(models.get('ses_pinned')).toEqual({ providerID: 'provider', id: 'c', variant: 'low' });
+      expect(models.get('ses_main')).toEqual({ providerID: 'provider', id: 'a', variant: 'low' });
+      written.length = 0;
+
+      expect((await press(pinnedComposer, effort)).defaultPrevented).toBe(true);
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'high' } }]);
+      await opencodeClient.sendMessage({ id: 'ses_pinned', text: 'Next', directory });
+      expect(accepted.at(-1)).toEqual({ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'high' } });
+      expect(models.get('ses_pinned')).toEqual({ providerID: 'provider', id: 'c', variant: 'high' });
+      expect(models.get('ses_main')).toEqual({ providerID: 'provider', id: 'a', variant: 'low' });
+      written.length = 0;
+
+      // The same keys in the main chat's composer still change the main session, and only it.
+      expect((await press(mainComposer, favorite)).defaultPrevented).toBe(true);
+      expect((await press(mainComposer, effort)).defaultPrevented).toBe(true);
+      expect(written.map((entry) => entry.id)).toEqual(['ses_main', 'ses_main']);
+      expect(written[0]?.model).toMatchObject({ providerID: 'provider', id: 'b' });
+    }, false, <PinnedComposerKeys formRef={formRef} />, (id) => { accepted.push({ id, model: models.get(id) }); }, (id, model, dir) => {
+      seenDirectories.push(dir);
+      if (dir !== directory) return false;
+      models.set(id, model);
+      return true;
+    });
+  } finally {
+    switchModel.mockRestore();
+    opencodeClient.setDirectory(oldDirectory);
+    selections.clearSessionSelections('ses_pinned');
+    useConfigStore.setState(oldConfig, true);
+    useUIStore.setState(oldUI, true);
+    useSessionUIStore.setState(oldSession, true);
+  }
+});
+
+test('a pinned column shortcut uses the pinned directory model catalog', async () => {
+  const oldConfig = useConfigStore.getState();
+  const oldUI = useUIStore.getState();
+  const oldSession = useSessionUIStore.getState();
+  const selections = useSelectionStore.getState();
+  const written: Array<{ id: string; model: unknown }> = [];
+  const models = new Map<string, unknown>([
+    ['ses_main', { providerID: 'provider', id: 'a', variant: 'low' }],
+    ['ses_pinned', { providerID: 'provider', id: 'b', variant: 'low' }],
+  ]);
+  const accepted: Array<{ id: string; model: unknown }> = [];
+  const switchModel = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (id, model) => { written.push({ id, model }); models.set(id, model); });
+  const model = (id: string) => ({ id, providerID: 'provider', modelID: id, name: id, enabled: true, status: 'active' as const,
+    capabilities: { tools: true, input: ['text'], output: ['text'] }, variants: [{ id: 'low', settings: {} }, { id: 'high', settings: {} }], time: { released: 0 }, cost: [], limit: { context: 1, output: 1 } });
+  const formRef = React.createRef<HTMLFormElement>();
+  try {
+    await withShortcutsMounted(async () => {
+      await act(async () => {
+        const activeProvider = { id: 'provider', name: 'provider', activation: 'enabled' as const, package: 'provider', models: [model('a'), model('b')] };
+        const pinnedProvider = { ...activeProvider, models: [model('a'), model('b'), model('c')] };
+        useConfigStore.setState({
+          providers: [activeProvider], activeDirectoryKey: '/workspace/main',
+          directoryScoped: { ...useConfigStore.getState().directoryScoped, [directory]: { ...useConfigStore.getState().directoryScoped[directory], providers: [pinnedProvider] } },
+          currentProviderId: 'provider', currentModelId: 'a', currentAgentName: 'build', currentVariant: 'low', currentVariantSelection: { override: 'low', inherited: 'low' },
+        });
+        useSessionUIStore.setState({ currentSessionId: 'ses_main', currentSessionDirectory: null });
+        useUIStore.setState({
+          favoriteModels: [{ providerID: 'provider', modelID: 'a' }, { providerID: 'provider', modelID: 'b' }, { providerID: 'provider', modelID: 'c' }],
+          hiddenModels: [], shortcutOverrides: {}, isSettingsDialogOpen: false, isCommandPaletteOpen: false, isHelpDialogOpen: false, isSessionSwitcherOpen: false, isAboutDialogOpen: false,
+        });
+        // The pinned column's session runs on b at low effort (and remembers low on c); the main chat on a.
+        selections.saveSessionAgentSelection('ses_pinned', 'build');
+        selections.saveSessionModelSelection('ses_pinned', 'provider', 'b');
+        selections.saveAgentModelVariantForSession('ses_pinned', 'build', 'provider', 'b', 'low');
+        selections.saveAgentModelVariantForSession('ses_pinned', 'build', 'provider', 'c', 'low');
+      });
+      const column = document.createElement('form');
+      column.dataset.chatColumn = 'pinned';
+      column.dataset.chatSessionId = 'ses_pinned';
+      document.body.append(column);
+      const pinnedComposer = createComposer(column);
+      formRef.current = column;
+      const mainComposer = createComposer(document.body);
+      const press = async (target: HTMLElement, init: KeyboardEventInit) => {
+        const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+        await act(async () => { target.dispatchEvent(event); });
+        await whenModelPickWritten('ses_pinned');
+        await whenModelPickWritten('ses_main');
+        return event;
+      };
+      const favorite = { key: ']', code: 'BracketRight', ctrlKey: true, altKey: true };
+      const effort = { key: 'T', code: 'KeyT', ctrlKey: true, shiftKey: true };
+
+      expect(selectProvidersForDirectory(useConfigStore.getState(), directory)[0]?.models.map((m) => m.id)).toEqual(['a', 'b', 'c']);
+      expect((await press(pinnedComposer, favorite)).defaultPrevented).toBe(true);
+      await opencodeClient.sendMessage({ id: 'ses_pinned', text: 'Next', directory });
+      expect(accepted.at(-1)).toEqual({ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'low' } });
+      expect(models.get('ses_pinned')).toEqual({ providerID: 'provider', id: 'c', variant: 'low' });
+      expect(models.get('ses_main')).toEqual({ providerID: 'provider', id: 'a', variant: 'low' });
+      written.length = 0;
+
+      expect((await press(pinnedComposer, effort)).defaultPrevented).toBe(true);
+      expect(written).toEqual([{ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'high' } }]);
+      await opencodeClient.sendMessage({ id: 'ses_pinned', text: 'Next', directory });
+      expect(accepted.at(-1)).toEqual({ id: 'ses_pinned', model: { providerID: 'provider', id: 'c', variant: 'high' } });
+      expect(models.get('ses_pinned')).toEqual({ providerID: 'provider', id: 'c', variant: 'high' });
+      expect(models.get('ses_main')).toEqual({ providerID: 'provider', id: 'a', variant: 'low' });
+      written.length = 0;
+
+      // The same keys in the main chat's composer still change the main session, and only it.
+      expect((await press(mainComposer, favorite)).defaultPrevented).toBe(true);
+      expect((await press(mainComposer, effort)).defaultPrevented).toBe(true);
+      expect(written.map((entry) => entry.id)).toEqual(['ses_main', 'ses_main']);
+      expect(written[0]?.model).toMatchObject({ providerID: 'provider', id: 'b' });
+    }, false, <PinnedComposerKeys formRef={formRef} />, (id) => { accepted.push({ id, model: models.get(id) }); });
+  } finally {
+    switchModel.mockRestore();
+    selections.clearSessionSelections('ses_pinned');
+    useConfigStore.setState(oldConfig, true);
+    useUIStore.setState(oldUI, true);
+    useSessionUIStore.setState(oldSession, true);
+  }
 });
 
 test('double Escape stops a running chat only from its composer', async () => {

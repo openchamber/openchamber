@@ -70,7 +70,7 @@ Auto. There is no env gate — the feature shipped dark behind
 - The sentinel never reaches OpenCode. OpenCode 2.x holds the model and agent
   on the session and a prompt body carries only the user's text, so Auto is
   per-session state: `POST /api/session` drops the sentinel from the create
-  body (the session starts on OpenCode's default; the first send switches it),
+  body (the session starts on OpenCode's default; the creating client then marks it with one model switch of the sentinel),
   `POST /api/session/:id/model` with the sentinel is
   swallowed and marks the session (`noteModelSelection`), and every
   `POST /api/session/:id/{prompt,command}` in a marked session is routed
@@ -79,8 +79,12 @@ Auto. There is no env gate — the feature shipped dark behind
   resumes a turn, so it is routed on the values the user filled in, and a
   failure answers with an error and leaves the form pending. Both sit ahead of
   the generic proxy, which replays a parsed body.
-  The message queue calls `resolveAutoSelection` itself and applies the answer
-  with the model/agent switches it already makes. Without a fallback model the
+  The message queue calls `resolveAutoSelection` itself with `liveOnly`, so an
+  ordinary item routes only while the session carries the mark, and applies the
+  answer with the model/agent switches it already makes. A `liveOnly` answer is
+  null when the mark was cleared while the classifier ran: the check is the last
+  step before the answer returns, so an explicit pick that arrived meanwhile wins.
+  Without a fallback model the
   runtime throws 400 rather than forwarding. The OpenChamber session service
   (`openchamber-sessions/routes.js`) talks to OpenCode through the SDK and can
   pick Auto up from Session Defaults, so it calls `resolveAutoSelection` itself

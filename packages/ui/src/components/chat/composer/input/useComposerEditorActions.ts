@@ -16,6 +16,7 @@ import type { useComposerAutocompleteState } from './useComposerAutocompleteStat
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
+import { commitAgentPinnedModel } from '@/sync/model-gesture';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getCycledPrimaryAgentName } from '../../mobileControlsUtils';
 import { isAutoModel } from '@/lib/routing/autoModel';
@@ -113,7 +114,10 @@ export function useComposerEditorActions({
             pickSessionAgent(currentSessionId, nextAgentName);
         }
 
-        if (!columnPinned) setAgent(nextAgentName);
+        if (!columnPinned) {
+            setAgent(nextAgentName);
+            commitAgentPinnedModel(currentSessionId, nextAgentName);
+        }
     }, [agents, columnPinned, currentAgentName, currentModelId, currentProviderId, currentSessionId, setAgent, pickSessionAgent]);
 
     const dictationHeightHostRef = React.useRef<HTMLDivElement | null>(null);

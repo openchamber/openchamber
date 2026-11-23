@@ -175,6 +175,29 @@ describe('resolveAutoSelection', () => {
     expect(jev.ask).not.toHaveBeenCalled();
   });
 
+  it('routes a queued send only while the session carries the Auto mark', async () => {
+    const { runtime, jev } = makeRuntime({ answers: { category: { choice: 'hard', confidence: 0.97 } } });
+    expect(await runtime.resolveAutoSelection(send({ liveOnly: true }))).toBeNull();
+    expect(jev.ask).not.toHaveBeenCalled();
+    runtime.noteModelSelection('s1', AUTO, '/repo');
+    expect((await runtime.resolveAutoSelection(send({ liveOnly: true }))).model).toMatchObject({ providerID: 'openai', id: 'gpt-6-astra' });
+    runtime.noteModelSelection('s1', { providerID: 'anthropic', id: 'claude-opus-5' }, '/repo');
+    expect(await runtime.resolveAutoSelection(send({ liveOnly: true }))).toBeNull();
+  });
+
+  it('answers a queued send with nothing, and announces no decision, when an explicit pick cleared the mark while it classified', async () => {
+    const { runtime, jev, events } = makeRuntime({ answers: { category: { choice: 'hard', confidence: 0.97 } } });
+    runtime.noteModelSelection('s1', AUTO, '/repo');
+    jev.ask.mockImplementationOnce(async () => {
+      runtime.noteModelSelection('s1', { providerID: 'anthropic', id: 'claude-opus-5' }, '/repo');
+      return { answers: { category: { choice: 'hard', confidence: 0.97 } }, ms: 12 };
+    });
+
+    expect(await runtime.resolveAutoSelection(send({ liveOnly: true }))).toBeNull();
+    expect(jev.ask).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([]);
+  });
+
   it('answers with the routed category model, variant and agent', async () => {
     const { runtime, events } = makeRuntime({ answers: { category: { choice: 'hard', confidence: 0.97 } } });
     const resolved = await runtime.resolveAutoSelection(send({ agent: 'build' }));

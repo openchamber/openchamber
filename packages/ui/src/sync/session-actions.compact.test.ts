@@ -5,8 +5,9 @@ import type { ModelRef, ModelSelection, Session } from "@/lib/opencode/model"
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from "@/lib/runtime-switch"
 import { compactSession } from "./session-actions"
 import { ChildStoreManager } from "./child-store"
-import { getAllSyncSessions, setSyncRefs } from "./sync-refs"
+import { setSyncRefs } from "./sync-refs"
 import { useSelectionStore } from "./selection-store"
+import { commitModelPick, whenModelPickWritten } from "./model-gesture"
 
 const DIRECTORY = "/repo"
 const SESSION_ID = "ses_compact"
@@ -30,7 +31,7 @@ const sessionOn = (model: ModelRef): Session => ({
 
 let manager: ChildStoreManager
 let calls: ClientCall[]
-let switchError: Error | null
+let releaseSwitch: Promise<void> | null
 const originalBase = getRuntimeApiBaseUrl()
 const originalRuntime = getRuntimeKey()
 
@@ -41,20 +42,14 @@ beforeEach(() => {
     session: [sessionOn({ providerID: "provider", id: "model-a", variant: "high" })],
   })
   calls = []
-  switchError = null
+  releaseSwitch = null
   useSelectionStore.setState({ sessionPickedModels: new Map() })
   spyOn(opencodeClient, "switchSessionModel").mockImplementation(async (_id, model, directory) => {
+    await releaseSwitch
     calls.push({ method: "switchModel", model, directory })
-    if (switchError) throw switchError
   })
   spyOn(opencodeClient, "compactSession").mockImplementation(async (_id, directory) => {
     calls.push({ method: "compact", directory })
-  })
-  // The server holds what the sync store holds.
-  spyOn(opencodeClient, "getSession").mockImplementation(async (id) => {
-    const session = getAllSyncSessions().find((candidate) => candidate.id === id)
-    if (!session) throw new Error(`no session ${id}`)
-    return session
   })
 })
 
@@ -65,138 +60,52 @@ afterEach(() => {
 })
 
 describe("compactSession", () => {
-  test("settles the applied pick only after successful compaction", async () => {
-    const store = useSelectionStore.getState()
-    store.pickSessionModel(SESSION_ID, "provider", "model-b")
-    spyOn(opencodeClient, "compactSession").mockRejectedValueOnce(new Error("compact refused"))
-      .mockResolvedValue(undefined)
-    const selection = { providerID: "provider", modelID: "model-b" }
-    await expect(compactSession(SESSION_ID, selection, DIRECTORY)).rejects.toThrow("compact refused")
-    expect(store.getSessionModelPick(SESSION_ID)).toEqual({ providerId: "provider", modelId: "model-b" })
-    await compactSession(SESSION_ID, selection, DIRECTORY)
-    expect(store.getSessionModelPick(SESSION_ID)).toBeNull()
-  })
+  test("compacts on the model the session has and writes no model, whatever the composer or a pending pick shows", async () => {
+    useSelectionStore.getState().pickSessionModel(SESSION_ID, "provider", "model-b")
 
-  test("a successful compaction settles its runtime after a switch and preserves a newer pick", async () => {
-    const store = useSelectionStore.getState()
-    store.pickSessionModel(SESSION_ID, "provider", "model-b")
-    spyOn(opencodeClient, "compactSession").mockImplementation(async () => {
-      switchRuntimeEndpoint({ apiBaseUrl: "https://compact-other.test", runtimeKey: "compact-other" })
-      store.pickSessionModel(SESSION_ID, "provider", "model-b")
-    })
-    await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-b" }, DIRECTORY)
-    expect(store.getSessionModelPick(SESSION_ID)).toEqual({ providerId: "provider", modelId: "model-b" })
-    switchRuntimeEndpoint({ apiBaseUrl: originalBase, runtimeKey: originalRuntime })
-    expect(store.getSessionModelPick(SESSION_ID)).toBeNull()
-  })
-
-  test("switches a changed model before compacting, both in the session directory", async () => {
-    await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-b", variant: "high" }, DIRECTORY)
-
-    expect(calls).toEqual([
-      { method: "switchModel", model: { providerID: "provider", id: "model-b", variant: "high" }, directory: DIRECTORY },
-      { method: "compact", directory: DIRECTORY },
-    ])
-  })
-
-  test("switches when only the reasoning variant changes", async () => {
-    await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-a", variant: "low" }, DIRECTORY)
-
-    expect(calls).toEqual([
-      { method: "switchModel", model: { providerID: "provider", id: "model-a", variant: "low" }, directory: DIRECTORY },
-      { method: "compact", directory: DIRECTORY },
-    ])
-  })
-
-  test("sends no switch when the model and variant already match the session", async () => {
-    await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-a", variant: "high" }, DIRECTORY)
+    await compactSession(SESSION_ID, DIRECTORY)
 
     expect(calls).toEqual([{ method: "compact", directory: DIRECTORY }])
   })
 
-  test("treats an explicit Default as the effort the session already records", async () => {
-    manager.getChild(DIRECTORY)?.setState({
-      session: [sessionOn({ providerID: "provider", id: "model-a", variant: "default" })],
-    })
+  test("a failed compaction is not retried with a model", async () => {
+    spyOn(opencodeClient, "compactSession").mockRejectedValueOnce(new Error("compact refused")).mockResolvedValue(undefined)
 
-    await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-a", variant: null }, DIRECTORY)
-
-    expect(calls).toEqual([{ method: "compact", directory: DIRECTORY }])
-  })
-
-  test("a failed switch leaves the transcript uncompacted", async () => {
-    switchError = new Error("switch refused")
-
-    await expect(
-      compactSession(SESSION_ID, { providerID: "provider", modelID: "model-b", variant: "high" }, DIRECTORY),
-    ).rejects.toThrow("switch refused")
-
-    expect(calls).toEqual([
-      { method: "switchModel", model: { providerID: "provider", id: "model-b", variant: "high" }, directory: DIRECTORY },
-    ])
-  })
-
-  for (const returnToOriginal of [false, true]) {
-    test(`a runtime switch during model reconciliation cancels compaction, return to original: ${returnToOriginal}`, async () => {
-      let finishSwitch = () => {}
-      let switchStarted = () => {}
-      const reachedSwitch = new Promise<void>((resolve) => { switchStarted = resolve })
-      const pendingSwitch = new Promise<void>((resolve) => { finishSwitch = resolve })
-      spyOn(opencodeClient, "switchSessionModel").mockImplementation(() => {
-        switchStarted()
-        return pendingSwitch
-      })
-
-      const result = compactSession(SESSION_ID, { providerID: "provider", modelID: "model-b", variant: "high" }, DIRECTORY)
-      await reachedSwitch
-      switchRuntimeEndpoint({ apiBaseUrl: "https://compact-other.test", runtimeKey: "compact-other" })
-      if (returnToOriginal) {
-        switchRuntimeEndpoint({ apiBaseUrl: originalBase, runtimeKey: originalRuntime })
-      }
-      finishSwitch()
-
-      await expect(result).rejects.toThrow("runtime changed")
-      expect(calls).toEqual([])
-    })
-  }
-
-  test("an Auto pick compacts on the session's own model without a switch", async () => {
-    await compactSession(SESSION_ID, { providerID: "openchamber", modelID: "auto" }, DIRECTORY)
-
-    expect(calls).toEqual([{ method: "compact", directory: DIRECTORY }])
-  })
-
-  test("a failed session read still compacts, with the picked model stated explicitly", async () => {
-    const store = useSelectionStore.getState()
-    store.pickSessionModel(SESSION_ID, "provider", "model-a")
-    spyOn(opencodeClient, "getSession").mockRejectedValue(new Error("session read failed"))
-
-    // The cache already matches the pick, so only the failed read makes it switch.
-    await compactSession(SESSION_ID, { providerID: "provider", modelID: "model-a", variant: "high" }, DIRECTORY)
-
-    expect(calls).toEqual([
-      { method: "switchModel", model: { providerID: "provider", id: "model-a", variant: "high" }, directory: DIRECTORY },
-      { method: "compact", directory: DIRECTORY },
-    ])
-    expect(store.getSessionModelPick(SESSION_ID)).toBeNull()
-  })
-
-  test("a runtime switch during a failed session read cancels compaction", async () => {
-    spyOn(opencodeClient, "getSession").mockImplementation(async () => {
-      switchRuntimeEndpoint({ apiBaseUrl: "https://compact-other.test", runtimeKey: "compact-other" })
-      throw new Error("session read failed")
-    })
-
-    await expect(
-      compactSession(SESSION_ID, { providerID: "provider", modelID: "model-b" }, DIRECTORY),
-    ).rejects.toThrow("runtime changed")
+    await expect(compactSession(SESSION_ID, DIRECTORY)).rejects.toThrow("compact refused")
+    await compactSession(SESSION_ID, DIRECTORY)
 
     expect(calls).toEqual([])
   })
 
-  test("compacts directly when the composer has no selection", async () => {
-    await compactSession(SESSION_ID, null, DIRECTORY)
+  test("waits for this client's own pick still being written, then compacts", async () => {
+    let release = () => {}
+    releaseSwitch = new Promise<void>((resolve) => { release = resolve })
+    commitModelPick(SESSION_ID, { providerID: "provider", modelID: "model-b", variant: "low" }, DIRECTORY)
 
-    expect(calls).toEqual([{ method: "compact", directory: DIRECTORY }])
+    // Without the wait the compaction would be recorded here, before the held switch is released.
+    const compacting = compactSession(SESSION_ID, DIRECTORY)
+    release()
+    await compacting
+    await whenModelPickWritten(SESSION_ID)
+    expect(calls).toEqual([
+      { method: "switchModel", model: { providerID: "provider", id: "model-b", variant: "low" }, directory: DIRECTORY },
+      { method: "compact", directory: DIRECTORY },
+    ])
   })
+
+  for (const returnToOriginal of [false, true]) {
+    test(`a runtime switch while a pick is being written cancels compaction, return to original: ${returnToOriginal}`, async () => {
+      let release = () => {}
+      releaseSwitch = new Promise<void>((resolve) => { release = resolve })
+      commitModelPick(SESSION_ID, { providerID: "provider", modelID: "model-b" }, DIRECTORY)
+
+      const result = compactSession(SESSION_ID, DIRECTORY)
+      switchRuntimeEndpoint({ apiBaseUrl: "https://compact-other.test", runtimeKey: "compact-other" })
+      if (returnToOriginal) switchRuntimeEndpoint({ apiBaseUrl: originalBase, runtimeKey: originalRuntime })
+      release()
+
+      await expect(result).rejects.toThrow("runtime changed")
+      expect(calls.filter((call) => call.method === "compact")).toEqual([])
+    })
+  }
 })

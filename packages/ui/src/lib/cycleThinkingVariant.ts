@@ -1,4 +1,5 @@
 import { useConfigStore } from '@/stores/useConfigStore';
+import { commitComposerPick } from '@/sync/model-gesture';
 import { useSelectionStore } from '@/sync/selection-store';
 
 export const cycleThinkingVariant = (sessionId: string | null | undefined): boolean => {
@@ -6,6 +7,7 @@ export const cycleThinkingVariant = (sessionId: string | null | undefined): bool
   if (config.getCurrentModelVariants().length === 0) return false;
   const nextVariantOverride = config.cycleCurrentVariant();
   const { currentAgentName, currentProviderId, currentModelId } = useConfigStore.getState();
+  commitComposerPick(sessionId);
   if (sessionId && currentAgentName && currentProviderId && currentModelId) {
     useSelectionStore.getState().saveAgentModelVariantForSession(
       sessionId,

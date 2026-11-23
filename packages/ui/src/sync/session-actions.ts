@@ -2,7 +2,6 @@
 import { compact, partIds, type FilePart, type FormRequest, type Message, type Metadata, type ModelSelection, type Part, type PermissionRequest, type Session, type SyntheticMessage, type TextPart, type UserMessage } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { attachmentBasename, withMissingCitations } from "@/lib/attachmentIdentity"
-import { isAutoModel } from "@/lib/routing/autoModel"
 import { Binary } from "./binary"
 import { dropSessionCaches } from "./session-cache"
 import { buildMetadataMergePatch, readForkMessages } from "./session-metadata-helpers"
@@ -24,7 +23,8 @@ import {
   useRecoverableQuestionsStore,
   type RecoveredQuestion,
 } from "./recoverable-questions"
-import { resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
+import { whenModelPickWritten } from "./model-gesture"
+import { resolveCheckedSendSelection } from "./session-selection"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -442,31 +442,11 @@ export async function waitForConnectionOrThrow(): Promise<void> {
 }
 
 
-type CompactSelection = {
-  providerID: string
-  modelID: string
-  variant?: string | null
-}
-
-export async function compactSession(
-  sessionId: string,
-  selection: CompactSelection | null,
-  directory?: string | null,
-): Promise<void> {
+export async function compactSession(sessionId: string, directory?: string | null): Promise<void> {
   const isCurrentRuntime = captureRuntimeInstance()
-  const settleModelPick = selection && !isAutoModel(selection.providerID, selection.modelID)
-    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, selection.providerID, selection.modelID)
-    : undefined
-  if (selection && !isAutoModel(selection.providerID, selection.modelID)) {
-    const { model } = await resolveSendSelection(sessionId, directory ?? undefined, selection)
-    if (!isCurrentRuntime()) throw new Error("Compaction was cancelled because the runtime changed.")
-    if (model) {
-      await opencodeClient.switchSessionModel(sessionId, model, directory)
-    }
-  }
+  await whenModelPickWritten(sessionId)
   if (!isCurrentRuntime()) throw new Error("Compaction was cancelled because the runtime changed.")
   await opencodeClient.compactSession(sessionId, directory)
-  settleModelPick?.()
 }
 
 type SessionListSnapshot = {
@@ -2156,80 +2136,21 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
 
 export type FormAnswer = Record<string, string | number | boolean | string[]>
 
-type FormSelection = {
-  model?: { providerID: string; modelID: string; variant?: string | null }
-  agent?: string
-}
-
-function resolveFormSelection(record: Session | undefined, sessionId: string): FormSelection {
-  const picks = useSelectionStore.getState()
-  const agentPick = picks.getSessionAgentPick(sessionId) ?? undefined
-  if (
-    record
-    && (isReviewSession(record) || !record.parentID)
-    && useSessionUIStore.getState().currentSessionId === sessionId
-  ) {
-    const config = useConfigStore.getState()
-    return {
-      agent: agentPick ?? config.currentAgentName ?? undefined,
-      model: config.currentProviderId && config.currentModelId
-        ? {
-            providerID: config.currentProviderId,
-            modelID: config.currentModelId,
-            variant: config.currentVariantSelection.override === null ? null : config.currentVariant,
-          }
-        : undefined,
-    }
+function resolveFormAgent(record: Session | undefined, sessionId: string): string | undefined {
+  const agentPick = useSelectionStore.getState().getSessionAgentPick(sessionId) ?? undefined
+  if (record && (isReviewSession(record) || !record.parentID) && useSessionUIStore.getState().currentSessionId === sessionId) {
+    return agentPick ?? useConfigStore.getState().currentAgentName ?? undefined
   }
-  const recordModel = record?.model
-  const modelPick = picks.getSessionModelPick(sessionId)
-  const model = modelPick ?? (recordModel ? { providerId: recordModel.providerID, modelId: recordModel.id } : null)
-  const agent = agentPick ?? record?.agent
-  const savedEffort = model && agent
-    ? picks.getAgentModelVariantForSession(sessionId, agent, model.providerId, model.modelId)
-    : undefined
-  const effortPicked = savedEffort !== undefined && !(recordModel
-    && picks.isSessionModelSwitched(sessionId, `${recordModel.providerID}/${recordModel.id}#${recordModel.variant ?? ""}`))
-  if (!model || (!modelPick && !effortPicked)) return { agent: agentPick }
-  const recordEffort = recordModel?.providerID === model.providerId && recordModel.id === model.modelId
-    ? recordModel.variant
-    : undefined
-  return {
-    agent: agentPick,
-    model: { providerID: model.providerId, modelID: model.modelId, variant: effortPicked ? savedEffort : recordEffort },
-  }
+  return agentPick
 }
 
-async function applyFormSelection(record: Session | undefined, sessionId: string, directory: string | undefined, runtimeKey: string): Promise<() => void> {
-  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return () => {}
-  const { model, agent } = resolveFormSelection(record, sessionId)
-  if (!model && !agent) return () => {}
-  const settleModelPick = model
-    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID, runtimeKey)
-    : undefined
-  const selection = await resolveCheckedSendSelection(sessionId, directory, {
-    providerID: model?.providerID ?? "",
-    modelID: model?.modelID ?? "",
-    variant: model?.variant,
-    agent,
-  })
-  await opencodeClient.applySendSelection(
-    sessionId,
-    { model: model ? selection.model : undefined, agent: selection.agent },
-    directory,
-    runtimeKey,
-  )
-  return () => settleModelPick?.()
-}
-
-export async function applyModelPickToRetry(sessionId: string, directory: string | undefined): Promise<void> {
-  const pick = useSelectionStore.getState().getSessionModelPick(sessionId)
-  if (!pick || isAutoModel(pick.providerId, pick.modelId)) return
-  const { model } = resolveFormSelection(findSessionRecordAnywhere(sessionId, directory), sessionId)
-  if (model?.providerID !== pick.providerId || model.modelID !== pick.modelId) return
-  const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID)
-  await opencodeClient.switchSessionModel(sessionId, { providerID: model.providerID, id: model.modelID, variant: model.variant }, directory)
-  settleModelPick()
+async function applyFormSelection(record: Session | undefined, sessionId: string, directory: string | undefined, runtimeKey: string): Promise<void> {
+  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return
+  await whenModelPickWritten(sessionId)
+  const agent = resolveFormAgent(record, sessionId)
+  if (!agent) return
+  const { agent: changedAgent } = await resolveCheckedSendSelection(sessionId, directory, { providerID: "", modelID: "", agent })
+  await opencodeClient.applySendSelection(sessionId, { agent: changedAgent }, directory, runtimeKey)
 }
 
 export async function replyToForm(
@@ -2249,13 +2170,12 @@ export async function replyToForm(
       sessionId,
       getRequestReplyDirectory("form", sessionId, formId),
     )
-    const settleSelection = await applyFormSelection(record, sessionId, replyDirectory, runtimeKey)
+    await applyFormSelection(record, sessionId, replyDirectory, runtimeKey)
     assertRuntimeCurrent()
     if (await opencodeClient.replyToForm(sessionId, formId, answer, replyDirectory) !== true) {
       throw new Error("Form reply failed")
     }
     if (!isCurrentRuntime()) return
-    settleSelection()
     removeFormRequestFromChildStores(sessionId, formId)
     noteLocalFormReplied(sessionId, formId)
   } catch (error) {

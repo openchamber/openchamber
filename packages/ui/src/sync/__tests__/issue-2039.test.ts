@@ -947,12 +947,14 @@ describe("assistant answer worktree routing", () => {
     const originalSendMessage = state.sendMessage
     const originalWorktreeMetadata = state.worktreeMetadata
     let createdDirectory: string | null | undefined
+    let createdSelection: unknown
 
     useSessionUIStore.setState({
       availableWorktreesByProject: new Map([["/repo", [sourceWorktree]]]),
       worktreeMetadata: new Map([["source-session", sourceWorktree]]),
-      createSession: async (_title, directory) => {
+      createSession: async (_title, directory, _metadata, selection) => {
         createdDirectory = directory
+        createdSelection = selection
         return {
           id: "created-session",
           projectID: "project",
@@ -990,5 +992,7 @@ describe("assistant answer worktree routing", () => {
 
     expect(createdWorktreeProjects).toEqual([{ id: "project", path: "/repo" }])
     expect(createdDirectory).toBe("/worktrees/generated-branch")
+    // The execution's model is the new session's at creation; the send that follows writes none.
+    expect(createdSelection).toEqual({ model: { providerID: "provider", id: "model", variant: undefined } })
   })
 })

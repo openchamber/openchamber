@@ -1,13 +1,14 @@
 import { opencodeClient } from "@/lib/opencode/client"
-import { isSameModelRef, toModelRef, type ModelRef, type Session } from "@/lib/opencode/model"
+import type { Session } from "@/lib/opencode/model"
+import { isAutoModel } from "@/lib/routing/autoModel"
 import { markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { captureRuntimeInstance } from "@/lib/runtime-switch"
 import { selectCatalogLoadedForDirectory, selectConfigAgentsForDirectory, useConfigStore } from "@/stores/useConfigStore"
-import { getAllSyncSessions, getDirectoryState } from "./sync-refs"
+import { whenModelPickWritten } from "./model-gesture"
 
 type ResolvedSendSelection = {
-  model?: ModelRef
   agent?: string
+  providerID?: string
 }
 
 export async function resolveSendSelection(
@@ -15,7 +16,7 @@ export async function resolveSendSelection(
   directory: string | undefined,
   desired: { providerID: string; modelID: string; variant?: string | null; agent?: string },
 ): Promise<ResolvedSendSelection> {
-  const model = toModelRef({ providerID: desired.providerID, id: desired.modelID, variant: desired.variant })
+  await whenModelPickWritten(sessionId)
   const isCurrentRuntime = captureRuntimeInstance()
   let serverSession: Session
   try {
@@ -26,17 +27,12 @@ export async function resolveSendSelection(
       throw error
     }
     if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
-    return { model }
+    return {}
   }
   if (!isCurrentRuntime()) throw new Error("Message was not sent because the runtime changed.")
-  const syncSession = getDirectoryState(directory)?.session.find((candidate) => candidate.id === sessionId)
-    ?? getAllSyncSessions().find((candidate) => candidate.id === sessionId)
-  const runsOn = (session: Session | undefined) => Boolean(session?.model && isSameModelRef(session.model, model))
-  const modelChanged = !runsOn(serverSession) || !runsOn(syncSession)
-  const agentChanged = Boolean(desired.agent) && serverSession.agent !== desired.agent
   return {
-    model: modelChanged ? model : undefined,
-    agent: agentChanged ? desired.agent : undefined,
+    agent: desired.agent && serverSession.agent !== desired.agent ? desired.agent : undefined,
+    providerID: isAutoModel(desired.providerID, desired.modelID) ? undefined : serverSession.model?.providerID,
   }
 }
 

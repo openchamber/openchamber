@@ -5,8 +5,11 @@ import { z } from "zod"
 import { createDeferredSafeJSONStorage } from "@/stores/utils/safeStorage"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { isAutoModel } from "@/lib/routing/autoModel"
+import { isSameModelRef, type ModelRef } from "@/lib/opencode/model"
+import { getAllSyncSessionMap } from "./sync-refs"
 
 type ModelSelection = { providerId: string; modelId: string }
+type ModelPick = ModelSelection & { base: ModelRef | null }
 type LastUsedProvider = { providerID: string; modelID: string }
 type VariantSelections = Map<string, Map<string, Map<string, string | null>>>
 const variantEntriesSchema = z.array(z.tuple([
@@ -30,7 +33,7 @@ const persistedSelectionSchema = z.object({
 
 type SelectionState = {
   sessionModelSelections: Map<string, ModelSelection>
-  sessionPickedModels: Map<string, ModelSelection>
+  sessionPickedModels: Map<string, ModelPick>
   sessionAgentSelections: Map<string, string>
   sessionPickedAgents: Map<string, string>
   sessionFollowedAgents: Map<string, string>
@@ -45,6 +48,7 @@ type SelectionState = {
   getSessionModelSelection: (sessionId: string) => { providerId: string; modelId: string } | null
   pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void
   getSessionModelPick: (sessionId: string) => ModelSelection | null
+  liveSessionModelPick: (sessionId: string, sessionModel: ModelRef | undefined) => ModelSelection | null
   captureSessionModelPickSettlement: (sessionId: string, providerId: string, modelId: string, runtimeKey?: string) => () => void
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void
   getSessionAgentSelection: (sessionId: string) => string | null
@@ -93,11 +97,34 @@ export const useSelectionStore = create<SelectionState>()(
 
       pickSessionModel: (sessionId, providerId, modelId) => set((state) => {
         const sessionPickedModels = new Map(state.sessionPickedModels)
-        sessionPickedModels.set(variantSessionKey(sessionId), { providerId, modelId })
+        sessionPickedModels.set(variantSessionKey(sessionId), {
+          providerId,
+          modelId,
+          base: getAllSyncSessionMap().get(sessionId)?.model ?? null,
+        })
         return { sessionPickedModels }
       }),
 
-      getSessionModelPick: (sessionId) => get().sessionPickedModels.get(variantSessionKey(sessionId)) ?? null,
+      getSessionModelPick: (sessionId) => {
+        const pick = get().sessionPickedModels.get(variantSessionKey(sessionId))
+        return pick ? { providerId: pick.providerId, modelId: pick.modelId } : null
+      },
+
+      liveSessionModelPick: (sessionId, sessionModel) => {
+        const key = variantSessionKey(sessionId)
+        const pick = get().sessionPickedModels.get(key)
+        if (!pick) return null
+        if (!pick.base || !sessionModel || isSameModelRef(pick.base, sessionModel)) {
+          return { providerId: pick.providerId, modelId: pick.modelId }
+        }
+        set((state) => {
+          if (state.sessionPickedModels.get(key) !== pick) return state
+          const sessionPickedModels = new Map(state.sessionPickedModels)
+          sessionPickedModels.delete(key)
+          return { sessionPickedModels }
+        })
+        return null
+      },
 
       captureSessionModelPickSettlement: (sessionId, providerId, modelId, runtimeKey = getRuntimeKey()) => {
         const key = JSON.stringify([runtimeKey, sessionId])

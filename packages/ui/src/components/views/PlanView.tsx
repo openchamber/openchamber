@@ -40,7 +40,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { TodoSendDialog } from '@/components/session/TodoSendDialog';
-import { resolveExecutionForDirectory, type TodoSendExecution } from '@/components/session/todoSendExecution';
+import { resolveWorktreeExecution, type TodoSendExecution } from '@/components/session/todoSendExecution';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { toast } from '@/components/ui';
 import { loadMagicPrompts, type MagicPromptSnapshot } from '@/lib/magicPrompts';
@@ -625,7 +625,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
 
         let sessionId: string | null = null;
         let directoryHint: string | null = sendTargetProject.path;
-        let execution = dialogExecution;
+        let execution: TodoSendExecution | null = dialogExecution;
 
         if (pendingPlanSend.target === 'worktree') {
           if (!canCreateWorktree) {
@@ -637,7 +637,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           }
           sessionId = created.id;
           directoryHint = created.directory;
-          execution = await resolveExecutionForDirectory(created.directory, dialogExecution);
+          execution = await resolveWorktreeExecution(sessionId, created.directory, dialogExecution);
         } else {
           const sessionResult = await createSession(undefined, sendTargetProject.path, undefined, {
             model: { providerID: execution.providerID, id: execution.modelID, variant: execution.variant || undefined },
@@ -651,7 +651,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
           initializeNewOpenChamberSession(sessionResult.id, useConfigStore.getState().agents ?? []);
         }
 
-        if (!sessionId) {
+        if (!sessionId || !execution) {
           return;
         }
 

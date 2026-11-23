@@ -380,32 +380,9 @@ describe('resolveSendSelection thinking level', () => {
   });
   const desire = (variant) => resolveSendSelection('ses_variant', DIRECTORY, { providerID: 'openai', modelID: MODEL.id, variant });
 
-  // An explicit Default is `null` in UI state; OpenCode rejects a null
-  // variant, so it has to switch the session off its effort without one.
-  test('Default on a session with an effort switches it to the model without a variant', async () => {
+  test('no effort the composer shows makes a send state a model', async () => {
     seedSession({ ...MODEL, variant: 'high' });
-    expect((await desire(null)).model).toEqual(MODEL);
-  });
-
-  test('Default on a session without an effort sends no switch', async () => {
-    seedSession(MODEL);
-    expect((await desire(null)).model).toBeUndefined();
-    expect((await desire(undefined)).model).toBeUndefined();
-  });
-
-  // OpenCode records a switch without a variant as variant "default"; reading
-  // that back as a difference would switch again before every prompt.
-  test('Default on a session OpenCode recorded as "default" sends no switch', async () => {
-    seedSession({ ...MODEL, variant: 'default' });
-    expect((await desire(null)).model).toBeUndefined();
-    expect((await desire(undefined)).model).toBeUndefined();
-    expect((await desire('high')).model).toEqual({ ...MODEL, variant: 'high' });
-  });
-
-  test('a chosen effort switches only when it differs', async () => {
-    seedSession({ ...MODEL, variant: 'high' });
-    expect((await desire('high')).model).toBeUndefined();
-    expect((await desire('low')).model).toEqual({ ...MODEL, variant: 'low' });
+    for (const variant of [null, undefined, 'high', 'low']) expect(await desire(variant)).not.toHaveProperty('model');
   });
 });
 

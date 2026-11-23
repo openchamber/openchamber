@@ -323,7 +323,7 @@ test('a background agent switch retains the session model, not an older model fo
   }
 }));
 
-[['M3', 'M4'], ['M3', 'M1'], ['M1', 'M1']].forEach(([beforeSendModel, externalModel]) => test(`a background guest prompt carries an unsent model over ${beforeSendModel}, then follows an external switch to ${externalModel}`, async () => {
+[['M3', 'M4'], ['M3', 'M1'], ['M1', 'M1']].forEach(([beforeSendModel, externalModel]) => test(`a background guest prompt never writes a pending pick over ${beforeSendModel}, and follows an external switch to ${externalModel}`, async () => {
   const sessionId = 'guest-unsent-model';
   const selection = useSelectionStore.getState();
   const ui = useSessionUIStore.getState();
@@ -350,12 +350,12 @@ test('a background agent switch retains the session model, not an older model fo
     expect(await prompt()).toEqual({ ok: true, result: { sent: 'failed' } });
     expect(selection.getSessionModelPick(sessionId)).toEqual({ providerId: 'p', modelId: 'M2' });
     expect(await prompt()).toEqual({ ok: true, result: { sent: 'sent' } });
-    expect(send.mock.calls[1]?.[0].model).toEqual({ providerID: 'p', id: 'M2', variant: 'high' });
+    expect(send.mock.calls[1]?.[0]).not.toHaveProperty('model');
     expect(selection.getSessionModelPick(sessionId)).toBeNull();
     record = { ...record, model: { providerID: 'p', id: externalModel, variant: externalModel === 'M1' ? undefined : 'low' } };
     expect(await prompt()).toEqual({ ok: true, result: { sent: 'sent' } });
     // The session already holds the external model, so no switch is needed.
-    expect(send.mock.calls[2]?.[0].model).toBeUndefined();
+    expect(send.mock.calls[2]?.[0]).not.toHaveProperty('model');
     expect(selection.getSessionModelSelection(sessionId)).toEqual({ providerId: 'p', modelId: externalModel });
   } finally {
     selection.clearSessionSelections(sessionId);
@@ -401,7 +401,7 @@ test('a background agent switch retains the session model, not an older model fo
   }
 }));
 
-test('composer and guest sends retain the same unsent model after selecting a pinned agent', async () => {
+test('composer and guest sends leave the session model alone after selecting a pinned agent', async () => {
   const sessionId = 'guest-pinned-agent';
   const selection = useSelectionStore.getState();
   const config = useConfigStore.getState();
@@ -430,8 +430,9 @@ test('composer and guest sends retain the same unsent model after selecting a pi
     useSessionUIStore.setState({ currentSessionId: 'another-chat' });
     await promptGuestSession({ request: { text: 'Extension prompt', send: true }, sessionId,
       directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
-    expect(send.mock.calls[0]?.[0].model?.id).toBe('M2');
-    expect(send.mock.calls[1]?.[0].model).toEqual(send.mock.calls[0]?.[0].model);
+    expect(send.mock.calls[0]?.[0]).not.toHaveProperty('model');
+    expect(send.mock.calls[1]?.[0]).not.toHaveProperty('model');
+    expect(switchModel.mock.calls.length).toBe(0);
     expect(selection.getSessionModelPick(sessionId)).toBeNull();
   } finally {
     selection.clearSessionSelections(sessionId);
@@ -459,6 +460,23 @@ test('a guest session in another project registers without changing the open pag
   expect(useProjectsStore.getState().activeProjectId).toBe('a');
   expect(useUIStore.getState().openGuestPageId).toBe('board');
   expect(useGlobalSessionsStore.getState().entityById.get(created.id)?.directory).toBe('/project-b');
+});
+
+test('a guest session that sends starts on the composer model and effort, and its first message writes no model', async () => {
+  const create = setup();
+  const config = useConfigStore.getState();
+  useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'M5', currentAgentName: 'build', currentVariant: 'high' });
+  const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+  try {
+    const result = await startGuestSession({ directory: '/project-a', t: (key) => key, assertAuthorized: () => {},
+      request: { providerId: 'board', id: 'TASK-4', title: 'Task', url: 'https://example.com/task', projectId: 'b', text: 'Do it' } });
+    // The model and effort go in the create body; nothing is left for the first send to write.
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ model: { providerID: 'p', id: 'M5', variant: 'high' }, agent: 'build' });
+    expect(result).toMatchObject({ sessionId: created.id, sent: 'sent' });
+    expect(send.mock.calls[0]?.slice(1, 4)).toEqual(['p', 'M5', 'build']);
+  } finally {
+    useConfigStore.setState({ currentProviderId: config.currentProviderId, currentModelId: config.currentModelId, currentAgentName: config.currentAgentName, currentVariant: config.currentVariant });
+  }
 });
 
 test('named worktrees forward the base ref through existing creation and keep bootstrap failures explicit', async () => {

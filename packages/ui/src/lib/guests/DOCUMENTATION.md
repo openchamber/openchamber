@@ -176,7 +176,7 @@ A page of a shared-surface extension sends its viewer id with every `serviceRequ
 
 ### Why guest prompts to an open subagent classify their own record
 
-The app-wide composer can still hold a parent's selection right after a child is opened. A guest prompt to a root session, or to a review session, answers with what the composer shows; every other session uses its own record and unsent picks. The record is looked up in the panel's directory store, then every store, then the global cache, so a child whose store has not loaded is still classified (`#6555`).
+The app-wide composer can still hold a parent's selection right after a child is opened. A guest prompt to a root session, or to a review session, answers with what the composer shows; every other session uses its own record and unsent picks. The record is looked up in the panel's directory store, then every store, then the global cache, so a child whose store has not loaded is still classified (`#6555`). A guest that starts a session creates it on the composer's model and effort (in the create body), so the first prompt needs no model write; a prompt writes no model for any session, because a pick already wrote itself when it was made (`../../sync/DOCUMENTATION.md`).
 
 ### Why a guest session passes a selection at creation
 

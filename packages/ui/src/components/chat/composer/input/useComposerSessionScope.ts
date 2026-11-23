@@ -13,7 +13,6 @@ import { useProjectActions } from '@/components/layout/projectActionsRunnerConte
 import { usePendingComposerReferences } from '../../composer/pendingComposerReferences';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useRetryModelPick } from '@/hooks/useRetryModelPick';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useComposerTextEffect } from '../../composer/state/composerText';
 import { useOpenCodeTrustPaused } from '@/components/projects/useOpenCodeTrustPause';
@@ -82,11 +81,6 @@ export function useComposerSessionScope({
         : btwSessionId;
 
     const isBtwActive = Boolean(btwComposerSessionId) && !btwPanel.collapsed;
-
-    useRetryModelPick(
-        isBtwActive ? btwSessionId : currentSessionId,
-        (isBtwActive ? btwDirectory : null) ?? currentSessionDirectoryForSync ?? currentDirectory ?? undefined,
-    );
 
     const isBtwPanelVisible = btwHoldsDock(btwPanel, hasPendingForm);
 

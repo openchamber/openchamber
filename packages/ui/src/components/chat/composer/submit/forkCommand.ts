@@ -1,6 +1,7 @@
 
 import type { Session } from '@/lib/opencode/model';
 import type { ChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { whenModelPickWritten } from '@/sync/model-gesture';
 
 export interface ForkSendSelection {
     providerID: string;
@@ -25,6 +26,7 @@ export async function runForkCommand(
     selection: ForkSendSelection,
     deps: ForkCommandDeps,
 ): Promise<ForkCommandOutcome> {
+    await whenModelPickWritten(sourceSessionId);
     const forked = await deps.fork(sourceSessionId);
     if (!forked) return 'stale';
     const text = prompt.trim();

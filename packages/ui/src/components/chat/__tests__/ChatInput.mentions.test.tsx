@@ -256,13 +256,13 @@ const mountComposer = async (run: (composer: Composer) => Promise<void>, options
 
 afterAll(() => browser.close());
 
-// The client decides the model and agent writes inside its send order; the stub does the same and keeps the result on the call.
+// The client decides the agent write and the send's provider inside its send order; the stub does the same and keeps the result on the call.
 const sendResolvingSelection = async (params: Parameters<typeof opencodeClient.sendMessage>[0]) => {
   Object.assign(params, await params.resolveSelection?.());
   return 'msg';
 };
 
-test('a picker choice during attachment preparation survives the composer send', async () => {
+test('a picker choice during attachment preparation survives the composer send, which writes no model', async () => {
   const originalFetch = globalThis.fetch;
   const send = spyOn(opencodeClient, 'sendMessage').mockImplementation(sendResolvingSelection);
   // FileReader is browser-owned; the mention read and composer submit stay real.
@@ -297,7 +297,7 @@ test('a picker choice during attachment preparation survives the composer send',
       });
       await settle();
       expect(send.mock.calls.length).toBe(1);
-      expect(send.mock.calls[0]?.[0].model?.variant).toBe('low');
+      expect(send.mock.calls[0]?.[0]).not.toHaveProperty('model');
       expect(useUIStore.getState().lastUsedEfforts['provider/model']).toBe('high');
     });
   } finally {
@@ -307,7 +307,7 @@ test('a picker choice during attachment preparation survives the composer send',
   }
 });
 
-test('the queued row Send preserves the newer remembered effort', async () => {
+test('the queued row Send preserves the newer remembered effort and writes no model', async () => {
   const send = spyOn(opencodeClient, 'sendMessage').mockImplementation(sendResolvingSelection);
   const queued = { id: 'queued-effort', content: 'queued low', text: 'queued low', createdAt: 1, sendConfig: { providerID: 'provider', modelID: 'model', variant: 'low' } };
   const take = spyOn(useMessageQueueStore.getState(), 'takeForSend').mockResolvedValue([queued]);
@@ -325,7 +325,7 @@ test('the queued row Send preserves the newer remembered effort', async () => {
       await settle();
       expect(take.mock.calls.length).toBe(1);
       expect(send.mock.calls.length).toBe(1);
-      expect(send.mock.calls[0]?.[0].model?.variant).toBe('low');
+      expect(send.mock.calls[0]?.[0]).not.toHaveProperty('model');
       expect(useUIStore.getState().lastUsedEfforts['provider/model']).toBe('high');
     });
   } finally {

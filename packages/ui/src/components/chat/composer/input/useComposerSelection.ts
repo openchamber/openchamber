@@ -2,9 +2,10 @@ import type { useComposerSessionScope } from './useComposerSessionScope';
 import type { useComposerEditorState } from './useComposerEditorState';
 import type { useComposerColumn } from './useComposerColumn';
 import React from 'react';
-import { resolveModelMetadata, useConfigStore } from '@/stores/useConfigStore';
+import { resolveModelMetadata, selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { commitModelPick } from '@/sync/model-gesture';
 import { useSelectionStore } from '@/sync/selection-store';
 import { btwModelAvailability, resolveBtwSelection } from '@/stores/useBtwStore';
 import { usePinnedComposerSelection } from '../../pinnedComposerSelection';
@@ -55,6 +56,10 @@ export function useComposerSelection({
     const providerCatalog = useConfigStore((state) => state.providers);
 
     const autoReady = useRoutingStore(selectAutoReady);
+
+    const pinnedDirectory = columnPinned && !isBtwActive ? currentDirectory ?? undefined : undefined;
+
+    const controlledCatalog = useConfigStore((state) => selectProvidersForDirectory(state, pinnedDirectory));
 
     const currentModelMetadata = React.useMemo(
         () => currentProviderId && currentModelId
@@ -131,37 +136,37 @@ export function useComposerSelection({
             || ui.isAboutDialogOpen);
     };
 
-    const cycleBtwFavoriteModel = (event: KeyboardEvent, delta: number): boolean | void => {
-        if (!isBtwKey(event) || !btwComposerSessionId) return false;
+    const controlled = isBtwActive
+        ? { sessionId: btwComposerSessionId, selection: effectiveBtwSelection }
+        : columnPinned && pinnedComposerSelection ? { sessionId: currentSessionId, selection: pinnedComposerSelection } : null;
+
+    const cycleControlledFavoriteModel = (event: KeyboardEvent, delta: number): boolean | void => {
+        if (!isBtwKey(event) || !controlled?.sessionId) return false;
         const ui = useUIStore.getState();
-        const { model, agent } = effectiveBtwSelection;
+        const { model, agent } = controlled.selection;
         const next = getNextFavoriteModel(
             ui.favoriteModels,
-            providerCatalog,
+            controlledCatalog,
             ui.hiddenModels,
             { providerID: model?.providerId ?? '', modelID: model?.modelId ?? '' },
             delta,
         );
         if (!next) return false;
         const selections = useSelectionStore.getState();
-        selections.saveSessionModelSelection(btwComposerSessionId, next.providerID, next.modelID);
-        if (agent) selections.saveAgentModelForSession(btwComposerSessionId, agent, next.providerID, next.modelID);
-        selections.pickSessionModel(btwComposerSessionId, next.providerID, next.modelID);
+        selections.saveSessionModelSelection(controlled.sessionId, next.providerID, next.modelID);
+        if (agent) selections.saveAgentModelForSession(controlled.sessionId, agent, next.providerID, next.modelID);
+        commitModelPick(controlled.sessionId, { providerID: next.providerID, modelID: next.modelID, variant: agent ? selections.getAgentModelVariantForSession(controlled.sessionId, agent, next.providerID, next.modelID) : undefined }, pinnedDirectory);
     };
 
-    const cycleBtwThinkingVariant = (event: KeyboardEvent): boolean | void => {
-        if (!isBtwKey(event) || !btwComposerSessionId) return false;
-        const { model, agent, variant } = effectiveBtwSelection;
+    const cycleControlledThinkingVariant = (event: KeyboardEvent): boolean | void => {
+        if (!isBtwKey(event) || !controlled?.sessionId) return false;
+        const { model, agent, variant } = controlled.selection;
         if (!model || !agent) return false;
-        const variants = modelVariantNames(findCatalogModel(providerCatalog.find((provider) => provider.id === model.providerId)?.models, model.modelId));
+        const variants = modelVariantNames(findCatalogModel(controlledCatalog.find((provider) => provider.id === model.providerId)?.models, model.modelId));
         if (variants.length === 0) return false;
-        useSelectionStore.getState().saveAgentModelVariantForSession(
-            btwComposerSessionId,
-            agent,
-            model.providerId,
-            model.modelId,
-            nextThinkingVariant(variants, variant),
-        );
+        const nextVariant = nextThinkingVariant(variants, variant);
+        useSelectionStore.getState().saveAgentModelVariantForSession(controlled.sessionId, agent, model.providerId, model.modelId, nextVariant);
+        commitModelPick(controlled.sessionId, { providerID: model.providerId, modelID: model.modelId, variant: nextVariant }, pinnedDirectory);
     };
 
     useKeybinds(isBtwActive ? {
@@ -169,9 +174,12 @@ export function useComposerSelection({
             if (!isBtwKey(event) || !btwComposerSessionId) return false;
             setBtwModelSelectorOpen((open) => !open);
         },
-        cycle_thinking_variant: cycleBtwThinkingVariant,
-        cycle_favorite_model_forward: (event) => cycleBtwFavoriteModel(event, 1),
-        cycle_favorite_model_backward: (event) => cycleBtwFavoriteModel(event, -1),
+    } : {});
+
+    useKeybinds(controlled ? {
+        cycle_thinking_variant: cycleControlledThinkingVariant,
+        cycle_favorite_model_forward: (event) => cycleControlledFavoriteModel(event, 1),
+        cycle_favorite_model_backward: (event) => cycleControlledFavoriteModel(event, -1),
     } : {});
 
     return {

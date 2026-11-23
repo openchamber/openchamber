@@ -11,7 +11,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useInputStore } from '@/sync/input-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { resolveExecutionForDirectory, type TodoSendExecution } from '../todoSendExecution';
+import { resolveWorktreeExecution, type TodoSendExecution } from '../todoSendExecution';
 
 type PendingSendTarget = {
   kind: 'session' | 'worktree';
@@ -105,7 +105,7 @@ export const useProjectTodoSend = (options: {
 
         let sessionId: string | null = null;
         let directoryHint: string | null = projectRef.path;
-        let execution = dialogExecution;
+        let execution: TodoSendExecution | null = dialogExecution;
 
         if (pendingSendTarget.kind === 'worktree') {
           if (!canCreateWorktree) {
@@ -118,7 +118,7 @@ export const useProjectTodoSend = (options: {
           }
           sessionId = created.id;
           directoryHint = created.directory;
-          execution = await resolveExecutionForDirectory(created.directory, dialogExecution);
+          execution = await resolveWorktreeExecution(sessionId, created.directory, dialogExecution);
         } else {
           const session = await createSession(undefined, projectRef.path, undefined, {
             model: { providerID: execution.providerID, id: execution.modelID, variant: execution.variant || undefined },
@@ -133,7 +133,7 @@ export const useProjectTodoSend = (options: {
           initializeNewOpenChamberSession(session.id, useConfigStore.getState().agents ?? []);
         }
 
-        if (!sessionId) {
+        if (!sessionId || !execution) {
           return;
         }
 

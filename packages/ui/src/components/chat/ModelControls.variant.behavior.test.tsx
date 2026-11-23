@@ -65,6 +65,8 @@ type KnownElsewhere = { models: typeof model[]; agents: TestAgent[] };
 const nothingKnownElsewhere = (): KnownElsewhere => ({ models: [], agents: [] });
 let knownElsewhere = nothingKnownElsewhere();
 let forcePreserveManualOverride: boolean | null = null;
+/** The fresh pick the session holds in this client, when a test gives it one. */
+let livePick: { providerId: string; modelId: string } | null = null;
 
 /** Every effort written for the session, in order, including `undefined`. */
 const variantWrites: VariantChoice[] = [];
@@ -72,6 +74,9 @@ const variantWrites: VariantChoice[] = [];
 const overrideWrites: Array<{ override: VariantChoice; inherited: VariantChoice }> = [];
 /** Every model remembered as the last chat pick. */
 const lastSelectedWrites: string[] = [];
+/** Every model the controls wrote to a session, as the client call sent it. */
+const gestures: Array<{ sessionId: string; selection: unknown }> = [];
+/** Every model pick the controls made on the composer's screen, written or not. */
 const pendingModelWrites: string[] = [];
 
 type ConfigState = {
@@ -181,6 +186,7 @@ type SelectionState = {
   getAgentModelVariantForSession: () => VariantChoice;
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void;
   pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void;
+  liveSessionModelPick: () => { providerId: string; modelId: string } | null;
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void;
   pickSessionAgent: (sessionId: string, agentName: string) => void;
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void;
@@ -220,6 +226,7 @@ const useSelectionStore = create<SelectionState>((set, get) => ({
   getAgentModelVariantForSession: () => get().savedVariant,
   saveSessionModelSelection: () => undefined,
   pickSessionModel: (sessionId, providerId, modelId) => { pendingModelWrites.push(`${sessionId}:${providerId}/${modelId}`); },
+  liveSessionModelPick: () => livePick,
   saveSessionAgentSelection: (sessionId, agentName) => set((state) => ({
     sessionAgentSelections: new Map(state.sessionAgentSelections).set(sessionId, agentName),
   })),
@@ -399,6 +406,9 @@ mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isTouch: false }) }
 mock.module('@/lib/startupTrace', () => ({ markStartupTrace: () => undefined }));
 
 const { ModelControls } = await import('./ModelControls');
+const { opencodeClient } = await import('@/lib/opencode/client');
+const { whenModelPickWritten } = await import('@/sync/model-gesture');
+spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (sessionId, selection) => { gestures.push({ sessionId, selection }); });
 const { ChatColumnSessionContext } = await import('./chatColumnSession');
 const { I18nProvider, useI18nStore } = await import('@/lib/i18n');
 const enDict = useI18nStore.getState().dictionary;
@@ -507,11 +517,13 @@ describe('ModelControls effort restore', () => {
     variantWrites.length = 0;
     overrideWrites.length = 0;
     lastSelectedWrites.length = 0;
+    gestures.length = 0;
     pendingModelWrites.length = 0;
     latestUserChoice = null;
     knownElsewhere = nothingKnownElsewhere();
     setSessionRecord(undefined);
     forcePreserveManualOverride = null;
+    livePick = null;
     useSessionUIStore.setState({ currentSessionId: SESSION_ID });
     useUIStore.setState({ isMobile: false, isModelSelectorOpen: false, lastUsedEfforts: {} });
     useSelectionStore.setState({
@@ -597,7 +609,7 @@ describe('ModelControls effort restore', () => {
       expect(variantWrites).not.toContain(null);
       // Opening a session is not a pick: the next new session must not inherit its model.
       expect(lastSelectedWrites).toEqual([]);
-      expect(pendingModelWrites).toEqual([]);
+      expect(gestures).toEqual([]);
       expect(useSelectionStore.getState().savedVariant).toBe('low');
       expect(useConfigStore.getState().currentVariantSelection.override).toBe('low');
     } finally {
@@ -822,6 +834,25 @@ describe('ModelControls effort restore', () => {
 
       expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
       expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('choosing a level in an open session writes that model and level to the session', async () => {
+    useSessionUIStore.setState({ currentSessionId: SESSION_ID });
+    useConfigStore.setState({ currentVariantSelection: { override: undefined, inherited: undefined } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(gestures).toEqual([]);
+      await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
+      const highButton = Array.from(dom.container.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'High');
+      await act(async () => highButton?.click());
+
+      await whenModelPickWritten(SESSION_ID);
+      expect(gestures).toEqual([{ sessionId: SESSION_ID, selection: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' } }]);
+      expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
     } finally {
       await cleanup();
     }
@@ -1082,6 +1113,7 @@ describe('ModelControls effort restore', () => {
   test('a preserved manual override keeps a recorded explicit Default', async () => {
     latestUserChoice = { id: 'msg-3', agent: AGENT, providerID: PROVIDER_ID, modelID: MODEL_ID, variant: 'high' };
     forcePreserveManualOverride = true;
+    livePick = { providerId: PROVIDER_ID, modelId: MODEL_ID };
     useSelectionStore.setState({ savedVariant: null });
     useConfigStore.setState({ selectionSource: 'manual' });
 
@@ -1139,6 +1171,7 @@ describe('ModelControls effort restore', () => {
           .at(-1);
         await act(async () => defaultButton?.click());
         expect(saveVariant.mock.calls.at(-1)).toEqual([btwSessionId, 'plan', PROVIDER_ID, MODEL_ID, null]);
+        expect(gestures).toEqual([]);
         // A BTW picker sees the model's memory but never rewrites it.
         expect(useUIStore.getState().lastUsedEfforts).toEqual({});
         const config = useConfigStore.getState();
@@ -1156,6 +1189,26 @@ describe('ModelControls effort restore', () => {
   // The BTW composer offers the agent picker, so a side question can start on
   // another agent without collapsing the panel first (#6333).
   for (const isMobile of [false, true]) {
+    test(`a controlled pick on an existing session writes exactly the model and level it chose (mobile: ${isMobile})`, async () => {
+      const pinnedSessionId = 'ses_pinned_chat';
+      useUIStore.setState({ isMobile, isModelSelectorOpen: true });
+      const { dom, cleanup } = await renderModelControls({
+        sessionId: pinnedSessionId,
+        selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: 'plan', variant: 'low' },
+        rememberVariantPicks: false,
+      });
+      try {
+        await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__model-trigger')?.click());
+        const modelButton = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button:not(.model-controls__model-trigger)')).find((button) => button.textContent?.trim() === MODEL_ID);
+        await act(async () => modelButton?.click());
+        await whenModelPickWritten(pinnedSessionId);
+
+        expect(gestures).toEqual([{ sessionId: pinnedSessionId, selection: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'low' } }]);
+      } finally {
+        await cleanup();
+      }
+    });
+
     test(`a controlled agent pick stays on its own session (mobile: ${isMobile})`, async () => {
       const btwSessionId = 'btw-pending:ses_restore';
       useUIStore.setState({ isMobile });
@@ -1212,6 +1265,36 @@ describe('ModelControls effort restore', () => {
       await cleanup();
     }
   });
+
+  for (const pins of [true, false]) {
+    test(`choosing an agent ${pins ? 'that pins a model writes that model once, at the choice' : 'without a pinned model writes no model'}`, async () => {
+      const original = useConfigStore.getState().setAgent;
+      const chosen: TestAgent = pins ? { ...planAgent, model: { providerID: PROVIDER_ID, id: OTHER_MODEL_ID } } : planAgent;
+      useConfigStore.setState({
+        providers: [twoModelProvider],
+        agents: [agent, chosen],
+        // Like the real store, an agent that pins a model also moves the composer onto it.
+        setAgent: (agentName) => {
+          original(agentName);
+          const pinned = useConfigStore.getState().agents.find((entry) => entry.name === agentName)?.model;
+          if (pinned) useConfigStore.setState({ currentProviderId: pinned.providerID, currentModelId: pinned.id });
+        },
+      });
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        const planRow = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === 'Plan');
+        expect(planRow).toBeDefined();
+        await act(async () => planRow?.click());
+        await whenModelPickWritten(SESSION_ID);
+
+        expect(useSelectionStore.getState().sessionAgentSelections.get(SESSION_ID)).toBe('plan');
+        expect(gestures).toEqual(pins ? [{ sessionId: SESSION_ID, selection: { providerID: PROVIDER_ID, id: OTHER_MODEL_ID, variant: undefined } }] : []);
+      } finally {
+        await cleanup();
+        useConfigStore.setState({ setAgent: original });
+      }
+    });
+  }
 
   for (const isMobile of [false, true]) {
     test(`reselecting the controlled model preserves Default (mobile: ${isMobile})`, async () => {
@@ -1347,6 +1430,7 @@ describe('ModelControls effort restore', () => {
     test('the picker follows a switch while a manual model choice is kept', async () => {
       setSessionRecord(recordOn(AGENT));
       forcePreserveManualOverride = true;
+      livePick = { providerId: PROVIDER_ID, modelId: MODEL_ID };
       useConfigStore.setState({ selectionSource: 'manual' });
       const { dom, cleanup } = await renderModelControls();
       try {
@@ -1371,15 +1455,31 @@ describe('ModelControls effort restore', () => {
       withModels();
       // The picker holds a model the session has not been sent with yet.
       useConfigStore.setState({ selectionSource: 'manual' });
+      livePick = { providerId: PROVIDER_ID, modelId: MODEL_ID };
       setSessionRecord(recordWith(OTHER_MODEL_ID));
       const { cleanup } = await renderModelControls();
       try {
         expect(useConfigStore.getState().currentModelId).toBe(MODEL_ID);
 
+        // The session moved on after the pick: the real store drops it then.
+        livePick = null;
         await act(async () => setSessionRecord(recordWith(THIRD_MODEL_ID)));
         expect(useConfigStore.getState().currentModelId).toBe(THIRD_MODEL_ID);
         // A switch made elsewhere is not this person's pick.
         expect(lastSelectedWrites).toEqual([]);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('opening a session follows its model when only a remembered selection disagrees', async () => {
+      withModels();
+      // What the picker held last time is a remnant, not a pick made in this client.
+      useConfigStore.setState({ selectionSource: 'manual' });
+      setSessionRecord(recordWith(OTHER_MODEL_ID));
+      const { cleanup } = await renderModelControls();
+      try {
+        expect(useConfigStore.getState().currentModelId).toBe(OTHER_MODEL_ID);
       } finally {
         await cleanup();
       }

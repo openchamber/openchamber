@@ -85,10 +85,11 @@ generic rendering.
   OpenCode is back.
   Sends to one session run one after another on the runtime instance they were
   captured on (`inSessionSendOrder` in `prompt-resend.ts`): a later send's
-  model and agent writes and synthetic context wait until the earlier prompt
-  is admitted or failed, so they cannot change what it runs with. The composer
-  passes `resolveSelection`, so which writes a send skips is decided after
-  that wait, against what the session runs on then. `sendCommand` takes the
+  agent write and synthetic context wait until the earlier prompt is admitted
+  or failed, so they cannot change what it runs with. A send never writes a
+  model (`sync/DOCUMENTATION.md`). The composer passes `resolveSelection`, so
+  the agent write a send skips and the provider the circuit judges are decided
+  after that wait, against what the session runs on then. `sendCommand` takes the
   same place in that order, without resends. Each request
   of a send, including every resend, first checks that runtime instance, so a
   switch away and back stops it; a send captured on a runtime the user left

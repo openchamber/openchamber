@@ -79,9 +79,9 @@ let loader: SessionMessageLoader
 let historyReads = 0
 let creation = deferred<void>()
 let createSessionCalls: Array<{ id: string | undefined; directory: string | null | undefined }> = []
+let createdModels: Array<ModelSelection | undefined> = []
 let sendCalls: Array<{
   id: string
-  model: ModelSelection | undefined
   text: string
   context: string[]
   pendingAtSend: PendingDraftSend | undefined
@@ -129,7 +129,7 @@ test("a recovered answer uses the real send path without consuming the main comp
   }
 })
 
-test("a /btw fork on the main chat's agent and model keeps its own level from one send to the next", async () => {
+test("a send to a /btw fork keeps the fork's own level, leaves the main composer's, and writes no model", async () => {
   const main = sessionRecord("ses_main", DIRECTORY)
   const fork = sessionRecord("ses_fork", DIRECTORY)
   childStores.ensureChild(DIRECTORY, { bootstrap: false }).setState({ session: [main, fork] })
@@ -142,7 +142,7 @@ test("a /btw fork on the main chat's agent and model keeps its own level from on
     currentVariant: "low",
     currentVariantSelection: { override: "low", inherited: "low" },
   })
-  // The /btw composer picked high for the fork, as `startBtwSession` saves it.
+  // The /btw composer picked high for the fork, as `startBtwSession` saves it and writes it once at the fork.
   const selection = useSelectionStore.getState()
   selection.saveAgentModelVariantForSession(fork.id, "build", "provider", "model", "high")
   const forkLevel = () => useSelectionStore.getState().getAgentModelVariantForSession(fork.id, "build", "provider", "model")
@@ -153,10 +153,9 @@ test("a /btw fork on the main chat's agent and model keeps its own level from on
 
   try {
     await sendToFork("first")
-    expect(forkLevel()).toBe("high")
     await sendToFork("second")
 
-    expect(sendCalls.map((call) => [call.id, call.model?.variant])).toEqual([[fork.id, "high"], [fork.id, "high"]])
+    expect(sendCalls.map((call) => call.id)).toEqual([fork.id, fork.id])
     expect(forkLevel()).toBe("high")
     expect(useConfigStore.getState().currentVariantSelection.override).toBe("low")
   } finally {
@@ -179,6 +178,7 @@ beforeEach(() => {
   historyReads = 0
   creation = deferred<void>()
   createSessionCalls = []
+  createdModels = []
   sendCalls = []
   shellCalls = []
   childStores = new ChildStoreManager()
@@ -197,15 +197,15 @@ beforeEach(() => {
   opencodeClient.getSession = async (id, directory) => sessionRecord(id, directory ?? DIRECTORY)
   opencodeClient.createSession = async (params, directory) => {
     createSessionCalls.push({ id: params?.id, directory })
+    createdModels.push(params?.model)
     await creation.promise
     return sessionRecord(params?.id ?? "ses_server", directory ?? DIRECTORY)
   }
   opencodeClient.sendMessage = async (params) => {
-    // The client decides the model and agent writes inside its send order.
-    const selection = params.resolveSelection ? await params.resolveSelection() : params
+    // The client decides the agent write inside its send order.
+    await params.resolveSelection?.()
     sendCalls.push({
       id: params.id,
-      model: selection.model,
       text: params.text,
       context: (params.context ?? []).map((item) => item.text),
       pendingAtSend: useSessionUIStore.getState().pendingDraftSends.get(params.id),
@@ -261,6 +261,8 @@ describe("the first message of a draft", () => {
     // No agent works yet: the session shows "Creating session…" alone.
     expect(store.getState().session_status[sessionId]).toBeUndefined()
     expect(createSessionCalls).toEqual([{ id: sessionId, directory: DIRECTORY }])
+    // The draft gives the new session its model and effort at creation; the send writes none.
+    expect(createdModels).toEqual([{ providerID: "provider", id: "model", variant: undefined }])
     expect(sendCalls).toEqual([])
     expect(historyReads).toBe(0)
 
@@ -269,7 +271,7 @@ describe("the first message of a draft", () => {
 
     expect(store.getState().session.map((session) => session.id)).toContain(sessionId)
     expect(sendCalls).toHaveLength(1)
-    expect(sendCalls[0]).toMatchObject({ id: sessionId, text: "hello", model: undefined })
+    expect(sendCalls[0]).toMatchObject({ id: sessionId, text: "hello" })
     // The line "Creating session…" is gone once the session exists; Send
     // waits until the prompt request has left.
     expect(sendCalls[0].pendingAtSend).toEqual({ draftId: 1, sessionCreated: true })

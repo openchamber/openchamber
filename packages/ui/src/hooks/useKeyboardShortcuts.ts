@@ -6,6 +6,7 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
+import { commitAgentPinnedModel, commitComposerPick } from '@/sync/model-gesture';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -63,6 +64,10 @@ const dropdownTargetSelector = [
   '[role="listbox"]', '[role="menu"]', '[role="menuitem"]', '[role="option"]',
   '[data-radix-popper-content-wrapper]',
 ].join(',');
+
+const isInPinnedColumn = (event: KeyboardEvent): boolean => (
+  event.target instanceof Element && event.target.closest('[data-chat-column="pinned"]') !== null
+);
 
 function hasOverlayOpen(): boolean {
   const state = useUIStore.getState();
@@ -273,6 +278,7 @@ export const useKeyboardShortcuts = () => {
         useSelectionStore.getState().pickSessionAgent(sessionId, next);
       }
       config.setAgent(next);
+      if (!isInPinnedColumn(event)) commitAgentPinnedModel(sessionId, next);
       state.addRecentAgent(next);
     },
     toggle_terminal: () => {
@@ -293,8 +299,8 @@ export const useKeyboardShortcuts = () => {
       if (state.isSettingsDialogOpen || hasOverlay) return false;
       state.setModelSelectorOpen(!state.isModelSelectorOpen);
     },
-    cycle_thinking_variant: () => {
-      if (hasActiveBtwComposer()) return false;
+    cycle_thinking_variant: (event) => {
+      if (hasActiveBtwComposer() || isInPinnedColumn(event)) return false;
       const state = useUIStore.getState();
       const hasOverlay = state.isCommandPaletteOpen
         || state.isHelpDialogOpen
@@ -303,8 +309,8 @@ export const useKeyboardShortcuts = () => {
       if (state.isSettingsDialogOpen || hasOverlay) return false;
       if (!cycleThinkingVariant(useSessionUIStore.getState().currentSessionId)) return false;
     },
-    cycle_favorite_model_forward: () => cycleFavoriteModel(1),
-    cycle_favorite_model_backward: () => cycleFavoriteModel(-1),
+    cycle_favorite_model_forward: (event) => cycleFavoriteModel(1, event),
+    cycle_favorite_model_backward: (event) => cycleFavoriteModel(-1, event),
     expand_input: () => {
       if (hasActiveBtwComposer()) return false;
       if (useUIStore.getState().isMobile) return false;
@@ -334,8 +340,8 @@ export const useKeyboardShortcuts = () => {
     return navigateSessionHistory(delta) ? undefined : false;
   }
 
-  function cycleFavoriteModel(delta: number): boolean | void {
-    if (hasActiveBtwComposer()) return false;
+  function cycleFavoriteModel(delta: number, event: KeyboardEvent): boolean | void {
+    if (hasActiveBtwComposer() || isInPinnedColumn(event)) return false;
     const state = useUIStore.getState();
     const hasOverlay = state.isCommandPaletteOpen
       || state.isHelpDialogOpen
@@ -354,7 +360,7 @@ export const useKeyboardShortcuts = () => {
     config.setProvider(next.providerID);
     config.setModel(next.modelID);
     const sessionId = useSessionUIStore.getState().currentSessionId;
-    if (sessionId) useSelectionStore.getState().pickSessionModel(sessionId, next.providerID, next.modelID);
+    commitComposerPick(sessionId);
     state.addRecentModel(next.providerID, next.modelID);
     state.setLastSelectedModel(next.providerID, next.modelID);
   }

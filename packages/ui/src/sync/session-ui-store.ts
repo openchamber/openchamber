@@ -281,7 +281,6 @@ export async function routeMessage(params: Pick<SendMessageOptions, "isCurrentRu
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
-        providerID: params.providerID,
         resolveSelection: sendSelection,
         text: params.content,
         agentMentions: params.agentMentionName ? [{ name: params.agentMentionName }] : undefined,
@@ -2280,7 +2279,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       sessionDirectory = await resolveCreatedWorktreeStartDirectory(createdWorktreeProject, createdWorktree)
     }
 
-    const session = await get().createSession(undefined, sessionDirectory)
+    const session = await get().createSession(undefined, sessionDirectory, undefined, { model: { providerID, id: modelID, variant: execution.variant || undefined } })
     if (!session) {
       if (createdWorktree && createdWorktreeProject) {
         const { removeProjectWorktree } = await import("@/lib/worktrees/worktreeManager")

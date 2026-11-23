@@ -935,7 +935,11 @@ class OpencodeService {
         metadata: params?.metadata,
       }),
     )
-    return projectSession(info)
+    const created = projectSession(info)
+    if (params?.model && isAutoModel(params.model.providerID, params.model.id)) {
+      await this.switchSessionModel(created.id, params.model, directory)
+    }
+    return created
   }
 
   async getSession(id: string, directory?: string | null, signal?: AbortSignal): Promise<Session> {
@@ -1199,7 +1203,7 @@ class OpencodeService {
 
   async applySendSelection(
     sessionID: string,
-    selection: { model?: ModelSelection; agent?: string },
+    selection: { agent?: string },
     directory: string | null | undefined,
     runtime: string | undefined | (() => void),
   ): Promise<void> {
@@ -1207,12 +1211,6 @@ class OpencodeService {
     if (selection.agent) {
       assertCanSend()
       await this.assertAgentAvailable(selection.agent, directory)
-    }
-    if (selection.model) {
-      assertCanSend()
-      await this.switchSessionModel(sessionID, selection.model, directory)
-    }
-    if (selection.agent) {
       assertCanSend()
       await this.switchSessionAgent(sessionID, selection.agent, directory)
     }
@@ -1234,10 +1232,9 @@ class OpencodeService {
   async sendMessage(params: {
     runtimeKey?: string
     id: string
-    model?: ModelSelection
     agent?: string
-    resolveSelection?: () => Promise<{ model?: ModelSelection; agent?: string }>
-    providerID: string
+    resolveSelection?: () => Promise<{ agent?: string; providerID?: string }>
+    providerID?: string
     text: string
     files?: Array<FileInputLite>
     context?: SyntheticContextInput[]
@@ -1268,8 +1265,7 @@ class OpencodeService {
       throw new Error("Message must have at least one part (text or file)")
     }
 
-    assertProviderCircuitClosed(params.providerID)
-
+    let providerID = params.providerID
     let commitRevert = params.commitRevert
     const admitSynthetic = async (item: SyntheticContextInput) => {
       assertCanSend()
@@ -1309,7 +1305,9 @@ class OpencodeService {
 
     try {
       await inSessionSendOrder(params.id, isCurrent, async () => {
-        const selection = params.resolveSelection ? await params.resolveSelection() : { model: params.model, agent: params.agent }
+        const selection = params.resolveSelection ? await params.resolveSelection() : { agent: params.agent, providerID: params.providerID }
+        providerID = selection.providerID
+        assertProviderCircuitClosed(providerID)
         await this.applySendSelection(params.id, selection, params.directory, assertCanSend)
         const skills = await this.resolveSkillMentions(params.skills?.names ?? [], params.directory)
         const unresolvedInstruction = params.skills?.instructionFor(skills.unresolved) ?? null
@@ -1328,21 +1326,20 @@ class OpencodeService {
       })
     } catch (error) {
       if (!(error instanceof AgentUnavailableError) && !(error instanceof Error && isDefiniteTransportFailure(error))) {
-        recordProviderError(params.providerID, error instanceof OpencodeApiError ? error.status : undefined)
+        recordProviderError(providerID, error instanceof OpencodeApiError ? error.status : undefined)
       }
       throw error
     }
 
-    recordProviderSuccess(params.providerID)
+    recordProviderSuccess(providerID)
     return messageId
   }
 
   async sendCommand(params: {
     runtimeKey?: string
     id: string
-    model?: ModelSelection
     agent?: string
-    resolveSelection?: () => Promise<{ model?: ModelSelection; agent?: string }>
+    resolveSelection?: () => Promise<{ agent?: string }>
     command: string
     arguments?: string
     files?: Array<FileInputLite>
@@ -1355,7 +1352,7 @@ class OpencodeService {
     const { assertCanSend, isCurrent } = captureSendRuntime(params.runtimeKey)
     const files = await Promise.all((params.files ?? []).map((file) => this.toPromptFile(file)))
     await inSessionSendOrder(params.id, isCurrent, async () => {
-      const selection = params.resolveSelection ? await params.resolveSelection() : { model: params.model, agent: params.agent }
+      const selection = params.resolveSelection ? await params.resolveSelection() : { agent: params.agent }
       await this.applySendSelection(params.id, selection, params.directory, assertCanSend)
       const context = (params.context ?? []).filter((item) => item.text.trim())
       if (context.length > 0 && params.commitRevert) {

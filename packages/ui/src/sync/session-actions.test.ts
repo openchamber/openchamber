@@ -4193,8 +4193,7 @@ describe("cancelForm passes directory", () => {
   })
 })
 
-describe("replyToForm applies the composer selection", () => {
-  const OTHER_MODEL = { providerID: "openai", id: "gpt-6" }
+describe("replyToForm applies the composer's agent and never its model", () => {
   const SESSION_MODEL = { providerID: "anthropic", id: "claude-3" }
   const seedSession = (id: string, overrides: Partial<Session> = {}) => {
     const record: Session = { ...sessionFixture(id), model: SESSION_MODEL, agent: "build", ...overrides }
@@ -4233,7 +4232,7 @@ describe("replyToForm applies the composer selection", () => {
   beforeEach(reset)
   afterEach(reset)
 
-  test("switches the main chat's session to the composer's selection before the answer", async () => {
+  test("an answer from the main chat switches the session to the composer's agent, and leaves its model alone", async () => {
     mainSessionId = "session-a"
     seedSession("session-a")
     selectionPicks.agents.set("session-a", "plan")
@@ -4242,48 +4241,45 @@ describe("replyToForm applies the composer selection", () => {
     await replyInMainChat()
 
     expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
-    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
-      model: { ...OTHER_MODEL, variant: "high" },
-      agent: "plan",
-    })
-    expect(selectionPicks.settled).toEqual(["session-a:openai/gpt-6"])
-  })
-
-  test("an explicit Default takes the session off its effort", async () => {
-    mainSessionId = "session-a"
-    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "high" } })
-    configState = { currentProviderId: "anthropic", currentModelId: "claude-3", currentVariant: "high", variantOverride: null, currentAgentName: "build" }
-    listedAgents = ["build"]
-
-    await replyInMainChat()
-
-    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
-    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ model: SESSION_MODEL })
-  })
-
-  test("a failed switch leaves the answer unsent and the pick in place", async () => {
-    mainSessionId = "session-a"
-    seedSession("session-a")
-    configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
-    selectionApplyError = new Error("model switch failed")
-
-    await expect(replyInMainChat()).rejects.toThrow("model switch failed")
-
-    expect(replyMethods()).toEqual([])
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ agent: "plan" })
     expect(selectionPicks.settled).toEqual([])
   })
 
-  test("a failed session read still sends a model-only answer, with the picked model stated explicitly", async () => {
+  test("a composer on another model or effort, or on an explicit Default, switches nothing", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a", { model: { ...SESSION_MODEL, variant: "high" } })
+    listedAgents = ["build"]
+    for (const state of [
+      { currentProviderId: "openai", currentModelId: "gpt-6", currentVariant: "low", currentAgentName: "build" },
+      { currentProviderId: "anthropic", currentModelId: "claude-3", currentVariant: "high", variantOverride: null, currentAgentName: "build" },
+    ]) {
+      configState = state
+      await replyInMainChat()
+    }
+
+    expect(replyMethods()).toEqual(["form.reply", "form.reply"])
+  })
+
+  test("a failed agent switch leaves the answer unsent", async () => {
+    mainSessionId = "session-a"
+    seedSession("session-a", { agent: "plan" })
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentAgentName: "build" }
+    selectionApplyError = new Error("agent switch failed")
+
+    await expect(replyInMainChat()).rejects.toThrow("agent switch failed")
+
+    expect(replyMethods()).toEqual([])
+  })
+
+  test("a failed session read still sends the answer, with no model", async () => {
     mainSessionId = "session-a"
     seedSession("session-a")
-    // The server read fails; the cache alone already matches the pick.
     sessionRecords.clear()
-    configState = { currentProviderId: "anthropic", currentModelId: "claude-3" }
+    configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
 
     await replyInMainChat()
 
-    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
-    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ model: SESSION_MODEL })
+    expect(replyMethods()).toEqual(["form.reply"])
   })
 
   test("a changed agent the folder lacks leaves the form pending, and the error names it", async () => {
@@ -4330,9 +4326,7 @@ describe("replyToForm applies the composer selection", () => {
     expect(replyMethods()).toEqual(["form.reply"])
   })
 
-  test("Auto reaches the session as the sentinel before the answer", async () => {
-    // The sentinel marks the session; the server then routes the reply to the
-    // concrete model before forwarding it (routing/routes.http.test.js).
+  test("an Auto composer sends no sentinel with the answer: the server's mark routes it", async () => {
     mainSessionId = "session-a"
     seedSession("session-a")
     listedAgents = ["build"]
@@ -4340,14 +4334,11 @@ describe("replyToForm applies the composer selection", () => {
 
     await replyInMainChat()
 
-    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
-    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
-      model: { providerID: "openchamber", id: "auto" },
-    })
+    expect(replyMethods()).toEqual(["form.reply"])
   })
 
   for (const surface of ["a pinned chat", "a /btw fork"]) {
-    test(`${surface} replies with its own picks, never the main chat's`, async () => {
+    test(`${surface} replies with its own agent pick, never the main chat's, and no model`, async () => {
       mainSessionId = "session-main"
       configState = { currentProviderId: "google", currentModelId: "gemini", currentVariant: "max", currentAgentName: "review" }
       seedSession("session-a")
@@ -4357,14 +4348,11 @@ describe("replyToForm applies the composer selection", () => {
 
       await replyInMainChat()
 
-      expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
-        model: { ...OTHER_MODEL, variant: "low" },
-        agent: "plan",
-      })
+      expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ agent: "plan" })
     })
   }
 
-  test("an effort-only change in a pinned chat keeps the session's model and agent", async () => {
+  test("an effort saved for a pinned chat is not applied with the answer: the pick already wrote it", async () => {
     mainSessionId = "session-main"
     configState = { currentProviderId: "google", currentModelId: "gemini", currentAgentName: "review" }
     seedSession("session-a", { model: { ...SESSION_MODEL, variant: "low" } })
@@ -4372,10 +4360,7 @@ describe("replyToForm applies the composer selection", () => {
 
     await replyInMainChat()
 
-    expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
-    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
-      model: { ...SESSION_MODEL, variant: "high" },
-    })
+    expect(replyMethods()).toEqual(["form.reply"])
   })
 
   test("a child session answered from its parent keeps what it is bound to", async () => {
@@ -4470,7 +4455,7 @@ describe("replyToForm applies the composer selection", () => {
     expect(replyCalls.find((call) => call.method === "form.reply")?.params.directory).toBe("/owned/newer")
   })
 
-  test("an unknown root reads its record from the server and answers with the composer (#6053)", async () => {
+  test("an unknown root reads its record from the server and answers with the composer's agent (#6053)", async () => {
     mainSessionId = "session-a"
     configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentAgentName: "build" }
     fetchedSessionRecords.set("session-a", {
@@ -4484,10 +4469,7 @@ describe("replyToForm applies the composer selection", () => {
 
     expect(replyCalls.some((call) => call.method === "session.get")).toBe(true)
     expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
-    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
-      model: { providerID: "openai", id: "gpt-6" },
-      agent: "build",
-    })
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ agent: "build" })
     expect(replyCalls.find((call) => call.method === "form.reply")?.params.directory).toBe("/owned/root")
   })
 
@@ -4507,10 +4489,7 @@ describe("replyToForm applies the composer selection", () => {
 
     expect(replyCalls.some((call) => call.method === "session.get")).toBe(true)
     expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
-    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
-      model: { providerID: "google", id: "gemini", variant: "max" },
-      agent: "review",
-    })
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ agent: "review" })
     expect(replyCalls.find((call) => call.method === "form.reply")?.params.directory).toBe("/owned/review")
   })
 
@@ -4568,10 +4547,7 @@ describe("replyToForm applies the composer selection", () => {
     await replyInMainChat()
 
     expect(replyMethods()).toEqual(["selection.apply", "form.reply"])
-    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({
-      model: { providerID: "google", id: "gemini", variant: "max" },
-      agent: "review",
-    })
+    expect(replyCalls.find((call) => call.method === "selection.apply")?.params.selection).toEqual({ agent: "review" })
   })
 
   test("an effort saved before a switch made elsewhere does not undo that switch", async () => {
@@ -4600,13 +4576,13 @@ describe("replyToForm applies the composer selection", () => {
   })
 
   for (const roundTrip of [false, true]) {
-    test(`a runtime change during the switch stops the reply, return to original: ${roundTrip}`, async () => {
+    test(`a runtime change during the agent switch stops the reply, return to original: ${roundTrip}`, async () => {
       const original = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() }
       const home = { apiBaseUrl: "http://form-home.test", runtimeKey: "form-home" }
       switchRuntimeEndpoint(home)
       mainSessionId = "session-a"
       seedSession("session-a")
-      configState = { currentProviderId: "openai", currentModelId: "gpt-6" }
+      configState = { currentProviderId: "openai", currentModelId: "gpt-6", currentAgentName: "plan" }
       const form = buildForm("q-1", "session-a")
       const store = createStore({}, { form: { "session-a": [form] } })
       let release = () => {}

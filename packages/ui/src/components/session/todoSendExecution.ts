@@ -1,4 +1,6 @@
+import { opencodeClient } from '@/lib/opencode/client';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { toastModelSwitchFailed } from '@/sync/model-gesture';
 
 export type TodoSendExecution = {
   providerID: string;
@@ -9,7 +11,7 @@ export type TodoSendExecution = {
   picked: { model: boolean; variant: boolean; agent: boolean };
 };
 
-export const resolveExecutionForDirectory = async (
+const resolveExecutionForDirectory = async (
   directory: string,
   execution: TodoSendExecution,
 ): Promise<TodoSendExecution> => {
@@ -28,4 +30,26 @@ export const resolveExecutionForDirectory = async (
     variant: picked.model || (picked.variant && sameModel) ? execution.variant : (defaults.variant ?? ''),
     agent: picked.agent ? execution.agent : (defaults.agentName ?? ''),
   };
+};
+
+export const resolveWorktreeExecution = async (
+  sessionId: string,
+  directory: string,
+  execution: TodoSendExecution,
+): Promise<TodoSendExecution | null> => {
+  const resolved = await resolveExecutionForDirectory(directory, execution);
+  if (resolved.providerID && resolved.modelID) {
+    try {
+      await opencodeClient.switchSessionModel(
+        sessionId,
+        { providerID: resolved.providerID, id: resolved.modelID, variant: resolved.variant || undefined },
+        directory,
+      );
+    } catch (error) {
+      console.warn('[todo-send] the worktree model switch was not applied:', error);
+      toastModelSwitchFailed();
+      return null;
+    }
+  }
+  return resolved;
 };

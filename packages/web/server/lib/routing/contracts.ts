@@ -29,6 +29,7 @@ export interface AutoSelectionInput extends SessionScope {
   model: RoutingModelRef | { providerID: string; modelID: string } | null | undefined;
   agent?: string | null | undefined;
   requestText?: string;
+  liveOnly?: boolean;
 }
 
 export interface Selection {

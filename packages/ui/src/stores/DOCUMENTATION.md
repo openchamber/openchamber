@@ -723,35 +723,45 @@ agent together with the model `setAgent` resolved for it. Only
 clear the pick. An effort picked in a draft is a choice of its own: those same
 paths leave the draft alone while `currentVariantSelection.override` is set.
 
-A live unsent model pick survives changing the agent,
-before either an older per-agent override or the new agent's pinned-model
-catalog lookup can replace it. `selectionSource: 'manual'` alone grants no such
+A model pick the session record has not yet caught up with survives changing the
+agent, before either an older per-agent override or the new agent's pinned-model
+catalog lookup can replace it. The pick is display state only: the gesture has
+already written it to the session (`sync/model-gesture.ts`). `selectionSource: 'manual'` alone grants no such
 precedence because restoring a session writes that source too.
 
-### Why only an unsent model pick overrides a pinned model
+### Why only a model pick the record has not caught up with overrides a pinned model
 
-An explicit model pick describes the next message's model. Switching agents
-keeps that intent, including while the pinned model is absent from discovery.
-A model restored from the session lets the newly selected agent apply its
-pinned model. Treating every manual source as live intent would prevent that
-normal agent selection from working. Picker changes make no session API writes,
-except while the session's turn waits for an automatic retry: the composer then
-switches the session to the unsent model pick at once
-(`sync/session-actions.ts` `applyModelPickToRetry`, driven by
-`hooks/useRetryModelPick.ts`), because OpenCode reloads the session's model
-before every attempt.
+An explicit model pick describes the model the person wants now. Switching
+agents keeps that intent, including while the pinned model is absent from
+discovery. A model restored from the session lets the newly selected agent apply
+its pinned model. Treating every manual source as live intent would prevent that
+normal agent selection from working. An agent's pinned model is
+written only at the gesture that chooses the agent: `commitAgentPinnedModel`
+(`sync/model-gesture.ts`) writes it once, as a pick, when the composer then
+shows the agent's pinned model. A model the user kept, a saved per-agent model
+and an unpinned default are never written by choosing an agent, and a send
+writes none.
 
-### Why a pick reaches a retrying turn and waits during plain generation
+### Why a pick is written when it is made
 
-A turn stuck in a retry wait does nothing until its next attempt, so a model
-picked then is the person moving the turn off a failing model; the switch makes
-the next attempt run on it and the turn goes on, as the limit-failover plugin
-does from OpenCode's retry hook. During plain generation the same switch would
-also land mid-turn: OpenCode reloads the model before every step, so the rest of
-the turn would run on the new model after the next tool call. That pick waits
-for the next send instead, or for the retry wait if the turn falls into one
-first. Auto waits for the next send too, because it routes a prompt and a retry
-has none.
+A model or effort pick is written to the session at once (`commitModelPick` in
+`sync/model-gesture.ts`, through the existing `switchSessionModel`), carrying
+exactly the provider, model and effort the gesture chose, and no later send,
+form answer, compaction, retry or queued delivery writes a model for an existing
+session. A pick that waited for a later send had to be judged then against a
+server model that other clients can change in between, and every such judgment
+(a pick compared with a cached record, a "still current" check) could replay an
+older choice over a newer one. A pick written once has no later life to
+validate. This includes a pick made while a turn is generating or waiting for a
+retry: OpenCode reloads the session's model before each step or attempt, so the
+rest of that turn runs on the new model. That is the person's explicit choice;
+what changed is that it no longer waits for the next send.
+
+Picks in one client are written in order, and a pick that a newer one overtakes
+before it starts is skipped. A send that follows a pick waits for the pick's
+write, so the prompt runs on the model just chosen. A write that fails drops the
+pick, so the composer follows the session again, and tells the user; nothing
+retries it later.
 
 An open session's agent goes both ways. A pick applies to the session when the
 next message is sent (`switchAgent` before the prompt). Until then it is the
