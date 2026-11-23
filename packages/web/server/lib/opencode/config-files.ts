@@ -72,6 +72,24 @@ const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
 const getOpenCodeDataDir = (env: NodeJS.ProcessEnv = process.env) =>
   path.join(env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), '.local', 'share'), 'opencode');
 
+/**
+ * Where OpenCode keeps its database: `OPENCODE_DB` when set (absolute, or
+ * relative to the data directory), else `opencode.db` in the data
+ * directory. The data directory follows `XDG_DATA_HOME`, else
+ * `$HOME/.local/share` — the way OpenCode itself resolves it, so an
+ * isolated launch with a temporary HOME names its own database. A
+ * `:memory:` database has no file; callers that need a file path get the
+ * default location.
+ */
+const resolveOpenCodeDbPath = (env: NodeJS.ProcessEnv = process.env) => {
+  const home = env.HOME?.trim() || os.homedir();
+  const dataHome = env.XDG_DATA_HOME?.trim() || path.join(home, '.local', 'share');
+  const dataDir = path.join(dataHome, 'opencode');
+  const configured = (env.OPENCODE_DB ?? '').trim();
+  if (configured && configured !== ':memory:') return path.resolve(dataDir, configured);
+  return path.join(dataDir, 'opencode.db');
+};
+
 
 const AGENT_SCOPE = {
   USER: 'user',
@@ -746,6 +764,7 @@ function findWorktreeRoot(startDir?: string | null): string | null {
 
 export {
   getOpenCodeDataDir,
+  resolveOpenCodeDbPath,
   OPENCODE_CONFIG_DIR,
   AGENT_DIR,
   COMMAND_DIR,

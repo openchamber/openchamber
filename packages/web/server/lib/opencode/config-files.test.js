@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { readConfigFile, readConfigLayer, readConfigLayers, writeConfig, MAX_CONFIG_FILE_BYTES } from './config-files.js';
+import { readConfigFile, readConfigLayer, readConfigLayers, writeConfig, MAX_CONFIG_FILE_BYTES, resolveOpenCodeDbPath } from './config-files.js';
 import { parseMdFile, parseMdFileAsync, MD_FILE_MAX_BYTES, writeMdFile } from './markdown-files.js';
 import { walkSkillMdFiles, listSkillSupportingFiles } from './skill-files.js';
 
@@ -962,4 +962,31 @@ describe('listSkillSupportingFiles caps (#1365)', () => {
     expect(result.truncated).toBe(false);
     expect(result.files).toHaveLength(SKILL_SUPPORTING_FILES_MAX_FILES);
   }, 60_000);
+});
+
+describe('resolveOpenCodeDbPath', () => {
+  it('honours an absolute OPENCODE_DB', () => {
+    expect(resolveOpenCodeDbPath({ HOME: '/home/u', OPENCODE_DB: '/data/custom.db' })).toBe('/data/custom.db');
+  });
+
+  it('resolves a relative OPENCODE_DB against the data directory', () => {
+    expect(resolveOpenCodeDbPath({ HOME: '/home/u', XDG_DATA_HOME: '/xdg', OPENCODE_DB: 'rel.db' }))
+      .toBe(path.join('/xdg', 'opencode', 'rel.db'));
+  });
+
+  it('defaults to opencode.db under XDG_DATA_HOME', () => {
+    expect(resolveOpenCodeDbPath({ HOME: '/home/u', XDG_DATA_HOME: '/xdg' }))
+      .toBe(path.join('/xdg', 'opencode', 'opencode.db'));
+  });
+
+  it('falls back to $HOME/.local/share when XDG_DATA_HOME is unset', () => {
+    expect(resolveOpenCodeDbPath({ HOME: '/home/u' }))
+      .toBe(path.join('/home/u', '.local', 'share', 'opencode', 'opencode.db'));
+  });
+
+  it('treats :memory: and blank values as unset', () => {
+    const fallback = path.join('/home/u', '.local', 'share', 'opencode', 'opencode.db');
+    expect(resolveOpenCodeDbPath({ HOME: '/home/u', OPENCODE_DB: ':memory:' })).toBe(fallback);
+    expect(resolveOpenCodeDbPath({ HOME: '/home/u', OPENCODE_DB: '  ' })).toBe(fallback);
+  });
 });

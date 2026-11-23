@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { z } from 'zod';
 
-import { getOpenCodeDataDir } from './config-files.js';
+import { resolveOpenCodeDbPath } from './config-files.js';
 import type { BunSqliteModule } from './dependency-contracts.js';
 
 interface MigrationDatabase {
@@ -25,13 +25,6 @@ export interface V1MigrationOutcome {
   revisited: number;
   reason?: string;
 }
-
-const resolveOpenCodeDbPath = (env: NodeJS.ProcessEnv) => {
-  const dataDir = getOpenCodeDataDir(env);
-  const configured = (env.OPENCODE_DB ?? '').trim();
-  if (configured && configured !== ':memory:') return path.resolve(dataDir, configured);
-  return path.join(dataDir, 'opencode.db');
-};
 
 const MIGRATION_STATE_KEY = 'migration.v1-v2';
 

@@ -38,6 +38,7 @@ import { prepareManagedOpenCodeEnv } from './managed-opencode-env.js';
 import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from '../diagnostics/startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
+import { resolveOpenCodeDbPath } from './config-files.js';
 import { attachSharedService, restoreSharedServiceState, type SharedOpenCodeServiceConnector } from './shared-service.js';
 import { serverDiagnosticJournal } from '../diagnostics/server-journal.js';
 import { readBoundedResponseJson, readBoundedResponseText } from '../shared/response-body.js';
@@ -129,6 +130,7 @@ export interface OpenCodeLaunchDiagnostics {
   pathEntryCount: number;
   hasShellEnv: boolean;
   shellEnvKeysCount: number;
+  databasePath: string;
 }
 
 export interface OpenCodeHealthFailureSnapshot extends OpenCodeHealthFailure {
@@ -1098,6 +1100,12 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
 
     const pathValue = processEnv?.PATH ?? '';
     const pathEntryCount = pathValue ? pathValue.split(process.platform === 'win32' ? ';' : ':').filter(Boolean).length : 0;
+    const spawnEnv = launchSpec?.env ? { ...processEnv, ...launchSpec.env } : processEnv;
+    // Name the database this launch will open before the process starts,
+    // so a launch pointed at the wrong database is visible in the log
+    // instead of silently migrating it (#2501).
+    const configuredDb = (spawnEnv.OPENCODE_DB ?? '').trim();
+    const databasePath = configuredDb === ':memory:' ? ':memory:' : resolveOpenCodeDbPath(spawnEnv);
     state.lastOpenCodeLaunchDiagnostics = {
       launchedAt: new Date().toISOString(),
       sourceBinary,
@@ -1110,7 +1118,9 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       pathEntryCount,
       hasShellEnv: shellEnvKeysCount > 0,
       shellEnvKeysCount,
+      databasePath,
     };
+    console.log(`[OpenCode] database: ${databasePath}`);
     console.log('[OpenCode] Launching managed server', state.lastOpenCodeLaunchDiagnostics);
 
     mkdirSync(managedPaths.dir, { recursive: true, mode: 0o700 });
@@ -1130,7 +1140,7 @@ export const createOpenCodeLifecycleRuntime = (deps: OpenCodeLifecycleDependenci
       const launch = withoutInheritedListenFds(binary, args);
       child = spawnProcess(launch.command, launch.args, {
       cwd,
-      env: launchSpec?.env ? { ...processEnv, ...launchSpec.env } : processEnv,
+      env: spawnEnv,
       detached: process.platform !== 'win32',
       windowsHide: true,
         stdio: [stdinLease ? 'pipe' : 'ignore', logFd, logFd],
