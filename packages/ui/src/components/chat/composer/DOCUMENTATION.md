@@ -1562,8 +1562,10 @@ command can leave the queue untouched and delivery can take only part of it.
   does not list, a failed skill list, or a prompt rejected with
   `Skill not found` (resent once with the same message id, since preparation
   fails before admission). A queued message carries the skill names captured
-  at queue time (`QueuedMessage.skills`), and every delivery attaches them the
-  same way: a manual send through `buildOutgoingMessage`, the VS Code
+  at queue time (`QueuedMessage.skills`), and so does a goal writer job's held
+  message (`goalWriterHeldMessage`), which the server queues as it is. Every
+  delivery attaches them the same way: a manual send through
+  `buildOutgoingMessage`, the VS Code
   auto-send through `sendMessage`, and the server queue by its own lookup
   (`packages/web/server/lib/message-queue/DOCUMENTATION.md`). An instruction
   alone is not enough: OpenCode keeps a skill with `disable-model-invocation`
