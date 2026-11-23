@@ -38,6 +38,7 @@ const setup = ({ settings = { agentImageToolEnabled: true, agentImageModel: 'ope
     fsPromises: fs.promises,
     // Local time: the file is named by the clock the user sees.
     now: () => new Date(2026, 9, 27, 17, 10, 25, 942),
+    catalogRetryDelaysMs: [0, 0],
   });
   return { generate, requests };
 };
@@ -108,6 +109,19 @@ describe('image.generate', () => {
     await expect(failing(tagged('ModelNotFoundError'))).rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('no longer available') });
     await expect(failing(tagged('ProviderRequestError', 'insufficient credits'))).rejects.toMatchObject({ statusCode: 502, message: 'The provider refused: insufficient credits' });
     await expect(setup({ answer: () => ({ images: [] }) }).generate({ prompt: 'x' }, {})).rejects.toMatchObject({ statusCode: 502 });
+  });
+
+  it('asks again while a cold OpenCode has not loaded the model yet', async () => {
+    let attempts = 0;
+    const answer = () => {
+      attempts += 1;
+      if (attempts < 3) throw tagged('ModelNotFoundError');
+      return { images: [{ type: 'image', data: PNG.toString('base64'), mime: 'image/png' }] };
+    };
+    const directory = makeDir();
+    const result = await setup({ answer }).generate({ prompt: 'x', path: 'cold.png' }, { directory });
+    expect(attempts).toBe(3);
+    expect(result.images).toEqual([{ path: path.join(directory, 'cold.png'), mime: 'image/png' }]);
   });
 });
 

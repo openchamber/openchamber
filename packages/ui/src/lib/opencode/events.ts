@@ -774,8 +774,8 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "persistent-pty.added":
     case "persistent-pty.removed":
     case "persistent-pty.updated":
-      return []
     case "artifact.updated":
+    case "experimental.job.updated":
       return []
 
     case "tui.command.execute":

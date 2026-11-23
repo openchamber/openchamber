@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { asNonEmptyString, isRecord, isString } from '../shared/object-guards.js';
 import { createMessageId } from '../dispatch-results/runtime.js';
+import { LOCATION_PLUGINS_NOT_READY, waitForPluginList } from '../opencode/location-plugins.js';
 
 interface FetchOptions {
   directory?: string | undefined;
@@ -33,6 +34,17 @@ interface PromptBody {
 
 export const catalogScope = (directory: string | undefined) => ({ directory, query: directory ? { 'location[directory]': directory } : {} });
 
+export const awaitCatalog = async <Result>(
+  openCodeFetch: (fetchPath: string, options?: FetchOptions) => Promise<Result>,
+  directory: string | undefined,
+) => {
+  const ready = await waitForPluginList(async () => {
+    const plugins = await openCodeFetch('/api/plugin', catalogScope(directory));
+    return Array.isArray(plugins) ? plugins : [];
+  });
+  if (!ready) throw new Error(LOCATION_PLUGINS_NOT_READY);
+};
+
 export const parseQueuedSkills = z.unknown().transform((value): string[] => [
   ...new Set((Array.isArray(value) ? value : []).map((entry) => asNonEmptyString(entry) ?? '').filter(Boolean)),
 ]).parse;
@@ -63,7 +75,7 @@ export function createQueuedSkills<Result>({ openCodeFetch, persist, now }: {
     if (names.length === 0) return { attached: [], unresolved: [] };
     let known: ReturnType<typeof parseKnownSkills>;
     try {
-      await openCodeFetch('/api/model', catalogScope(directory));
+      await awaitCatalog(openCodeFetch, directory);
       known = parseKnownSkills(await openCodeFetch('/api/skill', catalogScope(directory)));
     } catch (error) {
       console.warn('[message-queue] could not list skills; naming them in an instruction instead:', (isRecord(error) ? error.message : undefined) ?? error);

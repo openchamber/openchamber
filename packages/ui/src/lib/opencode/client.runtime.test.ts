@@ -15,6 +15,7 @@ describe('provider catalog instance ownership', () => {
     const transport = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.pathname === '/auth/url-token') return new Response(null, { status: 404 });
+      if (url.pathname === '/api/plugin') return Response.json({ location: {}, data: [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }] });
       requests.push(url.pathname);
       await held;
       return Response.json({ location: {}, data: url.pathname.endsWith('/default') ? null : [] });
@@ -30,9 +31,10 @@ describe('provider catalog instance ownership', () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'http://catalog-a.test', runtimeKey: 'catalog-a' });
     opencodeClient.reconnectToRuntimeBaseUrl();
     release();
-    await first;
+    // After a round trip the older read is retired too: its plugin wait sees the switch before it reads the catalog.
+    expect(await first.then(() => 'completed', () => 'retired')).toBe(roundTrip ? 'retired' : 'completed');
     expect(await outcome).toBe(roundTrip ? 'retired' : 'completed');
     const catalogRequests = ['/api/model', '/api/model/default', '/api/provider'];
-    expect(requests).toEqual(roundTrip ? catalogRequests : [...catalogRequests, ...catalogRequests]);
+    expect(requests).toEqual(roundTrip ? [] : [...catalogRequests, ...catalogRequests]);
   });
 });

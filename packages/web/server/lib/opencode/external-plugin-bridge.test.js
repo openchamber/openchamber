@@ -147,6 +147,7 @@ describe('external-plugin-bridge', () => {
       { id: 'opencode_worktree_create', options: { namespace: 'opencode' } },
       { id: 'opencode_models', options: { namespace: 'opencode' } },
       { id: 'experimental_image_generate', options: {} },
+      { id: 'generate_image', options: {} },
       { id: 'automation_create', options: {} },
     ];
     const mock = createMockPluginContext(builtinTools);
@@ -182,6 +183,7 @@ describe('external-plugin-bridge', () => {
       expect(active.removed).toContain('opencode_worktree_create');
       expect(active.removed).toContain('opencode_models');
       expect(active.removed).toContain('experimental_image_generate');
+      expect(active.removed).toContain('generate_image');
       expect(active.removed).toContain('automation_create');
       expect(mock.runAgentTransform('Native title')).not.toBe('Native title');
 

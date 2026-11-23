@@ -1,5 +1,6 @@
 import { OpenCode, type ModelSettings } from '@opencode/client';
 import { z } from 'zod';
+import { waitForLocationPlugins } from '../../web/server/lib/opencode/location-plugins.js';
 import type { BridgeResponse } from './bridge';
 import type { OpenCodeManager } from './opencode';
 
@@ -44,6 +45,7 @@ export const readOpenCodeSmallModelCatalog = async (
   if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
   const client = OpenCode.make({ baseUrl: apiUrl.replace(/\/+$/, ''), headers });
   const signal = AbortSignal.timeout(8_000);
+  await waitForLocationPlugins(client, signal);
   const [providers, models] = await Promise.all([
     client.provider.list(undefined, { signal }),
     client.model.list(undefined, { signal }),

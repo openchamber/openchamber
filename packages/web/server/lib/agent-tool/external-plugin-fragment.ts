@@ -19,7 +19,8 @@ const OPENCODE_TOOLS_REPLACED_BY_SCHEDULE = [
   'automation_delete',
 ];
 
-const OPENCODE_TOOL_REPLACED_BY_IMAGE = 'experimental_image_generate';
+// external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/core/src/tool/plugin/image-generate.ts The image tool is generate_image since 2.4.0, experimental_image_generate before.
+const OPENCODE_TOOLS_REPLACED_BY_IMAGE = ['experimental_image_generate', 'generate_image'];
 
 export const createDynamicAgentToolPluginFragment = () => {
   const namespaceLines = Object.entries(CODE_MODE_CATALOG_LINES).map(([name, description]) => {
@@ -82,7 +83,7 @@ ${allEntries.schedule}      }`,
       }`,
     `      if (enabled.secret) {\n${allEntries.secret}      }`,
     `      if (enabled.image) {
-        tools.remove(${JSON.stringify(OPENCODE_TOOL_REPLACED_BY_IMAGE)})
+        for (const id of ${JSON.stringify(OPENCODE_TOOLS_REPLACED_BY_IMAGE)}) tools.remove(id)
 ${allEntries.image}      }`,
     `      if (enabled.usage) {\n${allEntries.usage}      }`,
     `      if (enabled.terminal) {\n${allEntries.terminal}      }`,

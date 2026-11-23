@@ -357,6 +357,7 @@ describe('OpenChamber control service', () => {
       model('a', 'new', 3, 'fam'), model('a', 'older', 2, 'fam'), model('a', 'secret', 4),
       model('b', 'old', 1, 'bfam'), model('b', 'newer', 5, 'bfam'),
     ] })) };
+    client.plugin = { list: async () => ({ data: [{ state: { status: 'active' } }] }) };
     client.provider = { list: vi.fn(async () => ({ data: [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }] })) };
 
     const first = await service.execute('models.search', {}, '/repo');
@@ -379,6 +380,7 @@ describe('OpenChamber control service', () => {
       readSettingsFromDiskMigrated: vi.fn(async () => ({ favoriteModels: [], recentModels: [], hiddenModels: [] })),
     });
     client.model = { list: vi.fn(async () => ({ data: [model('glm-5.3-highspeed', 2), model('glm-5.2', 1), model('glm-5.3', 2)] })) };
+    client.plugin = { list: async () => ({ data: [{ state: { status: 'active' } }] }) };
     client.provider = { list: vi.fn(async () => ({ data: [{ id: 'z', name: 'Zed' }] })) };
 
     const found = await service.execute('models.search', { query: 'glm' }, '/repo');

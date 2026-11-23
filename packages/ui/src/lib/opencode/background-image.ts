@@ -23,7 +23,8 @@ export function readImageJobStart(metadata: Metadata | undefined): Omit<RunningI
 }
 
 const endMetadataSchema = z.object({
-  source: z.string().regex(/^(experimental_)?image_generate$/),
+  // external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/core/src/tool/plugin/image-generate.ts The image tool is generate_image since 2.4.0.
+  source: z.string().regex(/^((experimental_)?image_generate|generate_image)$/),
   jobID: z.string().min(1),
 })
 

@@ -1,6 +1,7 @@
 
 import { z } from "zod"
 
+import { unwrapBackgroundResult } from "./background-result"
 import type { Message, Metadata, ToolPart } from "./model"
 
 export type RunningShell = {
@@ -57,20 +58,17 @@ const completionMetadataSchema = z.object({
   timeout: z.boolean().optional(),
 })
 
-const ENVELOPE = /^\s*<shell\b[^>]*>\n?([\s\S]*?)\n?<\/shell>\s*$/
-
 export function readShellCompletion(message: Message): ShellCompletion | undefined {
   if (message.role !== "synthetic") return undefined
   const parsed = completionMetadataSchema.safeParse(message.metadata ?? {})
   if (!parsed.success) return undefined
-  const envelope = message.text.match(ENVELOPE)
   return {
     shellID: parsed.data.shellID,
     state: parsed.data.state,
     exit: parsed.data.exit,
     signal: parsed.data.signal,
     timeout: parsed.data.timeout,
-    output: envelope ? envelope[1] : message.text,
+    output: unwrapBackgroundResult(message.text, "shell") ?? message.text,
     endedAt: message.time.created,
   }
 }

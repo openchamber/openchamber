@@ -205,9 +205,9 @@ const useAutomationTrigger = () => {
     };
 };
 
-const automationSummary = (automation: AutomationView): string => (automation.action.type === 'prompt'
-    ? automation.action.prompt
-    : automation.action.code);
+const automationSummary = ({ action }: AutomationView): string => (action.type === 'prompt'
+    ? action.prompt
+    : action.type === 'code' ? action.code : action.command);
 
 const AutomationBody: React.FC<{ automation: AutomationView }> = ({ automation }) => {
     const { t } = useI18n();
@@ -239,8 +239,8 @@ const AutomationBody: React.FC<{ automation: AutomationView }> = ({ automation }
             {action.type === 'prompt'
                 ? <div className="typography-meta whitespace-pre-wrap break-words text-foreground">{action.prompt}</div>
                 : (
-                    <Section label={t('chat.toolPart.opencode.automation.code')}>
-                        <pre className="typography-code whitespace-pre-wrap break-words text-foreground">{action.code}</pre>
+                    <Section label={t(action.type === 'code' ? 'chat.toolPart.opencode.automation.code' : 'chat.toolPart.opencode.automation.shell')}>
+                        <pre className="typography-code whitespace-pre-wrap break-words text-foreground">{action.type === 'code' ? action.code : action.command}</pre>
                     </Section>
                 )}
             <Actions />
@@ -261,7 +261,8 @@ const AutomationsBody: React.FC<{ data: ResultOf<'automation_list'> }> = ({ data
                         primary={automation.name ?? automationSummary(automation).split('\n')[0]}
                         secondary={[
                             describeTrigger(automation),
-                            automation.action.type === 'code' ? t('chat.toolPart.opencode.automation.code') : undefined,
+                            automation.action.type === 'code' ? t('chat.toolPart.opencode.automation.code')
+                                : automation.action.type === 'shell' ? t('chat.toolPart.opencode.automation.shell') : undefined,
                             automation.status === 'paused' ? t('chat.toolPart.openchamber.schedule.paused')
                                 : automation.status === 'done' ? t('chat.toolPart.opencode.schedule.done') : undefined,
                         ].filter(Boolean).join(' · ')}

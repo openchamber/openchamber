@@ -2,6 +2,7 @@ import { OpenCode } from '@opencode/client';
 import type { ModelInfo, OpenCodeClient } from '@opencode/client';
 import type { SmallModelClient } from './contracts.js';
 import { asNonEmptyString } from '../shared/guards.js';
+import { readLocationCatalog, waitForLocationPlugins } from '../opencode/location-plugins.js';
 
 export interface OpenCodeRuntimeProviders {
   buildOpenCodeUrl: (requestPath: string, query: string) => string;
@@ -104,6 +105,7 @@ export async function listModelInfos(client: OpenCodeClient, directory?: string 
     return modelCache;
   }
   try {
+    await waitForLocationPlugins(client);
     const models = unwrap(await client.model.list());
     if (models.length === 0) return models;
     modelCache = models;
@@ -119,6 +121,7 @@ export async function listModelInfos(client: OpenCodeClient, directory?: string 
 
 export async function listProviderInfos(client: OpenCodeClient) {
   try {
+    await waitForLocationPlugins(client);
     return unwrap(await client.provider.list());
   } catch (error) {
     const refusal = getTrustRefusal(error);
@@ -164,7 +167,7 @@ export function findModelInfo<ProviderID, ModelID>(models: ModelInfo[], provider
 export async function readOpenCodeCatalog(directory: string | null) {
   const client = getSmallModelClient(directory);
   if (!client) throw new Error('OpenCode on this computer is not running');
-  const [providers, models] = await Promise.all([client.provider.list(), client.model.list()]);
+  const [models, providers] = await readLocationCatalog(client);
   if (!Array.isArray(providers?.data) || !Array.isArray(models?.data)) throw new Error('OpenCode answered no provider list');
   return { providers: providers.data, models: models.data };
 }

@@ -142,6 +142,8 @@ environment.respondSettings(async (_url, init) => {
 environment.respond(async (url, init) => {
   const directory = decodeURIComponent(new Headers(init?.headers).get('x-opencode-directory') ?? '') || url.searchParams.get('directory') || DIRECTORY;
   const providerKey = `${url.origin}:${directory}`;
+  // Every location here has activated its plugins.
+  if (url.pathname === '/api/plugin') return Response.json({ data: [{ source: { type: 'builtin' }, features: {}, state: { status: 'active' } }] });
   if (['/api/model', '/api/model/default', '/api/provider'].includes(url.pathname)) {
     let read = providerReads.get(providerKey);
     if (!read) {
@@ -2399,8 +2401,18 @@ describe('useConfigStore provider persistence', () => {
     const newAgents = deferred<TestAgent[]>();
     let providerReads = 0;
     let agentReads = 0;
-    getProvidersForConfigImpl = () => ++providerReads === 1 ? providers.promise : newProviders.promise;
-    listAgentsImpl = () => ++agentReads === 1 ? agents.promise : newAgents.promise;
+    const replacementProviderRead = deferred<void>();
+    const replacementAgentRead = deferred<void>();
+    getProvidersForConfigImpl = () => {
+      if (++providerReads === 1) return providers.promise;
+      replacementProviderRead.resolve();
+      return newProviders.promise;
+    };
+    listAgentsImpl = () => {
+      if (++agentReads === 1) return agents.promise;
+      replacementAgentRead.resolve();
+      return newAgents.promise;
+    };
     const providerBefore = getProvidersCalls;
     const agentBefore = listAgentsCalls;
     const triggers = Array.from({ length: 8 }, () => [
@@ -2410,7 +2422,7 @@ describe('useConfigStore provider persistence', () => {
     providers.resolve(providerResponse('old'));
     agents.resolve([{ name: 'build', mode: 'primary' }]);
     await Promise.all(triggers.slice(0, 2));
-    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    await Promise.all([replacementProviderRead.promise, replacementAgentRead.promise]);
     expect(getProvidersCalls - providerBefore).toBe(2);
     expect(listAgentsCalls - agentBefore).toBe(2);
     newProviders.resolve(providerResponse('live'));

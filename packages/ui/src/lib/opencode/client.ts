@@ -1,6 +1,7 @@
 
 import { AgentUnavailableError } from "./agent-unavailable-error"
 import { readFolderAgents } from "./folder-agents"
+import { requireLocationPlugins, waitForLocationPlugins } from "./location-plugins"
 import { isLocationNotFoundError } from "./location-errors"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
 import type {
@@ -41,14 +42,11 @@ import {
   type McpServerStatus,
   type Message,
   type Metadata,
-  type Model,
-  type ModelRef,
   type ModelSelection,
   type Part,
   type PermissionReply,
   type PermissionRequest,
   type Project,
-  type Provider,
   type Session,
   type SessionStatus,
   type Skill,
@@ -64,7 +62,7 @@ import { runningImageJobFromWire, type RunningImageJob } from "./background-imag
 import { writeTempFiles, type TempFileResult, type TempFileSource } from "./temp-files"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
-import { withZenName } from "./providerDisplayName"
+import { projectProviderCatalog, type ProviderCatalog } from "./provider-catalog"
 import { readMessageThroughAncestors } from "./message-ownership"
 import {
   deniesAnyProvider,
@@ -442,11 +440,7 @@ export type SessionListOptions = {
   parentID?: string | null
 }
 
-export type ProviderCatalog = {
-  providers: Provider[]
-  models: Model[]
-  default?: ModelRef
-}
+export type { ProviderCatalog }
 
 type FetchPermissionResult =
   | { state: "ok"; permission: PermissionRequest }
@@ -791,7 +785,9 @@ class OpencodeService {
   }
 
   async listImageModels(): Promise<Array<{ value: string; name: string; providerID: string }>> {
-    const models = await call("model.list", () => this.clientFor(this.currentDirectory).model.list({ types: ["image"] }).then((r) => r.data))
+    const client = this.clientFor(this.currentDirectory)
+    await requireLocationPlugins([client], captureRuntimeInstance())
+    const models = await call("model.list", () => client.model.list({ types: ["image"] }).then((r) => r.data))
     return models.map((model) => ({ value: `${model.providerID}/${model.modelID}`, name: model.name, providerID: model.providerID }))
   }
 
@@ -1800,18 +1796,13 @@ class OpencodeService {
     const request = (async () => {
       const client = this.clientFor(effectiveDirectory)
       const providerClient = isSpaceDirectory(effectiveDirectory) ? this.hostClientOfSpace(effectiveDirectory) : client
+      await requireLocationPlugins([client, providerClient], isCurrent)
       const [models, fallback, providers] = await Promise.all([
         call("model.list", () => client.model.list({ types: ["chat", "image"] }).then((r) => r.data)),
         call("model.default", () => client.model.default().then((r) => r.data)).catch(() => undefined),
         call("provider.list", () => providerClient.provider.list().then((r) => r.data)),
       ])
-      return compact({
-        providers: providers.map(withZenName),
-        models: models.map((model) => (
-          Array.isArray(model.variants) ? model : { ...model, variants: [] }
-        )),
-        default: fallback ? { id: fallback.modelID, providerID: fallback.providerID } : undefined,
-      })
+      return projectProviderCatalog(models, fallback, providers)
     })()
 
     this.providerCatalogInFlight.set(key, request)
@@ -1868,7 +1859,9 @@ class OpencodeService {
     if (names.length === 0) return { attached: [], unresolved: [] }
     let known: Skill[]
     try {
-      await call("model.default", () => this.clientFor(directory).model.default()).catch(() => undefined)
+      const isCurrent = captureRuntimeInstance()
+      await waitForLocationPlugins(this.clientFor(directory), isCurrent)
+      if (!isCurrent()) throw new Error("Runtime instance changed")
       known = await this.listSkills(directory)
     } catch (error) {
       console.warn("[opencode] Could not list skills; naming them in an instruction instead:", error)

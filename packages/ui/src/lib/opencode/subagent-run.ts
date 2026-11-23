@@ -1,6 +1,7 @@
 
 import { z } from "zod"
 
+import { unwrapBackgroundResult } from "./background-result"
 import type { Message, Metadata, Part, Session, SyntheticMessage, ToolPart } from "./model"
 import { isSubagentTool, subagentDescription, subagentSessionId } from "./tools"
 
@@ -22,19 +23,16 @@ const runMetadataSchema = z.object({
   state: z.enum(["running", "completed", "error", "cancelled"]),
 })
 
-const ENVELOPE = /^\s*<subagent\b[^>]*>\n?([\s\S]*?)\n?<\/subagent>\s*$/
-
 export function readSubagentRun(message: Message): SubagentRun | undefined {
   if (message.role !== "synthetic") return undefined
   const parsed = runMetadataSchema.safeParse(message.metadata ?? {})
   if (!parsed.success) return undefined
-  const envelope = message.text.match(ENVELOPE)
   return {
     childSessionID: parsed.data.childID,
     agent: parsed.data.agent,
     state: parsed.data.state,
     description: message.description,
-    output: envelope ? envelope[1] : message.text,
+    output: unwrapBackgroundResult(message.text, "subagent") ?? message.text,
     reportedAt: message.time.created,
   }
 }
@@ -80,13 +78,12 @@ export function readForegroundSubagentRun(part: ToolPart): SubagentRun | undefin
   const parsed = foregroundCallMetadataSchema.safeParse(part.state.metadata ?? {})
   if (!parsed.success) return undefined
   const text = part.state.status === "completed" ? part.state.output : part.state.output || part.state.error
-  const envelope = text.match(ENVELOPE)
   const state = part.state.status === "error" ? "error" : parsed.data.status ?? "completed"
   return {
     childSessionID: parsed.data.sessionID,
     state,
     description: subagentDescription(part.state.input),
-    output: envelope ? envelope[1] : text,
+    output: unwrapBackgroundResult(text, "subagent") ?? text,
     reportedAt: part.state.time.end,
   }
 }

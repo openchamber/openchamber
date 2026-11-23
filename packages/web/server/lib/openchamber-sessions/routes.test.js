@@ -113,6 +113,7 @@ vi.mock('@opencode/client', () => ({
         },
         message: { list: sessionMessagesMock },
         command: { list: commandListMock },
+        plugin: { list: async () => ({ data: [{ state: { status: 'active' } }] }) },
         model: { list: modelListMock },
         agent: { list: agentListMock },
         config: { get: configGetMock },
