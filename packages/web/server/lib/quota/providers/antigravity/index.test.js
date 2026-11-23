@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { OpenCodeUpstreamAuthError, isOpenCodeUpstreamAuthRejection } from '../../../opencode/credential-auth-error.js';
 import { ANTIGRAVITY_ACCOUNTS_PATHS } from '../../utils/index.js';
 import { fetchQuota } from './index.js';
+import { configureAntigravityKeyringSources } from './auth.js';
 import { configureOpenCodeCredentials } from '../../../opencode/auth.js';
 
 
@@ -34,11 +35,17 @@ const loadProvider = async () => {
   process.env.OPENCODE_CONFIG_DIR = path.join(isolatedHome, '.config', 'opencode');
   process.env.XDG_DATA_HOME = path.join(isolatedHome, '.local', 'share');
   vi.resetModules();
-  const [{ configureOpenCodeCredentials }, { fetchQuota }] = await Promise.all([
+  const [{ configureOpenCodeCredentials }, { fetchQuota }, { configureAntigravityKeyringSources }] = await Promise.all([
     import('../../../opencode/auth.js'),
     import('./index.js'),
+    import('./auth.js'),
   ]);
-  return { configureOpenCodeCredentials, fetchQuota };
+  // The keyring is not a HOME-derived source, so the isolated home cannot
+  // fence it off: fence it here instead. Keyring cases below install
+  // their own lookup; every other case sees no keyring login, so a real
+  // agy credential on the machine running the tests can never leak in.
+  configureAntigravityKeyringSources({ lookupSecretService: async () => undefined });
+  return { configureOpenCodeCredentials, fetchQuota, configureAntigravityKeyringSources };
 };
 
 const googleOAuthEntry = {
@@ -281,6 +288,100 @@ describe('Antigravity fetchQuota credential resolution', () => {
     expect(result.error).toBe('Not configured');
     expect(fetchStub).not.toHaveBeenCalled();
   });
+
+  it('resolves the agy keyring login as configured when no other source holds a login', async () => {
+    const { configureOpenCodeCredentials, fetchQuota, configureAntigravityKeyringSources } = await loadProvider();
+    configureOpenCodeCredentials({ list: async () => [] });
+    configureAntigravityKeyringSources({
+      lookupSecretService: async () => JSON.stringify({ token: { access_token: 'agy-access', refresh_token: 'keyring-refresh-token', expiry: '2030-01-01T00:00:00Z' } }),
+    });
+    // Token refresh is refused, so a resolved candidate is observable as
+    // the refresh-failure state (configured) rather than "Not configured",
+    // and the refresh token presented to the token endpoint is the
+    // keyring's.
+    const presented = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      presented.push(String(init?.body ?? ''));
+      return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 });
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Failed to refresh Antigravity token');
+    expect(presented).toHaveLength(1);
+    expect(presented[0]).toContain('keyring-refresh-token');
+  });
+
+  it('tries the keyring candidate before a store login carrying a different token', async () => {
+    const { configureOpenCodeCredentials, fetchQuota, configureAntigravityKeyringSources } = await loadProvider();
+    configureOpenCodeCredentials({ list: async () => [googleOAuthEntry] });
+    configureAntigravityKeyringSources({
+      lookupSecretService: async () => JSON.stringify({ token: { refresh_token: 'keyring-refresh-token' } }),
+    });
+    const presented = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      presented.push(String(init?.body ?? ''));
+      return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 });
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.configured).toBe(true);
+    expect(presented).toHaveLength(2);
+    expect(presented[0]).toContain('keyring-refresh-token');
+    expect(presented[1]).toContain('refresh-token');
+    expect(presented[1]).not.toContain('keyring');
+  });
+
+  it('keeps the refresh-failure state for a keyring login rejected as wrong-client', async () => {
+    const { configureOpenCodeCredentials, fetchQuota, configureAntigravityKeyringSources } = await loadProvider();
+    configureOpenCodeCredentials({ list: async () => [] });
+    configureAntigravityKeyringSources({
+      lookupSecretService: async () => JSON.stringify({ token: { refresh_token: 'keyring-refresh-token' } }),
+    });
+    // The agy CLI issues the keyring credential to the Antigravity client
+    // itself, so its token is Antigravity-issued by construction: even a
+    // wrong-client-shaped rejection there is a broken account to surface,
+    // not an unavailable source to hide — the accounts file's rule.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'unauthorized_client' }), { status: 401 })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Failed to refresh Antigravity token');
+  });
+
+  it('returns model windows through the keyring login', async () => {
+    const { configureOpenCodeCredentials, fetchQuota, configureAntigravityKeyringSources } = await loadProvider();
+    configureOpenCodeCredentials({ list: async () => [] });
+    configureAntigravityKeyringSources({
+      lookupSecretService: async () => JSON.stringify({ token: { refresh_token: 'keyring-refresh|project-k' } }),
+    });
+    const bodies = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      if (url === 'https://oauth2.googleapis.com/token') {
+        return Response.json({ access_token: 'test-access' });
+      }
+      bodies.push(JSON.parse(init.body));
+      return Response.json(url.endsWith(':retrieveUserQuotaSummary') ? {} : {
+        models: { 'gemini-test': { quotaInfo: { remainingFraction: 0.75 } } }
+      });
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result).toMatchObject({
+      ok: true, configured: true,
+      usage: { windows: {}, models: { 'gemini-test': { windows: {
+        '5h': { usedPercent: 25, remainingPercent: 75 }
+      } } } }
+    });
+    // The project packed into the keyring token rides the quota requests.
+    expect(bodies).toContainEqual({ project: 'project-k' });
+  });
 });
 
 // ---- upstream tests ----
@@ -296,10 +397,12 @@ beforeEach(() => {
   // The provider also reads the OpenCode credential store; these cases
   // cover the accounts file alone, so the store is wired and empty.
   configureOpenCodeCredentials({ list: async () => [] });
+  configureAntigravityKeyringSources({ lookupSecretService: async () => undefined });
 });
 
 afterEach(() => {
   configureOpenCodeCredentials(null);
+  configureAntigravityKeyringSources(null);
   vi.unstubAllGlobals();
   ANTIGRAVITY_ACCOUNTS_PATHS.splice(0, ANTIGRAVITY_ACCOUNTS_PATHS.length, ...originalPaths);
   rmSync(directory, { recursive: true, force: true });

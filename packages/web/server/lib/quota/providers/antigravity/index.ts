@@ -3,7 +3,7 @@ import { buildResult } from '../../utils/index.js';
 import { credentialSourceUsesLocalStore, readLocalOpenCodeCredentials, readOpenCodeCredentials } from '../../../opencode/auth.js';
 import type { LegacyAuthFile } from '../../../opencode/auth.js';
 import { isOpenCodeUpstreamAuthRejection } from '../../../opencode/credential-auth-error.js';
-import { resolveAntigravityAuth, resolveAntigravityStoreAuth, DEFAULT_PROJECT_ID } from './auth.js';
+import { resolveAntigravityAuth, resolveAntigravityKeyringAuth, resolveAntigravityStoreAuth, DEFAULT_PROJECT_ID } from './auth.js';
 import {
   refreshAntigravityTokenResult,
   isWrongClientRejection,
@@ -21,14 +21,23 @@ export const providerName = 'Antigravity';
 type AuthCandidate = {
   refreshToken: string;
   projectId: string | null;
-  origin: 'file' | 'store';
+  origin: 'keyring' | 'file' | 'store';
 };
 
 const resolveAuthCandidates = async () => {
   const candidates: AuthCandidate[] = [];
+  // Candidate order mirrors the opencode fork's quota provider — keyring,
+  // accounts file, credential store — so every surface resolves the same
+  // candidate set for the same machine (code#2490). The keyring read
+  // fails soft: no bus, no entry or an unreadable entry adds no candidate
+  // and manufactures no error state; the file and the store still speak.
+  const keyringAuth = await resolveAntigravityKeyringAuth();
+  if (keyringAuth?.refreshToken) {
+    candidates.push({ ...keyringAuth, refreshToken: keyringAuth.refreshToken, origin: 'keyring' });
+  }
   const fileAuth = resolveAntigravityAuth();
   if (fileAuth) {
-    if (fileAuth.refreshToken) candidates.push({ ...fileAuth, refreshToken: fileAuth.refreshToken, origin: 'file' });
+    if (fileAuth.refreshToken && !candidates.some((candidate) => candidate.refreshToken === fileAuth.refreshToken)) candidates.push({ ...fileAuth, refreshToken: fileAuth.refreshToken, origin: 'file' });
   }
   let storeReadFailed = false;
   let storeReadError = null;
@@ -118,7 +127,9 @@ export const fetchQuota = async () => {
     // there is no Antigravity source to be broken - report the provider
     // as not configured instead of a permanent refresh failure. The
     // accounts file is Antigravity-issued by construction, so a file
-    // candidate's rejection keeps the failure state below.
+    // candidate's rejection keeps the failure state below. The keyring
+    // credential is issued to the Antigravity client by the agy CLI, so
+    // it keeps the failure state for the same reason.
     if (refreshFailures.every(({ candidate, result }) => candidate.origin === 'store' && isWrongClientRejection(result))) {
       return buildResult({
         providerId,

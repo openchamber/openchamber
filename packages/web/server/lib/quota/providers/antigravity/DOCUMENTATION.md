@@ -20,6 +20,26 @@ module and implements its own quota reader.
 
 ## Decisions
 
+### Why the keyring is a first-class candidate source
+
+The agy CLI's login lives in the keyring (Secret Service service `gemini`,
+username `antigravity`), and the opencode fork's antigravity-auth bridge
+reads it in place; on CLI-signed-in machines it is the only Antigravity
+login, and the fleet's quota gatherer reads the pool through it. This
+module's candidate set — accounts file and credential-store `google`
+OAuth — never adopted it, so the server endpoint and the CLI reported a
+working pool "Not configured" while the gatherer read it fine (code#2490).
+`auth.ts` now resolves the keyring credential first, mirroring the fork's
+candidate order (keyring, file, store) and its in-place read
+(`secret-service.ts`, read-only, never written back), so every surface
+resolves the same candidate set for the same machine. The keyring token is
+Antigravity-issued by construction, so — like the accounts file — a
+wrong-client rejection keeps the refresh-failure state; only store
+candidates can reclassify as "Not configured". A failed keyring read adds
+no candidate and manufactures no error state: the file and the store
+still speak.
+
+
 ### Why label reads keep their native failures
 
 Account files, Google quota responses and VS Code's summary cast establish no
