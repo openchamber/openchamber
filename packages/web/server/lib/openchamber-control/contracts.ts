@@ -47,6 +47,7 @@ export interface ControlInput {
   targetSessionId?: unknown;
   goal?: unknown;
   goalTokenBudget?: unknown;
+  permissionAutoAccept?: unknown;
   runInWorktree?: unknown;
   cleanupWorktree?: unknown;
   baseBranch?: unknown;
