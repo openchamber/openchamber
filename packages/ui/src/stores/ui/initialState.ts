@@ -148,6 +148,8 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'diffFileLayout'
   | 'diffWrapLines'
   | 'diffHideWhitespace'
+  | 'referencePreviewNewestFirst'
+  | 'referencePreviewCollapseDescription'
   | 'diffFileListMode'
   | 'diffFileTreeWidth'
   | 'walkthroughTocWidth'
@@ -377,6 +379,8 @@ export const createInitialUIState = (): Pick<UIStore,
   diffFileLayout: {},
   diffWrapLines: false,
   diffHideWhitespace: false,
+  referencePreviewNewestFirst: false,
+  referencePreviewCollapseDescription: true,
   diffFileListMode: 'flat',
   diffFileTreeWidth: 240,
   walkthroughTocWidth: 224,

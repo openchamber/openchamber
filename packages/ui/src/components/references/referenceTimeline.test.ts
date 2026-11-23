@@ -29,4 +29,15 @@ describe('reference timeline', () => {
     const entries = buildReferenceTimeline([comment('note', '2026-10-01T09:00:00Z'), comment('undated', null)], [commit('a', '2026-10-01T09:00:00Z')]);
     expect(entries.map((entry) => entry.key)).toEqual(['undated', 'note', 'commit:a']);
   });
+
+  test('newest first mirrors the grouped timeline, its commit groups newest first', () => {
+    const entries = buildReferenceTimeline(
+      [comment('review', '2026-10-01T12:00:00Z'), comment('reply', '2026-10-02T12:00:00Z')],
+      [commit('a', '2026-10-01T09:00:00Z'), commit('b', '2026-10-01T10:00:00Z'), commit('c', '2026-10-01T15:00:00Z')],
+      [{ kind: 'issue', number: 4, url: 'https://github.com/acme/app/issues/4', createdAt: '2026-10-01T11:00:00Z' }],
+      { newestFirst: true },
+    );
+
+    expect(entries.map((entry) => (entry.kind === 'commits' ? entry.commits.map((item) => item.sha).join('+') : entry.kind === 'reference' ? `#${entry.reference.number}` : entry.key))).toEqual(['reply', 'c', 'review', '#4', 'b+a']);
+  });
 });

@@ -250,6 +250,8 @@ export interface UIStore {
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
   diffHideWhitespace: boolean;
+  referencePreviewNewestFirst: boolean;
+  referencePreviewCollapseDescription: boolean;
   diffFileListMode: 'flat' | 'tree';
   diffFileTreeWidth: number;
   walkthroughTocWidth: number;
@@ -530,6 +532,8 @@ export interface UIStore {
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
   setDiffHideWhitespace: (hide: boolean) => void;
+  setReferencePreviewNewestFirst: (value: boolean) => void;
+  setReferencePreviewCollapseDescription: (value: boolean) => void;
   setDiffFileListMode: (mode: 'flat' | 'tree') => void;
   setDiffFileTreeWidth: (width: number) => void;
   setWalkthroughTocWidth: (width: number) => void;

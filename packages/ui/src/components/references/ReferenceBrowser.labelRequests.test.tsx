@@ -137,8 +137,8 @@ const show = async (): Promise<void> => {
   await flush();
 };
 
-/** The one filter trigger: the filter, and the applied labels named after it. */
-const filterTrigger = () => host.querySelector<HTMLButtonElement>('button[aria-label="Filter"], button[aria-label^="Filter:"]');
+/** The one filter trigger: the icon inside the search field. */
+const filterTrigger = () => host.querySelector<HTMLButtonElement>('[data-slot="reference-filter-trigger"]');
 /** The open panel; one still animating out is left over in the document. */
 const menu = () => [...document.querySelectorAll<HTMLElement>('[role="menu"]')]
   .find((element) => !element.hasAttribute('data-ending-style')) ?? null;
@@ -166,8 +166,11 @@ describe('the labels a list read carries', () => {
     await show();
     // One read, already narrowed: the remembered filter never trails an unfiltered read.
     expect(reads).toEqual([['bug', 'reload-only']]);
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: bug, reload-only');
+    expect(filterTrigger()?.closest('[data-slot="reference-search-field"]')).not.toBeNull();
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open · bug +1');
+    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('true');
     await openMenu();
+    expect(menu()).not.toBeNull();
     await closeMenu();
   });
 
@@ -175,15 +178,16 @@ describe('the labels a list read carries', () => {
     await show();
     await openMenu();
     // The selection is remembered for the app run: start from none.
-    if (filterTrigger()?.getAttribute('aria-label')?.includes(':')) await click(labelChoice('Clear'));
+    const clear = labelChoice('Clear');
+    if (clear) await click(clear);
     reads = [];
     await click(labelChoice('bug'));
     await click(labelChoice('docs'));
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: bug, docs');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open · bug +1');
     expect(reads.at(-1)).toEqual(['bug', 'docs']);
     // Unticking one leaves the other applied, and reads with it.
     await click(labelChoice('bug'));
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: docs');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open · docs');
     expect(reads.at(-1)).toEqual(['docs']);
     await closeMenu();
   });

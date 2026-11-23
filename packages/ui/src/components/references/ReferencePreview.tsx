@@ -1,6 +1,5 @@
 import * as React from 'react';
 
-import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -12,15 +11,17 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
-import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import type { CachedValue } from './referenceCache';
 import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './projectUploads';
 import { ReferenceMarkdownEditor } from './ReferenceMarkdownEditor';
+import { CollapsedBody, ReferenceBody } from './CollapsedBody';
+import { PreviewDisplayMenu } from './previewDisplayMenu';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { trackerPresentation } from '@/lib/trackers/presentation';
@@ -50,7 +51,6 @@ import { forgetReferenceTextDraft, referenceTextDraft, referenceTextDraftKey, re
 
 export type ReferencePreviewPurpose = 'attach' | 'worktree';
 
-const MARKDOWN_CLASS = '[&_img]:max-w-full [&_img]:h-auto';
 const ZOOMABLE_IMAGE_CLASS = '[&_[data-markdown-content]_img:not(a_img):not([aria-hidden=true])]:cursor-zoom-in';
 
 const PreviewFrame: React.FC<{ pinned: boolean; header: React.ReactNode; meta: React.ReactNode; footer: React.ReactNode; children: React.ReactNode }> = ({ pinned, header, meta, footer, children }) => {
@@ -226,25 +226,6 @@ const ChangeFlags: React.FC<{ reference: RepositoryReference }> = ({ reference }
                 </span>
             ) : null}
         </span>
-    );
-};
-
-const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
-    const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
-    const links = React.useContext(ReferenceLinksContext);
-    const shown = React.useMemo(() => (rewrite ? rewrite(content) : content), [content, rewrite]);
-    const emojiShortcodes = useEmojiShortcodes(shown);
-    return (
-        <SimpleMarkdownRenderer
-            content={shown}
-            className={MARKDOWN_CLASS}
-            enableFileReferences={false}
-            allowRawHtml
-            singleTilde
-            repositoryLinks={links.repository}
-            emojiShortcodes={emojiShortcodes}
-            directory={links.directory}
-        />
     );
 };
 
@@ -437,6 +418,8 @@ const RepositoryPreview: React.FC<{
     commentActions?: ScopedCommentActions;
 }> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice, onSaveText, commentActions }) => {
     const { t } = useI18n();
+    const newestFirst = useUIStore((state) => state.referencePreviewNewestFirst);
+    const collapseDescription = useUIStore((state) => state.referencePreviewCollapseDescription);
     const [refreshing, setRefreshing] = React.useState(false);
     const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
     const refresh = onRefresh ? () => {
@@ -472,15 +455,20 @@ const RepositoryPreview: React.FC<{
             }
             return item;
         };
-        return mapDetail(detail, (value) => buildReferenceTimeline(value.comments.map((comment, index) => commentItem(comment, `${comment.url}#${index}`)), (value.pull?.commits ?? []).map((commit) => ({
-            sha: commit.sha,
-            headline: commit.headline,
-            author: commit.author?.login ?? commit.authorName,
-            avatarUrl: commit.author?.avatarUrl ?? null,
-            committedAt: commit.committedAt,
-            url: commit.url,
-        })), value.references ?? []));
-    }, [detail, t]);
+        return mapDetail(detail, (value) => buildReferenceTimeline(
+            value.comments.map((comment, index) => commentItem(comment, `${comment.url}#${index}`)),
+            (value.pull?.commits ?? []).map((commit) => ({
+                sha: commit.sha,
+                headline: commit.headline,
+                author: commit.author?.login ?? commit.authorName,
+                avatarUrl: commit.author?.avatarUrl ?? null,
+                committedAt: commit.committedAt,
+                url: commit.url,
+            })),
+            value.references ?? [],
+            { newestFirst },
+        ));
+    }, [detail, t, newestFirst]);
     const relative = useRelative(now);
     const descriptor = useSourceControlProvider(reference.provider);
     const look = repositoryStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
@@ -665,6 +653,7 @@ const RepositoryPreview: React.FC<{
                             </TooltipTrigger>
                             <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.label })}</TooltipContent>
                         </Tooltip>
+                        <PreviewDisplayMenu />
                     </div>
                     {editing ? (
                         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -822,7 +811,9 @@ const RepositoryPreview: React.FC<{
                         </div>
                     </>
                 ) : body ? (
-                    <ReferenceBody content={body} />
+                    <CollapsedBody key={`${reference.url}:${collapseDescription}`} collapsed={collapseDescription}>
+                        <ReferenceBody content={body} />
+                    </CollapsedBody>
                 ) : (
                     <p className="typography-meta text-muted-foreground">{t('references.picker.preview.noDescription')}</p>
                 )}
@@ -915,6 +906,8 @@ const TrackerPreview: React.FC<{
     onOpenIssue?: (issue: TrackerItemSummary) => void;
 }> = ({ issue, detail, purpose, pinned, now, footer: footerOverride, stateControl, onOpenIssue }) => {
     const { t } = useI18n();
+    const newestFirst = useUIStore((state) => state.referencePreviewNewestFirst);
+    const collapseDescription = useUIStore((state) => state.referencePreviewCollapseDescription);
     const relative = useRelative(now);
     const descriptor = useTrackerDescriptor(issue.provider);
     const { capabilities } = descriptor;
@@ -927,17 +920,20 @@ const TrackerPreview: React.FC<{
     const updated = relative(issue.updatedAt);
     const assignee = issue.assignee?.name;
     const comments = React.useMemo(
-        () => mapDetail(detail, (value) => (value.comments ?? []).map((comment): ReferenceTimelineEntry => ({
-            kind: 'comment',
-            key: comment.id,
-            author: comment.author?.name ?? null,
-            avatarUrl: comment.author?.avatarUrl ?? null,
-            body: comment.body,
-            createdAt: comment.createdAt,
-            context: null,
-            location: null,
-        }))),
-        [detail],
+        () => mapDetail(detail, (value) => {
+            const items = (value.comments ?? []).map((comment): ReferenceTimelineEntry => ({
+                kind: 'comment',
+                key: comment.id,
+                author: comment.author?.name ?? null,
+                avatarUrl: comment.author?.avatarUrl ?? null,
+                body: comment.body,
+                createdAt: comment.createdAt,
+                context: null,
+                location: null,
+            }));
+            return newestFirst ? items.reverse() : items;
+        }),
+        [detail, newestFirst],
     );
 
     const footer = footerOverride ?? (
@@ -970,6 +966,7 @@ const TrackerPreview: React.FC<{
                             </TooltipTrigger>
                             <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.name })}</TooltipContent>
                         </Tooltip>
+                        <PreviewDisplayMenu />
                     </div>
                     <h3 dir="auto" className="typography-ui-header font-semibold break-words text-foreground">{issue.title}</h3>
                 </>
@@ -1002,7 +999,9 @@ const TrackerPreview: React.FC<{
                 ) : detail.status === 'error' ? (
                     <p className="typography-meta text-[var(--status-error-text)]">{t('references.picker.error.load', { error: detail.error })}</p>
                 ) : full?.description?.trim() ? (
-                    <ReferenceBody content={full.description} />
+                    <CollapsedBody key={`${issue.id}:${collapseDescription}`} collapsed={collapseDescription}>
+                        <ReferenceBody content={full.description} />
+                    </CollapsedBody>
                 ) : (
                     <p className="typography-meta text-muted-foreground">{t('references.picker.preview.noDescription')}</p>
                 )}

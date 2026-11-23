@@ -186,8 +186,8 @@ const show = async (options: { kind?: RepositoryReferenceKind; source?: Referenc
   };
 };
 
-/** The one filter trigger: the filter, and the applied labels named after it. */
-const filterTrigger = () => host.querySelector<HTMLButtonElement>('button[aria-label="Filter"], button[aria-label^="Filter:"]');
+/** The one filter trigger: the icon inside the search field. */
+const filterTrigger = () => host.querySelector<HTMLButtonElement>('[data-slot="reference-filter-trigger"]');
 /** The open panel; one still animating out is left over in the document. */
 const menu = () => [...document.querySelectorAll<HTMLElement>('[role="menu"]')]
   .find((element) => !element.hasAttribute('data-ending-style')) ?? null;
@@ -223,8 +223,9 @@ const groupLabel = (name: string) => [...(menu()?.querySelectorAll<HTMLElement>(
 /** Opens the panel, emptying labels an earlier test left: the selection is remembered for the app run. */
 const openFiltered = async (shown: Shown) => {
   await openMenu();
-  if (!filterTrigger()?.getAttribute('aria-label')?.includes(':')) return;
-  await click(labelChoice('Clear'));
+  const clear = labelChoice('Clear');
+  if (!clear) return;
+  await click(clear);
   shown.patches.length = 0;
   shown.reads.length = 0;
   shown.labelReads.length = 0;
@@ -277,24 +278,28 @@ describe('the labels filter in the filter menu', () => {
     // An empty selection is left out of the request, so it reads as unset.
     expect(issueReads(shown).at(-1)?.labels ?? []).toEqual([]);
     expect(checked('bug')).toBe(false);
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open');
+    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('false');
     await closeMenu();
   });
 
-  test('the one trigger names what is applied, counting past the first', async () => {
+  test('the one trigger is the field icon and names what is applied, counting past the first', async () => {
     const shown = await show();
     await openFiltered(shown);
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
-    expect(filterTrigger()?.textContent?.trim()).toBe('Open');
+    const trigger = filterTrigger();
+    expect(trigger?.closest('[data-slot="reference-search-field"]')).not.toBeNull();
+    expect(trigger?.querySelector('use')?.getAttribute('href')).toBe('#oc-filter-3');
+    expect(trigger?.getAttribute('aria-label')).toBe('Filter: Open');
+    expect(trigger?.getAttribute('aria-pressed')).toBe('false');
+    expect(menu()).not.toBeNull();
     await click(labelChoice('bug'));
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: bug');
-    expect(filterTrigger()?.textContent?.trim()).toBe('Open · bug');
-    expect(filterTrigger()?.getAttribute('title')).toBe('Open · bug');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open · bug');
+    expect(filterTrigger()?.getAttribute('title')).toBe('Filter: Open · bug');
+    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('true');
     await click(labelChoice('docs'));
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: bug, docs');
-    expect(filterTrigger()?.textContent?.trim()).toBe('Open · bug +1');
-    // The tooltip still names every applied label.
-    expect(filterTrigger()?.getAttribute('title')).toBe('Open · bug, docs');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open · bug +1');
+    // The tooltip carries the same summary the old text showed.
+    expect(filterTrigger()?.getAttribute('title')).toBe('Filter: Open · bug +1');
     await closeMenu();
   });
 
@@ -305,7 +310,7 @@ describe('the labels filter in the filter menu', () => {
     await click(labelChoice('docs'));
     await click(labelChoice('Clear'));
     expect(shown.patches.at(-1)).toEqual({ labels: [] });
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open');
     // Nothing to clear once none are chosen.
     expect(labelChoice('Clear')).toBeUndefined();
     await closeMenu();
@@ -336,7 +341,7 @@ describe('the labels filter in the filter menu', () => {
     expect(menu()?.textContent).toContain('This project is not readable');
     // The chosen label stays chosen, and can still be unpicked.
     expect(checked('bug')).toBe(true);
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: bug');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open · bug');
     expect(shown.patches.at(-1)).toEqual({ labels: ['bug'] });
     await closeMenu();
   });
@@ -384,7 +389,8 @@ describe('the labels filter in the filter menu', () => {
     expect(labelChoice('bug')).toBeUndefined();
     expect(shown.labelReads).toEqual([]);
     // A set picked in one repository does not name itself on a list that cannot use it.
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open');
+    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('false');
     await closeMenu();
   });
 
@@ -394,7 +400,7 @@ describe('the labels filter in the filter menu', () => {
     expect(menu()?.textContent).toContain('People');
     expect(menu()?.textContent).not.toContain('Labels');
     expect(shown.labelReads).toEqual([]);
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open');
     await closeMenu();
   });
 
@@ -405,7 +411,7 @@ describe('the labels filter in the filter menu', () => {
     expect(menu()?.textContent).not.toContain('Labels');
     expect(labelChoice('bug')).toBeUndefined();
     expect(shown.labelReads).toEqual([]);
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open');
     await closeMenu();
   });
 });
@@ -477,8 +483,9 @@ describe('the GitHub qualifiers the search text carries', () => {
     await openMenu();
     // The panel names the qualifier that decides the field, not a stale control value.
     expect(groupLabel('Status')?.textContent).toBe('Status · is:closed');
-    expect(filterTrigger()?.textContent).toContain('is:closed');
-    expect(filterTrigger()?.textContent).not.toContain('Open');
+    expect(filterTrigger()?.getAttribute('aria-label')).toContain('is:closed');
+    expect(filterTrigger()?.getAttribute('aria-label')).not.toContain('Open');
+    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('true');
     const group = groupLabel('Status')?.nextElementSibling;
     const items = [...(group?.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-radio-item"]') ?? [])];
     expect(items.length).toBeGreaterThan(0);

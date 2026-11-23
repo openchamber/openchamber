@@ -361,6 +361,8 @@ const uiStorePersistOptions = {
     diffLayoutPreference: state.diffLayoutPreference,
     diffWrapLines: state.diffWrapLines,
     diffHideWhitespace: state.diffHideWhitespace,
+    referencePreviewNewestFirst: state.referencePreviewNewestFirst,
+    referencePreviewCollapseDescription: state.referencePreviewCollapseDescription,
     diffFileListMode: state.diffFileListMode,
     diffFileTreeWidth: state.diffFileTreeWidth,
     walkthroughTocWidth: state.walkthroughTocWidth,

@@ -179,7 +179,7 @@ const click = async (element: HTMLElement | null | undefined) => {
   await act(async () => { element.click(); });
   await flush();
 };
-const filterTrigger = () => host.querySelector<HTMLButtonElement>('button[aria-label="Filter"], button[aria-label^="Filter:"]');
+const filterTrigger = () => host.querySelector<HTMLButtonElement>('[data-slot="reference-filter-trigger"]');
 
 describe('a label write the host search has not caught up with', () => {
   test('the list keeps the written labels, and the filter follows them', async () => {
@@ -231,7 +231,10 @@ describe("the phone's filter", () => {
   test('opens as one sheet without raising the keyboard; a label narrows, Clear widens', async () => {
     answer = () => ({ items: [], hasMore: false });
     await show('/work/phone', { isMobile: true });
-    await click(filterTrigger());
+    const trigger = filterTrigger();
+    expect(trigger?.closest('[data-slot="reference-search-field"]')).not.toBeNull();
+    expect(trigger?.getAttribute('aria-pressed')).toBe('false');
+    await click(trigger);
     const sheet = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Filter"]');
     expect(sheet).not.toBeNull();
     // Status, people and the labels with their search, together in the sheet.
@@ -245,16 +248,29 @@ describe("the phone's filter", () => {
     reads = [];
     await click(labelRow('bug'));
     expect(reads.at(-1)?.labels).toEqual(['bug']);
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: bug');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open · bug');
+    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('true');
     // Picking keeps the sheet open.
     expect(document.querySelector('[role="dialog"][aria-label="Filter"]')).not.toBeNull();
 
     // The unfiltered list was read on open, so it shows from the cache.
     await click(labelRow('Clear'));
     expect(browserShown().repositoryFilter.labels).toEqual([]);
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open');
+    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('false');
 
     await click(document.querySelector<HTMLButtonElement>('[role="dialog"][aria-label="Filter"] button[aria-label="Close"]'));
     expect(document.querySelector('[role="dialog"][aria-label="Filter"]')).toBeNull();
+  });
+});
+
+describe('the desktop filter', () => {
+  test('is the icon inside the search field and opens the menu', async () => {
+    answer = () => ({ items: [], hasMore: false });
+    await show('/work/desktop-filter');
+    const trigger = filterTrigger();
+    expect(trigger?.closest('[data-slot="reference-search-field"]')).not.toBeNull();
+    await click(trigger);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
   });
 });

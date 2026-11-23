@@ -55,10 +55,15 @@ const entryTime = (entry: ReferenceTimelineEntry): number => Date.parse(
         : entry.kind === 'reference' ? entry.reference.createdAt : entry.commits[0]?.committedAt) ?? '',
 ) || 0;
 
+type ReferenceTimelineOptions = {
+    newestFirst?: boolean;
+};
+
 export const buildReferenceTimeline = (
     comments: ReferenceCommentItem[],
     commits: ReferenceCommitItem[],
     references: SourceControlReferenceLink[] = [],
+    options: ReferenceTimelineOptions = {},
 ): ReferenceTimelineEntry[] => {
     const singles: ReferenceTimelineEntry[] = [
         ...comments,
@@ -77,5 +82,8 @@ export const buildReferenceTimeline = (
         }
         entries.push(entry);
     }
-    return entries;
+    if (!options.newestFirst) return entries;
+    return entries
+        .map((entry) => (entry.kind === 'commits' ? { ...entry, commits: [...entry.commits].reverse() } : entry))
+        .reverse();
 };

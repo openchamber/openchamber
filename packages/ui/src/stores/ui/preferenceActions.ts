@@ -50,6 +50,8 @@ export const createPreferenceActions: UIStoreSlice<
   | 'setDiffFileTreeWidth'
   | 'setDiffWrapLines'
   | 'setDiffHideWhitespace'
+  | 'setReferencePreviewNewestFirst'
+  | 'setReferencePreviewCollapseDescription'
   | 'setWalkthroughTocWidth'
   | 'setGitChangesViewMode'
   | 'setToolJsonViewMode'
@@ -286,6 +288,14 @@ export const createPreferenceActions: UIStoreSlice<
 
   setDiffHideWhitespace: (hide) => {
     set({ diffHideWhitespace: hide });
+  },
+
+  setReferencePreviewNewestFirst: (value) => {
+    set({ referencePreviewNewestFirst: value });
+  },
+
+  setReferencePreviewCollapseDescription: (value) => {
+    set({ referencePreviewCollapseDescription: value });
   },
 
   setWalkthroughTocWidth: (width) => {
