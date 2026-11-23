@@ -13,13 +13,12 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { handleDropdownNavigationKey, shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
 import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { MobileSheetRow, MobileSheetSearch, MobileSheetSection, PICKER_SEARCH_INPUT_CLASS } from '@/components/ui/MobileSheetList';
-import { PRESSED_CLASS } from '@/components/ui/action-toolbar';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Label } from '@/lib/api/types';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -31,8 +30,6 @@ import { cn } from '@/lib/utils';
 import { ReferenceLabelChips, ReferencePickerRow } from './ReferencePickerRow';
 import { useRepositoryLabelReader } from './useRepositoryLabelReader';
 import {
-    DEFAULT_REPOSITORY_FILTER,
-    DEFAULT_TRACKER_FILTER,
     REPOSITORY_PEOPLE,
     REPOSITORY_PEOPLE_LABEL_KEYS,
     REPOSITORY_STATE_LABEL_KEYS,
@@ -260,6 +257,7 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
     const labelsAvailable = source === 'repository' && !browser.across && browser.repositoryKind !== 'discussion' && Boolean(browser.directory);
     const shownLabels = labelsAvailable ? applied : NO_LABEL_NAMES;
     const labelSummary = shownLabels.length === 0 ? null : shownLabels.length === 1 ? shownLabels[0] : `${shownLabels[0]} +${shownLabels.length - 1}`;
+    const appliedNames = shownLabels.join(', ');
     const advancedSearch = source === 'repository' && browser.descriptor.features.advancedSearch;
     const stateQualifier = advancedSearch ? browser.query.match(QUALIFIER_STATE)?.[0].trim() ?? null : null;
     const peopleQualifier = advancedSearch ? browser.query.match(QUALIFIER_PEOPLE)?.[0].trim() ?? null : null;
@@ -275,16 +273,8 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
     const summary = [statusText, peopleText, source === 'repository' ? labelSummary : priority === 'all' ? null : t(TRACKER_PRIORITY_LABEL_KEYS[priority])]
         .filter(Boolean)
         .join(' · ');
+    const title = source === 'repository' ? [statusText, peopleText, appliedNames || null].filter(Boolean).join(' · ') : summary;
     const filterLabel = t('references.picker.filter.label');
-    const active = source === 'repository'
-        ? stateFromSearch || peopleFromSearch
-            || repository.state !== DEFAULT_REPOSITORY_FILTER.state
-            || repository.people !== DEFAULT_REPOSITORY_FILTER.people
-            || (labelsAvailable && applied.length > 0)
-        : state !== DEFAULT_TRACKER_FILTER.state
-            || (filters.people && people !== DEFAULT_TRACKER_FILTER.people)
-            || (filters.priority && priority !== DEFAULT_TRACKER_FILTER.priority);
-    const accessibleLabel = summary ? `${filterLabel}: ${summary}` : filterLabel;
 
     const group = <T extends string>(
         label: string,
@@ -319,30 +309,26 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
         onChange: (labels: string[]) => browser.selectRepositoryFilter({ labels: normalizeLabelFilter(labels) }),
     } : null;
 
-    const triggerClassName = cn(
-        'flex size-6 shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        active ? PRESSED_CLASS : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+    const triggerProps = {
+        'aria-label': appliedNames ? `${filterLabel}: ${appliedNames}` : filterLabel,
+        title,
+        className: cn(dropdownTriggerVariants({ size: browser.isMobile ? 'mobile' : 'default' }), 'min-w-0 max-w-[18rem] shrink-0', browser.isMobile && 'max-w-[45%]'),
+    };
+    const triggerContent = (
+        <>
+            <span className="flex min-w-0 items-center gap-1.5">
+                <Icon name="filter-3" className="size-4" />
+                <span className="truncate">{summary}</span>
+            </span>
+            <Icon name="arrow-down-s" className="size-4 opacity-50" />
+        </>
     );
-    const triggerIcon = <Icon name="filter-3" className="size-4" />;
 
     if (browser.isMobile) {
         return (
             <MobileReferenceFilterSheet
                 title={filterLabel}
-                trigger={(open) => (
-                    <button
-                        type="button"
-                        data-slot="reference-filter-trigger"
-                        aria-haspopup="dialog"
-                        aria-label={accessibleLabel}
-                        aria-pressed={active}
-                        title={accessibleLabel}
-                        onClick={open}
-                        className={triggerClassName}
-                    >
-                        {triggerIcon}
-                    </button>
-                )}
+                trigger={(open) => <button type="button" aria-haspopup="dialog" onClick={open} {...triggerProps}>{triggerContent}</button>}
                 groups={groups}
                 labels={labelSection}
             />
@@ -351,23 +337,9 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
 
     return (
         <DropdownMenu>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                        <button
-                            type="button"
-                            data-slot="reference-filter-trigger"
-                            aria-label={accessibleLabel}
-                            aria-pressed={active}
-                            title={accessibleLabel}
-                            className={triggerClassName}
-                        >
-                            {triggerIcon}
-                        </button>
-                    </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={6}>{accessibleLabel}</TooltipContent>
-            </Tooltip>
+            <DropdownMenuTrigger asChild>
+                <button type="button" {...triggerProps}>{triggerContent}</button>
+            </DropdownMenuTrigger>
             <DropdownMenuContent
                 align="end"
                 className={cn('max-h-[min(var(--available-height),28rem)] overflow-y-auto', labelsAvailable ? 'w-64' : 'w-56')}
@@ -449,7 +421,7 @@ export const ReferenceBrowserSearch: React.FC<{
 
     return (
         <div className={cn('flex items-center gap-2', !isMobile && 'min-w-[14rem] flex-1')}>
-            <div data-slot="reference-search-field" className="relative min-w-0 flex-1">
+            <div className="relative min-w-0 flex-1">
                 <Icon name="search" className={cn('pointer-events-none absolute inset-s-2.5 top-1/2 -translate-y-1/2 text-muted-foreground', isMobile ? 'size-3.5' : 'size-4')} />
                 <Input
                     ref={searchRef}
@@ -461,7 +433,7 @@ export const ReferenceBrowserSearch: React.FC<{
                     aria-label={placeholder}
                     title={placeholder + advancedHint}
                     inputSize={isMobile ? 'default' : 'compact'}
-                    className={cn('w-full', isMobile ? PICKER_SEARCH_INPUT_CLASS : 'ps-8', query ? 'pe-[5.25rem]' : 'pe-14')}
+                    className={cn('w-full', isMobile ? PICKER_SEARCH_INPUT_CLASS : 'ps-8', 'pe-14')}
                 />
                 <div className="absolute inset-e-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
                     {list.refreshing && list.status !== 'loading' ? (
@@ -481,9 +453,9 @@ export const ReferenceBrowserSearch: React.FC<{
                             <Icon name="close" className="size-3.5" />
                         </button>
                     ) : null}
-                    <ReferenceFilterMenu browser={browser} />
                 </div>
             </div>
+            <ReferenceFilterMenu browser={browser} />
             {trailing}
         </div>
     );
