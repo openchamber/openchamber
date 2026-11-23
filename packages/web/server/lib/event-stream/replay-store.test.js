@@ -184,6 +184,58 @@ describe('replay store', () => {
     expect(state.entries.map((item) => item.position)).toEqual([2]);
   });
 
+  it('does not advance the durable drop marker past a failed trim (#2509)', () => {
+    const filePath = tempFile();
+    const store = createReplayStore({ filePath, warn: () => {} });
+    store.load();
+    expect(store.appendLocal(entry(1, 'inst-a:0'))).toBe(true);
+    expect(store.appendLocal(entry(2, 'inst-a:1'))).toBe(true);
+    expect(store.appendLocal(entry(3, 'inst-a:2'))).toBe(true);
+
+    // Same EISDIR injection as the #2111 test above: appends fail while
+    // the store file is a directory.
+    rmSync(filePath);
+    mkdirSync(filePath);
+    expect(store.appendTrim(2)).toBe(false);
+    expect(store.state().droppedLocalThroughPosition).toBe(0);
+    expect(store.state().entries.map((item) => item.position)).toEqual([1, 2, 3]);
+
+    rmSync(filePath, { recursive: true, force: true });
+    expect(store.appendTrim(2)).toBe(true);
+    expect(store.state().droppedLocalThroughPosition).toBe(2);
+    expect(store.state().entries.map((item) => item.position)).toEqual([3]);
+    // The injection replaced the file, so the reload sees only the trim
+    // records — but the marker they carry is exactly the one that landed.
+    expect(createReplayStore({ filePath }).load().droppedLocalThroughPosition).toBe(2);
+  });
+
+  it('keeps the writes queued behind a failed reset queued, ahead of the reset itself (#2509)', () => {
+    const filePath = tempFile();
+    const store = createReplayStore({ filePath, warn: () => {} });
+    store.load();
+    expect(store.appendLocal(entry(1, 'inst-a:0'))).toBe(true);
+
+    rmSync(filePath);
+    mkdirSync(filePath);
+    expect(store.appendHead({ position: 9, upstream: 'inst-a:8' })).toBe(false);
+    expect(store.appendReset({ position: 3, upstream: 'inst-b:0' })).toBe(false);
+    // Neither failure advanced the store's own state.
+    expect(store.state().head).toEqual({ position: 1, upstream: 'inst-a:0' });
+    expect(store.state().entries.map((item) => item.position)).toEqual([1]);
+
+    // Recovery: the queued head lands first, then the reset, then the new
+    // head — the persisted sequence never skips the failed frame.
+    rmSync(filePath, { recursive: true, force: true });
+    expect(store.appendHead({ position: 10, upstream: 'inst-b:1' })).toBe(true);
+    const state = createReplayStore({ filePath }).load();
+    expect(state.head).toEqual({ position: 10, upstream: 'inst-b:1' });
+    expect(state.entries).toEqual([]);
+    // The reset's drop marker reaches the queued head's position (9). Had
+    // the failed reset discarded the queue, the marker would stop at the
+    // reset's own position (3).
+    expect(state.droppedLocalThroughPosition).toBe(9);
+  });
+
   it('keeps in-memory-only stores committing without a persistence path (#2111)', () => {
     const store = createReplayStore();
     store.load();

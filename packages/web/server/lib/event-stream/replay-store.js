@@ -95,8 +95,8 @@ export function createReplayStore({
   // Encoded records whose append failed. They are not committed — the state
   // below never advances past them — and they must land, in order, before
   // any later record, so the persisted head can never skip a failed frame
-  // (#2111). A later successful write flushes them first; a reset clears
-  // them, because a reset supersedes everything before it.
+  // (#2111). A later successful write flushes them first; a reset that
+  // lands clears them, because a reset supersedes everything before it.
   let pendingLines = [];
 
   const noteWriteFailure = (error) => {
@@ -335,9 +335,17 @@ export function createReplayStore({
     },
     appendReset({ position, upstream }) {
       const sanitized = sanitizeHead({ position: Math.max(head.position, position), upstream });
-      // A reset supersedes every earlier record, committed or still pending.
+      // A reset supersedes every earlier record, committed or still pending
+      // — but only once it lands. A failed reset supersedes nothing: the
+      // queued lines stay queued, ahead of the reset record the failed
+      // write leaves behind, so the persisted sequence never skips a
+      // failed frame (#2509, the #2111 ordering rule).
+      const superseded = pendingLines;
       pendingLines = [];
-      if (!write({ v: STORE_VERSION, t: RECORD_KIND_RESET, p: sanitized.position, u: sanitized.upstream })) return false;
+      if (!write({ v: STORE_VERSION, t: RECORD_KIND_RESET, p: sanitized.position, u: sanitized.upstream })) {
+        pendingLines = [...superseded, ...pendingLines];
+        return false;
+      }
       head = sanitized;
       droppedLocalThroughPosition = Math.max(droppedLocalThroughPosition, sanitized.position);
       entries = [];
