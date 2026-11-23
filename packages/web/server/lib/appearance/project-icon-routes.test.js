@@ -516,6 +516,7 @@ describe('project icon routes', () => {
         open: vi.fn(async () => createMockFileHandle(Buffer.from('svg-bytes'))),
         mkdir: vi.fn(async () => {}),
         writeFile: vi.fn(async () => {}),
+        rename: vi.fn(async () => {}),
         unlink: vi.fn(async () => {}),
       },
       path,
@@ -1069,6 +1070,186 @@ describe('project icon discovery symlink rejection (#2294)', () => {
     } finally {
       await nativeFsPromises.rm(projectDir, { recursive: true, force: true });
       await nativeFsPromises.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+describe('project icon persistence failure safety (#2512)', () => {
+  const iconFileName = (projectId, ext) =>
+    `project-${crypto.createHash('sha1').update(projectId).digest('hex')}.${ext}`;
+
+  const setupIconScenario = async ({ failPersist = false, withFavicon = false } = {}) => {
+    const projectDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-persist-project-'));
+    const dataDir = await nativeFsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-icon-persist-data-'));
+    const iconsDir = path.join(dataDir, 'project-icons');
+    await nativeFsPromises.mkdir(iconsDir, { recursive: true });
+    const oldIconName = iconFileName('proj-1', 'png');
+    const oldBytes = Buffer.from('old-icon-bytes');
+    await nativeFsPromises.writeFile(path.join(iconsDir, oldIconName), oldBytes);
+
+    const discoveredBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    let candidates = [];
+    if (withFavicon) {
+      const faviconPath = path.join(projectDir, 'favicon.svg');
+      await nativeFsPromises.writeFile(faviconPath, discoveredBytes);
+      candidates = [{ name: 'favicon.svg', path: faviconPath, relativePath: 'favicon.svg', extension: 'svg' }];
+    }
+
+    let saved = {
+      projects: [{
+        id: 'proj-1',
+        path: projectDir,
+        iconImage: { mime: 'image/png', updatedAt: 1, source: 'custom' },
+      }],
+    };
+    const persistSettings = async (next) => {
+      if (failPersist) {
+        throw new Error('settings write failed');
+      }
+      saved = { ...saved, ...next };
+      return saved;
+    };
+    const persistResolvedSettings = async (resolve) => {
+      if (failPersist) {
+        throw new Error('settings write failed');
+      }
+      saved = { ...saved, ...resolve(saved) };
+      return saved;
+    };
+
+    const { app, getRoute } = createRouteRegistry();
+    registerProjectIconRoutes(app, {
+      fsPromises: nativeFsPromises,
+      path,
+      crypto,
+      openchamberDataDir: dataDir,
+      sanitizeProjects: (projects) => projects,
+      readSettingsFromDiskMigrated: async () => saved,
+      persistSettings,
+      persistResolvedSettings,
+      createFsSearchRuntime: () => ({ searchFilesystemFiles: async () => candidates }),
+      spawn: vi.fn(),
+      resolveGitBinaryForSpawn: vi.fn(),
+    });
+
+    return {
+      iconsDir,
+      oldIconName,
+      oldBytes,
+      discoveredBytes,
+      getRoute,
+      getSaved: () => saved,
+      cleanup: async () => {
+        await nativeFsPromises.rm(projectDir, { recursive: true, force: true });
+        await nativeFsPromises.rm(dataDir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  const getIcon = async (getRoute) => {
+    const res = createMockResponse();
+    await getRoute('GET', '/api/projects/:projectId/icon')({
+      params: { projectId: 'proj-1' },
+      query: {},
+    }, res);
+    return res;
+  };
+
+  it('keeps the previous uploaded icon readable when persisting the new metadata fails', async () => {
+    const scenario = await setupIconScenario({ failPersist: true });
+    try {
+      const res = createMockResponse();
+      await scenario.getRoute('PUT', '/api/projects/:projectId/icon')({
+        params: { projectId: 'proj-1' },
+        body: { dataUrl: `data:image/jpeg;base64,${Buffer.from('new-icon-bytes').toString('base64')}` },
+      }, res);
+
+      expect(res.statusCode).toBe(500);
+      // The old icon file is untouched and no staged or new file remains.
+      await expect(nativeFsPromises.readFile(path.join(scenario.iconsDir, scenario.oldIconName)))
+        .resolves.toEqual(scenario.oldBytes);
+      await expect(nativeFsPromises.readdir(scenario.iconsDir)).resolves.toEqual([scenario.oldIconName]);
+      expect(scenario.getSaved().projects[0].iconImage)
+        .toEqual({ mime: 'image/png', updatedAt: 1, source: 'custom' });
+
+      const getRes = await getIcon(scenario.getRoute);
+      expect(getRes.statusCode).toBe(200);
+      expect(getRes.body.equals(scenario.oldBytes)).toBe(true);
+    } finally {
+      await scenario.cleanup();
+    }
+  });
+
+  it('replaces the uploaded icon only after the new metadata persists', async () => {
+    const scenario = await setupIconScenario();
+    try {
+      const newBytes = Buffer.from('new-icon-bytes');
+      const res = createMockResponse();
+      await scenario.getRoute('PUT', '/api/projects/:projectId/icon')({
+        params: { projectId: 'proj-1' },
+        body: { dataUrl: `data:image/jpeg;base64,${newBytes.toString('base64')}` },
+      }, res);
+
+      expect(res.statusCode).toBe(200);
+      const newIconName = iconFileName('proj-1', 'jpg');
+      await expect(nativeFsPromises.readdir(scenario.iconsDir)).resolves.toEqual([newIconName]);
+      await expect(nativeFsPromises.readFile(path.join(scenario.iconsDir, newIconName)))
+        .resolves.toEqual(newBytes);
+      expect(scenario.getSaved().projects[0].iconImage).toMatchObject({ mime: 'image/jpeg', source: 'custom' });
+
+      const getRes = await getIcon(scenario.getRoute);
+      expect(getRes.statusCode).toBe(200);
+      expect(getRes.body.equals(newBytes)).toBe(true);
+    } finally {
+      await scenario.cleanup();
+    }
+  });
+
+  it('keeps the previous icon readable when discovery persistence fails', async () => {
+    const scenario = await setupIconScenario({ failPersist: true, withFavicon: true });
+    try {
+      const res = createMockResponse();
+      await scenario.getRoute('POST', '/api/projects/:projectId/icon/discover')({
+        params: { projectId: 'proj-1' },
+        body: { force: true },
+      }, res);
+
+      expect(res.statusCode).toBe(500);
+      await expect(nativeFsPromises.readFile(path.join(scenario.iconsDir, scenario.oldIconName)))
+        .resolves.toEqual(scenario.oldBytes);
+      await expect(nativeFsPromises.readdir(scenario.iconsDir)).resolves.toEqual([scenario.oldIconName]);
+      expect(scenario.getSaved().projects[0].iconImage)
+        .toEqual({ mime: 'image/png', updatedAt: 1, source: 'custom' });
+
+      const getRes = await getIcon(scenario.getRoute);
+      expect(getRes.statusCode).toBe(200);
+      expect(getRes.body.equals(scenario.oldBytes)).toBe(true);
+    } finally {
+      await scenario.cleanup();
+    }
+  });
+
+  it('publishes the discovered icon only after its metadata persists', async () => {
+    const scenario = await setupIconScenario({ withFavicon: true });
+    try {
+      const res = createMockResponse();
+      await scenario.getRoute('POST', '/api/projects/:projectId/icon/discover')({
+        params: { projectId: 'proj-1' },
+        body: { force: true },
+      }, res);
+
+      expect(res.statusCode).toBe(200);
+      const discoveredIconName = iconFileName('proj-1', 'svg');
+      await expect(nativeFsPromises.readdir(scenario.iconsDir)).resolves.toEqual([discoveredIconName]);
+      await expect(nativeFsPromises.readFile(path.join(scenario.iconsDir, discoveredIconName)))
+        .resolves.toEqual(scenario.discoveredBytes);
+      expect(scenario.getSaved().projects[0].iconImage)
+        .toMatchObject({ mime: 'image/svg+xml', source: 'auto' });
+
+      const getRes = await getIcon(scenario.getRoute);
+      expect(getRes.statusCode).toBe(200);
+      expect(getRes.body.equals(scenario.discoveredBytes)).toBe(true);
+    } finally {
+      await scenario.cleanup();
     }
   });
 });
