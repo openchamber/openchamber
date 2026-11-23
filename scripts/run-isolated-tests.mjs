@@ -60,8 +60,12 @@ const resolveCommand = (file) => {
   if (isTypeScript || /(?:from\s+|require\(\s*)['"]bun:test['"]/.test(source)) {
     return { label: 'bun', command: bunExecutable, args: ['test', '--conditions=openchamber-source', file] };
   }
+  // --test-force-exit: a browser suite that fails while Vite is still
+  // transforming leaves the dev server's native work alive after close, so
+  // the file sat finished but unexited until FILE_TIMEOUT_MS and its failure
+  // read as a timeout. The results are already reported when it exits.
   if (/(?:from\s+|require\(\s*)['"]node:test['"]/.test(source)) {
-    return { label: 'node', command: 'node', args: ['--test', file] };
+    return { label: 'node', command: 'node', args: ['--test', '--test-force-exit', file] };
   }
   if (EXTENSION_HOST_SUITE.test(source)) return { skip: 'runs in the VS Code extension host' };
   return null;
