@@ -32,6 +32,7 @@ export const createContextWindowController = ({
       const bounds = getWindowStateSnapshot(panel, { minWidth: MIN_WINDOW_WIDTH, minHeight: MIN_WINDOW_HEIGHT });
       if (bounds) saveState({ bounds });
     },
+    onPersistError: (error) => log.warn('[context-window] failed to persist panel window geometry', error),
   });
 
   const openOwners = () => [...panels.entries()].filter(([, panel]) => !panel.isDestroyed()).map(([ownerId]) => ownerId);

@@ -1,5 +1,6 @@
 export const createWindowGeometryState = ({
   persist,
+  onPersistError,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
   delayMs = 300,
@@ -34,6 +35,17 @@ export const createWindowGeometryState = ({
       if (expectedTimer !== undefined) timers.delete(key);
       try {
         await persist(browserWindow);
+      } catch (error) {
+        // A failed geometry write is not fatal: report it and leave the app
+        // running with the previously saved geometry.
+        if (onPersistError) {
+          try {
+            onPersistError(error);
+          } catch {
+            // A failing reporter must not turn a handled persistence
+            // failure back into an unhandled rejection.
+          }
+        }
       } finally {
         if (revisions.get(key) === revision) revisions.delete(key);
       }

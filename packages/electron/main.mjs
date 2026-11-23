@@ -812,7 +812,10 @@ const writeWindowState = async (browserWindow) => {
   });
 };
 
-const windowGeometryState = createWindowGeometryState({ persist: writeWindowState });
+const windowGeometryState = createWindowGeometryState({
+  persist: writeWindowState,
+  onPersistError: (error) => log.warn('[electron] failed to persist window geometry:', error),
+});
 const debounceWindowStatePersist = (browserWindow, immediate = false) => {
   windowGeometryState.schedule(browserWindow, immediate);
 };
