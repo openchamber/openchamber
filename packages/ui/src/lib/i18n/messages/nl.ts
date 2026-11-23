@@ -1861,6 +1861,7 @@ export const dict = {
   'filesView.toast.savingNotSupported': 'Opslaan niet ondersteund',
   'filesView.toast.writeFileFailed': 'Kan bestand niet schrijven',
   'filesView.toast.saveFailed': 'Kan niet opslaan',
+  'filesView.toast.canvasEditorUnavailable': 'De editor voor dit bestand is niet beschikbaar, dus de niet-opgeslagen wijzigingen kunnen niet worden opgeslagen',
   'filesView.editor.copyFileContents': 'Inhoud van bestand kopiëren',
   'filesView.editor.toast.contentsCopied': 'Bestandsinhoud gekopieerd',
   'filesView.editor.copyFilePathTitle': 'Bestandspad kopiëren ({path})',

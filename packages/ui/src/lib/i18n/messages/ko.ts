@@ -1867,6 +1867,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.toast.savingNotSupported': '저장을 지원하지 않음',
   'filesView.toast.writeFileFailed': '파일 쓰기 실패',
   'filesView.toast.saveFailed': '저장 실패',
+  'filesView.toast.canvasEditorUnavailable': '이 파일의 편집기를 사용할 수 없어 저장되지 않은 변경 사항을 저장할 수 없습니다',
   'filesView.editor.copyFileContents': '파일 내용 복사',
   'filesView.editor.toast.contentsCopied': '파일 내용을 복사했습니다',
   'filesView.editor.copyFilePathTitle': '파일 경로 복사({path})',

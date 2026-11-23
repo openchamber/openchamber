@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { canMountBinaryCanvas, FileCanvasTooLargeError, readCanvasResponseBytes, shouldShowFileCanvas } from './fileCanvas';
+import { canMountBinaryCanvas, FileCanvasTooLargeError, readCanvasResponseBytes, resolveFileCanvasSave, shouldShowFileCanvas, type FileCanvasHandle } from './fileCanvas';
 
 describe('shouldShowFileCanvas', () => {
   const shown = (overrides: Partial<Parameters<typeof shouldShowFileCanvas>[0]>) =>
@@ -69,5 +69,40 @@ describe('canMountBinaryCanvas', () => {
   test('waits while the stat is in flight, and mounts on a settled stat with no size', () => {
     expect(canMountBinaryCanvas(null, false, 16)).toBe(false);
     expect(canMountBinaryCanvas(null, true, 16)).toBe(true);
+  });
+});
+
+describe('resolveFileCanvasSave', () => {
+  const handle = (content: string): FileCanvasHandle => ({
+    getContent: () => ({ ok: true, snapshot: { signature: 'sig', content } }),
+    markSaved: () => {},
+  });
+
+  test('dirty canvas with a live editor resolves to a snapshot of that editor', () => {
+    const canvas = handle('guest edits');
+    const resolution = resolveFileCanvasSave({ canvasDirty: true, canvas });
+    expect(resolution.kind).toBe('snapshot');
+    if (resolution.kind === 'snapshot') {
+      expect(resolution.canvas).toBe(canvas);
+    }
+  });
+
+  test('dirty canvas whose editor disappeared is blocked instead of falling back to the draft', () => {
+    // Regression: a guest editor edited the file, then was paused/removed
+    // before save, leaving canvasDirty set with no handle. The save must
+    // fail closed; resolving to the text draft would silently replace the
+    // guest edits with the old content and report success.
+    const resolution = resolveFileCanvasSave({ canvasDirty: true, canvas: null });
+    expect(resolution.kind).toBe('blocked-missing-editor');
+  });
+
+  test('clean canvas with no editor resolves to the plain draft save', () => {
+    // Pausing/removing an editor with no unsaved edits keeps working:
+    // nothing is dirty, so the save proceeds from the text draft.
+    expect(resolveFileCanvasSave({ canvasDirty: false, canvas: null }).kind).toBe('no-canvas');
+  });
+
+  test('clean canvas does not consult a mounted editor handle', () => {
+    expect(resolveFileCanvasSave({ canvasDirty: false, canvas: handle('x') }).kind).toBe('no-canvas');
   });
 });

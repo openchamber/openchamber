@@ -1,7 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { type FileStatSnapshot, fileStatSnapshotForRequestedPath } from '../../fileStatChange';
-import { EMPTY_CANVAS_READ } from '@/components/views/files/fileCanvas';
+import { EMPTY_CANVAS_READ, resolveFileCanvasSave } from '@/components/views/files/fileCanvas';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -35,7 +35,7 @@ export function useFileDraft() {
 }
 
 export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope, tabs, files, t }: {
-  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef' | 'canvasDirty' | 'canvasEditorRef' | 'canvasLastEditAtRef' | 'setCanvasDirty' | 'setCanvasRemountNonce'>;
+  canvasState: Pick<ReturnType<typeof useFileCanvasState>, 'binaryCanvasRef' | 'canvasDirty' | 'canvasEditorRef' | 'canvasLastEditAtRef' | 'setCanvasRemountNonce'>;
   diagram: Pick<ReturnType<typeof useFileDiagram>, 'diagramSavedXmlRef' | 'diagramXmlRef'>;
   draft: Pick<ReturnType<typeof useFileDraft>, 'autoSaveEnabled' | 'autoSaveTimerRef' | 'draftContent' | 'isSaving' | 'setAutoSaveStatus' | 'setDraftContent' | 'setIsSaving'>;
   fileDocument: Pick<ReturnType<typeof useFileDocument>, 'contentDetectedBinary' | 'fileContent' | 'fileLoading' | 'lastLoadedFileContentRef' | 'lastLoadedFileRevisionRef' | 'lastLoadedFileStatRef' | 'loadedFileLineEnding' | 'loadedFilePath' | 'pendingPathMoveRef' | 'setFileContent' | 'setFileContentRevision' | 'setLoadedFileLineEnding'>;
@@ -44,7 +44,7 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
   files: ReturnType<typeof useRuntimeAPIs>['files'];
   t: ReturnType<typeof useI18n>['t'];
 }) {
-  const { binaryCanvasRef, canvasDirty, canvasEditorRef, canvasLastEditAtRef, setCanvasDirty, setCanvasRemountNonce } = canvasState;
+  const { binaryCanvasRef, canvasDirty, canvasEditorRef, canvasLastEditAtRef, setCanvasRemountNonce } = canvasState;
   const { diagramSavedXmlRef, diagramXmlRef } = diagram;
   const { autoSaveEnabled, autoSaveTimerRef, draftContent, isSaving, setAutoSaveStatus, setDraftContent, setIsSaving } = draft;
   const { contentDetectedBinary, fileContent, fileLoading, lastLoadedFileContentRef, lastLoadedFileRevisionRef, lastLoadedFileStatRef, loadedFileLineEnding, loadedFilePath, pendingPathMoveRef, setFileContent, setFileContentRevision, setLoadedFileLineEnding } = fileDocument;
@@ -173,9 +173,13 @@ export function useFileSaving({ canvasState, diagram, draft, fileDocument, scope
     setIsSaving(true);
 
     try {
-      const canvas = canvasDirty ? canvasEditorRef.current : null;
-      if (canvasDirty && !canvas) setCanvasDirty(false);
-      const canvasRead = canvas ? await canvas.getContent('save') : EMPTY_CANVAS_READ;
+      const canvasSave = resolveFileCanvasSave({ canvasDirty, canvas: canvasEditorRef.current });
+      if (canvasSave.kind === 'blocked-missing-editor') {
+        console.warn(`[saveDraft] refusing to save "${selectedFile.path}": its canvas editor is gone but has unsaved changes.`);
+        toast.error(t('filesView.toast.canvasEditorUnavailable'));
+        return false;
+      }
+      const canvasRead = canvasSave.kind === 'snapshot' ? await canvasSave.canvas.getContent('save') : EMPTY_CANVAS_READ;
       if (!canvasRead.ok) {
         toast.error(canvasRead.message);
         return false;

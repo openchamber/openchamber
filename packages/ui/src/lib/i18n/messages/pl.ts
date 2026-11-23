@@ -2601,6 +2601,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.toast.copyFailed': 'Nie udało się skopiować',
   'filesView.toast.openInAppFailed': 'Nie udało się otworzyć w {app}',
   'filesView.toast.saveFailed': 'Nie udało się zapisać',
+  'filesView.toast.canvasEditorUnavailable': 'Edytor tego pliku jest niedostępny, więc niezapisane zmiany nie mogą zostać zapisane',
   'filesView.toast.savingNotSupported': 'Zapisywanie nie jest obsługiwane',
   'filesView.toast.writeFileFailed': 'Nie udało się zapisać pliku',
   'filesView.tree.actions.newFileTitle': 'Nowy plik',

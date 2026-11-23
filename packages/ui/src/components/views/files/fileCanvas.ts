@@ -14,6 +14,29 @@ export type FileCanvasHandle = {
   markSaved: (signature: string) => void;
 };
 
+export type FileCanvasSaveResolution =
+  | { kind: 'snapshot'; canvas: FileCanvasHandle }
+  | { kind: 'no-canvas' }
+  | { kind: 'blocked-missing-editor' };
+
+/**
+ * Decides where a save gets its canvas content from. A canvas that is dirty
+ * but whose editor handle is gone (a guest editor paused or removed before
+ * its content could be handed to the text draft) must fail closed: the draft
+ * does not hold the canvas edits, so writing it would silently discard them
+ * while reporting success. A clean canvas resolves to the plain draft save
+ * whether or not an editor is still mounted, so removing an editor with no
+ * unsaved edits keeps working normally.
+ */
+export const resolveFileCanvasSave = (input: {
+  canvasDirty: boolean;
+  canvas: FileCanvasHandle | null;
+}): FileCanvasSaveResolution => {
+  if (!input.canvasDirty) return { kind: 'no-canvas' };
+  if (!input.canvas) return { kind: 'blocked-missing-editor' };
+  return { kind: 'snapshot', canvas: input.canvas };
+};
+
 export const shouldShowFileCanvas = (input: {
   hasCanvas: boolean;
   viewMode: 'preview' | 'edit';

@@ -1822,6 +1822,7 @@ export const dict: Record<I18nKey, string> = {
   "filesView.toast.savingNotSupported": "Збереження не підтримується",
   "filesView.toast.writeFileFailed": "Не вдалося записати файл",
   "filesView.toast.saveFailed": "Не вдалося зберегти",
+  "filesView.toast.canvasEditorUnavailable": "Редактор цього файлу недоступний, тому незбережені зміни не можна зберегти",
   "filesView.editor.copyFileContents": "Копіювати вміст файлу",
   "filesView.editor.toast.contentsCopied": "Вміст файлу скопійовано",
   "filesView.editor.copyFilePathTitle": "Копіювати шлях до файлу ({path})",
