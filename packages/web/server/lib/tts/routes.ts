@@ -96,6 +96,29 @@ export function buildSayArgs({ voice, rate, tempFile, text }: { voice: string; r
   return ['-v', voice, '-r', String(rate), '-o', tempFile, '--data-format=aac', '--', text];
 }
 
+type SayExecFileAsync = (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
+
+// Runs macOS `say` and returns the generated audio bytes. The output file
+// lives inside a per-request directory created with mkdtemp: the name is
+// unpredictable and the directory is created exclusively, so concurrent
+// requests can never share a file and no symlink can be planted at the
+// output path in advance. The whole directory is removed in a finally, so
+// a failed `say` leaves nothing behind in the shared temp directory.
+export async function synthesizeSayAudio({ voice, rate, text, execFileAsync }: { voice: string; rate: number; text: string; execFileAsync: SayExecFileAsync }) {
+  const fs = await import('fs');
+  const os = await import('os');
+  const path = await import('path');
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-say-'));
+  try {
+    // m4a for browser compatibility (buildSayArgs passes --data-format=aac)
+    const tempFile = path.join(tempDir, 'speech.m4a');
+    await execFileAsync('say', buildSayArgs({ voice, rate, tempFile, text }));
+    return await fs.promises.readFile(tempFile);
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayTTSCapability: Promise<SayTtsCapability> }) {
   let ttsModulePromise: Promise<typeof import('./index.js')> | null = null;
   const getTtsModule = async () => {
@@ -312,14 +335,7 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
       
       const { execFile } = await import('child_process');
       const { promisify } = await import('util');
-      const fs = await import('fs');
-      const os = await import('os');
-      const path = await import('path');
       const execFileAsync = promisify(execFile);
-
-      // Create temp file for audio output (use m4a for browser compatibility)
-      const tempDir = os.tmpdir();
-      const tempFile = path.join(tempDir, `say-${Date.now()}.m4a`);
 
       // Generate audio file using 'say' via execFile: voice, rate, file,
       // and text are argv entries, never a shell command string, so no
@@ -328,12 +344,7 @@ export function registerTtsRoutes(app: Application, { sayTTSCapability }: { sayT
       // --data-format=aac outputs as m4a which browsers can decode
       console.log('[TTS-Say] Generating speech:', { textLength: text.length, voice, rate: parsedRate });
 
-      await execFileAsync('say', buildSayArgs({ voice, rate: parsedRate, tempFile, text: text.trim() }));
-      
-      // Read the generated audio file
-      const audioBuffer = await fs.promises.readFile(tempFile);
-
-      fs.promises.unlink(tempFile).catch(() => {});
+      const audioBuffer = await synthesizeSayAudio({ voice, rate: parsedRate, text: text.trim(), execFileAsync });
 
       res.setHeader('Content-Type', 'audio/mp4');
       res.setHeader('X-Speech-Voice', speechVoiceHeaderValue(voice));
