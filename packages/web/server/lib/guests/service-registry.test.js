@@ -11,20 +11,14 @@ import {
   reapOrphanedGuestServices,
   recordGuestService,
 } from './service-registry.js';
+import { isProcessAlive } from '../process-alive.js';
 
 const REGISTRY_MODULE = pathToFileURL(path.join(import.meta.dirname, 'service-registry.js')).href;
 const TOKEN = 'a'.repeat(48);
 const OTHER_TOKEN = 'b'.repeat(48);
 const ENTRY = '/fixture/docker/service/main.js';
 
-const alive = (pid) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+const alive = isProcessAlive;
 
 let dir;
 const spawned = [];
