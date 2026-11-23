@@ -111,7 +111,7 @@ export interface WorkflowRuntimeOptions {
     | { type: 'openchamber:workflow-run-removed'; properties: { runId: string; parentSessionId: string } }) => void;
   isEnabled?: () => Promise<boolean>;
   startsWithoutApproval?: (sessionId: string) => Promise<boolean>;
-  fsPromises: Pick<typeof fs, 'readFile' | 'access' | 'mkdir' | 'writeFile' | 'readdir'>;
+  fsPromises: Pick<typeof fs, 'readFile' | 'access' | 'mkdir' | 'writeFile' | 'readdir' | 'rename' | 'unlink'>;
   path: Pick<typeof pathModule, 'join' | 'relative' | 'dirname'>;
   now?: () => number;
   sleep?: (duration: number) => Promise<void>;
