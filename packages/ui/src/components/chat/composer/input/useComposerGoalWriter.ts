@@ -215,6 +215,7 @@ export function useComposerGoalWriter({
             content: captured.messageToQueue,
             text: captured.textToQueue,
             agentMention: captured.agentMention,
+            skills: captured.skillNames.length > 0 ? captured.skillNames : undefined,
             attachments: captured.attachmentsToQueue,
             context: [...captured.context],
         };
