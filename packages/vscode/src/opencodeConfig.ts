@@ -600,7 +600,7 @@ const resolvePromptFilePath = (reference: string): string | null => {
 
 const writePromptFile = (filePath: string, content: string) => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content, 'utf8');
+  writeFileAtomic(filePath, content);
 };
 
 const getProjectConfigCandidates = (workingDirectory?: string): string[] => {
@@ -1753,7 +1753,7 @@ export const writePluginDirFile = (
     throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
   }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content, 'utf8');
+  writeFileAtomic(filePath, content);
 };
 
 export const deletePluginDirFile = (id: string, workingDirectory?: string): void => {
@@ -3626,7 +3626,7 @@ export const writeSkillSupportingFile = (skillDir: string, relativePath: string,
   const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   assertSkillSupportingFileWithinCap(relativePath, content);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-  fs.writeFileSync(fullPath, content, 'utf8');
+  writeFileAtomic(fullPath, content);
 };
 
 export const deleteSkillSupportingFile = (skillDir: string, relativePath: string): void => {

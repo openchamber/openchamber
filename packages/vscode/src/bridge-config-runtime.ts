@@ -4,6 +4,7 @@ import { readMachineSetting } from './machine-settings';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import {
   createAgent,
   createCommand,
@@ -253,7 +254,7 @@ export async function handleConfigBridgeMessage(
         return { id, type, success: false, error: `Content exceeds maximum size of ${MAX_BEHAVIOR_PROMPT_SIZE} bytes` };
       }
       await fs.promises.mkdir(path.dirname(AGENTS_MD_PATH), { recursive: true });
-      await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
+      writeFileAtomic(AGENTS_MD_PATH, content);
       return {
         id,
         type,
