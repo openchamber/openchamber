@@ -29,6 +29,7 @@ import {
   searchDirectory,
   resolveFileReadPath,
   resolveDirectoryListPath,
+  resolveDirectoryCreatePath,
   fetchModelsMetadata,
 } from './bridge-fs-helpers-runtime';
 import {
@@ -106,6 +107,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         searchDirectory,
         resolveFileReadPath,
         resolveDirectoryListPath,
+        resolveDirectoryCreatePath,
         parseDroppedFileReference,
         readUriAsAttachment,
       }

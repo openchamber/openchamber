@@ -707,3 +707,84 @@ export const resolveDirectoryListPath = async (
     return { ok: false, status: 500, error: 'Failed to resolve directory path' };
   }
 };
+
+export type FsCreatePathResolution =
+  | { ok: true; resolvedPath: string }
+  | { ok: false; status: number; error: string };
+
+type LooseCanonicalization =
+  | { ok: true; canonicalPath: string }
+  | { ok: false; reason: 'symlink' | 'error' };
+
+// Canonicalize as much of a path as exists: the nearest existing ancestor
+// is resolved with realpath and the missing segments are re-attached, so
+// the result is where a create would actually land. A symlink component
+// whose target is missing cannot be canonicalized - creating through it
+// would land wherever it points - so it reports `symlink` instead of a
+// path that only looks contained.
+const canonicalizeLoose = async (target: string): Promise<LooseCanonicalization> => {
+  const missing: string[] = [];
+  let ancestor = target;
+  for (;;) {
+    try {
+      const canonicalAncestor = await fs.promises.realpath(ancestor);
+      const canonicalPath = missing.length > 0
+        ? path.join(canonicalAncestor, ...missing.reverse())
+        : canonicalAncestor;
+      return { ok: true, canonicalPath };
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err?.code !== 'ENOENT') {
+        return { ok: false, reason: 'error' };
+      }
+      const ancestorStats = await fs.promises.lstat(ancestor).catch(() => undefined);
+      if (ancestorStats?.isSymbolicLink()) {
+        return { ok: false, reason: 'symlink' };
+      }
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) {
+        return { ok: false, reason: 'error' };
+      }
+      missing.push(path.basename(ancestor));
+      ancestor = parent;
+    }
+  }
+};
+
+export const resolveDirectoryCreatePath = async (
+  targetPath: string,
+  workspaceRoot: string,
+  additionalRoots: string[] = [],
+): Promise<FsCreatePathResolution> => {
+  const resolved = resolveUserPath(targetPath, workspaceRoot);
+  if (!resolved) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+
+  const candidate = await canonicalizeLoose(resolved);
+  if (!candidate.ok) {
+    return candidate.reason === 'symlink'
+      ? { ok: false, status: 403, error: 'Access to directory denied' }
+      : { ok: false, status: 500, error: 'Failed to resolve directory path' };
+  }
+
+  // A create is contained when its canonical landing spot sits inside any
+  // sanctioned root, each canonicalized the same loose way (the managed
+  // Chats root, for one, may not exist yet). A root that cannot be
+  // canonicalized simply vouches for nothing.
+  let sawRoot = false;
+  for (const root of [workspaceRoot, ...additionalRoots]) {
+    const canonicalRoot = await canonicalizeLoose(root);
+    if (!canonicalRoot.ok) {
+      continue;
+    }
+    sawRoot = true;
+    if (isPathInside(candidate.canonicalPath, canonicalRoot.canonicalPath)) {
+      return { ok: true, resolvedPath: candidate.canonicalPath };
+    }
+  }
+  if (!sawRoot) {
+    return { ok: false, status: 500, error: 'Failed to resolve directory path' };
+  }
+  return { ok: false, status: 403, error: 'Access to directory denied' };
+};

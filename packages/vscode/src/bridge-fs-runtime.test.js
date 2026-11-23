@@ -27,6 +27,7 @@ const deps = {
   searchDirectory: mock(),
   resolveFileReadPath: mock(),
   resolveDirectoryListPath: async (target) => ({ ok: true, resolvedPath: target }),
+  resolveDirectoryCreatePath: async (target) => ({ ok: true, resolvedPath: target }),
   parseDroppedFileReference: mock(),
   readUriAsAttachment: mock(),
 };
