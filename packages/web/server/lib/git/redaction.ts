@@ -80,6 +80,21 @@ export function redactGitText<Value>(value: Value, { secrets = [], maxChars = DE
     // preserving structure and the scheme word.
     .replace(new RegExp(`\\b(${SENSITIVE_TEXT_KEY_PATTERN})(["']?\\s*[:=]\\s*["'])((?:bearer|basic)\\s+)?[^\\s"',;]+`, 'gi'), `$1$2$3${REDACTED}`)
     .replace(new RegExp(`\\b(${SENSITIVE_TEXT_KEY_PATTERN})(\\s*[:=]\\s*(?:bearer|basic))\\s+[^\\s,;]+`, 'gi'), `$1$2 ${REDACTED}`)
+    // #2463: ordinary mid-line assignments (fatal: api_key=..., msg: access_token: ...)
+    // — the generic sensitive-key rule redactSensitiveText carries; without it an
+    // echoed credential after other text on the line survived every pattern above.
+    // The lookahead refuses bearer/basic-headed values so the scheme word is
+    // preserved for the scheme-headed rule above, exactly as in the sibling.
+    // Two deliberate differences from the sibling, both because this surface
+    // redacts URLs first and keeps non-sensitive query params (the sibling
+    // strips the whole query): '&' also ends the value, so a value cannot eat
+    // '&ref=main'; and a value that is already the redaction marker — raw or
+    // URL-encoded by the URL pass above — is left exactly as it is.
+    .replace(
+      new RegExp(`\\b(${SENSITIVE_TEXT_KEY_PATTERN})\\s*[:=]\\s*(?!(?:bearer|basic)\\s)([^\\s"',;&]+)`, 'gi'),
+      (match, key: string, value: string) =>
+        value === REDACTED || value === encodeURIComponent(REDACTED) ? match : `${key}=${REDACTED}`,
+    )
     .replace(/^(\s*(?:password|oauth_token|access_token|private_token|token)\s*=).*$/gim, `$1${REDACTED}`)
     .replace(/\b(authorization|private-token|oauth-token)\s*[:=]\s*[^\s"',;]+/gi, `$1=${REDACTED}`);
 
