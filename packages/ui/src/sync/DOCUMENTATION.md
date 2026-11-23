@@ -1008,8 +1008,42 @@ is a later stage.
 automatic runs share a lock acquired before loading. Each run requests a fresh
 complete global snapshot and refuses the loader's error/fallback state. A
 runtime switch stops the batch and prevents writing its cooldown into the new
-runtime. Automatic attempts are limited to once per day while the app is open;
-manual runs bypass the cooldown and enabled checkbox.
+runtime. Automatic attempts are limited to once per day and need someone at
+the app: they start at launch or on the first pointer, key, focus or
+visibility event after the cooldown, and not when the app has been left
+untouched for ten minutes. A window that mounts hidden waits for it to be
+shown. Manual runs bypass the cooldown and enabled checkbox.
+
+A session's age counts only time the app was in use. Each run credits this
+device with one interval (a day) of use; when the next run comes later, the
+stretch from the end of that day to the run is an absence, excluded from the
+age of every session older than it, on that run and every later one. Automatic
+and manual runs, the Settings preview, both actions and the archived-only mode
+all use the same cutoff from `currentRetentionAbsences`. Absences behind the
+cutoff no longer change any result and are pruned on each run, so the list
+holds at most one entry per day of the period.
+
+The last run and the absences live in their own `localStorage` key
+(`openchamber.sessionRetention.clock`), read when a run starts and
+read-merged-written when it ends (latest last run, union of absences), so one
+tab's stale `ui-store` write cannot erase what another tab recorded, and a tab
+with an older view cannot run again inside another tab's cooldown: the key's
+last run drives both the cooldown and the absences. Without that key (an
+install from before it) the store's `autoDeleteLastRunAt` takes its place. A
+stored value that
+fails the schema is ignored. Absences count only while automatic cleanup is on:
+a run with it off uses plain wall time and clears the key, and turning it on in
+Settings clears it and the last run, so the period applies as stated at once,
+as the preview showed. A device with no history at all (no key and no stored
+last run: a new browser profile, cleared storage, a webview that keeps none)
+cannot tell a week away from a first launch, so its first automatic run only
+starts the clock and cleans nothing (`no-history`); the next one is a day
+later. Run now and the preview still count plain wall time there. A client
+that keeps no storage between launches (a private window) therefore never
+cleans automatically; other clients on the same server still do.
+VS Code webviews keep separate storage, so turning cleanup on in the Settings
+webview does not reset the chat webview's clock; that webview then keeps
+excluding its own absences.
 
 Retention targets unarchived sessions by last activity by default. The opt-in
 `sessionRetentionOnlyArchived` setting switches both the preview and execution
@@ -1038,6 +1072,19 @@ blocks deletion of its ancestors while unrelated sessions continue.
 Cleanup uses the canonical archive/delete actions, including confirmed `404`
 deletion, persisted-state cleanup and runtime guards. Settings shares the run
 state and shows loading or fetch failure separately from an eligible count.
+
+### Why time away from the app does not count, and is stored
+
+Counting wall time meant a user with a short period who came back after a
+holiday lost at once everything they had been working on before leaving.
+Excluding only the gap since the last run, without storing it, merely moved
+that loss to the next day's run, so every absence is kept until it is behind
+the cutoff. A prompt before a large cleanup was rejected: the maintainer wants
+it silent. An app left open but untouched counts as away, because a run while
+nobody is there would credit the following day as use; that is why automatic
+runs wait for user activity rather than a timer. Pruning uses the current
+period, so raising the period later can count a pruned absence again for
+sessions that had already expired under the shorter one.
 
 ### Why In work sessions stay unless the user includes them
 

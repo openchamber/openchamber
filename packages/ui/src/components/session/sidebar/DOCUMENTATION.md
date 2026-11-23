@@ -924,8 +924,19 @@ root. When the folder is gone or the draft moves to another project or
 worktree, the label hides and the session lands unfiled. Its saved row stays
 in the project or worktree list until the session is sent. A draft
 this device failed to store (offline, or a 413 for attachments over the
-server's limit, which the user is told once) keeps this device's newer copy
-when reopened here. The first draft opened in a folder takes over the text
+server's limit, which the user is told once) still gets its row, built from
+what the device tried to send, and keeps this device's newer copy when
+reopened here: without the row, a first save lost on a bad connection left
+the text in the composer's storage with nothing in the sidebar that leads
+back to it. The store keeps the failed save in localStorage
+(`openchamber.sessionDrafts.unsynced.v1`, each window rewriting only its own
+entry; attachments not uploaded yet keep their id there and their bytes in
+memory, so a send whose answer was lost does not drop a file the server got),
+shows those rows before the server's list arrives, and sends them again after
+each successful list read, which follows a reconnect; a 413 waits for the
+user's next change. Throwing away a draft the server never had removes its row
+for good, offline too. A move that fails (a gone space's draft) leaves the
+draft where it was, since its text on this device is kept under that folder. The first draft opened in a folder takes over the text
 that folder kept under the old per-folder key
 (`readChatDraftClaimingFolderDraft`). Search leaves drafts out. The phone lists
 and opens the same drafts. VS Code has no shared drafts: it keeps the
@@ -1259,7 +1270,8 @@ expanded; an order saved before it existed gets it first on read. Its caption
 (`page` rows, `pages/SidebarPageRow.tsx`, from `pages/useSidebarPages.ts`) are
 Overview (while the feature is on), Issues and PRs, Scheduled tasks, Archive,
 Stats, Integrations catalog (not in enterprise mode), then each active
-extension page. A row is a one-line session row: the icon in the tree's slot,
+extension page; that is the default order, and the sections manager hides and
+reorders single pages (`sections/DOCUMENTATION.md`). A row is a one-line session row: the icon in the tree's slot,
 so the label starts where session titles do, the label in the row-title
 colour. An open page fills its row (`oc-selected`) and the next press closes
 it. A page with a shortcut (Overview, Issues and PRs, Archive) shows it in a

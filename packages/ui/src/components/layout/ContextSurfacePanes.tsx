@@ -62,7 +62,7 @@ type PanelBrowserTab = {
 const browserTabRenderKey = (directory: string, tabId: string): string => `${directory}\u0000${tabId}`;
 const AGENT_TAB_IDLE_SWEEP_MS = 60_000;
 
-const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boolean; side: 'left' | 'right' }> = ({ visible, active, fill = false, side }) => {
+const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boolean; stretch?: boolean; side: 'left' | 'right' }> = ({ visible, active, fill = false, stretch = false, side }) => {
   const { t } = useI18n();
   const width = useUIStore((state) => state.contextEditorTreeWidth);
   const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
@@ -130,6 +130,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
   };
 
   const appliedWidth = visible ? width : 0;
+  const stretched = fill && stretch && visible;
 
   return (
     <div
@@ -139,11 +140,11 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
         fill && (side === 'left' ? 'me-auto' : 'ms-auto'),
       )}
       style={{
-        width: `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
+        width: stretched ? '100%' : `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
         maxWidth: fill ? '100%' : undefined,
         ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
         overflowX: 'clip',
-        transitionProperty: isResizing ? 'none' : 'width',
+        transitionProperty: isResizing || stretch ? 'none' : 'width',
         transitionDuration: '200ms',
         transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
       }}
@@ -174,7 +175,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
           isResizing && 'pointer-events-none',
           !visible && 'pointer-events-none select-none opacity-0'
         )}
-        style={{ width: 'var(--oc-editor-tree-width)', maxWidth: fill ? '100%' : undefined }}
+        style={{ width: stretched ? '100%' : 'var(--oc-editor-tree-width)', maxWidth: fill ? '100%' : undefined }}
         aria-hidden={!visible}
       >
         <SidebarFilesTree visible={visible && active} />
@@ -527,7 +528,7 @@ export const ContextSurfacePanes: React.FC = () => {
               )}
             </div>
           ) : null}
-          {spacePreparing ? null : <EditorTreeColumn visible={contextEditorTreeVisible} active={fileZone.isOpen && isFileTabActive} fill={!showsEditor} side={fileTreeSide} />}
+          {spacePreparing ? null : <EditorTreeColumn visible={contextEditorTreeVisible} active={fileZone.isOpen && isFileTabActive} fill={!showsEditor} stretch={fileZone.zone === 'bottom'} side={fileTreeSide} />}
         </ZonePane>
       ) : null}
       {chatActiveTab && activeChatSessionID && activeChatPinnedSession ? (

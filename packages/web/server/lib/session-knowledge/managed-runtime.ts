@@ -12,6 +12,7 @@ interface ToolSettings {
 type ManagedKnowledgeDependencies = Pick<SessionKnowledgeDependencies,
   'projectContextRuntime' | 'agentMemoryRuntime' | 'resolveProjectId' | 'readExtensionInstructions' | 'readLeadBrief'
   | 'readCheckoutBranch' | 'readPlaceholderBranch' | 'readSessionMetadata' | 'persistSessionMetadata'> & {
+  hasProjectActions: (directory: string) => Promise<boolean>;
   isToolHost: () => boolean;
   readSettings: () => Promise<ToolSettings | null>;
   isAgentMemoryEnabled: () => Promise<boolean>;
@@ -29,6 +30,7 @@ export const createManagedSessionKnowledgeRuntime = ({
   isWorkflowToolEnabled,
   listWorktrees,
   openCodeSessionClient,
+  hasProjectActions,
   ...dependencies
 }: ManagedKnowledgeDependencies) => {
   const toolSettingOn = (key: keyof ToolSettings) => async () => {
@@ -48,6 +50,7 @@ export const createManagedSessionKnowledgeRuntime = ({
     isPageRenderingAvailable: toolSettingOn('agentRenderToolEnabled'),
     isSecretRequestAvailable: toolSettingOn('agentSecretToolEnabled'),
     isWorkflowAvailable: async () => isToolHost() && isWorkflowToolEnabled(),
+    hasProjectActions: async (directory) => isToolHost() && hasProjectActions(directory),
     instructionEntries: {
       put: (sessionID, directory, key, value) => openCodeSessionClient(directory)
         .experimental.session.instructions.entry.put({ sessionID, key, value }),

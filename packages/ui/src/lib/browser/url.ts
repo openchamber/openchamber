@@ -12,20 +12,49 @@ const isLoopbackAuthority = (value: string): boolean => {
 
 export const BLANK_URL = 'about:blank';
 
+const SEARCH_ORIGIN = 'https://www.google.com';
+const SEARCH_PATH = '/search';
+
+const searchUrl = (query: string): string => `${SEARCH_ORIGIN}${SEARCH_PATH}?q=${encodeURIComponent(query)}`;
+
+export const framableUrl = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== SEARCH_ORIGIN || parsed.pathname !== SEARCH_PATH || parsed.searchParams.has('igu')) return url;
+    parsed.searchParams.set('igu', '1');
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+};
+
+const looksLikeHost = (parsed: URL, typed: string): boolean => (
+  parsed.hostname.includes('.')
+  || parsed.hostname.startsWith('[')
+  || isLoopbackAuthority(typed)
+  || parsed.port !== ''
+);
+
 export const normalizeBrowserUrl = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) return BLANK_URL;
 
-  const withScheme = trimmed.includes('://')
-    ? trimmed
-    : `${isLoopbackAuthority(trimmed) ? 'http' : 'https'}://${trimmed}`;
+  if (trimmed.includes('://')) {
+    try {
+      const parsed = new URL(trimmed);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : BLANK_URL;
+    } catch {
+      return /\s/.test(trimmed) ? searchUrl(trimmed) : BLANK_URL;
+    }
+  }
 
+  if (/\s/.test(trimmed)) return searchUrl(trimmed);
+  if (/^[a-z][a-z0-9+.-]*:(?!\d)/i.test(trimmed)) return BLANK_URL;
   try {
-    const parsed = new URL(withScheme);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return BLANK_URL;
-    return parsed.toString();
+    const parsed = new URL(`${isLoopbackAuthority(trimmed) ? 'http' : 'https'}://${trimmed}`);
+    return looksLikeHost(parsed, trimmed) ? parsed.toString() : searchUrl(trimmed);
   } catch {
-    return BLANK_URL;
+    return searchUrl(trimmed);
   }
 };
 

@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { UIStore } from './ui/types';
-import { uiStorePersistOptions } from './ui/persistence';
+import { contextWindowPersistOptions } from './ui/persistence';
+import { withContextWindowRouting } from '@/lib/contextWindow/routing';
 import { createInitialUIState } from './ui/initialState';
 import { createAppearanceActions } from './ui/appearanceActions';
 import { createWorkspaceActions } from './ui/workspaceActions';
@@ -32,7 +33,7 @@ export type { ContextPanelMode } from '@/lib/surfaces/modes';
 export const useUIStore = create<UIStore>()(
   devtools(
     persist(
-      (set, get, store) => ({
+      (set, get, store) => withContextWindowRouting({
         ...createInitialUIState(),
         ...createAppearanceActions(set, get, store),
         ...createWorkspaceActions(set, get, store),
@@ -43,7 +44,7 @@ export const useUIStore = create<UIStore>()(
         ...createNotificationActions(set, get, store),
         ...createAgentActions(set, get, store),
       }),
-      uiStorePersistOptions,
+      contextWindowPersistOptions(),
     ),
     { name: 'ui-store' },
   ),

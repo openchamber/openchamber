@@ -111,22 +111,8 @@ const normalizeNotificationTemplates = (templates: SettingsDocument[string]) => 
   return { templates: next, changed };
 };
 
-const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
-  'agentControlToolEnabled',
-  'agentScheduleToolEnabled',
-  'agentWebToolEnabled',
-  'agentMemoryToolEnabled',
-  'agentKnowledgeToolEnabled',
-  'agentNotifyToolEnabled',
-  'agentRenderToolEnabled',
-  'agentImageToolEnabled',
-  'agentSecretToolEnabled',
-  'agentUsageToolEnabled',
-  'agentTerminalToolEnabled',
-  'agentWorkflowToolEnabled',
-  'fallbackModel',
-  'accountSwitchProviders',
-]);
+const MANAGED_PLUGIN_SETTING = /^agent[A-Z]\w*ToolEnabled$/;
+const MANAGED_PLUGIN_SETTINGS_KEYS = new Set(['fallbackModel', 'accountSwitchProviders']);
 
 export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
   const {
@@ -1167,7 +1153,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
 
       const changedKeys = Object.keys(sanitized);
       await writeSettingsToDisk(next, { surface, changedKeys });
-      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
+      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTING.test(key) || MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
         await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
           console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
         });

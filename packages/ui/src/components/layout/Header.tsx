@@ -34,6 +34,8 @@ import { useKeybinds } from '@/hooks/useKeybind';
 
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { HeaderPlaceMark } from '@/components/session/spaces/HeaderPlaceMark';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { SessionMenuItemHint } from '@/components/session/SessionMenuItemHint';
@@ -350,7 +352,7 @@ export const Header: React.FC = () => {
     : isChatDirectoryForHome(sessionDirectory || selectedSessionDirectory, homeDirectory);
 
   const showHeaderMetaRow = !isChatContext && !workStatusPanelVisible
-    && Boolean(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind));
+    && Boolean(activeProjectLabel || currentBranchLabel || spaceIdOfDirectory(openDirectory) || (!isNewSessionDraftOpen && worktreeBadgeKind));
 
 
 
@@ -880,12 +882,7 @@ export const Header: React.FC = () => {
                     : 'typography-micro text-[0.65625rem] text-muted-foreground',
                 )}>
                   {activeProjectLabel ? <span dir="auto" className="truncate">{activeProjectLabel}</span> : null}
-                  {currentBranchLabel ? (
-                    <span className="inline-flex min-w-0 items-center gap-0.5">
-                      <Icon name="git-branch" className={cn('flex-shrink-0 text-muted-foreground', isNewSessionDraftOpen ? 'h-3.5 w-3.5' : 'h-3 w-3')} />
-                      <span dir="ltr" className={cn('truncate', isNewSessionDraftOpen && 'text-muted-foreground')}>{currentBranchLabel}</span>
-                    </span>
-                  ) : null}
+                  <HeaderPlaceMark directory={openDirectory || null} branch={currentBranchLabel} draft={isNewSessionDraftOpen} />
                   {!isNewSessionDraftOpen && worktreeBadgeKind ? (
                     <span className={cn(
                       "inline-flex min-w-0 items-center gap-0.5",

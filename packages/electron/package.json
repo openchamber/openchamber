@@ -85,14 +85,21 @@
       "!**/node_modules/**/!(LICENSE*|LICENCE*|license*|licence*|License*).md",
       "!**/node_modules/bun-pty{,/**}",
       "!**/node_modules/luxon/{src,build/amd,build/global,build/cjs-browser}{,/**}",
-      "!node_modules/@openchamber/web/{dist,src,public,scripts,test,server,bin}{,/**}",
+      "!node_modules/@openchamber/web/{dist,src,public,scripts,test,server,bin,opencode-server}{,/**}",
+      "!node_modules/@openchamber/web/build/opencode-server{,/**}",
       "!node_modules/@openchamber/web/*.{html,tgz}",
       "!node_modules/@openchamber/web/{tsconfig*.json,tsconfig.tsbuildinfo}",
       "!**/node_modules/7zip-bin/{linux,mac}{,/**}",
       "!**/node_modules/7zip-bin/!(${os})/**/*",
       "!**/node_modules/7zip-bin/win/!(${arch}){,/**}",
       "!node_modules/node-pty/prebuilds/!(${platform}-${arch}){,/**}",
-      "!**/node_modules/@vscode/ripgrep-*{,/**}"
+      "!**/node_modules/@vscode/ripgrep-*{,/**}",
+      "!**/node_modules/@lydell/node-pty*{,/**}",
+      "!**/node_modules/@parcel/watcher*{,/**}",
+      "!**/node_modules/@ff-labs/fff-*{,/**}",
+      "!**/node_modules/ffi-rs{,/**}",
+      "!**/node_modules/@yuuang/ffi-rs*{,/**}",
+      "!**/node_modules/@opencode/pty*{,/**}"
     ],
     "extraResources": [
       {

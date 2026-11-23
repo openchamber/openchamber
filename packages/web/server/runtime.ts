@@ -1201,6 +1201,7 @@ const sessionLead = createSessionLeadServer({
 });
 
 const sessionKnowledgeRuntime = createManagedSessionKnowledgeRuntime({
+  hasProjectActions: (directory) => agentToolRuntime?.hasProjectActions(directory) ?? Promise.resolve(false),
   isToolHost: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
   readSettings: () => readSettingsFromDiskMigrated(),
   readExtensionInstructions: guestAgentContext.instructionText,
@@ -1515,13 +1516,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     ? event.directory
     : '';
   for (const payload of event?.translated?.() ?? []) {
-    // external: https://github.com/anomalyco/opencode OpenCode 2 supplies no plugin abort signal; turn cancellation stops pending OpenChamber actions here.
-    if (payload.type === 'session.idle' && 'aborted' in payload.properties && payload.properties.aborted === true) {
-      agentToolRuntime?.abortSession?.(payload.properties.sessionID);
-    }
-    if ((payload.type === 'session.idle' || payload.type === 'session.error') && payload.properties.sessionID !== undefined) {
-      openChamberControlService.releaseAnswerWaits(payload.properties.sessionID);
-    }
+    agentToolRuntime?.processSessionEvent(payload);
     sessionLineage.observe(payload);
     turnDurationRecorder.processPayload(payload, directory || payload.properties?.directory || '');
     sessionAssistRuntime.processPayload(payload, directory || payload.properties?.directory || '');
@@ -2407,6 +2402,9 @@ async function main(options: WebUiServerOptions = {}) {
     env: process.env,
     executeAction: (...args) => openChamberControlService.execute(...args),
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
+    releaseAnswerWaits: (sessionID) => openChamberControlService.releaseAnswerWaits(sessionID),
+    projectActions: { readSettings: readSettingsFromDiskMigrated, getTerminalRuntime: () => terminalRuntime,
+      projectPathFor: openChamberSessionService.projectPathFor, readProjectSetup: projectConfigRuntime.readProjectSetup },
     getActivePort: () => {
       const address = server?.address?.();
       return address && !isString(address) ? address.port : null;

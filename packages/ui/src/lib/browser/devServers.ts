@@ -3,12 +3,20 @@ import { z } from 'zod';
 import { normalizePath } from '@/lib/pathNormalization';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
+const pageSchema = z.object({
+  title: z.string().min(1).nullable().catch(null),
+  icon: z.string().startsWith('data:image/').nullable().catch(null),
+});
+
 const discoveredServerSchema = z.object({
   port: z.number().int().positive(),
   url: z.string().min(1),
   command: z.string(),
   directory: z.string().min(1).optional(),
+  page: pageSchema.nullable().optional(),
 });
+
+type DevServerPage = z.infer<typeof pageSchema>;
 
 type DiscoveredDevServer = z.infer<typeof discoveredServerSchema>;
 
@@ -61,6 +69,7 @@ type DevServerCandidate = {
   readonly announced: boolean;
   readonly command?: string;
   readonly directory?: string;
+  readonly page?: DevServerPage | null;
 };
 
 const portOf = (url: string): number | null => {
@@ -101,6 +110,7 @@ export const mergeDevServerCandidates = ({
         announced: announcedUrl !== undefined,
         command: server.command,
         directory: server.directory,
+        page: server.page,
       };
     })
     .sort((left, right) => {
@@ -117,6 +127,7 @@ export type WorkFolder = {
 type PlacedDevServer = DevServerCandidate & {
   readonly folderName: string | null;
   readonly outsideWork: boolean;
+  readonly notWebPage: boolean;
 };
 
 const contains = (folder: string, path: string): boolean => (
@@ -166,6 +177,7 @@ export const placeDevServerCandidates = ({
         ...candidate,
         folderName: folder ? lastSegment(folder.path) : null,
         outsideWork: serverDirectory !== null && folder === null && !candidate.announced,
+        notWebPage: candidate.page === null && !candidate.announced,
       },
       rank,
     };

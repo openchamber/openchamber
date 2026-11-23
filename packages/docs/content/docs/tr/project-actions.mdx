@@ -31,6 +31,12 @@ Sunucu başlatan bir eylem için **auto-open URL** seçeneğini açın. OpenCham
 
 Sunucunun sabit bir adresi varsa onu eylemin URL alanına yazın. `{worktree}` ve `{branch}` eylemin çalıştığı çalışma kopyasını yerleştirir, böylece tek bir eylem her worktree'de çalışır. [portless](https://github.com/vercel-labs/portless) ile `https://{worktree}.myapp.localhost`, `feature/auth` üzerindeki bir worktree'de `https://auth.myapp.localhost`, ana çalışma kopyasında `https://myapp.localhost` açar. Alana hiç ihtiyacınız olmayabilir: portless adresini yazdırdığında OpenChamber arkasındaki port yerine o adresi açar. Uzak bir örneğe bağlı masaüstünde bunun yerine portu açar, çünkü tünelden uzak makineye yalnızca loopback portları geçer.
 
+## Eylemleri ajana çalıştırtmak
+
+Bir ajan da projenin eylemlerini çalıştırabilir; böylece geliştirme sunucunu kaydettiğin komutla başlatır. **Ayarlar → Genel → OpenChamber Araçları** altında **Proje eylemleri**ni aç; varsayılan olarak kapalıdır. Eylemleri olan bir projedeki oturumlara bundan sonra bu söylenir.
+
+Ajan bu bilgisayar için eylemleri listeler, birini senin kullanacağın klasörde çalıştırır, çıktısını okur ve yeniden durdurur. Ajanın çalıştırması eylemler menüsünde **ajan** işaretiyle görünür, böylece ikinci bir kopya başlatmazsın. Eylemi zaten sen çalıştırıyorsan ajan senin çalıştırmanı kullanır ve onu durduramaz. Ajanın çalıştırmaları, oturumu arşivlendiğinde ya da OpenChamber kapandığında durur. Yalıtılmış bir alandaki oturumlarda bu araç yoktur.
+
 ## İlgili
 
 - [Depo yapılandırması](/repository-config/) — eylemleri ve kurulum komutlarını tüm ekip için depoda tutun

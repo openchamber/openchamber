@@ -3,6 +3,11 @@ import type {
   DesktopSshPortForward,
 } from '@/lib/desktopSsh';
 import type { IconName } from "@/components/icon/icons";
+import type { OpenChamberProjectAction, ProjectSetup } from '@/lib/openchamberConfig';
+
+export const isProjectActionForPlatform = (action: Pick<OpenChamberProjectAction, 'platforms'>, platform: ProjectSetup['platform']): boolean => (
+  platform === undefined || !action.platforms?.length || (platform !== null && action.platforms.includes(platform))
+);
 
 type ProjectActionIconKey =
   | 'play'

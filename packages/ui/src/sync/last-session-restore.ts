@@ -4,6 +4,7 @@ import { ensureGlobalSessionsLoaded, refreshGlobalSessions, resolveGlobalSession
 import { useSessionUIStore } from './session-ui-store';
 import { isSessionAdmitted } from './session-admission';
 import { clearLastActiveSession, readLastActiveSession } from './last-session-cache';
+import { isContextWindow } from '@/lib/contextWindow/role';
 
 export type LastSessionRestoreResult =
     | 'restored'
@@ -94,6 +95,7 @@ export const beginLastSessionRestore = (options: {
     readonly selectNow: boolean;
     readonly refresh: boolean;
 }): (() => Promise<LastSessionRestoreResult>) => {
+    if (isContextWindow()) return async () => 'none';
     const reopened = options.selectNow ? reopenLastActiveSession() : null;
     return reopened
         ? () => confirmReopenedSession(reopened, options.refresh)

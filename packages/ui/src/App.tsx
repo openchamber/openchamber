@@ -2,7 +2,7 @@ import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibi
 import React from 'react';
 import { startDiagnosticCapture } from '@/lib/diagnostics/capture';
 import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
-import { MainLayout } from '@/components/layout/MainLayout';
+import { WindowLayout } from '@/components/layout/WindowLayout';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SnippetQuickCreateDialog } from '@/components/snippets/SnippetQuickCreateDialog';
 import { GlobalQuestionDialogs } from '@/components/layout/GlobalQuestionDialogs';
@@ -877,7 +877,7 @@ function App({ apis }: AppProps) {
                   <SyncAppEffects backgroundWorkEnabled />
                   <OpenCodeUpdateToast />
                   <ProjectConfigErrorToast />
-                  <MainLayout />
+                  <WindowLayout />
                   {/* Unmounted, not faded: the shell under it is ready, and a
                       fade only delays the moment it is seen. */}
                   {isDesktopRuntime && !(bootOutcomeKnown && bootViewIsMain) ? <AppStartupOverlay ready={false} /> : null}

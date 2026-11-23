@@ -105,6 +105,9 @@ describe('terminal transport', () => {
       actionId: 'build',
       executionId: 'exec-1',
     });
+    // The agent mark survives the parse, or the actions menu could not show who started a run.
+    expect(parseTerminalSessionPurpose({ type: 'project-action', actionId: 'dev', executionId: 'agent-1', agentSessionId: 'ses_a' }))
+      .toEqual({ type: 'project-action', actionId: 'dev', executionId: 'agent-1', agentSessionId: 'ses_a' });
     expect(parseTerminalSessionPurpose({ type: 'project-action', actionId: 'build' })).toBe(undefined);
     expect(parseTerminalSession({
       sessionId: 'term-1',

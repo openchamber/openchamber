@@ -62,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -258,6 +259,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ko,
   ...integrationsCatalogI18n['ko'],
   ...diffFindI18n['ko'],
+  ...contextWindowI18n['ko'],
   ...markdownOutlineI18n['ko'],
   ...markdownGithubI18n['ko'],
   ...autocompleteScopeI18n['ko'],
@@ -1332,6 +1334,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '저장소의 하위 모듈 및 Git LFS 설정을 검토한 후 다시 시도하세요.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '저장소에 파일이 너무 많습니다.',
   'worktree.bootstrap.toast.branchNameConflict': '브랜치 이름이 기존 브랜치와 충돌합니다. 이름이 같거나 한쪽이 다른 쪽 안에 중첩되어 있습니다. 브랜치 이름을 바꾸고 워크트리를 다시 만드세요.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '서브모듈을 가져오지 않았습니다. OpenChamber는 네트워크 원격을 통해서만 가져오는데, 이 worktree에는 사용할 원격이 없습니다. 저장소의 원격이 이 컴퓨터의 폴더이거나, 원격이 없거나, 브랜치가 아무것도 추적하지 않습니다. 저장소 폴더에서 직접 작업하거나, upstream이 네트워크 원격인 브랜치에서 worktree를 만드세요.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS 파일을 가져오지 않았습니다. OpenChamber는 네트워크 원격을 통해서만 가져오는데, 이 worktree에는 사용할 원격이 없습니다. 저장소의 원격이 이 컴퓨터의 폴더이거나, 원격이 없거나, 브랜치가 아무것도 추적하지 않습니다. 저장소 폴더에서 직접 작업하거나, upstream이 네트워크 원격인 브랜치에서 worktree를 만드세요.',
   'worktree.bootstrap.toast.cancelled': '워크트리 설정이 취소되었습니다. 준비되면 다시 시도하세요.',
   'worktree.bootstrap.toast.transportFailed': '저장소 접근 권한과 네트워크 연결을 확인한 후 다시 시도하세요.',
   'worktree.bootstrap.toast.timeoutDescription': '워크트리는 생성되었지만 백그라운드 설정 시간이 초과되었습니다.',
@@ -1924,7 +1928,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '캐시 읽기',
   'contextSidebar.tokens.cacheWrite': '캐시 쓰기',
   'contextSidebar.tokens.cacheHit': '캐시 적중',
-  'chat.workStatus.replyCacheHit': '캐시 적중 (응답)',
+  'chat.workStatus.replyCacheHit': '프롬프트 캐시',
+  'chat.workStatus.replyCacheHitDescription': '마지막 응답에서 캐시로부터 읽은 프롬프트 비율입니다.',
   'contextSidebar.actions.copyJson': 'JSON 복사',
   'contextSidebar.actions.copy': '복사',
   'contextSidebar.actions.copied': '복사됨',

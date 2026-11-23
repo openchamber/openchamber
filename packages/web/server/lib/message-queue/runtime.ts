@@ -15,6 +15,7 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { attachmentHint } from '../routing/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { parseAttachment, toPublicAttachment, type PublicQueuedAttachment, type QueuedAttachment } from './attachments.js';
+import { catalogScope, createQueuedSkills, parseQueuedSkills, parseSkillInstructions, type SkillInstruction } from './skills.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -54,6 +55,7 @@ export interface QueuedItemInput {
   content: string;
   text: string;
   agentMention?: string;
+  skills?: string[];
   attachments: QueuedAttachment[];
   context: QueuedContextPart[];
   contextPreview?: string;
@@ -66,9 +68,10 @@ export interface QueuedItem extends QueuedItemInput {
   id: string;
   createdAt: number;
   syntheticIds?: string[];
+  skillInstructions?: SkillInstruction[];
 }
 
-export interface PublicQueuedItem extends Omit<QueuedItem, 'context' | 'syntheticIds' | 'attachments'> {
+export interface PublicQueuedItem extends Omit<QueuedItem, 'context' | 'syntheticIds' | 'skillInstructions' | 'attachments'> {
   attachments: PublicQueuedAttachment[];
 }
 
@@ -141,12 +144,6 @@ interface CommandBody {
   name: string;
   text: string;
   files?: PromptFile[];
-}
-
-interface PromptBody {
-  text: string;
-  files?: PromptFile[];
-  agents?: { name: string }[];
 }
 
 const hasSelectedModel = (model: QueueModel): model is QueueModel & RoutingModelRef => Boolean(model.providerID && model.id);
@@ -223,6 +220,8 @@ const queuedItemInputSchema = z.unknown().transform((value): QueuedItemInput => 
   const item: Omit<QueuedItemInput, 'attachments' | 'context' | 'sendConfig'> & Partial<Pick<QueuedItemInput, 'attachments' | 'context' | 'sendConfig'>> = { content, text };
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
+  const skills = parseQueuedSkills(raw.skills);
+  if (skills.length > 0) item.skills = skills;
   item.attachments = attachments;
   item.context = context;
   const contextPreview = asNonEmptyString(raw.contextPreview).slice(0, 103);
@@ -246,6 +245,8 @@ const storedItemSchema = z.unknown().transform((value): QueuedItem | null => {
     const item: QueuedItem = { id, createdAt: asCount(raw.createdAt) ?? Date.now(), ...parseQueuedItemInput(raw) };
     const syntheticIds = asList(raw.syntheticIds) ?? [];
     if (syntheticIds.length > 0 && syntheticIds.every((entry): entry is string => MESSAGE_ID_PATTERN.test(asText(entry)))) item.syntheticIds = syntheticIds;
+    const skillInstructions = parseSkillInstructions(raw.skillInstructions).filter((instruction) => MESSAGE_ID_PATTERN.test(instruction.id));
+    if (skillInstructions.length > 0) item.skillInstructions = skillInstructions;
     return item;
   } catch {
     return null;
@@ -256,6 +257,7 @@ const parseStoredItem = storedItemSchema.parse;
 const toPublicItem = (item: QueuedItem) => {
   const publicItem: Omit<PublicQueuedItem, 'attachments' | 'sendConfig'> & Partial<Pick<PublicQueuedItem, 'attachments' | 'sendConfig'>> = { id: item.id, createdAt: item.createdAt, content: item.content, text: item.text };
   if (item.agentMention) publicItem.agentMention = item.agentMention;
+  if (item.skills) publicItem.skills = [...item.skills];
   publicItem.attachments = item.attachments.map(toPublicAttachment);
   const contextPreview = item.contextPreview || item.context
     .filter((part) => part.kind !== 'instruction')
@@ -518,7 +520,8 @@ export function createMessageQueueRuntime({
     const [head = '', ...tail] = text.split(' ');
     const name = head.slice(1);
     if (!name) return null;
-    const commands = asList(await openCodeFetch('/api/command', { directory })) ?? [];
+    await openCodeFetch('/api/model', catalogScope(directory));
+    const commands = asList(await openCodeFetch('/api/command', catalogScope(directory))) ?? [];
     const match = commands.map((command) => asRecord(command)).find((command) => command?.name === name);
     if (!match) return null;
     return {
@@ -526,6 +529,8 @@ export function createMessageQueueRuntime({
       arguments: tail.join(' '),
     };
   };
+
+  const queuedSkills = createQueuedSkills({ openCodeFetch, persist, now });
 
   const toPromptFile = (attachment: QueuedAttachment) => {
     const file: PromptFile = { uri: attachment.dataUrl };
@@ -591,17 +596,16 @@ export function createMessageQueueRuntime({
     }
 
     const command = await resolveSlashCommand(item.text, directory);
+    const skills = await queuedSkills.prepare(sessionId, directory, item, Boolean(command), async () => {
+      const session = asRecord(await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory }));
+      if (!session) throw new Error(`OpenCode returned no record for session ${sessionId}`);
+      if (session.revert) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/revert/commit`, { directory, method: 'POST' });
+    });
 
     if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory);
 
-    if (synthetics.length > 0) {
-      await ensureSyntheticIds(item, synthetics.length);
-      const session = asRecord(await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory }));
-      if (!session) throw new Error(`OpenCode returned no record for session ${sessionId}`);
-      if (session.revert) {
-        await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/revert/commit`, { directory, method: 'POST' });
-      }
-    }
+    if (synthetics.length > 0) await ensureSyntheticIds(item, synthetics.length);
+    if (synthetics.length > 0) await skills.commitStagedRevert();
 
     if (item.goal) {
       await createSessionGoal({
@@ -624,6 +628,7 @@ export function createMessageQueueRuntime({
         body: { id: item.syntheticIds[index], ...synthetic },
       });
     }
+    await skills.admitUnresolved();
 
     if (command) {
       const body: CommandBody = { name: command.name, text: command.arguments };
@@ -634,14 +639,7 @@ export function createMessageQueueRuntime({
         body,
       });
     } else {
-      const body: PromptBody = { text: item.text };
-      if (promptFiles.length > 0) body.files = promptFiles;
-      if (item.agentMention) body.agents = [{ name: item.agentMention }];
-      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
-        directory,
-        method: 'POST',
-        body,
-      });
+      await skills.sendPrompt(item.text, promptFiles, item.agentMention);
     }
   };
 

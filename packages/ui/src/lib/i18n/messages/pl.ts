@@ -62,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -258,6 +259,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.pl,
   ...integrationsCatalogI18n['pl'],
   ...diffFindI18n['pl'],
+  ...contextWindowI18n['pl'],
   ...markdownOutlineI18n['pl'],
   ...markdownGithubI18n['pl'],
   ...autocompleteScopeI18n['pl'],
@@ -2124,7 +2126,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': 'Odczyt cache',
   'contextSidebar.tokens.cacheWrite': 'Zapis cache',
   'contextSidebar.tokens.cacheHit': 'Trafienie cache',
-  'chat.workStatus.replyCacheHit': 'Trafienie cache (odpowiedź)',
+  'chat.workStatus.replyCacheHit': 'Cache promptu',
+  'chat.workStatus.replyCacheHitDescription': 'Udział promptu odczytany z pamięci podręcznej w ostatniej odpowiedzi.',
   'contextSidebar.tokens.input': 'Wejście',
   'contextSidebar.tokens.output': 'Wyjście',
   'contextSidebar.tokens.reasoning': 'Rozumowanie',
@@ -2646,6 +2649,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Sprawdź konfigurację podmodułów i Git LFS w repozytorium, a następnie spróbuj ponownie.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repozytorium zawiera zbyt wiele plików.',
   'worktree.bootstrap.toast.branchNameConflict': 'Nazwa gałęzi koliduje z istniejącą gałęzią: ta sama nazwa albo jedna zagnieżdżona w drugiej. Zmień nazwę gałęzi i utwórz drzewo pracy ponownie.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Nie pobrano submodułów: OpenChamber pobiera je tylko przez zdalne repozytorium w sieci, a ten worktree takiego nie ma. Remote repozytorium to folder na tym komputerze, nie ma żadnego remote albo gałąź żadnego nie śledzi. Pracuj w samym folderze repozytorium albo utwórz worktree z gałęzi, której upstream to sieciowy remote.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Nie pobrano plików Git LFS: OpenChamber pobiera je tylko przez zdalne repozytorium w sieci, a ten worktree takiego nie ma. Remote repozytorium to folder na tym komputerze, nie ma żadnego remote albo gałąź żadnego nie śledzi. Pracuj w samym folderze repozytorium albo utwórz worktree z gałęzi, której upstream to sieciowy remote.',
   'worktree.bootstrap.toast.cancelled': 'Konfiguracja drzewa pracy została anulowana. Spróbuj ponownie, gdy będziesz gotowy.',
   'worktree.bootstrap.toast.transportFailed': 'Sprawdź dostęp do repozytorium i połączenie sieciowe, a następnie spróbuj ponownie.',
   'worktree.bootstrap.toast.timeoutDescription': 'Drzewo pracy zostało utworzone, ale konfiguracja w tle przekroczyła limit czasu.',

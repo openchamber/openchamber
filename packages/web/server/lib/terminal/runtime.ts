@@ -30,7 +30,7 @@ import type { TerminalHistoryPending } from './history.js';
 import type { TerminalThemeMode } from './theme-response.js';
 import type { TerminalWsFrameOptions, TerminalWsJsonObject, TerminalWsJsonValue } from './terminal-ws-protocol.js';
 
-export type TerminalPurpose = { type: 'terminal' } | { type: 'project-action'; actionId: string; executionId: string };
+export type TerminalPurpose = { type: 'terminal' } | { type: 'project-action'; actionId: string; executionId: string; agentSessionId?: string };
 type TerminalStatus = 'running' | 'exited';
 type TerminalBackend = 'bun-pty' | 'node-pty';
 type PtyOptions = IPtyForkOptions & IWindowsPtyForkOptions;
@@ -73,13 +73,13 @@ export interface TerminalRuntimeOptions extends Pick<TerminalShellResolverOption
   logger?: { warn?: typeof console.warn };
 }
 
-interface TerminalAppearanceInput {
+export interface TerminalAppearanceInput {
   themeMode?: unknown;
   terminalBackground?: unknown;
   terminalForeground?: unknown;
 }
 
-interface TerminalRequestFields extends TerminalAppearanceInput {
+export interface TerminalRequestFields extends TerminalAppearanceInput {
   cwd?: unknown;
   sessionId?: unknown;
   sessionIds?: unknown;
@@ -242,7 +242,7 @@ const normalizePurposeId = (value: string, errorMessage: string) => {
   if (normalized.length > MAX_PURPOSE_ID_CHARS) throw new Error(errorMessage);
   return normalized;
 };
-const normalizeTerminalPurpose = ({ purpose: value }: Pick<TerminalRequestFields, 'purpose'>): TerminalPurpose => {
+const normalizeTerminalPurpose = ({ purpose: value }: Pick<TerminalRequestFields, 'purpose'>, agentSessionId?: string): TerminalPurpose => {
   if (value == null) return TERMINAL_PURPOSE;
   if (!isObjectRecord(value)) throw new Error('Invalid terminal purpose');
   if (value.type === 'terminal') return TERMINAL_PURPOSE;
@@ -255,7 +255,7 @@ const normalizeTerminalPurpose = ({ purpose: value }: Pick<TerminalRequestFields
   const rawExecutionId = value.executionId;
   if (!isString(rawExecutionId)) throw new Error(executionIdError);
   const executionId = normalizePurposeId(rawExecutionId, executionIdError);
-  return { type: 'project-action', actionId, executionId };
+  return agentSessionId ? { type: 'project-action', actionId, executionId, agentSessionId } : { type: 'project-action', actionId, executionId };
 };
 const getSessionPurpose = (session: TerminalSession) => session.purpose ?? TERMINAL_PURPOSE;
 const isPurposeActionMatch = (left: TerminalPurpose, right: TerminalPurpose) => {
@@ -621,14 +621,14 @@ export function createTerminalRuntime({
     return { session, ptyProcess: spawned.process };
   };
 
-  const createSession = async ({ sessionId, cwd, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false, mode, command, purpose }: TerminalRequestFields): Promise<TerminalSession> => {
+  const createSession = async ({ sessionId, cwd, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false, mode, command, purpose }: TerminalRequestFields, agentSessionId?: string): Promise<TerminalSession> => {
     if (shutdownPromise) throw new Error('Terminal runtime is shutting down');
     if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
     if (!isBoolean(loginShell)) throw new Error('Invalid terminal login mode');
     const normalizedShell = isText(shell) ? normalizeTerminalShell(shell) : null;
     if (!normalizedShell) throw new Error('Invalid terminal shell');
     const launchMode = normalizeCreateMode({ mode, command });
-    const normalizedPurpose = normalizeTerminalPurpose({ purpose });
+    const normalizedPurpose = normalizeTerminalPurpose({ purpose }, agentSessionId);
     const id = isText(sessionId) && sessionId.trim() ? sessionId.trim() : randomUUID();
     if (id.length > 128) throw new Error('Invalid terminal session id');
     const existing = sessions.get(id);
@@ -895,18 +895,17 @@ export function createTerminalRuntime({
     } catch (error) { res.status(400).json(errorBody(hasErrorFields(error) ? error : undefined, 'Failed to restart terminal')); }
     finally { if (pendingSessionRestarts.get(session.id) === restart) pendingSessionRestarts.delete(session.id); }
   });
-  app.delete('/api/terminal/:sessionId', async (req, res) => {
-    const sessionId = req.params.sessionId;
+  const closeTerminal = async (sessionId: string | undefined) => {
     const session = sessionId === undefined ? undefined : sessions.get(sessionId);
     if (!session) {
       const pending = sessionId === undefined ? undefined : pendingSessionCreates.get(sessionId);
-      if (!pending) return res.status(404).json({ error: 'Terminal session not found' });
+      if (!pending) return false;
       pending.cancelled = true;
       try { await pending.promise; }
       catch (error) {
         if (!hasErrorFields(error) || error.message !== 'Terminal session was closed during creation') throw error;
       }
-      return res.json({ success: true });
+      return true;
     }
     sessions.delete(session.id);
     announceSessionsChanged();
@@ -914,8 +913,9 @@ export function createTerminalRuntime({
     session.retired = true;
     closeAttachments(session.id, 'CLOSED', 'Terminal closed');
     await terminateProcess(session.process);
-    res.json({ success: true });
-  });
+    return true;
+  };
+  app.delete('/api/terminal/:sessionId', async (req, res) => (await closeTerminal(req.params.sessionId) ? res.json({ success: true }) : res.status(404).json({ error: 'Terminal session not found' })));
   app.post('/api/terminal/force-kill', (req, res) => {
     const { sessionId, cwd } = hasRequestFields(req.body) ? req.body : {}; let killedCount = 0;
     const killedSessionIds = [];
@@ -931,7 +931,7 @@ export function createTerminalRuntime({
     const now = Date.now();
     for (const [id, session] of sessions) {
       const attached = [...connections].some((connection) => connection.attachments.has(id));
-      if (!attached && now - session.lastActivity > IDLE_TIMEOUT_MS) {
+      if (!attached && !(session.status === 'running' && 'agentSessionId' in getSessionPurpose(session)) && now - session.lastActivity > IDLE_TIMEOUT_MS) {
         sessions.delete(id); session.retired = true; discardOutput(session); closeAttachments(id, 'IDLE_TIMEOUT', 'Terminal expired after being idle'); void terminateProcess(session.process, true);
         announceSessionsChanged();
       }
@@ -969,5 +969,5 @@ export function createTerminalRuntime({
     if (!shutdownPromise) shutdownPromise = stop();
     return shutdownPromise;
   };
-  return { shutdown, listTerminals, readTerminal };
+  return { shutdown, listTerminals, readTerminal, closeTerminal, createSession: (fields: TerminalRequestFields, agentSessionId?: string) => createSession(fields, agentSessionId).then(({ id }) => id) };
 }

@@ -3,6 +3,11 @@ import { useI18n } from '@/lib/i18n';
 import { spaceIdOfDirectory } from './space-route';
 import { useSpacesStore } from './spaces-store';
 
+export const useSpaceNameOf = (directory: string | null | undefined): string | null => {
+  const spaceId = spaceIdOfDirectory(directory);
+  return useSpacesStore((state) => (spaceId ? state.journey?.get(spaceId)?.name ?? null : null));
+};
+
 export const useSpaceMarkLabel = (directory: string | null | undefined): string | null => {
   const { t } = useI18n();
   const spaceId = spaceIdOfDirectory(directory);

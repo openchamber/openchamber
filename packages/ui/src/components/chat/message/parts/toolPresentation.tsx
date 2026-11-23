@@ -94,6 +94,9 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
     if (tool === 'openchamber_notify') {
         return <Icon name="notification-3" className={iconClass} />;
     }
+    if (tool === 'openchamber_actions') {
+        return <Icon name="play" className={iconClass} />;
+    }
     if (tool === 'openchamber_usage') {
         return <Icon name="bar-chart-2" className={iconClass} />;
     }

@@ -62,6 +62,7 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -258,6 +259,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-CN'],
   ...integrationsCatalogI18n['zh-CN'],
   ...diffFindI18n['zh-CN'],
+  ...contextWindowI18n['zh-CN'],
   ...markdownOutlineI18n['zh-CN'],
   ...markdownGithubI18n['zh-CN'],
   ...autocompleteScopeI18n['zh-CN'],
@@ -1332,6 +1334,8 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.invalidConfiguration': '请检查仓库的子模块和 Git LFS 配置，然后重试。',
   'worktree.bootstrap.toast.repositoryTooManyFiles': '仓库中的文件太多。',
   'worktree.bootstrap.toast.branchNameConflict': '分支名称与现有分支冲突：名称相同，或其中一个嵌套在另一个之下。请重命名分支，然后重新创建工作树。',
+  'worktree.bootstrap.toast.submoduleSourceLocal': '未获取子模块：OpenChamber 只通过网络远程仓库获取子模块，而这个 worktree 没有可用的远程。仓库的远程是这台电脑上的文件夹、没有远程，或分支没有跟踪任何远程。请直接在仓库文件夹中工作，或从 upstream 为网络远程的分支创建 worktree。',
+  'worktree.bootstrap.toast.lfsSourceLocal': '未获取 Git LFS 文件：OpenChamber 只通过网络远程仓库获取这些文件，而这个 worktree 没有可用的远程。仓库的远程是这台电脑上的文件夹、没有远程，或分支没有跟踪任何远程。请直接在仓库文件夹中工作，或从 upstream 为网络远程的分支创建 worktree。',
   'worktree.bootstrap.toast.cancelled': '工作树设置已取消。准备好后请重试。',
   'worktree.bootstrap.toast.transportFailed': '请检查仓库访问权限和网络连接，然后重试。',
   'worktree.bootstrap.toast.timeoutDescription': '工作树已创建，但后台设置超时。',
@@ -1890,7 +1894,8 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.cacheRead': '缓存读取',
   'contextSidebar.tokens.cacheWrite': '缓存写入',
   'contextSidebar.tokens.cacheHit': '缓存命中',
-  'chat.workStatus.replyCacheHit': '缓存命中（回复）',
+  'chat.workStatus.replyCacheHit': '提示缓存',
+  'chat.workStatus.replyCacheHitDescription': '最近一次回复中从缓存读取的提示占比。',
   'contextSidebar.actions.copyJson': '复制 JSON',
   'contextSidebar.actions.copy': '复制',
   'contextSidebar.actions.copied': '已复制',

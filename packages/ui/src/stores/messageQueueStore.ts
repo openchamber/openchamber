@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
+import { devtools, persist, type StorageValue } from 'zustand/middleware';
 import { z } from 'zod';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { createInputHistoryIdentity, createInputHistorySubmission, useInputHistoryStore } from './useInputHistoryStore';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { serverAttachmentSchema, toAttachedFile, toServerAttachment, type ServerQueueAttachmentInput } from './messageQueueAttachments';
+import { copyQueuedMentions, serverMentionFields, type QueuedMentions } from './messageQueueMentions';
 import { contextPartMetadataSchema, type ContextPartMetadata } from '@/lib/messages/contextParts';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -76,11 +77,10 @@ export type QueuedContextPart =
         text: string;
     };
 
-export interface QueuedMessage {
+export interface QueuedMessage extends QueuedMentions {
     id: string;
     content: string;
     text: string;
-    agentMention?: string;
     attachments?: AttachedFile[];
     context?: QueuedContextPart[];
     contextPreview?: string;
@@ -90,10 +90,9 @@ export interface QueuedMessage {
     scheduledTask?: z.infer<typeof scheduledTaskSchema>;
 }
 
-interface QueuedMessageInput {
+interface QueuedMessageInput extends QueuedMentions {
     content: string;
     text?: string;
-    agentMention?: string;
     attachments?: AttachedFile[];
     context?: QueuedContextPart[];
     sendConfig?: QueuedMessageSendConfig;
@@ -155,7 +154,7 @@ const serverItemBaseSchema = z.object({
     createdAt: z.number(),
     content: z.string(),
     text: z.string(),
-    agentMention: z.string().optional(),
+    ...serverMentionFields,
     attachments: z.array(serverAttachmentSchema),
     context: z.array(serverContextPartSchema).optional(),
     contextPreview: z.string().optional(),
@@ -205,17 +204,16 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     if (selection.success) message.sendConfig = selection.data;
     if (item.goal) message.goal = item.goal;
     if ('scheduledTask' in item) message.scheduledTask = item.scheduledTask;
-    if (item.agentMention) message.agentMention = item.agentMention;
+    copyQueuedMentions(item, message);
     if (item.attachments.length > 0) message.attachments = item.attachments.map(toAttachedFile);
     if (item.context) message.context = item.context;
     if (item.contextPreview) message.contextPreview = item.contextPreview;
     return message;
 };
 
-type ServerQueueItemInput = {
+type ServerQueueItemInput = QueuedMentions & {
     content: string;
     text: string;
-    agentMention?: string;
     attachments: ServerQueueAttachmentInput[];
     context: QueuedContextPart[];
     contextPreview?: string;
@@ -254,7 +252,7 @@ const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessag
         context: message.context ?? [],
         sendConfig,
     };
-    if (message.agentMention) item.agentMention = message.agentMention;
+    copyQueuedMentions(message, item);
     if (message.goal) item.goal = message.goal;
     const contextPreview = getQueuedMessagePreview({ content: '', context: message.context });
     if (contextPreview) item.contextPreview = contextPreview;
@@ -350,7 +348,9 @@ const withDeliveryText = (queues: Record<string, PersistedQueuedMessage[]>): Rec
     ]))
 );
 
-export const migrateMessageQueueState = (persistedState: unknown, version: number): Partial<MessageQueueStore> => {
+type PersistedQueueStore = Pick<MessageQueueState, 'queuedMessages' | 'quarantinedLegacyMessages' | 'followUpBehavior'>;
+
+export const migrateMessageQueueState = (persistedState: unknown, version: number): PersistedQueueStore => {
     const state = (persistedState ?? {}) as PersistedMessageQueueState;
     const legacyQueues = version < 2 ? (state.queuedMessages ?? {}) : {};
     return {
@@ -361,6 +361,53 @@ export const migrateMessageQueueState = (persistedState: unknown, version: numbe
         }),
         followUpBehavior: normalizeFollowUpBehavior(state.followUpBehavior, state.queueModeEnabled ?? null),
     };
+};
+
+const storedQueueEnvelopeSchema = z.object({ state: z.unknown(), version: z.number().optional() });
+
+let flushedQueues: Record<string, QueuedMessage[]> = {};
+const clearedQueueKeys = new Set<string>();
+
+const readStoredQueues = (stored: string | null): Record<string, QueuedMessage[]> | null => {
+    if (stored === null) return {};
+    let json: unknown;
+    try {
+        json = JSON.parse(stored);
+    } catch {
+        return null;
+    }
+    const envelope = storedQueueEnvelopeSchema.safeParse(json);
+    if (!envelope.success) return null;
+    try {
+        return migrateMessageQueueState(envelope.data.state, envelope.data.version ?? 0).queuedMessages ?? {};
+    } catch {
+        return null;
+    }
+};
+
+const mergeQueuesWithStored = (
+    pending: StorageValue<PersistedQueueStore>,
+    stored: string | null,
+): StorageValue<PersistedQueueStore> => {
+    const ours = pending.state.queuedMessages;
+    const previous = flushedQueues;
+    flushedQueues = ours;
+    const cleared = [...clearedQueueKeys];
+    clearedQueueKeys.clear();
+    if (isServerOwnedMessageQueue()) return pending;
+    const storedQueues = readStoredQueues(stored);
+    if (!storedQueues) return pending;
+    const queuedMessages = { ...storedQueues };
+    for (const key of cleared) {
+        if (!ours[key]) delete queuedMessages[key];
+    }
+    for (const key of new Set([...Object.keys(previous), ...Object.keys(ours)])) {
+        if (ours[key] === previous[key]) continue;
+        const queue = ours[key];
+        if (queue) queuedMessages[key] = queue;
+        else delete queuedMessages[key];
+    }
+    return { ...pending, state: { ...pending.state, queuedMessages } };
 };
 
 const withoutKey = <T,>(record: Record<string, T>, key: string): Record<string, T> => {
@@ -520,7 +567,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             createdAt: Date.now(),
                             sendConfig: message.sendConfig,
                         };
-                        if (message.agentMention) queuedMessage.agentMention = message.agentMention;
+                        copyQueuedMentions(message, queuedMessage);
                         if (message.attachments && message.attachments.length > 0) queuedMessage.attachments = message.attachments;
                         if (message.context && message.context.length > 0) queuedMessage.context = message.context;
                         if (message.goal) queuedMessage.goal = message.goal;
@@ -650,6 +697,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             if (retained.length > 0) {
                                 return { queuedMessages: { ...state.queuedMessages, [key]: retained } };
                             }
+                            clearedQueueKeys.add(key);
                             return { queuedMessages: withoutKey(state.queuedMessages, key) };
                         });
                         if (isServerOwnedMessageQueue()) {
@@ -660,6 +708,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     forgetQueue: (target) => {
                         const key = getMessageQueueKey(target);
                         appliedRevisions.delete(key);
+                        clearedQueueKeys.add(key);
                         set((state) => ({
                             queuedMessages: withoutKey(state.queuedMessages, key),
                             sendingIds: withoutKey(state.sendingIds, key),
@@ -857,8 +906,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             {
                 name: 'message-queue-store',
                 version: 3,
-                storage: createDeferredSafeJSONStorage(),
-                partialize: (state) => ({
+                storage: createDeferredSafeJSONStorage<PersistedQueueStore>({ mergeWithStored: mergeQueuesWithStored }),
+                partialize: (state): PersistedQueueStore => ({
                     queuedMessages: Object.fromEntries(
                         Object.entries(state.queuedMessages).filter(([key]) => {
                             const runtimeKey = parseMessageQueueKey(key)?.runtimeKey;
@@ -876,6 +925,8 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
         }
     )
 );
+
+flushedQueues = useMessageQueueStore.getState().queuedMessages;
 
 export const messageQueueUpdatedEventSchema = z.object({
     type: z.literal('openchamber:message-queue.updated'),

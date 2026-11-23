@@ -778,8 +778,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
     const projectPath = await projectPathFor(directory);
     const settings = await readSettingsFromDiskMigrated();
     const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.path === projectPath);
-    if (!project) return NO_WORKTREE_SETUP;
-    return worktreeSetupOf(await readProjectSetup(project.id), project.path);
+    return project ? worktreeSetupOf(await readProjectSetup(project.id), project.path) : NO_WORKTREE_SETUP;
   };
 
   const waitForWorktreeBootstrapReady = async ({ directory, bootstrapStore }: { directory: string; bootstrapStore: BootstrapStore }) => {
@@ -1593,6 +1592,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
   return {
     create,
     resolveDirectory,
+    projectPathFor,
     archive,
     unarchive,
     archiveStore,

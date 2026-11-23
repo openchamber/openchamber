@@ -119,8 +119,10 @@ let
     buildPhase = ''
       # Same two commands as the Dockerfile builder stage. The server imports
       # @openchamber/sdk at runtime, so its dist output must exist.
+      # Nix ships opencodeCli on runtimePath and builds offline, so skip
+      # fetching the npm-bundled OpenCode server's Claude Agent SDK tarball.
       bun run --cwd packages/sdk build
-      bun run build:web
+      OPENCHAMBER_SKIP_BUNDLED_OPENCODE_SERVER=1 bun run build:web
     '';
 
     installPhase = ''

@@ -154,6 +154,17 @@ export const OPENCHAMBER_TERMINAL_ACTIONS = Object.freeze(
   OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
+export const OPENCHAMBER_PROJECT_ACTIONS_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'actions.list', title: 'List project actions', description: "This project's actions for this computer: id, name, command, the folder it runs in, url when set, and its current or last run with who started it" },
+  { action: 'actions.run', title: 'Run a project action', description: 'Start the action name in its folder, as the actions menu does. When the action already runs, nothing starts a second copy and the answer says whose run it is' },
+  { action: 'actions.logs', title: 'Read project action output', description: "The end of the current or last run of the action name as plain text; maxBytes caps it" },
+  { action: 'actions.stop', title: 'Stop a project action', description: 'Stop the action name, only a run you started' },
+]);
+
+export const OPENCHAMBER_PROJECT_ACTIONS_ACTIONS = Object.freeze(
+  OPENCHAMBER_PROJECT_ACTIONS_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
 export const OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS = Object.freeze([
   { action: 'workflow.check', title: 'Check a workflow', description: 'Compile script, or a saved workflow by name, without running it: its name, description and phases' },
   { action: 'workflow.run', title: 'Propose a workflow run', description: 'script, or name of a saved workflow, with optional args. The run waits for the user to approve it in the chat, or starts at once when their settings allow that; the report arrives here as a message when the run ends. Returns runId and state at once' },
@@ -214,9 +225,27 @@ const ACTIONS_BY_TOOL: Readonly<Record<string, readonly string[]>> = Object.free
   openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
   openchamber_usage: OPENCHAMBER_USAGE_ACTIONS,
   openchamber_terminal: OPENCHAMBER_TERMINAL_ACTIONS,
+  openchamber_actions: OPENCHAMBER_PROJECT_ACTIONS_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
+
+export const AGENT_TOOL_ACTION_TITLES: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries([
+  ...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_WEB_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_USAGE_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_TERMINAL_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_PROJECT_ACTIONS_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
+  ...OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
+].map(({ action, title }) => [action, title])));
 
 const bareName = (action: string) => {
   const separator = action.indexOf('.');
@@ -263,6 +292,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_USAGE_ACTIONS,
   ...OPENCHAMBER_TERMINAL_ACTIONS,
+  ...OPENCHAMBER_PROJECT_ACTIONS_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);

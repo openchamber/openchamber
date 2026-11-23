@@ -109,7 +109,7 @@ export interface TerminalSession {
 
 export type TerminalSessionPurpose =
   | { type: 'terminal' }
-  | { type: 'project-action'; actionId: string; executionId: string };
+  | { type: 'project-action'; actionId: string; executionId: string; agentSessionId?: string };
 
 export type TerminalShell = 'auto' | 'bash' | 'zsh' | 'sh' | 'fish' | 'pwsh' | 'powershell' | 'cmd' | 'dash' | 'ksh' | 'nu';
 
@@ -674,7 +674,7 @@ export type GitNetworkOperationErrorCode =
   | 'GIT_LFS_CLIENT_MISSING'
   | 'CHECKOUT_TOO_LARGE'
   | 'PATH_LENGTH_LIMIT'
-  | 'BRANCH_NAME_CONFLICT'
+  | 'BRANCH_NAME_CONFLICT' | 'SUBMODULE_SOURCE_LOCAL' | 'LFS_SOURCE_LOCAL'
   | 'UNKNOWN';
 
 export interface GitNetworkOperationError<Code extends GitNetworkOperationErrorCode = GitNetworkOperationErrorCode> {

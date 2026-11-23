@@ -19,7 +19,12 @@ Neighbouring stores still own terminal state and the files view's open paths.
 - Initial arrays, maps, templates, and keyboard preferences are created when
   the store initializer runs.
 - Persistence keeps the `ui-store` key, version 30, migration ordering, and
-  the same saved fields.
+  the same saved fields. A context panel window swaps only the storage
+  (`contextWindowPersistOptions`): its zone layout and tabs go to its own
+  record, and it writes back only the shared fields it changed.
+- The context-panel actions listed in `lib/contextWindow/routing.ts` are
+  wrapped when the store is composed; while the main window's panel is in a
+  window of its own, they run there.
 - Context-tab actions retain their terminal and files-view side effects.
 - Browser tab IDs share one module-level sequence across user and agent tabs.
 - Consumers continue to import the store, public types, constants, and helpers

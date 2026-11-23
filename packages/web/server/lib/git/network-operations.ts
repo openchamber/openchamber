@@ -1492,8 +1492,8 @@ export function createNetworkOperations({
         let endpoint;
         try {
           if (!parentEndpoint || !parentRemoteName) {
-            submodules.push({ path: resultPath, status: 'authorization-required', error: publicError(
-              'AUTHENTICATION_REQUIRED', 'Submodule hydration requires the exact parent fetch source and an explicit endpoint grant; fetch from a selected source and retry',
+            submodules.push({ path: resultPath, status: 'invalid', error: publicError(
+              'SUBMODULE_SOURCE_LOCAL', 'Submodules weren\'t fetched: OpenChamber fetches them only through a network remote, and this worktree has none to use. The repository\'s remote is a folder on this computer, it has no remote, or its branch tracks none. Work in the repository folder itself, or start the worktree from a branch whose upstream is a network remote.',
             ) });
             continue;
           }
@@ -1586,8 +1586,8 @@ export function createNetworkOperations({
         return;
       }
       if (!parentEndpoint || !parentRemoteName) {
-        lfs.push({ path: lfsPath, status: 'authorization-required', error: publicError(
-          'AUTHENTICATION_REQUIRED', 'Git LFS hydration requires the exact parent fetch source and an explicit HTTPS endpoint grant; fetch from a selected source and retry',
+        lfs.push({ path: lfsPath, status: 'invalid', error: publicError(
+          'LFS_SOURCE_LOCAL', 'Git LFS files weren\'t fetched: OpenChamber fetches them only through a network remote, and this worktree has none to use. The repository\'s remote is a folder on this computer, it has no remote, or its branch tracks none. Work in the repository folder itself, or start the worktree from a branch whose upstream is a network remote.',
         ) });
         return;
       }
@@ -2772,7 +2772,7 @@ export function createNetworkOperations({
     }, deadline);
     await registerWithAudit(plans);
     const result = await executeOperation(operationId, deadline);
-    return result.hydration;
+    return result.hydration ?? (result.error ? rethrow(Object.assign(new Error(result.error.message), { code: result.error.code })) : undefined);
   };
 
   return Object.freeze({

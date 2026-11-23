@@ -298,6 +298,7 @@ export interface UIStore {
   agentNotifyToolEnabled: boolean;
   agentUsageToolEnabled: boolean;
   agentTerminalToolEnabled: boolean;
+  agentActionsToolEnabled: boolean;
   agentImageToolEnabled: boolean;
   agentImageModel: string;
   agentMemoryDreamingEnabled: boolean;
@@ -377,6 +378,7 @@ export interface UIStore {
   closeContextFile: (directory: string, filePath: string) => void;
   closeContextPanelTabs: (directory: string, tabIds: readonly string[]) => void;
   closeContextPanel: (directory: string) => void;
+  toggleContextPanel: (directory: string) => void;
   closeContextZone: (
     directory: string,
     zone: ContextZone,
@@ -571,6 +573,7 @@ export interface UIStore {
   setAgentNotifyToolEnabled: (value: boolean) => void;
   setAgentUsageToolEnabled: (value: boolean) => void;
   setAgentTerminalToolEnabled: (value: boolean) => void;
+  setAgentActionsToolEnabled: (value: boolean) => void;
   setAgentImageToolEnabled: (value: boolean) => void;
   setAgentImageModel: (value: string) => void;
   setAgentMemoryDreamingEnabled: (value: boolean) => void;

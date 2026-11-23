@@ -144,4 +144,26 @@ describe('VS Code worktree upstream tracking', () => {
       expect(readBranchConfig(created.path, 'feature/tracking', 'merge')).toBe('refs/heads/main');
     });
   }, 30_000);
+
+  it('records the branch a new worktree branch starts from as its parent', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      runGit(repository, ['branch', 'feature/base']);
+
+      const fromHead = await createWorktree(repository, { mode: 'new', branchName: 'from-head', worktreeName: 'from-head' });
+      const fromFullRef = await createWorktree(repository, {
+        mode: 'new', branchName: 'from-full-ref', worktreeName: 'from-full-ref', startRef: 'refs/heads/feature/base',
+      });
+      const fromRemote = await createWorktree(repository, {
+        mode: 'new', branchName: 'from-remote', worktreeName: 'from-remote', startRef: 'origin/main',
+      });
+      await Promise.all([fromHead, fromFullRef, fromRemote].map((created) => waitForBootstrapReady(created.path)));
+
+      expect(readBranchConfig(repository, 'from-head', 'gh-merge-base')).toBe('next');
+      expect(readBranchConfig(repository, 'from-full-ref', 'gh-merge-base')).toBe('feature/base');
+      expect(readBranchConfig(repository, 'from-remote', 'gh-merge-base')).toBe('main');
+    });
+  }, 30_000);
 });

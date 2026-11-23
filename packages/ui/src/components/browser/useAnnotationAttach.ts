@@ -3,10 +3,12 @@ import React from 'react';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
+import { createInlineCommentDraftId, useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useInputStore } from '@/sync/input-store';
 import { readComposerAddress } from '@/hooks/useComposerAddress';
 import { formatBrowserAnnotationPrompt } from '@/lib/browser/annotationPrompt';
+import { saveAnnotationScreenshot } from '@/lib/browser/annotationScreenshotStore';
+import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { AnnotationSessionResult } from '@/lib/browser/annotationSession';
 import type { BrowserAnnotationOverlayLabels } from '@/lib/browser/annotationOverlay';
 
@@ -22,17 +24,21 @@ export const useAnnotationAttach = (directory: string, intro?: string) => {
       return;
     }
 
-    let screenshot: string | undefined;
+    let attachedScreenshot: AttachedFile | undefined;
     if (result.screenshot) {
       try {
-        await addAttachedFile(result.screenshot, attachments, ([landed]) => { screenshot = landed?.filename; });
+        await addAttachedFile(result.screenshot, attachments, ([landed]) => { attachedScreenshot = landed; });
       } catch {
-        screenshot = undefined;
+        attachedScreenshot = undefined;
       }
     }
+    const screenshot = attachedScreenshot?.filename;
     const screenshotAttached = screenshot !== undefined;
+    const draftId = createInlineCommentDraftId();
+    if (attachedScreenshot) await saveAnnotationScreenshot(draftId, attachedScreenshot);
 
     addInlineCommentDraft(target, {
+      id: draftId,
       source: 'preview-annotation',
       fileLabel: result.payload.pageUrl || result.payload.pageTitle || 'browser',
       startLine: 1,
