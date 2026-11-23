@@ -32,8 +32,12 @@ type ModelGroupWindow = {
 export const parseBucket = <Bucket>(bucket: Bucket) => {
   const fields = payloadFields(bucket);
   const remainingFraction = toNumber(fields?.remainingFraction);
+  // Float percent, never integer-quantized: rounding belongs to the
+  // display layer — an integer read 99.9% used as 100% / 0% remaining,
+  // and it made this surface disagree with the fork's float read of the
+  // same pool in the same tick (the fork's #1941 rule; code#2490).
   const remainingPercent = remainingFraction !== null
-    ? Math.round(remainingFraction * 100)
+    ? remainingFraction * 100
     : null;
   const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
   const resetAt = toTimestamp(fields?.resetTime);
@@ -153,8 +157,9 @@ export const transformModels = <Payload>(modelsPayload: Payload, modelGroupWindo
     } else {
       const quotaInfo = payloadFields(payloadFields(modelData)?.quotaInfo);
       const remainingFraction = toNumber(quotaInfo?.remainingFraction);
+      // Float percent, never integer-quantized — see parseBucket.
       const remainingPercent = remainingFraction !== null
-        ? Math.round(remainingFraction * 100)
+        ? remainingFraction * 100
         : null;
       const usedPercent = remainingPercent !== null ? Math.min(100, Math.max(0, 100 - remainingPercent)) : null;
       const resetAt = toTimestamp(quotaInfo?.resetTime);

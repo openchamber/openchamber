@@ -36,7 +36,7 @@ interface QuotaProvider {
   readonly providerId: string | null;
   readonly providerName: string;
   readonly aliases?: readonly string[];
-  readonly isConfigured: (auth: LegacyAuthFile) => boolean;
+  readonly isConfigured: (auth: LegacyAuthFile) => boolean | Promise<boolean>;
   readonly fetchQuota: (deps?: QuotaFetchDeps) => Promise<ProviderResult>;
   /** OpenCode integration ids whose stored credential rows this provider can fetch for, one result each. */
   readonly credentialAliases?: readonly string[];
@@ -501,7 +501,7 @@ export const listConfiguredQuotaProviders = async ({ includeDisabled = false } =
 
   for (const [id, provider] of providerEntries()) {
     try {
-      if (provider.isConfigured(auth)) {
+      if (await provider.isConfigured(auth)) {
         configured.push(id);
       }
     } catch {

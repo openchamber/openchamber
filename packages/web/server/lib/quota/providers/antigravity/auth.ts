@@ -9,6 +9,7 @@ import {
 } from '../../utils/index.js';
 import type { LegacyAuthFile } from '../../../opencode/auth.js';
 import { parseGoogleRefreshToken } from '../google/transforms.js';
+import { lookupSecretService } from './secret-service.js';
 
 export const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
 
@@ -96,4 +97,75 @@ export const resolveAntigravityStoreAuth = (auth: LegacyAuthFile | null | undefi
   };
 };
 
-export const isConfigured = (auth: LegacyAuthFile) => resolveAntigravityAuth() !== null || resolveAntigravityStoreAuth(auth) !== null;
+/**
+ * The Antigravity login the agy CLI holds: a keyring credential (Secret
+ * Service service `gemini`, username `antigravity`) whose token record the
+ * opencode fork's antigravity-auth bridge reads in place — the live login
+ * on machines signed in through the CLI, and the source the fleet's quota
+ * gatherer reads the pool through. A surface that skips the keyring
+ * reports such a machine "Not configured" while the fork reads the pool
+ * fine (code#2490). The entry is read in place and never written back.
+ */
+interface KeyringCredential {
+  token?: unknown;
+}
+
+interface KeyringToken {
+  refresh_token?: unknown;
+}
+
+const isKeyringCredential = (value: unknown): value is KeyringCredential =>
+  value !== null && typeof value === 'object';
+
+const isKeyringToken = (value: unknown): value is KeyringToken =>
+  value !== null && typeof value === 'object';
+
+export const parseAntigravityKeyringCredential = (raw: string | undefined) => {
+  if (!raw) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const token = isKeyringCredential(parsed) && isKeyringToken(parsed.token) ? parsed.token : null;
+  // A whitespace-only refresh token is the unexpected-shape/absent case
+  // the fork's bridge treats as no credential, not a token to present.
+  const refreshToken = typeof token?.refresh_token === 'string' ? token.refresh_token.trim() : null;
+  if (!refreshToken) {
+    return null;
+  }
+  const refreshParts = parseGoogleRefreshToken(refreshToken);
+  if (!refreshParts.refreshToken) {
+    return null;
+  }
+  return {
+    sourceId: 'antigravity',
+    sourceLabel: 'Antigravity',
+    refreshToken: refreshParts.refreshToken,
+    projectId: refreshParts.projectId ?? refreshParts.managedProjectId
+  };
+};
+
+interface AntigravityKeyringSources {
+  lookupSecretService: (service: string, username: string) => Promise<string | undefined>;
+}
+
+const defaultKeyringSources: AntigravityKeyringSources = { lookupSecretService };
+let keyringSources = defaultKeyringSources;
+
+/** Replaces the keyring read (tests); `null` restores the real one. */
+export const configureAntigravityKeyringSources = (next: Partial<AntigravityKeyringSources> | null) => {
+  keyringSources = next ? { ...defaultKeyringSources, ...next } : defaultKeyringSources;
+};
+
+export const resolveAntigravityKeyringAuth = async () => {
+  const raw = await keyringSources.lookupSecretService('gemini', 'antigravity').catch(() => undefined);
+  return parseAntigravityKeyringCredential(raw);
+};
+
+export const isConfigured = async (auth: LegacyAuthFile) => resolveAntigravityAuth() !== null
+  || resolveAntigravityStoreAuth(auth) !== null
+  || (await resolveAntigravityKeyringAuth()) !== null;

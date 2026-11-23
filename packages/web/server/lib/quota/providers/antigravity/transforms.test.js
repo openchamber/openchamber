@@ -93,6 +93,18 @@ describe('Antigravity transforms', () => {
     expect(fiveHourBucket.window.usedPercent).toBe(0);
   });
 
+  it('publishes float percents, never integer-quantized', () => {
+    const bucket = parseBucket({
+      bucketId: 'gemini-weekly',
+      window: 'weekly',
+      resetTime: '2026-10-08T14:29:35Z',
+      remainingFraction: 0.9836
+    });
+
+    expect(bucket.window.remainingPercent).toBeCloseTo(98.36, 10);
+    expect(bucket.window.usedPercent).toBeCloseTo(1.64, 10);
+  });
+
   it('clamps usedPercent to 100 when remainingFraction is negative', () => {
     const bucket = parseBucket({
       bucketId: 'gemini-5h',
