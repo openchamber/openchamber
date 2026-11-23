@@ -8,6 +8,7 @@ import { listenForNotificationNavigation } from '@/lib/router/notificationNaviga
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { isContextWindow } from '@/lib/contextWindow/role';
 
 function isVSCodeContext(): boolean {
   if (typeof window === 'undefined') {
@@ -18,7 +19,7 @@ function isVSCodeContext(): boolean {
 }
 
 export function useRouter(): void {
-  const isVSCode = React.useMemo(() => isVSCodeContext(), []);
+  const isVSCode = React.useMemo(() => isVSCodeContext() || isContextWindow(), []);
 
   const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);

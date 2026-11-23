@@ -6,7 +6,7 @@ import type { RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, isSshForwardedRuntime, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { spaceIdOfDirectory, spaceRootDirectory } from '@/lib/spaces/space-route';
-import { DEV_TUNNEL_HOSTNAME, isLoopbackUrl } from './url';
+import { DEV_TUNNEL_HOSTNAME, framableUrl, isLoopbackUrl } from './url';
 import { isCapacitorApp } from '@/lib/platform';
 import { openMobileDevTunnel, closeMobileDevTunnels } from './mobileDevTunnel';
 
@@ -99,7 +99,7 @@ export const isSpaceUnreachableFromHere = (directory: string | null | undefined)
 );
 
 export const resolveIframeBrowserUrl = (url: string, directory?: string | null): string => (
-  isRemoteWebLoopbackUrl(url, directory) ? '' : url
+  isRemoteWebLoopbackUrl(url, directory) ? '' : framableUrl(url)
 );
 
 export const reachesDevServersThroughTunnel = (): boolean => (

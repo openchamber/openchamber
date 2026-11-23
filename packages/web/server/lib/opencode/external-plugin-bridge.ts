@@ -27,6 +27,7 @@ export interface ExternalBridgeToolFlags {
   secret: boolean;
   usage: boolean;
   terminal: boolean;
+  actions: boolean;
   workflow: boolean;
 }
 
@@ -89,6 +90,7 @@ const resolveToolFlags = (settings: ManagedConfigSettings | null): ExternalBridg
     secret: settings?.agentSecretToolEnabled !== false,
     usage: settings?.agentUsageToolEnabled === true,
     terminal: settings?.agentTerminalToolEnabled === true,
+    actions: settings?.agentActionsToolEnabled === true,
     workflow: settings?.agentWorkflowToolEnabled === true,
   };
 };

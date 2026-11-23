@@ -261,6 +261,17 @@ per phase in the same message and starts the run once the user agrees to them:
 without a model named every agent runs on the session's own model, often the
 most expensive one, and dozens of those cost many times a cheap model.
 
+## When to run a project action
+
+A session whose agent has the `openchamber_actions` tool (the setting on and
+OpenChamber launched OpenCode) and whose project has actions for this platform
+is told to run the app through them (`PROJECT_ACTIONS_GUIDANCE`, read through
+`hasProjectActions`): people kept a skill that told the agent how to start their
+dev server, while the action already held the command. A project without
+actions, a folder outside every project, a space's folder and a setup that
+cannot be read get no line, so the tool costs nothing where it has nothing to
+run.
+
 ## Where the tools are called
 
 The tools whose call the chat draws (`openchamber_render`,

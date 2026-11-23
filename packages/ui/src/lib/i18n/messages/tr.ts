@@ -76,6 +76,7 @@ import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
 import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 import { questionAnswersI18n } from './question-answers.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -194,6 +195,7 @@ export const dict = {
   ...sessionGoalWriterI18n['tr'],
   ...subsessionModelsI18n['tr'],
   ...diffFindI18n['tr'],
+  ...contextWindowI18n['tr'],
   ...questionAnswersI18n['tr'],
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
@@ -1817,7 +1819,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache Okuma',
   'contextSidebar.tokens.cacheWrite': 'Cache Yazma',
   'contextSidebar.tokens.cacheHit': 'Cache Hit',
-  'chat.workStatus.replyCacheHit': 'Önbellek isabeti (yanıt)',
+  'chat.workStatus.replyCacheHit': 'Prompt önbelleği',
+  'chat.workStatus.replyCacheHitDescription': 'Son yanıtta önbellekten okunan prompt oranı.',
   'contextSidebar.actions.copyJson': 'JSON\'u Kopyala',
   'contextSidebar.actions.copy': 'Kopyala',
   'contextSidebar.actions.copied': 'Kopyalandı',
@@ -3899,6 +3902,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Repository submodule ve Git LFS yapılandırmasını gözden geçirin, ardından yeniden deneyin.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repository\'de çok fazla dosya var.',
   'worktree.bootstrap.toast.branchNameConflict': 'Dal adı mevcut bir dalla çakışıyor: aynı ad ya da biri diğerinin içinde. Dalı yeniden adlandırın ve worktree\'yi yeniden oluşturun.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Alt modüller alınmadı: OpenChamber bunları yalnızca ağ üzerindeki bir remote üzerinden alır ve bu worktree\'nin kullanabileceği bir remote yok. Deponun remote\'u bu bilgisayardaki bir klasör, hiç remote yok ya da dal hiçbirini izlemiyor. Doğrudan depo klasöründe çalışın veya worktree\'yi upstream\'i bir ağ remote\'u olan bir daldan oluşturun.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS dosyaları alınmadı: OpenChamber bunları yalnızca ağ üzerindeki bir remote üzerinden alır ve bu worktree\'nin kullanabileceği bir remote yok. Deponun remote\'u bu bilgisayardaki bir klasör, hiç remote yok ya da dal hiçbirini izlemiyor. Doğrudan depo klasöründe çalışın veya worktree\'yi upstream\'i bir ağ remote\'u olan bir daldan oluşturun.',
   'worktree.bootstrap.toast.cancelled': 'Worktree kurulumu iptal edildi. Hazır olduğunuzda yeniden deneyin.',
   'worktree.bootstrap.toast.transportFailed': 'Repository erişimini ve ağ bağlantısını kontrol edin, ardından yeniden deneyin.',
   'gitView.pr.actions.openOnProvider': '{provider} üzerinde aç',

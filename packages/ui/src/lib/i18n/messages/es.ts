@@ -77,6 +77,7 @@ import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
 import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 import { questionAnswersI18n } from './question-answers.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -266,6 +267,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionGoalWriterI18n['es'],
   ...subsessionModelsI18n['es'],
   ...diffFindI18n['es'],
+  ...contextWindowI18n['es'],
   ...questionAnswersI18n['es'],
   'terminalView.actions.attachSelection': 'Adjuntar salida seleccionada',
   'terminalView.actions.copySelection': 'Copiar salida seleccionada',
@@ -1341,6 +1343,8 @@ export const dict: Record<I18nKey, string> = {
   "worktree.bootstrap.toast.invalidConfiguration": "Revisa la configuración de submódulos y Git LFS del repositorio, y vuelve a intentarlo.",
   "worktree.bootstrap.toast.repositoryTooManyFiles": "El repositorio tiene demasiados archivos.",
   "worktree.bootstrap.toast.branchNameConflict": "El nombre de la rama choca con una rama existente: el mismo nombre o uno anidado dentro del otro. Cambia el nombre de la rama y vuelve a crear el worktree.",
+  "worktree.bootstrap.toast.submoduleSourceLocal": "No se obtuvieron los submódulos: OpenChamber solo los obtiene a través de un remoto de red, y este worktree no tiene ninguno. El remoto del repositorio es una carpeta en este equipo, no hay remoto o la rama no sigue ninguno. Trabaja en la carpeta del repositorio o crea el worktree desde una rama cuyo upstream sea un remoto de red.",
+  "worktree.bootstrap.toast.lfsSourceLocal": "No se obtuvieron los archivos de Git LFS: OpenChamber solo los obtiene a través de un remoto de red, y este worktree no tiene ninguno. El remoto del repositorio es una carpeta en este equipo, no hay remoto o la rama no sigue ninguno. Trabaja en la carpeta del repositorio o crea el worktree desde una rama cuyo upstream sea un remoto de red.",
   "worktree.bootstrap.toast.cancelled": "La configuración del worktree se canceló. Vuelve a intentarlo cuando quieras.",
   "worktree.bootstrap.toast.transportFailed": "Comprueba el acceso al repositorio y la conexión de red, y vuelve a intentarlo.",
   "worktree.bootstrap.toast.timeoutDescription": "El worktree se creó, pero la configuración en segundo plano agotó el tiempo de espera.",
@@ -1895,7 +1899,8 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.tokens.cacheRead": "Lectura de caché",
   "contextSidebar.tokens.cacheWrite": "Escritura de caché",
   "contextSidebar.tokens.cacheHit": "Acierto de caché",
-  "chat.workStatus.replyCacheHit": "Acierto de caché (respuesta)",
+  "chat.workStatus.replyCacheHit": "Caché del prompt",
+  "chat.workStatus.replyCacheHitDescription": "Proporción del prompt leída desde la caché en la última respuesta.",
   "contextSidebar.actions.copyJson": "Copiar JSON",
   "contextSidebar.actions.copy": "Copiar",
   "contextSidebar.actions.copied": "Copiado",

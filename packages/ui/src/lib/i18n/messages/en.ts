@@ -76,6 +76,7 @@ import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
 import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 import { questionAnswersI18n } from './question-answers.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -255,6 +256,7 @@ export const dict = {
   ...sessionGoalWriterI18n['en'],
   ...subsessionModelsI18n['en'],
   ...diffFindI18n['en'],
+  ...contextWindowI18n['en'],
   ...questionAnswersI18n['en'],
   'terminalView.actions.attachSelection': 'Attach selected output',
   'terminalView.actions.copySelection': 'Copy selected output',
@@ -1346,6 +1348,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Review the repository submodule and Git LFS configuration, then retry.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'The repository has too many files.',
   'worktree.bootstrap.toast.branchNameConflict': 'The branch name clashes with an existing branch: the same name, or one nested inside the other. Rename the branch and create the worktree again.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Submodules weren\'t fetched: OpenChamber fetches them only through a network remote, and this worktree has none to use. The repository\'s remote is a folder on this computer, it has no remote, or its branch tracks none. Work in the repository folder itself, or start the worktree from a branch whose upstream is a network remote.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Git LFS files weren\'t fetched: OpenChamber fetches them only through a network remote, and this worktree has none to use. The repository\'s remote is a folder on this computer, it has no remote, or its branch tracks none. Work in the repository folder itself, or start the worktree from a branch whose upstream is a network remote.',
   'worktree.bootstrap.toast.cancelled': 'Worktree setup was cancelled. Retry when you are ready.',
   'worktree.bootstrap.toast.transportFailed': 'Check repository access and network connectivity, then retry.',
   'worktree.bootstrap.toast.timeoutDescription': 'The worktree was created, but background setup timed out.',
@@ -1939,7 +1943,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Cache read',
   'contextSidebar.tokens.cacheWrite': 'Cache write',
   'contextSidebar.tokens.cacheHit': 'Cache hit',
-  'chat.workStatus.replyCacheHit': 'Cache hit (reply)',
+  'chat.workStatus.replyCacheHit': 'Prompt cache',
+  'chat.workStatus.replyCacheHitDescription': 'Share of the prompt read from cache in the latest reply.',
   'contextSidebar.actions.copyJson': 'Copy JSON',
   'contextSidebar.actions.copy': 'Copy',
   'contextSidebar.actions.copied': 'Copied',

@@ -15,6 +15,7 @@ export const createAgentActions: UIStoreSlice<
   | 'setAgentNotifyToolEnabled'
   | 'setAgentUsageToolEnabled'
   | 'setAgentTerminalToolEnabled'
+  | 'setAgentActionsToolEnabled'
   | 'setAgentImageToolEnabled'
   | 'setAgentImageModel'
   | 'setAgentMemoryDreamingEnabled'
@@ -87,6 +88,10 @@ export const createAgentActions: UIStoreSlice<
 
   setAgentTerminalToolEnabled: (value) => {
     set({ agentTerminalToolEnabled: value });
+  },
+
+  setAgentActionsToolEnabled: (value) => {
+    set({ agentActionsToolEnabled: value });
   },
 
   setAgentImageToolEnabled: (value) => {

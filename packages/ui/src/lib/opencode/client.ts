@@ -60,6 +60,7 @@ import {
   toModelRef,
 } from "./model"
 import { ascendingId } from "./ids"
+import { matchSkillMentions, type SkillAttachmentRef } from "./skill-mentions"
 import { RuntimeRoutingResponseError, validateRuntimeResponse } from "./runtime-response"
 import { runningShellFromWire, shellCancellationNote, shellEndFromWire, type RunningShell, type ShellEndRecord, type ShellToStop } from "./background-shell"
 import { runningImageJobFromWire, type RunningImageJob } from "./background-image"
@@ -220,8 +221,6 @@ export type SkillMentions = {
   names: readonly string[]
   instructionFor: (names: readonly string[]) => string | null
 }
-
-type SkillAttachmentRef = { id: string; name: string }
 
 const isSkillNotFound = (error: OpencodeApiError): boolean =>
   error.tag === "InvalidRequestError" && error.detail.startsWith("Skill not found")
@@ -2097,19 +2096,13 @@ class OpencodeService {
     if (names.length === 0) return { attached: [], unresolved: [] }
     let known: Skill[]
     try {
+      await call("model.default", () => this.clientFor(directory).model.default()).catch(() => undefined)
       known = await this.listSkills(directory)
     } catch (error) {
       console.warn("[opencode] Could not list skills; naming them in an instruction instead:", error)
       return { attached: [], unresolved: [...names] }
     }
-    const attached: SkillAttachmentRef[] = []
-    const unresolved: string[] = []
-    for (const name of names) {
-      const match = known.find((skill) => skill.name === name) ?? known.find((skill) => skill.id === name)
-      if (!match) unresolved.push(name)
-      else if (!attached.some((skill) => skill.id === match.id)) attached.push({ id: match.id, name })
-    }
-    return { attached, unresolved }
+    return matchSkillMentions(names, known)
   }
 
   async listMcpServers(directory?: string | null): Promise<McpServerStatus[]> {

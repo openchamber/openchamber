@@ -19,6 +19,43 @@ client). VS Code does not mount `ContextPanel`, so it has no such menu.
 
 `ContextPanel` owns the open-file strip in each workspace zone. Its editor mounts `FilesView`, which has no tab row of its own. The file strip enables `SortableTabsStrip`'s `scrollWithWheel` option, so a regular vertical mouse wheel reaches tabs past either edge without changing the open file or showing a scrollbar. Other context panel tab modes keep their existing wheel behavior.
 
+## Context panel window
+
+`ContextWindowLayout.tsx` is the context panel in a window of its own: the
+rail and three zones, with the bottom zone as the center column where a main
+window has the chat. `ContextPanel` `variant="center"` fills that column with
+no resize handle; `variant="side"` marks the side zones there. No zone in
+that window expands, since the center already takes the room. The mode
+itself, routing and following the main window live in `lib/contextWindow`
+(`DOCUMENTATION.md` there). While a main window is detached, `MainLayout`
+mounts no zones, panes, drop overlay or fit arbiter, and keeps only the
+closed right zone, whose slot holds the work-status card. In the rail's place
+it shows `DetachedPanelRail`: a pressed button that brings the panel window
+to the front, and in the slot of the detach control a button that brings the
+panel back to this window, so the panel is never out of reach from the chat
+window. The rail and
+the zone header (`ContextZoneWindowButtons`) carry the control that detaches
+the panel; in the panel window the rail's control sends it back.
+
+- The three zone cards in the panel window start at one top edge and share
+  one header height: the center card takes no top gutter (the side cards
+  have none), and without the desktop header the row is padded by the
+  cards' bottom gutter so no card touches the window's edge.
+- The center is a destination everywhere a zone is chosen: the zone menu
+  (`ZoneMoveMenuItems`) names the bottom zone "center" there with its own
+  icon, and the drop overlay labels its target the same way.
+- Drop targets follow the layout direction: in a right-to-left layout the
+  measured physical sides map to the mirrored zones. Their labels are not
+  swapped again, because right-to-left dictionaries already name the start
+  zone by the side it shows on.
+- Drop target frames are opaque, so the zone's content does not read through
+  behind the label. An open zone's frame is its card cut to its target
+  (`computeZoneDropFrames`): in the panel window a closed side's strip is
+  carved out of the center column, and the center card would otherwise run
+  under that strip's frame.
+- A file surface with no editor beside its tree fills a bottom or center
+  zone with the tree; side zones shrink to the tree's width instead.
+
 ## Header session tabs
 
 `SessionTabsStrip.tsx` is the header's horizontal working set of sessions, in
@@ -205,6 +242,10 @@ so it survives the sidebar closing and reopening. A folder change remounts the t
   use the session checkout. Session lookup uses the store's own directory key
   normalization to avoid Windows path mismatches. Transient fetch failure retains
   known actions, and an unavailable saved pick falls back to the first action.
+- A run an agent started through its tool comes from the server's listing with
+  `agentSessionId` in its purpose; the run carries `startedByAgent` while it runs,
+  and the header, menu and dialog mark it, so the user does not start a second
+  copy. The user can still stop it from here.
 - Repository actions require shared-setup trust before execution; declining runs
   nothing. The action chooser sets its highlight only on opening so updates
   cannot move the user's selection.

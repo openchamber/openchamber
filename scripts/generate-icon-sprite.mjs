@@ -40,6 +40,13 @@ const customIconData = new Map([
     "worktree",
     `<path fill="currentColor" d="M22 11H20V7H11.5858L9.58579 5H4V19H11V21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.4142L12.4142 5H21C21.5523 5 22 5.44772 22 6V11Z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M15.5 14V21M21 14V14.5C21 16.4 19.9 17.5 18 17.5H17.5C16.4 17.5 15.5 18.4 15.5 19.5"/><circle fill="currentColor" cx="15.5" cy="14" r="2"/><circle fill="currentColor" cx="21" cy="14" r="2"/><circle fill="currentColor" cx="15.5" cy="21" r="2"/>`,
   ],
+  // The center zone of the context panel window: Remixicon has a left, right
+  // and bottom panel but no middle one. `layout-left` and `layout-right`
+  // combined, so the three zone icons in a menu read as one set.
+  [
+    "layout-center",
+    `<path fill="currentColor" d="M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM7 5H4V19H7V5ZM15 5H9V19H15V5ZM20 5H17V19H20V5Z"/>`,
+  ],
   // Lead: an agent's head in 2px lines with its work branching down to three
   // sessions, what a lead does. Remixicon has no agent mark; the head keeps
   // it apart from `organization-chart` and `node-tree`, and it stays clear at

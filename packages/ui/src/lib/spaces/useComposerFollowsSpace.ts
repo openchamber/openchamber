@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { useConfigStore } from '@/stores/useConfigStore';
-import { composerModelForSpace, spaceModelRefusal } from './space-model-access';
+import { followSpaceModel, spaceModelRefusal } from './space-model-access';
 import { spaceIdOfDirectory } from './space-route';
 import { useSpacesStore } from './spaces-store';
 
@@ -21,10 +21,6 @@ export const useComposerFollowsSpace = (draftDirectory: string | null): void => 
       if (catalogRead) handled.current = draftDirectory;
       return;
     }
-    const model = composerModelForSpace(draftDirectory);
-    if (!model) return;
-    handled.current = draftDirectory;
-    useConfigStore.getState().setProvider(model.providerId);
-    useConfigStore.getState().setModel(model.modelId);
+    if (followSpaceModel(draftDirectory)) handled.current = draftDirectory;
   }, [catalog, catalogRead, currentProviderId, draftDirectory, running]);
 };

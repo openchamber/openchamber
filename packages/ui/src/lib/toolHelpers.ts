@@ -25,6 +25,22 @@ export interface ToolMetadata {
   category: 'file' | 'search' | 'code' | 'system' | 'ai' | 'web';
 }
 
+const OPENCHAMBER_TOOL_NAMES: [string, string][] = [
+  ['openchamber', 'OpenChamber'],
+  ['openchamber_schedule', 'OpenChamber Schedule'],
+  ['openchamber_web', 'OpenChamber Web'],
+  ['openchamber_memory', 'OpenChamber Memory'],
+  ['openchamber_knowledge', 'OpenChamber Knowledge'],
+  ['openchamber_notify', 'OpenChamber Notify'],
+  ['openchamber_usage', 'OpenChamber Usage'],
+  ['openchamber_render', 'OpenChamber Render'],
+  ['openchamber_image', 'OpenChamber Image'],
+  ['openchamber_secret', 'OpenChamber Secret'],
+  ['openchamber_workflow', 'OpenChamber Workflow'],
+  ['openchamber_terminal', 'OpenChamber Terminal'],
+  ['openchamber_actions', 'OpenChamber Project Actions'],
+];
+
 const TOOL_METADATA: Record<string, ToolMetadata> = {
 
   read: {
@@ -174,82 +190,7 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       inputFields: []
     },
 
-    openchamber: {
-      displayName: 'OpenChamber',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_schedule: {
-      displayName: 'OpenChamber Schedule',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_web: {
-      displayName: 'OpenChamber Web',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_memory: {
-      displayName: 'OpenChamber Memory',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_knowledge: {
-      displayName: 'OpenChamber Knowledge',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_notify: {
-      displayName: 'OpenChamber Notify',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_usage: {
-      displayName: 'OpenChamber Usage',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_render: {
-      displayName: 'OpenChamber Render',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_image: {
-      displayName: 'OpenChamber Image',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_secret: {
-      displayName: 'OpenChamber Secret',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
-
-    openchamber_workflow: {
-      displayName: 'OpenChamber Workflow',
-      category: 'system',
-      outputLanguage: 'json',
-      inputFields: []
-    },
+    ...Object.fromEntries(OPENCHAMBER_TOOL_NAMES.map(([name, displayName]) => [name, { displayName, category: 'system', outputLanguage: 'json', inputFields: [] }])),
 
     plan_enter: {
       displayName: 'Plan Mode',

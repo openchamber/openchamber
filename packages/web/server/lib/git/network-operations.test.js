@@ -2855,8 +2855,8 @@ process.exit(safe ? 0 : 1);
     });
 
     expect(result).toMatchObject({
-      status: 'authorization-required',
-      submodules: [{ path: submodulePath, status: 'authorization-required' }],
+      status: 'invalid',
+      submodules: [{ path: submodulePath, status: 'invalid', error: { code: 'SUBMODULE_SOURCE_LOCAL' } }],
       lfs: [{ path: '.', status: 'not-needed' }],
     });
     expect(setupValue.calls.some((call) => call.args.includes('check-attr'))).toBe(false);
@@ -2906,11 +2906,13 @@ process.exit(safe ? 0 : 1);
         expect(result.phase).toBe('setup-ready');
         expect(await fs.readFile(path.join(created.path, 'README.md'), 'utf8')).toBe('ordinary content\n');
       } else {
-        expect(result).toMatchObject({ status: 'failed', phase: 'directory-created', errorCode: 'AUTHENTICATION_REQUIRED' });
+        // No network remote to fetch from is not an authentication problem: say what was skipped and how to get it.
+        const code = kind === 'lfs' ? 'LFS_SOURCE_LOCAL' : 'SUBMODULE_SOURCE_LOCAL';
+        expect(result).toMatchObject({ status: 'failed', phase: 'directory-created', errorCode: code, error: expect.stringContaining('start the worktree from a branch whose upstream is a network remote') });
         const entries = kind === 'lfs' ? result.hydration.lfs : result.hydration.submodules;
         expect(entries).toEqual([expect.objectContaining({
-          path: kind === 'lfs' ? '.' : 'vendor/child', status: 'authorization-required',
-          error: { code: 'AUTHENTICATION_REQUIRED', message: expect.stringContaining('exact parent fetch source') },
+          path: kind === 'lfs' ? '.' : 'vendor/child', status: 'invalid',
+          error: { code, message: expect.stringContaining('only through a network remote') },
         })]);
       }
       expect(validateGitTransportContext).not.toHaveBeenCalled();

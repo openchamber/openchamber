@@ -351,4 +351,12 @@ describe('loopback navigations against a remote instance', () => {
     expect(isRemoteWebLoopbackUrl('https://example.test/docs/')).toBe(false);
     expect(resolveIframeBrowserUrl('https://example.test/docs/')).toBe('https://example.test/docs/');
   });
+
+  test('a web search loads in the frame, which Google allows only when asked', () => {
+    asDesktop(false);
+
+    expect(resolveIframeBrowserUrl('https://www.google.com/search?q=react%20hooks'))
+      .toBe('https://www.google.com/search?q=react+hooks&igu=1');
+    expect(resolveIframeBrowserUrl('https://www.google.com/maps')).toBe('https://www.google.com/maps');
+  });
 });

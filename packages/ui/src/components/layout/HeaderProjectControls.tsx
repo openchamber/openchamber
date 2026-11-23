@@ -9,7 +9,8 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useObserveProjectActionRuns, useProjectActions } from './projectActionsRunnerContext';
-import { ProjectActionRunIndicator } from './ProjectActionRunIndicator';
+import { ProjectActionAgentBadge, ProjectActionRunIndicator } from './ProjectActionRunIndicator';
+import { useRunStartedByAgent } from './useRunStartedByAgent';
 import { ProjectActionDescription } from './ProjectActionDescription';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
@@ -26,6 +27,7 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
   const shown = runner?.available ? runner.shown : null;
   const shownRun = shown && runner ? runner.runOf(shown) : null;
   useObserveProjectActionRuns(true);
+  const shownRunStartedByAgent = useRunStartedByAgent(shownRun);
   const previewUrl = useTerminalStore((state) => {
     if (!shownRun) return null;
     return state.getDirectoryState(shownRun.directory)?.tabs.find((tab) => tab.id === shownRun.tabId)?.previewUrl ?? null;
@@ -77,6 +79,9 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
             <div className="flex flex-col gap-0.5">
               <span>{label}</span>
               <ProjectActionDescription action={shown} />
+              {shownRunStartedByAgent ? (
+                <span className="typography-micro text-muted-foreground">{t('projectActions.run.startedByAgent')}</span>
+              ) : null}
               <span className="typography-micro text-muted-foreground">
                 <TooltipLabelWithShortcut label={t('projectActions.header.allActions')} shortcut={allActionsShortcut} />
               </span>
@@ -105,6 +110,7 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
                   {t('projectActions.menu.sharedBadge')}
                 </span>
               ) : null}
+              <ProjectActionAgentBadge run={runner.runOf(entry)} />
               <ProjectActionRunIndicator run={runner.runOf(entry)} className="ms-auto" />
             </ContextMenuItem>
           ))}

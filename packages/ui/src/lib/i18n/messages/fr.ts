@@ -76,6 +76,7 @@ import { sessionGoalWriterI18n } from './session-goal-writer.i18n';
 import { subsessionModelsI18n } from './subsession-models.i18n';
 import { diffFindI18n } from './diff-find.i18n';
 import { questionAnswersI18n } from './question-answers.i18n';
+import { contextWindowI18n } from './context-window.i18n';
 import { markdownOutlineI18n } from './markdown-outline.i18n';
 import { markdownGithubI18n } from './markdown-github.i18n';
 import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
@@ -255,6 +256,7 @@ export const dict = {
   ...sessionGoalWriterI18n['fr'],
   ...subsessionModelsI18n['fr'],
   ...diffFindI18n['fr'],
+  ...contextWindowI18n['fr'],
   ...questionAnswersI18n['fr'],
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.copySelection': 'Copier la sortie sélectionnée',
@@ -1692,7 +1694,8 @@ export const dict = {
   'contextSidebar.tokens.cacheRead': 'Lecture du cache',
   'contextSidebar.tokens.cacheWrite': 'Écriture du cache',
   'contextSidebar.tokens.cacheHit': 'Succès du cache',
-  'chat.workStatus.replyCacheHit': 'Succès du cache (réponse)',
+  'chat.workStatus.replyCacheHit': 'Cache du prompt',
+  'chat.workStatus.replyCacheHitDescription': 'Part du prompt lue depuis le cache lors de la dernière réponse.',
   'contextSidebar.actions.copyJson': 'Copier JSON',
   'contextSidebar.actions.copy': 'Copie',
   'contextSidebar.actions.copied': 'Copié',
@@ -3602,6 +3605,8 @@ export const dict = {
   'worktree.bootstrap.toast.invalidConfiguration': 'Vérifiez la configuration des sous-modules et de Git LFS du dépôt, puis réessayez.',
   'worktree.bootstrap.toast.repositoryTooManyFiles': 'Le dépôt contient trop de fichiers.',
   'worktree.bootstrap.toast.branchNameConflict': 'Le nom de la branche entre en conflit avec une branche existante : le même nom, ou l’un imbriqué dans l’autre. Renommez la branche et recréez le worktree.',
+  'worktree.bootstrap.toast.submoduleSourceLocal': 'Les sous-modules n\'ont pas été récupérés : OpenChamber ne les récupère que via un remote réseau, et ce worktree n\'en a aucun. Le remote du dépôt est un dossier sur cet ordinateur, il n\'y a pas de remote, ou la branche n\'en suit aucun. Travaillez dans le dossier du dépôt lui-même, ou créez le worktree à partir d\'une branche dont l\'upstream est un remote réseau.',
+  'worktree.bootstrap.toast.lfsSourceLocal': 'Les fichiers Git LFS n\'ont pas été récupérés : OpenChamber ne les récupère que via un remote réseau, et ce worktree n\'en a aucun. Le remote du dépôt est un dossier sur cet ordinateur, il n\'y a pas de remote, ou la branche n\'en suit aucun. Travaillez dans le dossier du dépôt lui-même, ou créez le worktree à partir d\'une branche dont l\'upstream est un remote réseau.',
   'worktree.bootstrap.toast.cancelled': 'La configuration du worktree a été annulée. Réessayez lorsque vous êtes prêt.',
   'worktree.bootstrap.toast.transportFailed': 'Vérifiez l’accès au dépôt et la connexion réseau, puis réessayez.',
   'worktree.bootstrap.toast.timeoutDescription': 'Le worktree a été créé, mais la configuration en arrière-plan a expiré.',
