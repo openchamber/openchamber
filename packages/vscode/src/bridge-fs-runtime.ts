@@ -209,10 +209,21 @@ export async function handleFsBridgeMessage(
         includeHidden?: boolean;
         respectGitignore?: boolean;
       };
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+      // Contain the search root to the active workspace before either search
+      // path (RelativePattern or the recursive fallback) consumes it. The
+      // shared directory resolver canonicalizes both sides, so a root that
+      // escapes through an in-workspace symlink is refused, while a symlink
+      // whose canonical target stays inside the workspace is allowed and is
+      // searched at that target.
+      const resolution = await deps.resolveDirectoryListPath(directory || workspaceRoot, workspaceRoot);
+      if (!resolution.ok) {
+        return { id, type, success: false, error: resolution.error };
+      }
       const abort = new AbortController();
       searchAbortControllers.set(id, abort);
       try {
-        const files = await deps.searchDirectory(directory, query, limit, Boolean(includeHidden), respectGitignore !== false, abort.signal);
+        const files = await deps.searchDirectory(resolution.resolvedPath, query, limit, Boolean(includeHidden), respectGitignore !== false, abort.signal);
         return { id, type, success: true, data: { files } };
       } finally {
         searchAbortControllers.delete(id);
