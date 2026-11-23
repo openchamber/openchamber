@@ -530,6 +530,7 @@ jobs:
     needs: prepare
     if: ${{ needs.prepare.outputs.build == 'true' }}
     permissions:
+      actions: read
       contents: write
     uses: ./.github/workflows/mobile-release.yml
     with:
@@ -550,6 +551,7 @@ jobs:
     # GitHub checks every job of the called workflow against these, the
     # skipped Android one included.
     permissions:
+      actions: read
       contents: write
     uses: ./.github/workflows/mobile-release.yml
     with:
