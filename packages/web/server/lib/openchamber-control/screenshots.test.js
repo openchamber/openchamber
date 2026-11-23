@@ -82,3 +82,49 @@ describe('writing a screenshot', () => {
     expect(fs.written.size).toBe(0);
   });
 });
+
+describe('concurrent screenshots', () => {
+  const createExclusiveFs = () => {
+    const written = new Map();
+    return {
+      written,
+      mkdir: async () => {},
+      writeFile: async (target, data, options) => {
+        if (options?.flag === 'wx' && written.has(target)) {
+          const error = new Error(`EEXIST: file already exists, open '${target}'`);
+          error.code = 'EEXIST';
+          throw error;
+        }
+        written.set(target, data);
+      },
+    };
+  };
+
+  it('never lets two captures in the same millisecond overwrite each other', async () => {
+    const fs = createExclusiveFs();
+    const now = new Date('2026-11-21T05:00:00.123Z');
+    const [first, second] = await Promise.all([
+      writeScreenshot({ directory: '/work/project', base64: Buffer.from('first').toString('base64'), label: 'same', now, fs }),
+      writeScreenshot({ directory: '/work/project', base64: Buffer.from('second').toString('base64'), label: 'same', now, fs }),
+    ]);
+
+    expect(first.path).not.toBe(second.path);
+    expect([first.path, second.path].sort()).toEqual([
+      '.openchamber/screenshots/same-2026-11-21T05-00-00-123-2.jpg',
+      '.openchamber/screenshots/same-2026-11-21T05-00-00-123.jpg',
+    ]);
+    expect(fs.written.get(first.absolutePath).toString()).toBe('first');
+    expect(fs.written.get(second.absolutePath).toString()).toBe('second');
+  });
+
+  it('keeps an existing capture when a later one reuses its name', async () => {
+    const fs = createExclusiveFs();
+    const now = new Date('2026-11-21T05:00:00.123Z');
+    const first = await writeScreenshot({ directory: '/work/project', base64: Buffer.from('first').toString('base64'), label: 'same', now, fs });
+    const second = await writeScreenshot({ directory: '/work/project', base64: Buffer.from('second').toString('base64'), label: 'same', now, fs });
+
+    expect(second.path).not.toBe(first.path);
+    expect(fs.written.get(first.absolutePath).toString()).toBe('first');
+    expect(fs.written.get(second.absolutePath).toString()).toBe('second');
+  });
+});
