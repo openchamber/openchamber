@@ -6,9 +6,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
-import { compactQuotaValueLabel, formatQuotaResetLabel, formatQuotaResetShort, formatQuotaWindowValueLabel, isExtensionQuotaProviderId } from '@/lib/quota';
+import { compactQuotaValueLabel, formatQuotaResetLabel, formatQuotaResetRelative, formatQuotaResetShort, formatQuotaWindowValueLabel, isExtensionQuotaProviderId } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useUsageProviderGroups } from '@/components/usage/usageGroups';
 import { UsageGiftResetButton } from '@/components/usage/UsageGiftResetButton';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -23,12 +24,14 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
   const { t } = useI18n();
   const groups = useUsageProviderGroups();
   const displayMode = useQuotaStore((state) => state.displayMode);
+  const resetDisplay = useQuotaStore((state) => state.resetDisplay);
   const isLoading = useQuotaStore((state) => state.isLoading);
   const loadedRuntimeKey = useQuotaStore((state) => state.loadedRuntimeKey);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const fetchQuotas = useQuotaStore((state) => state.fetchQuotas);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
+  const now = useMinuteTickerNow(resetDisplay === 'relative');
 
   useQuotaAutoRefresh(visible && (groups.length > 0 || loadedRuntimeKey === null));
 
@@ -118,7 +121,8 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
             const resetFallback = row.window.resetAfterFormatted ?? row.window.resetAtFormatted;
             const { providerId } = group;
             const { resetAt } = row.window;
-            const resetLabel = formatQuotaResetShort(resetAt, resetFallback, timeFormatPreference, { providerId });
+            const resetLabel = (resetDisplay === 'relative' ? formatQuotaResetRelative(resetAt, { now }) : null)
+              ?? formatQuotaResetShort(resetAt, resetFallback, timeFormatPreference, { providerId });
             const resetFull = formatQuotaResetLabel(resetAt, resetFallback, timeFormatPreference, providerId);
             const rowLabel = row.subtitle ? `${row.subtitle} · ${row.label}` : row.label;
             const tooltipLines = [

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { clampPercent, compactQuotaValueLabel, formatPercent, formatQuotaResetShort, formatQuotaRowValue, formatQuotaValueLabel, formatQuotaWindowValueLabel, formatWindowLabel } from './utils';
+import { clampPercent, compactQuotaValueLabel, formatPercent, formatQuotaResetDuration, formatQuotaResetRelative, formatQuotaResetShort, formatQuotaRowValue, formatQuotaValueLabel, formatQuotaWindowValueLabel, formatWindowLabel } from './utils';
 import type { UsageWindow } from '@/types';
 import { formatMessage } from '@/lib/i18n';
 import { dict } from '@/lib/i18n/messages/en';
@@ -113,6 +113,23 @@ describe('short reset times and compact counts for a narrow row', () => {
     const lateNow = new Date(2026, 10, 12, 23, 59, 55);
     const elapsed = new Date(2026, 10, 12, 23, 59, 45).getTime();
     expect(formatQuotaResetShort(elapsed, null, '24h', { providerId: 'claude', now: lateNow })).toBe('23:59');
+  });
+
+  test('the time left before a reset reads in minutes, hours and minutes, or whole days', () => {
+    const at = (hour: number, minute = 0) => new Date(2026, 10, 12, hour, minute).getTime();
+    const later = (days: number, hour: number) => new Date(2026, 10, 12 + days, hour).getTime();
+    expect(formatQuotaResetRelative(at(10, 45), { now })).toBe('in 45m');
+    expect(formatQuotaResetRelative(at(12, 35), { now })).toBe('in 2h 35m');
+    expect(formatQuotaResetRelative(at(17), { now })).toBe('in 7h');
+    expect(formatQuotaResetRelative(later(1, 12), { now })).toBe('in 1d');
+    expect(formatQuotaResetRelative(later(12, 10), { now })).toBe('in 12d');
+    expect(formatQuotaResetRelative(new Date(now.getTime() + 30_000).getTime(), { now })).toBe('in less than a minute');
+  });
+
+  test('a passed or missing reset has no countdown, so the absolute label stays', () => {
+    expect(formatQuotaResetRelative(at(0, 9), { now })).toBeNull();
+    expect(formatQuotaResetRelative(null, { now })).toBeNull();
+    expect(formatQuotaResetDuration(Number.NaN, { now })).toBeNull();
   });
 
   test('long numbers in a count compact as token counts do; short ones stay as written', () => {

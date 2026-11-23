@@ -3551,6 +3551,8 @@ export const dict = {
   'contextFileOpen.failure.missing': '{name} לא נמצא',
   'contextFileOpen.failure.unreadable': 'לא ניתן לפתוח את {name}',
   'quota.window.5h': '5 שעות',
+  'quota.reset.inDuration': 'בעוד {duration}',
+  'quota.reset.lessThanMinute': 'פחות מדקה',
   'quota.window.7d': 'מגבלת 7 ימים',
   'quota.window.extraUsage': 'שימוש נוסף',
   'quota.window.weekly': 'שבועי',

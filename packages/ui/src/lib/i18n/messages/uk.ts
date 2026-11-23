@@ -3642,6 +3642,8 @@ export const dict: Record<I18nKey, string> = {
   "contextFileOpen.failure.missing": "{name} не знайдено",
   "contextFileOpen.failure.unreadable": "Не вдалося відкрити {name}",
   "quota.window.5h": "5 годин",
+  "quota.reset.inDuration": "через {duration}",
+  "quota.reset.lessThanMinute": "менше хвилини",
   "quota.window.7d": "Ліміт на 7 днів",
   "quota.window.extraUsage": "Додаткове використання",
   "quota.window.weekly": "Щотижня",

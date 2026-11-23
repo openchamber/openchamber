@@ -3656,6 +3656,8 @@ export const dict: Record<I18nKey, string> = {
   'contextFileOpen.failure.missing': 'Nie znaleziono pliku {name}',
   'contextFileOpen.failure.unreadable': 'Nie można otworzyć pliku {name}',
   'quota.window.5h': '5 godzin',
+  'quota.reset.inDuration': 'za {duration}',
+  'quota.reset.lessThanMinute': 'mniej niż minuta',
   'quota.window.7d': 'Limit 7-dniowy',
   'quota.window.extraUsage': 'Dodatkowe zużycie',
   'quota.window.weekly': 'Tygodniowo',

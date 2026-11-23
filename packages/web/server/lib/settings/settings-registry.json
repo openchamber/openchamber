@@ -884,6 +884,9 @@
     "usageDisplayMode": {
       "scope": "profile"
     },
+    "usageResetDisplay": {
+      "scope": "profile"
+    },
     "usageDropdownProviders": {
       "scope": "profile"
     },

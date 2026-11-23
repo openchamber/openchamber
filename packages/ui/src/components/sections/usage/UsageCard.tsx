@@ -1,9 +1,10 @@
 import type { QuotaProviderId, UsageWindow } from '@/types';
-import { formatQuotaWindowValueLabel, formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
+import { formatQuotaWindowValueLabel, formatQuotaResetLabel, formatQuotaResetDuration, formatWindowLabel } from '@/lib/quota';
 import { UsageProgressBar } from './UsageProgressBar';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
+import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { UsageGiftResetButton } from '@/components/usage/UsageGiftResetButton';
 import { useI18n } from '@/lib/i18n';
 
@@ -32,7 +33,9 @@ export const UsageCard: React.FC<UsageCardProps> = ({
 }) => {
   const { t } = useI18n();
   const displayMode = useQuotaStore((state) => state.displayMode);
+  const resetDisplay = useQuotaStore((state) => state.resetDisplay);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
+  const now = useMinuteTickerNow(resetDisplay === 'relative');
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
   const hasPercent = displayPercent !== null;
   const barLabel = displayMode === 'remaining'
@@ -45,7 +48,10 @@ export const UsageCard: React.FC<UsageCardProps> = ({
     timeFormatPreference,
     providerId,
   );
-  const resetText = resetLabel ? t('settings.usage.card.resetsAt', { time: resetLabel }) : '';
+  const resetDuration = resetDisplay === 'relative' ? formatQuotaResetDuration(window.resetAt, { now }) : null;
+  const resetText = resetDuration
+    ? t('settings.usage.card.resetsIn', { duration: resetDuration })
+    : resetLabel ? t('settings.usage.card.resetsAt', { time: resetLabel }) : '';
   const windowLabel = formatWindowLabel(title);
 
   return (

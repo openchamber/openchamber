@@ -1,8 +1,10 @@
 import React from 'react';
 import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
-import { formatQuotaResetLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
+import { formatQuotaResetLabel, formatQuotaResetRelative, formatQuotaWindowValueLabel } from '@/lib/quota';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useQuotaStore } from '@/stores/useQuotaStore';
+import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import type { UsageWindow } from '@/types';
 import type { UsageProviderGroup } from './usageGroups';
@@ -29,6 +31,8 @@ export const UsageProviderCards: React.FC<{
   className?: string;
 }> = ({ groups, displayMode, timeFormatPreference, className }) => {
   const { t } = useI18n();
+  const resetDisplay = useQuotaStore((state) => state.resetDisplay);
+  const now = useMinuteTickerNow(resetDisplay === 'relative');
   return (
   <div className={cn('space-y-1.5', className)}>
     {groups.map((group) => (
@@ -60,12 +64,13 @@ export const UsageProviderCards: React.FC<{
                 ? row.window.remainingPercent
                 : row.window.usedPercent;
               const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
-              const resetLabel = formatQuotaResetLabel(
-                row.window.resetAt,
-                row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
-                timeFormatPreference,
-                group.providerId,
-              );
+              const resetLabel = (resetDisplay === 'relative' ? formatQuotaResetRelative(row.window.resetAt, { now }) : null)
+                ?? formatQuotaResetLabel(
+                  row.window.resetAt,
+                  row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
+                  timeFormatPreference,
+                  group.providerId,
+                );
               return (
                 <div key={row.key} className="flex min-w-0 items-baseline justify-between gap-3">
                   <span className="flex min-w-0 flex-1 items-baseline gap-1.5">

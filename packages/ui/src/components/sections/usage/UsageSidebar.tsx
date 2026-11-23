@@ -35,10 +35,12 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
   const isLoading = useQuotaStore((state) => state.isLoading);
   const usageDisplayMode = useQuotaStore((state) => state.displayMode);
   const setUsageDisplayMode = useQuotaStore((state) => state.setDisplayMode);
+  const usageResetDisplay = useQuotaStore((state) => state.resetDisplay);
+  const setUsageResetDisplay = useQuotaStore((state) => state.setResetDisplay);
   const providers = useQuotaProviders();
   useQuotaAutoRefresh(true, true);
 
-  const persistUsageSettings = React.useCallback(async (changes: { usageDisplayMode?: 'usage' | 'remaining'; usageDropdownProviders?: string[] }) => {
+  const persistUsageSettings = React.useCallback(async (changes: { usageDisplayMode?: 'usage' | 'remaining'; usageResetDisplay?: 'absolute' | 'relative'; usageDropdownProviders?: string[] }) => {
     try {
       await updateDesktopSettings(changes);
     } catch (error) {
@@ -53,6 +55,14 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
     setUsageDisplayMode(value);
     void persistUsageSettings({ usageDisplayMode: value });
   }, [persistUsageSettings, setUsageDisplayMode]);
+
+  const handleUsageResetDisplayChange = React.useCallback((value: string) => {
+    if (value !== 'absolute' && value !== 'relative') {
+      return;
+    }
+    setUsageResetDisplay(value);
+    void persistUsageSettings({ usageResetDisplay: value });
+  }, [persistUsageSettings, setUsageResetDisplay]);
 
   const bgClass = 'bg-background';
 
@@ -88,6 +98,22 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
             <SelectContent>
               <SelectItem value="usage">{t('settings.usage.sidebar.field.displayModeUsage')}</SelectItem>
               <SelectItem value="remaining">{t('settings.usage.sidebar.field.displayModeRemaining')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="typography-micro text-muted-foreground">{t('settings.usage.sidebar.field.resetTime')}</span>
+          <Select value={usageResetDisplay} onValueChange={handleUsageResetDisplayChange}>
+            <SelectTrigger className="w-fit" aria-label={t('settings.usage.sidebar.field.resetTime')}>
+              <SelectValue>
+                {usageResetDisplay === 'relative'
+                  ? t('settings.usage.sidebar.field.resetTimeRelative')
+                  : t('settings.usage.sidebar.field.resetTimeAbsolute')}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="absolute">{t('settings.usage.sidebar.field.resetTimeAbsolute')}</SelectItem>
+              <SelectItem value="relative">{t('settings.usage.sidebar.field.resetTimeRelative')}</SelectItem>
             </SelectContent>
           </Select>
         </div>

@@ -1,9 +1,10 @@
 import React from 'react';
 import type { ConsoleBudget, ConsoleBudgets } from '@/types/quota';
-import { formatQuotaResetLabel } from '@/lib/quota';
+import { formatQuotaResetLabel, formatQuotaResetDuration } from '@/lib/quota';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { UsageProgressBar } from './UsageProgressBar';
 
@@ -66,10 +67,16 @@ const sharingLabel = (budget: ConsoleBudget, workspace: string | null, t: Transl
 const BudgetRow: React.FC<{ budget: ConsoleBudget; workspace: string | null }> = ({ budget, workspace }) => {
   const { t } = useI18n();
   const displayMode = useQuotaStore((state) => state.displayMode);
+  const resetDisplay = useQuotaStore((state) => state.resetDisplay);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
+  const now = useMinuteTickerNow(resetDisplay === 'relative');
   const left = Math.max(0, budget.limit - budget.spent);
   const displayPercent = displayMode === 'remaining' ? 100 - budget.usedPercent : budget.usedPercent;
   const resetLabel = formatQuotaResetLabel(budget.resetsAt, null, timeFormatPreference);
+  const resetDuration = resetDisplay === 'relative' ? formatQuotaResetDuration(budget.resetsAt, { now }) : null;
+  const resetText = resetDuration
+    ? t('settings.usage.card.resetsIn', { duration: resetDuration })
+    : resetLabel ? t('settings.usage.card.resetsAt', { time: resetLabel }) : '';
 
   return (
     <div className="py-3">
@@ -91,7 +98,7 @@ const BudgetRow: React.FC<{ budget: ConsoleBudget; workspace: string | null }> =
         <UsageProgressBar percent={displayPercent} tonePercent={budget.usedPercent} className="h-1.5" />
         <div className="mt-1 flex items-center justify-between gap-3">
           <span className="typography-micro text-muted-foreground">
-            {resetLabel ? t('settings.usage.card.resetsAt', { time: resetLabel }) : ''}
+            {resetText}
           </span>
           <span className="typography-micro text-muted-foreground tabular-nums">
             {t('settings.usage.consoleBudgets.spentOf', { spent: formatUsd(budget.spent), limit: formatUsd(budget.limit) })}

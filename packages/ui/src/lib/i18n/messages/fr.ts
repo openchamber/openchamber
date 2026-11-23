@@ -3313,6 +3313,8 @@ export const dict = {
   'contextFileOpen.failure.missing': '{name} est introuvable',
   'contextFileOpen.failure.unreadable': 'Impossible d’ouvrir {name}',
   'quota.window.5h': '5 heures',
+  'quota.reset.inDuration': 'dans {duration}',
+  "quota.reset.lessThanMinute": "moins d'une minute",
   'quota.window.7d': 'Limite sur 7 jours',
   'quota.window.extraUsage': 'Utilisation supplémentaire',
   'quota.window.weekly': 'Hebdomadaire',
