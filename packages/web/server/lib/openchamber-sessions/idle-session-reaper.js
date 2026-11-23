@@ -134,7 +134,7 @@ export const createIdleSessionReaper = ({
       const selectCandidates = async (sessions, statusMap, currentTime) => {
         const statusFor = (session) => {
           if (statusMap) {
-            const fromMap = statusMap instanceof Map ? statusMap.get(session.id) : statusMap[session.id];
+            const fromMap = statusMap instanceof Map ? statusMap.get(session.id) : Object.hasOwn(statusMap, session.id) ? statusMap[session.id] : undefined;
             if (fromMap !== undefined) return statusTypeOf(fromMap);
           }
           return statusTypeOf(session?.status);

@@ -866,6 +866,39 @@ describe('openchamber session routes', () => {
     });
   });
 
+  it('reaps a prototype-named idle session the active set does not list', async () => {
+    const now = Date.now();
+    sessionListMock.mockImplementation(async () => ({
+      data: [{ id: 'constructor', time: { created: now - 4 * 60 * 60 * 1000, updated: now - 3 * 60 * 60 * 1000 } }],
+    }));
+    const setArchived = vi.fn(async () => undefined);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => Response.json({ data: {} }));
+    try {
+      const service = createOpenChamberSessionService({
+        archiveStore: createMemoryArchiveStore(),
+        sessionMetadataStore: createMemorySessionMetadataStore(),
+        readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }] }),
+        sanitizeProjects: (projects) => projects,
+        validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+        buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+        getOpenCodeAuthHeaders: () => ({}),
+        waitForOpenCodeReady: vi.fn(async () => undefined),
+        openCodeArchive: { setArchived, readArchivedAt: vi.fn(async () => null) },
+        ...createGitDependencies(),
+      });
+
+      const result = await service.idleSessionReaper.sweep();
+
+      // The active set has no own 'constructor' entry: Object.prototype must
+      // not read as busy, so the idle session is reaped.
+      expect(result.reaped).toEqual(['constructor']);
+      expect(setArchived).toHaveBeenCalledWith('constructor', true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('records on the prompt the session whose agent sent it, with its title', async () => {
     const { app } = createApp();
     sessionGetMock.mockImplementation(async ({ sessionID }) => ({ id: sessionID, title: 'PR triage', location: { directory: '/repo/app' } }));

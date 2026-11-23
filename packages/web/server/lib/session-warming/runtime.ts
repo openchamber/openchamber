@@ -273,7 +273,7 @@ export const createSessionWarmingRuntime = ({
         return null;
       }
       const active = activeSessionsSchema.safeParse(unwrapOpenCodeResponse(await readBoundedResponseJson(response, ACTIVE_SESSIONS_RESPONSE_MAX_BYTES)));
-      return active.success ? Boolean(active.data[sessionId]) : null;
+      return active.success ? Object.hasOwn(active.data, sessionId) && Boolean(active.data[sessionId]) : null;
     } catch {
       return null;
     }
