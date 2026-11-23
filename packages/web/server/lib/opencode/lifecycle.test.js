@@ -2425,3 +2425,68 @@ describe('managed credential rotation', () => {
     expect(sha256(after.agentToolToken)).toBe(sha256(OLD_TOKEN));
   });
 });
+
+describe('launch database log line (#2501)', () => {
+  const startWithLogCapture = async (runtime, events) => {
+    spawnMock.mockImplementation(() => {
+      events.push('spawn');
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const server = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = server;
+  };
+
+  it('names an explicitly configured OPENCODE_DB before the managed process spawns', async () => {
+    const events = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      events.push(`log:${args.map(String).join(' ')}`);
+    });
+    const previous = process.env.OPENCODE_DB;
+    process.env.OPENCODE_DB = '/tmp/isolated-home/opencode.db';
+    const runtime = createRuntime();
+    try {
+      await startWithLogCapture(runtime, events);
+      const dbLogIndex = events.findIndex((entry) => entry.includes('[OpenCode] database: /tmp/isolated-home/opencode.db'));
+      expect(dbLogIndex).toBeGreaterThanOrEqual(0);
+      expect(events.indexOf('spawn')).toBeGreaterThan(dbLogIndex);
+      expect(runtime.testState.lastOpenCodeLaunchDiagnostics.databasePath).toBe('/tmp/isolated-home/opencode.db');
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+      log.mockRestore();
+      if (previous === undefined) delete process.env.OPENCODE_DB;
+      else process.env.OPENCODE_DB = previous;
+    }
+  });
+
+  it('names the default database under XDG_DATA_HOME when OPENCODE_DB is unset', async () => {
+    const events = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...args) => {
+      events.push(`log:${args.map(String).join(' ')}`);
+    });
+    const xdg = fsSync.mkdtempSync(path.join(os.tmpdir(), 'opencode-xdg-test-'));
+    const previousDb = process.env.OPENCODE_DB;
+    const previousXdg = process.env.XDG_DATA_HOME;
+    delete process.env.OPENCODE_DB;
+    process.env.XDG_DATA_HOME = xdg;
+    const runtime = createRuntime();
+    try {
+      await startWithLogCapture(runtime, events);
+      const expected = path.join(xdg, 'opencode', 'opencode.db');
+      const dbLogIndex = events.findIndex((entry) => entry.includes(`[OpenCode] database: ${expected}`));
+      expect(dbLogIndex).toBeGreaterThanOrEqual(0);
+      expect(events.indexOf('spawn')).toBeGreaterThan(dbLogIndex);
+      expect(runtime.testState.lastOpenCodeLaunchDiagnostics.databasePath).toBe(expected);
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+      log.mockRestore();
+      if (previousDb === undefined) delete process.env.OPENCODE_DB;
+      else process.env.OPENCODE_DB = previousDb;
+      if (previousXdg === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = previousXdg;
+      await fs.rm(xdg, { recursive: true, force: true });
+    }
+  });
+});
