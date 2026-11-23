@@ -15,6 +15,15 @@ import { cn } from '@/lib/utils';
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
+import { ReferenceFilterPanel, type ReferenceFilterGroup, type ReferenceFilterLabelSection } from '@/components/references/referenceFilterPanel';
+import {
+  DEFAULT_PULL_REQUEST_FILTER,
+  PULL_REQUEST_STATUS_FILTERS,
+  filterPullRequests,
+  pullRequestRepository,
+  type PullRequestFilter,
+  type PullRequestStatusFilter,
+} from './pullRequestFilter';
 
 export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   comparison: ReturnType<typeof usePullRequestComparison>;
@@ -27,12 +36,16 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   const tablet = useTabletLayout();
   const sheet = mobile && !tablet.enabled;
   const [open, setOpen] = useState(false);
-  useEffect(() => { if (!comparison.enabled) setOpen(false); }, [comparison.enabled]);
+  const [filter, setFilter] = useState<PullRequestFilter>(DEFAULT_PULL_REQUEST_FILTER);
+  useEffect(() => { if (!comparison.enabled) { setOpen(false); setFilter(DEFAULT_PULL_REQUEST_FILTER); } }, [comparison.enabled]);
   const label = t('pullRequestComparison.select');
   const changeOpen = (next: boolean) => {
     setOpen(next);
     if (next && !comparison.loading) void comparison.revalidate();
-    if (!next) comparison.setQuery('');
+    if (!next) {
+      comparison.setQuery('');
+      setFilter(DEFAULT_PULL_REQUEST_FILTER);
+    }
   };
   const selected = comparison.selectedSource;
   const selectedLabel = selected ? `${reference(selected.number)}${revisionSuffix(selected)}` : label;
@@ -44,8 +57,55 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     <span className="truncate">{selectedLabel}</span>
     <Icon name="arrow-down-s" className="size-3.5" />
   </Button>;
+
+  const statusLabel = (status: PullRequestStatusFilter): string => {
+    if (status === 'open') return t('references.picker.filter.open');
+    if (status === 'draft') return t('references.picker.state.draft');
+    if (status === 'closed') return t('references.picker.filter.state.closed');
+    if (status === 'merged') return t('references.picker.filter.state.merged');
+    return t('references.picker.filter.state.all');
+  };
+  const allLabel = statusLabel('all');
+  const repositories = [...new Set(comparison.prs.map(pullRequestRepository))];
+  const authors = [...new Set(comparison.prs.flatMap((pr) => (pr.author ? [pr.author.username] : [])))];
+  const labelChoices = [...new Map(comparison.prs.flatMap((pr) => pr.labels ?? []).map((entry) => [entry.name, entry])).values()];
+  const group = (groupLabel: string, value: string, options: { value: string; label: string }[], onSelect: (value: string) => void): ReferenceFilterGroup =>
+    ({ label: groupLabel, value, options, onSelect, taken: false });
+  const groups: ReferenceFilterGroup[] = [
+    group(t('references.picker.filter.group.status'), filter.status, PULL_REQUEST_STATUS_FILTERS.map((status) => ({ value: status, label: statusLabel(status) })),
+      (next) => setFilter((current) => ({ ...current, status: PULL_REQUEST_STATUS_FILTERS.find((status) => status === next) ?? 'all' }))),
+    ...(repositories.length > 1 || filter.repository ? [group(t('session.githubPrPicker.filter.group.repository'), filter.repository,
+      [{ value: '', label: allLabel }, ...repositories.map((repository) => ({ value: repository, label: repository }))],
+      (next) => setFilter((current) => ({ ...current, repository: next })))] : []),
+    ...(authors.length > 1 || filter.author ? [group(t('session.githubPrPicker.filter.group.author'), filter.author,
+      [{ value: '', label: allLabel }, ...authors.map((author) => ({ value: author, label: author }))],
+      (next) => setFilter((current) => ({ ...current, author: next })))] : []),
+  ];
+  const labelSection: ReferenceFilterLabelSection | null = labelChoices.length > 0 ? {
+    kind: 'labels',
+    choices: labelChoices,
+    applied: filter.labels,
+    onChange: (labels) => setFilter((current) => ({ ...current, labels })),
+  } : null;
+  const filterSummary = [
+    filter.status === 'all' ? null : statusLabel(filter.status),
+    filter.repository || null,
+    filter.author || null,
+    filter.labels.length > 0 ? filter.labels.join(', ') : null,
+  ].filter(Boolean).join(' · ');
+  const visiblePrs = filterPullRequests(comparison.prs, filter);
+
   const picker = <Command className="min-h-0" shouldFilter={false} onKeyDown={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}>
     <CommandInput autoFocus={!sheet} value={comparison.query} onValueChange={comparison.setQuery}
+      trailing={<ReferenceFilterPanel
+        title={t('references.picker.filter.label')}
+        summary={filterSummary}
+        groups={groups}
+        labelSection={labelSection}
+        appearance="icon"
+        mobile={sheet}
+        onClearAll={filterSummary ? () => setFilter(DEFAULT_PULL_REQUEST_FILTER) : undefined}
+      />}
       placeholder={t('session.githubPrPicker.searchPlaceholder')} aria-label={t('session.githubPrPicker.searchPlaceholder')} />
     {comparison.loading ? <div className="flex items-center gap-2 p-4 typography-meta text-muted-foreground">
       <Icon name="loader-4" className="size-4 animate-spin" />{t('session.githubPrPicker.loading.pullRequests')}
@@ -55,7 +115,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     </div> : <CommandList className={cn('min-h-0', mobile && 'max-h-[min(45dvh,24rem)]')}>
       <CommandEmpty>{t('session.githubPrPicker.empty.noPullRequestsFound')}</CommandEmpty>
       <CommandGroup>
-        {open && comparison.prs.map((pr) => {
+        {open && visiblePrs.map((pr) => {
           const key = `${joinProjectPath(pr.project.owner, pr.project.name)}#${pr.number}`;
           return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
             onSelect={() => { comparison.select(pr); changeOpen(false); }}>

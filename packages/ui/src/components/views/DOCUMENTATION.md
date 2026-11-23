@@ -330,6 +330,16 @@ The comparison picker puts the bound remote's default branch first, without
 changing automatic base detection. Other remotes' defaults keep their place:
 a base on a remote other than the bound one is rejected.
 
+The pull-request picker (`git/PullRequestComparisonSelector.tsx`) narrows its
+loaded page with the same filter panel the board uses, as an icon inside its
+search field: status (All / Open / Draft / Closed / Merged), a repository when
+the page spans several, an author when there is more than one, and the labels
+the loaded change requests carry (an item must carry every chosen label).
+`git/pullRequestFilter.ts` holds the predicate and the default; the panel itself
+is `components/references/referenceFilterPanel.tsx`. Filtering is client-side
+over the merged page, so Load more appends and the filter re-applies, and the
+picker drops both its filter and its search text when it closes.
+
 A status read re-reads the Branch file list (one request). Each expanded file
 re-reads its patch only when its own `revision` from that listing moved
 (`branchPathRevisions` into `useRangeKeyedCache`), so an agent's read-only shell
