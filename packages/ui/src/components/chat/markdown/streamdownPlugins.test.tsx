@@ -107,6 +107,50 @@ describe('Streamdown processing policy', () => {
     const windows = 'Before\r\n\r\n\\[\r\nx\r\n\r\ny\r\n\\]\r\n\r\nAfter';
     expect(parseMarkdownBlocksWithMath(windows)).toHaveLength(3);
   });
+  test('keeps earlier blocks when a later quoted list changes during streaming', () => {
+    const before = 'Intro\n\n<details><summary>Details</summary>\n\nBody\n\n</details>\n\n> - \\[\n>   x\n>\n>   y';
+    const after = `${before}\n    \\]\n\nTail`;
+    const earlier = parseMarkdownBlocksWithMath(before);
+    const complete = parseMarkdownBlocksWithMath(after);
+    expect(complete.join('')).toBe(after);
+    expect(complete.slice(0, 2)).toEqual(earlier.slice(0, 2));
+    expect(render(complete[1]).querySelector('details')).not.toBeNull();
+
+    const prefix = `\`\`\`text\n\\[example\\]\n\`\`\`\n\n${Array.from({ length: 75 }, (_, i) => `Paragraph ${i}`).join('\n\n')}\n\n`;
+    const document = `${prefix}> - item\n>   explanation\nlazy continuation`;
+    const blocks = parseMarkdownBlocksWithMath(document);
+    expect(blocks.join('')).toBe(document);
+    expect(blocks.length).toBeGreaterThan(75);
+  });
+  test('keeps blocks between separate damaged quoted lists during streaming', () => {
+    const quote = ['> - \\[', '>   x', '>', '>   y', '    \\]'].join('\n');
+    const disclosure = '<details><summary>Details</summary>\n\nBody\n\n</details>';
+    const paragraphs = Array.from({ length: 300 }, (_, i) => `Paragraph ${i}`).join('\n\n');
+    const before = `Start\n\n${quote}\n\n${disclosure}\n\n${paragraphs}\n\n> - \\[\n>   x\n>\n>   y`;
+    const after = `${before}\n    \\]\n\nEnd`;
+    const earlier = parseMarkdownBlocksWithMath(before);
+    const complete = parseMarkdownBlocksWithMath(after);
+    const earlierDetails = earlier.find(block => block.includes('<details>'));
+    const completeDetails = complete.find(block => block.includes('<details>'));
+    expect(complete.join('')).toBe(after);
+    expect(completeDetails).toBe(earlierDetails);
+    expect(completeDetails).not.toContain('> -');
+    expect(complete.length).toBeGreaterThan(300);
+    const repeated = `Start\n\n${quote}\n\n${Array(300).fill('Repeated paragraph').join('\n\n')}\n\n${quote}\n\nEnd`;
+    const repeatedBlocks = parseMarkdownBlocksWithMath(repeated);
+    expect(repeatedBlocks.join('')).toBe(repeated);
+    expect(repeatedBlocks.length).toBeGreaterThan(300);
+  });
+  test('keeps repeated paragraphs and headings after a lazy quote', () => {
+    const prefix = '```text\n\\[x\\]\n```\n\n> - item\n>   explanation\nlazy continuation';
+    const repeated = `${prefix} Shared paragraph\n\n${Array(300).fill('Shared paragraph').join('\n\n')}\n\nTail`;
+    const headings = `${prefix}\n${Array.from({ length: 300 }, (_, i) => `## Section ${i}\nOne short body.`).join('\n\n')}\n\nTail`;
+    for (const source of [repeated, headings]) {
+      const blocks = parseMarkdownBlocksWithMath(source);
+      expect(blocks.join('')).toBe(source);
+      expect(blocks.length).toBeGreaterThan(300);
+    }
+  });
   test('keeps adjacent multiline equations intact and accepts tabs on delimiters', () => {
     const source = '\\[\nx\n\\]\n\\[\ny\n\nz\n\\]';
     const blocks = parseMarkdownBlocksWithMath(source);

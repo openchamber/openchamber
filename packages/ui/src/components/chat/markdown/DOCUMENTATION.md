@@ -157,7 +157,7 @@ Multiline bracket math uses a concrete micromark flow construct because text con
 
 `parseMarkdownBlocksWithMath` joins blocks inside a closed top-level equation. Streaming, windowed rendering, and settled row cuts use it. Its delimiters must match the tokenizer. A block that starts a container or code cannot open a join. The opener is a standalone `\[` indented at most three spaces. `mathBlocks.ts` has no renderer plugins, so the chat timeline can import it eagerly.
 
-Streamdown can duplicate a quoted list when a line omits its quote prefix. If its blocks change source that contains `\[`, the renderer uses the whole source as one block. The comparison accepts normalized line endings.
+If a line omits its quote prefix, Streamdown can duplicate a quoted list. If the blocks change source that contains `\[`, the splitter restores each changed range from the source. It keeps matching blocks after a new parse finds the same boundaries. This keeps earlier content mounted and leaves document windowing available. The comparison accepts normalized line endings.
 
 The flow construct interrupts a paragraph only when the equation crosses a blank line. One that closes inside the paragraph is left to the text construct, which keeps the inline precedence of code spans around delimiter lines.
 
