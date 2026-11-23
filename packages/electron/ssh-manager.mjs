@@ -105,6 +105,39 @@ const readJsonRoot = (settingsFilePath) => {
   }
 };
 
+// Write paths must never rebuild the shared settings file from the empty
+// base readJsonRoot returns for a malformed file: that silently erases
+// every other setting (#2410). The strict reader keeps the lenient answer
+// only where nothing can be lost — a missing file (fresh install) or an
+// empty one — and throws for anything else, before any write, leaving the
+// original bytes untouched. The error never quotes the file's contents:
+// settings.json can hold credentials.
+const readJsonRootForWrite = (settingsFilePath) => {
+  let raw;
+  try {
+    raw = fs.readFileSync(settingsFilePath, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return {};
+    throw error;
+  }
+  if (!raw.trim()) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw Object.assign(
+      new Error(
+        `Refusing to rewrite the settings file at ${settingsFilePath}: its existing contents are not a valid JSON object. Fix or remove the file and retry; no settings were changed.`,
+      ),
+      { code: 'SETTINGS_FILE_MALFORMED' },
+    );
+  }
+  return parsed;
+};
+
 const writeJsonRoot = async (settingsFilePath, root) => {
   await fsp.mkdir(path.dirname(settingsFilePath), { recursive: true });
   const tmp = `${settingsFilePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -918,7 +951,7 @@ export class ElectronSshManager {
   }
 
   async setInstances(config) {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = readJsonRootForWrite(this.settingsFilePath);
     const previousSshIds = new Set(
       (Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [])
         .map((entry) => String(entry?.id || '').trim())
@@ -1043,7 +1076,7 @@ export class ElectronSshManager {
   }
 
   async updateHostRuntime(instanceId, label, localUrl, clientToken = '') {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = readJsonRootForWrite(this.settingsFilePath);
     const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
     const existing = hosts.find((entry) => entry?.id === instanceId);
     const token = typeof clientToken === 'string' ? clientToken.trim() : '';
@@ -1118,7 +1151,7 @@ export class ElectronSshManager {
   }
 
   async persistLocalPort(instanceId, localPort) {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = readJsonRootForWrite(this.settingsFilePath);
     const instances = Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [];
     for (const instance of instances) {
       if (instance?.id !== instanceId) continue;
