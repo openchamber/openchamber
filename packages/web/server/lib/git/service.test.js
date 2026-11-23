@@ -12,6 +12,7 @@ import { isUserAction } from '../environment/refresh-scope.js';
 import { normalizeGitOutputPath } from './output-path.js';
 import { configureProjectStartCommandSource } from '../opencode/project-start-command.js';
 import { killLiveTrees, liveTreeCount } from '../spaces/run-command.js';
+import { isProcessAlive } from '../process-alive.js';
 import { MAX_GIT_LOG_COUNT } from './log-limits.js';
 
 import {
@@ -2786,14 +2787,7 @@ describe('createWorktree', () => {
 
       const descendantPid = Number(fs.readFileSync(pidFile, 'utf8'));
       expect(Number.isInteger(descendantPid)).toBe(true);
-      const isAlive = (pid) => {
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch {
-          return false;
-        }
-      };
+      const isAlive = (pid) => isProcessAlive(pid);
       await expect.poll(() => isAlive(descendantPid), { timeout: 5_000 }).toBe(false);
     } finally {
       if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;

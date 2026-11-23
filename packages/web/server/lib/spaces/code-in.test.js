@@ -11,6 +11,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { SECRET, SETUP_GIT, blob, createLocalPlace, createTestHost, forConfig, hostState, makeBait, readTree, removeTestHosts, shortStatus, unexpectedChanges } from './code-in-bait.js';
 import { createCodeIn } from './code-in.js';
+import { isProcessAlive } from '../process-alive.js';
 import { buildExtUrl } from './code-transfer.js';
 import { SpaceError } from './errors.js';
 import { createHostGit } from './host-git.js';
@@ -921,14 +922,7 @@ describe.skipIf(WIN)('transfer into a local stand-in for a space', () => {
     expect(failure).toMatchObject({ code: 'code_transfer_failed', details: { cause: 'command_timeout' } });
     const pid = local.hangPid();
     expect(Number.isInteger(pid) && pid > 1).toBe(true);
-    const alive = () => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
+    const alive = () => isProcessAlive(pid);
     try {
       await expect.poll(alive, { timeout: 10_000 }).toBe(false);
     } finally {

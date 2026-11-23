@@ -12,6 +12,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { blob, createLocalPlace, createTestHost, forConfig, hostState, makeBait, removeTestHosts, unexpectedChanges } from './code-in-bait.js';
 import { createCodeOut, firstRedirectedFolder, nameNotAllowedHere } from './code-out.js';
+import { isProcessAlive } from '../process-alive.js';
 import { SpaceError } from './errors.js';
 
 const WIN = process.platform === 'win32';
@@ -2568,15 +2569,10 @@ describe('applyAsChanges after round eight', () => {
     g(['add', '--all']);
     g(['commit', '--quiet', '-m', message]);
   };
-  /** Whether the process `pid` still runs, asked with signal 0, which signals nothing. */
+  /** Whether the process `pid` still runs. A zombie does not count: it has exited, signal 0 or not (#2495). */
   const alive = (pid) => {
     if (!Number.isInteger(pid) || pid <= 1) throw new Error(`not a pid to ask about: ${pid}`);
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
+    return isProcessAlive(pid);
   };
   /** Waits up to `ms` for the pids written into `file` to be gone, and resolves those still alive. */
   const leftAfter = async (file, ms = 3000) => {
@@ -3248,14 +3244,7 @@ describe.skipIf(WIN)('bringCodeOut from a local stand-in for a space', () => {
     expect(failure).toMatchObject({ code: 'code_out_failed', details: { step: 'fetch into the quarantine', cause: 'command_timeout' } });
     const pid = space.local.hangPid();
     expect(Number.isInteger(pid) && pid > 1).toBe(true);
-    const alive = () => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
+    const alive = () => isProcessAlive(pid);
     for (let attempt = 0; attempt < 50 && alive(); attempt += 1) {
       await new Promise((resolve) => { setTimeout(resolve, 100); });
     }

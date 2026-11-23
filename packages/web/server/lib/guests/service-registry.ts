@@ -1,6 +1,7 @@
 
 import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -61,9 +62,24 @@ export const createGuestServiceRegistry = ({
   const isPidAlive = (pid: number) => {
     try {
       signalProcess(pid, 0);
-      return true;
     } catch (error) {
       return hasErrorCode(error) && error.code === 'EPERM';
+    }
+    if (platform !== 'linux') return true;
+    // Signal 0 also succeeds for a zombie: a process that has exited but
+    // whose parent has not collected it. Where the init does not reap
+    // adopted orphans (the fleet build container is one such place) a
+    // stopped service stays a zombie indefinitely, and counting it as
+    // alive would keep its record and report the reap as failed (#2495).
+    // A state read that fails proves nothing either way — the process
+    // may have exited in the gap, or the pid may be a test double — so
+    // signal 0's answer stands.
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+      return state !== 'Z' && state !== 'X';
+    } catch {
+      return true;
     }
   };
 

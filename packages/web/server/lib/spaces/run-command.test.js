@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { SpaceError } from './errors.js';
 import { killLiveTrees, killProcessTree, liveTreeCount, runCommand } from './run-command.js';
+import { isProcessAlive } from '../process-alive.js';
 
 const node = process.execPath;
 const sourceHook = new URL('../../../scripts/register-server-sources.mjs', import.meta.url).href;
@@ -16,12 +17,7 @@ const sourceHook = new URL('../../../scripts/register-server-sources.mjs', impor
 const isRealPid = (pid) => Number.isInteger(pid) && pid > 1;
 const isAlive = (pid) => {
   if (!isRealPid(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  return isProcessAlive(pid);
 };
 const waitFor = async (condition, timeoutMs = 10_000) => {
   const started = Date.now();

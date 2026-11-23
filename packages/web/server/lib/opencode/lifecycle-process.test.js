@@ -3,10 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createOpenCodeLifecycleRuntime } from './lifecycle.js';
+import { isProcessAlive } from '../process-alive.js';
 
-const alive = (pid) => {
-  try { process.kill(pid, 0); return true; } catch { return false; }
-};
+const alive = isProcessAlive;
 
 const createRuntime = (waitForReady, state, dataDir) => createOpenCodeLifecycleRuntime({
   state,
