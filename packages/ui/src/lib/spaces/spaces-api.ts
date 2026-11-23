@@ -1,6 +1,7 @@
 
 import { z } from 'zod';
 
+import { invokeDesktopCommand } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const SPACES_ROUTE = '/api/openchamber/spaces';
@@ -378,8 +379,17 @@ export type SpaceSetup = z.infer<typeof setupSchema>;
 export const readSpaceSetup = (spaceId: string, signal?: AbortSignal): Promise<SpaceSetupOutput> =>
   request(`${SPACES_ROUTE}/${spaceId}/setup`, setupOutputSchema, { signal });
 
-export const removeSpace = (spaceId: string, { deleteUnsavedChats = false }: { deleteUnsavedChats?: boolean } = {}): Promise<SpaceRemoval> =>
-  request(`${SPACES_ROUTE}/${spaceId}${deleteUnsavedChats ? '?unsavedChats=delete' : ''}`, removalSchema, { method: 'DELETE' });
+export const removeSpace = async (spaceId: string, { deleteUnsavedChats = false }: { deleteUnsavedChats?: boolean } = {}): Promise<SpaceRemoval> => {
+  const removal = await request(`${SPACES_ROUTE}/${spaceId}${deleteUnsavedChats ? '?unsavedChats=delete' : ''}`, removalSchema, { method: 'DELETE' });
+  // The desktop shell keeps per-space browser-preview state (the proxy
+  // chain and the hardened preview session) for every previewed space;
+  // release it now that the space is gone. Best-effort and desktop-only:
+  // a failed notification must not fail the removal itself.
+  if (typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__)) {
+    void invokeDesktopCommand('desktop_space_preview_teardown', { spaceId }).catch(() => {});
+  }
+  return removal;
+};
 
 const archiveSchema = z.object({ spaceId: spaceIdSchema, name: z.string(), directory: z.string() });
 

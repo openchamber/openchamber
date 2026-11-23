@@ -149,6 +149,7 @@ import {
 } from './browser-panel-security.mjs';
 import { browserPanelKeyAction, browserPanelMouseAction, runBrowserPanelAction } from './browser-panel-navigation.mjs';
 import { isSpaceId, spaceIdOfPreviewPartition, spacePreviewPartition, spacePreviewProxyConfig } from './space-preview.mjs';
+import { createSpacePreviewState } from './space-preview-state.mjs';
 import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { parsePairingDeepLink } from './pairing-deep-link.mjs';
@@ -1079,7 +1080,6 @@ const hardenBrowserPanelSession = () => {
   });
 };
 
-const spacePreviews = new Map();
 let deadProxyPortPromise = null;
 const getDeadProxyPort = () => {
   if (!deadProxyPortPromise) {
@@ -1103,46 +1103,33 @@ const getDeadProxyPort = () => {
   return deadProxyPortPromise;
 };
 
-const spacePreviewOf = (spaceId) => {
-  let entry = spacePreviews.get(spaceId);
-  if (!entry) {
-    entry = { ports: new Set(), chain: Promise.resolve() };
-    spacePreviews.set(spaceId, entry);
-  }
-  return entry;
-};
-
-const applySpacePreviewProxy = (spaceId) => {
-  const entry = spacePreviewOf(spaceId);
-  entry.chain = entry.chain.catch(() => {}).then(async () => {
+const spacePreviews = createSpacePreviewState({
+  applyProxy: async (spaceId, localPorts) => {
     const panelSession = session.fromPartition(spacePreviewPartition(spaceId));
     hardenPanelSession(panelSession);
     const deadProxyPort = await getDeadProxyPort();
-    await panelSession.setProxy(spacePreviewProxyConfig({ deadProxyPort, localPorts: [...entry.ports] }));
-  });
-  return entry.chain;
-};
+    await panelSession.setProxy(spacePreviewProxyConfig({ deadProxyPort, localPorts }));
+  },
+  releaseSpace: (spaceId) => {
+    // Preview sessions are per-space; the persistent browser-panel
+    // sessions are hardened separately and never tracked against a
+    // space, so they are not released here.
+    panelSessions.delete(session.fromPartition(spacePreviewPartition(spaceId)));
+  },
+  onProxyError: (spaceId, error) => {
+    log.warn(`[electron] could not reset the preview proxy of space ${spaceId}: ${error?.message || error}`);
+  },
+});
 
-const openSpacePreviewPort = (spaceId, localPort) => {
-  spacePreviewOf(spaceId).ports.add(localPort);
-  return applySpacePreviewProxy(spaceId);
-};
+const applySpacePreviewProxy = (spaceId) => spacePreviews.prepare(spaceId);
 
-const closeSpacePreviewPort = (spaceId, localPort) => {
-  const entry = spacePreviews.get(spaceId);
-  if (!entry || !entry.ports.delete(localPort)) return Promise.resolve();
-  return applySpacePreviewProxy(spaceId);
-};
+const openSpacePreviewPort = (spaceId, localPort) => spacePreviews.openPort(spaceId, localPort);
 
-const closeAllSpacePreviewPorts = () => {
-  for (const [spaceId, entry] of spacePreviews) {
-    if (entry.ports.size === 0) continue;
-    entry.ports.clear();
-    applySpacePreviewProxy(spaceId).catch((error) => {
-      log.warn(`[electron] could not reset the preview proxy of space ${spaceId}: ${error?.message || error}`);
-    });
-  }
-};
+const closeSpacePreviewPort = (spaceId, localPort) => spacePreviews.closePort(spaceId, localPort);
+
+const closeAllSpacePreviewPorts = () => spacePreviews.closeAll();
+
+const teardownSpacePreview = (spaceId) => spacePreviews.teardown(spaceId);
 
 const guardAttachedWebviews = (contents) => {
   contents.on('will-attach-webview', (event, webPreferences, params) => {
@@ -4049,6 +4036,12 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!isSpaceId(args.spaceId)) throw new Error('A valid space id is required');
       await applySpacePreviewProxy(args.spaceId);
       return { ready: true };
+    }
+
+    case 'desktop_space_preview_teardown': {
+      if (!isSpaceId(args.spaceId)) throw new Error('A valid space id is required');
+      const released = await teardownSpacePreview(args.spaceId);
+      return { released };
     }
 
     case 'desktop_browser_set_color_scheme': {
