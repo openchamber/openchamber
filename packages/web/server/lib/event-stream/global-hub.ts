@@ -203,7 +203,10 @@ export function createGlobalMessageStreamHub({
   let localGeneration = 0;
   let droppedLocalThroughPosition = persisted.droppedLocalThroughPosition;
   // The newest OpenCode id the hub has seen: the head of the feed, which a browser may adopt as its
-  // cursor. Undefined until OpenCode has sent one, and after a resync that carries none.
+  // cursor. Undefined until OpenCode has sent one, and after a resync that carries none. An
+  // upstream event whose durable head write is refused does not move it: the event still fans
+  // out and sits in the replay buffer, but the id a browser may adopt never names a head the
+  // file cannot back, until a later head write lands (#2509).
   let latestEventId = isOpenCodeEventId(persisted.head.upstream) ? persisted.head.upstream : undefined;
   // The upstream cursor, kept across a stop so the next connection replays what it missed. After a
   // restart it is the persisted head, so the shared reader resumes instead of starting at the tail.
@@ -230,24 +233,32 @@ export function createGlobalMessageStreamHub({
 
   const trimLocalEntries = () => {
     const cutoff = now() - localReplayMaxAgeMs;
+    let removedCount = 0;
+    let removedBytes = 0;
     let removedThrough = droppedLocalThroughPosition;
     while (
-      localEntries.length > 0
+      localEntries.length - removedCount > 0
       && (
-        localEntries.length > localReplayLimit
-        || localBytes > localReplayByteLimit
-        || (localEntries[0]?.committedAt ?? cutoff) < cutoff
+        localEntries.length - removedCount > localReplayLimit
+        || localBytes - removedBytes > localReplayByteLimit
+        || (localEntries[removedCount]?.committedAt ?? cutoff) < cutoff
       )
     ) {
-      const removed = localEntries.shift();
+      const removed = localEntries[removedCount];
       if (!removed) break;
-      localBytes -= removed.bytes;
+      removedCount += 1;
+      removedBytes += removed.bytes;
       removedThrough = Math.max(removedThrough, removed.position);
     }
-    if (removedThrough > droppedLocalThroughPosition) {
-      droppedLocalThroughPosition = removedThrough;
-      durable.appendTrim(removedThrough);
-    }
+    if (removedThrough <= droppedLocalThroughPosition) return;
+    // The in-memory entries mirror the store's, so a trim leaves the mirror only when the file
+    // has recorded the drop. A refused trim keeps the frames — the store still holds them and
+    // a restart would reload them — and the next local commit retries the trim (#2509, the
+    // appendLocal rule of #2111 applied to trim).
+    if (!durable.appendTrim(removedThrough)) return;
+    localEntries.splice(0, removedCount);
+    localBytes -= removedBytes;
+    droppedLocalThroughPosition = removedThrough;
   };
 
   localEntries = persisted.entries.map((entry: LocalReplayEntry) => ({
@@ -340,8 +351,13 @@ export function createGlobalMessageStreamHub({
       localGeneration += 1;
       latestEventId = isOpenCodeEventId(normalized.eventId) ? normalized.eventId : undefined;
       resumeCursor = latestEventId ?? '';
-      droppedLocalThroughPosition = Math.max(droppedLocalThroughPosition, position);
-      durable.appendReset({ position, upstream: latestEventId ?? '' });
+      // The in-memory reset above is a live fact — pre-resync frames must not replay across
+      // it — but the drop marker is a claim about the file, and it advances only when the
+      // reset lands there. A refused reset leaves the store holding the pre-resync state,
+      // so the marker must not claim those frames are dropped from it (#2509).
+      if (durable.appendReset({ position, upstream: latestEventId ?? '' })) {
+        droppedLocalThroughPosition = Math.max(droppedLocalThroughPosition, position);
+      }
     } else if (payloadType(normalized.payload) === SERVER_CONNECTED_PAYLOAD_TYPE && !isOpenCodeEventId(normalized.eventId)) {
       // An id-less greeting is OpenCode's hello to one connection, not part of the state a browser
       // holds: it goes live without a position, a cursor or a replay entry. A greeting that carries
@@ -352,6 +368,7 @@ export function createGlobalMessageStreamHub({
       const upstreamEvent = isOpenCodeEventId(normalized.eventId);
       normalized.upstream = upstreamEvent ? normalized.eventId : (latestEventId ?? '');
       normalized.local = !upstreamEvent;
+      const previousLatestEventId = latestEventId;
       if (upstreamEvent) latestEventId = normalized.eventId;
 
       const serializedFrame = normalized.serialize();
@@ -386,8 +403,12 @@ export function createGlobalMessageStreamHub({
           localGeneration += 1;
           trimLocalEntries();
         }
-      } else {
-        durable.appendHead({ position, upstream: latestEventId });
+      } else if (!durable.appendHead({ position, upstream: latestEventId })) {
+        // The store refused the head write, so the file's head is still the previous one: the
+        // event fans out and sits in the buffer, but the head a browser may adopt stays at
+        // the previous id until a later head write lands (#2509; the appendLocal rule of
+        // #2111 applied to the head).
+        latestEventId = previousLatestEventId;
       }
 
       if (bytes > replayByteLimit) {
@@ -433,8 +454,13 @@ export function createGlobalMessageStreamHub({
     position += 1;
     normalized.position = position;
     normalized.upstream = normalized.eventId;
+    const previousLatestEventId = latestEventId;
     latestEventId = normalized.eventId;
-    durable.appendHead({ position, upstream: latestEventId });
+    if (!durable.appendHead({ position, upstream: latestEventId })) {
+      // The event still goes out with its assigned position, but a refused head write leaves
+      // the durable head — and so the head a browser may adopt — at the previous id (#2509).
+      latestEventId = previousLatestEventId;
+    }
   };
 
   const replayAfter = (eventId: string | null | undefined) => {

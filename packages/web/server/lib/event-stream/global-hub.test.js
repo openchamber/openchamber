@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createGlobalMessageStreamHub } from './global-hub.js';
 import { DELTA_COALESCE_WINDOW_MS } from './delta-coalescer.js';
+import { createReplayStore } from './replay-store.js';
 
 afterEach(() => vi.useRealTimers());
 
@@ -430,5 +431,122 @@ describe('events of isolated spaces in the global hub', () => {
     hub.subscribeEvent(event => seen.push(event.spaceId), { spaces: true });
     hub.injectEvent({ payload: { type: 'session.execution.started', data: { sessionID: 's1' } }, directory: '/home/me', spaceId: null });
     expect(seen).toEqual([null, null]);
+  });
+});
+
+describe('durable append failures (#2509)', () => {
+  // A store that delegates to a real in-memory store, with single appends
+  // refused on demand: the hub must honor a refusal the way it already
+  // honors appendLocal's (#2111) — in-memory state must not claim more
+  // than the file holds.
+  const wrapStore = (store, overrides = {}) => ({
+    load: () => store.load(),
+    state: () => store.state(),
+    appendLocal: (entry) => store.appendLocal(entry),
+    appendHead: (head) => store.appendHead(head),
+    appendTrim: (position) => store.appendTrim(position),
+    appendReset: (head) => store.appendReset(head),
+    ...overrides,
+  });
+  const makeHub = (options) => createGlobalMessageStreamHub({
+    buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    upstreamReconnectDelayMs: 60_000,
+    ...options,
+  });
+  const upstreamBlock = (sequence) => `id: ${ocId(sequence)}\ndata: ${JSON.stringify({ id: `e${sequence}`, type: 'message.updated', properties: {} })}\n\n`;
+
+  it('keeps the adopted head at the previous id when the durable head write is refused', async () => {
+    const store = createReplayStore();
+    const hub = makeHub({
+      replayStore: wrapStore(store, { appendHead: () => false }),
+      fetchImpl: async () => createSseResponse({ blocks: [upstreamBlock(0)] }),
+    });
+    const received = [];
+    hub.subscribeEvent(event => received.push(event.eventId));
+    try {
+      await readUpstream(hub);
+      // The event fanned out live — live delivery is not a durability
+      // claim — but the head a browser may adopt never moved, because the
+      // store's head is still empty.
+      expect(received).toEqual([ocId(0)]);
+      expect(hub.headEventId()).toBeUndefined();
+      expect(store.state().head).toEqual({ position: 0, upstream: '' });
+    } finally { hub.stop(); }
+  });
+
+  it('adopts the newest head once a later head write lands', async () => {
+    const store = createReplayStore();
+    let headCalls = 0;
+    const hub = makeHub({
+      replayStore: wrapStore(store, {
+        appendHead: (head) => {
+          headCalls += 1;
+          return headCalls === 1 ? false : store.appendHead(head);
+        },
+      }),
+      fetchImpl: async () => createSseResponse({ blocks: [upstreamBlock(0), upstreamBlock(1)] }),
+    });
+    try {
+      await readUpstream(hub);
+      expect(hub.headEventId()).toBe(ocId(1));
+      expect(store.state().head).toEqual({ position: 2, upstream: ocId(1) });
+    } finally { hub.stop(); }
+  });
+
+  it('keeps trimmed local frames in the mirror when the durable trim is refused, and retries on the next commit', () => {
+    const store = createReplayStore();
+    let refuseTrim = true;
+    const hub = makeHub({
+      localReplayLimit: 1,
+      replayStore: wrapStore(store, {
+        appendTrim: (position) => (refuseTrim ? false : store.appendTrim(position)),
+      }),
+      fetchImpl: async () => createSseResponse({ blocks: [] }),
+    });
+    const injectLocal = (id) => {
+      hub.injectEvent({ payload: { id, type: 'message.updated', properties: {} }, directory: '', spaceId: null });
+      hub.flushPending();
+    };
+    try {
+      injectLocal('local-a');
+      injectLocal('local-b');
+      // The second commit overflows the limit of 1, but the store refused
+      // the trim, so the mirror keeps both frames — the store still holds
+      // them, and a restart would reload them.
+      expect(hub.localFrames()).toBe(2);
+      expect(store.state().entries.map((entry) => entry.position)).toEqual([1, 2]);
+      refuseTrim = false;
+      injectLocal('local-c');
+      // The next commit retries the trim, and this time it lands.
+      expect(hub.localFrames()).toBe(1);
+      expect(store.state().entries.map((entry) => entry.position)).toEqual([3]);
+      expect(store.state().droppedLocalThroughPosition).toBe(2);
+    } finally { hub.stop(); }
+  });
+
+  it('does not advance the durable drop marker when the durable reset is refused', async () => {
+    const store = createReplayStore();
+    const hub = makeHub({
+      replayStore: wrapStore(store, { appendReset: () => false }),
+      fetchImpl: async () => createSseResponse({
+        blocks: [
+          upstreamBlock(0),
+          `id: ${ocId(1)}\ndata: ${JSON.stringify({ id: 'evt_resync', type: 'server.resync', data: {} })}\n\n`,
+        ],
+      }),
+    });
+    try {
+      hub.injectEvent({ payload: { id: 'local-a', type: 'message.updated', properties: {} }, directory: '', spaceId: null });
+      hub.flushPending();
+      await readUpstream(hub);
+      // The store still holds the pre-resync local frame and head, because
+      // the reset never landed — so a cursor from before the resync is
+      // answered from what the file holds, not refused as dropped.
+      expect(store.state().entries.map((entry) => entry.position)).toEqual([1]);
+      expect(store.state().head).toEqual({ position: 2, upstream: ocId(0) });
+      expect(hub.durableResumePlan({ stream: 'global', position: 1, upstream: ocId(0) }))
+        .toEqual({ kind: 'upstream', upstream: ocId(0), entries: [] });
+    } finally { hub.stop(); }
   });
 });
