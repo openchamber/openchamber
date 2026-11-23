@@ -179,11 +179,16 @@ export const registerOpenChamberRoutes = (app: Application, dependencies: OpenCh
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {
       const parseString = (value: QueryValue | undefined) => (isString(value) && value.trim().length > 0 ? value.trim() : undefined);
-      const parseReportUsage = (value: string | undefined) => {
-        if (value === undefined) return true;
-        const normalized = value.trim().toLowerCase();
-        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
-        return true;
+      const parseReportUsage = (value: QueryValue | undefined) => {
+        // Express delivers repeated query keys as an array. Any explicit
+        // opt-out among the supplied values wins, so a repeated parameter
+        // can never turn an opt-out into an opt-in.
+        const values = (Array.isArray(value) ? value : [value]).filter(isString);
+        if (values.length === 0) return true;
+        return values.every((entry) => {
+          const normalized = entry.trim().toLowerCase();
+          return normalized !== 'false' && normalized !== '0' && normalized !== 'no';
+        });
       };
       const inferDeviceClass = (ua: string) => {
         const value = (ua || '').toLowerCase();
@@ -201,7 +206,7 @@ export const registerOpenChamberRoutes = (app: Application, dependencies: OpenCh
         instanceMode: parseString(req.query.instanceMode),
         currentVersion: parseString(req.query.currentVersion),
         installId: parseString(req.query.installId),
-        reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
+        reportUsage: parseReportUsage(req.query.reportUsage),
       };
       let updateInfo: RouteUpdateInfo;
       if (process.env.OPENCHAMBER_RUNTIME === 'desktop' && updateRequest.appType === 'web') {
