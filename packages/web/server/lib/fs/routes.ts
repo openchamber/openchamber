@@ -2074,7 +2074,29 @@ export const registerFsRoutes = (app: Application, dependencies: FsRouteDependen
     }
 
     try {
-      const resolved = path.resolve(targetPath.trim());
+      const workspacePath = await resolveWorkspacePathFromContext({
+        req,
+        targetPath: targetPath.trim(),
+        resolveProjectDirectory,
+        path,
+        os,
+        fsPromises,
+        normalizeDirectoryPath,
+        managedRoots,
+        chatsRoots,
+      });
+      if (!workspacePath.ok) {
+        return res.status(400).json({ error: workspacePath.error });
+      }
+      // Canonicalize both sides before launching the host file browser: a
+      // target that only escapes through a symlinked ancestor, or that is
+      // itself a symlink out of the workspace, must not be revealed.
+      const canonicalTarget = await fsPromises.realpath(workspacePath.resolved);
+      const canonicalBase = await canonicalDirectoryPath(workspacePath.base, fsPromises, path);
+      if (!isPathWithinRoot(canonicalTarget, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      const resolved = canonicalTarget;
       await fsPromises.access(resolved);
 
       if (platform === 'darwin') {

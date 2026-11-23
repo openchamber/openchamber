@@ -92,6 +92,10 @@ type FsDeps = {
     | { ok: true; resolvedPath: string }
     | { ok: false; status: number; error: string }
   >;
+  resolveRevealPath: (inputPath: string, workspaceRoot: string, additionalRoots?: string[]) => Promise<
+    | { ok: true; resolvedPath: string }
+    | { ok: false; status: number; error: string }
+  >;
   parseDroppedFileReference: (rawReference: string) => DroppedReferenceParse;
   readUriAsAttachment: (uri: vscode.Uri, name: string) => Promise<ReadUriAsAttachmentResult>;
 };
@@ -484,8 +488,25 @@ export async function handleFsBridgeMessage(
       }
 
       try {
-        const uri = value.includes('://') ? vscode.Uri.parse(value) : vscode.Uri.file(value);
-        await vscode.commands.executeCommand('revealFileInOS', uri);
+        // Reveal is a host-side capability: only a local file path inside
+        // the active workspace (or the managed chats root) may be handed to
+        // the OS file browser. A non-file URI names no local path to
+        // contain, so it is refused rather than passed through.
+        let fsPath = value;
+        if (value.includes('://')) {
+          const uri = vscode.Uri.parse(value);
+          if (uri.scheme !== 'file') {
+            return { id, type, success: false, error: 'Only local file paths can be revealed' };
+          }
+          fsPath = uri.fsPath;
+        }
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+        const chatsRoot = path.join(os.homedir(), '.config', 'openchamber', 'chats');
+        const resolution = await deps.resolveRevealPath(fsPath, workspaceRoot, [chatsRoot]);
+        if (!resolution.ok) {
+          return { id, type, success: false, error: resolution.error };
+        }
+        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(resolution.resolvedPath));
         return { id, type, success: true, data: { success: true } };
       } catch {
         return { id, type, success: false, error: 'Failed to reveal path' };

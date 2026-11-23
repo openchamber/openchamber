@@ -38,6 +38,7 @@ const deps = {
   resolveFileReadPath: helpers.resolveFileReadPath,
   resolveDirectoryListPath: helpers.resolveDirectoryListPath,
   resolveDirectoryCreatePath: helpers.resolveDirectoryCreatePath,
+  resolveRevealPath: helpers.resolveRevealPath,
   parseDroppedFileReference: () => {
     throw new Error('not used by fs:mkdir tests');
   },
