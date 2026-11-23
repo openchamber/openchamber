@@ -73,7 +73,8 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
   // non-empty bound that parses as neither, or a repeated bound (array), is
   // rejected with 400 (#2155, #2371): forwarding it as undefined would
   // silently widen the request into an unfiltered one. An absent or empty
-  // bound stays "no filter".
+  // bound stays "no filter". A repeated taskId is rejected the same way
+  // (#2418).
   app.get('/api/projects/:projectId/scheduled-tasks/run-history', async (req, res) => {
     const projectID = parseProjectID(req);
     if (!projectID) {
@@ -123,9 +124,19 @@ export const registerScheduledTaskRoutes = (app: Application, dependencies: Sche
       }
       limit = Number(text);
     }
+    // #2418: a repeated taskId arrives as an array, which asNonEmptyString
+    // would drop to undefined, silently widening the request into an
+    // unfiltered project history. Reject a present non-string taskId with
+    // 400, like the repeated since/until bounds above; an absent or empty
+    // taskId stays "no filter", and a single value keeps its trim/empty
+    // handling in asNonEmptyString.
+    const taskIdParam = req.query?.taskId;
+    if (taskIdParam !== undefined && !isString(taskIdParam)) {
+      return res.status(400).json({ error: 'taskId must be a single value' });
+    }
     const runs = scheduledTaskRunHistory.listRuns({
       projectID,
-      taskID: asNonEmptyString(req.query?.taskId) ?? undefined,
+      taskID: asNonEmptyString(taskIdParam) ?? undefined,
       since: since.value,
       until: until.value,
       limit,
