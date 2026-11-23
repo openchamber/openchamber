@@ -384,10 +384,20 @@ export const createProjectContextRuntime = (deps: ProjectContextDependencies & {
     if (Buffer.byteLength(serialized, 'utf8') > CONTEXT_FILE_READ_MAX_BYTES) {
       throw mutationError(`Stored project context would exceed the ${CONTEXT_FILE_READ_MAX_BYTES}-byte read cap; refusing to write`, 413);
     }
+    await writeTextAtomic(filePath, serialized);
+  };
+
+  // Plan bodies are user-authored content: an in-place write truncates the
+  // destination before any bytes land, so an interrupted save loses the
+  // previous text and a concurrent reader can observe an empty or partial
+  // plan (#2442). Write a temp sibling and rename it over the destination
+  // instead, so readers only ever see the whole old or whole new body and a
+  // failed replacement leaves the previous file intact.
+  const writeTextAtomic = async (filePath: string, content: string) => {
     const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
     try {
-      await fsPromises.writeFile(temporaryPath, serialized, 'utf8');
+      await fsPromises.writeFile(temporaryPath, content, 'utf8');
       await renameWithRetry((from, to) => fsPromises.rename(from, to), temporaryPath, filePath);
     } catch (error) {
       await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
@@ -463,7 +473,7 @@ export const createProjectContextRuntime = (deps: ProjectContextDependencies & {
         }
         if (raw === null) continue;
         await fsPromises.mkdir(plansDir, { recursive: true });
-        await fsPromises.writeFile(targetPath, raw, 'utf8');
+        await writeTextAtomic(targetPath, raw);
       }
 
       links.push({
@@ -987,7 +997,7 @@ export const createProjectContextRuntime = (deps: ProjectContextDependencies & {
           throw error;
         }
         await checkExpectedRaw(filePath);
-        await fsPromises.writeFile(filePath, raw, 'utf8');
+        await writeTextAtomic(filePath, raw);
         onChanged?.(sanitizeProjectId(projectId));
         const parsed = parsePlanMarkdown(raw);
         const context = await readContext(projectId);
@@ -1014,7 +1024,7 @@ export const createProjectContextRuntime = (deps: ProjectContextDependencies & {
       }
 
       await checkExpectedRaw(filePath);
-      await fsPromises.writeFile(filePath, raw, 'utf8');
+      await writeTextAtomic(filePath, raw);
 
       const parsed = parsePlanMarkdown(raw);
       const nextLink = { ...link, title: parsed.title };
@@ -1051,7 +1061,7 @@ export const createProjectContextRuntime = (deps: ProjectContextDependencies & {
         attempt += 1;
       }
 
-      await fsPromises.writeFile(path.join(plansDir, file), formatPlanMarkdown(title, body), 'utf8');
+      await writeTextAtomic(path.join(plansDir, file), formatPlanMarkdown(title, body));
 
       const link = { id: idFactory(), file, title, createdAt, pinned: false };
       const next = { ...current, plans: [link, ...current.plans] };

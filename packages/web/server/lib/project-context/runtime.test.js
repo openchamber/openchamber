@@ -239,6 +239,58 @@ afterEach(async () => {
   await fsPromises.rm(projectsDirPath, { recursive: true, force: true });
 });
 
+describe('atomic plan saves', () => {
+  const renameFailure = () => {
+    const error = new Error('disk gone');
+    error.code = 'EIO';
+    return error;
+  };
+
+  const runtimeWithRename = (rename) => createProjectContextRuntime({
+    fsPromises: { ...fsPromises, rename },
+    path,
+    projectsDirPath,
+    createId: () => 'unused',
+  });
+
+  test('a failed replacement leaves the previous plan intact and removes the temp file', async () => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'A', body: 'original' });
+    const original = await runtime.readPlan(PROJECT_ID, plan.id);
+    const failing = runtimeWithRename(async () => { throw renameFailure(); });
+    await expect(failing.updatePlan(PROJECT_ID, plan.id, { raw: '# New\n' }, { expectedRaw: original.raw })).rejects.toMatchObject({ message: 'disk gone' });
+    expect((await runtime.readPlan(PROJECT_ID, plan.id)).raw).toBe(original.raw);
+    expect(await fsPromises.readdir(plansDir())).toEqual([plan.file]);
+  });
+
+  test('a failed create leaves no plan file and no temp file behind', async () => {
+    const failing = runtimeWithRename(async () => { throw renameFailure(); });
+    await expect(failing.createPlan(PROJECT_ID, { title: 'A', body: 'original' })).rejects.toMatchObject({ message: 'disk gone' });
+    expect(await fsPromises.readdir(plansDir())).toEqual([]);
+  });
+
+  test('a reader during a save sees the whole previous plan until the replacement lands', async () => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'A', body: 'original' });
+    const original = await runtime.readPlan(PROJECT_ID, plan.id);
+    let releaseRename;
+    const gate = new Promise((resolve) => { releaseRename = resolve; });
+    let markRenameEntered;
+    const renameEntered = new Promise((resolve) => { markRenameEntered = resolve; });
+    const realRename = fsPromises.rename;
+    const gated = runtimeWithRename(async (from, to) => { markRenameEntered(); await gate; return realRename(from, to); });
+    const saving = gated.updatePlan(PROJECT_ID, plan.id, { raw: '# Replacement\n' }, { expectedRaw: original.raw });
+    await renameEntered;
+    // The temp sibling is fully written and the rename is still pending:
+    // every read returns the complete previous plan, never a partial one.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect((await runtime.readPlan(PROJECT_ID, plan.id)).raw).toBe(original.raw);
+    }
+    releaseRename();
+    await saving;
+    expect((await runtime.readPlan(PROJECT_ID, plan.id)).raw).toBe('# Replacement\n');
+    expect(await fsPromises.readdir(plansDir())).toEqual([plan.file]);
+  });
+});
+
 describe('projectId validation', () => {
   test('rejects traversal and empty ids', async () => {
     await expect(runtime.readContext('../escape')).rejects.toThrow('unsupported characters');
