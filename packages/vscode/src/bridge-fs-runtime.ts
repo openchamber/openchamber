@@ -84,6 +84,10 @@ type FsDeps = {
     | { ok: true; resolvedPath: string }
     | { ok: false; status: number; error: string }
   >;
+  resolveDirectoryListPath: (inputPath: string, workspaceRoot: string) => Promise<
+    | { ok: true; resolvedPath: string }
+    | { ok: false; status: number; error: string }
+  >;
   parseDroppedFileReference: (rawReference: string) => DroppedReferenceParse;
   readUriAsAttachment: (uri: vscode.Uri, name: string) => Promise<ReadUriAsAttachmentResult>;
 };
@@ -159,7 +163,12 @@ export async function handleFsBridgeMessage(
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
       const { path: targetPath, respectGitignore } = (payload || {}) as { path?: string; respectGitignore?: boolean };
       const target = targetPath || workspaceRoot;
-      const resolvedPath = deps.resolveUserPath(target, workspaceRoot) || workspaceRoot;
+
+      const resolution = await deps.resolveDirectoryListPath(target, workspaceRoot);
+      if (!resolution.ok) {
+        return { id, type, success: false, error: resolution.error };
+      }
+      const resolvedPath = resolution.resolvedPath;
 
       const entries = await deps.listDirectoryEntries(resolvedPath);
       const normalized = deps.normalizeFsPath(resolvedPath);
