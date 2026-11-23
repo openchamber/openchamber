@@ -37,8 +37,8 @@ export const formatQuotaValueLabel = (
     return translate('quota.value.creditsUsed', { credits: formatCredits(window.creditsUsed) });
   }
   if (window.credits) {
-    const { used, limit } = window.credits;
-    const shown = mode === 'remaining' ? Math.max(0, Math.round((limit - used) * 1e6) / 1e6) : used;
+    const { used, limit, remaining = Math.max(0, Math.round((limit - used) * 1e6) / 1e6) } = window.credits;
+    const shown = mode === 'remaining' ? remaining : used;
     return `${formatCredits(shown)} / ${formatCredits(limit)}`;
   }
   return window.valueLabel ?? formatPercent(percent);

@@ -50,6 +50,7 @@ describe('Zhipu AI Coding Plan quota provider', () => {
       windowSeconds: 7 * 24 * 60 * 60,
       resetAt: 1798425600000,
       valueLabel: '6k / 10k credits',
+      credits: { used: 6000, limit: 10000, remaining: 4000 },
     });
     expect(windows['MCP Tools']).toMatchObject({
       usedPercent: 5,

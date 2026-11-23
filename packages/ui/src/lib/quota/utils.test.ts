@@ -33,6 +33,7 @@ describe('quota utils', () => {
     expect(formatQuotaValueLabel(window, 80, t, 'remaining')).toBe('15,925.1 / 20,000');
     expect(formatQuotaValueLabel({ credits: { used: 21000, limit: 20000 } }, 0, t, 'remaining')).toBe('0 / 20,000');
     expect(formatQuotaValueLabel({ credits: { used: 20000 - 0.05, limit: 20000 } }, 0, t, 'remaining')).toBe('0.1 / 20,000');
+    expect(formatQuotaValueLabel({ credits: { used: 65, limit: 12000, remaining: 11934 } }, 99, t, 'remaining')).toBe('11,934 / 12,000');
   });
   test('treats non-finite percentages as missing', () => {
     expect(clampPercent(Infinity)).toBeNull();

@@ -3,7 +3,7 @@ import type { LegacyAuthFile } from '../../opencode/auth.js';
 import type { UsageWindow } from '../utils/contracts.js';
 import { asNonEmptyString } from '../../shared/guards.js';
 import { isString } from '../../shared/object-guards.js';
-import { envelopeError, formatCreditValueLabel, hasDataFields, hasPayloadFields, isCreditLimit, isLimitArray, isNumber, isTimeLimit } from './zhipuai-coding-plan.js';
+import { creditAmounts, envelopeError, formatCreditValueLabel, hasDataFields, hasPayloadFields, isCreditLimit, isLimitArray, isNumber, isTimeLimit } from './zhipuai-coding-plan.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -221,7 +221,8 @@ export const fetchQuota = async () => {
         usedPercent,
         windowSeconds,
         resetAt,
-        valueLabel: creditValueLabel
+        valueLabel: creditValueLabel,
+        credits: creditAmounts(limit)
       });
     }
 

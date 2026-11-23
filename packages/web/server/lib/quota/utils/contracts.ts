@@ -23,6 +23,7 @@ export interface UsageWindowInput<Percent = number | null | undefined, Seconds =
 export interface UsageWindowCredits {
   used: number;
   limit: number;
+  remaining?: number;
 }
 
 export interface UsageWindow<Percent = number | null | undefined, Seconds = number | null> {
