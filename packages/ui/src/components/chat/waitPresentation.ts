@@ -14,12 +14,17 @@ type NamedWait = {
 };
 
 const TIMER_SOURCE = 'timer';
+const SCRIPT_SOURCE = 'script';
 const MINUTE_MS = 60_000;
 
 export const waitSubject = (wait: NamedWait, t: Translate): string => {
   if (wait.source === TIMER_SOURCE) {
     const minutes = wait.args?.minutes;
     return minutes === undefined ? t('chat.waits.source.timer') : t('chat.waits.timer', { minutes });
+  }
+  if (wait.source === SCRIPT_SOURCE) {
+    const minutes = wait.args?.minutes;
+    return minutes === undefined ? t('chat.waits.source.script') : t('chat.waits.script', { minutes });
   }
   return wait.label ? `${wait.title} (${wait.label})` : wait.title;
 };

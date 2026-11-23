@@ -110,7 +110,7 @@ const ExtensionWaitNoticeRow: React.FC<{ notice: ExtensionWaitNotice; blockId: s
             presentation={{
                 icon: 'timer',
                 iconClassName: notice.outcome === 'ended' ? 'text-[var(--status-warning)]' : undefined,
-                title: notice.subject,
+                title: notice.scriptMinutes === undefined ? notice.subject : t('chat.waits.script', { minutes: notice.scriptMinutes }),
                 expandLabel: t('chat.sessionNotice.showDetails'),
                 collapseLabel: t('chat.sessionNotice.hideDetails'),
                 markdownVariant: 'assistant',

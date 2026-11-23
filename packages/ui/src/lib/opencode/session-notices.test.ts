@@ -119,6 +119,13 @@ describe("readSessionNotice: shown", () => {
       expect(readSessionNotice(synthetic("Timer (8 s): 8 seconds passed", { ...metadata, minutes: 6 }, text))).not.toHaveProperty("timerMinutes")
     })
 
+    test("marks the built-in script by its minutes, and keeps what the script returned", () => {
+      const script = { ...metadata, extension: null, type: "script", title: "Script", label: "every 5 minutes", minutes: 5, subject: "Script (every 5 minutes)", summary: "<ready>" }
+      const notice = readSessionNotice(synthetic("Script (every 5 minutes): <ready>", script, text))!
+      expect(notice).toMatchObject({ kind: "extension-wait", scriptMinutes: 5, summary: "<ready>" })
+      expect(notice).not.toHaveProperty("timerMinutes")
+    })
+
     test("an outcome this build does not know stays a plain notice", () => {
       expect(readSessionNotice(synthetic("Timer (8 s): snoozed", { ...metadata, outcome: "snoozed" }, text))?.kind).toBe("plugin")
     })
