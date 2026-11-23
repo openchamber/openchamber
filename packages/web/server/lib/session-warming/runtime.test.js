@@ -204,6 +204,22 @@ describe('session warming runtime', () => {
     expect(pings(fetchImpl)).toHaveLength(1);
   });
 
+  it('arms the window for a prototype-named session the active set does not list', async () => {
+    const { runtime, fetchImpl } = makeRuntime();
+    runtime.setEnabled(true);
+    runtime.processPayload(status('busy', 'constructor'));
+    runtime.setSessionWarm('constructor', DIRECTORY, true);
+    expect(runtime.snapshot().sessions).toEqual([{ sessionId: 'constructor', warmUntil: null }]);
+
+    // The turn ends while the stream is down; the settle read finds no own
+    // entry for 'constructor' in the active set. Object.prototype must not
+    // read as a running session: the window arms and the pings flow.
+    runtime.processPayload({ type: 'server.connected', properties: {} });
+    await runDue();
+    expect(runtime.snapshot().sessions[0].warmUntil).not.toBeNull();
+    expect(fetchImpl.mock.calls.filter(([url]) => String(url).includes('/api/session/constructor/generate'))).toHaveLength(1);
+  });
+
   it('keeps pinging on the usual beat after a failed ping', async () => {
     let fail = true;
     const { runtime, fetchImpl } = makeRuntime({ answer: () => new Response('boom', { status: fail ? 503 : 200 }) });

@@ -842,7 +842,7 @@ export const createOpenChamberSessionService = (dependencies: SessionServiceDepe
       return new Map(
         sessions.flatMap((session) => {
           const id = sessionIdOf(session);
-          return id ? [[id, statuses[id] ? { type: 'busy' } : { type: 'idle' }] as const] : [];
+          return id ? [[id, Object.hasOwn(statuses, id) && statuses[id] ? { type: 'busy' } : { type: 'idle' }] as const] : [];
         }),
       );
     },

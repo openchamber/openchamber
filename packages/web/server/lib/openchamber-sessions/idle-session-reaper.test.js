@@ -227,6 +227,23 @@ describe('createIdleSessionReaper', () => {
     ]);
   });
 
+  it('reaps a prototype-named session a record status map has no entry for', async () => {
+    const store = makeArchiveStore();
+    const reaper = makeReaper({
+      sessions: [session('constructor')],
+      store,
+      getSessionStatuses: async () => ({}),
+    });
+
+    const result = await reaper.sweep();
+
+    // The empty record has no own 'constructor' entry: Object.prototype must
+    // not supply one, so the record-carried idle status decides.
+    expect(result.liveIdle).toBe(1);
+    expect(result.reaped).toEqual(['constructor']);
+    expect(store.archived.has('constructor')).toBe(true);
+  });
+
   it('keeps a session with pending or unknown pending work live', async () => {
     const store = makeArchiveStore();
     const sessions = [session('ses_parent'), session('ses_unknown'), session('ses_clear')];
