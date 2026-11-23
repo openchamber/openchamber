@@ -133,7 +133,8 @@ async function createGoalRowFixture() {
         { find: '@', replacement: path.join(repo, 'packages/ui/src') },
       ],
     },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
+    // Vite reads port 0 as its default 5173 and walks up from there; take a free one.
+    server: { host: '127.0.0.1', port: await reservePort(), strictPort: true, fs: { allow: [repo, fixture] } },
   });
   try {
     await server.listen();
