@@ -155,7 +155,12 @@ export async function downloadToFile(
       await rm(tmpPath, { force: true }).catch(() => undefined);
       throw new Error(`The download from ${url} did not match its pinned checksum, so it was discarded; try again`);
     }
-    await rename(tmpPath, outputPath);
+    try {
+      await rename(tmpPath, outputPath);
+    } catch (error) {
+      await rm(tmpPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
   } finally {
     if (stallTimer) clearTimeout(stallTimer);
   }

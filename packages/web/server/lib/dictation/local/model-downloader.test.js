@@ -130,6 +130,16 @@ describe('downloadToFile', () => {
     expect(fs.existsSync(file)).toBe(false);
   });
 
+  it('discards the verified temp file when the final rename fails', async () => {
+    const file = tempFile();
+    await mkdir(file, { recursive: true });
+    await expect(
+      downloadToFile('https://example.test/archive.tar.bz2', file, undefined, { ...PINS, fetchImpl: fetchReturning(CONTENT) }),
+    ).rejects.toThrow();
+    const leftovers = fs.readdirSync(path.dirname(file)).filter((name) => name.includes('.tmp-'));
+    expect(leftovers).toEqual([]);
+  });
+
   it('refuses to download a model with no pins, before fetching', async () => {
     const file = tempFile();
     let fetched = false;
