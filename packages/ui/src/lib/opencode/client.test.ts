@@ -283,10 +283,37 @@ test('a drive-root system-info fallback stays absolute', async () => {
 
   test("the current directory scopes calls that pass none", async () => {
     opencodeClient.setDirectory("/repo/current")
-    responses.push(json({ location: {}, data: [] }))
+    responses.push(agentList("build"))
     await opencodeClient.listAgents()
     expect(requests[0].url.pathname).toBe("/api/agent")
     expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/current"))
+  })
+
+  test("a cold folder's empty agent list is read again after its plugins activate", async () => {
+    responses.push(agentList(), json({ data: { modelID: "m", providerID: "p" } }), agentList("build", "plan"))
+    const agents = await opencodeClient.listAgents("/repo/cold")
+    expect(agents.map(({ id }: { id: string }) => id)).toEqual(["build", "plan"])
+    expect(requests.map((request) => request.url.pathname)).toEqual(["/api/agent", "/api/model/default", "/api/agent"])
+    expect(requests.every((request) => request.headers.get("x-opencode-directory") === encodeURIComponent("/repo/cold"))).toBe(true)
+  })
+
+  test("an agent list that stays empty after activation is the folder's answer", async () => {
+    responses.push(agentList(), json({ data: { modelID: "m", providerID: "p" } }), agentList())
+    expect(await opencodeClient.listAgents("/repo/empty")).toEqual([])
+    expect(requests).toHaveLength(3)
+  })
+
+  test("a runtime switch during the activation wait sends no second read to the new host", async () => {
+    responses.push(agentList(), () => {
+      runtimeKey = "other"
+      return json({ data: { modelID: "m", providerID: "p" } })
+    })
+    try {
+      await expect(opencodeClient.listAgents("/repo/cold")).rejects.toThrow("Runtime instance changed")
+      expect(requests.map((request) => request.url.pathname)).toEqual(["/api/agent", "/api/model/default"])
+    } finally {
+      runtimeKey = "test-runtime"
+    }
   })
 
 })
@@ -559,12 +586,14 @@ describe("sendMessage", () => {
   test("a failed or empty agent lookup does not block the send", async () => {
     responses.push(new Error("agent list unreachable"), noContent(), json({ id: "msg_10" }))
     await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", agent: "build", text: "hello", messageId: "msg_10" })
-    responses.push(agentList(), noContent(), json({ id: "msg_11" }))
+    responses.push(agentList(), json({ data: { modelID: "m", providerID: "p" } }), agentList(), noContent(), json({ id: "msg_11" }))
     await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", agent: "build", text: "hello", messageId: "msg_11" })
     expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
       "GET /api/agent",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/prompt",
+      "GET /api/agent",
+      "GET /api/model/default",
       "GET /api/agent",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/prompt",

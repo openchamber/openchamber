@@ -1,5 +1,6 @@
 
 import { AgentUnavailableError } from "./agent-unavailable-error"
+import { readFolderAgents } from "./folder-agents"
 import { isLocationNotFoundError } from "./location-errors"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
 import type {
@@ -906,7 +907,7 @@ class OpencodeService {
     const stat = await this.getDirectoryAvailability(directory)
     if (stat !== "missing") return stat
     try {
-      await this.listAgents(directory)
+      await call("agent.list", () => this.clientFor(this.resolveDirectory(directory)).agent.list())
       return "available"
     } catch (error) {
       return error instanceof Error && isLocationNotFoundError(error) ? "missing" : "unknown"
@@ -1826,11 +1827,9 @@ class OpencodeService {
     const key = effectiveDirectory ?? ""
 
     const existing = this.listAgentsInFlight.get(key)
-    if (existing) {
-      return existing
-    }
+    if (existing) return existing
 
-    const request = call("agent.list", () => this.clientFor(effectiveDirectory).agent.list().then((r) => r.data.map(projectAgent)))
+    const request = call("agent.list", () => readFolderAgents(this.clientFor(effectiveDirectory), captureRuntimeInstance()).then((agents) => agents.map(projectAgent)))
 
     this.listAgentsInFlight.set(key, request)
     try {

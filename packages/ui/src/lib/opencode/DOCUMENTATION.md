@@ -212,6 +212,23 @@ Before that, the agent picker marks such an agent with a warning
 (`components/chat/agentAvailability.ts`), read from the loaded catalog of the
 composer's own folder; a catalog still loading marks nothing.
 
+### Why an empty agent list is read again after `model.default`
+
+Since OpenCode 2.2.7 `agent.list` answers before a location's plugins have
+registered their agents, so the first read of a folder OpenCode has not started
+is an empty list, while `model.default` waits up to 5 seconds for those plugins.
+`listAgents` (`folder-agents.ts`) takes an empty answer as not ready, waits on
+`model.default` and reads once more, and that second answer is the folder's
+list. Committing the first answer made the agent picker mark the session's
+agent as missing until `agent.updated` re-read the list. Reading the models
+before every agent read was rejected: a warm folder would pay a second round
+trip for nothing. When the wait times out the second answer is used as it is
+and the `agent.updated` re-read covers the rest; failing the read there would
+fail the app's start whenever plugins are slow. A runtime switch during the wait
+stops before the second read, so it never reaches the new host with the old
+folder. `getLocationAvailability` only probes whether the folder exists, so it
+reads `agent.list` once without the wait.
+
 ### Why ancestor reads belong to tool completion
 
 A child transcript can list a tool message stored by its parent. Completing an

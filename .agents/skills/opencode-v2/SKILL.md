@@ -93,7 +93,7 @@ as a fix.
 Open asks upstream (OpenCode Slack): declaring 500 bodies on session
 mutations; `agent.list` waiting for plugin activation the way `model.list`
 and `provider.list` do (done in 2.2.0, dropped again in 2.2.7 by #62796, so
-the cold-catalog recovery in `useConfigStore` stays); built-in provider plugins setting
+`listAgents` re-reads an empty list after `model.default`); built-in provider plugins setting
 attribution headers only when the client has not set its own, so a client can
 name itself to a provider (today some plugins overwrite provider-level
 headers). Dropped: an import route for missing 1.x
@@ -140,7 +140,10 @@ gap.
   `model.list`, `model.default` and, since 2.2.0, `provider.list` wait up to
   5 seconds for the location's plugins. `agent.list` waited in 2.2.0 to 2.2.6
   and answers early again since 2.2.7: the first read of a cold location is an
-  empty list, then `agent.updated` follows within a second. The recovery stays.
+  empty list, then `agent.updated` follows within a second. The UI's
+  `opencodeClient.listAgents` takes an empty answer as not ready, waits on
+  `model.default` and reads once more; committing the empty list made the
+  agent picker flag the session's agent as missing until the event's re-read.
   OpenChamber's server session selection works around it by reading
   `model.list` first, which waits for activation, and `agent.list` after it
   (`openchamber-sessions/selection-inputs.ts`); a `ServiceUnavailableError`

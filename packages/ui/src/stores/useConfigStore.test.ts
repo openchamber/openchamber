@@ -672,6 +672,7 @@ describe('useConfigStore provider persistence', () => {
     expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['other-stale']);
 
     liveProviderId = 'fresh';
+    liveAgents = [testAgent('build')];
     await hydrated.initializeApp();
 
     const reloaded = useConfigStore.getState();
@@ -2461,6 +2462,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a worktree left while its catalog was incomplete is read again on return', async () => {
     const worktree = '/workspace/starting-worktree';
+    liveAgents = [testAgent('build')];
     let pluginRegistered = false;
     const requested: Array<string | null | undefined> = [];
     getProvidersForConfigImpl = async (directory) => {
@@ -2484,6 +2486,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a read that began before the catalog changed does not make the worktree fresh', async () => {
     const worktree = '/workspace/slow-worktree';
+    liveAgents = [testAgent('build')];
     const slowRead = deferred<TestProviderResponse>();
     let reads = 0;
     getProvidersForConfigImpl = async (directory) => {
@@ -2618,6 +2621,7 @@ describe('useConfigStore provider persistence', () => {
 
   test('a directory activation stops after a runtime switch during its provider wait', async () => {
     const pending = deferred<TestProviderResponse>();
+    liveAgents = [testAgent('build')];
     getProvidersForConfigImpl = () => pending.promise;
     const activation = useConfigStore.getState().activateDirectory(DIRECTORY);
     switchRuntimeEndpoint({ apiBaseUrl: 'https://activation-next.example', runtimeKey: 'activation-next' });
