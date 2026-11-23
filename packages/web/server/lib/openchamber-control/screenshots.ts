@@ -52,16 +52,27 @@ export const writeScreenshot = async ({
   }
 
   const extension = (isImageText(mime) ? EXTENSIONS.get(mime) : undefined) || '.jpg';
-  const relativePath = path.join(
-    SCREENSHOT_DIRECTORY,
-    `${screenshotSlug(label)}-${screenshotStamp(now)}${extension}`,
-  );
-  const absolutePath = path.join(directory, relativePath);
+  const stem = `${screenshotSlug(label)}-${screenshotStamp(now)}`;
+  const data = Buffer.from(base64, 'base64');
 
-  await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-  await fs.writeFile(absolutePath, Buffer.from(base64, 'base64'));
+  await fs.mkdir(path.join(directory, SCREENSHOT_DIRECTORY), { recursive: true });
 
-  return { path: relativePath.split(path.sep).join('/'), absolutePath };
+  // Exclusive-create ('wx') so a capture can never truncate an existing
+  // one: two captures with the same label in the same millisecond would
+  // otherwise share a path and the later write would silently replace
+  // the earlier image. The loser retries with a numeric suffix until it
+  // owns a fresh path.
+  for (let attempt = 1; ; attempt += 1) {
+    const fileName = attempt === 1 ? `${stem}${extension}` : `${stem}-${attempt}${extension}`;
+    const relativePath = path.join(SCREENSHOT_DIRECTORY, fileName);
+    const absolutePath = path.join(directory, relativePath);
+    try {
+      await fs.writeFile(absolutePath, data, { flag: 'wx' });
+      return { path: relativePath.split(path.sep).join('/'), absolutePath };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') throw error;
+    }
+  }
 };
 
 const capturedSchema = z.object({ path: z.string().trim().min(1) });
