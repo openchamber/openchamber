@@ -40,6 +40,7 @@ const resetHarness = () => {
   desktopHostsSetCalls = 0;
   runtimeSwitchCalls = 0;
   sessionStatusOk = false;
+  sessionStatusOverride = null;
   homeReady = true;
   ensureHomeCalls = 0;
   homeResolutionHangs = false;
@@ -194,6 +195,7 @@ const reactJsxRuntime = {
 let desktopShell = false;
 let runtimeFetchRejects = true;
 let sessionStatusOk = false;
+let sessionStatusOverride: { status: number; body: string } | null = null;
 let homeReady = true;
 let ensureHomeCalls = 0;
 let homeResolutionHangs = false;
@@ -274,6 +276,13 @@ mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: mock(async () => {
     if (runtimeFetchRejects) {
       throw new Error('offline');
+    }
+
+    if (sessionStatusOverride) {
+      return new Response(sessionStatusOverride.body, {
+        status: sessionStatusOverride.status,
+        headers: { 'content-type': 'application/json' },
+      });
     }
 
     return new Response(JSON.stringify({ authenticated: sessionStatusOk }), {
@@ -526,5 +535,48 @@ describe('SessionAuthGate status-check failure behavior', () => {
     expect(desktopHostsGetCalls).toBe(0);
     expect(desktopHostsSetCalls).toBe(0);
     expect(runtimeSwitchCalls).toBe(0);
+  });
+
+  test('a 401 whose body is the JSON null takes the locked branch, not the network-error branch', async () => {
+    // A proxy or server can answer a definite 401 with a valid-but-null JSON
+    // body. JSON.parse succeeds on 'null', so the gate must treat the parsed
+    // value as untrusted instead of throwing on property access and
+    // misreporting the response as a connectivity failure.
+    resetHarness();
+    desktopShell = false;
+    runtimeFetchRejects = false;
+    sessionStatusOverride = { status: 401, body: 'null' };
+
+    const tree = await renderGate();
+    const text = collectText(tree);
+
+    expect(text).toContain('sessionAuth.locked.unlockTitle');
+    expect(text).not.toContain('sessionAuth.error.networkTitle');
+  });
+
+  test('a 429 whose body is the JSON null takes the rate-limited branch, not the network-error branch', async () => {
+    resetHarness();
+    desktopShell = false;
+    runtimeFetchRejects = false;
+    sessionStatusOverride = { status: 429, body: 'null' };
+
+    const tree = await renderGate();
+    const text = collectText(tree);
+
+    expect(text).toContain('sessionAuth.error.rateLimitTitle');
+    expect(text).not.toContain('sessionAuth.error.networkTitle');
+  });
+
+  test('a 401 with a malformed JSON body still takes the locked branch', async () => {
+    resetHarness();
+    desktopShell = false;
+    runtimeFetchRejects = false;
+    sessionStatusOverride = { status: 401, body: 'not json' };
+
+    const tree = await renderGate();
+    const text = collectText(tree);
+
+    expect(text).toContain('sessionAuth.locked.unlockTitle');
+    expect(text).not.toContain('sessionAuth.error.networkTitle');
   });
 });

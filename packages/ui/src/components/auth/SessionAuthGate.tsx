@@ -97,6 +97,25 @@ const fetchSessionStatus = async (): Promise<Response> => {
   return response;
 };
 
+/**
+ * Parse a response body as a JSON object. The parsed value is untrusted:
+ * valid JSON can still be `null`, an array, or a primitive, and reading
+ * properties off those shapes throws or misleads. Only a non-null object
+ * is returned; every other shape (including malformed JSON) falls back
+ * to an empty object.
+ */
+const parseJsonObjectBody = (text: string): Record<string, unknown> => {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Malformed JSON falls through to the empty object.
+  }
+  return {};
+};
+
 const readStoredTrustDevice = (): boolean => {
   if (typeof window === 'undefined') {
     return false;
@@ -460,12 +479,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
           return;
         }
         if (response.status === 401) {
-          let data: { tunnelLocked?: boolean; debug?: { hasRefreshToken: boolean; message: string } } = {};
-          try {
-            data = JSON.parse(responseText);
-          } catch {
-            data = {};
-          }
+          const data = parseJsonObjectBody(responseText) as {
+            tunnelLocked?: boolean;
+            debug?: { hasRefreshToken: boolean; message: string };
+          };
           resetTransientRetry();
           setIsTunnelLocked(data.tunnelLocked === true);
           setPasskeyStatus(latestPasskeyStatus);
@@ -474,12 +491,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
           return;
         }
       if (response.status === 429) {
-        let data: { retryAfter?: number } = {};
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          data = {};
-        }
+        const data = parseJsonObjectBody(responseText) as { retryAfter?: number };
         resetTransientRetry();
         setRetryAfter(data.retryAfter);
         setIsTunnelLocked(false);
@@ -716,7 +728,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       }
 
       if (response.status === 429) {
-        const data = await response.json().catch(() => ({}));
+        const data = parseJsonObjectBody(await response.text().catch(() => '')) as { retryAfter?: number };
         setRetryAfter(data.retryAfter);
         setIsTunnelLocked(false);
         setState('rate-limited');
