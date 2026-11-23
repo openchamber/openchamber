@@ -88,6 +88,10 @@ type FsDeps = {
     | { ok: true; resolvedPath: string }
     | { ok: false; status: number; error: string }
   >;
+  resolveDirectoryCreatePath: (inputPath: string, workspaceRoot: string, additionalRoots?: string[]) => Promise<
+    | { ok: true; resolvedPath: string }
+    | { ok: false; status: number; error: string }
+  >;
   parseDroppedFileReference: (rawReference: string) => DroppedReferenceParse;
   readUriAsAttachment: (uri: vscode.Uri, name: string) => Promise<ReadUriAsAttachmentResult>;
 };
@@ -243,9 +247,13 @@ export async function handleFsBridgeMessage(
         return { id, type, success: false, error: 'Path is required' };
       }
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-      const resolvedPath = deps.resolveUserPath(target, workspaceRoot);
-      await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolvedPath));
-      return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedPath) } };
+      const chatsRoot = path.join(os.homedir(), '.config', 'openchamber', 'chats');
+      const resolution = await deps.resolveDirectoryCreatePath(target, workspaceRoot, [chatsRoot]);
+      if (!resolution.ok) {
+        return { id, type, success: false, error: resolution.error };
+      }
+      await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolution.resolvedPath));
+      return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolution.resolvedPath) } };
     }
 
     case 'api:fs/home': {
