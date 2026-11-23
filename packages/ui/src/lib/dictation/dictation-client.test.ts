@@ -361,3 +361,100 @@ describe('DictationClient and sender after the stream is given up', () => {
         expect(dials()).toBe(1);
     });
 });
+
+describe('DictationClient concurrent connection attempts', () => {
+    // Oracle for openchamber#2400: the connection attempt is reserved before
+    // any await, so two first-time callers entering while the dial is still
+    // pending (in production the dial includes the runtime auth-token
+    // refresh) share exactly one WebSocket, and a failed shared attempt
+    // settles every caller instead of stranding one on an untracked socket.
+    function deferredDial() {
+        let release: (socket: RelayTunnelWebSocket) => void = () => {};
+        let fail: (error: Error) => void = () => {};
+        const promise = new Promise<RelayTunnelWebSocket>((resolve, reject) => {
+            release = resolve;
+            fail = reject;
+        });
+        return { promise, release, fail };
+    }
+
+    // Records how a connection call settles; attaching the handlers up front
+    // keeps a rejected shared attempt from surfacing as unhandled.
+    function settle(call: Promise<void>): Promise<string> {
+        return call.then(
+            () => 'resolved',
+            (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
+    }
+
+    test('two concurrent ensureConnected calls share one dial and resolve from the tracked socket', async () => {
+        const socket = new FakeSocket();
+        const dial = deferredDial();
+        let dials = 0;
+        const client = new DictationClient(() => {
+            dials += 1;
+            return dial.promise;
+        });
+
+        const firstCall = client.ensureConnected();
+        const secondCall = client.ensureConnected();
+
+        expect(dials).toBe(1);
+
+        dial.release(socket);
+        // Let the client attach its handlers before the socket reports ready.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        socket.open();
+
+        await firstCall;
+        await secondCall;
+        expect(client.isConnected).toBe(true);
+
+        // Already connected: a later caller must not dial again.
+        await client.ensureConnected();
+        expect(dials).toBe(1);
+    });
+
+    test('a socket that closes before ready rejects every caller sharing the attempt', async () => {
+        const socket = new FakeSocket();
+        const dial = deferredDial();
+        const client = new DictationClient(() => dial.promise);
+
+        const firstOutcome = settle(client.ensureConnected());
+        const secondOutcome = settle(client.ensureConnected());
+
+        dial.release(socket);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        socket.drop();
+
+        expect(await firstOutcome).toBe('Dictation connection failed');
+        expect(await secondOutcome).toBe('Dictation connection failed');
+        expect(client.isConnected).toBe(false);
+    });
+
+    test('a dial that fails rejects every caller sharing the attempt, and the next call dials again', async () => {
+        const dial = deferredDial();
+        const retrySocket = new FakeSocket();
+        let dials = 0;
+        const client = new DictationClient(() => {
+            dials += 1;
+            return dials === 1 ? dial.promise : Promise.resolve(retrySocket);
+        });
+
+        const firstOutcome = settle(client.ensureConnected());
+        const secondOutcome = settle(client.ensureConnected());
+
+        dial.fail(new Error('token endpoint down'));
+
+        expect(await firstOutcome).toBe('token endpoint down');
+        expect(await secondOutcome).toBe('token endpoint down');
+
+        // The failed attempt is cleared, so a later caller starts a fresh dial.
+        const retry = client.ensureConnected();
+        expect(dials).toBe(2);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        retrySocket.open();
+        await retry;
+        expect(client.isConnected).toBe(true);
+    });
+});
