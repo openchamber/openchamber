@@ -188,7 +188,10 @@ jobs:
             sleep 30
           done
 
-          ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1 || true)
+          if ! ENTITLEMENTS=$(codesign -d --entitlements :- "$APP_PATH" 2>&1); then
+            echo "Error: codesign failed to read entitlements: $ENTITLEMENTS"
+            exit 1
+          fi
           if echo "$ENTITLEMENTS" | grep -q "com.apple.security.app-sandbox"; then
             echo "Error: app sandbox entitlement is present"
             exit 1
