@@ -62,7 +62,8 @@ async function createPageFitFixture() {
     css: { postcss: repo },
     resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
     optimizeDeps: { noDiscovery: true, include: ['zod'] },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
+    // Vite reads port 0 as its default 5173 and walks up from there; take a free one.
+    server: { host: '127.0.0.1', port: await reservePort(), strictPort: true, fs: { allow: [repo, fixture] } },
   });
   try {
     await server.listen();
@@ -87,8 +88,8 @@ async function assertPageFits(client, url) {
     assert.equal(result.exceptionDetails, undefined, result.exceptionDetails?.exception?.description);
     return result.result.value;
   };
-  const until = async (expression) => {
-    const deadline = Date.now() + 15_000;
+  const until = async (expression, timeoutMs = 15_000) => {
+    const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (await evaluate(expression)) return;
       await wait(25);
@@ -99,7 +100,9 @@ async function assertPageFits(client, url) {
 
   await client.send('Page.enable');
   await client.send('Page.navigate', { url });
-  await until('typeof window.measurePage === "function"');
+  // The first load transforms the UI modules; with other browser suites
+  // running that took longer than 15 s.
+  await until('typeof window.measurePage === "function"', 90_000);
 
   const bordered = await evaluate('borderedPictures');
   for (const width of [420, 720, 960]) {

@@ -47,7 +47,8 @@ test('JSON tree stays bounded and its tail remains reachable', { skip: !chrome &
     logLevel: 'error',
     css: { postcss: repo },
     resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
+    // Vite reads port 0 as its default 5173 and walks up from there; take a free one.
+    server: { host: '127.0.0.1', port: await reservePort(), strictPort: true, fs: { allow: [repo, fixture] } },
   });
   let browser;
   let client;

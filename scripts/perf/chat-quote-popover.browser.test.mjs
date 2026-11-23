@@ -46,7 +46,8 @@ async function createQuotePopoverFixture() {
     css: { postcss: repo },
     resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
     optimizeDeps: { noDiscovery: true, include: ['@base-ui/react/tooltip', 'react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', 'clsx', 'tailwind-merge'] },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
+    // Vite reads port 0 as its default 5173 and walks up from there; take a free one.
+    server: { host: '127.0.0.1', port: await reservePort(), strictPort: true, fs: { allow: [repo, fixture] } },
   });
   try {
     await server.listen();
@@ -70,8 +71,8 @@ async function assertQuotePopoverBounds(client, url) {
     assert.equal(result.exceptionDetails, undefined, result.exceptionDetails?.exception?.description);
     return result.result.value;
   };
-  const until = async (expression) => {
-    const deadline = Date.now() + 15_000;
+  const until = async (expression, timeoutMs = 15_000) => {
+    const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (await evaluate(expression)) return;
       await wait(25);
@@ -100,7 +101,9 @@ async function assertQuotePopoverBounds(client, url) {
   };
   await client.send('Page.enable');
   await client.send('Page.navigate', { url });
-  await until(`location.href === ${JSON.stringify(url)} && typeof window.renderSavedQuote === "function"`);
+  // The first load transforms the UI modules and compiles the stylesheet; with
+  // other browser suites running that took longer than 15 s.
+  await until(`location.href === ${JSON.stringify(url)} && typeof window.renderSavedQuote === "function"`, 90_000);
   for (const width of [320, 390, 1024]) {
     await client.send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: true });
     for (const direction of ['ltr', 'rtl']) {
