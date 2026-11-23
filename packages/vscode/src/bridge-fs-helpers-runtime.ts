@@ -675,3 +675,35 @@ export const resolveFileReadPath = async (targetPath: string, requestedRoot?: st
     return { ok: false, status: 500, error: 'Failed to resolve file path' };
   }
 };
+
+export type FsListPathResolution =
+  | { ok: true; resolvedPath: string }
+  | { ok: false; status: number; error: string };
+
+export const resolveDirectoryListPath = async (
+  targetPath: string,
+  workspaceRoot: string,
+): Promise<FsListPathResolution> => {
+  const resolved = resolveUserPath(targetPath, workspaceRoot) || workspaceRoot;
+
+  try {
+    // Canonicalize both sides before comparing: the workspace root itself
+    // can sit behind a symlink (e.g. /tmp on macOS), and a target that only
+    // escapes through a symlinked ancestor must still be refused.
+    const [canonicalRoot, canonicalTarget] = await Promise.all([
+      fs.promises.realpath(workspaceRoot),
+      fs.promises.realpath(resolved),
+    ]);
+    if (!isPathInside(canonicalTarget, canonicalRoot)) {
+      return { ok: false, status: 403, error: 'Access to directory denied' };
+    }
+
+    return { ok: true, resolvedPath: canonicalTarget };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'ENOENT') {
+      return { ok: false, status: 404, error: 'Directory not found' };
+    }
+    return { ok: false, status: 500, error: 'Failed to resolve directory path' };
+  }
+};

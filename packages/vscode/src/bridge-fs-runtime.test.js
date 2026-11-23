@@ -26,6 +26,7 @@ const deps = {
   execGit: mock(),
   searchDirectory: mock(),
   resolveFileReadPath: mock(),
+  resolveDirectoryListPath: async (target) => ({ ok: true, resolvedPath: target }),
   parseDroppedFileReference: mock(),
   readUriAsAttachment: mock(),
 };
