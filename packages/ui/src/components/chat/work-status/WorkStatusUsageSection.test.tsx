@@ -48,14 +48,15 @@ test('the collapsed headline shows the compacted count the row shows', async () 
           resetAt: null,
           resetAtFormatted: null,
           resetAfterFormatted: null,
-          valueLabel: '3,967.8 / 20,000 used',
+          valueLabel: '4,074.9 / 20,000 used',
+          credits: { used: 4074.9, limit: 20000 },
         } } },
       }],
     });
     await act(async () => root.render(<I18nProvider><WorkStatusUsageSection /></I18nProvider>));
     const heading = container.querySelector('button[aria-expanded]')?.textContent ?? '';
-    expect(heading).toContain('3,967.8 / 20K used');
-    expect(heading).not.toContain('20,000');
+    expect(heading).toContain('AI Credits4.1K / 20K');
+    expect(heading).not.toContain('used');
   } finally {
     await act(async () => root.unmount());
     load.mockRestore();

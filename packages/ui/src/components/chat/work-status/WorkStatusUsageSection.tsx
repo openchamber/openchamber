@@ -51,6 +51,7 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
       headline.row.window,
       displayMode === 'remaining' ? headline.row.window.remainingPercent : headline.row.window.usedPercent,
       t,
+      displayMode,
     )
     : null;
 
@@ -115,7 +116,7 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
             const displayPercent = displayMode === 'remaining'
               ? row.window.remainingPercent
               : row.window.usedPercent;
-            const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
+            const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t, displayMode);
             const shownMetric = compactQuotaValueLabel(metricLabel);
             const resetFallback = row.window.resetAfterFormatted ?? row.window.resetAtFormatted;
             const { providerId } = group;

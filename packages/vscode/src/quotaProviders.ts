@@ -39,6 +39,7 @@ type UsageWindow = {
   valueLabel?: string | null;
   value?: { kind: 'requests'; count: number } | { kind: 'spend'; spent: number | null; limit: number | null };
   creditsUsed?: number;
+  credits?: { used: number; limit: number };
   giftReset?: UsageWindowGiftReset | null;
 };
 
@@ -485,7 +486,7 @@ const calculateResetAfterSeconds = (resetAt: number | null) => {
   return delta < 0 ? 0 : delta;
 };
 
-const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; value?: UsageWindow['value']; creditsUsed?: number }) => {
+const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number | null; resetAt: number | null; valueLabel?: string | null; value?: UsageWindow['value']; creditsUsed?: number; credits?: UsageWindow['credits'] }) => {
   const resetAfterSeconds = calculateResetAfterSeconds(data.resetAt);
   const resetFormatted = data.resetAt ? formatResetTime(data.resetAt) : null;
   const window: UsageWindow = {
@@ -500,6 +501,7 @@ const toUsageWindow = (data: { usedPercent: number | null; windowSeconds: number
     ...(data.creditsUsed !== undefined ? { creditsUsed: data.creditsUsed } : {}),
   };
   if (data.value) window.value = data.value;
+  if (data.credits) window.credits = data.credits;
   return window;
 };
 
@@ -1833,10 +1835,8 @@ const buildCopilotWindows = (payload: CopilotUserPayload) => {
       ? null
       : `${formatCopilotCredits(used)} / ${formatCopilotCredits(entitlement)} used`;
     windows[label] = toUsageWindow({
-      usedPercent,
-      windowSeconds: null,
-      resetAt,
-      valueLabel,
+      usedPercent, windowSeconds: null, resetAt, valueLabel,
+      credits: used === null || entitlement === null ? undefined : { used, limit: entitlement },
     });
   };
 

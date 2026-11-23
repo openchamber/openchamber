@@ -1664,6 +1664,7 @@ describe('GitHub Copilot quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.ok(Math.abs(result.usage!.windows.premium_interactions!.usedPercent! - 34.86916666666666) < 1e-9);
     assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '20,921.5 / 60,000 used');
+    assert.deepEqual(result.usage!.windows.premium_interactions!.credits, { used: 20921.5, limit: 60000 });
   });
 
   test('keeps the fractional credit rather than rounding it away', async () => {

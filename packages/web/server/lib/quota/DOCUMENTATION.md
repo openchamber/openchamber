@@ -513,12 +513,19 @@ where entitlement is unbounded (`-1` or null), `credits_used` provides the only
 meaningful consumption indicator. It crosses the quota response as numeric
 `creditsUsed` so changing the UI locale translates the message without refetching.
 
-The label is fixed to the used axis, so with the display preference set to
-`remaining` the bar and its caption flip to remaining while the number still reads
-`… used`. That mismatch is accepted deliberately: the Kimi section of this document
-declined a `valueLabel` for exactly this reason, and the label suppressing the
-percent is the defect this change removes, so shipping the percent instead would
-trade a wrong number for no number.
+The window also carries the two numbers behind the label as `credits: { used,
+limit }`. Shared UI formats them itself, so the figure follows the used/remaining
+display preference like a percent does: `4,074.9 / 20,000` while showing usage,
+`15,925.1 / 20,000` while showing what is left, with no axis word, since the
+preference already names the axis. The fixed `… used` label stays on the wire for
+clients built before `credits` existed (their quota schema drops the unknown
+field and keeps showing the label) and for the agent's usage tool.
+
+### Why structured credits and not a new `value` kind
+
+`value` is a discriminated union that every client parses with a closed list of
+kinds, so a new kind would fail the whole quota response on an older mobile or
+VS Code build. An extra optional field is stripped by those parsers instead.
 
 ## OpenRouter key semantics
 
