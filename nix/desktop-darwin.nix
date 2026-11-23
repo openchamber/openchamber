@@ -46,7 +46,10 @@ stdenvNoCC.mkDerivation {
     mkdir -p node_modules/@openchamber
     ln -sfn ../../packages/web node_modules/@openchamber/web
     bun run --cwd packages/sdk build
-    bun run --cwd packages/electron build:web-assets
+    # build:web-assets runs the web build, whose build:server would bundle
+    # upstream's npm OpenCode server (a network fetch, and a server launched
+    # ahead of the fork's opencode); see nix/package.nix.
+    OPENCHAMBER_SKIP_BUNDLED_OPENCODE_SERVER=1 bun run --cwd packages/electron build:web-assets
     bun run --cwd packages/electron bundle:main
     runHook postBuild
   '';
