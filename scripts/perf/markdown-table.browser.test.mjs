@@ -81,8 +81,15 @@ test('chat Markdown tables expand into spare transcript width and show hidden-ed
     root: fixture,
     logLevel: 'error',
     css: { postcss: repo },
+    // The JSX transform adds this import after the dependency scan, so without
+    // it Vite optimizes it on the first request and reloads the page under the
+    // test: the fixture's renderFixture vanished between the ready check and
+    // the call, and the run then hung on the optimizer until the file timeout.
+    optimizeDeps: { include: ['react/jsx-dev-runtime'] },
     resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
+    // Vite reads port 0 as its default 5173 and walks up from there, so
+    // concurrent browser suites could meet on one port; take a free one.
+    server: { host: '127.0.0.1', port: await reservePort(), strictPort: true, fs: { allow: [repo, fixture] } },
   });
   let browser;
   let client;
@@ -151,12 +158,26 @@ test('chat Markdown tables expand into spare transcript width and show hidden-ed
       };
     })()`);
 
-    // A first Vite dependency scan can reload the page. Retry the fixture after it settles.
+    // A dependency Vite still finds late reloads the page, which drops the
+    // fixture: render it again until its wide table mounts.
+    // An evaluation the reload cuts short fails with one of these; any other
+    // failure is the test's own.
+    const RELOADED = /context was destroyed|Cannot find context|navigated or closed|Promise was collected/;
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      await waitReady();
-      await evaluate('window.renderFixture()');
-      await wait(1200);
-      if (await evaluate('Boolean(document.querySelector("#main [data-table-width-toggle]"))')) break;
+      let mounted = false;
+      try {
+        await waitReady();
+        mounted = await evaluate(`(() => {
+          if (typeof window.renderFixture !== 'function') return false;
+          window.renderFixture();
+          return true;
+        })()`);
+        await wait(1200);
+        mounted = mounted && await evaluate('Boolean(document.querySelector("#main [data-table-width-toggle]"))');
+      } catch (error) {
+        if (!RELOADED.test(String(error?.message))) throw error;
+      }
+      if (mounted) break;
       assert.notEqual(attempt, 3, 'wide table never mounted with its expansion control');
     }
     await settle();
