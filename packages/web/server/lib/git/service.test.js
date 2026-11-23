@@ -8787,8 +8787,18 @@ describe('file-diff working-tree size cap', () => {
     return filePath;
   };
 
+  // Git treats a blob over core.bigFileThreshold as binary in diffs, so a
+  // machine-wide threshold under the cap (a 16m system gitconfig, say) turns
+  // these text blobs into binary ones. The cases below assume git's default
+  // 512m; the repository sets it so the user's config cannot decide them.
+  const createCapRepo = async () => {
+    const repo = await createTempRepo();
+    runGit(repo.tmpDir, ['config', 'core.bigFileThreshold', '512m']);
+    return repo;
+  };
+
   const commitSizedFile = async (name, size) => {
-    const { tmpDir, git } = await createTempRepo();
+    const { tmpDir, git } = await createCapRepo();
     makeSizedFile(tmpDir, name, size);
     await git.add(name);
     await git.commit('Initial');
@@ -8796,7 +8806,7 @@ describe('file-diff working-tree size cap', () => {
   };
 
   const commitSmallThenResize = async (name, size) => {
-    const { tmpDir, git } = await createTempRepo();
+    const { tmpDir, git } = await createCapRepo();
     fs.writeFileSync(path.join(tmpDir, name), 'small\n');
     await git.add(name);
     await git.commit('Initial');
@@ -8873,6 +8883,14 @@ describe('file-diff working-tree size cap', () => {
     const tmpDir = await commitSizedFile('big.txt', CAP + 1);
     fs.rmSync(path.join(tmpDir, 'big.txt'));
     await expect(getFileDiff(tmpDir, { path: 'big.txt' })).rejects.toMatchObject({ code: 'file_too_large' });
+  });
+
+  it('follows a repository threshold under the blob size: git calls the blob binary', async () => {
+    if (!canRunGit()) return;
+    const tmpDir = await commitSizedFile('big.txt', 2 * 1024 * 1024);
+    runGit(tmpDir, ['config', 'core.bigFileThreshold', '1m']);
+    fs.writeFileSync(path.join(tmpDir, 'big.txt'), 'changed\n');
+    expect(await getFileDiff(tmpDir, { path: 'big.txt' })).toMatchObject({ original: '', modified: '', isBinary: true });
   });
 
   it('diffs a committed blob at exactly the cap byte-identically', async () => {
