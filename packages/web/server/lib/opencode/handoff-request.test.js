@@ -34,6 +34,33 @@ describe('handoff request file', () => {
     expect(fs.existsSync(getHandoffRequestPath(dataDir))).toBe(false);
   });
 
+  it('does not delete a newer request published between read and cleanup', () => {
+    const dataDir = tempDir();
+    const older = writeHandoffRequest({ dataDir, requesterPid: 77, entry: '/old/cli.js', execPath: '/node', version: '2.6.0', now: () => 1000 });
+    const originalReadFileSync = fs.readFileSync;
+    let republished = false;
+    fs.readFileSync = (...args) => {
+      const bytes = originalReadFileSync(...args);
+      if (!republished && String(args[0]).includes('handoff-request')) {
+        republished = true;
+        // A newer CLI invocation atomically replaces the request path while
+        // the consumer still holds the older request's bytes; the older
+        // consume's cleanup must not unlink the newer request.
+        writeHandoffRequest({ dataDir, requesterPid: 78, entry: '/new/cli.js', execPath: '/node', version: '2.6.0', now: () => 1002 });
+      }
+      return bytes;
+    };
+    try {
+      expect(consumeHandoffRequest({ dataDir, now: () => 1003, kill: () => true })).toEqual({ ...older, allowDowngrade: false });
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+    }
+    expect(republished).toBe(true);
+    const next = consumeHandoffRequest({ dataDir, now: () => 1004, kill: () => true });
+    expect(next?.entry).toBe('/new/cli.js');
+    expect(fs.existsSync(getHandoffRequestPath(dataDir))).toBe(false);
+  });
+
   it('discards stale, malformed, and dead-requester records', () => {
     const dataDir = tempDir();
     const writeRaw = (value) => {
