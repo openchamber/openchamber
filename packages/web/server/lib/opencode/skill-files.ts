@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { OPENCODE_CONFIG_DIR, getAncestors, findWorktreeRoot } from './config-files.js';
 import { isString } from '../shared/object-guards.js';
+import { writeFileAtomic } from './atomic-write.js';
 import { createTraversalBudget } from '../shared/traversal-budget.js';
 import type { MarkdownDocument } from './markdown-files.js';
 
@@ -339,7 +340,7 @@ function writeSkillSupportingFile<Path, Content>(skillDir: string, relativePath:
   if (!isString(content) && !isWritableView(content)) {
     throw Object.assign(new TypeError('The skill file content must be a string or an ArrayBuffer view'), { code: 'ERR_INVALID_ARG_TYPE' });
   }
-  fs.writeFileSync(fullPath, content, 'utf8');
+  writeFileAtomic(fullPath, content);
 }
 
 function deleteSkillSupportingFile<Path>(skillDir: string, relativePath: Path) {

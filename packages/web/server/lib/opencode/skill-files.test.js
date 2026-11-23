@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { walkSkillMdFiles } from './skill-files.js';
+import { SKILL_SUPPORTING_FILE_MAX_BYTES, walkSkillMdFiles, writeSkillSupportingFile } from './skill-files.js';
 
 const FIXTURE_DIR = path.join(os.tmpdir(), `openchamber-skill-files-test-${process.pid}`);
 
@@ -166,5 +166,41 @@ describe('walkSkillMdFiles', () => {
     linkDirectory(path.join(FIXTURE_DIR, 'a'), path.join('b', 'to-a'));
 
     expect(await foundRelative()).toEqual(['a/SKILL.md', 'b/to-a/SKILL.md']);
+  });
+});
+
+describe('writeSkillSupportingFile', () => {
+  const WRITE_DIR = path.join(os.tmpdir(), `openchamber-skill-write-test-${process.pid}`);
+
+  beforeEach(() => {
+    fs.rmSync(WRITE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(WRITE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(WRITE_DIR, { recursive: true, force: true });
+  });
+
+  it('writes string content', () => {
+    const skillDir = path.join(WRITE_DIR, 'skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    writeSkillSupportingFile(skillDir, 'notes.md', 'hello');
+    expect(fs.readFileSync(path.join(skillDir, 'notes.md'), 'utf8')).toBe('hello');
+  });
+
+  it('writes byte-view content byte-exact, including non-UTF8 bytes', () => {
+    const skillDir = path.join(WRITE_DIR, 'skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    const bytes = new Uint8Array([0x00, 0xff, 0x10, 0x41, 0x80]);
+    writeSkillSupportingFile(skillDir, 'data.bin', bytes);
+    expect([...fs.readFileSync(path.join(skillDir, 'data.bin'))]).toEqual([...bytes]);
+  });
+
+  it('refuses over-cap content before writing anything', () => {
+    const skillDir = path.join(WRITE_DIR, 'skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    const big = 'x'.repeat(SKILL_SUPPORTING_FILE_MAX_BYTES + 1);
+    expect(() => writeSkillSupportingFile(skillDir, 'big.txt', big)).toThrow(/too large/);
+    expect(fs.existsSync(path.join(skillDir, 'big.txt'))).toBe(false);
   });
 });

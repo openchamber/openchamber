@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'yaml';
 import { OPENCODE_CONFIG_DIR } from '../opencode/config-files.js';
+import { writeFileAtomic } from '../opencode/atomic-write.js';
 import { readBoundedFileSync } from '../shared/bounded-file-read.js';
 import { isString } from '../shared/object-guards.js';
 
@@ -127,7 +128,7 @@ function writeMarkdownFile(filePath: string, { content, aliases = [], descriptio
   }
 
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, output, 'utf8');
+  writeFileAtomic(filePath, output);
 }
 
 function loadSnippetFile(dir: string, filename: string, source: SnippetScope): Snippet | null {

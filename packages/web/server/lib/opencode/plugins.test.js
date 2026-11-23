@@ -730,4 +730,10 @@ describe('opencode plugins data layer', () => {
     expect(switchStore.read()).toEqual({ ok: true, resources: [] });
   });
 
+  test('writes byte-view plugin content byte-exact, including non-UTF8 bytes', () => {
+    const bytes = new Uint8Array([0x00, 0xff, 0x10, 0x41, 0x80]);
+    plugins.writePluginDirFile({ fileName: 'bytes.js', content: bytes, scope: 'project' }, projectDir);
+    const written = fs.readFileSync(path.join(projectDir, '.opencode', 'plugins', 'bytes.js'));
+    expect([...written]).toEqual([...bytes]);
+  });
 });

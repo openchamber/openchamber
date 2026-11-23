@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Worker } from 'worker_threads';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { MD_FILE_MAX_BYTES, parseMdFile, parseMdFileAsync, writeMdFile } from './markdown-files.js';
+import { MD_FILE_MAX_BYTES, parseMdFile, parseMdFileAsync, writeMdFile, writePromptFile } from './markdown-files.js';
 import { readConfigFile, writeConfig } from './config-files.js';
 import { updateAgent } from './agents.js';
 
@@ -295,5 +296,84 @@ describe('updateAgent frontmatter preservation', () => {
       request: { body: { temperature: 0.7 } },
     });
     expect(parsed.body).toBe('Body of strateg.');
+  });
+});
+
+describe('writePromptFile', () => {
+  const PROMPT_DIR = path.join(os.tmpdir(), `openchamber-prompt-file-test-${process.pid}`);
+
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    fs.rmSync(PROMPT_DIR, { recursive: true, force: true });
+    fs.mkdirSync(PROMPT_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(PROMPT_DIR, { recursive: true, force: true });
+  });
+
+  it('keeps a symlinked prompt file a symlink and writes through to the target', () => {
+    const target = path.join(PROMPT_DIR, 'target.md');
+    const link = path.join(PROMPT_DIR, 'link.md');
+    fs.writeFileSync(target, 'old prompt', 'utf8');
+    fs.symlinkSync(target, link);
+    writePromptFile(link, 'new prompt');
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(target, 'utf8')).toBe('new prompt');
+  });
+
+  it('never lets a concurrent reader observe an empty or partial file during a save', async () => {
+    const filePath = path.join(PROMPT_DIR, 'prompt.md');
+    const payloadA = 'a'.repeat(256 * 1024);
+    const payloadB = 'b'.repeat(128 * 1024);
+    writePromptFile(filePath, payloadA);
+
+    const stopFlag = new Int32Array(new SharedArrayBuffer(4));
+    const readerSource = `
+      const fs = require('fs');
+      const { parentPort, workerData } = require('worker_threads');
+      const allowed = new Set(workerData.lengths);
+      const seen = new Set();
+      let reads = 0;
+      let badLength = -1;
+      while (Atomics.load(workerData.stopFlag, 0) === 0) {
+        let length;
+        try {
+          length = fs.readFileSync(workerData.filePath).length;
+        } catch {
+          continue;
+        }
+        reads += 1;
+        if (!allowed.has(length)) {
+          badLength = length;
+          break;
+        }
+        seen.add(length);
+      }
+      parentPort.postMessage({ badLength, reads, seen: [...seen] });
+    `;
+    const worker = new Worker(readerSource, {
+      eval: true,
+      workerData: { filePath, lengths: [payloadA.length, payloadB.length], stopFlag },
+    });
+    const resultPromise = new Promise((resolve) => worker.once('message', resolve));
+    try {
+      for (let i = 0; i < 60; i += 1) {
+        writePromptFile(filePath, i % 2 === 0 ? payloadB : payloadA);
+      }
+    } finally {
+      Atomics.store(stopFlag, 0, 1);
+    }
+    const result = await resultPromise;
+    await worker.terminate();
+
+    // Oracle (#2378): every length the racing reader observed is exactly one
+    // of the two complete generations — never 0 (truncated) and never a
+    // partial length in between.
+    expect(result.badLength).toBe(-1);
+    expect(result.reads).toBeGreaterThan(10);
+    expect(result.seen).toContain(payloadA.length);
+    expect(result.seen).toContain(payloadB.length);
   });
 });

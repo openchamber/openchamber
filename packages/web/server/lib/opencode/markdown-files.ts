@@ -204,7 +204,7 @@ function resolvePromptFilePath<Reference>(reference: Reference) {
 function writePromptFile(filePath: string, content?: string | null) {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, content ?? '', 'utf8');
+  writeFileAtomic(filePath, content ?? '');
   console.log(`Updated prompt file: ${filePath}`);
 }
 

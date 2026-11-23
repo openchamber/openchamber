@@ -19,7 +19,7 @@ function resolveWriteTarget(filePath: string) {
   return target;
 }
 
-export function writeFileAtomic(filePath: string, content: string) {
+export function writeFileAtomic(filePath: string, content: string | ArrayBufferView) {
   const target = resolveWriteTarget(filePath);
   const exists = fs.existsSync(target);
   if (exists) {
@@ -30,7 +30,11 @@ export function writeFileAtomic(filePath: string, content: string) {
   try {
     const fd = fs.openSync(tmp, 'wx', mode ?? 0o666);
     try {
-      fs.writeFileSync(fd, content, 'utf8');
+      if (typeof content === 'string') {
+        fs.writeFileSync(fd, content, 'utf8');
+      } else {
+        fs.writeFileSync(fd, new Uint8Array(content.buffer, content.byteOffset, content.byteLength));
+      }
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);

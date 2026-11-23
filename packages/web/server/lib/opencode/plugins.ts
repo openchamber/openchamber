@@ -18,6 +18,7 @@ import { isPluginDenialOverridden, pluginPolicyResource, pluginSwitchState } fro
 import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from './config-v2.js';
 import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
 import { canonicalPluginPath, isExistingPluginFileName, pluginDirEntryKind, resolveLocalPluginPath } from './plugin-paths.js';
+import { writeFileAtomic } from './atomic-write.js';
 import type { JsonObject, JsonValue } from '../shared/json-values.js';
 import type { OpenCodeConfigLayer, OpenCodeConfigLayers } from './config-files.js';
 import type { PluginSwitchStore, PluginSwitchState } from './plugin-switches.js';
@@ -570,10 +571,8 @@ function writePluginDirFile(file: PluginFileInput | null | undefined, workingDir
     throw codedError(`Plugin file exceeds maximum size of ${MAX_PLUGIN_FILE_BYTES} bytes`, 'PLUGIN_FILE_TOO_LARGE');
   }
   fs.mkdirSync(dir, { recursive: true });
-  if (isString(content)) {
-    fs.writeFileSync(absolutePath, content, 'utf8');
-  } else if (ArrayBuffer.isView(content)) {
-    fs.writeFileSync(absolutePath, new Uint8Array(content.buffer, content.byteOffset, content.byteLength));
+  if (isString(content) || ArrayBuffer.isView(content)) {
+    writeFileAtomic(absolutePath, content);
   } else {
     throw new TypeError('Plugin file content must be text or bytes');
   }
