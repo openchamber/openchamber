@@ -50,6 +50,25 @@ const WINDOWS_PROBE_TIMEOUT_MS = 10_000;
 const LOGIN_SHELL_ENV_MARKER = '__OPENCHAMBER_ENV__';
 const LOGIN_SHELL_ENV_COMMAND = `echo ${LOGIN_SHELL_ENV_MARKER}; env -0`;
 
+// Variables that point at the user's real OpenCode state. Filling them from
+// the login shell is only safe when the caller did not isolate the launch: a
+// caller that points HOME or an XDG base directory somewhere else expects
+// OpenCode state to live under those directories too, not the shell's.
+const PATH_BEARING_ENV_KEYS = [
+  'OPENCODE_DB',
+  'OPENCODE_CONFIG',
+  'OPENCODE_CONFIG_DIR',
+  'XDG_DATA_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_STATE_HOME',
+  'XDG_CACHE_HOME',
+  'HOME',
+];
+
+// The caller-directory variables compared against the snapshot to detect an
+// isolated launch.
+const ISOLATION_ENV_KEYS = ['HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME'];
+
 const WELL_KNOWN_OPENCODE_PATHS = [
   '/opt/homebrew/bin/opencode',
   '/usr/local/bin/opencode',
@@ -314,7 +333,20 @@ export const createOpenCodeEnvRuntime = (deps: OpenCodeEnvDependencies) => {
       return;
     }
 
+    const callerIsolatedLaunch = ISOLATION_ENV_KEYS.some((key) => {
+      const callerValue = process.env[key];
+      const shellValue = snapshot[key];
+      return isString(callerValue) && callerValue.length > 0
+        && isString(shellValue) && shellValue.length > 0
+        && normalizeDirectoryPath(callerValue) !== normalizeDirectoryPath(shellValue);
+    });
+
     const skipKeys = new Set(['PWD', 'OLDPWD', 'SHLVL', '_', 'ARGV0']);
+    if (callerIsolatedLaunch) {
+      for (const key of PATH_BEARING_ENV_KEYS) {
+        skipKeys.add(key);
+      }
+    }
     for (const [key, value] of Object.entries(snapshot)) {
       if (skipKeys.has(key)) {
         continue;
