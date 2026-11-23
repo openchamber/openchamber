@@ -70,3 +70,30 @@ describe('Git redaction (#2074 residual shapes)', () => {
     expect(redactGitText("{'ref': 'main'}")).toBe("{'ref': 'main'}");
   });
 });
+
+describe('Git redaction (#2463 mid-line assignments)', () => {
+  const secret = 'PROBE789';
+
+  it.each([
+    ['equals after fatal prefix', `fatal: api_key=${secret}`],
+    ['equals after error prefix', `error: client_secret=${secret}`],
+    ['x-api-key mid-sentence', `run with x-api-key=${secret} now`],
+    ['colon form after msg prefix', `msg: access_token: ${secret}`],
+    ['password mid-line', `clone failed password=${secret} retrying`],
+    ['bare secret key mid-line', `warning: secret=${secret} in config`],
+    ['token colon form mid-line', `debug: token: ${secret} end`],
+  ])('redacts the secret in: %s', (_name, input) => {
+    const output = redactGitText(input);
+    expect(output).not.toContain(secret);
+    expect(output).toContain('[redacted]');
+  });
+
+  it('preserves non-sensitive assignments and surrounding text', () => {
+    expect(redactGitText('fatal: ref=main count=3 user=bob')).toBe('fatal: ref=main count=3 user=bob');
+    expect(redactGitText(`fatal: api_key=${secret} for repo`)).toBe('fatal: api_key=[redacted] for repo');
+  });
+
+  it('keeps the scheme word for bearer-headed mid-line values', () => {
+    expect(redactGitText(`fatal: token=Bearer ${secret}`)).toBe('fatal: token=Bearer [redacted]');
+  });
+});
