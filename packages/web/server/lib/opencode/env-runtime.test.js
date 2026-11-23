@@ -246,6 +246,95 @@ describe('OpenCode env runtime', () => {
     }
   });
 
+  it('does not fill path-bearing OpenCode variables from the shell when the caller isolated HOME', () => {
+    const isolatedHome = createTempDir('openchamber-isolated-home-');
+    const keys = ['HOME', 'OPENCODE_DB', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR', 'XDG_DATA_HOME', 'OPENCHAMBER_ISO_TEST_MARKER'];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    process.env.HOME = isolatedHome;
+    delete process.env.OPENCODE_DB;
+    delete process.env.OPENCODE_CONFIG;
+    delete process.env.OPENCODE_CONFIG_DIR;
+    delete process.env.XDG_DATA_HOME;
+    delete process.env.OPENCHAMBER_ISO_TEST_MARKER;
+    const { runtime, state } = createRuntime({});
+    state.cachedLoginShellEnvSnapshot = {
+      PATH: '/usr/bin',
+      HOME: '/home/test-user',
+      OPENCODE_DB: '/home/test-user/.local/share/opencode/opencode.db',
+      OPENCODE_CONFIG: '/home/test-user/.config/opencode/opencode.json',
+      OPENCODE_CONFIG_DIR: '/home/test-user/.config/opencode',
+      XDG_DATA_HOME: '/home/test-user/.local/share',
+      OPENCHAMBER_ISO_TEST_MARKER: '1',
+    };
+
+    try {
+      runtime.applyLoginShellEnvSnapshot();
+      expect(process.env.HOME).toBe(isolatedHome);
+      expect(process.env.OPENCODE_DB).toBeUndefined();
+      expect(process.env.OPENCODE_CONFIG).toBeUndefined();
+      expect(process.env.OPENCODE_CONFIG_DIR).toBeUndefined();
+      expect(process.env.XDG_DATA_HOME).toBeUndefined();
+      // Non-path variables still fill from the snapshot.
+      expect(process.env.OPENCHAMBER_ISO_TEST_MARKER).toBe('1');
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
+
+  it('treats a caller-set XDG directory that differs from the shell as an isolated launch', () => {
+    const isolatedDataHome = createTempDir('openchamber-isolated-xdg-');
+    const keys = ['XDG_DATA_HOME', 'OPENCODE_DB'];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    process.env.XDG_DATA_HOME = isolatedDataHome;
+    delete process.env.OPENCODE_DB;
+    const { runtime, state } = createRuntime({});
+    state.cachedLoginShellEnvSnapshot = {
+      PATH: '/usr/bin',
+      HOME: process.env.HOME,
+      XDG_DATA_HOME: '/home/test-user/.local/share',
+      OPENCODE_DB: '/home/test-user/.local/share/opencode/opencode.db',
+    };
+
+    try {
+      runtime.applyLoginShellEnvSnapshot();
+      expect(process.env.XDG_DATA_HOME).toBe(isolatedDataHome);
+      expect(process.env.OPENCODE_DB).toBeUndefined();
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
+
+  it('still fills path-bearing OpenCode variables from the shell when the launch is not isolated', () => {
+    const keys = ['OPENCODE_DB', 'OPENCODE_CONFIG_DIR'];
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    delete process.env.OPENCODE_DB;
+    delete process.env.OPENCODE_CONFIG_DIR;
+    const { runtime, state } = createRuntime({});
+    state.cachedLoginShellEnvSnapshot = {
+      PATH: '/usr/bin',
+      HOME: process.env.HOME,
+      OPENCODE_DB: '/home/test-user/.local/share/opencode/opencode.db',
+      OPENCODE_CONFIG_DIR: '/home/test-user/.config/opencode',
+    };
+
+    try {
+      runtime.applyLoginShellEnvSnapshot();
+      expect(process.env.OPENCODE_DB).toBe('/home/test-user/.local/share/opencode/opencode.db');
+      expect(process.env.OPENCODE_CONFIG_DIR).toBe('/home/test-user/.config/opencode');
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
+
   it('uses a login-shell snapshot provided by the host instead of probing the shell', () => {
     let probes = 0;
     const spawnSyncSpy = () => { probes += 1; return { status: 0, stdout: 'PATH=/from/probe\0' }; };
