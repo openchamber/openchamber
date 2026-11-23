@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { createTunnelRoutesRuntime } from './routes.js';
-import { TunnelServiceError, normalizeOptionalPath, normalizeTunnelProvider } from './types.js';
+import { TunnelServiceError, isSupportedTunnelMode, normalizeOptionalPath, normalizeTunnelMode, normalizeTunnelProvider } from './types.js';
 
 describe('public tunnel password requirement', () => {
   const createRuntime = (hasUiPassword) => {
@@ -121,5 +121,156 @@ describe('tunnel doctor required fields', () => {
     expect(checks.find((check) => check.id === 'requirement_hostname').status).toBe('fail');
     expect(checks.find((check) => check.id === 'requirement_token').status).toBe('fail');
     expect(checks.find((check) => check.id === 'requirement_configPath').status).toBe('fail');
+  });
+});
+
+describe('tunnel start failure cleanup', () => {
+  const createStartRuntime = ({ failConfigRead = false, startError = null, withPrevious = false } = {}) => {
+    const events = [];
+    const previousController = { provider: 'cloudflare', mode: 'quick', stop: () => {} };
+    let activeController = withPrevious ? previousController : null;
+    let stopCalls = 0;
+    let clearCalls = 0;
+
+    const tunnelService = {
+      start: async () => {
+        if (startError) {
+          throw startError;
+        }
+        activeController = { provider: 'cloudflare', mode: 'quick', stop: () => {} };
+        events.push('service-start');
+        return { provider: 'cloudflare', publicUrl: 'https://new.example.com', activeMode: 'quick', providerMetadata: null };
+      },
+      stop: () => {
+        stopCalls += 1;
+        events.push('service-stop');
+        activeController = null;
+        return true;
+      },
+      resolveActiveProvider: () => (activeController ? 'cloudflare' : null),
+      resolveActiveMode: () => (activeController ? 'quick' : null),
+      getPublicUrl: () => (activeController ? 'https://old.example.com' : null),
+    };
+
+    const tunnelAuthController = {
+      getActiveTunnelId: () => (withPrevious ? 'existing-tunnel-id' : null),
+      getActiveTunnelMode: () => 'quick',
+      revokeTunnelArtifacts: () => ({ revokedBootstrapCount: 0, invalidatedSessionCount: 0 }),
+      setActiveTunnel: () => { events.push('auth-set'); },
+      issueBootstrapToken: () => ({ token: 'bootstrap-token', expiresAt: 999 }),
+      clearActiveTunnel: () => { clearCalls += 1; events.push('auth-clear'); },
+      listTunnelSessions: () => [],
+    };
+
+    const runtime = createTunnelRoutesRuntime({
+      crypto: { randomUUID: () => 'uuid-1' },
+      URL,
+      tunnelService,
+      tunnelProviderRegistry: { get: () => null },
+      tunnelAuthController,
+      hasUiPassword: true,
+      readSettingsFromDiskMigrated: async () => ({}),
+      readManagedRemoteTunnelConfigFromDisk: async () => {
+        if (failConfigRead) {
+          throw new Error('managed config read failed');
+        }
+        return { tunnels: [] };
+      },
+      normalizeTunnelProvider,
+      normalizeTunnelMode,
+      normalizeOptionalPath,
+      normalizeManagedRemoteTunnelHostname: () => undefined,
+      normalizeTunnelBootstrapTtlMs: () => null,
+      normalizeTunnelSessionTtlMs: () => 1000,
+      isSupportedTunnelMode,
+      upsertManagedRemoteTunnelToken: async () => {},
+      resolveManagedRemoteTunnelToken: async () => '',
+      TUNNEL_MODE_MANAGED_REMOTE: 'managed-remote',
+      TUNNEL_PROVIDER_CLOUDFLARE: 'cloudflare',
+      TunnelServiceError,
+      getActivePort: () => 4321,
+      getRuntimeManagedRemoteTunnelHostname: () => undefined,
+      setRuntimeManagedRemoteTunnelHostname: () => {},
+      getRuntimeManagedRemoteTunnelToken: () => '',
+      setRuntimeManagedRemoteTunnelToken: () => {},
+      getActiveTunnelController: () => activeController,
+      setActiveTunnelController: (value) => {
+        events.push(value ? 'controller-set' : 'controller-null');
+        activeController = value;
+      },
+    });
+
+    const routes = new Map();
+    runtime.registerRoutes({
+      get: (path, handler) => routes.set(`GET ${path}`, handler),
+      post: (path, handler) => routes.set(`POST ${path}`, handler),
+      put: (path, handler) => routes.set(`PUT ${path}`, handler),
+    });
+
+    const invoke = async (route, req) => {
+      let status = 200;
+      let body;
+      await routes.get(route)(req, {
+        status(code) { status = code; return this; },
+        json(payload) { body = payload; return this; },
+      });
+      return { status, body };
+    };
+
+    return {
+      events,
+      previousController,
+      invoke,
+      getActiveController: () => activeController,
+      getStopCalls: () => stopCalls,
+      getClearCalls: () => clearCalls,
+    };
+  };
+
+  const silenceConsoleError = async (fn) => {
+    const original = console.error;
+    console.error = () => {};
+    try {
+      return await fn();
+    } finally {
+      console.error = original;
+    }
+  };
+
+  it('stops the just-started process when post-start work fails', async () => {
+    const harness = createStartRuntime({ failConfigRead: true });
+    const { status, body } = await silenceConsoleError(() => harness.invoke('POST /api/openchamber/tunnel/start', { body: {} }));
+    expect(status).toBe(500);
+    expect(body.code).toBe('startup_failed');
+    expect(harness.getStopCalls()).toBe(1);
+    expect(harness.getActiveController()).toBeNull();
+    expect(harness.getClearCalls()).toBe(1);
+    expect(harness.events.indexOf('service-stop')).toBeLessThan(harness.events.indexOf('auth-clear'));
+
+    await harness.invoke('POST /api/openchamber/tunnel/stop', { body: {} });
+    expect(harness.getStopCalls()).toBe(1);
+  });
+
+  it('stops the replacement process when post-start work fails over an existing tunnel', async () => {
+    const harness = createStartRuntime({ failConfigRead: true, withPrevious: true });
+    const { status } = await silenceConsoleError(() => harness.invoke('POST /api/openchamber/tunnel/start', { body: {} }));
+    expect(status).toBe(500);
+    expect(harness.getStopCalls()).toBe(1);
+    expect(harness.getActiveController()).toBeNull();
+    expect(harness.getClearCalls()).toBe(1);
+  });
+
+  it('preserves the previously active tunnel when the start fails before mutating state', async () => {
+    const harness = createStartRuntime({
+      startError: new TunnelServiceError('validation_error', 'invalid tunnel request'),
+      withPrevious: true,
+    });
+    const { status, body } = await silenceConsoleError(() => harness.invoke('POST /api/openchamber/tunnel/start', { body: {} }));
+    expect(status).toBe(422);
+    expect(body.code).toBe('validation_error');
+    expect(harness.getStopCalls()).toBe(0);
+    expect(harness.getClearCalls()).toBe(0);
+    expect(harness.getActiveController()).toBe(harness.previousController);
+    expect(harness.events).not.toContain('controller-null');
   });
 });

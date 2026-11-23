@@ -547,6 +547,7 @@ export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies
       if (!hasUiPassword) {
         return res.status(403).json({ ok: false, code: 'ui_password_required', error: 'A UI password is required before starting a public tunnel. Restart OpenChamber with --ui-password.' });
       }
+      let previousController: TunnelController | null = null;
       try {
         const settings = await readSettingsFromDiskMigrated();
         if (isText(_req?.body?.provider) && _req.body.provider.trim().length > 0) {
@@ -604,6 +605,7 @@ export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies
         const savedHttpsPort = isNumber(settings?.tunnelHttpsPort) && allowedHttpsPorts.includes(settings.tunnelHttpsPort) ? settings.tunnelHttpsPort : undefined;
         const httpsPort = _req?.body?.httpsPort ?? savedHttpsPort;
 
+        previousController = getActiveTunnelController();
         const previousTunnelId = tunnelAuthController.getActiveTunnelId();
         const previousMode = tunnelAuthController.getActiveTunnelMode();
         const previousProvider = tunnelService.resolveActiveProvider();
@@ -676,8 +678,20 @@ export const createTunnelRoutesRuntime = (dependencies: TunnelRoutesDependencies
         });
       } catch (error) {
         console.error('Failed to start tunnel:', error);
-        setActiveTunnelController(null);
-        tunnelAuthController.clearActiveTunnel();
+        const currentController = getActiveTunnelController();
+        if (currentController && currentController !== previousController) {
+          // This request installed a new tunnel before the failure: stop the
+          // just-started provider process before dropping its only handle,
+          // otherwise it keeps running untracked behind a "no tunnel" state.
+          tunnelService.stop();
+          tunnelAuthController.clearActiveTunnel();
+        } else if (!currentController && previousController) {
+          // The service already stopped the previous tunnel while attempting
+          // this start, so only the stale auth state is left to clear.
+          tunnelAuthController.clearActiveTunnel();
+        }
+        // Otherwise the failure happened before any tunnel state changed:
+        // preserve the previously active controller and auth state.
         if (error instanceof TunnelServiceError) {
           const status = error.code === 'missing_dependency'
             ? 400
