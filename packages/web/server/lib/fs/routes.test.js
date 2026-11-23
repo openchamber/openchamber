@@ -958,6 +958,31 @@ describe('fs write, delete, rename and mkdir stay inside the workspace through a
     await expect(nativeFs.lstat(path.join(outside, 'newdir'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('refuses a mkdir with missing descendants below a link out of the workspace', async () => {
+    const getRoute = registerReal(workspace);
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/mkdir')({
+      body: { path: path.join(workspace, 'link', 'created', 'nested') },
+    }, res);
+
+    expect(res.statusCode).toBe(403);
+    await expect(nativeFs.lstat(path.join(outside, 'created'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('creates missing descendants below a link that stays inside the workspace', async () => {
+    const getRoute = registerReal(workspace);
+    await mkdir(path.join(workspace, 'inner'));
+    await nativeFs.symlink(path.join(workspace, 'inner'), path.join(workspace, 'inner-link'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    const res = createMockResponse();
+    await getRoute('POST', '/api/fs/mkdir')({
+      body: { path: path.join(workspace, 'inner-link', 'created', 'nested') },
+    }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect((await nativeFs.stat(path.join(workspace, 'inner', 'created', 'nested'))).isDirectory()).toBe(true);
+  });
+
   it('creates inside a link to a workspace folder whose name starts with two dots', async () => {
     const getRoute = registerReal(workspace);
     await mkdir(path.join(workspace, '..notes'));
