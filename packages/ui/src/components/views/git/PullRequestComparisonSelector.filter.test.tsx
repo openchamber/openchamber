@@ -62,6 +62,19 @@ const labelledComparison: ReturnType<typeof usePullRequestComparison> = {
   ],
 };
 
+const manyLabels: Label[] = [
+  'api', 'bug', 'docs', 'feature', 'good first issue', 'help wanted',
+  'performance', 'question', 'refactor', 'tests', 'ui', 'wontfix',
+].map((name, index) => ({ name, color: index % 2 === 0 ? '6e7781' : 'd73a4a' }));
+
+const crowdedComparison: ReturnType<typeof usePullRequestComparison> = {
+  ...comparison,
+  prs: [
+    { ...changeRequest(1, 'nebula', 'open', 'Nebula open'), labels: manyLabels },
+    changeRequest(2, 'octocat', 'open', 'Octocat open'),
+  ],
+};
+
 type PickerHarness = {
   container: HTMLDivElement;
   click: (element: HTMLElement | null | undefined) => Promise<void>;
@@ -155,49 +168,6 @@ test('the picker filter narrows the loaded pull requests and shows its active st
   });
 });
 
-test('the phone picker keeps its filter in the same sheet, collapsed labels included', async () => {
-  await withPicker(labelledComparison, async ({ container, click, rows }) => {
-    const dialogs = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
-    const overlayRoots = () => [...document.querySelectorAll<HTMLElement>('#mobile-overlay-root > *')];
-    const filterTrigger = () => document.querySelector<HTMLButtonElement>('button[aria-pressed]');
-    const group = (name: string) => document.querySelector<HTMLElement>(`[role="group"][aria-label="${name}"]`);
-    const labelsRow = () => group('Labels')?.querySelector<HTMLButtonElement>('button[aria-expanded]') ?? null;
-    const labelChoice = (name: string) => [...(group('Labels')?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
-      .find((element) => element.textContent?.trim() === name);
-
-    await click(container.querySelector<HTMLButtonElement>('button'));
-    expect(dialogs()).toHaveLength(1);
-    expect(overlayRoots()).toHaveLength(1);
-    expect(document.querySelector('input')).not.toBeNull();
-    expect(group('Status')).toBeNull();
-
-    await click(filterTrigger());
-    expect(dialogs()).toHaveLength(1);
-    expect(overlayRoots()).toHaveLength(1);
-    expect(group('Status')).not.toBeNull();
-    expect(filterTrigger()?.getAttribute('aria-expanded')).toBe('true');
-    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('false');
-    expect(labelsRow()?.getAttribute('aria-expanded')).toBe('false');
-    expect(labelChoice('bug')).toBeUndefined();
-
-    await click(labelsRow());
-    expect(labelsRow()?.getAttribute('aria-expanded')).toBe('true');
-    expect(labelChoice('bug')).toBeDefined();
-
-    await click(labelChoice('bug'));
-    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('true');
-    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: bug');
-    expect(rows()).toHaveLength(1);
-    expect(rows()[0]?.textContent).toContain('Nebula open');
-
-    await click(filterTrigger());
-    expect(group('Status')).toBeNull();
-    expect(filterTrigger()?.getAttribute('aria-expanded')).toBe('false');
-    expect(filterTrigger()?.getAttribute('aria-pressed')).toBe('true');
-    expect(rows()).toHaveLength(1);
-  }, { mobile: true });
-});
-
 test('the picker keeps its label choices collapsed until the Labels row is opened and collapses when filters are cleared', async () => {
   await withPicker(labelledComparison, async ({ container, click, rows }) => {
     const filterMenu = () => [...document.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-content"]')]
@@ -217,7 +187,7 @@ test('the picker keeps its label choices collapsed until the Labels row is opene
     expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
 
     await click(labelRow());
-    expect(labelChoices().map((choice) => choice.textContent?.trim())).toEqual(['docs', 'bug']);
+    expect(labelChoices().map((choice) => choice.textContent?.trim())).toEqual(['bug', 'docs']);
     expect(labelRow()?.getAttribute('aria-expanded')).toBe('true');
 
     await click(labelChoices().find((choice) => choice.textContent?.includes('docs')));
@@ -241,4 +211,29 @@ test('the picker keeps its label choices collapsed until the Labels row is opene
     expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
     expect(rows()).toHaveLength(2);
   });
+});
+
+test('the phone picker opens the same filter menu as the board, not a sheet', async () => {
+  await withPicker(crowdedComparison, async ({ container, click, rows }) => {
+    const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
+    const menu = () => document.querySelector<HTMLElement>('[data-slot="dropdown-menu-content"]');
+    const labelsRow = () => [...(menu()?.querySelectorAll<HTMLButtonElement>('button[aria-expanded]') ?? [])]
+      .find((element) => element.textContent?.trim().startsWith('Labels')) ?? null;
+    const labelChoices = () => menu()?.textContent ?? '';
+
+    await click(container.querySelector<HTMLButtonElement>('button'));
+    expect(dialog()).not.toBeNull();
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Filter"]'));
+
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(menu()).not.toBeNull();
+    expect(labelsRow()?.getAttribute('aria-expanded')).toBe('false');
+    expect(labelChoices()).not.toContain('api');
+
+    await click(labelsRow());
+    expect(labelsRow()?.getAttribute('aria-expanded')).toBe('true');
+    for (const label of manyLabels) expect(labelChoices()).toContain(label.name);
+    expect(rows().length).toBeGreaterThan(0);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  }, { mobile: true });
 });

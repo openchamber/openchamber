@@ -1,4 +1,3 @@
-import { useRevealOnExpand } from '@/hooks/useRevealOnExpand';
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
@@ -46,13 +45,12 @@ type ReferenceFilterPanelProps = {
     groups: readonly ReferenceFilterGroup[];
     labelSection?: ReferenceFilterLabelSection | null;
     collapsibleLabels?: boolean;
-    appearance: 'full' | 'icon' | 'inline';
+    appearance: 'full' | 'icon';
     mobile?: boolean;
     ariaLabel?: string;
     triggerTitle?: string;
     onClearAll?: () => void;
-    expanded?: boolean;
-    onToggle?: () => void;
+    menuMaxHeightClassName?: string;
 };
 
 type LabelChoices =
@@ -431,29 +429,6 @@ const MobileReferenceFilterSheet: React.FC<{
     );
 };
 
-export const ReferenceFilterInline: React.FC<{
-    groups: readonly ReferenceFilterGroup[];
-    labelSection?: ReferenceFilterLabelSection | null;
-    collapsibleLabels?: boolean;
-    onClearAll?: () => void;
-}> = ({ groups, labelSection = null, collapsibleLabels = false, onClearAll }) => {
-    const [labelsExpanded, setLabelsExpanded] = React.useState(false);
-    const scrollRef = useRevealOnExpand<HTMLDivElement>(labelsExpanded, '[aria-expanded]');
-    return (
-        <div ref={scrollRef} className="max-h-[min(35dvh,16rem)] shrink-0 overflow-y-auto overscroll-contain border-b border-edge-muted pb-1">
-            <MobileFilterBody
-                groups={groups}
-                labelSection={labelSection}
-                collapsibleLabels={collapsibleLabels}
-                labelsExpanded={labelsExpanded}
-                onToggleLabels={() => setLabelsExpanded((current) => !current)}
-                onCollapseLabels={() => setLabelsExpanded(false)}
-                onClearAll={onClearAll}
-            />
-        </div>
-    );
-};
-
 export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
     title,
     summary,
@@ -465,8 +440,7 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
     ariaLabel,
     triggerTitle,
     onClearAll,
-    expanded = false,
-    onToggle,
+    menuMaxHeightClassName,
 }) => {
     const { t } = useI18n();
     const [labelsExpanded, setLabelsExpanded] = React.useState(false);
@@ -480,14 +454,11 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
             'aria-label': accessibleLabel,
             title: tooltip,
         };
-        if (appearance === 'inline') {
-            common['aria-expanded'] = expanded;
-            common.onClick = onToggle;
-        } else if (open) {
+        if (open) {
             common['aria-haspopup'] = 'dialog';
             common.onClick = open;
         }
-        if (appearance === 'icon' || appearance === 'inline') {
+        if (appearance === 'icon') {
             return (
                 <button
                     {...common}
@@ -519,8 +490,6 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
         );
     };
 
-    if (appearance === 'inline') return trigger();
-
     if (mobile) {
         return (
             <MobileReferenceFilterSheet
@@ -539,9 +508,10 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
             <DropdownMenuTrigger asChild>{trigger()}</DropdownMenuTrigger>
             <DropdownMenuContent
                 align="end"
+                positionerClassName="z-[70]"
                 className={cn(
                     'overflow-y-auto',
-                    collapsibleLabels ? 'max-h-[min(var(--available-height),40rem)]' : 'max-h-[min(var(--available-height),28rem)]',
+                    menuMaxHeightClassName ?? (collapsibleLabels ? 'max-h-[min(var(--available-height),40rem)]' : 'max-h-[min(var(--available-height),28rem)]'),
                     labelSection ? 'w-64' : 'w-56',
                 )}
             >

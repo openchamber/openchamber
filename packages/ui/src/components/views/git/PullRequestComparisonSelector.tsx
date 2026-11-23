@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
-import { ReferenceFilterInline, ReferenceFilterPanel, type ReferenceFilterGroup, type ReferenceFilterLabelSection } from '@/components/references/referenceFilterPanel';
+import { ReferenceFilterPanel, type ReferenceFilterGroup, type ReferenceFilterLabelSection } from '@/components/references/referenceFilterPanel';
 import {
   DEFAULT_PULL_REQUEST_FILTER,
   PULL_REQUEST_STATUS_FILTERS,
@@ -37,8 +37,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   const sheet = mobile && !tablet.enabled;
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<PullRequestFilter>(DEFAULT_PULL_REQUEST_FILTER);
-  const [filterInline, setFilterInline] = useState(false);
-  useEffect(() => { if (!comparison.enabled) { setOpen(false); setFilter(DEFAULT_PULL_REQUEST_FILTER); setFilterInline(false); } }, [comparison.enabled]);
+  useEffect(() => { if (!comparison.enabled) { setOpen(false); setFilter(DEFAULT_PULL_REQUEST_FILTER); } }, [comparison.enabled]);
   const label = t('pullRequestComparison.select');
   const changeOpen = (next: boolean) => {
     setOpen(next);
@@ -46,7 +45,6 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     if (!next) {
       comparison.setQuery('');
       setFilter(DEFAULT_PULL_REQUEST_FILTER);
-      setFilterInline(false);
     }
   };
   const selected = comparison.selectedSource;
@@ -70,7 +68,8 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   const allLabel = statusLabel('all');
   const repositories = [...new Set(comparison.prs.map(pullRequestRepository))];
   const authors = [...new Set(comparison.prs.flatMap((pr) => (pr.author ? [pr.author.username] : [])))];
-  const labelChoices = [...new Map(comparison.prs.flatMap((pr) => pr.labels ?? []).map((entry) => [entry.name, entry])).values()];
+  const labelChoices = [...new Map(comparison.prs.flatMap((pr) => pr.labels ?? []).map((entry) => [entry.name, entry])).values()]
+    .sort((left, right) => left.name.localeCompare(right.name));
   const group = (groupLabel: string, value: string, options: { value: string; label: string }[], onSelect: (value: string) => void): ReferenceFilterGroup =>
     ({ label: groupLabel, value, options, onSelect, taken: false });
   const groups: ReferenceFilterGroup[] = [
@@ -106,51 +105,51 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
         groups={groups}
         labelSection={labelSection}
         collapsibleLabels
-        appearance={sheet ? 'inline' : 'icon'}
-        mobile={sheet}
-        expanded={filterInline}
-        onToggle={() => setFilterInline((current) => !current)}
+        appearance="icon"
         onClearAll={clearFilter}
+        menuMaxHeightClassName="max-h-[min(60dvh,24rem)]"
       />}
       placeholder={t('session.githubPrPicker.searchPlaceholder')} aria-label={t('session.githubPrPicker.searchPlaceholder')} />
-    {sheet && filterInline ? <ReferenceFilterInline
-      groups={groups}
-      labelSection={labelSection}
-      collapsibleLabels
-      onClearAll={clearFilter}
-    /> : null}
-    {comparison.loading ? <div className="flex items-center gap-2 p-4 typography-meta text-muted-foreground">
-      <Icon name="loader-4" className="size-4 animate-spin" />{t('session.githubPrPicker.loading.pullRequests')}
-    </div> : comparison.error && comparison.prs.length === 0 ? <div className="flex flex-col items-center gap-2 p-4 typography-meta text-muted-foreground">
-      <span>{comparison.error}</span>
-      <Button variant="outline" size="sm" onClick={() => void comparison.refresh()}>{t('diffView.actions.retry')}</Button>
-    </div> : <CommandList className={cn('min-h-0', mobile && 'max-h-[min(45dvh,24rem)]')}>
-      <CommandEmpty>{t('session.githubPrPicker.empty.noPullRequestsFound')}</CommandEmpty>
-      <CommandGroup>
-        {open && visiblePrs.map((pr) => {
-          const key = `${joinProjectPath(pr.project.owner, pr.project.name)}#${pr.number}`;
-          return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
-            onSelect={() => { comparison.select(pr); changeOpen(false); }}>
-            <div className="min-w-0 flex-1">
-              <div dir="auto" className="oc-ui-start-align truncate typography-ui-label" title={pr.title}>{reference(pr.number)} {pr.title}</div>
-              <div dir="ltr" className="oc-ui-start-align truncate typography-meta text-muted-foreground">{joinProjectPath(pr.project.owner, pr.project.name)} · {pr.head} → {pr.base}</div>
-            </div>
-            {selected?.number === pr.number && selected.sourceRepo?.owner === pr.project.owner && selected.sourceRepo?.repo === pr.project.name
-              && <Icon name="check" className="size-3.5" />}
-          </CommandItem>;
-        })}
-      </CommandGroup>
-      {comparison.error && <p className="px-3 py-2 typography-meta text-muted-foreground">{comparison.error}</p>}
-      {!comparison.error && comparison.incompleteProjectIds.length > 0 && <div className="flex items-center justify-between gap-2 px-3 py-2 typography-meta text-muted-foreground">
-        <span>{t('pullRequestComparison.partial')}</span>
+    {comparison.loading ? (
+      <div className="flex items-center gap-2 p-4 typography-meta text-muted-foreground">
+        <Icon name="loader-4" className="size-4 animate-spin" />{t('session.githubPrPicker.loading.pullRequests')}
+      </div>
+    ) : comparison.error && comparison.prs.length === 0 ? (
+      <div className="flex flex-col items-center gap-2 p-4 typography-meta text-muted-foreground">
+        <span>{comparison.error}</span>
         <Button variant="outline" size="sm" onClick={() => void comparison.refresh()}>{t('diffView.actions.retry')}</Button>
-      </div>}
-      {comparison.hasMore && <Button variant="ghost" size="sm" disabled={comparison.loadingMore} onClick={() => void comparison.loadMore()}>
-        {comparison.error ? t('diffView.actions.retry') : t('session.githubPrPicker.actions.loadMore')}
-      </Button>}
-    </CommandList>}
+      </div>
+    ) : (
+      <CommandList className={cn('min-h-0', mobile && 'max-h-[min(45dvh,24rem)]')}>
+        <CommandEmpty>{t('session.githubPrPicker.empty.noPullRequestsFound')}</CommandEmpty>
+        <CommandGroup>
+          {open && visiblePrs.map((pr) => {
+            const key = `${joinProjectPath(pr.project.owner, pr.project.name)}#${pr.number}`;
+            return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
+              onSelect={() => { comparison.select(pr); changeOpen(false); }}>
+              <div className="min-w-0 flex-1">
+                <div dir="auto" className="oc-ui-start-align truncate typography-ui-label" title={pr.title}>{reference(pr.number)} {pr.title}</div>
+                <div dir="ltr" className="oc-ui-start-align truncate typography-meta text-muted-foreground">{joinProjectPath(pr.project.owner, pr.project.name)} · {pr.head} → {pr.base}</div>
+              </div>
+              {selected?.number === pr.number && selected.sourceRepo?.owner === pr.project.owner && selected.sourceRepo?.repo === pr.project.name
+                && <Icon name="check" className="size-3.5" />}
+            </CommandItem>;
+          })}
+        </CommandGroup>
+        {comparison.error && <p className="px-3 py-2 typography-meta text-muted-foreground">{comparison.error}</p>}
+        {!comparison.error && comparison.incompleteProjectIds.length > 0 && <div className="flex items-center justify-between gap-2 px-3 py-2 typography-meta text-muted-foreground">
+          <span>{t('pullRequestComparison.partial')}</span>
+          <Button variant="outline" size="sm" onClick={() => void comparison.refresh()}>{t('diffView.actions.retry')}</Button>
+        </div>}
+        {comparison.hasMore && <Button variant="ghost" size="sm" disabled={comparison.loadingMore} onClick={() => void comparison.loadMore()}>
+          {comparison.error ? t('diffView.actions.retry') : t('session.githubPrPicker.actions.loadMore')}
+        </Button>}
+      </CommandList>
+    )}
   </Command>;
-  if (sheet) return <>{trigger}<MobileOverlayPanel open={open} title={label} onClose={() => changeOpen(false)}>{picker}</MobileOverlayPanel></>;
+  if (sheet) return <>{trigger}<MobileOverlayPanel open={open} title={label} onClose={() => changeOpen(false)}>
+    {picker}
+  </MobileOverlayPanel></>;
   return <DropdownMenu open={open} onOpenChange={changeOpen}>
     <HoverTooltip label={selected?.sourceRepo ? `${joinProjectPath(selected.sourceRepo.owner, selected.sourceRepo.repo)} ${selectedLabel}` : label} side="bottom">
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
