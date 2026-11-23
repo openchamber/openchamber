@@ -1854,6 +1854,142 @@ describe('fs reveal', () => {
     expect(error).toHaveBeenCalledWith('Failed to reveal path:', expect.objectContaining({ cause: spawnError }));
     error.mockRestore();
   });
+
+  it('rejects a path outside the workspace without launching', async () => {
+    const spawn = vi.fn();
+    const handler = registerReveal({
+      fsPromises: {
+        access: vi.fn(async () => undefined),
+        stat: vi.fn(async () => ({ isDirectory: () => false })),
+      },
+      spawn,
+    });
+
+    const res = await callReveal(handler, { path: '/outside/secret.txt' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Path is outside of active workspace' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a symlink escape whose canonical target leaves the workspace', async () => {
+    const spawn = vi.fn();
+    const handler = registerReveal({
+      fsPromises: {
+        realpath: async (targetPath) => (targetPath === '/repo/link.txt' ? '/outside/secret.txt' : targetPath),
+        access: vi.fn(async () => undefined),
+        stat: vi.fn(async () => ({ isDirectory: () => false })),
+      },
+      spawn,
+    });
+
+    const res = await callReveal(handler, { path: '/repo/link.txt' });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('still reveals a path under a managed root', async () => {
+    const child = new EventEmitter();
+    child.unref = vi.fn();
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
+    const handler = registerReveal({
+      fsPromises: {
+        access: vi.fn(async () => undefined),
+        stat: vi.fn(async () => ({ isDirectory: () => false })),
+      },
+      spawn,
+    });
+
+    const res = await callReveal(handler, { path: '/home/user/.config/openchamber/chats/session/file.txt' });
+
+    expect(res.body).toEqual({ success: true, path: '/home/user/.config/openchamber/chats/session/file.txt' });
+    expect(spawn).toHaveBeenCalledWith('xdg-open', ['/home/user/.config/openchamber/chats/session'], { windowsHide: true, stdio: 'ignore', detached: true });
+  });
+});
+
+describe('fs reveal containment (real fs)', () => {
+  let base;
+  let workspace;
+  let outside;
+
+  beforeEach(async () => {
+    base = await mkdtemp(path.join(tmpdir(), 'oc-fs-reveal-'));
+    workspace = path.join(base, 'workspace');
+    outside = path.join(base, 'outside');
+    await mkdir(workspace, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await nativeFs.writeFile(path.join(workspace, 'file.txt'), 'inside');
+    await nativeFs.writeFile(path.join(outside, 'secret.txt'), 'outside');
+    await nativeFs.symlink(path.join(outside, 'secret.txt'), path.join(workspace, 'escape.txt'));
+  });
+
+  afterEach(async () => {
+    await rm(base, { recursive: true, force: true });
+  });
+
+  const registerRealReveal = (spawn) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => base },
+      path,
+      fsPromises: nativeFs,
+      spawn,
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: workspace }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: path.join(base, '.config'),
+    });
+    return getRoute('POST', '/api/fs/reveal');
+  };
+
+  const createLauncher = () => {
+    const child = new EventEmitter();
+    child.unref = vi.fn();
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    });
+    return spawn;
+  };
+
+  it('reveals an in-workspace file', async () => {
+    const spawn = createLauncher();
+    const handler = registerRealReveal(spawn);
+
+    const res = await callReveal(handler, { path: path.join(workspace, 'file.txt') });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ success: true, path: path.join(workspace, 'file.txt') });
+    expect(spawn).toHaveBeenCalledWith('xdg-open', [workspace], { windowsHide: true, stdio: 'ignore', detached: true });
+  });
+
+  it('rejects an outside path', async () => {
+    const spawn = createLauncher();
+    const handler = registerRealReveal(spawn);
+
+    const res = await callReveal(handler, { path: path.join(outside, 'secret.txt') });
+
+    expect(res.statusCode).toBe(400);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a symlink escape', async () => {
+    const spawn = createLauncher();
+    const handler = registerRealReveal(spawn);
+
+    const res = await callReveal(handler, { path: path.join(workspace, 'escape.txt') });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access denied' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });
 
 describe('fs exec git-read cache', () => {

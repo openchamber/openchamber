@@ -708,6 +708,45 @@ export const resolveDirectoryListPath = async (
   }
 };
 
+export type FsRevealPathResolution =
+  | { ok: true; resolvedPath: string }
+  | { ok: false; status: number; error: string };
+
+export const resolveRevealPath = async (
+  targetPath: string,
+  workspaceRoot: string,
+  additionalRoots: string[] = [],
+): Promise<FsRevealPathResolution> => {
+  const trimmed = targetPath.trim();
+  if (!trimmed) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+  const resolved = resolveUserPath(trimmed, workspaceRoot);
+  if (!resolved) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+
+  try {
+    // Canonicalize both sides before comparing: the workspace root itself
+    // can sit behind a symlink (e.g. /tmp on macOS), and a target that only
+    // escapes through a symlinked ancestor must still be refused.
+    const canonicalTarget = await fs.promises.realpath(resolved);
+    for (const root of [workspaceRoot, ...additionalRoots]) {
+      const canonicalRoot = await fs.promises.realpath(root).catch(() => path.resolve(root));
+      if (isPathInside(canonicalTarget, canonicalRoot)) {
+        return { ok: true, resolvedPath: canonicalTarget };
+      }
+    }
+    return { ok: false, status: 403, error: 'Access to path denied' };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'ENOENT') {
+      return { ok: false, status: 404, error: 'Path not found' };
+    }
+    return { ok: false, status: 500, error: 'Failed to resolve path' };
+  }
+};
+
 export type FsCreatePathResolution =
   | { ok: true; resolvedPath: string }
   | { ok: false; status: number; error: string };
