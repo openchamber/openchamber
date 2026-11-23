@@ -824,6 +824,63 @@ describe('workflow runtime', () => {
     expect(agents.reports.every((report) => report.body.resume === true)).toBe(true);
   });
 
+  it('saves a workflow script through a temp file and an atomic rename, leaving no temp behind', async () => {
+    const agents = fakeAgentSessions();
+    const renames = [];
+    const fsPromises = {
+      ...fs,
+      rename: async (source, target) => { renames.push([source, target]); await fs.rename(source, target); },
+    };
+    const { runtime, act, dataDir } = await setup(agents, { fsPromises });
+    const source = script("return agent('x')");
+    await act('workflow.save', { script: source });
+    const folder = path.join(dataDir, '.openchamber', 'workflows');
+    const target = path.join(folder, 'test-flow.js');
+    // The saved script is complete and parseable, and it arrived by rename.
+    expect(await fs.readFile(target, 'utf8')).toBe(`${source}\n`);
+    expect(await runtime.listSaved({ directory: dataDir })).toEqual({ workflows: [{ name: 'test-flow', description: 'A test' }] });
+    expect(renames).toHaveLength(1);
+    expect(renames[0][1]).toBe(target);
+    expect(path.dirname(renames[0][0])).toBe(folder);
+    expect(renames[0][0]).toMatch(/\.tmp$/);
+    expect(await fs.readdir(folder)).toEqual(['test-flow.js']);
+  });
+
+  it('replaces a saved workflow only with overwrite: true, and replaces it whole', async () => {
+    const agents = fakeAgentSessions();
+    const { act, dataDir } = await setup(agents);
+    const folder = path.join(dataDir, '.openchamber', 'workflows');
+    const target = path.join(folder, 'test-flow.js');
+    await act('workflow.save', { script: script("return agent('one')") });
+    await expect(act('workflow.save', { script: script("return agent('two')") })).rejects.toMatchObject({ statusCode: 409 });
+    expect(await fs.readFile(target, 'utf8')).toContain("agent('one')");
+    await act('workflow.save', { script: script("return agent('two')"), overwrite: true });
+    expect(await fs.readFile(target, 'utf8')).toContain("agent('two')");
+    expect(await fs.readdir(folder)).toEqual(['test-flow.js']);
+  });
+
+  it('keeps the previous saved script intact when the replacement write or rename fails', async () => {
+    const agents = fakeAgentSessions();
+    let failAt = null;
+    const fsPromises = {
+      ...fs,
+      writeFile: async (...args) => { if (failAt === 'write') throw new Error('disk full'); return fs.writeFile(...args); },
+      rename: async (...args) => { if (failAt === 'rename') throw new Error('rename failed'); return fs.rename(...args); },
+    };
+    const { act, dataDir } = await setup(agents, { fsPromises });
+    const folder = path.join(dataDir, '.openchamber', 'workflows');
+    const target = path.join(folder, 'test-flow.js');
+    await act('workflow.save', { script: script("return agent('one')") });
+    const before = await fs.readFile(target, 'utf8');
+    for (const mode of ['write', 'rename']) {
+      failAt = mode;
+      await expect(act('workflow.save', { script: script("return agent('two')"), overwrite: true })).rejects.toThrow(mode === 'write' ? 'disk full' : 'rename failed');
+      // No truncation of the previous script, and no temp file stranded.
+      expect(await fs.readFile(target, 'utf8')).toBe(before);
+      expect(await fs.readdir(folder)).toEqual(['test-flow.js']);
+    }
+  });
+
   it('refuses the answer tool to a session that is not a workflow agent asked for one', async () => {
     const agents = fakeAgentSessions();
     const { runtime } = await setup(agents);

@@ -740,7 +740,14 @@ export const createWorkflowRuntime = ({
       throw new OpenChamberControlError(`${path.relative(directory, target)} exists; pass overwrite: true to replace it`, 409);
     }
     await fsPromises.mkdir(path.dirname(target), { recursive: true });
-    await fsPromises.writeFile(target, script.endsWith('\n') ? script : `${script}\n`, 'utf8');
+    const temporary = `${target}.${pid}.tmp`;
+    try {
+      await fsPromises.writeFile(temporary, script.endsWith('\n') ? script : `${script}\n`, 'utf8');
+      await fsPromises.rename(temporary, target);
+    } catch (error) {
+      await fsPromises.unlink(temporary).catch(() => undefined);
+      throw error;
+    }
     return { name: parsed.meta.name, path: target, run: `workflow.run with name ${parsed.meta.name}` };
   };
 
