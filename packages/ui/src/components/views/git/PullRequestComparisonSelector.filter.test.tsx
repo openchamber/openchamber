@@ -168,6 +168,7 @@ test('the picker keeps its label choices collapsed until the Labels row is opene
 
     await click(document.querySelector<HTMLButtonElement>('button[aria-label="Filter"]'));
     expect(labelChoices()).toHaveLength(0);
+    expect(labelRow()?.tagName).toBe('BUTTON');
     expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
 
     await click(labelRow());

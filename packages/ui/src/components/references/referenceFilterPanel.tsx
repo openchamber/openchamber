@@ -177,7 +177,7 @@ const DesktopLabelChoices: React.FC<LabelChoicesBodyProps> = ({ choices, applied
                     });
                 }}
             />
-            <CommandList aria-label={t('references.picker.filter.group.labels')} className="max-h-48">
+            <CommandList aria-label={t('references.picker.filter.group.labels')} className="max-h-[13rem]">
                 <LabelChoicesState choices={choices} empty={shown.length === 0} />
                 {shown.map((label) => {
                     const checked = applied.includes(label.name);
@@ -227,18 +227,21 @@ const DesktopLabelSection: React.FC<LabelSectionBodyProps> = (props) => {
         <>
             <DropdownMenuSeparator />
             <DropdownMenuItem
+                asChild
+                nativeButton
                 closeOnClick={false}
-                aria-expanded={expanded}
                 onSelect={onToggle}
-                className="gap-2"
+                className="w-full text-start font-medium text-muted-foreground hover:bg-transparent hover:text-foreground data-[highlighted]:bg-transparent data-[highlighted]:text-foreground"
             >
-                <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 text-muted-foreground" />
-                <span className="shrink-0">{t('references.picker.filter.group.labels')}</span>
-                {appliedChips.length > 0 ? (
-                    <span className="ms-auto flex min-w-0 justify-end overflow-hidden">
-                        <ReferenceLabelChips labels={appliedChips} max={2} />
-                    </span>
-                ) : null}
+                <button type="button" aria-expanded={expanded}>
+                    <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 text-current" />
+                    <span className="shrink-0">{t('references.picker.filter.group.labels')}</span>
+                    {appliedChips.length > 0 ? (
+                        <span className="ms-auto flex min-w-0 justify-end overflow-hidden">
+                            <ReferenceLabelChips labels={appliedChips} max={2} />
+                        </span>
+                    ) : null}
+                </button>
             </DropdownMenuItem>
             {expanded ? <DesktopLabelChoices {...body} /> : null}
         </>
@@ -479,7 +482,11 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
             <DropdownMenuTrigger asChild>{trigger()}</DropdownMenuTrigger>
             <DropdownMenuContent
                 align="end"
-                className={cn('max-h-[min(var(--available-height),28rem)] overflow-y-auto', labelSection ? 'w-64' : 'w-56')}
+                className={cn(
+                    'overflow-y-auto',
+                    collapsibleLabels ? 'max-h-[min(var(--available-height),40rem)]' : 'max-h-[min(var(--available-height),28rem)]',
+                    labelSection ? 'w-64' : 'w-56',
+                )}
             >
                 {groups.map((entry, index) => (
                     <React.Fragment key={entry.label}>
