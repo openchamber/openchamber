@@ -1670,6 +1670,11 @@ class OpencodeService {
   }): Promise<void> {
     const ownsRuntime = captureRuntimeInstance()
     const note = shellCancellationNote(params.shells)
+    // external: https://github.com/anomalyco/opencode/blob/v2.4.1/packages/protocol/src/groups/job.ts job.cancel (2.4.0) reports an agent's command as cancelled; a command the user ran is no job, and a server without job.list (before 2.3) or job.cancel (before 2.4) gets its shells removed.
+    const jobs = await this.clientFor(params.sessionDirectory).experimental.job.list({ status: "running" })
+      .then((running) => new Set(running.map((job) => job.id)), () => new Set<string>())
+    const ensureRuntime = () => { if (!ownsRuntime()) throw new Error("Commands were not stopped because the runtime changed.") }
+    ensureRuntime()
     await call("session.synthetic", () =>
       this.clientFor(params.sessionDirectory).session.synthetic({
         sessionID: params.sessionID,
@@ -1679,10 +1684,11 @@ class OpencodeService {
         resume: false,
       }),
     )
-    if (!ownsRuntime()) throw new Error("Commands were not stopped because the runtime changed.")
-    const removals = await Promise.allSettled(params.shells.map((shell) =>
-      call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID })),
-    ))
+    ensureRuntime()
+    const remove = async (shell: ShellToStop) => { ensureRuntime(); return call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID })) }
+    const removals = await Promise.allSettled(params.shells.map((shell) => (jobs.has(shell.shellID)
+      ? this.clientFor(shell.shellDirectory).experimental.job.cancel({ id: shell.shellID }).catch(() => remove(shell))
+      : remove(shell))))
     const failure = removals.find((result) => result.status === "rejected")
     if (failure) throw failure.reason
   }
