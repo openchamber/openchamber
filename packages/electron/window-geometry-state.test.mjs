@@ -191,3 +191,144 @@ test('bounds restored after a save skipped while minimized are written once the 
   });
   assert.deepEqual(fakeTimers.pending(), []);
 });
+
+test('a rejected immediate persist is reported instead of unhandled, and a later save still persists', async () => {
+  const fakeTimers = createFakeTimers();
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const failure = new Error('simulated settings write failure');
+    const reported = [];
+    const persisted = [];
+    let shouldFail = true;
+    const geometry = createWindowGeometryState({
+      persist: async (window) => {
+        if (shouldFail) throw failure;
+        persisted.push(window.id);
+      },
+      onPersistError: (error) => reported.push(error),
+      ...fakeTimers,
+    });
+    const window = createWindow(17);
+
+    geometry.schedule(window, true);
+    await flush();
+    await flush();
+
+    assert.deepEqual(reported, [failure]);
+    assert.deepEqual(unhandled, []);
+
+    // The rejection released the revision, so a later update persists normally.
+    shouldFail = false;
+    geometry.schedule(window, true);
+    await flush();
+    assert.deepEqual(persisted, [17]);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+test('a rejected timer-driven persist is reported instead of unhandled, and a later save still persists', async () => {
+  const fakeTimers = createFakeTimers();
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const failure = new Error('simulated settings write failure');
+    const reported = [];
+    const persisted = [];
+    let shouldFail = true;
+    const geometry = createWindowGeometryState({
+      persist: async (window) => {
+        if (shouldFail) throw failure;
+        persisted.push(window.id);
+      },
+      onPersistError: (error) => reported.push(error),
+      ...fakeTimers,
+    });
+    const window = createWindow(19);
+
+    geometry.schedule(window);
+    await fakeTimers.fire(fakeTimers.pending()[0]);
+    await flush();
+
+    assert.deepEqual(reported, [failure]);
+    assert.deepEqual(unhandled, []);
+
+    shouldFail = false;
+    geometry.schedule(window);
+    await fakeTimers.fire(fakeTimers.pending()[0]);
+    assert.deepEqual(persisted, [19]);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+test('a throwing persist-error reporter cannot re-arm the rejection', async () => {
+  const fakeTimers = createFakeTimers();
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const persisted = [];
+    let shouldFail = true;
+    const geometry = createWindowGeometryState({
+      persist: async (window) => {
+        if (shouldFail) throw new Error('simulated settings write failure');
+        persisted.push(window.id);
+      },
+      onPersistError: () => { throw new Error('reporter failed'); },
+      ...fakeTimers,
+    });
+    const window = createWindow(21);
+
+    geometry.schedule(window, true);
+    await flush();
+    await flush();
+    assert.deepEqual(unhandled, []);
+
+    // Cleanup still happened: the next update persists.
+    shouldFail = false;
+    geometry.schedule(window, true);
+    await flush();
+    assert.deepEqual(persisted, [21]);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+test('a rejected persist without a reporter is still handled, never unhandled', async () => {
+  const fakeTimers = createFakeTimers();
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const persisted = [];
+    let shouldFail = true;
+    const geometry = createWindowGeometryState({
+      persist: async (window) => {
+        if (shouldFail) throw new Error('simulated settings write failure');
+        persisted.push(window.id);
+      },
+      ...fakeTimers,
+    });
+    const window = createWindow(23);
+
+    geometry.schedule(window, true);
+    await flush();
+    await flush();
+    assert.deepEqual(unhandled, []);
+
+    shouldFail = false;
+    geometry.schedule(window);
+    await fakeTimers.fire(fakeTimers.pending()[0]);
+    assert.deepEqual(persisted, [23]);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
