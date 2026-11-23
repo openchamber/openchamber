@@ -91,7 +91,11 @@ stdenvNoCC.mkDerivation {
     bun run --cwd packages/sdk build
     # `build` compiles the TypeScript server and CLI into packages/web/build
     # (build:server) before the Vite UI build; the wrapper runs build/bin/cli.js.
-    bun run --cwd packages/web build
+    # build:server would also bundle upstream's npm OpenCode server, which
+    # fetches from the network and, once bundled, is launched ahead of the
+    # `opencode` on PATH. This package runs the fork's opencode from the
+    # wrapper's PATH, so the bundle is skipped, as upstream's own nix build does.
+    OPENCHAMBER_SKIP_BUNDLED_OPENCODE_SERVER=1 bun run --cwd packages/web build
     runHook postBuild
   '';
 

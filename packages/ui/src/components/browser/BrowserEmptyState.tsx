@@ -101,7 +101,7 @@ export const BrowserEmptyState: React.FC<{
   const [showOutsideWork, setShowOutsideWork] = React.useState(false);
   const visibleCandidates = React.useMemo(
     () => candidates.filter((candidate) => candidate.announced || (
-      !hiddenPorts.includes(candidate.port) && (showOutsideWork || !candidate.outsideWork)
+      !hiddenPorts.includes(candidate.port) && (showOutsideWork || (!candidate.outsideWork && !candidate.notWebPage))
     )),
     [candidates, hiddenPorts, showOutsideWork],
   );
@@ -116,7 +116,7 @@ export const BrowserEmptyState: React.FC<{
       </div>
 
       {candidates.length > 0 ? (
-        <div className="flex min-h-0 w-full max-w-sm flex-col gap-1">
+        <div className="flex min-h-0 w-full max-w-lg flex-col gap-1">
           <span className="shrink-0 typography-micro text-start text-muted-foreground">
             {announced.length > 0
               ? t('contextPanel.browser.devServers.justStarted')
@@ -136,6 +136,7 @@ export const BrowserEmptyState: React.FC<{
                   size={isMobileSurfaceRuntime() ? 'default' : 'sm'}
                   className={cn('min-w-0 flex-1 justify-start gap-2', isMobileSurfaceRuntime() && 'min-h-11', remoteOnly && 'cursor-default opacity-60')}
                   aria-disabled={remoteOnly || undefined}
+                  title={candidate.page?.title ? [candidate.page.title, candidate.command].filter(Boolean).join(' · ') : undefined}
                   onClick={() => {
                     if (remoteOnly) return;
                     clearAnnouncedDevServers(directory);
@@ -151,14 +152,25 @@ export const BrowserEmptyState: React.FC<{
                     >
                       <Icon name="instance" className="size-3.5" aria-hidden="true" />
                     </span>
+                  ) : candidate.page?.icon ? (
+                    <img src={candidate.page.icon} alt="" className="size-3.5 shrink-0 object-contain" />
                   ) : (
                     <Icon name="global" className="size-3.5 shrink-0" aria-hidden="true" />
                   )}
-                  <span className="truncate">
-                    {browserUrlLabel(candidate.url) || candidate.url}
-                    <span className="typography-micro text-muted-foreground">{pathLabel(candidate.url)}</span>
-                  </span>
-                  {candidate.command ? (
+                  {candidate.page?.title ? (
+                    <>
+                      <span className="min-w-0 truncate" dir="auto">{candidate.page.title}</span>
+                      <span className="shrink-0 typography-micro text-muted-foreground" dir="ltr">
+                        {browserUrlLabel(candidate.url) || candidate.url}{pathLabel(candidate.url)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="truncate">
+                      {browserUrlLabel(candidate.url) || candidate.url}
+                      <span className="typography-micro text-muted-foreground">{pathLabel(candidate.url)}</span>
+                    </span>
+                  )}
+                  {candidate.command && !candidate.page?.title ? (
                     <span className="min-w-0 truncate typography-micro text-muted-foreground" dir="ltr" title={candidate.command}>
                       {candidate.command}
                     </span>

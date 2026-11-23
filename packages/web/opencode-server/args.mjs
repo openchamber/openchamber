@@ -1,4 +1,3 @@
-
 export const usage = 'Usage: opencode serve [--stdio] [--hostname <host>] [--port <port>] [--cors <origin>]... | opencode --version';
 
 export const parseArgs = (argv) => {

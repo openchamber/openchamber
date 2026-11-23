@@ -23,8 +23,15 @@ COPY . .
 RUN bun run --cwd packages/sdk build
 RUN bun run build:web
 
+FROM node:24-slim AS node-runtime
+
 FROM oven/bun:1.4.4 AS runtime
 WORKDIR /home/openchamber
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+  && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   bash \
@@ -32,8 +39,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates \
   git \
   less \
-  nodejs \
-  npm \
   openssh-client \
   python3 \
   && rm -rf /var/lib/apt/lists/*
@@ -52,8 +57,7 @@ ENV NPM_CONFIG_PREFIX=/home/openchamber/.npm-global
 ENV PATH=${NPM_CONFIG_PREFIX}/bin:${PATH}
 
 RUN npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/openchamber/.npm-global && \
-  mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh && \
-  npm install -g @opencode/cli@2.3.2
+  mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh
 
 # cloudflared 2026.3.0 - update digest explicitly when upgrading
 COPY --from=cloudflare/cloudflared@sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283 /usr/local/bin/cloudflared /usr/local/bin/cloudflared

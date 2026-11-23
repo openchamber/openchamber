@@ -694,33 +694,6 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     if (!tracking) return true;
     return tracking.startsWith('origin/');
   }, [status?.tracking]);
-  const defaultTargetBranch = React.useMemo(() => {
-    const fromMeta = worktreeMetadata?.createdFromBranch;
-    const normalizedFromMeta = typeof fromMeta === 'string' ? fromMeta.trim() : '';
-    const current = typeof status?.current === 'string' ? status.current.trim() : '';
-    const normalizedRoot = typeof rootBranchHint === 'string' ? rootBranchHint.trim() : '';
-
-    if (normalizedFromMeta) {
-      const looksLikeCorruptedSelfTarget =
-        normalizedFromMeta === current &&
-        normalizedFromMeta.startsWith('opencode/') &&
-        normalizedRoot.length > 0 &&
-        normalizedRoot !== normalizedFromMeta;
-
-      if (looksLikeCorruptedSelfTarget) {
-        return normalizedRoot;
-      }
-
-      return normalizedFromMeta;
-    }
-    if (normalizedRoot) {
-      return normalizedRoot;
-    }
-    if (current) {
-      return current;
-    }
-    return 'HEAD';
-  }, [worktreeMetadata?.createdFromBranch, status, rootBranchHint]);
   const clearGeneratedHighlights = React.useCallback(() => {
     setGeneratedHighlights([]);
   }, []);
@@ -1503,6 +1476,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     worktreeMetadata?.createdFromBranch,
   ]);
   const baseBranch = useBranchPullRequestBase(gitDirectory ?? null, currentBranch, isActive, binding, branches, derivedBaseBranch);
+  const defaultTargetBranch = baseBranch || currentBranch || 'HEAD';
   useBranchPullRequestRequest(isActive ? gitDirectory ?? null : null, isActive ? currentBranch : null, binding);
 
   const updateTargetBranch = React.useMemo(() => {

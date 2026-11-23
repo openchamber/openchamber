@@ -16,7 +16,7 @@ import type { SubmitOptions } from './chatInputProps';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { queuedMessageFromTakenItem, type QueuedMessage, type QueuedMessageInput } from '@/stores/messageQueueStore';
+import { queuedMessageFromTakenItem, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useGoalSpecJobStore } from '@/stores/useGoalSpecJobStore';
 import { useGoalSpecJobSync } from '@/hooks/useGoalSpecJobSync';
@@ -40,6 +40,7 @@ import { toast } from '@/components/ui';
 import { collectGoalWriterContext } from '@/components/chat/goalWriterContext';
 import type { GoalSpecDialogRequest, GoalWriterHandoff, GoalWriterRunOptions } from '@/components/chat/GoalSpecDialog';
 import { recordLinkedReferences } from './recordLinkedReferences';
+import { goalWriterHeldMessage } from './goalWriterHeldMessage';
 import { createComposerSubmitErrorMessage } from './createComposerSubmitErrorMessage';
 
 type DraftTargetInfo = Pick<ReturnType<typeof useComposerDraftTarget>, 'showDraftTargetSelectors' | 'selectedDraftProject' | 'selectedDraftProjectIsGitRepo'>;
@@ -211,13 +212,7 @@ export function useComposerGoalWriter({
             { runtimeKey, isCurrent: isCurrentRuntime },
         );
         if (!captured) return;
-        const message: QueuedMessageInput & Pick<QueuedMessage, 'content'> = {
-            content: captured.messageToQueue,
-            text: captured.textToQueue,
-            agentMention: captured.agentMention,
-            attachments: captured.attachmentsToQueue,
-            context: [...captured.context],
-        };
+        const message = goalWriterHeldMessage(captured);
         // The composer is free for the next message at once. Its goal arm went
         // with this message: the server sets the written spec as the goal.
         useSessionGoalArmStore.getState().setArmed(false);

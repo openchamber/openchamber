@@ -2,10 +2,10 @@ import type { SourceControlProvider } from '@/lib/source-control/types';
 import { create } from 'zustand';
 import { z } from 'zod';
 import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
-import { devtools, persist } from 'zustand/middleware';
+import { devtools, persist, type PersistStorage } from 'zustand/middleware';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
-import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage, flushDeferredStorage, getSafeStorage } from './utils/safeStorage';
 import { chatQuoteAnchorSchema, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { diffCommentOriginSchema, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 
@@ -40,6 +40,8 @@ export interface InlineCommentDraft {
 }
 
 export const EMPTY_INLINE_COMMENT_DRAFTS: InlineCommentDraft[] = [];
+
+export const createInlineCommentDraftId = (): string => `icd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
 interface InlineCommentDraftState {
   drafts: Record<string, InlineCommentDraft[]>;
@@ -193,6 +195,61 @@ const removeDraftKey = (state: InlineCommentDraftState, key: string): InlineComm
   return { drafts };
 };
 
+const STORAGE_KEY = 'openchamber-inline-comment-drafts';
+
+const persistedValueSchema = z.object({ state: z.unknown(), version: z.number().optional() });
+
+const readPersistedDrafts = (raw: string | null): Record<string, InlineCommentDraft[]> | null => {
+  if (raw === null) return {};
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const value = persistedValueSchema.safeParse(json);
+  if (!value.success) return null;
+  const envelope = persistedDraftEnvelopeSchema.safeParse(value.data.state);
+  if (!envelope.success) return null;
+  return migratePersistedDrafts(envelope, value.data.version ?? 0).drafts;
+};
+
+const persistedBucketSchema = z.array(persistedDraftSchema);
+
+const sameAsStored = (own: InlineCommentDraft[], stored: InlineCommentDraft[]): boolean => {
+  const parsed = persistedBucketSchema.safeParse(own);
+  return parsed.success && JSON.stringify(parsed.data) === JSON.stringify(stored);
+};
+
+const adoptDrafts = (
+  current: Record<string, InlineCommentDraft[]>,
+  incoming: Record<string, InlineCommentDraft[]>,
+): Record<string, InlineCommentDraft[]> | null => {
+  let changed = Object.keys(current).some((key) => !(key in incoming));
+  const drafts: Record<string, InlineCommentDraft[]> = {};
+  for (const [key, bucket] of Object.entries(incoming)) {
+    const own = current[key];
+    if (own && sameAsStored(own, bucket)) {
+      drafts[key] = own;
+    } else {
+      drafts[key] = bucket;
+      changed = true;
+    }
+  }
+  return changed ? drafts : null;
+};
+
+const deferredDraftStorage = createDeferredSafeJSONStorage<InlineCommentDraftState>();
+let storedDrafts: Record<string, InlineCommentDraft[]> | undefined;
+const draftStorage: PersistStorage<InlineCommentDraftState> | undefined = deferredDraftStorage && {
+  ...deferredDraftStorage,
+  setItem: (name, value) => {
+    if (value.state.drafts === storedDrafts) return;
+    storedDrafts = value.state.drafts;
+    return deferredDraftStorage.setItem(name, value);
+  },
+};
+
 export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
   devtools(
     persist(
@@ -203,9 +260,7 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
           if (!key || (draft.source === 'terminal' && !draft.code.trim())) return null;
           const requestedId = draft.id?.trim();
           const idIsTaken = Boolean(requestedId) && (get().drafts[key] ?? []).some((item) => item.id === requestedId);
-          const id = requestedId && !idIsTaken
-            ? requestedId
-            : `icd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          const id = requestedId && !idIsTaken ? requestedId : createInlineCommentDraftId();
           const nextDraft: InlineCommentDraft = { ...draft, sessionKey: target.sessionKey, id, createdAt: Date.now() };
           let storedId: string | null = null;
           set((state) => {
@@ -300,8 +355,8 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         },
       }),
       {
-        name: 'openchamber-inline-comment-drafts',
-        storage: createDeferredSafeJSONStorage(),
+        name: STORAGE_KEY,
+        storage: draftStorage,
         version: 3,
         partialize: (state) => ({ drafts: state.drafts }),
         migrate: (persisted, version) => migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse(persisted), version),
@@ -310,3 +365,20 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
     { name: 'inline-comment-draft-store' },
   ),
 );
+
+storedDrafts = useInlineCommentDraftStore.getState().drafts;
+
+const adoptDraftsOfOtherWindow = (event: StorageEvent): void => {
+  if (event.key !== STORAGE_KEY) return;
+  flushDeferredStorage();
+  const raw = getSafeStorage().getItem(STORAGE_KEY);
+  if (raw === null && event.newValue !== null) return;
+  const incoming = readPersistedDrafts(raw);
+  if (!incoming) return;
+  const drafts = adoptDrafts(useInlineCommentDraftStore.getState().drafts, incoming);
+  if (!drafts) return;
+  storedDrafts = drafts;
+  useInlineCommentDraftStore.setState({ drafts });
+};
+
+globalThis.window?.addEventListener('storage', adoptDraftsOfOtherWindow);

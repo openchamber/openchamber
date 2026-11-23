@@ -28,12 +28,33 @@ describe('normalizeBrowserUrl', () => {
     expect(normalizeBrowserUrl('file:///etc/passwd')).toBe(BLANK_URL);
     expect(normalizeBrowserUrl('javascript://alert(1)')).toBe(BLANK_URL);
     expect(normalizeBrowserUrl('data://text/html,x')).toBe(BLANK_URL);
+    expect(normalizeBrowserUrl('javascript:alert(1)')).toBe(BLANK_URL);
+    expect(normalizeBrowserUrl('data:text/html,<p>hi</p>')).toBe(BLANK_URL);
   });
 
-  test('treats empty and unparseable input as blank', () => {
+  test('treats empty input, a blank page and an unparseable address as blank', () => {
     expect(normalizeBrowserUrl('')).toBe(BLANK_URL);
     expect(normalizeBrowserUrl('   ')).toBe(BLANK_URL);
     expect(normalizeBrowserUrl('http://')).toBe(BLANK_URL);
+    expect(normalizeBrowserUrl(BLANK_URL)).toBe(BLANK_URL);
+  });
+
+  test('searches the web for text that is not an address', () => {
+    expect(normalizeBrowserUrl('react hooks')).toBe('https://www.google.com/search?q=react%20hooks');
+    expect(normalizeBrowserUrl('react hooks https://react.dev')).toBe('https://www.google.com/search?q=react%20hooks%20https%3A%2F%2Freact.dev');
+    expect(normalizeBrowserUrl('  vite  ')).toBe('https://www.google.com/search?q=vite');
+    expect(normalizeBrowserUrl('c++ & rust?')).toBe('https://www.google.com/search?q=c%2B%2B%20%26%20rust%3F');
+    expect(normalizeBrowserUrl('what is localhost:3000')).toBe('https://www.google.com/search?q=what%20is%20localhost%3A3000');
+  });
+
+  test('keeps anything shaped like a host an address', () => {
+    expect(normalizeBrowserUrl('localhost:3000')).toBe('http://localhost:3000/');
+    expect(normalizeBrowserUrl('example.com/docs?q=1')).toBe('https://example.com/docs?q=1');
+    expect(normalizeBrowserUrl('192.168.1.20:8080')).toBe('https://192.168.1.20:8080/');
+    expect(normalizeBrowserUrl('[::1]:5173')).toBe('http://[::1]:5173/');
+    expect(normalizeBrowserUrl('[2001:db8::1]')).toBe('https://[2001:db8::1]/');
+    expect(normalizeBrowserUrl('devbox:8080')).toBe('https://devbox:8080/');
+    expect(normalizeBrowserUrl('myapp.localhost:1355')).toBe('https://myapp.localhost:1355/');
   });
 });
 

@@ -89,6 +89,7 @@ const projectSetupSchema = z.object({
   draftStarters: sourcedStartersSchema,
   shared: sharedSchema,
   personal: personalSchema,
+  platform: z.enum(['macos', 'linux', 'windows']).nullable().optional(),
 });
 
 export type ProjectSetup = z.infer<typeof projectSetupSchema>;

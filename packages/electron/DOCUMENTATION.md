@@ -2,7 +2,7 @@
 
 ## Ownership
 
-Electron owns native windows, privileged IPC, desktop host credentials, browser-panel sessions, SSH and tunnel lifecycle, the in-process server's startup and shutdown, and the OpenCode server the app ships ([opencode-server/DOCUMENTATION.md](opencode-server/DOCUMENTATION.md)), which the in-process server starts. Shared UI and runtime selection belong to `packages/ui`; the server and relay tunnel client belong to `packages/web`. Build and release constraints live in [scripts/DOCUMENTATION.md](scripts/DOCUMENTATION.md). Commands and platform setup live in [README.md](README.md).
+Electron owns native windows, privileged IPC, desktop host credentials, browser-panel sessions, SSH and tunnel lifecycle, the in-process server's startup and shutdown, and staging the target-architecture OpenCode server ([../web/opencode-server/DOCUMENTATION.md](../web/opencode-server/DOCUMENTATION.md)), which the in-process server starts. Shared UI and runtime selection belong to `packages/ui`; the server and relay tunnel client belong to `packages/web`. Build and release constraints live in [scripts/DOCUMENTATION.md](scripts/DOCUMENTATION.md). Commands and platform setup live in [README.md](README.md).
 
 ## Invariants
 
@@ -41,6 +41,7 @@ Electron owns native windows, privileged IPC, desktop host credentials, browser-
 - AppImage launcher integration writes its icon before publishing the desktop entry because GNOME reads the entry immediately. Only app-marked entries are managed; user-hidden entries and third-party integration retain ownership. Installed package entries take precedence over an AppImage user entry, which would otherwise shadow them.
 - Hiding during a macOS full-screen transition preserves the latest visibility intent. A queued full-screen exit still completes after an explicit show; restoration waits for that exit. Hide/toggle can restore full screen, while close discards restoration. Early entry remains limited by Electron's lack of a public entry-start signal.
 - Minimize remains a normal taskbar or Dock minimize. Only close participates in tray background mode. macOS activation restores the last live surface, including a minimized mini chat, before creating another main window.
+- A context panel window (`context-window-controller.mjs`, `packages/ui/src/lib/contextWindow`) is the owner's app page with the owner's runtime. Closing it always closes it: tray, Quake and the macOS last-window hide skip it, and it does not count as a visible main window. The owner gets `openchamber:context-window-closed`; the panel window hides and shows with its owner and closes with it. `desktopContextWindow.owners` lists the owners of open panel windows; a quit leaves it as it is, and so does closing the last main window outside macOS, which quits the app. The first main window of the next run takes that list once to reopen the panel window at its saved bounds.
 
 ### Privilege and host boundaries
 

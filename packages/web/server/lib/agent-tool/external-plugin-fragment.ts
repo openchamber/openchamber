@@ -40,6 +40,7 @@ export const createDynamicAgentToolPluginFragment = () => {
     includeSecret: true,
     includeUsage: true,
     includeTerminal: true,
+    includeActions: true,
     includeWorkflow: true,
   });
 
@@ -56,6 +57,7 @@ export const createDynamicAgentToolPluginFragment = () => {
     includeSecret: false,
     includeUsage: false,
     includeTerminal: false,
+    includeActions: false,
     includeWorkflow: false,
   }).render;
 
@@ -84,6 +86,7 @@ ${allEntries.schedule}      }`,
 ${allEntries.image}      }`,
     `      if (enabled.usage) {\n${allEntries.usage}      }`,
     `      if (enabled.terminal) {\n${allEntries.terminal}      }`,
+    `      if (enabled.actions) {\n${allEntries.actions}      }`,
     `      if (enabled.workflow) {\n${allEntries.workflow}      }`,
   ];
 

@@ -208,6 +208,7 @@ export const createInitialUIState = (): Pick<UIStore,
   | 'agentNotifyToolEnabled'
   | 'agentUsageToolEnabled'
   | 'agentTerminalToolEnabled'
+  | 'agentActionsToolEnabled'
   | 'agentImageToolEnabled'
   | 'agentImageModel'
   | 'agentMemoryDreamingEnabled'
@@ -463,6 +464,7 @@ export const createInitialUIState = (): Pick<UIStore,
   agentNotifyToolEnabled: false,
   agentUsageToolEnabled: false,
   agentTerminalToolEnabled: false,
+  agentActionsToolEnabled: false,
   agentImageToolEnabled: false,
   agentImageModel: '',
   agentMemoryDreamingEnabled: false,

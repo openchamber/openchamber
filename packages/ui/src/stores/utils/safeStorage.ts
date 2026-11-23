@@ -9,9 +9,16 @@ const deferredFlushers = new Set<() => void>();
 const keyListings = new WeakMap<Storage, () => string[]>();
 let deferredFlushListenersRegistered = false;
 
-type JsonStorageOptions = {
+type JsonStorageOptions<S = unknown> = {
     reviver?: (key: string, value: unknown) => unknown;
     replacer?: (key: string, value: unknown) => unknown;
+    mergeWithStored?: (pending: StorageValue<S>, stored: string | null) => StorageValue<S>;
+};
+
+const mergedWithStored = <S>(storage: StateStorage, name: string, value: StorageValue<S>, options?: JsonStorageOptions<S>): StorageValue<S> => {
+    if (!options?.mergeWithStored) return value;
+    const stored = storage.getItem(name);
+    return stored instanceof Promise ? value : options.mergeWithStored(value, stored);
 };
 
 const registerDeferredFlusher = (flush: () => void) => {
@@ -45,7 +52,7 @@ export const flushDeferredStorage = (): void => {
 
 const createDeferredJSONStorage = <S>(
     getStorage: () => StateStorage,
-    options?: JsonStorageOptions,
+    options?: JsonStorageOptions<S>,
 ): PersistStorage<S> | undefined => {
     let storage: StateStorage;
     try {
@@ -69,7 +76,7 @@ const createDeferredJSONStorage = <S>(
 
         for (const [name, value] of writes) {
             try {
-                storage.setItem(name, JSON.stringify(value, options?.replacer));
+                storage.setItem(name, JSON.stringify(mergedWithStored(storage, name, value, options), options?.replacer));
             } catch (error) {
                 console.error('Failed to persist deferred storage value', error);
                 if (!pendingWrites.has(name) && !pendingDeletes.has(name)) pendingWrites.set(name, value);
@@ -133,7 +140,7 @@ const createDeferredJSONStorage = <S>(
     };
 };
 
-export const createDeferredSafeJSONStorage = <S>(options?: JsonStorageOptions) => (
+export const createDeferredSafeJSONStorage = <S>(options?: JsonStorageOptions<S>) => (
     createDeferredJSONStorage<S>(() => getSafeStorage(), options)
 );
 

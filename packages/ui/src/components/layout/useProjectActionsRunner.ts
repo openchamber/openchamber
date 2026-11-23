@@ -23,6 +23,7 @@ import {
 import { ensureSharedSetupTrusted } from '@/lib/sharedTrustConfirmation';
 import {
   AUTO_DISCOVER_ACTION_ID,
+  isProjectActionForPlatform,
   normalizeProjectActionDirectory,
   PROJECT_ACTIONS_UPDATED_EVENT,
   resolveProjectActionDesktopForwardUrl,
@@ -197,8 +198,7 @@ export const useProjectActionsRunner = ({
         return;
       }
       setupRef.current = setup;
-      const filtered = setup.projectActions;
-      setActions(filtered);
+      setActions(setup.projectActions.filter((action) => isProjectActionForPlatform(action, setup.platform)));
     } catch {
       if (loadRequestIdRef.current !== requestId) {
         return;
@@ -721,7 +721,7 @@ export const useProjectActionsRunner = ({
             getProjectSetup(setupTarget),
             readPackageJsonScripts(normalizedDirectory),
           ]);
-          const devServer = await detectDevServerCommand(normalizedDirectory, setup.projectActions, scripts);
+          const devServer = await detectDevServerCommand(normalizedDirectory, setup.projectActions.filter((entry) => isProjectActionForPlatform(entry, setup.platform)), scripts);
           if (!devServer) {
             throw new Error(t('contextPanel.preview.noDevServer'));
           }
@@ -817,7 +817,7 @@ export const useProjectActionsRunner = ({
         }
         adoptedExecutionId = created.purpose?.type === 'project-action' ? created.purpose.executionId : requestedExecutionId;
         activeSessionId = created.sessionId;
-        setTabPurpose(executionDirectory, tabId, { type: 'project-action', actionId: discovered.id, executionId: adoptedExecutionId });
+        setTabPurpose(executionDirectory, tabId, created.purpose?.type === 'project-action' ? created.purpose : { type: 'project-action', actionId: discovered.id, executionId: adoptedExecutionId });
         setTabSessionId(executionDirectory, tabId, activeSessionId, { expectedExecutionId: adoptedExecutionId });
         setConnecting(executionDirectory, tabId, false, { expectedExecutionId: adoptedExecutionId });
       }
@@ -852,7 +852,7 @@ export const useProjectActionsRunner = ({
               useTerminalStore.getState().replaceBuffer(executionDirectory, tabId, event.data ?? '', event.sequence ?? 0, terminalSnapshotSize(event));
               useTerminalStore.getState().setConnecting(executionDirectory, tabId, false, { expectedExecutionId: adoptedExecutionId });
               if (event.purpose?.type === 'project-action') {
-                useTerminalStore.getState().setTabPurpose(executionDirectory, tabId, { type: 'project-action', actionId: event.purpose.actionId, executionId: event.purpose.executionId });
+                useTerminalStore.getState().setTabPurpose(executionDirectory, tabId, event.purpose);
               }
               if (event.status === 'running') {
                 useTerminalStore.getState().setTabLifecycle(executionDirectory, tabId, 'running', { expectedExecutionId: adoptedExecutionId });
