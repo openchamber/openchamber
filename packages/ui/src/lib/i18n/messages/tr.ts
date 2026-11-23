@@ -3453,6 +3453,8 @@ export const dict = {
   'contextFileOpen.failure.missing': '{name} bulunamadı',
   'contextFileOpen.failure.unreadable': '{name} açılamadı',
   'quota.window.5h': '5 Saatlik',
+  'quota.reset.inDuration': '{duration} içinde',
+  'quota.reset.lessThanMinute': 'bir dakikadan az',
   'quota.window.7d': '7 Günlük Limit',
   'quota.window.extraUsage': 'Ek Kullanım',
   'quota.window.weekly': 'Haftalık',

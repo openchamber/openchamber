@@ -3356,6 +3356,8 @@ export const dict = {
   'contextFileOpen.failure.missing': '{name} wurde nicht gefunden',
   'contextFileOpen.failure.unreadable': '{name} konnte nicht geöffnet werden',
   'quota.window.5h': '5-Stunden-Limit',
+  'quota.reset.inDuration': 'in {duration}',
+  'quota.reset.lessThanMinute': 'weniger als eine Minute',
   'quota.window.7d': '7-Tage-Limit',
   'quota.window.extraUsage': 'Zusätzliche Nutzung',
   'quota.window.weekly': 'Wöchentlich',

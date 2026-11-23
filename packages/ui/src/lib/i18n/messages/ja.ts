@@ -3647,6 +3647,8 @@ export const dict: Record<I18nKey, string> = {
   'contextFileOpen.failure.missing': '{name} が見つかりません',
   'contextFileOpen.failure.unreadable': '{name} を開けませんでした',
   'quota.window.5h': '5時間',
+  'quota.reset.inDuration': '{duration}後',
+  'quota.reset.lessThanMinute': '1分未満',
   'quota.window.7d': '7日間制限',
   'quota.window.extraUsage': '追加利用',
   'quota.window.weekly': '毎週',

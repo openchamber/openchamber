@@ -3652,6 +3652,8 @@ export const dict: Record<I18nKey, string> = {
   'contextFileOpen.failure.missing': '未找到 {name}',
   'contextFileOpen.failure.unreadable': '无法打开 {name}',
   'quota.window.5h': '5 小时',
+  'quota.reset.inDuration': '{duration}后',
+  'quota.reset.lessThanMinute': '不到一分钟',
   'quota.window.7d': '7 天上限',
   'quota.window.extraUsage': '额外用量',
   'quota.window.weekly': '每周',

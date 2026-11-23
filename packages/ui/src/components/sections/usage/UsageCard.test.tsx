@@ -109,6 +109,19 @@ test('Claude reset labels stay stable across second-level drift at a minute boun
   }
 });
 
+test('a reset reads as time left when the usage setting asks for it', async () => {
+  const { useQuotaStore } = await import('@/stores/useQuotaStore');
+  const previous = useQuotaStore.getState().resetDisplay;
+  const resetAt = Date.now() + 12 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000;
+  try {
+    useQuotaStore.setState({ resetDisplay: 'relative' });
+    const container = render({ ...percentWindow, resetAt });
+    expect(container.textContent).toContain('Resets in 12d');
+  } finally {
+    useQuotaStore.setState({ resetDisplay: previous });
+  }
+});
+
 test('a monthly spending row shows its money without a quota bar and marks an unreadable amount', () => {
   const total = render(
     { ...balanceWindow, valueLabel: undefined, value: { kind: 'spend', spent: 226.64374512, limit: null } },

@@ -3651,6 +3651,8 @@ export const dict = {
   'contextFileOpen.failure.missing': '{name} is niet gevonden',
   'contextFileOpen.failure.unreadable': '{name} kan niet worden geopend',
   'quota.window.5h': '5-uurslimiet',
+  'quota.reset.inDuration': 'over {duration}',
+  'quota.reset.lessThanMinute': 'minder dan een minuut',
   'quota.window.7d': '7-dagenlimiet',
   'quota.window.extraUsage': 'Extra gebruik',
   'quota.window.weekly': 'Wekelijks',

@@ -5,7 +5,7 @@ import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { getCurrentIntlLocale, type I18nKey, type I18nParams } from '@/lib/i18n';
 import type { UsageWindow, UsageWindowValue } from '@/types/quota';
 
-const t = (key: Parameters<typeof formatMessage>[1]) => formatMessage(useI18nStore.getState().dictionary, key);
+const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) => formatMessage(useI18nStore.getState().dictionary, key, params);
 
 export const clampPercent = (value: number | null): number | null => {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -75,7 +75,9 @@ export const formatQuotaRowValue = (
 };
 
 const MINUTE_MS = 60_000;
-const WEEK_MS = 7 * 24 * 60 * MINUTE_MS;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
 const roundToMinute = (timestamp: number): number => Math.round(timestamp / MINUTE_MS) * MINUTE_MS;
 
 const getQuotaResetDate = (resetAt: number, providerId: string | undefined, now: Date): Date => {
@@ -140,6 +142,37 @@ export const formatQuotaResetShort = (
     return formatDateTimeForPreference(resetDate, timeFormatPreference, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   }
   return formatDateTimeForPreference(resetDate, timeFormatPreference, { month: 'short', day: 'numeric' });
+};
+
+export const formatQuotaResetDuration = (
+  resetAt: number | null,
+  { now = Date.now() }: { now?: Date | number } = {},
+): string | null => {
+  if (!resetAt || !Number.isFinite(resetAt)) return null;
+  const remaining = resetAt - (now instanceof Date ? now.getTime() : now);
+  if (remaining <= 0) return null;
+  if (remaining < MINUTE_MS) {
+    return t('quota.reset.lessThanMinute');
+  }
+  if (remaining < HOUR_MS) {
+    return t('common.relative.minutesAgoCompact', { count: Math.floor(remaining / MINUTE_MS) });
+  }
+  if (remaining < DAY_MS) {
+    const hours = Math.floor(remaining / HOUR_MS);
+    const minutes = Math.floor((remaining - hours * HOUR_MS) / MINUTE_MS);
+    return minutes === 0
+      ? t('common.relative.hoursAgoCompact', { count: hours })
+      : t('common.duration.hoursMinutesCompact', { hours, minutes });
+  }
+  return t('common.relative.daysAgoCompact', { count: Math.floor(remaining / DAY_MS) });
+};
+
+export const formatQuotaResetRelative = (
+  resetAt: number | null,
+  options: { now?: Date | number } = {},
+): string | null => {
+  const duration = formatQuotaResetDuration(resetAt, options);
+  return duration === null ? null : t('quota.reset.inDuration', { duration });
 };
 
 export const compactQuotaValueLabel = (label: string): string => (

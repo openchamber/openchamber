@@ -30,6 +30,7 @@ let nativeQuotaWindowVisible = false;
 
 interface QuotaSettingsState {
   displayMode: 'usage' | 'remaining';
+  resetDisplay: 'absolute' | 'relative';
   dropdownProviderIds: QuotaProviderId[];
   savedDropdownProviderIds: string[] | null;
   selectedModels: Record<string, string[]>;
@@ -54,6 +55,7 @@ interface QuotaStore extends QuotaSettingsState {
   fetchProviderQuota: (providerId: QuotaProviderId, invalidate?: boolean) => Promise<boolean>;
   setSelectedProvider: (providerId: QuotaProviderId | null) => void;
   setDisplayMode: (mode: 'usage' | 'remaining') => void;
+  setResetDisplay: (display: 'absolute' | 'relative') => void;
   setProviderInDropdown: (providerId: QuotaProviderId, shown: boolean) => string[];
   setSelectedModels: (providerId: string, modelNames: string[]) => void;
   setExpandedFamilies: (providerId: string, familyIds: string[]) => void;
@@ -73,10 +75,12 @@ const resolveDropdownProviderIds = (saved: readonly string[] | null, known: read
 
 const parseSettings = (data: DesktopSettings, extensionProviders: readonly ExtensionQuotaProvider[]): QuotaSettingsState => {
   const displayMode = data.usageDisplayMode === 'remaining' ? 'remaining' : 'usage';
+  const resetDisplay = data.usageResetDisplay === 'relative' ? 'relative' : 'absolute';
   const savedDropdownProviderIds = data.usageDropdownProviders ?? null;
 
   return {
     displayMode,
+    resetDisplay,
     savedDropdownProviderIds,
     dropdownProviderIds: resolveDropdownProviderIds(savedDropdownProviderIds, quotaProviderIds(extensionProviders)),
     selectedModels: data.usageSelectedModels ?? {},
@@ -86,6 +90,7 @@ const parseSettings = (data: DesktopSettings, extensionProviders: readonly Exten
 
 const defaultQuotaSettings = (extensionProviders: readonly ExtensionQuotaProvider[] = []): QuotaSettingsState => ({
   displayMode: 'usage',
+  resetDisplay: 'absolute',
   savedDropdownProviderIds: null,
   dropdownProviderIds: quotaProviderIds(extensionProviders),
   selectedModels: {},
@@ -396,6 +401,7 @@ export const useQuotaStore = create<QuotaStore>()(
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
       setDisplayMode: (mode) => set({ displayMode: mode }),
+      setResetDisplay: (display) => set({ resetDisplay: display }),
       setProviderInDropdown: (providerId, shown) => {
         const { savedDropdownProviderIds, dropdownProviderIds, extensionProviders } = get();
         const base: readonly string[] = savedDropdownProviderIds ?? dropdownProviderIds;

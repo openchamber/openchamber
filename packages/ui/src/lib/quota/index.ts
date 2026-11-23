@@ -6,6 +6,8 @@ export {
   formatQuotaRowValue,
   formatQuotaResetLabel,
   formatQuotaResetShort,
+  formatQuotaResetDuration,
+  formatQuotaResetRelative,
   compactQuotaValueLabel,
   resolveUsageTone,
   formatWindowLabel,

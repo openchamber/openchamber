@@ -563,6 +563,7 @@ export const SETTINGS_REGISTRY = {
   reportUsage: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('reportUsage', (v) => useUIStore.getState().setReportUsage(v)) }),
 
   usageDisplayMode: field({ scope: 'profile', parse: parseOneOf(['usage', 'remaining']) }),
+  usageResetDisplay: field({ scope: 'profile', parse: parseOneOf(['absolute', 'relative']) }),
   usageDropdownProviders: field({ scope: 'profile', parse: parseStringList }),
   usageSelectedModels: field({ scope: 'profile', parse: parseStringRecordOfStringLists }),
   usageCollapsedFamilies: field({ scope: 'profile', parse: parseStringRecordOfStringLists }),

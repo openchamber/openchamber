@@ -14,6 +14,7 @@ import { sshHostSchema } from '../spaces/places/ssh-host.js';
 import { PROVIDER_LOGO_MIMES } from '../appearance/provider-logo-routes.js';
 import { sanitizeDictationSettings } from './settings-dictation.js';
 import { keepOmittedBuiltinSections, sanitizeSidebarSections, sanitizeSidebarSettings, type SidebarSection } from './settings-sidebar.js';
+import { sanitizeUsageDisplaySettings, type UsageDisplaySettings } from '../quota/usage-display-settings.js';
 
 const settingsDocumentSchema = z.looseObject({});
 export type SettingsDocument = z.infer<typeof settingsDocumentSchema>;
@@ -206,6 +207,7 @@ export type SanitizedSettings = Partial<Record<BooleanSettingsKey, boolean>>
   & Partial<Record<ClearableStringSettingsKey, string | undefined>>
   & Partial<Record<NumberSettingsKey, number>>
   & Partial<Record<StringArraySettingsKey, string[]>>
+  & UsageDisplaySettings
   & {
     themeVariant?: 'light' | 'dark';
     inputHistoryScope?: 'session' | 'global';
@@ -226,7 +228,6 @@ export type SanitizedSettings = Partial<Record<BooleanSettingsKey, boolean>>
     sessionGoalChecker?: 'classifier' | 'small-model';
     notificationMode?: 'always' | 'hidden-only';
     notificationTemplates?: object;
-    usageDisplayMode?: 'usage' | 'remaining';
     sessionRetentionAction?: 'archive' | 'delete';
     tunnelBootstrapTtlMs?: number | null;
     managedLocalTunnelConfigPath?: string | null | undefined;
@@ -832,9 +833,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (isNumber(candidate.maxLastMessageLength) && Number.isFinite(candidate.maxLastMessageLength)) {
       result.maxLastMessageLength = Math.max(10, Math.round(candidate.maxLastMessageLength));
     }
-    if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
-      result.usageDisplayMode = candidate.usageDisplayMode;
-    }
+    Object.assign(result, sanitizeUsageDisplaySettings(candidate));
     if (Array.isArray(candidate.usageDropdownProviders)) {
       result.usageDropdownProviders = normalizeStringArray(candidate.usageDropdownProviders);
     }

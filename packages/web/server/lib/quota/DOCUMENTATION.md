@@ -26,6 +26,7 @@ extension applies the same policy in its own process at activation.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/quota/index.ts`: public entrypoint loaded by the runtime and feature-route composition through its `.js` specifier.
+- `packages/web/server/lib/quota/usage-display-settings.ts`: validation for the persisted usage display preferences (percent basis and reset-time display) that the settings sanitizer accepts.
 - `packages/web/server/lib/quota/routes.ts`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/antigravity/`: Antigravity-specific auth, API, and transform modules.

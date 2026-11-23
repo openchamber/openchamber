@@ -3642,6 +3642,8 @@ export const dict: Record<I18nKey, string> = {
   "contextFileOpen.failure.missing": "No se encontró {name}",
   "contextFileOpen.failure.unreadable": "No se pudo abrir {name}",
   "quota.window.5h": "5 horas",
+  "quota.reset.inDuration": "en {duration}",
+  "quota.reset.lessThanMinute": "menos de un minuto",
   "quota.window.7d": "Límite de 7 días",
   "quota.window.extraUsage": "Uso adicional",
   "quota.window.weekly": "Semanal",
