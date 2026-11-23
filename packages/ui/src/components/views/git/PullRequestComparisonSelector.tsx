@@ -102,6 +102,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
         summary={filterSummary}
         groups={groups}
         labelSection={labelSection}
+        collapsibleLabels
         appearance="icon"
         mobile={sheet}
         onClearAll={filterSummary ? () => setFilter(DEFAULT_PULL_REQUEST_FILTER) : undefined}

@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
-import type { ChangeRequest, Project, SourceControlIdentity, SourceControlUser } from '@/lib/source-control/types';
+import type { ChangeRequest, Label, Project, SourceControlIdentity, SourceControlUser } from '@/lib/source-control/types';
 
 const IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 
@@ -51,7 +51,27 @@ const comparison: ReturnType<typeof usePullRequestComparison> = {
   select: () => {},
 };
 
-test('the picker filter narrows the loaded pull requests and shows its active state', async () => {
+const docs: Label = { name: 'docs', color: '6e7781' };
+const bug: Label = { name: 'bug', color: 'd73a4a' };
+
+const labelledComparison: ReturnType<typeof usePullRequestComparison> = {
+  ...comparison,
+  prs: [
+    { ...changeRequest(1, 'nebula', 'open', 'Nebula open'), labels: [docs, bug] },
+    { ...changeRequest(2, 'octocat', 'open', 'Octocat open'), labels: [docs] },
+  ],
+};
+
+type PickerHarness = {
+  container: HTMLDivElement;
+  click: (element: HTMLElement | null | undefined) => Promise<void>;
+  rows: () => HTMLElement[];
+};
+
+const withPicker = async (
+  pickerComparison: ReturnType<typeof usePullRequestComparison>,
+  run: (harness: PickerHarness) => Promise<void>,
+) => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   const globals = {
@@ -98,12 +118,27 @@ test('the picker filter narrows the loaded pull requests and shows its active st
     await act(async () => { element.click(); });
   };
   const rows = () => [...document.querySelectorAll<HTMLElement>('[cmdk-item]')];
-  const option = (name: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
-    .find((element) => element.textContent?.trim() === name);
-  const filterTrigger = () => document.querySelector<HTMLButtonElement>('button[aria-pressed]');
 
   try {
-    await act(async () => root.render(<I18nProvider><PullRequestComparisonSelector comparison={comparison} /></I18nProvider>));
+    await act(async () => root.render(<I18nProvider><PullRequestComparisonSelector comparison={pickerComparison} /></I18nProvider>));
+    await run({ container, click, rows });
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    await dom.happyDOM.abort();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+};
+
+test('the picker filter narrows the loaded pull requests and shows its active state', async () => {
+  await withPicker(comparison, async ({ container, click, rows }) => {
+    const option = (name: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+      .find((element) => element.textContent?.trim() === name);
+    const filterTrigger = () => document.querySelector<HTMLButtonElement>('button[aria-pressed]');
+
     await click(container.querySelector<HTMLButtonElement>('button'));
     expect(rows()).toHaveLength(3);
 
@@ -115,13 +150,49 @@ test('the picker filter narrows the loaded pull requests and shows its active st
     expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: Open · nebula');
     expect(rows().map((row) => row.textContent)).toHaveLength(1);
     expect(rows()[0]?.textContent).toContain('Nebula open');
-  } finally {
-    await act(async () => root.unmount());
-    globalThis.fetch = originalFetch;
-    await dom.happyDOM.abort();
-    for (const [name, descriptor] of originals) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else Reflect.deleteProperty(globalThis, name);
-    }
-  }
+  });
+});
+
+test('the picker keeps its label choices collapsed until the Labels row is opened and collapses when filters are cleared', async () => {
+  await withPicker(labelledComparison, async ({ container, click, rows }) => {
+    const filterMenu = () => [...document.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-content"]')]
+      .filter((menu) => menu.querySelector('[role="menuitemradio"]'))
+      .at(-1);
+    const labelRow = () => [...(filterMenu()?.querySelectorAll<HTMLElement>('[aria-expanded]') ?? [])]
+      .find((element) => element.textContent?.trim().startsWith('Labels'));
+    const labelChoices = () => [...(filterMenu()?.querySelectorAll<HTMLElement>('[cmdk-item]') ?? [])];
+    const filterTrigger = () => document.querySelector<HTMLButtonElement>('button[aria-pressed]');
+
+    await click(container.querySelector<HTMLButtonElement>('button'));
+    expect(rows()).toHaveLength(2);
+
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Filter"]'));
+    expect(labelChoices()).toHaveLength(0);
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
+
+    await click(labelRow());
+    expect(labelChoices().map((choice) => choice.textContent?.trim())).toEqual(['docs', 'bug']);
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('true');
+
+    await click(labelChoices().find((choice) => choice.textContent?.includes('docs')));
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter: docs');
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('true');
+
+    await click(labelRow());
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
+    expect(labelChoices()).toHaveLength(0);
+    expect(labelRow()?.textContent).toContain('docs');
+
+    const clearAll = [...(filterMenu()?.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]') ?? [])]
+      .find((element) => element.textContent?.trim() === 'Clear filters');
+    expect(clearAll).toBeDefined();
+    await click(clearAll);
+
+    await click(document.querySelector<HTMLButtonElement>('button[aria-label="Filter"]'));
+    expect(labelRow()?.getAttribute('aria-expanded')).toBe('false');
+    expect(labelChoices()).toHaveLength(0);
+    expect(labelRow()?.textContent?.trim()).toBe('Labels');
+    expect(filterTrigger()?.getAttribute('aria-label')).toBe('Filter');
+    expect(rows()).toHaveLength(2);
+  });
 });

@@ -44,6 +44,7 @@ type ReferenceFilterPanelProps = {
     summary: string;
     groups: readonly ReferenceFilterGroup[];
     labelSection?: ReferenceFilterLabelSection | null;
+    collapsibleLabels?: boolean;
     appearance: 'full' | 'icon';
     mobile?: boolean;
     ariaLabel?: string;
@@ -75,6 +76,9 @@ const withApplied = (listed: readonly Label[], applied: readonly string[]) => {
     ];
 };
 
+const appliedLabelChips = (listed: readonly Label[], applied: readonly string[]) =>
+    withApplied(listed, applied).filter((label) => applied.includes(label.name));
+
 const useShownLabels = (listed: readonly Label[], applied: readonly string[], query: string) => {
     const all = React.useMemo(() => withApplied(listed, applied), [applied, listed]);
     return React.useMemo(() => (query ? rankByQuery(all, query, (label) => [label.name]) : all), [all, query]);
@@ -102,7 +106,8 @@ function useLabelChoices(directory: string | null, applied: readonly string[], q
 
     const listed = choices.status === 'ready' ? choices.items : NO_LABELS;
     const shown = useShownLabels(listed, applied, query);
-    return { hidden: !supported || choices.status === 'unsupported', choices, shown };
+    const appliedChips = React.useMemo(() => appliedLabelChips(listed, applied), [applied, listed]);
+    return { hidden: !supported || choices.status === 'unsupported', choices, shown, appliedChips };
 }
 
 const LabelChoicesState: React.FC<{ choices: LabelChoices; empty: boolean }> = ({ choices, empty }) => {
@@ -133,81 +138,118 @@ const LabelChoicesState: React.FC<{ choices: LabelChoices; empty: boolean }> = (
 type LabelSectionBodyProps = {
     choices: LabelChoices;
     applied: readonly string[];
+    appliedChips: { name: string; color: string | null }[];
     shown: { name: string; color: string | null }[];
     query: string;
     onQueryChange: (query: string) => void;
     onChange: (labels: string[]) => void;
+    collapsible: boolean;
+    expanded: boolean;
+    onToggle: () => void;
 };
 
-const DesktopLabelSection: React.FC<LabelSectionBodyProps> = ({ choices, applied, shown, query, onQueryChange, onChange }) => {
+type LabelChoicesBodyProps = Pick<LabelSectionBodyProps, 'choices' | 'applied' | 'shown' | 'query' | 'onQueryChange' | 'onChange'>;
+
+const DesktopLabelChoices: React.FC<LabelChoicesBodyProps> = ({ choices, applied, shown, query, onQueryChange, onChange }) => {
     const { t } = useI18n();
     const [activeId, setActiveId] = React.useState<string | null>(null);
 
     return (
+        <Command
+            shouldFilter={false}
+            value={activeId ?? undefined}
+            onValueChange={setActiveId}
+            onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
+            className="min-h-0"
+        >
+            <CommandInput
+                aria-label={t('references.picker.filter.labels.search')}
+                placeholder={t('references.picker.filter.labels.search')}
+                value={query}
+                onValueChange={onQueryChange}
+                onKeyDown={(event) => {
+                    if (isIMECompositionEvent(event)) {
+                        event.stopPropagation();
+                        return;
+                    }
+                    handleDropdownNavigationKey(event, (key) => {
+                        event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+                    });
+                }}
+            />
+            <CommandList aria-label={t('references.picker.filter.group.labels')} className="max-h-48">
+                <LabelChoicesState choices={choices} empty={shown.length === 0} />
+                {shown.map((label) => {
+                    const checked = applied.includes(label.name);
+                    return (
+                        <CommandItem
+                            key={label.name}
+                            value={label.name}
+                            onSelect={() => onChange(toggledLabel(applied, label.name))}
+                            className="max-w-full"
+                        >
+                            <span className="flex size-4 shrink-0 items-center justify-center">
+                                {checked ? <Icon name="check" className="size-4 text-foreground" /> : null}
+                            </span>
+                            <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
+                                <ReferenceLabelChips labels={[label]} />
+                            </span>
+                        </CommandItem>
+                    );
+                })}
+                {applied.length > 0 ? (
+                    <CommandItem value={CLEAR_LABELS_VALUE} onSelect={() => onChange([])} className="text-muted-foreground">
+                        <span className="flex size-4 shrink-0 items-center justify-center">
+                            <Icon name="close" className="size-3.5" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{t('references.picker.filter.labels.clear')}</span>
+                    </CommandItem>
+                ) : null}
+            </CommandList>
+        </Command>
+    );
+};
+
+const DesktopLabelSection: React.FC<LabelSectionBodyProps> = (props) => {
+    const { t } = useI18n();
+    const { choices, applied, appliedChips, shown, query, onQueryChange, onChange, collapsible, expanded, onToggle } = props;
+    const body = { choices, applied, shown, query, onQueryChange, onChange };
+    if (!collapsible) {
+        return (
+            <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>{t('references.picker.filter.group.labels')}</DropdownMenuLabel>
+                <DesktopLabelChoices {...body} />
+            </>
+        );
+    }
+    return (
         <>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel>{t('references.picker.filter.group.labels')}</DropdownMenuLabel>
-            <Command
-                shouldFilter={false}
-                value={activeId ?? undefined}
-                onValueChange={setActiveId}
-                onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
-                className="min-h-0"
+            <DropdownMenuItem
+                closeOnClick={false}
+                aria-expanded={expanded}
+                onSelect={onToggle}
+                className="gap-2"
             >
-                <CommandInput
-                    aria-label={t('references.picker.filter.labels.search')}
-                    placeholder={t('references.picker.filter.labels.search')}
-                    value={query}
-                    onValueChange={onQueryChange}
-                    onKeyDown={(event) => {
-                        if (isIMECompositionEvent(event)) {
-                            event.stopPropagation();
-                            return;
-                        }
-                        handleDropdownNavigationKey(event, (key) => {
-                            event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
-                        });
-                    }}
-                />
-                <CommandList aria-label={t('references.picker.filter.group.labels')} className="max-h-48">
-                    <LabelChoicesState choices={choices} empty={shown.length === 0} />
-                    {shown.map((label) => {
-                        const checked = applied.includes(label.name);
-                        return (
-                            <CommandItem
-                                key={label.name}
-                                value={label.name}
-                                onSelect={() => onChange(toggledLabel(applied, label.name))}
-                                className="max-w-full"
-                            >
-                                <span className="flex size-4 shrink-0 items-center justify-center">
-                                    {checked ? <Icon name="check" className="size-4 text-foreground" /> : null}
-                                </span>
-                                <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
-                                    <ReferenceLabelChips labels={[label]} />
-                                </span>
-                            </CommandItem>
-                        );
-                    })}
-                    {applied.length > 0 ? (
-                        <CommandItem value={CLEAR_LABELS_VALUE} onSelect={() => onChange([])} className="text-muted-foreground">
-                            <span className="flex size-4 shrink-0 items-center justify-center">
-                                <Icon name="close" className="size-3.5" />
-                            </span>
-                            <span className="min-w-0 flex-1 truncate">{t('references.picker.filter.labels.clear')}</span>
-                        </CommandItem>
-                    ) : null}
-                </CommandList>
-            </Command>
+                <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 text-muted-foreground" />
+                <span className="shrink-0">{t('references.picker.filter.group.labels')}</span>
+                {appliedChips.length > 0 ? (
+                    <span className="ms-auto flex min-w-0 justify-end overflow-hidden">
+                        <ReferenceLabelChips labels={appliedChips} max={2} />
+                    </span>
+                ) : null}
+            </DropdownMenuItem>
+            {expanded ? <DesktopLabelChoices {...body} /> : null}
         </>
     );
 };
 
-const MobileLabelSection: React.FC<LabelSectionBodyProps> = ({ choices, applied, shown, query, onQueryChange, onChange }) => {
+const MobileLabelChoices: React.FC<LabelChoicesBodyProps> = ({ choices, applied, shown, query, onQueryChange, onChange }) => {
     const { t } = useI18n();
 
     return (
-        <MobileSheetSection title={t('references.picker.filter.group.labels')}>
+        <>
             <MobileSheetSearch value={query} onChange={onQueryChange} placeholder={t('references.picker.filter.labels.search')} />
             <LabelChoicesState choices={choices} empty={shown.length === 0} />
             {shown.map((label) => (
@@ -220,36 +262,85 @@ const MobileLabelSection: React.FC<LabelSectionBodyProps> = ({ choices, applied,
                     {t('references.picker.filter.labels.clear')}
                 </MobileSheetRow>
             ) : null}
-        </MobileSheetSection>
+        </>
     );
 };
 
-const ProviderLabelSection: React.FC<{ section: Extract<ReferenceFilterLabelSection, { kind: 'provider' }>; mobile: boolean }> = ({ section, mobile }) => {
+const MobileLabelSection: React.FC<LabelSectionBodyProps> = (props) => {
+    const { t } = useI18n();
+    const { choices, applied, appliedChips, shown, query, onQueryChange, onChange, collapsible, expanded, onToggle } = props;
+    const label = t('references.picker.filter.group.labels');
+    const body = { choices, applied, shown, query, onQueryChange, onChange };
+    if (!collapsible) {
+        return <MobileSheetSection title={label}><MobileLabelChoices {...body} /></MobileSheetSection>;
+    }
+    return (
+        <div role="group" aria-label={label} className="pt-2 first:pt-0">
+            <MobileSheetRow
+                icon={expanded ? 'arrow-down-s' : 'arrow-right-s'}
+                aria-expanded={expanded}
+                onClick={onToggle}
+                meta={appliedChips.length > 0 ? (
+                    <span className="flex max-w-[45vw] justify-end overflow-hidden">
+                        <ReferenceLabelChips labels={appliedChips} max={2} />
+                    </span>
+                ) : undefined}
+            >
+                {label}
+            </MobileSheetRow>
+            {expanded ? <MobileLabelChoices {...body} /> : null}
+        </div>
+    );
+};
+
+type LabelSectionProps = {
+    mobile: boolean;
+    collapsible: boolean;
+    expanded: boolean;
+    onToggle: () => void;
+};
+
+const ProviderLabelSection: React.FC<LabelSectionProps & { section: Extract<ReferenceFilterLabelSection, { kind: 'provider' }> }> = ({ section, mobile, collapsible, expanded, onToggle }) => {
     const [query, setQuery] = React.useState('');
-    const { hidden, choices, shown } = useLabelChoices(section.directory, section.applied, query);
+    const { hidden, choices, shown, appliedChips } = useLabelChoices(section.directory, section.applied, query);
     if (hidden) return null;
-    const body = { choices, applied: section.applied, shown, query, onQueryChange: setQuery, onChange: section.onChange };
+    const body = {
+        choices,
+        applied: section.applied,
+        appliedChips,
+        shown,
+        query,
+        onQueryChange: setQuery,
+        onChange: section.onChange,
+        collapsible,
+        expanded,
+        onToggle,
+    };
     return mobile ? <MobileLabelSection {...body} /> : <DesktopLabelSection {...body} />;
 };
 
-const LocalLabelSection: React.FC<{ section: Extract<ReferenceFilterLabelSection, { kind: 'labels' }>; mobile: boolean }> = ({ section, mobile }) => {
+const LocalLabelSection: React.FC<LabelSectionProps & { section: Extract<ReferenceFilterLabelSection, { kind: 'labels' }> }> = ({ section, mobile, collapsible, expanded, onToggle }) => {
     const [query, setQuery] = React.useState('');
     const shown = useShownLabels(section.choices, section.applied, query);
     const body = {
         choices: { status: 'ready', items: [...section.choices] } satisfies LabelChoices,
         applied: section.applied,
+        appliedChips: appliedLabelChips(section.choices, section.applied),
         shown,
         query,
         onQueryChange: setQuery,
         onChange: section.onChange,
+        collapsible,
+        expanded,
+        onToggle,
     };
     return mobile ? <MobileLabelSection {...body} /> : <DesktopLabelSection {...body} />;
 };
 
-const LabelSection: React.FC<{ section: ReferenceFilterLabelSection; mobile: boolean }> = ({ section, mobile }) => (
+const LabelSection: React.FC<LabelSectionProps & { section: ReferenceFilterLabelSection }> = ({ section, mobile, collapsible, expanded, onToggle }) => (
     section.kind === 'provider'
-        ? <ProviderLabelSection section={section} mobile={mobile} />
-        : <LocalLabelSection section={section} mobile={mobile} />
+        ? <ProviderLabelSection section={section} mobile={mobile} collapsible={collapsible} expanded={expanded} onToggle={onToggle} />
+        : <LocalLabelSection section={section} mobile={mobile} collapsible={collapsible} expanded={expanded} onToggle={onToggle} />
 );
 
 const MobileReferenceFilterSheet: React.FC<{
@@ -257,14 +348,23 @@ const MobileReferenceFilterSheet: React.FC<{
     trigger: (open: () => void) => React.ReactNode;
     groups: readonly ReferenceFilterGroup[];
     labelSection?: ReferenceFilterLabelSection | null;
+    collapsibleLabels?: boolean;
     onClearAll?: () => void;
-}> = ({ title, trigger, groups, labelSection, onClearAll }) => {
+}> = ({ title, trigger, groups, labelSection, collapsibleLabels = false, onClearAll }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
+    const [labelsExpanded, setLabelsExpanded] = React.useState(false);
+    const close = () => {
+        setOpen(false);
+        setLabelsExpanded(false);
+    };
     return (
         <>
-            {trigger(() => setOpen(true))}
-            <MobileOverlayPanel open={open} title={title} onClose={() => setOpen(false)}>
+            {trigger(() => {
+                setLabelsExpanded(false);
+                setOpen(true);
+            })}
+            <MobileOverlayPanel open={open} title={title} onClose={close}>
                 {groups.map((entry) => (
                     <MobileSheetSection key={entry.label} title={entry.label}>
                         {entry.options.map((option) => (
@@ -279,9 +379,20 @@ const MobileReferenceFilterSheet: React.FC<{
                         ))}
                     </MobileSheetSection>
                 ))}
-                {labelSection ? <LabelSection section={labelSection} mobile /> : null}
+                {labelSection ? (
+                    <LabelSection
+                        section={labelSection}
+                        mobile
+                        collapsible={collapsibleLabels}
+                        expanded={labelsExpanded}
+                        onToggle={() => setLabelsExpanded((current) => !current)}
+                    />
+                ) : null}
                 {onClearAll ? (
-                    <MobileSheetRow icon="close" onClick={onClearAll}>
+                    <MobileSheetRow
+                        icon="close"
+                        onClick={collapsibleLabels ? () => { setLabelsExpanded(false); onClearAll(); } : onClearAll}
+                    >
                         {t('session.githubPrPicker.filter.clearAll')}
                     </MobileSheetRow>
                 ) : null}
@@ -295,6 +406,7 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
     summary,
     groups,
     labelSection = null,
+    collapsibleLabels = false,
     appearance,
     mobile = false,
     ariaLabel,
@@ -302,6 +414,7 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
     onClearAll,
 }) => {
     const { t } = useI18n();
+    const [labelsExpanded, setLabelsExpanded] = React.useState(false);
     const pressed = summary !== '';
     const accessibleLabel = ariaLabel ?? (pressed ? `${title}: ${summary}` : title);
     const tooltip = triggerTitle ?? (pressed ? `${title} · ${summary}` : title);
@@ -355,13 +468,14 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
                 trigger={trigger}
                 groups={groups}
                 labelSection={labelSection}
+                collapsibleLabels={collapsibleLabels}
                 onClearAll={onClearAll}
             />
         );
     }
 
     return (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(nextOpen) => { if (!nextOpen) setLabelsExpanded(false); }}>
             <DropdownMenuTrigger asChild>{trigger()}</DropdownMenuTrigger>
             <DropdownMenuContent
                 align="end"
@@ -380,11 +494,22 @@ export const ReferenceFilterPanel: React.FC<ReferenceFilterPanelProps> = ({
                         </DropdownMenuRadioGroup>
                     </React.Fragment>
                 ))}
-                {labelSection ? <LabelSection section={labelSection} mobile={false} /> : null}
+                {labelSection ? (
+                    <LabelSection
+                        section={labelSection}
+                        mobile={false}
+                        collapsible={collapsibleLabels}
+                        expanded={labelsExpanded}
+                        onToggle={() => setLabelsExpanded((current) => !current)}
+                    />
+                ) : null}
                 {onClearAll ? (
                     <>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={onClearAll} className="text-muted-foreground">
+                        <DropdownMenuItem
+                            onSelect={collapsibleLabels ? () => { setLabelsExpanded(false); onClearAll(); } : onClearAll}
+                            className="text-muted-foreground"
+                        >
                             <Icon name="close" className="size-3.5" />
                             <span className="min-w-0 flex-1 truncate">{t('session.githubPrPicker.filter.clearAll')}</span>
                         </DropdownMenuItem>
